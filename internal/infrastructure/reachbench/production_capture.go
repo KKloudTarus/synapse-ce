@@ -35,6 +35,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/gobinsubject"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/nugetreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -613,7 +614,7 @@ func runDotNetImport(ctx context.Context, _ *ProductionCapture, fixture Material
 }
 
 func runGoBinary(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {
-	return runStaticAt(ctx, fixture, fixture.Root, resolved, lifecycle, coverageAnswersRequestedSymbols, symbolSubjects(resolved),
+	return runStaticAt(ctx, fixture, fixture.Root, resolved, lifecycle, coverageAnswersRequestedSymbols, goBinarySubjects(resolved),
 		func() (staticAnalyzer, error) { return gobinreach.NewEntryCallAnalyzer(), nil },
 		func(analyzer staticAnalyzer) (*reachproof.Coordinator, error) {
 			coordinator, err := reachproof.NewCoordinatorForLanguage(analyzer, lifecycle.judgments, lifecycle.audit, lifecycle.clock, judgment.Tier2, reachproof.LanguageGoBinary)
@@ -623,6 +624,16 @@ func runGoBinary(ctx context.Context, _ *ProductionCapture, fixture Materialized
 			return coordinator.WithRaiseOnly(), nil
 		},
 	)
+}
+
+func goBinarySubjects(resolved measurement.ResolvedFixtureSubject) []ports.ReachabilitySubject {
+	subjects := symbolSubjects(resolved)
+	if len(subjects) == 1 && len(subjects[0].Symbols) == 1 {
+		if query, ok := gobinsubject.Encode(subjects[0].PackagePURL, subjects[0].Symbols[0]); ok {
+			subjects[0].Symbols[0] = query
+		}
+	}
+	return subjects
 }
 
 func runRustSymbols(ctx context.Context, _ *ProductionCapture, fixture MaterializedFixture, resolved measurement.ResolvedFixtureSubject, lifecycle captureLifecycle) (execution, error) {

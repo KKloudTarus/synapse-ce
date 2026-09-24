@@ -2,14 +2,12 @@ package reachbench
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"os/exec"
-	"strings"
+	"path/filepath"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	measurement "github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
 )
 
@@ -18,41 +16,41 @@ func TestGoBinaryProductionCaptureUsesRaiseOnlyEntrypointCallProof(t *testing.T)
 	if err != nil {
 		t.Skip("go toolchain unavailable")
 	}
-	execRunner := toolrunner.NewExecRunner(0, 0)
-	runner := &fixtureToolRunner{run: func(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult, error) {
-		if isFixtureToolchainProbe("go", spec) {
-			return matchingFixtureToolchainProbe("go"), nil
+	root := t.TempDir()
+	for name, body := range map[string]string{
+		"go.mod": "module example.invalid/capture-fixture\n\ngo 1.27\n\nrequire (\n\tgolang.org/x/net v0.59.0\n\tgolang.org/x/text v0.42.0 // indirect\n)\n",
+		"go.sum": "golang.org/x/net v0.59.0 h1:5zfYln+w5XCxwrnMMJPufRgNoXEaGxl0wo5GqPXyues=\n" +
+			"golang.org/x/net v0.59.0/go.mod h1:2DA/G1UfVbCpQPeWTmMPGY7Cs2PkBkwu743bVX5PIVg=\n" +
+			"golang.org/x/text v0.42.0 h1:JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=\n" +
+			"golang.org/x/text v0.42.0/go.mod h1:ojzP1Z+2QtioaF8DTtO8K5q7JWVVYwZKenzujK0Zd0E=\n",
+		"main.go": "package main\nimport \"golang.org/x/net/idna\"\n" +
+			"func main() { _, _ = idna.ToASCII(\"example.test\") }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
 		}
-		return execRunner.Run(ctx, spec)
-	}}
-	materializer, err := NewFixtureMaterializer(FixtureMaterializerDependencies{
-		ToolRunner: runner,
-		Platform:   func() string { return "linux/amd64" },
-		LocateTool: func(name string) (string, error) {
-			if name != "go" {
-				return "", fmt.Errorf("unexpected fixture tool %q", name)
-			}
-			return goPath, nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
-	specification := materializerFixture(t, "go-binary-input")
-	fixture, err := materializer.Materialize(context.Background(), FixtureMaterializationRequest{
-		Specification: specification,
-		WorkRoot:      privateMaterializerRoot(t),
-		CellKey:       "sha256:" + strings.Repeat("a", 64),
-	})
-	if err != nil {
-		t.Fatal(err)
+	output := filepath.Join(root, "capture-binary")
+	command := exec.Command(goPath, "build", "-trimpath", "-o", output, ".")
+	command.Dir = root
+	command.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+	if buildOutput, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("build versioned Go-binary capture fixture: %v: %s", err, buildOutput)
 	}
 
+	fixture := MaterializedFixture{Root: root}
+	positive := measurement.ResolvedFixtureSubject{Subject: measurement.FixtureSubject{
+		ID:              "versioned-dependency-positive",
+		PackageIdentity: "golang:golang.org/x/net@v0.59.0",
+		Locator: measurement.FixtureLocator{
+			Kind:   measurement.FixtureLocatorSourceSymbol,
+			Symbol: "golang.org/x/net/idna.ToASCII",
+		},
+	}}
 	lifecycle, err := newCaptureLifecycle()
 	if err != nil {
 		t.Fatal(err)
 	}
-	positive := fixtureSubjectByID(t, specification, "pkg:reachbench/go/binary#reachableDependency")
 	if _, err := runGoBinary(context.Background(), nil, fixture, positive, lifecycle); err != nil {
 		t.Fatal(err)
 	}
@@ -60,17 +58,18 @@ func TestGoBinaryProductionCaptureUsesRaiseOnlyEntrypointCallProof(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := judgment.WinningReachabilityClaims(judgments)
-	claim, found := claims[positive.Subject.ID]
+	claim, found := judgment.WinningReachabilityClaims(judgments)[positive.Subject.ID]
 	if !found || claim.Reachable != judgment.Reachable || claim.SuppressesFinding() {
-		t.Fatalf("positive Go-binary capture claim = %#v, want a non-suppressing reachable claim", claim)
+		t.Fatalf("versioned Go-binary capture claim = %#v, want a non-suppressing reachable claim", claim)
 	}
 
+	unreached := positive
+	unreached.Subject.ID = "versioned-dependency-absent"
+	unreached.Subject.Locator.Symbol = "golang.org/x/net/idna.NotCalled"
 	unreachedLifecycle, err := newCaptureLifecycle()
 	if err != nil {
 		t.Fatal(err)
 	}
-	unreached := fixtureSubjectByID(t, specification, "pkg:reachbench/go/binary#controlUnreachable")
 	if _, err := runGoBinary(context.Background(), nil, fixture, unreached, unreachedLifecycle); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +78,7 @@ func TestGoBinaryProductionCaptureUsesRaiseOnlyEntrypointCallProof(t *testing.T)
 		t.Fatal(err)
 	}
 	if len(unreachedJudgments) != 0 {
-		t.Fatalf("retained uncalled PCLNTAB symbol minted judgments: %#v", unreachedJudgments)
+		t.Fatalf("unproven Go-binary symbol minted judgments: %#v", unreachedJudgments)
 	}
 }
 

@@ -488,14 +488,21 @@ jobs:
             TestJavaLdapEncoderSanitizer
             TestJavaLdapFilterPartialSanitizationFlags
             TestJavaCanonicalPathIsNotASanitizer
-            TestPythonSanitizersAreClassSpecific
-            TestEncodeURIComponentSanitizesXSS
-            TestEscapeStringRegexpSanitizesReDoS
+            TestPythonHtmlEscapingRetainsUnknownContext
+            TestEncodeURIComponentDoesNotCleanXSS
+            TestEscapeStringRegexpRetainsReDoS
             TestPythonDisplayFieldSensitivityRefinesDisplayLiteral
             TestPythonDisplayFieldSensitivityWidensOnDisplayUncertainty
             TestPythonDisplayFieldSensitivityExtractorDesugars
             TestPythonShadowedSanitizerImportNotWalled
-            TestPythonFrameworkEscapersSanitizeXSS
+            TestPythonShellQuotingDoesNotHideCommandInjection
+            TestPythonBasenameAndSafeLoadRetainDangerousFlows
+            TestPythonEscapedRegexRetainsReDoS
+            TestPythonFrameworkEscapersRetainUnknownContext
+            TestJsTaintContextualEscapersDoNotHideXSS
+            TestJsTaintShellQuotingDoesNotHideCommandInjection
+            TestJsTaintBasenameRetainsParentTraversal
+            TestJsTaintEscapedRegexRetainsReDoS
             TestJsTaintSanitizedTwin
             TestJsTaintConfigurableSanitizersNotWalled
             TestJsTaintCrossClassSanitizerDoesNotClean

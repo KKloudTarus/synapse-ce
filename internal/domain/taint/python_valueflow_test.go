@@ -33,7 +33,7 @@ func TestPythonValueFlowTracksArgumentsAndReturnsInterprocedurally(t *testing.T)
 	}
 }
 
-func TestPythonSanitizersAreClassSpecific(t *testing.T) {
+func TestPythonHtmlEscapingRetainsUnknownContext(t *testing.T) {
 	document := sanitizerPythonDocument()
 	resolution, err := pythonprogram.Resolve(document)
 	if err != nil {
@@ -47,8 +47,8 @@ func TestPythonSanitizersAreClassSpecific(t *testing.T) {
 	if _, ok := pythonFindingFor(findings, TaintCommand, "python-taint-command"); !ok {
 		t.Fatalf("HTML escaping must not hide command injection: %+v", findings)
 	}
-	if _, ok := pythonFindingFor(findings, TaintXSS, "python-taint-xss"); ok {
-		t.Fatalf("HTML escaping must stop XSS flow: %+v", findings)
+	if _, ok := pythonFindingFor(findings, TaintXSS, "python-taint-xss"); !ok {
+		t.Fatalf("HTML escaping cannot clear XSS without output context: %+v", findings)
 	}
 }
 
@@ -230,7 +230,7 @@ func pythonValueFlowCorpus() []pythonCorpusCase {
 	return []pythonCorpusCase{
 		{name: "interprocedural command", doc: interproceduralPythonDocument(), class: TaintCommand, want: true},
 		{name: "sibling source and sink", doc: siblingCallsPythonDocument(), class: TaintCommand, want: false},
-		{name: "class-specific escaped XSS", doc: sanitizerPythonDocument(), class: TaintXSS, want: false},
+		{name: "HTML text escape false alarm", doc: sanitizerPythonDocument(), class: TaintXSS, want: false},
 		{name: "HTML escape is not command sanitizer", doc: sanitizerPythonDocument(), class: TaintCommand, want: true},
 		{name: "raw SQL argument only", doc: sqlArgumentPythonDocument(), class: TaintSQL, want: true},
 	}
@@ -267,10 +267,10 @@ func TestPythonValueFlowCorpusMetrics(t *testing.T) {
 			tn++
 		}
 	}
-	if tp != 3 || fp != 0 || fn != 0 || tn != 2 {
+	if tp != 3 || fp != 1 || fn != 0 || tn != 1 {
 		t.Fatalf("corpus metrics TP=%d FP=%d FN=%d TN=%d complete=%d partial=%d", tp, fp, fn, tn, complete, partial)
 	}
-	t.Logf("synthetic regression corpus: precision=100%% recall=100%% TP=%d FP=%d FN=%d TN=%d complete=%d partial=%d", tp, fp, fn, tn, complete, partial)
+	t.Logf("synthetic regression corpus: precision=75%% recall=100%% TP=%d FP=%d FN=%d TN=%d complete=%d partial=%d", tp, fp, fn, tn, complete, partial)
 }
 
 func BenchmarkPythonValueFlowCorpus(b *testing.B) {

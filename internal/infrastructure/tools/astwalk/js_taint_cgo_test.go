@@ -120,29 +120,6 @@ func TestJsTaintSanitizedTwin(t *testing.T) {
 		clean string // the rule that must NOT appear
 	}{
 		{
-			name: "xss_escape_html_default_call",
-			body: "const escapeHtml = require('escape-html');\n" +
-				"app.get('/x', (req, res) => { res.send(escapeHtml(req.query.m)); });\n",
-			clean: "js-taint-xss",
-		},
-		{
-			name:  "xss_encodeuricomponent_global",
-			body:  "app.get('/x', (req, res) => { res.send(encodeURIComponent(req.query.m)); });\n",
-			clean: "js-taint-xss",
-		},
-		{
-			name: "path_basename",
-			body: "const fs = require('fs');\nconst path = require('path');\n" +
-				"app.get('/x', (req, res) => { fs.readFile(path.basename(req.query.p), cb); });\n",
-			clean: "js-taint-path",
-		},
-		{
-			name: "command_shell_quote",
-			body: "const cp = require('child_process');\nconst sq = require('shell-quote');\n" +
-				"app.get('/x', (req, res) => { cp.exec(sq.quote([req.query.cmd])); });\n",
-			clean: "js-taint-command",
-		},
-		{
 			name: "ssrf_number_coercion",
 			body: "const axios = require('axios');\n" +
 				"app.get('/x', (req, res) => { axios.get(Number(req.query.u)); });\n",
@@ -159,7 +136,72 @@ func TestJsTaintSanitizedTwin(t *testing.T) {
 	}
 }
 
-// TestJsTaintConfigurableSanitizersNotWalled pins the #1039 reviewed decision: a CONFIGURABLE HTML sanitizer
+func TestJsTaintBasenameRetainsParentTraversal(t *testing.T) {
+	source := "const fs = require('fs');\nconst path = require('path');\n" +
+		"app.get('/x', (req, res) => {\n" +
+		"  fs.readFile('/srv/public/' + path.basename(req.query.p) + '/secret.txt', cb);\n});\n"
+	rules := jsTaintRules(t, map[string]string{"app.js": source})
+	if !rules["js-taint-path"] {
+		t.Fatalf("basename preserves '..' and must retain path traversal: %v", jsRuleList(rules))
+	}
+}
+
+func TestJsTaintEscapedRegexRetainsReDoS(t *testing.T) {
+	source := "const escapeStringRegexp = require('escape-string-regexp');\n" +
+		"app.get('/x', (req, res) => {\n" +
+		"  const pattern = '(a|' + escapeStringRegexp(req.query.p) + ')*$';\n" +
+		"  new RegExp(pattern);\n});\n"
+	rules := jsTaintRules(t, map[string]string{"app.js": source})
+	if !rules["js-taint-redos"] {
+		t.Fatalf("escaped text may overlap the surrounding regex alternatives: %v", jsRuleList(rules))
+	}
+}
+
+func TestJsTaintContextualEscapersDoNotHideXSS(t *testing.T) {
+	cases := map[string]string{
+		"url_component_in_script": "app.get('/x', (req, res) => {\n" +
+			"  res.send(\"<script>let x='\" +\n" +
+			"    encodeURIComponent(req.query.m) + \"'</script>\");\n});\n",
+		"url_in_script": "app.get('/x', (req, res) => { res.send(\"<script>let x='\" + encodeURI(req.query.m) + \"'</script>\"); });\n",
+		"html_escape_unquoted_attr": "const escapeHtml = require('escape-html');\n" +
+			"app.get('/x', (req, res) => { res.send('<img src=x onerror=' + escapeHtml(req.query.m) + '>'); });\n",
+	}
+	for name, source := range cases {
+		t.Run(name, func(t *testing.T) {
+			rules := jsTaintRules(t, map[string]string{"app.js": source})
+			if !rules["js-taint-xss"] {
+				t.Fatalf("context-dependent escaping must not suppress XSS: %v", jsRuleList(rules))
+			}
+		})
+	}
+}
+
+func TestJsTaintShellQuotingDoesNotHideCommandInjection(t *testing.T) {
+	cases := map[string]string{
+		"shell_quote_embedded": "const cp = require('child_process');\n" +
+			"const sq = require('shell-quote');\n" +
+			"app.get('/x', (req, res) => {\n" +
+			"  cp.exec('printf \"' + sq.quote([req.query.cmd]) + '\"');\n});\n",
+		"shescape_embedded": "const cp = require('child_process');\n" +
+			"const shescape = require('shescape');\n" +
+			"app.get('/x', (req, res) => {\n" +
+			"  cp.exec('printf \"' + shescape.quote(req.query.cmd) + '\"');\n});\n",
+		"shell_quote_executable": "const cp = require('child_process');\n" +
+			"const sq = require('shell-quote');\n" +
+			"app.get('/x', (req, res) => {\n" +
+			"  cp.exec(sq.quote([req.query.cmd]));\n});\n",
+	}
+	for name, source := range cases {
+		t.Run(name, func(t *testing.T) {
+			rules := jsTaintRules(t, map[string]string{"app.js": source})
+			if !rules["js-taint-command"] {
+				t.Fatalf("shell quoting in an unknown composition must retain command injection: %v", jsRuleList(rules))
+			}
+		})
+	}
+}
+
+// TestJsTaintConfigurableSanitizersNotWalled pins the decision that a configurable HTML sanitizer
 // (DOMPurify.sanitize, sanitize-html, js-xss) is NOT modeled as an unconditional XSS wall, because its safety
 // depends on version/config (bypass history, permissive allow-lists, non-HTML output contexts). Walling it
 // would risk a false negative, so the flow through it must STILL report XSS.

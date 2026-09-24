@@ -106,12 +106,7 @@ func TestPythonCrossFileInterprocedural(t *testing.T) {
 	}
 }
 
-// TestPythonShadowedSanitizerImportNotWalled is the #1-bar guard for #1089: when a FUNCTION-LOCAL binding (a
-// parameter or an assignment) shadows an imported sanitizer name, the taint engine must NOT apply the
-// sanitizer wall to that call. Otherwise a local named `escape` is walled as if it were the real HTML escaper,
-// hiding a real XSS. The suppression is scoped to sanitizers only, so it can only over-report, never touch
-// sink/source resolution (which is why local-assignment shadowing needs no `global`/`nonlocal` tracking). A
-// MODULE-level rebind is left alone (position-dependent, keeping the wall avoids a false positive).
+// A function-local binding that shadows an imported numeric converter must not inherit its wall.
 func TestPythonShadowedSanitizerImportNotWalled(t *testing.T) {
 	detect := func(t *testing.T, src string) []string {
 		t.Helper()
@@ -146,42 +141,129 @@ func TestPythonShadowedSanitizerImportNotWalled(t *testing.T) {
 		return false
 	}
 
-	// A parameter named `escape` shadows the imported escaper: `escape(x)` is the parameter, not the sanitizer,
-	// so the XSS flow must survive.
-	param := "from flask import escape, render_template_string\n" +
-		"def f(escape):\n    x = input()\n    render_template_string(escape(x))\n"
-	if cwes := detect(t, param); !has(cwes, "CWE-79") {
-		t.Errorf("a parameter shadowing the imported escaper must not wall XSS (CWE-79), got %v", cwes)
+	param := "from builtins import int as convert\nimport os\n" +
+		"def f(convert):\n    x = input()\n    os.system(str(convert(x)))\n"
+	if cwes := detect(t, param); !has(cwes, "CWE-78") {
+		t.Errorf("a parameter shadowing numeric conversion must not wall command injection, got %v", cwes)
 	}
 
-	// A FUNCTION-LOCAL assignment named `escape` also shadows the import: inside f, `escape` is the local, so
-	// the wall must not fire (it is not provably the real escaper).
-	localAssign := "from flask import render_template_string\n" +
-		"def f(user_fn):\n    escape = user_fn\n    x = input()\n    render_template_string(escape(x))\n"
-	if cwes := detect(t, localAssign); !has(cwes, "CWE-79") {
-		t.Errorf("a function-local assignment shadowing the escaper must not wall XSS (CWE-79), got %v", cwes)
+	localAssign := "from builtins import int as convert\nimport os\n" +
+		"def f(user_fn):\n    convert = user_fn\n    x = input()\n    os.system(str(convert(x)))\n"
+	if cwes := detect(t, localAssign); !has(cwes, "CWE-78") {
+		t.Errorf("a function-local assignment shadowing numeric conversion must not wall command injection, got %v", cwes)
 	}
 
-	// A MODULE-level reassignment of the imported name is NOT a shadow: a same-scope `escape = ...` after the
-	// import is a position-dependent rebind, so keeping the wall avoids a false positive. The escaper stands.
-	moduleRebind := "from flask import escape, render_template_string\n" +
-		"x = input()\nrender_template_string(escape(x))\nescape = None\n"
-	if cwes := detect(t, moduleRebind); has(cwes, "CWE-79") {
-		t.Errorf("a module-level rebind (not a function-local shadow) must not disable the escaper wall, got %v", cwes)
+	moduleRebind := "from builtins import int as convert\nimport os\n" +
+		"x = input()\nos.system(str(convert(x)))\nconvert = None\n"
+	if cwes := detect(t, moduleRebind); has(cwes, "CWE-78") {
+		t.Errorf("a later module-level rebind must not disable the earlier numeric wall, got %v", cwes)
 	}
 
-	// Control: with no shadow, the real imported escaper still neutralizes the XSS (the fix must not break the
-	// legitimate sanitizer wall).
-	control := "from flask import escape, render_template_string\n" +
-		"def f():\n    x = input()\n    render_template_string(escape(x))\n"
-	if cwes := detect(t, control); has(cwes, "CWE-79") {
-		t.Errorf("the unshadowed imported escaper must still neutralize XSS, got %v", cwes)
+	control := "from builtins import int as convert\nimport os\n" +
+		"def f():\n    x = input()\n    os.system(str(convert(x)))\n"
+	if cwes := detect(t, control); has(cwes, "CWE-78") {
+		t.Errorf("the unshadowed imported numeric conversion must neutralize command injection, got %v", cwes)
 	}
 }
 
-// TestPythonFrameworkEscapersSanitizeXSS proves the #1039 Django/Flask HTML escapers neutralize the XSS class
-// (and only that class) end to end through the real extractor + engine.
-func TestPythonFrameworkEscapersSanitizeXSS(t *testing.T) {
+func TestPythonShellQuotingDoesNotHideCommandInjection(t *testing.T) {
+	src := "import os\nimport shlex\n" +
+		"def f():\n    value = input()\n" +
+		"    os.system('printf \"' + shlex.quote(value) + '\"')\n"
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "m.py"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := PythonFactsFor(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := pythonprogram.Resolve(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, err := taint.BuildPythonValueGraph(doc, resolved, taint.DefaultPythonCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range graph.Vulnerabilities() {
+		if finding.CWE == "CWE-78" {
+			return
+		}
+	}
+	t.Fatal("shell quoting inside double quotes must retain command injection")
+}
+
+func TestPythonBasenameAndSafeLoadRetainDangerousFlows(t *testing.T) {
+	cases := []struct {
+		name, source, want string
+	}{
+		{"basename_parent", "import os\ndef f():\n    name = input()\n    open('/srv/public/' + os.path.basename(name) + '/secret.txt')\n", "CWE-22"},
+		{"safe_load_then_unsafe", "import yaml\ndef f():\n    value = input()\n    yaml.unsafe_load(yaml.safe_load(value))\n", "CWE-502"},
+		{"safe_load_only", "import yaml\ndef f():\n    yaml.safe_load(input())\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "m.py"), []byte(tc.source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			doc, err := PythonFactsFor(context.Background(), dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := pythonprogram.Resolve(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			graph, err := taint.BuildPythonValueGraph(doc, resolved, taint.DefaultPythonCatalog())
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, finding := range graph.Vulnerabilities() {
+				found = found || finding.CWE == tc.want
+				if tc.want == "" {
+					t.Fatalf("safe parsing alone must not be a deserialization sink: %+v", finding)
+				}
+			}
+			if tc.want != "" && !found {
+				t.Fatalf("want %s finding after context-dependent helper", tc.want)
+			}
+		})
+	}
+}
+
+func TestPythonEscapedRegexRetainsReDoS(t *testing.T) {
+	source := "import re\ndef f():\n" +
+		"    value = input()\n" +
+		"    re.compile('(a|' + re.escape(value) + ')*$')\n"
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "m.py"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := PythonFactsFor(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := pythonprogram.Resolve(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, err := taint.BuildPythonValueGraph(doc, resolved, taint.DefaultPythonCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range graph.Vulnerabilities() {
+		if finding.CWE == "CWE-1333" {
+			return
+		}
+	}
+	t.Fatal("escaped text may overlap the surrounding regex alternatives")
+}
+
+// TestPythonFrameworkEscapersRetainUnknownContext proves HTML escaping cannot clear XSS without output context.
+func TestPythonFrameworkEscapersRetainUnknownContext(t *testing.T) {
 	detect := func(t *testing.T, src string) []string {
 		t.Helper()
 		dir := t.TempDir()
@@ -221,16 +303,32 @@ func TestPythonFrameworkEscapersSanitizeXSS(t *testing.T) {
 		t.Fatalf("baseline unsanitized flow must report XSS (CWE-79), got %v", cwes)
 	}
 
-	// Django escape neutralizes the XSS flow.
-	django := "from django.utils.html import escape\nfrom flask import render_template_string\ndef f():\n    x = input()\n    render_template_string(escape(x))\n"
-	if cwes := detect(t, django); has(cwes, "CWE-79") {
-		t.Errorf("django.utils.html.escape must neutralize XSS, got %v", cwes)
+	// HTML text escaping leaves whitespace and equals signs usable in an unquoted attribute.
+	unquoted := "from html import escape\nfrom django.http import HttpResponse\ndef f():\n    x = input()\n    return HttpResponse('<input value=' + escape(x) + '>')\n"
+	if cwes := detect(t, unquoted); !has(cwes, "CWE-79") {
+		t.Errorf("HTML escaping in an unquoted attribute must retain XSS, got %v", cwes)
 	}
 
-	// Flask escape neutralizes the XSS flow.
+	// Django escape cannot prove the response context.
+	django := "from django.utils.html import escape\nfrom flask import render_template_string\ndef f():\n    x = input()\n    render_template_string(escape(x))\n"
+	if cwes := detect(t, django); !has(cwes, "CWE-79") {
+		t.Errorf("django.utils.html.escape must retain unknown-context XSS, got %v", cwes)
+	}
+
+	// Flask escape has the same context limit.
 	flaskEsc := "from flask import escape, render_template_string\ndef f():\n    x = input()\n    render_template_string(escape(x))\n"
-	if cwes := detect(t, flaskEsc); has(cwes, "CWE-79") {
-		t.Errorf("flask.escape must neutralize XSS, got %v", cwes)
+	if cwes := detect(t, flaskEsc); !has(cwes, "CWE-79") {
+		t.Errorf("flask.escape must retain unknown-context XSS, got %v", cwes)
+	}
+
+	markupsafe := "from markupsafe import escape\nfrom django.http import HttpResponse\ndef f():\n    x = input()\n    return HttpResponse('<input value=' + escape(x) + '>')\n"
+	if cwes := detect(t, markupsafe); !has(cwes, "CWE-79") {
+		t.Errorf("markupsafe.escape in an unquoted attribute must retain XSS, got %v", cwes)
+	}
+
+	bleach := "import bleach\nfrom django.http import HttpResponse\ndef f():\n    x = input()\n    return HttpResponse('<input value=' + bleach.clean(x) + '>')\n"
+	if cwes := detect(t, bleach); !has(cwes, "CWE-79") {
+		t.Errorf("bleach.clean in an unquoted attribute must retain XSS, got %v", cwes)
 	}
 
 	// Cross-class: an HTML escaper must NOT neutralize command injection (CWE-78).

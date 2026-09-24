@@ -60,7 +60,7 @@ func TestPythonCatalogCoversInitialFrameworkMatrix(t *testing.T) {
 	}
 }
 
-func TestPythonCatalogSafeLoadIsClassSpecificSafeShape(t *testing.T) {
+func TestPythonCatalogSafeLoadRetainsDataTaint(t *testing.T) {
 	catalog := DefaultPythonCatalog()
 	call := []string{"python:yaml:safe_load"}
 	for _, sink := range catalog.Sinks {
@@ -68,14 +68,10 @@ func TestPythonCatalogSafeLoadIsClassSpecificSafeShape(t *testing.T) {
 			t.Fatal("yaml.safe_load must not be an unsafe deserialization sink")
 		}
 	}
-	matchedSanitizer := false
 	for _, sanitizer := range catalog.Sanitizers {
 		if callMatches(sanitizer.Pattern, call, "") && containsTaintClass(sanitizer.Classes, TaintDeserialization) {
-			matchedSanitizer = true
+			t.Fatal("yaml.safe_load output can still reach an unsafe deserializer")
 		}
-	}
-	if !matchedSanitizer {
-		t.Fatal("yaml.safe_load must stop only the deserialization class")
 	}
 }
 
@@ -185,17 +181,16 @@ func TestPythonCatalogModelsInjectionClasses(t *testing.T) {
 	if !neutralizes("python:ldap.filter:escape_filter_chars", TaintLDAP) {
 		t.Error("twin: escape_filter_chars must neutralize the LDAP class")
 	}
-	// os.path.basename strips directory components, so it neutralizes path traversal (mirrors JS path.basename),
-	// and only that class: it must not be treated as a SQL or command sanitizer.
-	if !neutralizes("python:os.path:basename", TaintPathTraversal) {
-		t.Error("twin: os.path.basename must neutralize the path-traversal class")
+	// basename preserves the final '..' component and cannot prove path containment.
+	if neutralizes("python:os.path:basename", TaintPathTraversal) {
+		t.Error("os.path.basename must not neutralize path traversal")
 	}
 	if neutralizes("python:os.path:basename", TaintCommand) {
 		t.Error("twin: os.path.basename must not neutralize command injection")
 	}
-	// re.escape turns the value into a literal pattern, so it neutralizes ReDoS, and only ReDoS.
-	if !neutralizes("python:re:escape", TaintReDoS) {
-		t.Error("twin: re.escape must neutralize the ReDoS class")
+	// Escaped literals can still overlap static alternatives in a surrounding regex.
+	if neutralizes("python:re:escape", TaintReDoS) {
+		t.Error("re.escape must not neutralize ReDoS without the final regex structure")
 	}
 	if neutralizes("python:re:escape", TaintCommand) {
 		t.Error("twin: re.escape must not neutralize command injection")
