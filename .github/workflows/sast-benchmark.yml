@@ -26,16 +26,18 @@ jobs:
       OWASP_BENCHMARK_CSV_SHA256: 1809f6a690c6cf7dd6685df6ebe2eef8fe3ca93d19a7ca0ce45987ca4f5d78e1
     steps:
       - name: Checkout synapse
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Checkout OWASP BenchmarkJava (pinned)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: OWASP-Benchmark/BenchmarkJava
           ref: ${{ env.OWASP_BENCHMARK_REF }}
@@ -65,7 +67,7 @@ jobs:
 
       - name: Upload scorecard
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: owasp-benchmark-scorecard
           path: ${{ runner.temp }}/owasp-scorecard.log
@@ -81,16 +83,18 @@ jobs:
       SECURIBENCH_REF: 6a5a72488ea830d99f9464fc1f0562c4f864214b
     steps:
       - name: Checkout synapse
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Checkout Securibench Micro (pinned)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: too4words/securibench-micro
           ref: ${{ env.SECURIBENCH_REF }}
@@ -114,7 +118,7 @@ jobs:
 
       - name: Upload scorecard
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: securibench-scorecard
           path: ${{ runner.temp }}/securibench-scorecard.log
@@ -130,16 +134,18 @@ jobs:
       JULIET_REF: b2c6df3733e2176fe7097e4784895c6891632b4c
     steps:
       - name: Checkout synapse
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Checkout Juliet Java test suite (pinned)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: find-sec-bugs/juliet-test-suite
           ref: ${{ env.JULIET_REF }}
@@ -164,7 +170,7 @@ jobs:
 
       - name: Upload scorecard
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: juliet-scorecard
           path: ${{ runner.temp }}/juliet-scorecard.log
