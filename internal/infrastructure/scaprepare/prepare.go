@@ -245,7 +245,7 @@ func fetch(ctx context.Context, origin string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
@@ -307,7 +307,7 @@ func tarFindWithin(ctx context.Context, raw []byte, matches func(string) bool, l
 	if err != nil {
 		return nil, fmt.Errorf("open gzip archive: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(&boundedContextReader{ctx: ctx, reader: gz, remaining: limit})
 	for {
 		if err := ctx.Err(); err != nil {
@@ -391,7 +391,7 @@ func writeWithin(root, relative string, body []byte, mode os.FileMode) error {
 		return err
 	}
 	name := tmp.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	if _, err = tmp.Write(body); err == nil {
 		err = tmp.Sync()
 	}

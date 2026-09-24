@@ -58,7 +58,7 @@ func loadCatalog(path string) (bench.Catalog, error) {
 	if e != nil {
 		return bench.Catalog{}, e
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return bench.DecodeCatalog(f)
 }
 func loadSpec(path string) (bench.TrustedInputBindingSpec, error) {
@@ -66,6 +66,6 @@ func loadSpec(path string) (bench.TrustedInputBindingSpec, error) {
 	if e != nil {
 		return bench.TrustedInputBindingSpec{}, e
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return bench.DecodeTrustedInputBindingSpec(f)
 }
