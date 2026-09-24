@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"slices"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -286,4 +289,109 @@ func TestListBusinessAssetsPageFilterSemantics(t *testing.T) {
 	if _, total, err = repo.ListBusinessAssetsPage(ctx, "tpage-b", ports.BusinessAssetQuery{Limit: 10}); err != nil || total != 1 {
 		t.Fatalf("tenant-b total = %d err=%v, want only its own row", total, err)
 	}
+}
+
+// The dashboard pages the inventory, and a caller that walks the pages must see every asset
+// exactly once no matter which store answered. That holds only if both stores order the same way
+// and clamp the same way, so this asserts the two against each other rather than against a
+// hand-written expectation.
+//
+// Ordering is the part that silently diverges: the memory twin sorts Go strings by byte, while
+// Postgres orders by the database collation, and an ICU-initialised cluster puts "_infra" before
+// "Billing" where Go does the reverse. Mixed-case and punctuation-leading keys are what expose it.
+func TestListBusinessAssetsPageMatchesMemoryTwin(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ('ttwin-a','A') ON CONFLICT (id) DO NOTHING`); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM fleet_business_services WHERE tenant_id = 'ttwin-a'`)
+		_, _ = pool.Exec(bg, `DELETE FROM tenants WHERE id = 'ttwin-a'`)
+	})
+
+	repo := NewAssetRepository(pool)
+	twin := memory.NewAssetStore()
+	now := time.Now().UTC().Truncate(time.Second)
+	// Upper case, lower case and a leading underscore: byte order and collation order disagree
+	// on every one of these pairs.
+	for _, key := range []string{"Billing", "_infra", "alpha", "api-gateway", "apigateway"} {
+		ba, err := asset.NewBusinessAsset(shared.ID("twin-"+key), "ttwin-a", key, "Name "+key, "", asset.BusinessAssetApplication, asset.CriticalityLow, "platform-team", nil, "operator", now)
+		if err != nil {
+			t.Fatalf("new business asset %q: %v", key, err)
+		}
+		if err := repo.CreateBusinessAsset(ctx, ba); err != nil {
+			t.Fatalf("create %q in postgres: %v", key, err)
+		}
+		if err := twin.CreateBusinessAsset(ctx, ba); err != nil {
+			t.Fatalf("create %q in memory: %v", key, err)
+		}
+	}
+
+	cases := []struct {
+		name  string
+		query ports.BusinessAssetQuery
+	}{
+		{"first page", ports.BusinessAssetQuery{Limit: 2}},
+		{"second page", ports.BusinessAssetQuery{Limit: 2, Offset: 2}},
+		{"last partial page", ports.BusinessAssetQuery{Limit: 2, Offset: 4}},
+		// Past the end is a real request: a caller holding a stale page count asks for it.
+		{"offset past the end", ports.BusinessAssetQuery{Limit: 2, Offset: 99}},
+		// A non-positive limit asks for the count without the rows.
+		{"count only", ports.BusinessAssetQuery{Limit: 0}},
+		{"negative limit", ports.BusinessAssetQuery{Limit: -1}},
+		// A negative offset is clamped rather than refused or passed to the database.
+		{"negative offset", ports.BusinessAssetQuery{Limit: 2, Offset: -5}},
+		{"filtered count only", ports.BusinessAssetQuery{Limit: 0, Query: "api"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotItems, gotTotal, err := repo.ListBusinessAssetsPage(ctx, "ttwin-a", tc.query)
+			if err != nil {
+				t.Fatalf("postgres: %v", err)
+			}
+			wantItems, wantTotal, err := twin.ListBusinessAssetsPage(ctx, "ttwin-a", tc.query)
+			if err != nil {
+				t.Fatalf("memory: %v", err)
+			}
+			if gotTotal != wantTotal {
+				t.Fatalf("total: postgres %d, memory %d", gotTotal, wantTotal)
+			}
+			gotKeys, wantKeys := keysOf(gotItems), keysOf(wantItems)
+			if !slices.Equal(gotKeys, wantKeys) {
+				t.Fatalf("page: postgres %v, memory %v", gotKeys, wantKeys)
+			}
+			// A page the caller can display must not claim more rows than the filter matched.
+			if len(gotItems) > gotTotal {
+				t.Fatalf("page of %d rows reported a total of %d", len(gotItems), gotTotal)
+			}
+		})
+	}
+
+	// The count-only branch must still count, not return zero because it returned no rows.
+	if _, total, err := repo.ListBusinessAssetsPage(ctx, "ttwin-a", ports.BusinessAssetQuery{Limit: 0}); err != nil || total != 5 {
+		t.Fatalf("count-only total = %d err = %v, want 5", total, err)
+	}
+}
+
+func keysOf(items []*asset.BusinessAsset) []string {
+	out := make([]string, 0, len(items))
+	for _, a := range items {
+		out = append(out, a.Key)
+	}
+	return out
 }

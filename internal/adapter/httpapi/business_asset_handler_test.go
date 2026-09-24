@@ -147,3 +147,138 @@ func TestExternalFindingKindRequiresClientCapability(t *testing.T) {
 		t.Fatal("comma-separated external finding capability was not recognized")
 	}
 }
+
+// The shared engIDs fake answers one constant id. That is fine for a single-row test and wrong
+// for anything that counts or pages: every create would reuse the id and overwrite the last row.
+// seqIDs (user_handler_test.go) mints distinct ones.
+func newBusinessAssetRouterSeq(t *testing.T) *Router {
+	t.Helper()
+	assets := memory.NewAssetStore()
+	service, err := businessassetuc.NewService(assets, memory.NewFindingRepository(), memory.NewImportedFindingStore(), memory.NewJudgmentStore(), memory.NewRetestRepository(), &fakeAudit{}, fixedClock{}, &seqIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Router{log: discardLog(), businessAssets: service}
+}
+
+// The inventory's estate-wide "Critical" figure comes from this route, so a tenant reading
+// another tenant's histogram would be a cross-tenant leak of how much critical infrastructure
+// they run. The route carries no path parameter, so the hostile harness's tenant sweep does not
+// select it (harness_test.go picks GET routes containing /engagements/{, /projects/{ or /assets/{)
+// and this is the only place that scoping is asserted above the repository.
+func TestBusinessAssetCountsRBACIsolationAndShape(t *testing.T) {
+	routes := newBusinessAssetRouterSeq(t).routes()
+	call := func(role, tenant, method, path string, body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewReader(body))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", Role: role, TenantID: tenant}))
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, req)
+		return rec
+	}
+	create := func(tenant, key, criticality string) {
+		t.Helper()
+		body := []byte(`{"key":"` + key + `","name":"` + key + `","description":"d","type":"application","criticality":"` + criticality + `","owner":"team"}`)
+		if rec := call("consultant", tenant, http.MethodPost, "/api/v1/appsec/assets", body); rec.Code != http.StatusCreated {
+			t.Fatalf("create %s/%s status=%d body=%s", tenant, key, rec.Code, rec.Body.String())
+		}
+	}
+
+	create("tenant-a", "pay", "critical")
+	create("tenant-a", "ledger", "critical")
+	create("tenant-a", "wiki", "low")
+	create("tenant-b", "other", "critical")
+
+	counts := func(role, tenant string) (map[string]int, int, int) {
+		t.Helper()
+		rec := call(role, tenant, http.MethodGet, "/api/v1/appsec/asset-counts", nil)
+		var out struct {
+			ByCriticality map[string]int `json:"by_criticality"`
+			Total         int            `json:"total"`
+		}
+		if rec.Code == http.StatusOK {
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Fatalf("decode counts: %v body=%s", err, rec.Body.String())
+			}
+		}
+		return out.ByCriticality, out.Total, rec.Code
+	}
+
+	// View is the lowest role that may read the inventory, so readonly must be allowed here: a
+	// 403 would leave the summary strip permanently "unavailable" for every read-only operator.
+	byCriticality, total, code := counts("readonly", "tenant-a")
+	if code != http.StatusOK {
+		t.Fatalf("readonly counts status=%d", code)
+	}
+	if byCriticality["critical"] != 2 || byCriticality["low"] != 1 || total != 3 {
+		t.Fatalf("tenant-a counts=%v total=%d, want 2 critical, 1 low, 3 total", byCriticality, total)
+	}
+
+	// The histogram is the tenant's own estate. Tenant B has one critical asset of its own and
+	// must never see tenant A's two.
+	byCriticality, total, code = counts("readonly", "tenant-b")
+	if code != http.StatusOK {
+		t.Fatalf("tenant-b counts status=%d", code)
+	}
+	if byCriticality["critical"] != 1 || total != 1 {
+		t.Fatalf("tenant-b counts=%v total=%d, want only its own row", byCriticality, total)
+	}
+
+	// A tenant with nothing gets zeroes, not another tenant's figures.
+	byCriticality, total, code = counts("readonly", "tenant-empty")
+	if code != http.StatusOK {
+		t.Fatalf("empty tenant counts status=%d", code)
+	}
+	if total != 0 || len(byCriticality) != 0 {
+		t.Fatalf("empty tenant counts=%v total=%d, want empty", byCriticality, total)
+	}
+}
+
+// The list's `total` is the count of every row matching the filter, which is what the pager
+// divides to get its page count. Answering with len(items) would make the last page the only
+// page, and no existing assertion could tell the difference because every case fetched fewer
+// rows than the limit.
+func TestBusinessAssetListTotalCountsBeyondThePage(t *testing.T) {
+	routes := newBusinessAssetRouterSeq(t).routes()
+	call := func(method, path string, body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewReader(body))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "alice", Role: "consultant", TenantID: "tenant-a"}))
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, key := range []string{"alpha", "bravo", "charlie", "delta", "echo"} {
+		body := []byte(`{"key":"` + key + `","name":"` + key + `","description":"d","type":"application","criticality":"low","owner":"team"}`)
+		if rec := call(http.MethodPost, "/api/v1/appsec/assets", body); rec.Code != http.StatusCreated {
+			t.Fatalf("create %s status=%d body=%s", key, rec.Code, rec.Body.String())
+		}
+	}
+
+	page := func(path string) (int, int, int) {
+		t.Helper()
+		rec := call(http.MethodGet, path, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list %s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Items  []json.RawMessage `json:"items"`
+			Total  int               `json:"total"`
+			Offset int               `json:"offset"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode list: %v", err)
+		}
+		return len(out.Items), out.Total, out.Offset
+	}
+
+	if items, total, _ := page("/api/v1/appsec/assets?limit=2"); items != 2 || total != 5 {
+		t.Fatalf("first page items=%d total=%d, want 2 of 5", items, total)
+	}
+	if items, total, offset := page("/api/v1/appsec/assets?limit=2&offset=4"); items != 1 || total != 5 || offset != 4 {
+		t.Fatalf("last page items=%d total=%d offset=%d, want 1 of 5 at offset 4", items, total, offset)
+	}
+	// Past the end still reports the estate so the pager can correct itself, and the echoed
+	// offset is clamped to the total rather than repeating what the caller asked for.
+	if items, total, offset := page("/api/v1/appsec/assets?limit=2&offset=50"); items != 0 || total != 5 || offset != 5 {
+		t.Fatalf("past the end items=%d total=%d offset=%d, want 0 of 5 clamped to 5", items, total, offset)
+	}
+}

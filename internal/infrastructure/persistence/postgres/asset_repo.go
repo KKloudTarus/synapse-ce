@@ -278,19 +278,34 @@ func businessAssetFilterSQL(tenantID shared.ID, query ports.BusinessAssetQuery) 
 	return where, args
 }
 
+// countingRow appends a trailing column to a scan, so the page query can carry its own total
+// without a second statement and a second snapshot.
+type countingRow struct {
+	row   rowScanner
+	total *int
+}
+
+func (c countingRow) Scan(dest ...any) error { return c.row.Scan(append(dest, c.total)...) }
+
 // ListBusinessAssetsPage filters, orders and pages in the database. The count is of rows matching
 // the filter before the page is applied, so a caller can report a total without fetching it.
+//
+// The count rides along on the page query as a window aggregate rather than being read by a
+// separate statement. WithTenant runs at READ COMMITTED, where each statement takes its own
+// snapshot, so a separate COUNT could answer 1 while the SELECT beside it returned nothing, and
+// the inventory would render "1 result" over an empty table.
+//
+// Ordering is by byte value, not by the database's collation. The in-memory twin sorts Go
+// strings, and a Postgres initialised with ICU orders "_infra" before "Billing" where Go does the
+// reverse, which would put different rows on page N depending on which store answered.
 func (r *AssetRepository) ListBusinessAssetsPage(ctx context.Context, tenantID shared.ID, query ports.BusinessAssetQuery) ([]*asset.BusinessAsset, int, error) {
 	out := []*asset.BusinessAsset{}
 	total := 0
 	where, args := businessAssetFilterSQL(tenantID, query)
 	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM fleet_business_services WHERE `+where, args...).Scan(&total); err != nil {
-			return err
-		}
 		// A non-positive limit means "no page": the caller wants the count only.
 		if query.Limit <= 0 {
-			return nil
+			return tx.QueryRow(ctx, `SELECT COUNT(*) FROM fleet_business_services WHERE `+where, args...).Scan(&total)
 		}
 		offset := query.Offset
 		if offset < 0 {
@@ -298,21 +313,29 @@ func (r *AssetRepository) ListBusinessAssetsPage(ctx context.Context, tenantID s
 		}
 		pageArgs := append(append([]any{}, args...), query.Limit, offset)
 		rows, err := tx.Query(ctx,
-			`SELECT `+businessAssetCols+` FROM fleet_business_services WHERE `+where+
-				fmt.Sprintf(` ORDER BY "key" LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2),
+			`SELECT `+businessAssetCols+`, COUNT(*) OVER() FROM fleet_business_services WHERE `+where+
+				fmt.Sprintf(` ORDER BY "key" COLLATE "C" LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2),
 			pageArgs...)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			a, err := scanBusinessAsset(rows)
+			a, err := scanBusinessAsset(countingRow{row: rows, total: &total})
 			if err != nil {
 				return err
 			}
 			out = append(out, a)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		// An empty page carries no window aggregate. That is either an offset past the end or a
+		// filter that matches nothing, and only a count can tell them apart.
+		if len(out) == 0 {
+			return tx.QueryRow(ctx, `SELECT COUNT(*) FROM fleet_business_services WHERE `+where, args...).Scan(&total)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, 0, err
