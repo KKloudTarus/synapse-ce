@@ -3,39 +3,50 @@ package gobinreach
 import (
 	"bytes"
 	"context"
+	"debug/buildinfo"
 	"debug/elf"
 	"debug/gosym"
 	"encoding/binary"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/gobinsubject"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachability"
 )
 
 const (
 	maxEntryCallFunctions    = 200_000
+	maxEntryCallFiles        = 200_000
 	maxFunctionCodeBytes     = 16 << 20
 	maxEntryCallWalk         = 200_000
 	maxEntryCallPCData       = 64
 	maxEntryCallInlineCalls  = 65_536
 	maxEntryCallPCDataSteps  = 1_000_000
+	maxTotalInlineCalls      = 200_000
+	maxTotalPCDataSteps      = 1_000_000
 	maxEntryCallFunctionName = 4_096
+	maxDecodedFunctionNames  = 16 << 20
+	maxEntryCallSubjects     = 4_096
+	maxWitnessDepth          = 2_048
+	maxWitnessFrames         = 65_536
 )
 
 // EntryCallAnalyzer proves positive Go-binary reachability from main.main over direct Linux/amd64 calls.
 // It intentionally answers only paths it can decode from .gopclntab function ranges. Unsupported binaries,
 // malformed metadata, undecodable instructions, indirect calls, and unresolved direct targets contribute no
 // result; this is a raise-only capability, so uncertainty can only forgo a raise and can never mint a negative.
-type EntryCallAnalyzer struct{}
+type EntryCallAnalyzer struct {
+	active chan struct{}
+}
 
 // NewEntryCallAnalyzer returns the bounded direct-call Go-binary analyzer.
-func NewEntryCallAnalyzer() *EntryCallAnalyzer { return &EntryCallAnalyzer{} }
+func NewEntryCallAnalyzer() *EntryCallAnalyzer {
+	return &EntryCallAnalyzer{active: make(chan struct{}, 1)}
+}
 
 // Analyze reports only affected symbols reached from main.main by an observed chain of x86-64 direct calls.
 // A target that has no proven path is omitted rather than reported unreachable.
@@ -46,8 +57,24 @@ func (a *EntryCallAnalyzer) Analyze(ctx context.Context, dir string, subjects []
 	if strings.TrimSpace(dir) == "" {
 		return nil, fmt.Errorf("%w: Go-binary entry-call analysis requires a target directory", shared.ErrValidation)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if a == nil || a.active == nil {
+		return nil, fmt.Errorf("%w: Go-binary entry-call analyzer is not initialized", shared.ErrValidation)
+	}
+	// One analysis at a time bounds peak binary parsing memory for the shared service instance.
+	select {
+	case a.active <- struct{}{}:
+		defer func() { <-a.active }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if len(subjects) > maxEntryCallSubjects {
+		return &reachability.Analysis{}, nil
+	}
 
-	wanted := make(map[string]symbolcanon.Symbol, len(subjects))
+	wanted := make(map[string]wantedSubject, len(subjects))
 	ordered := make([]string, 0, len(subjects))
 	for _, subject := range subjects {
 		if strings.TrimSpace(subject) == "" {
@@ -56,11 +83,12 @@ func (a *EntryCallAnalyzer) Analyze(ctx context.Context, dir string, subjects []
 		if _, exists := wanted[subject]; exists {
 			continue
 		}
-		canonical := symbolcanon.Canonicalize(symbolcanon.Go, subject)
-		if len(canonical.Segments) < 2 {
-			continue // a bare leaf cannot safely identify a Go affected symbol
+		purl, symbol, valid := gobinsubject.Parse(subject)
+		key, keyValid := goSymbolKeyFor(symbol)
+		if !valid || !keyValid {
+			continue // an ambiguous or bare leaf cannot safely identify a Go affected symbol
 		}
-		wanted[subject] = canonical
+		wanted[subject] = wantedSubject{purl: purl, symbol: key}
 		ordered = append(ordered, subject)
 	}
 	if len(wanted) == 0 {
@@ -69,26 +97,7 @@ func (a *EntryCallAnalyzer) Analyze(ctx context.Context, dir string, subjects []
 
 	paths := map[string][]string{}
 	entrypoints := map[string]bool{}
-	files := 0
-	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // unreadable paths are no coverage for this binary, never a negative
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if path != dir && skipDir[d.Name()] {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if files++; files > maxFilesWalked {
-			return fs.SkipAll
-		}
-		if !d.Type().IsRegular() {
-			return nil
-		}
+	walkErr := walkBoundedRegularFiles(ctx, dir, maxWalkEntries, func(path string) error {
 		proven, root, ok := entryCallPathsFromLinuxAMD64ELF(ctx, path, wanted)
 		if err := ctx.Err(); err != nil {
 			return err
@@ -140,9 +149,15 @@ type inlineMetadata struct {
 	matches map[string]int
 }
 
-type symbolTail struct {
-	packageSegment string
-	name           string
+// goSymbolKey is the exact Go function identity used for raise-only matching. It deliberately retains the
+// punctuation that separates a module path from its package and function. Generic instantiations and pointer
+// receiver spelling are normalized because those differ between an advisory and PCLNTAB without changing the
+// function identity. No vendor, semantic-import-version, dot, or slash rewriting is permitted.
+type goSymbolKey string
+
+type wantedSubject struct {
+	purl   gobinsubject.PURL
+	symbol goSymbolKey
 }
 
 type pcDataRange struct {
@@ -150,29 +165,179 @@ type pcDataRange struct {
 	value int
 }
 
-func inlineWantedIndex(wanted map[string]symbolcanon.Symbol) map[symbolTail][]string {
-	indexed := make(map[symbolTail][]string, len(wanted))
-	for subject, symbol := range wanted {
-		if len(symbol.Segments) < 2 {
-			continue
-		}
-		key := symbolTail{packageSegment: symbol.Segments[len(symbol.Segments)-2], name: symbol.Segments[len(symbol.Segments)-1]}
+func inlineWantedIndex(wanted map[string]goSymbolKey) map[goSymbolKey][]string {
+	indexed := make(map[goSymbolKey][]string, len(wanted))
+	for subject, key := range wanted {
 		indexed[key] = append(indexed[key], subject)
 	}
 	return indexed
 }
 
-func symbolTailFor(name string) (symbolTail, bool) {
-	symbol := symbolcanon.Canonicalize(symbolcanon.Go, name)
-	if len(symbol.Segments) < 2 {
-		return symbolTail{}, false
+// boundSubjectsForBinary returns only queries whose exact PURL module and version are attributable to this
+// opened image's own build info. The longest owning module path wins for nested modules. A replacement, devel
+// version, conflict, absent build info, or any other ambiguity returns no subject for that proposed positive.
+func boundSubjectsForBinary(info *debug.BuildInfo, wanted map[string]wantedSubject) map[string]goSymbolKey {
+	if info == nil {
+		return nil
 	}
-	return symbolTail{packageSegment: symbol.Segments[len(symbol.Segments)-2], name: symbol.Segments[len(symbol.Segments)-1]}, true
+	modules, ok := indexBuildModules(info)
+	if !ok {
+		return nil
+	}
+	bound := make(map[string]goSymbolKey, len(wanted))
+	for subject, query := range wanted {
+		owner, ok := modules.owner(string(query.symbol))
+		if !ok || !goModuleOwnsSymbol(owner.Path, string(query.symbol)) ||
+			owner.Path != query.purl.Module || owner.Version != query.purl.Version {
+			continue
+		}
+		bound[subject] = query.symbol
+	}
+	if len(bound) == 0 {
+		return nil
+	}
+	return bound
+}
+
+type buildModuleIndex map[string]indexedBuildModule
+
+type indexedBuildModule struct {
+	module   debug.Module
+	conflict bool
+}
+
+// indexBuildModules reads an image's build metadata once, even when many affected symbols are queried.
+func indexBuildModules(info *debug.BuildInfo) (buildModuleIndex, bool) {
+	modules := make(buildModuleIndex, len(info.Deps)+1)
+	add := func(module debug.Module) {
+		if module.Path == "" {
+			return
+		}
+		if existing, found := modules[module.Path]; found {
+			if existing.module.Version != module.Version || existing.module.Replace != nil || module.Replace != nil {
+				existing.conflict = true
+				modules[module.Path] = existing
+			}
+			return
+		}
+		modules[module.Path] = indexedBuildModule{module: module}
+	}
+	add(info.Main)
+	for _, dependency := range info.Deps {
+		if dependency == nil {
+			return nil, false
+		}
+		add(*dependency)
+	}
+	return modules, true
+}
+
+// owner selects the longest module prefix at a Go package boundary. A root free function can have the
+// same spelling as a method from a shorter loaded module, so such overlap provides no coverage.
+func (modules buildModuleIndex) owner(symbol string) (debug.Module, bool) {
+	var candidate indexedBuildModule
+	candidateFound := false
+	rootCandidate := false
+	for end := len(symbol) - 1; end > 0; end-- {
+		if symbol[end] != '/' && symbol[end] != '.' {
+			continue
+		}
+		entry, exists := modules[symbol[:end]]
+		if !exists {
+			continue
+		}
+		if !candidateFound {
+			candidate = entry
+			candidateFound = true
+			rootCandidate = symbol[end] == '.'
+			if !rootCandidate {
+				break
+			}
+			continue
+		}
+		if rootCandidate {
+			return debug.Module{}, false
+		}
+	}
+	module := candidate.module
+	if !candidateFound || candidate.conflict || module.Replace != nil || module.Version == "" || module.Version == "(devel)" {
+		return debug.Module{}, false
+	}
+	return module, true
+}
+
+func goModuleOwnsSymbol(module, symbol string) bool {
+	return module != "" && gobinsubject.OwnsSymbol(module, symbol)
+}
+
+func goSymbolKeyFor(raw string) (goSymbolKey, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.ContainsAny(raw, " \t\r\n") {
+		return "", false
+	}
+	withoutGenerics, valid := stripGoGenericArguments(raw)
+	if !valid {
+		return "", false
+	}
+	var key strings.Builder
+	key.Grow(len(withoutGenerics))
+	for index := 0; index < len(withoutGenerics); index++ {
+		switch withoutGenerics[index] {
+		case '(':
+			if index+3 >= len(withoutGenerics) || withoutGenerics[index+1] != '*' {
+				return "", false
+			}
+			end := strings.IndexByte(withoutGenerics[index+2:], ')')
+			if end <= 0 {
+				return "", false
+			}
+			end += index + 2
+			if strings.ContainsAny(withoutGenerics[index+2:end], "()") {
+				return "", false
+			}
+			key.WriteString(withoutGenerics[index+2 : end])
+			index = end
+		case ')':
+			return "", false
+		default:
+			key.WriteByte(withoutGenerics[index])
+		}
+	}
+	result := key.String()
+	if strings.Count(result, ".") < 1 {
+		return "", false
+	}
+	return goSymbolKey(result), true
+}
+
+func stripGoGenericArguments(raw string) (string, bool) {
+	var key strings.Builder
+	key.Grow(len(raw))
+	depth := 0
+	for index := 0; index < len(raw); index++ {
+		switch raw[index] {
+		case '[':
+			depth++
+		case ']':
+			if depth == 0 {
+				return "", false
+			}
+			depth--
+		default:
+			if depth == 0 {
+				key.WriteByte(raw[index])
+			}
+		}
+	}
+	if depth != 0 {
+		return "", false
+	}
+	return key.String(), true
 }
 
 // entryCallPathsFromLinuxAMD64ELF reads the Linux/amd64 form only. The recover boundary protects the scanner
 // from malformed executable metadata and the debug/gosym parser; either failure is simply no coverage.
-func entryCallPathsFromLinuxAMD64ELF(ctx context.Context, path string, wanted map[string]symbolcanon.Symbol) (proven map[string][]string, root string, ok bool) {
+func entryCallPathsFromLinuxAMD64ELF(ctx context.Context, path string, wanted map[string]wantedSubject) (proven map[string][]string, root string, ok bool) {
 	defer func() {
 		if recover() != nil {
 			proven, root, ok = nil, "", false
@@ -182,33 +347,53 @@ func entryCallPathsFromLinuxAMD64ELF(ctx context.Context, path string, wanted ma
 		return nil, "", false
 	}
 
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() < 4 || info.Size() > maxBinaryBytes {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, "", false
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || !preflightELF(file, info.Size()) {
 		return nil, "", false
 	}
 	if ctx.Err() != nil {
 		return nil, "", false
 	}
-	executable, err := elf.Open(path)
+	executable, err := elf.NewFile(file)
 	if err != nil {
 		return nil, "", false
 	}
 	defer func() { _ = executable.Close() }()
 	if executable.Class != elf.ELFCLASS64 || executable.Machine != elf.EM_X86_64 || executable.Data != elf.ELFDATA2LSB ||
-		(executable.Type != elf.ET_EXEC && executable.Type != elf.ET_DYN) {
+		!linuxAMD64ProcessImage(executable) {
+		return nil, "", false
+	}
+	binaryInfo, err := buildinfo.Read(&budgetReaderAt{source: file, remaining: maxBuildInfoReadBytes})
+	if err != nil || ctx.Err() != nil {
+		return nil, "", false
+	}
+	bound := boundSubjectsForBinary(binaryInfo, wanted)
+	if len(bound) == 0 {
 		return nil, "", false
 	}
 	textSection := executable.Section(".text")
 	pclntabSection := executable.Section(".gopclntab")
-	if textSection == nil || pclntabSection == nil || textSection.Flags&elf.SHF_EXECINSTR == 0 {
+	if textSection == nil || pclntabSection == nil ||
+		textSection.Flags&(elf.SHF_ALLOC|elf.SHF_EXECINSTR) != elf.SHF_ALLOC|elf.SHF_EXECINSTR ||
+		textSection.Flags&elf.SHF_COMPRESSED != 0 ||
+		pclntabSection.Flags&elf.SHF_ALLOC == 0 || pclntabSection.Flags&elf.SHF_COMPRESSED != 0 ||
+		textSection.Size == 0 || textSection.Size > maxTextBytes ||
+		pclntabSection.Size == 0 || pclntabSection.Size > maxPCLNBytes {
 		return nil, "", false
 	}
 	text, err := textSection.Data()
-	if err != nil || len(text) == 0 || len(text) > maxBinaryBytes || ctx.Err() != nil {
+	if err != nil || len(text) == 0 || len(text) > maxTextBytes || ctx.Err() != nil {
 		return nil, "", false
 	}
 	pclntab, err := pclntabSection.Data()
-	if err != nil || len(pclntab) == 0 || len(pclntab) > maxBinaryBytes || ctx.Err() != nil {
+	if err != nil || len(pclntab) < 4 || len(pclntab) > maxPCLNBytes ||
+		binary.LittleEndian.Uint32(pclntab) != 0xfffffff1 ||
+		!boundedPCLNFunctionNames(pclntab) || ctx.Err() != nil {
 		return nil, "", false
 	}
 	table, err := gosym.NewTable(nil, gosym.NewLineTable(pclntab, textSection.Addr))
@@ -231,7 +416,7 @@ func entryCallPathsFromLinuxAMD64ELF(ctx context.Context, path string, wanted ma
 		}
 		functions[function.Entry] = pclntabFunction{name: name, entry: function.Entry, end: function.End}
 	}
-	inlineMetadata, inlineOK := pclntabInlinePaths(ctx, pclntab, textSection.Addr, functions, wanted)
+	inlineMetadata, inlineOK := pclntabInlinePaths(ctx, pclntab, textSection.Addr, functions, bound)
 	if !inlineOK || ctx.Err() != nil {
 		return nil, "", false
 	}
@@ -245,7 +430,7 @@ func entryCallPathsFromLinuxAMD64ELF(ctx context.Context, path string, wanted ma
 	if !found || ctx.Err() != nil {
 		return nil, "", false
 	}
-	paths, complete := walkDirectCalls(ctx, text, textSection.Addr, functions, start, wanted)
+	paths, complete := walkDirectCalls(ctx, text, textSection.Addr, functions, start, inlineWantedIndex(bound))
 	if !complete && len(paths) == 0 {
 		return nil, "", false
 	}
@@ -253,6 +438,48 @@ func entryCallPathsFromLinuxAMD64ELF(ctx context.Context, path string, wanted ma
 		return nil, "", false
 	}
 	return paths, start.name, true
+}
+
+// linuxAMD64ProcessImage accepts an executable or a PIE image with code and Go metadata in load segments.
+// ET_DYN plugins and shared libraries have no PT_INTERP; ambiguous static PIE forms provide no coverage.
+func linuxAMD64ProcessImage(executable *elf.File) bool {
+	if executable.Type != elf.ET_EXEC && executable.Type != elf.ET_DYN {
+		return false
+	}
+	text := executable.Section(".text")
+	pclntab := executable.Section(".gopclntab")
+	if text == nil || text.Size == 0 || text.Size > maxTextBytes ||
+		text.Flags&(elf.SHF_ALLOC|elf.SHF_EXECINSTR) != elf.SHF_ALLOC|elf.SHF_EXECINSTR ||
+		text.Flags&elf.SHF_COMPRESSED != 0 ||
+		pclntab == nil || pclntab.Size == 0 || pclntab.Size > maxPCLNBytes ||
+		pclntab.Flags&elf.SHF_ALLOC == 0 || pclntab.Flags&elf.SHF_COMPRESSED != 0 ||
+		!elfSectionMapped(executable, text, true) || !elfSectionMapped(executable, pclntab, false) {
+		return false
+	}
+	interpreter := false
+	for _, program := range executable.Progs {
+		if program.Type == elf.PT_INTERP {
+			interpreter = true
+		}
+	}
+	return executable.Type == elf.ET_EXEC || interpreter
+}
+
+func elfSectionMapped(executable *elf.File, section *elf.Section, executableLoad bool) bool {
+	for _, program := range executable.Progs {
+		if program.Type != elf.PT_LOAD || executableLoad && program.Flags&elf.PF_X == 0 ||
+			section.Addr < program.Vaddr || section.Offset < program.Off {
+			continue
+		}
+		virtualOffset := section.Addr - program.Vaddr
+		fileOffset := section.Offset - program.Off
+		if virtualOffset == fileOffset && virtualOffset <= program.Filesz &&
+			section.Size <= program.Filesz-virtualOffset &&
+			virtualOffset <= program.Memsz && section.Size <= program.Memsz-virtualOffset {
+			return true
+		}
+	}
+	return false
 }
 
 func functionsByName(ctx context.Context, functions map[uint64]pclntabFunction, name string) (pclntabFunction, bool) {
@@ -272,7 +499,7 @@ func functionsByName(ctx context.Context, functions map[uint64]pclntabFunction, 
 // still a concrete may-call proof inside its reached physical parent. Its bounded call records use binary parent
 // lookups, and an ancestor chain is rebuilt only for a requested matching symbol. Other PCLNTAB formats or any
 // malformed offset are deliberately no coverage rather than a guessed edge.
-func pclntabInlinePaths(ctx context.Context, data []byte, textStart uint64, functions map[uint64]pclntabFunction, wanted map[string]symbolcanon.Symbol) (map[uint64]inlineMetadata, bool) {
+func pclntabInlinePaths(ctx context.Context, data []byte, textStart uint64, functions map[uint64]pclntabFunction, wanted map[string]goSymbolKey) (map[uint64]inlineMetadata, bool) {
 	if ctx.Err() != nil {
 		return nil, false
 	}
@@ -321,6 +548,7 @@ func pclntabInlinePaths(ctx context.Context, data []byte, textStart uint64, func
 		functionLen uint64
 	}
 	metadata := make([]functionMetadata, 0, nfunc)
+	remainingNameBytes := maxDecodedFunctionNames
 	maximumEnd := uint64(0)
 	for index := uint64(0); index < nfunc; index++ {
 		if ctx.Err() != nil {
@@ -343,6 +571,10 @@ func pclntabInlinePaths(ctx context.Context, data []byte, textStart uint64, func
 		if !valid || name != function.name {
 			return nil, false
 		}
+		if len(name) > remainingNameBytes {
+			return nil, false
+		}
+		remainingNameBytes -= len(name)
 		npcdata := binary.LittleEndian.Uint32(data[dataOffset+28:])
 		nfuncdata := data[dataOffset+43]
 		if npcdata > maxEntryCallPCData || nfuncdata > maxEntryCallPCData ||
@@ -364,6 +596,8 @@ func pclntabInlinePaths(ctx context.Context, data []byte, textStart uint64, func
 	}
 
 	out := make(map[uint64]inlineMetadata)
+	remainingPCDataSteps := maxTotalPCDataSteps
+	remainingInlineCalls := maxTotalInlineCalls
 	for _, item := range metadata {
 		if ctx.Err() != nil {
 			return nil, false
@@ -383,11 +617,15 @@ func pclntabInlinePaths(ctx context.Context, data []byte, textStart uint64, func
 		if pcdataOffset == 0 || pctabOffset+uint64(pcdataOffset) >= uint64(len(data)) {
 			return nil, false
 		}
-		ranges, maximumIndex, valid := inlinePCDataRanges(ctx, data, pctabOffset+uint64(pcdataOffset), item.functionLen)
+		ranges, maximumIndex, valid := inlinePCDataRanges(ctx, data, pctabOffset+uint64(pcdataOffset), item.functionLen, &remainingPCDataSteps)
 		if !valid || maximumIndex < 0 || maximumIndex >= maxEntryCallInlineCalls {
 			return nil, false
 		}
 		count := maximumIndex + 1
+		if count > remainingInlineCalls {
+			return nil, false
+		}
+		remainingInlineCalls -= count
 		inlineStart := goFuncOffset + uint64(inlineOffset)
 		if inlineStart < goFuncOffset || inlineStart > uint64(len(data)) || uint64(count) > (uint64(len(data))-inlineStart)/inlineCallBytes {
 			return nil, false
@@ -406,6 +644,10 @@ func pclntabInlinePaths(ctx context.Context, data []byte, textStart uint64, func
 			if !valid {
 				return nil, false
 			}
+			if len(name) > remainingNameBytes {
+				return nil, false
+			}
+			remainingNameBytes -= len(name)
 			parentPC := int64(int32(binary.LittleEndian.Uint32(data[offset+8:])))
 			if parentPC < 0 || uint64(parentPC) >= item.functionLen {
 				return nil, false
@@ -446,7 +688,7 @@ func pclntabFunctionName(data []byte, functionNameOffset uint64, nameOffset int6
 	return string(data[start : start+uint64(end)]), true
 }
 
-func inlinePCDataRanges(ctx context.Context, data []byte, offset, functionLen uint64) ([]pcDataRange, int, bool) {
+func inlinePCDataRanges(ctx context.Context, data []byte, offset, functionLen uint64, remaining *int) ([]pcDataRange, int, bool) {
 	if ctx.Err() != nil || offset >= uint64(len(data)) || functionLen == 0 {
 		return nil, 0, false
 	}
@@ -457,9 +699,10 @@ func inlinePCDataRanges(ctx context.Context, data []byte, offset, functionLen ui
 	first := true
 	var ranges []pcDataRange
 	for steps := 0; steps < maxEntryCallPCDataSteps; steps++ {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || *remaining == 0 {
 			return nil, 0, false
 		}
+		*remaining -= 1
 		delta, next, valid := pclntabVarint(data, cursor)
 		if !valid {
 			return nil, 0, false
@@ -555,17 +798,17 @@ func validInlineCallParents(ctx context.Context, calls []inlineCall) bool {
 	return true
 }
 
-func inlineCallMatches(ctx context.Context, calls []inlineCall, wanted map[symbolTail][]string) (map[string]int, bool) {
+func inlineCallMatches(ctx context.Context, calls []inlineCall, wanted map[goSymbolKey][]string) (map[string]int, bool) {
 	matches := make(map[string]int)
 	for index, call := range calls {
 		if ctx.Err() != nil {
 			return nil, false
 		}
-		tail, valid := symbolTailFor(call.name)
+		key, valid := goSymbolKeyFor(call.name)
 		if !valid {
 			continue
 		}
-		for _, subject := range wanted[tail] {
+		for _, subject := range wanted[key] {
 			if _, alreadyMatched := matches[subject]; !alreadyMatched {
 				matches[subject] = index
 			}
@@ -577,7 +820,7 @@ func inlineCallMatches(ctx context.Context, calls []inlineCall, wanted map[symbo
 func inlineCallPath(ctx context.Context, calls []inlineCall, index int) ([]string, bool) {
 	path := make([]string, 0, 8)
 	for steps := 0; index != -1; steps++ {
-		if ctx.Err() != nil || index < 0 || index >= len(calls) || steps >= len(calls) {
+		if ctx.Err() != nil || index < 0 || index >= len(calls) || steps >= len(calls) || steps >= maxWitnessDepth {
 			return nil, false
 		}
 		path = append(path, calls[index].name)
@@ -593,12 +836,35 @@ func inlineCallPath(ctx context.Context, calls []inlineCall, index int) ([]strin
 // It stops an undecodable branch, but retains an already decoded path to a queried symbol: that positive is
 // independent of coverage elsewhere. The complete return value is therefore useful only for deciding whether a
 // binary with no positive evidence provided any usable coverage at all.
-func walkDirectCalls(ctx context.Context, text []byte, textAddress uint64, functions map[uint64]pclntabFunction, start pclntabFunction, wanted map[string]symbolcanon.Symbol) (map[string][]string, bool) {
+func walkDirectCalls(ctx context.Context, text []byte, textAddress uint64, functions map[uint64]pclntabFunction, start pclntabFunction, wanted map[goSymbolKey][]string) (map[string][]string, bool) {
 	paths := map[string][]string{}
 	complete := true
-
-	// Keep paths separate from the visited set so identical call chains are stable and no mutable slice is shared.
-	functionPaths := map[uint64][]string{start.entry: {start.name}}
+	remainingWitnessFrames := maxWitnessFrames
+	// Retain one predecessor per visited function. Full paths are built only for matched subjects.
+	parents := make(map[uint64]uint64)
+	depths := map[uint64]int{start.entry: 1}
+	buildPath := func(entry uint64) []string {
+		depth := depths[entry]
+		if depth == 0 || depth > maxWitnessDepth {
+			return nil
+		}
+		path := make([]string, depth)
+		for index := depth - 1; index >= 0; index-- {
+			function, exists := functions[entry]
+			if !exists {
+				return nil
+			}
+			path[index] = function.name
+			if index > 0 {
+				parent, exists := parents[entry]
+				if !exists {
+					return nil
+				}
+				entry = parent
+			}
+		}
+		return path
+	}
 	queue := []pclntabFunction{start}
 	seen := map[uint64]bool{start.entry: true}
 	for len(queue) > 0 {
@@ -607,17 +873,23 @@ func walkDirectCalls(ctx context.Context, text []byte, textAddress uint64, funct
 		}
 		current := queue[0]
 		queue = queue[1:]
-		path := functionPaths[current.entry]
-		currentSymbol := symbolcanon.Canonicalize(symbolcanon.Go, current.name)
-		for subject, wantedSymbol := range wanted {
-			if ctx.Err() != nil {
-				return paths, false
+		var path []string
+		witness := func() []string {
+			if path == nil {
+				path = buildPath(current.entry)
 			}
-			if _, found := paths[subject]; found {
-				continue
-			}
-			if symbolcanon.TailMatch(wantedSymbol, currentSymbol, 2) {
-				paths[subject] = append([]string(nil), path...)
+			return path
+		}
+		currentKey, currentValid := goSymbolKeyFor(current.name)
+		for _, subject := range wanted[currentKey] {
+			if _, found := paths[subject]; !found && currentValid {
+				proof := witness()
+				if len(proof) == 0 || len(proof) > remainingWitnessFrames {
+					complete = false
+					continue
+				}
+				paths[subject] = append([]string(nil), proof...)
+				remainingWitnessFrames -= len(proof)
 			}
 		}
 		// Linker-recorded inline frames are executable code inside the reached physical parent. They carry their
@@ -634,7 +906,14 @@ func walkDirectCalls(ctx context.Context, text []byte, textAddress uint64, funct
 			if !valid {
 				return paths, false
 			}
-			paths[subject] = append(append([]string(nil), path...), inlinePath...)
+			proof := witness()
+			if len(proof) == 0 || len(proof)+len(inlinePath) > maxWitnessDepth ||
+				len(proof)+len(inlinePath) > remainingWitnessFrames {
+				complete = false
+				continue
+			}
+			paths[subject] = append(append([]string(nil), proof...), inlinePath...)
+			remainingWitnessFrames -= len(proof) + len(inlinePath)
 		}
 
 		codeStart := current.entry - textAddress
@@ -658,8 +937,13 @@ func walkDirectCalls(ctx context.Context, text []byte, textAddress uint64, funct
 			if !exists || seen[target] {
 				continue
 			}
+			if depths[current.entry] >= maxWitnessDepth {
+				complete = false
+				continue
+			}
 			seen[target] = true
-			functionPaths[target] = append(append([]string(nil), path...), callee.name)
+			parents[target] = current.entry
+			depths[target] = depths[current.entry] + 1
 			queue = append(queue, callee)
 		}
 	}

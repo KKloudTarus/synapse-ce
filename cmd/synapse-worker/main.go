@@ -24,6 +24,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/accuracyprobe"
@@ -45,6 +46,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gobinreach"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/license"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/licensemeta"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/risk"
@@ -83,6 +85,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	ownershipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ownership"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachproof"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
@@ -447,18 +450,32 @@ func main() {
 	scaService.SetUploadedSourceStore(uploadedSources)
 	configureCleanup := scacompose.Configure(scaService, cfg, scaExecution.Sandbox, log)
 	defer configureCleanup()
-	// Source-only judgment-minting scanners in the default scan path (Python value-flow taint today), shared
-	// with synapse-api via scacompose. The worker runs queued SCA scans, so without this a worker-run scan
-	// would be regex-only. Gated on the judgment lifecycle (it mints CapSAST proposals).
-	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled || cfg.JVMReachabilityEnabled) && cfg.JudgmentsEnabled {
+	// Queued scans need the same judgment-backed analysis as API scans.
+	if cfg.GoBinaryReachabilityEnabled && !cfg.JudgmentsEnabled {
+		if _, explicit := os.LookupEnv("SYNAPSE_REACH_GOBIN"); explicit {
+			log.Error("go-binary reachability requires SYNAPSE_JUDGMENTS_ENABLED; enable judgments or unset SYNAPSE_REACH_GOBIN")
+			os.Exit(1)
+		}
+		log.Warn("go-binary reachability auto-skipped: SYNAPSE_JUDGMENTS_ENABLED is off")
+	}
+	if (cfg.PythonTaintEnabled || cfg.JsTaintEnabled || cfg.JavaTaintEnabled || cfg.JVMReachabilityEnabled || cfg.GoBinaryReachabilityEnabled) && cfg.JudgmentsEnabled {
 		scaJudgmentSvc, jerr := analysisuc.NewService(postgres.NewJudgmentRepository(pool), evidenceService, auditLog, clock, ids)
 		if jerr != nil {
 			log.Error("worker SCA judgment service init failed", "err", jerr)
 			os.Exit(1)
 		}
 		if err := scacompose.ConfigureJudgmentScanners(scaService, cfg, scaExecution.Sandbox, scaJudgmentSvc, auditLog, clock, log); err != nil {
-			log.Error("worker python semantic taint init failed", "err", err)
+			log.Error("worker SCA judgment scanner init failed", "err", err)
 			os.Exit(1)
+		}
+		if cfg.GoBinaryReachabilityEnabled {
+			coord, cerr := reachproof.NewCoordinatorForLanguage(gobinreach.NewEntryCallAnalyzer(), scaJudgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageGoBinary)
+			if cerr != nil {
+				log.Error("worker go-binary reachability coordinator init failed", "err", cerr)
+				os.Exit(1)
+			}
+			scaService.SetGoBinaryReachability(coord.WithRaiseOnly())
+			log.Info("worker Go-binary affected-symbol reachability ENABLED (raise-only, PCLNTAB calls from main.main)")
 		}
 	}
 	if cfg.ComplianceEnabled {

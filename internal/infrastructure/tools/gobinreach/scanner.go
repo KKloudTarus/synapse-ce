@@ -1,15 +1,8 @@
-// Package gobinreach implements RAISE-ONLY symbol reachability for COMPILED Go binaries (EPIC #1034 D4.8,
-// #1038). It reads a Go binary's function symbol table (the `.gopclntab`) and returns the fully-qualified
-// function names (`importPath.Func`, `importPath.(*Recv).Method`) it observes, for symreach's raise-only
-// tail-match against an advisory's affected symbols.
+// Package gobinreach provides raise-only reachability evidence from compiled Go binaries.
+// It reads Go function metadata and proves direct-call paths from main.main to version-bound affected symbols.
 //
-// It is RAISE-ONLY by construction: the PRESENCE of a matched affected symbol raises a finding's urgency, but
-// ABSENCE is NO COVERAGE, never not_reachable. A stripped binary, an inlined or dead-code-eliminated function,
-// a non-Go binary, an object format it cannot read, or a malformed pclntab all contribute NOTHING (they are
-// treated as no coverage), so the analyzer can never mint a false not_reachable and its proof actors are
-// excluded from the deterministic-reachability set (a verdict here can never become an OpenVEX not_affected).
-// Every read is panic-contained: a corrupt pclntab that makes debug/gosym panic is recovered and yields no
-// coverage rather than crashing the scan.
+// Unproven paths provide no coverage and cannot produce a not_reachable or OpenVEX not_affected verdict.
+// Malformed function metadata yields no coverage instead of crashing the scan.
 package gobinreach
 
 import (
@@ -19,6 +12,8 @@ import (
 	"debug/gosym"
 	"debug/macho"
 	"debug/pe"
+	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -29,8 +24,10 @@ import (
 // scan limits bound the walk so a hostile or huge tree cannot exhaust time/memory. Real repos have a handful
 // of binaries; exceeding these simply stops (no coverage), never a false verdict.
 const (
-	maxFilesWalked = 200_000
+	maxWalkEntries = 200_000
 	maxBinaryBytes = 512 << 20 // a 512 MiB cap on a candidate binary read
+	maxPCLNBytes   = 64 << 20  // bound section decompression before reading untrusted metadata
+	maxTextBytes   = 128 << 20
 )
 
 // skipDir prunes VCS and dependency-cache directories that never hold a first-party build artifact.
@@ -51,26 +48,7 @@ func New() *GoBinarySymbolScanner { return &GoBinarySymbolScanner{} }
 // indistinguishable from coverage-with-absence); it only errors on an unusable directory argument.
 func (s *GoBinarySymbolScanner) ScanSymbolRefs(ctx context.Context, dir string) ([]string, error) {
 	seen := map[string]bool{}
-	files := 0
-	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // an unreadable entry is skipped, not fatal (raise-only: a miss forgoes a raise)
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if d.IsDir() {
-			if path != dir && skipDir[d.Name()] {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if files++; files > maxFilesWalked {
-			return fs.SkipAll
-		}
-		if !d.Type().IsRegular() {
-			return nil
-		}
+	walkErr := walkBoundedRegularFiles(ctx, dir, maxWalkEntries, func(path string) error {
 		for _, name := range symbolsFromGoBinary(ctx, path) {
 			seen[name] = true
 		}
@@ -94,6 +72,63 @@ func (s *GoBinarySymbolScanner) ScanSymbolRefs(ctx context.Context, dir string) 
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// walkBoundedRegularFiles reads at most limit+1 entries from any directory before sorting it.
+// This keeps a single adversarial directory from making filepath.WalkDir allocate for millions
+// of names before its callback can apply a limit. An oversized or unreadable directory has no
+// coverage; completed earlier paths remain valid positive evidence.
+func walkBoundedRegularFiles(ctx context.Context, root string, limit int, visit func(string) error) error {
+	if limit <= 0 {
+		return nil
+	}
+	rootInfo, err := os.Lstat(root)
+	if err != nil {
+		return nil
+	}
+	type item struct {
+		path  string
+		entry fs.DirEntry
+	}
+	stack := []item{{path: root, entry: fs.FileInfoToDirEntry(rootInfo)}}
+	discovered := 1
+	for len(stack) != 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if current.entry.IsDir() {
+			if current.path != root && skipDir[current.entry.Name()] {
+				continue
+			}
+			folder, err := os.Open(current.path)
+			if err != nil {
+				continue
+			}
+			remaining := limit - discovered
+			children, readErr := folder.ReadDir(remaining + 1)
+			_ = folder.Close()
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				continue
+			}
+			if len(children) > remaining {
+				return nil
+			}
+			discovered += len(children)
+			sort.Slice(children, func(left, right int) bool { return children[left].Name() < children[right].Name() })
+			for index := len(children) - 1; index >= 0; index-- {
+				stack = append(stack, item{path: filepath.Join(current.path, children[index].Name()), entry: children[index]})
+			}
+			continue
+		}
+		if current.entry.Type().IsRegular() {
+			if err := visit(current.path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // symbolsFromGoBinary returns the `.gopclntab` function names of the Go binary at path, or nil for anything
@@ -126,7 +161,7 @@ func symbolsFromGoBinary(ctx context.Context, path string) (names []string) {
 		return nil
 	}
 	pclntab, textStart, ok := goPclntab(ctx, path)
-	if !ok || len(pclntab) == 0 || ctx.Err() != nil {
+	if !ok || len(pclntab) == 0 || !boundedPCLNFunctionNames(pclntab) || ctx.Err() != nil {
 		return nil // not a Go binary, or stripped of its pclntab -> no coverage (never not_reachable)
 	}
 	lt := gosym.NewLineTable(pclntab, textStart)
@@ -169,24 +204,40 @@ func goPclntab(ctx context.Context, path string) (pclntab []byte, textStart uint
 	if ctx.Err() != nil {
 		return nil, 0, false
 	}
-	if ef, err := elf.Open(path); err == nil {
-		defer func() { _ = ef.Close() }()
-		if ctx.Err() != nil {
+	if file, err := os.Open(path); err == nil {
+		defer func() { _ = file.Close() }()
+		var magic [4]byte
+		if _, readErr := file.ReadAt(magic[:], 0); readErr != nil {
 			return nil, 0, false
 		}
-		sec := ef.Section(".gopclntab")
-		if sec == nil {
-			return nil, 0, false
+		if string(magic[:]) == "\x7fELF" {
+			info, statErr := file.Stat()
+			if statErr != nil || !info.Mode().IsRegular() || !preflightELF(file, info.Size()) {
+				return nil, 0, false
+			}
+			ef, parseErr := elf.NewFile(file)
+			if parseErr != nil {
+				return nil, 0, false
+			}
+			defer func() { _ = ef.Close() }()
+			if ctx.Err() != nil {
+				return nil, 0, false
+			}
+			sec := ef.Section(".gopclntab")
+			if sec == nil || sec.Size == 0 || sec.Size > maxPCLNBytes ||
+				sec.Flags&elf.SHF_ALLOC == 0 || sec.Flags&elf.SHF_COMPRESSED != 0 {
+				return nil, 0, false
+			}
+			data, err := sec.Data()
+			if err != nil || ctx.Err() != nil {
+				return nil, 0, false
+			}
+			var text uint64
+			if t := ef.Section(".text"); t != nil {
+				text = t.Addr
+			}
+			return data, text, true
 		}
-		data, err := sec.Data()
-		if err != nil || ctx.Err() != nil {
-			return nil, 0, false
-		}
-		var text uint64
-		if t := ef.Section(".text"); t != nil {
-			text = t.Addr
-		}
-		return data, text, true
 	}
 	if ctx.Err() != nil {
 		return nil, 0, false
@@ -197,7 +248,7 @@ func goPclntab(ctx context.Context, path string) (pclntab []byte, textStart uint
 			return nil, 0, false
 		}
 		sec := mf.Section("__gopclntab")
-		if sec == nil {
+		if sec == nil || sec.Size == 0 || sec.Size > maxPCLNBytes {
 			return nil, 0, false
 		}
 		data, err := sec.Data()
@@ -219,7 +270,7 @@ func goPclntab(ctx context.Context, path string) (pclntab []byte, textStart uint
 			return nil, 0, false
 		}
 		sec := pf.Section(".gopclntab")
-		if sec == nil {
+		if sec == nil || sec.Size == 0 || sec.Size > maxPCLNBytes {
 			// A PE Go binary may keep the table under the runtime.pclntab symbol rather than a named section;
 			// that path needs symbol resolution and is left as no coverage here (raise-only tolerates the miss).
 			return nil, 0, false
