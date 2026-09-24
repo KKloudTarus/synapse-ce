@@ -96,16 +96,16 @@ jobs:
           SYNAPSE_OWASP_BENCHMARK_DIR: ${{ github.workspace }}/owasp-benchmark
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
         run: |
-          set -o pipefail
-          CGO_ENABLED=1 go test -count=1 -v -run TestOWASPBenchmarkScorecard \
-            ./internal/infrastructure/tools/ast/ | tee "${RUNNER_TEMP}/owasp-scorecard.log"
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestOWASPBenchmarkScorecard \
+            "${RUNNER_TEMP}/owasp-scorecard.jsonl" pass ./internal/infrastructure/tools/ast/ \
+            -run '^TestOWASPBenchmarkScorecard$'
 
       - name: Upload scorecard
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: owasp-benchmark-scorecard-${{ needs.route.outputs.source_sha }}
-          path: ${{ runner.temp }}/owasp-scorecard.log
+          path: ${{ runner.temp }}/owasp-scorecard.jsonl
           if-no-files-found: error
           retention-days: 90
 
@@ -221,9 +221,9 @@ jobs:
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
           SYNAPSE_SEMGREP_SARIF: ${{ runner.temp }}/securibench-semgrep/semgrep.sarif
         run: |
-          set -o pipefail
-          CGO_ENABLED=1 go test -count=1 -v -run TestSecuribenchScorecard \
-            ./internal/infrastructure/tools/ast/ | tee "${RUNNER_TEMP}/securibench-scorecard.log"
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard \
+            "${RUNNER_TEMP}/securibench-scorecard.jsonl" pass ./internal/infrastructure/tools/ast/ \
+            -run '^TestSecuribenchScorecard$'
 
       - name: Upload scorecard
         if: always()
@@ -231,7 +231,7 @@ jobs:
         with:
           name: securibench-scorecard-${{ needs.route.outputs.source_sha }}
           path: |
-            ${{ runner.temp }}/securibench-scorecard.log
+            ${{ runner.temp }}/securibench-scorecard.jsonl
             ${{ runner.temp }}/securibench-semgrep
           if-no-files-found: error
           retention-days: 90
@@ -282,16 +282,16 @@ jobs:
           SYNAPSE_JULIET_DIR: ${{ github.workspace }}/juliet
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
         run: |
-          set -o pipefail
-          CGO_ENABLED=1 go test -count=1 -v -timeout 1800s -run TestJulietScorecard \
-            ./internal/infrastructure/tools/ast/ | tee "${RUNNER_TEMP}/juliet-scorecard.log"
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestJulietScorecard \
+            "${RUNNER_TEMP}/juliet-scorecard.jsonl" pass ./internal/infrastructure/tools/ast/ \
+            -timeout 1800s -run '^TestJulietScorecard$'
 
       - name: Upload scorecard
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: juliet-scorecard-${{ needs.route.outputs.source_sha }}
-          path: ${{ runner.temp }}/juliet-scorecard.log
+          path: ${{ runner.temp }}/juliet-scorecard.jsonl
           if-no-files-found: error
           retention-days: 90
 

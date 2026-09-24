@@ -570,7 +570,7 @@ jobs:
         env:
           SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/reachbench-scorecards/go/synapse-owned.json
           SYNAPSE_REACHBENCH_BASELINE_REPORTS: osv-scanner=${{ github.workspace }}/reachbench-scorecards/go/osv-scanner.json,semgrep-ce=${{ github.workspace }}/reachbench-scorecards/go/semgrep-ce.json
-        run: go test -count=1 -v -run TestGoReachabilityCorpus ./internal/infrastructure/tools/ssacallgraph
+        run: bash scripts/require-go-tests.sh TestGoReachabilityCorpus "$REACHBENCH_REPORT_DIR/owned-test.jsonl" pass ./internal/infrastructure/tools/ssacallgraph -run '^TestGoReachabilityCorpus$'
       - name: Upload Go scorecards
         id: upload
         if: ${{ always() }}
@@ -622,7 +622,7 @@ jobs:
           CGO_ENABLED: '1'
           SYNAPSE_REACHBENCH_OWNED_REPORT: ${{ github.workspace }}/reachbench-scorecards/python/synapse-owned.py.json
           SYNAPSE_REACHBENCH_BASELINE_REPORTS: semgrep-ce=${{ github.workspace }}/reachbench-scorecards/python/semgrep-ce.py.json
-        run: go test -count=1 -v -run TestPythonReachabilityCorpus ./internal/infrastructure/tools/astwalk
+        run: bash scripts/require-go-tests.sh TestPythonReachabilityCorpus "$REACHBENCH_REPORT_DIR/owned-test.jsonl" pass ./internal/infrastructure/tools/astwalk -run '^TestPythonReachabilityCorpus$'
       - name: Upload Python scorecards
         id: upload
         if: ${{ always() }}

@@ -128,6 +128,41 @@ func TestPerformanceBenchmarkRequiresEvidenceArtifact(t *testing.T) {
 	requireActiveLine(t, aggregateStep.Run, `test -n "$ARTIFACT"`)
 }
 
+func TestHostedBenchmarkPatternGatesRequirePassingTestEvents(t *testing.T) {
+	for _, tc := range []struct {
+		workflow string
+		job      string
+		step     string
+		tests    string
+		mode     string
+	}{
+		{"dynamic-security-benchmark.yml", "accuracy", "Passive DAST accuracy over the labeled observation corpus", "TestDASTOwnedAccuracy", "pass"},
+		{"dynamic-security-benchmark.yml", "accuracy", "CSPM posture accuracy over the fixture inventory", "TestCSPMOwnedAccuracy", "pass"},
+		{"security-accuracy.yml", "accuracy", "Secrets accuracy and gitleaks differential", "TestSecretsOwnedAccuracyAndGitleaksDifferential", "pass"},
+		{"security-accuracy.yml", "accuracy", "IaC misconfiguration accuracy and checkov differential", "TestIaCOwnedAccuracyAndCheckovDifferential", "pass"},
+		{"security-accuracy.yml", "accuracy", "Runtime host-CVE correlation accuracy", "TestHostCVECorrelationAccuracy,TestHostCVEAliasResolution", "pass"},
+		{"performance-benchmark.yml", "measure", "Image extraction perf gates (small and large target classes)", "TestImageExtractPerfGate,TestImageExtractLargeImagePerfGate", "measurement"},
+		{"performance-benchmark.yml", "measure", "Owned SBOM producer perf gate (pinned source class)", "TestOwnsbomPerfGate", "measurement"},
+		{"performance-benchmark.yml", "measure", "OS package catalog perf gate", "TestOSPkgCatalogPerfGate", "measurement"},
+		{"performance-benchmark.yml", "measure", "SBOM import perf gate (pinned SBOM class)", "TestSBOMImportPerfGate", "measurement"},
+		{"performance-benchmark.yml", "measure", "Secret scan perf gate", "TestSecretScanPerfGate", "measurement"},
+		{"sast-benchmark.yml", "owasp-scorecard", "Run OWASP scorecard + recall ratchet", "TestOWASPBenchmarkScorecard", "pass"},
+		{"sast-benchmark.yml", "securibench-scorecard", "Run Securibench scorecard + per-CWE ratchet", "TestSecuribenchScorecard", "pass"},
+		{"sast-benchmark.yml", "juliet-scorecard", "Run Juliet scorecard + per-CWE ratchet", "TestJulietScorecard", "pass"},
+		{"reachability-benchmark.yml", "go-oss-baselines", "Gate owned engine recall and parity", "TestGoReachabilityCorpus", "pass"},
+		{"reachability-benchmark.yml", "python-oss-baselines", "Gate owned Python engine recall and parity", "TestPythonReachabilityCorpus", "pass"},
+		{"owned-default-readiness.yml", "readiness", "Owned-only default operates without Syft or Grype", "TestOwnedOnlyScanNeedsNoSyftOrGrype", "pass"},
+		{"owned-default-readiness.yml", "readiness", "Unknown and unsupported coverage stays explicit", "TestOSDistroCoverageReadiness,TestOSCoverageWarnings", "pass"},
+	} {
+		t.Run(tc.workflow+"/"+tc.step, func(t *testing.T) {
+			job := requireJob(t, readHostedBenchmarkWorkflow(t, tc.workflow), tc.job)
+			step := requireStep(t, job, func(step benchmarkStep) bool { return step.Name == tc.step })
+			requireActiveLine(t, step.Run, "bash scripts/require-go-tests.sh "+tc.tests)
+			requireActiveLine(t, step.Run, " "+tc.mode+" ")
+		})
+	}
+}
+
 func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 	workflow := readHostedBenchmarkWorkflow(t, "sast-benchmark.yml")
 	route := requireJob(t, workflow, "route")

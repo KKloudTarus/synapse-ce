@@ -81,13 +81,13 @@ jobs:
           cache: true
       - name: Comparator-relative accuracy and ratchet evidence
         shell: bash
-        run: go test -count=1 ./internal/usecase/scabench/...
+        run: bash scripts/require-go-tests.sh TestOwnedRecallParityOnCommittedRatchet "$RUNNER_TEMP/readiness-parity.jsonl" pass ./internal/usecase/scabench/...
       - name: Owned-only default operates without Syft or Grype
         shell: bash
-        run: go test -count=1 ./internal/usecase/sca/ -run 'TestOwnedOnlyScanNeedsNoSyftOrGrype'
+        run: bash scripts/require-go-tests.sh TestOwnedOnlyScanNeedsNoSyftOrGrype "$RUNNER_TEMP/readiness-owned-only.jsonl" pass ./internal/usecase/sca/ -run '^TestOwnedOnlyScanNeedsNoSyftOrGrype$'
       - name: Unknown and unsupported coverage stays explicit
         shell: bash
-        run: go test -count=1 ./internal/usecase/sca/ -run 'Coverage|Distro'
+        run: bash scripts/require-go-tests.sh TestOSDistroCoverageReadiness,TestOSCoverageWarnings "$RUNNER_TEMP/readiness-coverage.jsonl" pass ./internal/usecase/sca/ -run 'Coverage|Distro'
       - name: Owned dependency-graph and advisory matching evidence
         shell: bash
         run: go test -count=1 ./internal/infrastructure/tools/ownsbom/... ./internal/domain/advisory/...

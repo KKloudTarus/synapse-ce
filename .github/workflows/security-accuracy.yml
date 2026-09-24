@@ -100,16 +100,16 @@ jobs:
           checkov --version || true
       - name: Secrets accuracy and gitleaks differential
         shell: bash
-        run: go test -count=1 -v ./internal/infrastructure/tools/secretscan/ -run 'TestSecretsOwnedAccuracyAndGitleaksDifferential'
+        run: bash scripts/require-go-tests.sh TestSecretsOwnedAccuracyAndGitleaksDifferential "$RUNNER_TEMP/secrets-accuracy.jsonl" pass ./internal/infrastructure/tools/secretscan/ -run '^TestSecretsOwnedAccuracyAndGitleaksDifferential$'
       - name: IaC misconfiguration accuracy and checkov differential
         shell: bash
-        run: go test -count=1 -v ./internal/infrastructure/tools/misconfig/ -run 'Differential|Accuracy'
+        run: bash scripts/require-go-tests.sh TestIaCOwnedAccuracyAndCheckovDifferential "$RUNNER_TEMP/iac-accuracy.jsonl" pass ./internal/infrastructure/tools/misconfig/ -run '^TestIaCOwnedAccuracyAndCheckovDifferential$'
       - name: Runtime host-CVE correlation accuracy
         shell: bash
-        run: go test -count=1 -v ./internal/domain/advisory/ -run 'HostCVE'
+        run: bash scripts/require-go-tests.sh TestHostCVECorrelationAccuracy,TestHostCVEAliasResolution "$RUNNER_TEMP/host-cve-accuracy.jsonl" pass ./internal/domain/advisory/ -run '^TestHostCVE(CorrelationAccuracy|AliasResolution)$'
       - name: Cross-dimension aggregation preserves per-dimension semantics
         shell: bash
-        run: go test -count=1 ./internal/usecase/benchagg/...
+        run: bash scripts/require-go-tests.sh TestAggregatePreservesPerDimensionSemantics "$RUNNER_TEMP/security-aggregation.jsonl" pass ./internal/usecase/benchagg/...
 
   aggregate:
     name: Aggregate security accuracy status

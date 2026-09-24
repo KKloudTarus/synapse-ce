@@ -69,10 +69,10 @@ jobs:
           cache: true
       - name: Passive DAST accuracy over the labeled observation corpus
         shell: bash
-        run: go test -count=1 -v ./internal/infrastructure/dastchecks/ -run 'TestDASTOwnedAccuracy'
+        run: bash scripts/require-go-tests.sh TestDASTOwnedAccuracy "$RUNNER_TEMP/dast-accuracy.jsonl" pass ./internal/infrastructure/dastchecks/ -run '^TestDASTOwnedAccuracy$'
       - name: CSPM posture accuracy over the fixture inventory
         shell: bash
-        run: go test -count=1 -v ./internal/domain/cloudposture/ -run 'TestCSPMOwnedAccuracy'
+        run: bash scripts/require-go-tests.sh TestCSPMOwnedAccuracy "$RUNNER_TEMP/cspm-accuracy.jsonl" pass ./internal/domain/cloudposture/ -run '^TestCSPMOwnedAccuracy$'
 
   aggregate:
     name: Aggregate dynamic benchmark status

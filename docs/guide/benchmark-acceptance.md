@@ -27,8 +27,8 @@ trusted job is authorization evidence only, not an accepted measurement.
 | `reachability-benchmark.yml` | Trusted route is `true`; trusted benchmark job ran; controller review and disposition evidence bind the source; sanitized artifact is present. |
 | `security-accuracy.yml` | Route, exact checkout assertion, accuracy job, and aggregate succeeded for `ACCEPTANCE_SHA`. |
 | `dynamic-security-benchmark.yml` | Route, exact checkout assertion, accuracy job, and aggregate succeeded for `ACCEPTANCE_SHA`. |
-| `performance-benchmark.yml` | Route, exact checkout assertion, measurement job, aggregate, and SHA-named performance-baselines artifact succeeded. |
-| `sast-benchmark.yml` | Route, exact checkout assertions, all scorecard jobs, aggregate, and SHA-named artifacts succeeded. OWASP, Juliet, Securibench, and pinned Semgrep evidence is present; the Python and sanitizer adversarial gates passed; post-triage precision improved over an accepted committed baseline without losing a true case or breaching a recall floor. |
+| `performance-benchmark.yml` | Route, exact checkout assertion, measurement job, aggregate, and SHA-named performance artifact succeeded. Its JSONL results contain passing test events and nonzero sample measurements for every target class alongside the committed baselines. |
+| `sast-benchmark.yml` | Route, exact checkout assertions, all scorecard jobs, aggregate, and SHA-named artifacts succeeded. OWASP, Juliet, and Securibench JSONL results contain passing scorecard test events; pinned Semgrep evidence is present; the Python and sanitizer adversarial gates passed; post-triage precision improved over an accepted committed baseline without losing a true case or breaching a recall floor. |
 | `owned-default-readiness.yml` | Route and readiness job succeeded; download `readiness.txt` and verify `revision: ACCEPTANCE_SHA` and `evidence_current: true`. |
 
 An ordinary green readiness aggregate does not establish currency: it may be for a revision that is not the
@@ -41,7 +41,9 @@ improvement gate has been added and passed on `ACCEPTANCE_SHA`. The committed pr
 is not an accepted baseline.
 
 Record each downloaded artifact's GitHub artifact ID, SHA-256 digest, retention period, and storage location.
-Record a short independent review of the collected evidence and its disposition. The reviewer must not be the
+Record Fable's independent implementation-coverage review against the parent EPIC and every child issue,
+including its findings and disposition. Record a separate independent review of the collected evidence. The
+evidence reviewer must not be the
 person who prepared the trusted input or accepted the benchmark claim. For engine accuracy, retain the
 independent pull-request review and a maintainer disposition from a different identity that bind the exact
 implementation commit; for reachability, retain the controller's corresponding review and disposition
@@ -59,7 +61,8 @@ unrelated protection and deployment checks.
 
 Disable the seven workflows through the GitHub Actions API with the `disabled_manually` state. Record the
 API response for each workflow, then read each workflow back and verify its state is exactly
-`disabled_manually`. Confirm a new push to `main` produces no run for any disabled workflow. Keep the
+`disabled_manually`. Observe the next natural push to `main` and confirm it produces no run for any disabled
+workflow; do not create a verification commit that changes `ACCEPTANCE_SHA`. Keep the
 acceptance evidence and configuration before/after snapshots with the final EPIC disposition.
 
 ## Re-enable
