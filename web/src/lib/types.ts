@@ -1365,7 +1365,9 @@ export interface EvidenceLedger {
 }
 
 // User: a real operator identity for attribution.
-export type UserRole = 'admin' | 'member'
+// The roles the server accepts (internal/domain/user/user.go). 'member' is the historical name
+// for 'consultant' and is kept because existing users carry it and createUser defaults to it.
+export type UserRole = 'admin' | 'consultant' | 'reviewer' | 'readonly' | 'member'
 
 export interface User {
   id: string
