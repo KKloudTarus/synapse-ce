@@ -12,8 +12,8 @@ benchmark workflows without treating a green aggregate as proof that its underly
    `reachability-benchmark.yml`, `security-accuracy.yml`, `dynamic-security-benchmark.yml`,
    `performance-benchmark.yml`, `sast-benchmark.yml`, and `owned-default-readiness.yml`.
 3. Preserve each run URL, workflow run ID and attempt, event, source SHA, aggregate job URL and conclusion.
-   For the hosted security, dynamic, and performance lanes, the route job, checkout assertion, and aggregate
-   must all succeed for `ACCEPTANCE_SHA`.
+   For the hosted security, dynamic, performance, and SAST lanes, the route job, checkout assertion, and
+   aggregate must all succeed for `ACCEPTANCE_SHA`.
 
 ## Collect non-vacuous evidence
 
@@ -28,12 +28,16 @@ trusted job is authorization evidence only, not an accepted measurement.
 | `security-accuracy.yml` | Route, exact checkout assertion, accuracy job, and aggregate succeeded for `ACCEPTANCE_SHA`. |
 | `dynamic-security-benchmark.yml` | Route, exact checkout assertion, accuracy job, and aggregate succeeded for `ACCEPTANCE_SHA`. |
 | `performance-benchmark.yml` | Route, exact checkout assertion, measurement job, aggregate, and SHA-named performance-baselines artifact succeeded. |
-| `sast-benchmark.yml` | OWASP, Securibench, and Juliet scorecard jobs succeeded and their scorecard artifacts are available. |
+| `sast-benchmark.yml` | Route, exact checkout assertions, all scorecard jobs, aggregate, and SHA-named artifacts succeeded. OWASP, Juliet, Securibench, and pinned Semgrep evidence is present; the Python and sanitizer adversarial gates passed; post-triage precision improved over an accepted committed baseline without losing a true case or breaching a recall floor. |
 | `owned-default-readiness.yml` | Route and readiness job succeeded; download `readiness.txt` and verify `revision: ACCEPTANCE_SHA` and `evidence_current: true`. |
 
 An ordinary green readiness aggregate does not establish currency: it may be for a revision that is not the
 designated candidate. The final acceptance artifact for `ACCEPTANCE_SHA` must explicitly contain
 `evidence_current: true`.
+
+The SAST route currently runs three propose-stage corpora. Its green aggregate does not satisfy the SAST
+row until the Semgrep, adversarial, and accepted post-triage gates have been added and passed on
+`ACCEPTANCE_SHA`. The committed pre-tuning diagnostic control is not an accepted baseline.
 
 Record each downloaded artifact's GitHub artifact ID, SHA-256 digest, retention period, and storage location.
 Record a short independent review of the collected evidence and its disposition. The reviewer must not be the
@@ -48,8 +52,9 @@ Do this only after the independent reviewer accepts the complete evidence set an
 fixed, deferred with an owner and date, or rejected with a reason. Capture the repository branch-protection
 and ruleset configuration before changing it. Remove only required checks belonging to these workflows:
 `Aggregate benchmark status` for engine and reachability, `Aggregate security accuracy status`, `Aggregate
-dynamic benchmark status`, `Aggregate performance status`, `Aggregate readiness status`, and the three SAST
-scorecards. Preserve all unrelated protection and deployment checks.
+dynamic benchmark status`, `Aggregate performance status`, `Aggregate readiness status`, and `Aggregate SAST
+benchmark status` (or the prior SAST scorecard checks if branch protection still lists them). Preserve all
+unrelated protection and deployment checks.
 
 Disable the seven workflows through the GitHub Actions API with the `disabled_manually` state. Record the
 API response for each workflow, then read each workflow back and verify its state is exactly
