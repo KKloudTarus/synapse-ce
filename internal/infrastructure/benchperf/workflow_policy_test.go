@@ -137,6 +137,8 @@ func TestSecurityAccuracyComparatorInputsAreImmutableAndRequired(t *testing.T) {
 		`--network none`, `--read-only`, `--cap-drop ALL`, `--security-opt no-new-privileges`,
 		`-v "$SYNAPSE_CHECKOV_HOST_TMPDIR:/work-tmp:ro"`, `"$SYNAPSE_CHECKOV_IMAGE"`,
 		`echo "TMPDIR=$RUNNER_TEMP/benchmark-tmp"`, `} >> "$GITHUB_ENV"`,
+		`export SYNAPSE_CHECKOV_HOST_TMPDIR="$RUNNER_TEMP/benchmark-tmp"`,
+		`export SYNAPSE_CHECKOV_IMAGE="$CHECKOV_IMAGE"`,
 	} {
 		requireActiveLine(t, checkov.Run, want)
 	}

@@ -114,6 +114,8 @@ jobs:
             echo "SYNAPSE_CHECKOV_HOST_TMPDIR=$RUNNER_TEMP/benchmark-tmp"
             echo "SYNAPSE_CHECKOV_IMAGE=$CHECKOV_IMAGE"
           } >> "$GITHUB_ENV"
+          export SYNAPSE_CHECKOV_HOST_TMPDIR="$RUNNER_TEMP/benchmark-tmp"
+          export SYNAPSE_CHECKOV_IMAGE="$CHECKOV_IMAGE"
           version="$("$RUNNER_TEMP/benchmark-bin/checkov" --version)"
           test "$version" = "$CHECKOV_VERSION"
       - name: Secrets accuracy and gitleaks differential
