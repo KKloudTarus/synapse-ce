@@ -382,6 +382,14 @@ func TestStrictC2AndMandatoryGuards(t *testing.T) {
 	if !contains(reasons, "reachable precision regressed") || !contains(reasons, "cohort go/source_tier2 reachable recall regressed") || !contains(reasons, "language go reachable recall regressed") {
 		t.Fatalf("higher C2 offset a mandatory guard: %v", reasons)
 	}
+
+	// A candidate must retain every language in the baseline ratchet. Without this check, removing a
+	// language from the reducer result would erase its per-language recall guard while the aggregate could pass.
+	ratchet.Languages = append(ratchet.Languages, RatchetLanguage{Language: "python", Recall: ratioFromCounts(1, 1)})
+	reasons = CheckCandidateAcceptance(candidate, ratchet, ExceptionManifest{SchemaVersion: ExceptionManifestSchemaVersion, ID: "none"})
+	if !contains(reasons, "language python is missing from candidate scorecard") {
+		t.Fatalf("missing ratcheted language was accepted: %v", reasons)
+	}
 }
 
 func TestLegacyConversionPreservesBytesLabelsAndCannotEnterAcceptance(t *testing.T) {

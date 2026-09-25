@@ -3,6 +3,7 @@ package misconfig
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,7 +48,7 @@ func recordCompetitorIdentity(t *testing.T, tool, bin string, versionArgs ...str
 // (the misconfig present) and a good fixture (fixed), plus the owned rule id and the checkov check id that
 // represent that category. A tool "detects" a category on a fixture when it flags that fixture with the
 // category's own rule/check, so an unrelated policy firing on the good fixture is not counted as a false
-// positive for this category. checkov is comparison data only, never a gate.
+// positive for this category. Checkov accuracy is comparison data; the hosted workflow requires a real scan.
 
 // iacCategory is one labeled misconfiguration category with a bad/good fixture pair and the per-tool rule that
 // represents the category, so the comparison is like-for-like rather than "any policy fired".
@@ -192,7 +193,7 @@ func TestIaCOwnedAccuracyAndCheckovDifferential(t *testing.T) {
 	}
 
 	// Competitor differential (comparison-only): checkov, scoped to the same category check ids.
-	ckovByFile, ok := runCheckov(t, dir)
+	ckovByFile, ok := runCheckov(t, dir, cats)
 	if !ok {
 		t.Log("checkov not on PATH or failed: skipping the owned-vs-checkov differential")
 		return
@@ -225,7 +226,7 @@ func rate(tp, other int) float64 {
 
 // runCheckov runs checkov over the corpus and returns file -> set of failed check ids. ok is false when
 // checkov is absent or errors, so the differential is skipped rather than failing (checkov is comparison-only).
-func runCheckov(t *testing.T, dir string) (map[string]map[string]bool, bool) {
+func runCheckov(t *testing.T, dir string, cats []iacCategory) (map[string]map[string]bool, bool) {
 	t.Helper()
 	bin, err := exec.LookPath("checkov")
 	if err != nil {
@@ -237,49 +238,112 @@ func runCheckov(t *testing.T, dir string) (map[string]map[string]bool, bool) {
 	// the JSON report regardless.
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "-d", dir, "--compact", "-o", "json", "--quiet")
-	out, _ := cmd.Output()
+	cmd := exec.CommandContext(ctx, bin, "-d", dir, "--compact", "-o", "json")
+	out, runErr := cmd.Output()
 	if ctx.Err() != nil {
 		t.Logf("checkov timed out (%v); skipping the differential", ctx.Err())
 		return nil, false
 	}
 	if len(out) == 0 {
+		if runErr != nil {
+			t.Logf("checkov command failed: %v", runErr)
+			if exitErr, ok := runErr.(*exec.ExitError); ok {
+				stderr := exitErr.Stderr
+				if len(stderr) > 2048 {
+					stderr = stderr[:2048]
+				}
+				t.Logf("checkov stderr prefix: %s", stderr)
+			}
+		}
 		t.Logf("checkov produced no output; skipping the differential")
 		return nil, false
 	}
-	var runs []struct {
-		Results struct {
-			FailedChecks []struct {
-				CheckID  string `json:"check_id"`
-				FilePath string `json:"file_path"`
-			} `json:"failed_checks"`
-		} `json:"results"`
-	}
-	// checkov emits either a single object or an array of run objects (one per check_type). Try array, then object.
-	if err := json.Unmarshal(out, &runs); err != nil {
-		var single struct {
-			Results struct {
-				FailedChecks []struct {
-					CheckID  string `json:"check_id"`
-					FilePath string `json:"file_path"`
-				} `json:"failed_checks"`
-			} `json:"results"`
-		}
-		if err2 := json.Unmarshal(out, &single); err2 != nil {
-			t.Logf("checkov report not in the expected JSON shape (%v); skipping the differential", err)
-			return nil, false
-		}
-		runs = append(runs, single)
-	}
-	byFile := map[string]map[string]bool{}
-	for _, r := range runs {
-		for _, c := range r.Results.FailedChecks {
-			b := filepath.Base(c.FilePath)
-			if byFile[b] == nil {
-				byFile[b] = map[string]bool{}
-			}
-			byFile[b][c.CheckID] = true
-		}
+	byFile, err := parseCheckovReport(out, cats)
+	if err != nil {
+		t.Logf("checkov report incomplete (%v); skipping the differential", err)
+		return nil, false
 	}
 	return byFile, true
+}
+
+type checkovFinding struct {
+	CheckID  string `json:"check_id"`
+	FilePath string `json:"file_path"`
+}
+
+type checkovRun struct {
+	Results *struct {
+		FailedChecks []checkovFinding `json:"failed_checks"`
+		PassedChecks []checkovFinding `json:"passed_checks"`
+	} `json:"results"`
+}
+
+// parseCheckovReport requires observed checks for every fixture. An empty or partial JSON report cannot
+// masquerade as a completed comparison with six misses.
+func parseCheckovReport(out []byte, cats []iacCategory) (map[string]map[string]bool, error) {
+	var runs []checkovRun
+	if err := json.Unmarshal(out, &runs); err != nil {
+		var single checkovRun
+		if err2 := json.Unmarshal(out, &single); err2 != nil {
+			return nil, fmt.Errorf("decode Checkov JSON: %w", err2)
+		}
+		runs = []checkovRun{single}
+	}
+	if len(runs) == 0 {
+		return nil, fmt.Errorf("no Checkov runs")
+	}
+	required := make(map[string]string, len(cats)*2)
+	observed := make(map[string]bool, len(cats)*2)
+	for _, c := range cats {
+		required[c.badFile] = c.checkovID
+		required[c.goodFile] = c.checkovID
+	}
+	byFile := make(map[string]map[string]bool, len(required))
+	for _, run := range runs {
+		if run.Results == nil {
+			return nil, fmt.Errorf("Checkov run has no results")
+		}
+		for _, check := range run.Results.PassedChecks {
+			if check.CheckID == "" || check.FilePath == "" {
+				return nil, fmt.Errorf("Checkov passed check lacks identity or file path")
+			}
+			name := filepath.Base(check.FilePath)
+			if check.CheckID == required[name] {
+				observed[name] = true
+			}
+		}
+		for _, check := range run.Results.FailedChecks {
+			if check.CheckID == "" || check.FilePath == "" {
+				return nil, fmt.Errorf("Checkov failed check lacks identity or file path")
+			}
+			name := filepath.Base(check.FilePath)
+			if check.CheckID == required[name] {
+				observed[name] = true
+			}
+			if byFile[name] == nil {
+				byFile[name] = map[string]bool{}
+			}
+			byFile[name][check.CheckID] = true
+		}
+	}
+	for name, checkID := range required {
+		if !observed[name] {
+			return nil, fmt.Errorf("no Checkov %s check for fixture %s", checkID, name)
+		}
+	}
+	return byFile, nil
+}
+
+func TestCheckovReportRequiresObservedCorpus(t *testing.T) {
+	cats := []iacCategory{{badFile: "rds-encryption_bad.tf", goodFile: "rds-encryption_good.tf", checkovID: "CKV_AWS_16"}}
+	for _, report := range []string{"[]", "null", "[{}]", `{"results":{}}`, `{"results":{"failed_checks":[{"check_id":"CKV_AWS_16","file_path":"/tmp/rds-encryption_bad.tf"}]}}`, `{"results":{"failed_checks":[{"check_id":"CKV_OTHER","file_path":"/tmp/rds-encryption_bad.tf"}],"passed_checks":[{"check_id":"CKV_OTHER","file_path":"/tmp/rds-encryption_good.tf"}]}}`} {
+		if _, err := parseCheckovReport([]byte(report), cats); err == nil {
+			t.Fatalf("accepted incomplete Checkov report %s", report)
+		}
+	}
+	report := `{"results":{"failed_checks":[{"check_id":"CKV_AWS_16","file_path":"/tmp/rds-encryption_bad.tf"}],"passed_checks":[{"check_id":"CKV_AWS_16","file_path":"/tmp/rds-encryption_good.tf"}]}}`
+	findings, err := parseCheckovReport([]byte(report), cats)
+	if err != nil || !findings["rds-encryption_bad.tf"]["CKV_AWS_16"] {
+		t.Fatalf("rejected observed Checkov report: findings=%v err=%v", findings, err)
+	}
 }

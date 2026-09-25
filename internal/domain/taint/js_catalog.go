@@ -137,25 +137,13 @@ func DefaultJsCatalog() JsCatalog {
 			jsSink(jsMod([]string{"lodash", "underscore"}, "template"), TaintSSTI, "CWE-1336", "js-taint-ssti", 0),
 		},
 		Sanitizers: []JsSanitizerModel{
-			// CWE-79: contextual HTML/URL encoders. encodeURIComponent / encodeURI are globals; the library
-			// escapers resolve through their import. Each neutralizes ONLY the XSS class.
-			{Pattern: JsCallablePattern{Globals: []string{"encodeURIComponent", "encodeURI"}}, Classes: []TaintClass{TaintXSS}},
-			{Pattern: jsMod([]string{"he"}, "encode", "escape"), Classes: []TaintClass{TaintXSS}},
-			{Pattern: jsMod([]string{"lodash", "lodash.escape", "validator"}, "escape"), Classes: []TaintClass{TaintXSS}},
-			// escape-html's default export IS the escape function, called directly (`escapeHtml(x)`); it must be
-			// recognized so an escaped value is not reported as still-tainted.
-			{Pattern: JsCallablePattern{Modules: []string{"escape-html", "lodash.escape"}, CallModule: true}, Classes: []TaintClass{TaintXSS}},
+			// basename is not a path-traversal wall: the final component can be "..".
 
-			// CWE-22: a basename strips every directory component, neutralizing path traversal only.
-			{Pattern: jsMod([]string{"path"}, "basename"), Classes: []TaintClass{TaintPathTraversal}},
+			// Shell-argument quoting is context-dependent: enclosing it in double quotes can restore
+			// command substitution. Without the final shell command shape, it cannot clear CWE-78.
 
-			// CWE-78: shell-argument quoting neutralizes command injection only.
-			{Pattern: jsMod([]string{"shell-quote"}, "quote"), Classes: []TaintClass{TaintCommand}},
-			{Pattern: jsMod([]string{"shescape"}, "quote", "quoteAll", "escape", "escapeAll"), Classes: []TaintClass{TaintCommand}},
-
-			// CWE-1333: escape-string-regexp's default export escapes a string so it matches literally inside a
-			// regex, so the value carries no injectable metacharacters; it neutralizes the ReDoS class only.
-			{Pattern: JsCallablePattern{Modules: []string{"escape-string-regexp"}, CallModule: true}, Classes: []TaintClass{TaintReDoS}},
+			// Regex escaping cannot clear ReDoS taint without the complete pattern. A literal may
+			// overlap a static alternative under repetition, such as (a|aa)*$.
 
 			// Numeric coercion produces a Number with no injectable structure, so it neutralizes every class.
 			{Pattern: JsCallablePattern{Globals: []string{"Number", "parseInt", "parseFloat"}}, Classes: all},
@@ -164,9 +152,13 @@ func DefaultJsCatalog() JsCatalog {
 		// DECLINED, each because sound detection would need resolution the PR1 facts do not carry and the
 		// syntactic shape alone would produce a false positive (or, for the HTML sanitizers, a false NEGATIVE):
 		//
+		//   - HTML and URL escapers (encodeURIComponent/encodeURI, he, lodash, escape-html) are NOT modeled as
+		//     unconditional XSS walls. Their safety depends on the output context: URL encoding leaves quotes
+		//     usable inside script strings, and HTML escaping does not protect an unquoted attribute. The
+		//     value-flow engine does not prove that context at a generic HTML response sink.
 		//   - HTML SANITIZER libraries (DOMPurify.sanitize, sanitize-html, js-xss filterXSS): NOT modeled as
-		//     unconditional XSS walls. Unlike a pure escaper (he/lodash/escape-html, which always render text
-		//     inert), a sanitizer's output is HTML whose safety depends on its VERSION and CONFIG: sanitize-html
+		//     unconditional XSS walls. A sanitizer's output is HTML whose safety depends on its VERSION and
+		//     CONFIG: sanitize-html
 		//     has had default-config bypasses (GHSA-rpr9-rxv7-x643) and can be configured to allow all tags,
 		//     DOMPurify is unsafe when the allow-list is widened or its output is used in a non-HTML context,
 		//     and js-xss exposes custom handlers. The catalog is not version/config-aware, so walling these

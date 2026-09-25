@@ -7,7 +7,8 @@ name: Security accuracy benchmark
 # The owned recall and precision floors are the gate. Competitor differentials (gitleaks, checkov) are
 # comparison data only and never fail the build, matching docs/benchmarks/competitor-identity.json. The
 # competitor versions installed here are the ones pinned in that file, so the committed head-to-head numbers
-# stay reproducible; the differential is skipped cleanly when a competitor is unavailable.
+# stay reproducible. The differential inputs themselves must materialize and match their immutable provenance
+# so an accepted comparison cannot silently become an owned-only run.
 
 on:
   pull_request:
@@ -31,16 +32,43 @@ env:
   CHECKOV_VERSION: "3.3.19"
 
 jobs:
+  route:
+    name: Bind benchmark source revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source revision is not a full lower-case SHA" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
   accuracy:
     name: Owned security accuracy
+    needs: route
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Release-asset checksum and OCI manifest digest are immutable comparison provenance for the versions above.
+      GITLEAKS_LINUX_X64_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+      CHECKOV_IMAGE: "bridgecrew/checkov@sha256:d3e96adafdb315ca82e792ca8708c01adae85292800fb064c8b309b3d0cb7b80"
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
           fetch-depth: 1
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -54,52 +82,74 @@ jobs:
           asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
           curl -fsSL --retry 3 -o "$tmp/$asset" "$base/$asset"
-          # Verify against the checksums published for this exact tag. gitleaks is comparison-only and can
-          # never fail or alter the gate, so a verification failure downgrades to no differential.
-          if curl -fsSL --retry 3 -o "$tmp/checksums.txt" "$base/checksums.txt"; then
-            ( cd "$tmp" && grep " $asset\$" checksums.txt | sha256sum -c - )
-          else
-            echo "checksums unavailable for gitleaks v${GITLEAKS_VERSION}; skipping install" >&2
-            exit 0
-          fi
+          printf '%s  %s\n' "$GITLEAKS_LINUX_X64_SHA256" "$tmp/$asset" | sha256sum -c -
           tar -xzf "$tmp/$asset" -C "$tmp" gitleaks
           install -m 0755 "$tmp/gitleaks" /usr/local/bin/gitleaks
-          gitleaks version
+          version="$(gitleaks version)"
+          test "$version" = "$GITLEAKS_VERSION"
       - name: Install pinned checkov
         shell: bash
         run: |
           set -euo pipefail
-          # checkov is comparison-only; a failed install leaves the differential skipped rather than red.
-          python3 -m pip install --quiet --disable-pip-version-check "checkov==${CHECKOV_VERSION}" || {
-            echo "checkov ${CHECKOV_VERSION} install failed; the differential will be skipped" >&2
-            exit 0
-          }
-          checkov --version || true
+          # The image digest pins Checkov and its transitive Python environment. The wrapper exposes only the
+          # benchmark temp directory read-only and rewrites its host path for the container. The generated
+          # fixture directories are mode 0700, so the container uses their owning runner UID and GID.
+          mkdir -p "$RUNNER_TEMP/benchmark-tmp" "$RUNNER_TEMP/benchmark-bin"
+          cat > "$RUNNER_TEMP/benchmark-bin/checkov" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          : "${SYNAPSE_CHECKOV_HOST_TMPDIR:?missing benchmark temp directory}"
+          : "${SYNAPSE_CHECKOV_IMAGE:?missing Checkov image digest}"
+          args=()
+          for arg in "$@"; do
+            args+=("${arg/"$SYNAPSE_CHECKOV_HOST_TMPDIR"/\/work-tmp}")
+          done
+          exec docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$SYNAPSE_CHECKOV_HOST_TMPDIR:/work-tmp:ro" "$SYNAPSE_CHECKOV_IMAGE" "${args[@]}"
+          EOF
+          chmod 0755 "$RUNNER_TEMP/benchmark-bin/checkov"
+          {
+            echo "PATH=$RUNNER_TEMP/benchmark-bin:$PATH"
+            echo "TMPDIR=$RUNNER_TEMP/benchmark-tmp"
+            echo "SYNAPSE_CHECKOV_HOST_TMPDIR=$RUNNER_TEMP/benchmark-tmp"
+            echo "SYNAPSE_CHECKOV_IMAGE=$CHECKOV_IMAGE"
+          } >> "$GITHUB_ENV"
+          export SYNAPSE_CHECKOV_HOST_TMPDIR="$RUNNER_TEMP/benchmark-tmp"
+          export SYNAPSE_CHECKOV_IMAGE="$CHECKOV_IMAGE"
+          version="$("$RUNNER_TEMP/benchmark-bin/checkov" --version)"
+          test "$version" = "$CHECKOV_VERSION"
       - name: Secrets accuracy and gitleaks differential
         shell: bash
-        run: go test -count=1 -v ./internal/infrastructure/tools/secretscan/ -run 'TestSecretsOwnedAccuracyAndGitleaksDifferential'
+        run: |
+          bash scripts/require-go-tests.sh TestSecretsOwnedAccuracyAndGitleaksDifferential "$RUNNER_TEMP/secrets-accuracy.jsonl" pass ./internal/infrastructure/tools/secretscan/ -run '^TestSecretsOwnedAccuracyAndGitleaksDifferential$'
+          jq -e 'select(.Action == "output" and .Test == "TestSecretsOwnedAccuracyAndGitleaksDifferential" and (.Output | contains("gitleaks secrets:")))' "$RUNNER_TEMP/secrets-accuracy.jsonl" > /dev/null
       - name: IaC misconfiguration accuracy and checkov differential
         shell: bash
-        run: go test -count=1 -v ./internal/infrastructure/tools/misconfig/ -run 'Differential|Accuracy'
+        run: |
+          bash scripts/require-go-tests.sh TestIaCOwnedAccuracyAndCheckovDifferential "$RUNNER_TEMP/iac-accuracy.jsonl" pass ./internal/infrastructure/tools/misconfig/ -run '^TestIaCOwnedAccuracyAndCheckovDifferential$'
+          jq -e 'select(.Action == "output" and .Test == "TestIaCOwnedAccuracyAndCheckovDifferential" and (.Output | contains("checkov iac:")))' "$RUNNER_TEMP/iac-accuracy.jsonl" > /dev/null
       - name: Runtime host-CVE correlation accuracy
         shell: bash
-        run: go test -count=1 -v ./internal/domain/advisory/ -run 'HostCVE'
+        run: bash scripts/require-go-tests.sh TestHostCVECorrelationAccuracy,TestHostCVEAliasResolution "$RUNNER_TEMP/host-cve-accuracy.jsonl" pass ./internal/domain/advisory/ -run '^TestHostCVE(CorrelationAccuracy|AliasResolution)$'
       - name: Cross-dimension aggregation preserves per-dimension semantics
         shell: bash
-        run: go test -count=1 ./internal/usecase/benchagg/...
+        run: bash scripts/require-go-tests.sh TestAggregatePreservesPerDimensionSemantics "$RUNNER_TEMP/security-aggregation.jsonl" pass ./internal/usecase/benchagg/...
 
   aggregate:
     name: Aggregate security accuracy status
-    needs: [accuracy]
+    needs: [route, accuracy]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - shell: bash
         env:
+          ROUTE: ${{ needs.route.result }}
           ACCURACY: ${{ needs.accuracy.result }}
         run: |
           set -euo pipefail
-          # This workflow owns no trusted path, so its verdict is the accuracy job itself. Reporting through
-          # an aggregator keeps the required-check name stable if a trusted lane is added later.
+          test "$ROUTE" = success
+          # This workflow owns no trusted path, so its verdict is the SHA-bound accuracy job itself. Reporting
+          # through an aggregator keeps the required-check name stable if a trusted lane is added later.
           test "$ACCURACY" = success

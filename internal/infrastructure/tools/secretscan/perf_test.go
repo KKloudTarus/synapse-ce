@@ -10,18 +10,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchperf"
 )
 
-// perf_test.go is the owned secret-scan performance gate (#1040 A6). It measures repeated scans of a pinned
-// workload and ratchets on BYTES ALLOCATED per scan via the shared benchperf contract. Allocation is
-// deterministic for a given Go toolchain and input, so unlike wall-clock latency it gives a stable cross-machine
-// regression signal; the 30% tolerance absorbs the small differences a different Go minor version can introduce
-// while catching a real regression (a leak or an added copy that inflates allocations). Wall-clock latency is
-// recorded and compared only within the same environment. The baseline lives at
-// docs/benchmarks/secretscan-perf.json.
+// The pinned workload is compared with the committed allocation ceiling.
+// Latency and throughput are compared with a same-runner control in hosted CI.
 
 const (
-	perfSamples      = 30
-	perfWarmup       = 5
-	perfAllocTolFrac = 0.30 // allow 30% growth in allocated bytes before the ratchet trips
+	perfSamples = 30
+	perfWarmup  = 5
 	// perfWorkloadFiles fixes the workload size so the scanned bytes are stable across runs and platforms.
 	perfWorkloadFiles = 40
 	perfBaselinePath  = "../../../../docs/benchmarks/secretscan-perf.json"
@@ -59,11 +53,14 @@ func TestSecretScanPerfGate(t *testing.T) {
 	}
 
 	res := benchperf.Measure(perfWarmup, perfSamples, scan)
+	if err := benchperf.CheckPeakEvidence(res); err != nil {
+		t.Fatal(err)
+	}
 	env := benchperf.EnvironmentDigest()
-	t.Logf("secretscan perf: env=%s samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
-		env, perfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
+	t.Logf("secretscan perf: release=%s env=%s samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s throughput_ops_per_second=%.6f",
+		benchperf.ReleaseDigest(), env, perfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest, res.ThroughputOpsPerSecond)
 
-	base, found, err := benchperf.Load(perfBaselinePath, perfSamples)
+	base, found, err := benchperf.Load(perfBaselinePath, perfWarmup, perfSamples)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,10 +72,10 @@ func TestSecretScanPerfGate(t *testing.T) {
 	if datasetDigest != base.DatasetDigest {
 		t.Fatalf("fixture drift: workload digest %s != committed %s (the measured workload changed)", datasetDigest, base.DatasetDigest)
 	}
-	ceil := benchperf.AllocCeiling(base.AllocBytes, perfAllocTolFrac)
+	ceil := base.AllocCeilingBytes
 	if res.MedianAllocBytes > ceil {
-		t.Errorf("secretscan allocations regressed: median %d bytes exceeds baseline %d + %.0f%% = %d",
-			res.MedianAllocBytes, base.AllocBytes, perfAllocTolFrac*100, ceil)
+		t.Errorf("secretscan allocations regressed: median %d bytes exceeds committed ceiling %d",
+			res.MedianAllocBytes, ceil)
 	}
 	if base.EnvironmentDigest == env {
 		t.Logf("latency vs same-environment baseline: p50 %s (baseline %dms), p95 %s (baseline %dms)",

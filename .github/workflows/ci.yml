@@ -70,6 +70,9 @@ jobs:
       - name: Check AWS staging security and data-governance invariants
         run: bash deploy/aws/staging/tests/static.sh
 
+      - name: Test Python gate scripts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
       - name: Build
         run: go build ./...
 

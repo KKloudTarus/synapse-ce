@@ -41,7 +41,7 @@ func executeCLIContext(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 	switch args[0] {
 	case "run":
-		return executeTrustedCLI(args[1:], stdout, stderr)
+		return executeTrustedCLI(ctx, args[1:], stdout, stderr)
 	case "candidate":
 		return executeCandidateCLI(ctx, args[1:], stdout, stderr)
 	default:
@@ -50,7 +50,7 @@ func executeCLIContext(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 }
 
-func executeTrustedCLI(args []string, stdout, stderr io.Writer) int {
+func executeTrustedCLI(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("synapse-sca-cycle run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	corpusRoot := flags.String("corpus-root", "", "absolute frozen corpus root")
@@ -69,7 +69,7 @@ func executeTrustedCLI(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "synapse-sca-cycle: positional arguments are not supported")
 		return 1
 	}
-	_, err := capture.Run(context.Background(), capture.RunInput{
+	_, err := capture.Run(ctx, capture.RunInput{
 		CorpusRoot: *corpusRoot, TrustedInputRoot: *trustedInputRoot, OutputRoot: *outputRoot,
 		RawRetentionRoot: *rawRetentionRoot, ImplementationCommit: *implementationCommit, RunKey: *runKey,
 	}, capture.RunnerFactory(productionRunner))

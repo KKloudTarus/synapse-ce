@@ -18,6 +18,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/gobinsubject"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/pyreach"
 )
@@ -777,6 +778,123 @@ func reachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vuln
 		}
 	}
 	return subs
+}
+
+// goBinaryReachabilitySubjects narrows the raise-only binary analyzer to Go components whose advisory
+// identity can be tied back to the scanned SBOM. It encodes the exact module PURL with each affected symbol,
+// so an advisory from another ecosystem or module cannot raise a finding through an unrelated Go binary.
+// A gap in this attribution is no coverage: the original finding remains reported and no judgment is made.
+func goBinaryReachabilitySubjects(findings []finding.Finding, vulns []vulnerability.Vulnerability, doc *sbom.SBOM) []ports.ReachabilitySubject {
+	type candidate struct {
+		identity goPackageIdentity
+		purl     string
+		symbols  map[string]struct{}
+		invalid  bool
+	}
+
+	byDedup := make(map[string]*candidate, len(vulns))
+	for _, v := range vulns {
+		key := vulnDedupKey(v)
+		identity, ok := goVulnerabilityIdentity(v)
+		if existing, exists := byDedup[key]; exists {
+			// A single persisted finding cannot safely stand for contradictory vulnerability records.
+			// Keep the raw PURL comparison exact: even PURLs with an equivalent parsed package/version can
+			// carry distinct qualifiers, and collapsing them would turn an attribution ambiguity into a proof.
+			// Reject the group rather than selecting whichever source happened to arrive last.
+			if !ok || existing.identity != identity || existing.purl != v.PackagePURL {
+				existing.invalid = true
+				continue
+			}
+			for _, symbol := range v.AffectedSymbols {
+				if symbol = strings.TrimSpace(symbol); symbol != "" {
+					existing.symbols[symbol] = struct{}{}
+				}
+			}
+			continue
+		}
+		entry := &candidate{identity: identity, purl: v.PackagePURL, symbols: map[string]struct{}{}}
+		if !ok {
+			entry.invalid = true
+		}
+		for _, symbol := range v.AffectedSymbols {
+			if symbol = strings.TrimSpace(symbol); symbol != "" {
+				entry.symbols[symbol] = struct{}{}
+			}
+		}
+		byDedup[key] = entry
+	}
+
+	sbomIdentities := make(map[goPackageIdentity]bool)
+	if doc != nil {
+		for _, component := range doc.Components {
+			if identity, ok := goComponentIdentity(component); ok {
+				sbomIdentities[identity] = true
+			}
+		}
+	}
+
+	var subjects []ports.ReachabilitySubject
+	for _, f := range findings {
+		entry, ok := byDedup[f.DedupKey]
+		if !ok || entry.invalid || len(entry.symbols) == 0 {
+			continue
+		}
+		// A binary symbol alone does not prove which dependency it belongs to. Require an exact canonical
+		// Go identity from this scan's SBOM; absent or non-Go-only SBOM data is no coverage.
+		if !sbomIdentities[entry.identity] {
+			continue
+		}
+		symbols := make([]string, 0, len(entry.symbols))
+		for symbol := range entry.symbols {
+			if subject, ok := gobinsubject.Encode(entry.purl, symbol); ok {
+				symbols = append(symbols, subject)
+			}
+		}
+		if len(symbols) == 0 {
+			continue
+		}
+		sort.Strings(symbols)
+		subjects = append(subjects, ports.ReachabilitySubject{FindingID: f.ID, Symbols: symbols, PackagePURL: entry.purl})
+	}
+	return subjects
+}
+
+type goPackageIdentity struct {
+	packageName string
+	version     string
+}
+
+func goVulnerabilityIdentity(v vulnerability.Vulnerability) (goPackageIdentity, bool) {
+	if ecosystem := strings.TrimSpace(v.Ecosystem); ecosystem != "" && !strings.EqualFold(ecosystem, "go") {
+		return goPackageIdentity{}, false
+	}
+	return goIdentity(strings.TrimSpace(v.Component), strings.TrimSpace(v.Version), v.PackagePURL)
+}
+
+func goComponentIdentity(component sbom.Component) (goPackageIdentity, bool) {
+	return goIdentity(strings.TrimSpace(component.Name), strings.TrimSpace(component.Version), component.PURL)
+}
+
+func goIdentity(component, version, purl string) (goPackageIdentity, bool) {
+	parsed, ok := gobinsubject.ParsePURL(purl)
+	if !ok || component == "" || version == "" {
+		return goPackageIdentity{}, false
+	}
+	packageName, purlVersion := parsed.Module, parsed.Version
+	if packageName == "stdlib" {
+		canonicalVersion := strings.TrimPrefix(purlVersion, "go")
+		if canonicalVersion == "" || strings.TrimPrefix(version, "go") != canonicalVersion {
+			return goPackageIdentity{}, false
+		}
+		if component != "stdlib" && component != "go"+canonicalVersion {
+			return goPackageIdentity{}, false
+		}
+		return goPackageIdentity{packageName: packageName, version: canonicalVersion}, true
+	}
+	if component != packageName || version != purlVersion {
+		return goPackageIdentity{}, false
+	}
+	return goPackageIdentity{packageName: packageName, version: purlVersion}, true
 }
 
 // pyReachabilitySubjects builds the per-finding inputs for TIER-1 Python import-reachability: each promoted

@@ -189,6 +189,86 @@ func TestJavaNoFalsePositive(t *testing.T) {
 	}
 }
 
+func TestJavaStrongUpdateConstantOverwriteSuppressesLaterSink(t *testing.T) {
+	doc := javaStrongUpdateDoc(false, false)
+	if paths := javaTaintPaths(t, doc); len(paths) != 0 {
+		t.Fatalf("a definite constant overwrite must clear the later sink, got %#v", paths)
+	}
+}
+
+func TestJavaConditionalOverwriteRetainsEarlierDefinitionAtJoin(t *testing.T) {
+	doc := javaStrongUpdateDoc(true, false)
+	paths := javaTaintPaths(t, doc)
+	if !javaPathAtCall(paths, "c-late") {
+		t.Fatalf("a conditional overwrite must retain the tainted definition at the join, got %#v", paths)
+	}
+}
+
+func TestJavaStrongUpdatePreservesSinkBeforeOverwrite(t *testing.T) {
+	doc := javaStrongUpdateDoc(false, true)
+	paths := javaTaintPaths(t, doc)
+	if !javaPathAtCall(paths, "c-early") {
+		t.Fatalf("the sink before the overwrite must remain tainted, got %#v", paths)
+	}
+	if javaPathAtCall(paths, "c-late") {
+		t.Fatalf("the definite overwrite must clear only the later sink, got %#v", paths)
+	}
+}
+
+func javaStrongUpdateDoc(conditional, earlySink bool) javaprogram.Document {
+	pos := func(line, column int) javaprogram.Position {
+		return javaprogram.Position{File: javaTestFile, Line: line, Column: column}
+	}
+	ref := func(name string) javaprogram.Reference {
+		return javaprogram.Reference{Kind: javaprogram.ReferenceName, Segments: []string{name}}
+	}
+	values := []javaprogram.Value{
+		{ID: "v-src", ScopeID: jHandID(), Kind: javaprogram.ValueCallResult, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceExpression}, Pos: pos(2, 9)},
+		{ID: "v-tainted", ScopeID: jHandID(), Kind: javaprogram.ValueBinding, Name: "name", Ref: ref("name"), Pos: pos(2, 2)},
+		{ID: "v-constant", ScopeID: jHandID(), Kind: javaprogram.ValueLiteral, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceLiteral}, Pos: pos(3, 9)},
+		{ID: "v-clean", ScopeID: jHandID(), Kind: javaprogram.ValueBinding, Name: "name", Ref: ref("name"), Pos: pos(3, 2)},
+		{ID: "v-late", ScopeID: jHandID(), Kind: javaprogram.ValueReference, Ref: ref("name"), Pos: pos(4, 16)},
+	}
+	flows := []javaprogram.ValueFlow{
+		{FromID: "v-src", ToID: "v-tainted", Kind: javaprogram.FlowAssignment, Pos: pos(2, 2)},
+		{FromID: "v-constant", ToID: "v-clean", Kind: javaprogram.FlowAssignment, Pos: pos(3, 2)},
+	}
+	assignments := []javaprogram.Assignment{
+		{ScopeID: jHandID(), Targets: []javaprogram.Reference{ref("name")}, TargetIDs: []string{"v-tainted"}, Value: javaprogram.Reference{Kind: javaprogram.ReferenceExpression}, ValueID: "v-src", Pos: pos(2, 2)},
+		{ScopeID: jHandID(), Targets: []javaprogram.Reference{ref("name")}, TargetIDs: []string{"v-clean"}, Value: javaprogram.Reference{Kind: javaprogram.ReferenceLiteral}, ValueID: "v-constant", StrongUpdate: !conditional, Pos: pos(3, 2)},
+	}
+	calls := []javaprogram.Call{
+		{ID: "c-src", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"request", "getParameter"}}, ResultID: "v-src", Pos: pos(2, 9)},
+		{ID: "c-late", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"writer", "println"}}, Arguments: []javaprogram.Argument{{Value: ref("name"), ValueID: "v-late", Pos: pos(4, 16)}}, Pos: pos(4, 9)},
+	}
+	if earlySink {
+		values = append(values, javaprogram.Value{ID: "v-early", ScopeID: jHandID(), Kind: javaprogram.ValueReference, Ref: ref("name"), Pos: pos(2, 30)})
+		calls = append(calls, javaprogram.Call{ID: "c-early", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"writer", "println"}}, Arguments: []javaprogram.Argument{{Value: ref("name"), ValueID: "v-early", Pos: pos(2, 30)}}, Pos: pos(2, 23)})
+	}
+	imports := []javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "javax.servlet.http.HttpServletResponse", Name: "HttpServletResponse", Pos: jPos()}}
+	doc := javaSkeleton(nil, values, flows, calls, imports)
+	doc.Assignments = assignments
+	return doc
+}
+
+func javaTaintPaths(t *testing.T, doc javaprogram.Document) []JavaTaintPath {
+	t.Helper()
+	graph, err := BuildJavaValueGraph(doc, DefaultJavaCatalog())
+	if err != nil {
+		t.Fatalf("build graph: %v", err)
+	}
+	return graph.Vulnerabilities()
+}
+
+func javaPathAtCall(paths []JavaTaintPath, callID string) bool {
+	for _, path := range paths {
+		if path.CallID == callID {
+			return true
+		}
+	}
+	return false
+}
+
 // javaTaintSinkDoc models `<sink>(a0, a1, ...)` where the request source, optionally routed through a
 // single-call sanitizer, reaches argument taintArg; the other arguments are constants. It is the rig for the
 // LDAP filter battery (taintArg 1) and the class-specific check (a command sink at taintArg 0).
@@ -355,5 +435,33 @@ func TestJavaLdapFilterPartialSanitizationFlags(t *testing.T) {
 	got := javaRules(t, javaSkeleton(nil, values, flows, calls, imports))
 	if !got["java-taint-ldap-search"] {
 		t.Errorf("a filter with a raw (unescaped) part must still flag as LDAP injection; got %v", got)
+	}
+}
+
+func TestJavaHTMLTextOutputProofSuppressesOnlyTheProvenXSSWrite(t *testing.T) {
+	p := jPos()
+	values := []javaprogram.Value{
+		{ID: "v-src", ScopeID: jHandID(), Kind: javaprogram.ValueCallResult, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceExpression}, Pos: p},
+		{ID: "v-arg", ScopeID: jHandID(), Kind: javaprogram.ValueReference, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceName, Segments: []string{"name"}}, Pos: p},
+	}
+	flows := []javaprogram.ValueFlow{{FromID: "v-src", ToID: "v-arg", Kind: javaprogram.FlowAssignment, Pos: p}}
+	imports := []javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "javax.servlet.http.HttpServletResponse", Name: "HttpServletResponse", Pos: p}}
+	base := []javaprogram.Call{
+		{ID: "c-src", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"request", "getParameter"}}, ResultID: "v-src", Pos: p},
+		{ID: "c-sink", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"writer", "println"}},
+			Arguments: []javaprogram.Argument{{Value: javaprogram.Reference{Kind: javaprogram.ReferenceName, Segments: []string{"name"}}, ValueID: "v-arg", Pos: p}}, Pos: p},
+	}
+	withoutProof := javaRules(t, javaSkeleton(nil, values, flows, base, imports))
+	if !withoutProof["java-taint-xss-writer"] {
+		t.Fatalf("writer without proof must remain an XSS finding: %v", withoutProof)
+	}
+	withProof := append([]javaprogram.Call(nil), base...)
+	withProof[1].OutputProof = javaprogram.OutputProofHTMLText
+	if got := javaRules(t, javaSkeleton(nil, values, flows, withProof, imports)); got["java-taint-xss-writer"] {
+		t.Fatalf("proven HTML-text writer remained an XSS finding: %v", got)
+	}
+	withProof[1].Callee = javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"rt", "exec"}}
+	if got := javaRules(t, javaSkeleton(nil, values, flows, withProof, imports)); !got["java-taint-command-exec"] {
+		t.Fatalf("HTML-text proof must not suppress a non-XSS sink: %v", got)
 	}
 }

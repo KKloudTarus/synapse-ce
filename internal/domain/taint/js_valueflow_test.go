@@ -304,8 +304,8 @@ func TestFsWriteFileDataArgIsSafe(t *testing.T) {
 
 // --- Sanitizer walls -----------------------------------------------------------------------------------
 
-// TestEncodeURIComponentSanitizesXSS: res.send(encodeURIComponent(userInput)) yields no XSS finding.
-func TestEncodeURIComponentSanitizesXSS(t *testing.T) {
+// TestEncodeURIComponentDoesNotCleanXSS keeps the source visible when the output context is unknown.
+func TestEncodeURIComponentDoesNotCleanXSS(t *testing.T) {
 	src := jsReqSource("v-src", "req", "query", "msg")
 	enc := jsprogram.Value{ID: "v-enc", ScopeID: jsModuleID(), Kind: jsprogram.ValueCallResult, Ref: jsprogram.Reference{Kind: jsprogram.ReferenceExpression}, Pos: jsPos(2, 20)}
 	call1 := jsprogram.Call{
@@ -316,8 +316,8 @@ func TestEncodeURIComponentSanitizesXSS(t *testing.T) {
 	}
 	call2 := jsAttrCall("c-send", []string{"res", "send"}, jsprogram.Reference{Kind: jsprogram.ReferenceExpression}, "v-enc")
 	doc := jsDoc(nil, []jsprogram.Value{src, enc}, []jsprogram.Call{call1, call2})
-	if rules := jsFindingRules(mustJsGraph(t, doc)); len(rules) != 0 {
-		t.Fatalf("encodeURIComponent should neutralize the XSS flow, got %v", rules)
+	if rules := jsFindingRules(mustJsGraph(t, doc)); !rules["js-taint-xss"] {
+		t.Fatalf("URL encoding must not unconditionally neutralize XSS, got %v", rules)
 	}
 }
 
@@ -397,9 +397,8 @@ func TestShadowedRegExpIsNotReDoS(t *testing.T) {
 	}
 }
 
-// TestEscapeStringRegexpSanitizesReDoS: escape-string-regexp's default export escapes the pattern, so the
-// value reaching RegExp carries no injectable metacharacters and the ReDoS flow is neutralized.
-func TestEscapeStringRegexpSanitizesReDoS(t *testing.T) {
+// TestEscapeStringRegexpRetainsReDoS keeps taint when the surrounding regex structure is unknown.
+func TestEscapeStringRegexpRetainsReDoS(t *testing.T) {
 	scope := jsModuleID()
 	src := jsReqSource("v-src", "req", "query", "q")
 	esc := jsprogram.Value{ID: "v-esc", ScopeID: scope, Kind: jsprogram.ValueCallResult, Ref: jsprogram.Reference{Kind: jsprogram.ReferenceExpression}, Pos: jsPos(3, 20)}
@@ -415,8 +414,8 @@ func TestEscapeStringRegexpSanitizesReDoS(t *testing.T) {
 		[]jsprogram.Value{src, esc},
 		[]jsprogram.Call{escCall, reCall},
 	)
-	if rules := jsFindingRules(mustJsGraph(t, doc)); rules["js-taint-redos"] {
-		t.Fatalf("escape-string-regexp should neutralize the ReDoS flow, got %v", rules)
+	if rules := jsFindingRules(mustJsGraph(t, doc)); !rules["js-taint-redos"] {
+		t.Fatalf("regex escaping cannot prove the final pattern is safe, got %v", rules)
 	}
 }
 

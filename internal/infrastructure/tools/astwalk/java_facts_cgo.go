@@ -30,6 +30,13 @@ const (
 	// so FQN-dense generated or hostile source cannot inflate the import list that the sink gate scans per
 	// candidate. A real compilation unit references far fewer distinct fully-qualified types than this.
 	maxSyntheticFQNTypes = 4096
+	// maxJavaDeadBranchEligibilityNodes limits the conservative structural proof used before omitting an
+	// exact `if (false)` consequence. Reaching the cap retains the branch, so hostile nesting cannot turn
+	// incomplete inspection into a false suppression.
+	maxJavaDeadBranchEligibilityNodes = 8192
+	// Multiple ineligible nested branches can inspect the same subtree repeatedly. This per-file cap
+	// bounds their combined work; exhaustion retains later consequences for ordinary extraction.
+	maxJavaDeadBranchEligibilityWork = 65536
 )
 
 // JavaFactsFor extracts a bounded, versioned Java semantic-facts document without compiling or executing
@@ -74,7 +81,8 @@ func JavaFactsFor(ctx context.Context, root string) (javaprogram.Document, error
 		extractor := javaFactExtractor{
 			doc: &doc, module: module, file: rel, source: content, moduleID: moduleID, modulePos: modulePos,
 			values: map[string]bool{}, flows: map[string]bool{}, gapKeys: map[string]bool{}, symbolQual: map[string]bool{},
-			fqnTypes: map[string]bool{},
+			fqnTypes: map[string]bool{}, locals: map[string]map[string][]string{}, rootBlocks: map[string]string{},
+			htmlWriterCount: map[uint32]int{},
 		}
 		doc.Modules = append(doc.Modules, javaprogram.Module{Name: module, File: rel, Package: extractor.packageName(rootNode), Pos: modulePos})
 		doc.Symbols = append(doc.Symbols, javaprogram.Symbol{
@@ -106,25 +114,30 @@ func JavaFactsFor(ctx context.Context, root string) (javaprogram.Document, error
 }
 
 type javaScope struct {
-	id        string
-	qualified string
-	kind      javaprogram.SymbolKind
+	id            string
+	qualified     string
+	kind          javaprogram.SymbolKind
+	strongUpdates bool
 }
 
 type javaFactExtractor struct {
-	doc        *javaprogram.Document
-	module     string
-	file       string
-	source     []byte
-	moduleID   string               // the compilation-unit scope id, for file-scoped synthetic imports
-	modulePos  javaprogram.Position // the module position, reused as the synthetic imports' position
-	budgetHit  bool
-	depth      int // current expression-recursion depth, bounded by maxJavaExprDepth
-	values     map[string]bool
-	flows      map[string]bool
-	gapKeys    map[string]bool // coverage-gap dedup keys, so gap() is O(1) not O(existing gaps)
-	symbolQual map[string]bool // qualified names already emitted in this module, to disambiguate overloads
-	fqnTypes   map[string]bool // inline fully-qualified type refs, lowered to on-demand imports post-walk
+	doc                         *javaprogram.Document
+	module                      string
+	file                        string
+	source                      []byte
+	moduleID                    string               // the compilation-unit scope id, for file-scoped synthetic imports
+	modulePos                   javaprogram.Position // the module position, reused as the synthetic imports' position
+	budgetHit                   bool
+	deadBranchEligibilityVisits int
+	depth                       int // current expression-recursion depth, bounded by maxJavaExprDepth
+	values                      map[string]bool
+	flows                       map[string]bool
+	gapKeys                     map[string]bool // coverage-gap dedup keys, so gap() is O(1) not O(existing gaps)
+	symbolQual                  map[string]bool // qualified names already emitted in this module, to disambiguate overloads
+	fqnTypes                    map[string]bool // inline fully-qualified type refs, lowered to on-demand imports post-walk
+	locals                      map[string]map[string][]string
+	rootBlocks                  map[string]string
+	htmlWriterCount             map[uint32]int
 }
 
 // enterExpr bounds recursion into an expression subtree of hostile depth. A true return must be paired with
@@ -153,6 +166,29 @@ func (e *javaFactExtractor) walk(node *sitter.Node, scope javaScope) {
 		return
 	}
 	switch node.Type() {
+	case "if_statement":
+		if e.skipExactFalseConsequence(node) {
+			// Walk condition and alternative normally. The consequence is syntactically unreachable, and the
+			// eligibility proof above established it cannot contain an independently callable body that the
+			// enclosing control flow would otherwise fail to visit.
+			e.walk(node.ChildByFieldName("condition"), scope)
+			e.walk(node.ChildByFieldName("alternative"), scope)
+			return
+		}
+		// Either arm may be skipped, so its assignments cannot replace an earlier value at a later join.
+		e.walk(node.ChildByFieldName("condition"), scope.withoutStrongUpdates())
+		e.walk(node.ChildByFieldName("consequence"), scope.withoutStrongUpdates())
+		e.walk(node.ChildByFieldName("alternative"), scope.withoutStrongUpdates())
+		return
+	case "while_statement", "do_statement", "for_statement", "enhanced_for_statement", "switch_statement", "switch_expression", "try_statement", "ternary_expression", "binary_expression", "assert_statement", "throw_statement", "labeled_statement":
+		// Writes in control-dependent code may be skipped or repeated. binary_expression is deliberately
+		// included because a right-hand &&/|| operand is conditional; treating the whole expression as
+		// conditional avoids relying on grammar-child position. A labeled block is included because a break to
+		// that label can skip a write and still reach a following sink. Keep earlier definitions reachable.
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			e.walk(node.NamedChild(i), scope.withoutStrongUpdates())
+		}
+		return
 	case "class_declaration", "interface_declaration", "enum_declaration", "record_declaration":
 		e.walkType(node, scope)
 		return
@@ -175,12 +211,71 @@ func (e *javaFactExtractor) walk(node *sitter.Node, scope javaScope) {
 		e.variableDeclaratorFact(node, scope)
 	case "return_statement":
 		e.returnFact(node, scope)
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			e.walk(node.NamedChild(i), scope.withoutStrongUpdates())
+		}
+		return
 	case "scoped_type_identifier":
 		e.recordFQNType(node)
 	}
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		e.walk(node.NamedChild(i), scope)
 	}
+}
+
+func (scope javaScope) withoutStrongUpdates() javaScope {
+	scope.strongUpdates = false
+	return scope
+}
+
+// skipExactFalseConsequence reports whether an if_statement consequence may be omitted without hiding an
+// executable Java body. Java's grammar wraps every if condition in one parenthesized_expression, so it
+// accepts only that wrapper with a single bare `false` literal; expressions such as `false || predicate`,
+// extra parentheses, or malformed syntax are retained. A bounded iterative scan rejects any
+// nested type, method, constructor, lambda, or anonymous-class body because those bodies are independently
+// executable after declaration. Every uncertainty retains the consequence.
+func (e *javaFactExtractor) skipExactFalseConsequence(node *sitter.Node) bool {
+	if node == nil || node.HasError() {
+		return false
+	}
+	condition := node.ChildByFieldName("condition")
+	consequence := node.ChildByFieldName("consequence")
+	if condition == nil || consequence == nil || condition.Type() != "parenthesized_expression" || condition.HasError() || consequence.HasError() || condition.NamedChildCount() != 1 {
+		return false
+	}
+	inner := condition.NamedChild(0)
+	if inner == nil || inner.Type() != "false" || inner.HasError() {
+		return false
+	}
+
+	seen := 0
+	stack := []*sitter.Node{consequence}
+	for len(stack) > 0 {
+		if seen >= maxJavaDeadBranchEligibilityNodes || e.deadBranchEligibilityVisits >= maxJavaDeadBranchEligibilityWork {
+			return false
+		}
+		last := len(stack) - 1
+		current := stack[last]
+		stack = stack[:last]
+		if current == nil || current.HasError() {
+			return false
+		}
+		seen++
+		e.deadBranchEligibilityVisits++
+		switch current.Type() {
+		case "class_declaration", "interface_declaration", "enum_declaration", "record_declaration",
+			"annotation_type_declaration", "method_declaration", "constructor_declaration", "lambda_expression":
+			return false
+		case "class_body":
+			// A class body below a statement is an anonymous class or a local type. Either owns code that can
+			// execute independently, so retain this consequence for ordinary extraction.
+			return false
+		}
+		for i := 0; i < int(current.ChildCount()); i++ {
+			stack = append(stack, current.Child(i))
+		}
+	}
+	return true
 }
 
 // recordFQNType notes an inline fully-qualified type reference such as
@@ -295,25 +390,32 @@ func (e *javaFactExtractor) walkMethod(node *sitter.Node, parent javaScope) {
 	}
 	qualified := e.uniqueQualified(joinJavaQualified(parent.qualified, name), node)
 	id := javaprogram.CanonicalSymbolID(e.module, qualified)
+	paramsNode := node.ChildByFieldName("parameters")
+	params := e.parameters(paramsNode, id)
 	symbol := javaprogram.Symbol{
 		ID: id, Module: e.module, QualifiedName: qualified, Name: name, ParentID: parent.id, Kind: kind,
-		Pos: e.position(node), Parameters: e.parameters(node.ChildByFieldName("parameters"), id), Annotations: e.modifierAnnotations(node),
+		Pos: e.position(node), Parameters: params, Annotations: e.modifierAnnotations(node),
 	}
 	e.doc.Symbols = append(e.doc.Symbols, symbol)
 	e.entrypointHints(symbol)
-	scope := javaScope{id: id, qualified: qualified, kind: kind}
+	scope := javaScope{id: id, qualified: qualified, kind: kind, strongUpdates: true}
+	body := node.ChildByFieldName("body")
+	e.registerRootBlock(scope.id, body)
+	for _, param := range params {
+		e.registerLocal(scope.id, param.Name, body)
+	}
 	// Record inline fully-qualified types in the signature too, not only the body: a sink receiver is often a
 	// method parameter (`void handle(javax.naming.directory.InitialDirContext idc)`), and its type node lives
 	// in the parameter list, which walkMethod does not otherwise descend into. Walking the parameters and the
 	// return type through the generic walk reaches their scoped_type_identifier nodes (which only trigger
 	// recordFQNType, no parameter or call facts) so the RequiresImport gate fires on an FQN-typed parameter.
-	if params := node.ChildByFieldName("parameters"); params != nil {
-		e.walk(params, scope)
+	if paramsNode != nil {
+		e.walk(paramsNode, scope)
 	}
 	if ret := node.ChildByFieldName("type"); ret != nil {
 		e.walk(ret, scope)
 	}
-	if body := node.ChildByFieldName("body"); body != nil {
+	if body != nil {
 		e.walk(body, scope)
 	}
 }
@@ -325,12 +427,19 @@ func (e *javaFactExtractor) walkLambda(node *sitter.Node, parent javaScope) {
 	name := "<fn@" + strconv.Itoa(pos.Line) + "_" + strconv.Itoa(pos.Column) + ">"
 	qualified := e.uniqueQualified(joinJavaQualified(parent.qualified, name), node)
 	id := javaprogram.CanonicalSymbolID(e.module, qualified)
+	paramsNode := node.ChildByFieldName("parameters")
+	params := e.parameters(paramsNode, id)
 	e.doc.Symbols = append(e.doc.Symbols, javaprogram.Symbol{
 		ID: id, Module: e.module, QualifiedName: qualified, Name: name, ParentID: parent.id,
-		Kind: javaprogram.SymbolLambda, Pos: pos, Parameters: e.parameters(node.ChildByFieldName("parameters"), id),
+		Kind: javaprogram.SymbolLambda, Pos: pos, Parameters: params,
 	})
 	if body := node.ChildByFieldName("body"); body != nil {
-		e.walk(body, javaScope{id: id, qualified: qualified, kind: javaprogram.SymbolLambda})
+		scope := javaScope{id: id, qualified: qualified, kind: javaprogram.SymbolLambda, strongUpdates: parent.strongUpdates}
+		e.registerRootBlock(scope.id, body)
+		for _, param := range params {
+			e.registerLocal(scope.id, param.Name, body)
+		}
+		e.walk(body, scope)
 	}
 }
 
@@ -435,7 +544,416 @@ func (e *javaFactExtractor) callFact(node *sitter.Node, scope javaScope, isNew b
 			call.Arguments = append(call.Arguments, arg)
 		}
 	}
+	if e.htmlTextOutputProof(node, scope) {
+		call.OutputProof = javaprogram.OutputProofHTMLText
+	}
 	e.doc.Calls = append(e.doc.Calls, call)
+}
+
+// htmlTextOutputProof recognizes one closed HTML-text response pattern. It is deliberately much narrower
+// than an output-encoder model: the write must be the only writer.println in its method, text/html must be
+// selected first, and the sole argument must be exactly "<html>" + a locally-proved helper result +
+// "</html>". Any unrecognized AST form leaves OutputProof empty, so downstream taint retains the finding.
+func (e *javaFactExtractor) htmlTextOutputProof(node *sitter.Node, scope javaScope) bool {
+	if node == nil || scope.kind != javaprogram.SymbolMethod || !javaWriterPrintln(node, e.source) {
+		return false
+	}
+	argument, helperName, ok := javaHTMLTextArgument(node, e.source)
+	if !ok || argument == nil || helperName == "" {
+		return false
+	}
+	method := javaEnclosingMethod(node)
+	if method == nil {
+		return false
+	}
+	count, known := e.htmlWriterCount[method.StartByte()]
+	if !known {
+		count = javaCountWriterPrintln(method, e.source)
+		e.htmlWriterCount[method.StartByte()] = count
+	}
+	if count != 1 ||
+		!javaPriorHTMLContentType(method, node, e.source) || !javaPriorWriterAcquisition(method, node, e.source) {
+		return false
+	}
+	resultName, ok := javaHTMLTextResultName(argument, helperName, method, e.source)
+	if !ok || resultName == "" || javaMethodReassigns(method, resultName, e.source) {
+		return false
+	}
+	helper := javaSiblingMethod(node, helperName, e.source)
+	return helper != nil && javaKnownHTMLTextHelper(helper, helperName, e.source)
+}
+
+func javaWriterPrintln(node *sitter.Node, source []byte) bool {
+	if node == nil || node.Type() != "method_invocation" {
+		return false
+	}
+	name := node.ChildByFieldName("name")
+	object := node.ChildByFieldName("object")
+	return name != nil && object != nil && name.Content(source) == "println" && object.Type() == "identifier" && object.Content(source) == "writer"
+}
+
+func javaHTMLTextArgument(node *sitter.Node, source []byte) (*sitter.Node, string, bool) {
+	args := node.ChildByFieldName("arguments")
+	if args == nil || args.NamedChildCount() != 1 {
+		return nil, "", false
+	}
+	argument := args.NamedChild(0)
+	var terms []*sitter.Node
+	javaFlattenStringConcat(argument, source, &terms)
+	if len(terms) != 3 || terms[0].Type() != "string_literal" || terms[1].Type() != "identifier" || terms[2].Type() != "string_literal" ||
+		terms[0].Content(source) != `"<html>"` || terms[2].Content(source) != `"</html>"` {
+		return nil, "", false
+	}
+	return argument, terms[1].Content(source), true
+}
+
+func javaFlattenStringConcat(node *sitter.Node, source []byte, out *[]*sitter.Node) {
+	if node != nil && node.Type() == "binary_expression" {
+		left, right := node.ChildByFieldName("left"), node.ChildByFieldName("right")
+		if left != nil && right != nil && javaBinaryOperator(node, source) == "+" {
+			javaFlattenStringConcat(left, source, out)
+			javaFlattenStringConcat(right, source, out)
+			return
+		}
+	}
+	*out = append(*out, node)
+}
+
+func javaBinaryOperator(node *sitter.Node, source []byte) string {
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child != nil && !child.IsNamed() {
+			return child.Content(source)
+		}
+	}
+	return ""
+}
+
+func javaEnclosingMethod(node *sitter.Node) *sitter.Node {
+	for current := node; current != nil; current = current.Parent() {
+		if current.Type() == "method_declaration" {
+			return current
+		}
+	}
+	return nil
+}
+
+func javaCountWriterPrintln(root *sitter.Node, source []byte) int {
+	if root == nil {
+		return 0
+	}
+	count := 0
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || count > 1 {
+			return
+		}
+		if current != root && current.Type() == "method_declaration" {
+			return
+		}
+		if javaWriterPrintln(current, source) {
+			count++
+		}
+		for i := 0; i < int(current.NamedChildCount()) && count <= 1; i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(root)
+	return count
+}
+
+func javaPriorHTMLContentType(method, before *sitter.Node, source []byte) bool {
+	return javaPriorCall(method, before, source, "resp", "setContentType", `"text/html"`)
+}
+
+func javaPriorWriterAcquisition(method, before *sitter.Node, source []byte) bool {
+	if method == nil || before == nil {
+		return false
+	}
+	matched := false
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || current.StartByte() >= before.StartByte() || matched {
+			return
+		}
+		if current.Type() == "assignment_expression" && javaCompact(current.Content(source)) == "writer=resp.getWriter()" {
+			matched = true
+			return
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(method.ChildByFieldName("body"))
+	return matched
+}
+
+func javaPriorCall(method, before *sitter.Node, source []byte, receiver, name, argument string) bool {
+	if method == nil || before == nil {
+		return false
+	}
+	matched := false
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || current.StartByte() >= before.StartByte() || matched {
+			return
+		}
+		if current.Type() == "method_invocation" {
+			object, methodName, args := current.ChildByFieldName("object"), current.ChildByFieldName("name"), current.ChildByFieldName("arguments")
+			if object != nil && methodName != nil && args != nil && object.Type() == "identifier" && object.Content(source) == receiver &&
+				methodName.Content(source) == name && args.NamedChildCount() == 1 && args.NamedChild(0).Content(source) == argument {
+				matched = true
+				return
+			}
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(method.ChildByFieldName("body"))
+	return matched
+}
+
+func javaHTMLTextResultName(argument *sitter.Node, helperName string, method *sitter.Node, source []byte) (string, bool) {
+	if argument == nil || method == nil {
+		return "", false
+	}
+	sinkBlock := javaEnclosingBlock(argument)
+	if sinkBlock == nil {
+		return "", false
+	}
+	var result string
+	var declaration *sitter.Node
+	valid := false
+	declarations := map[string]int{}
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || current != method && current.Type() == "method_declaration" {
+			return
+		}
+		if current.Type() == "variable_declarator" {
+			name, value := current.ChildByFieldName("name"), current.ChildByFieldName("value")
+			if name != nil {
+				declarations[name.Content(source)]++
+			}
+			if current.StartByte() < argument.StartByte() && name != nil && value != nil && value.Type() == "method_invocation" && javaBareCallNamed(value, helperName, source) {
+				if result != "" {
+					valid = false
+					return
+				}
+				if !javaDirectLocalDeclarationInBlock(current, sinkBlock) {
+					valid = false
+					return
+				}
+				result, declaration, valid = name.Content(source), current, true
+			}
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(method.ChildByFieldName("body"))
+	if !valid || result == "" || declaration == nil || declarations[result] != 1 || javaMethodParameterNamed(method, result, source) ||
+		javaClassFieldNamed(method, result, source) || !javaDirectLocalDeclarationInBlock(declaration, sinkBlock) ||
+		javaCompact(argument.Content(source)) != `"<html>"+`+result+`+"</html>"` {
+		return "", false
+	}
+	return result, true
+}
+
+func javaDirectLocalDeclarationInBlock(declaration, block *sitter.Node) bool {
+	if declaration == nil || block == nil {
+		return false
+	}
+	local := declaration.Parent()
+	return local != nil && local.Type() == "local_variable_declaration" && local.Parent() == block
+}
+
+func javaMethodParameterNamed(method *sitter.Node, name string, source []byte) bool {
+	params := method.ChildByFieldName("parameters")
+	if params == nil {
+		return false
+	}
+	for i := 0; i < int(params.NamedChildCount()); i++ {
+		param := params.NamedChild(i)
+		if paramName := param.ChildByFieldName("name"); paramName != nil && paramName.Content(source) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func javaEnclosingBlock(node *sitter.Node) *sitter.Node {
+	for current := node; current != nil; current = current.Parent() {
+		if current.Type() == "block" {
+			return current
+		}
+	}
+	return nil
+}
+
+func javaClassFieldNamed(method *sitter.Node, name string, source []byte) bool {
+	if method == nil || name == "" {
+		return false
+	}
+	for current := method.Parent(); current != nil; current = current.Parent() {
+		if current.Type() != "class_body" {
+			continue
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			member := current.NamedChild(i)
+			if member.Type() != "field_declaration" {
+				continue
+			}
+			for j := 0; j < int(member.NamedChildCount()); j++ {
+				candidate := member.NamedChild(j)
+				if candidate.Type() != "variable_declarator" {
+					continue
+				}
+				fieldName := candidate.ChildByFieldName("name")
+				if fieldName != nil && fieldName.Content(source) == name {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
+}
+
+func javaBareCallNamed(node *sitter.Node, want string, source []byte) bool {
+	name, object, args := node.ChildByFieldName("name"), node.ChildByFieldName("object"), node.ChildByFieldName("arguments")
+	return name != nil && object == nil && args != nil && args.NamedChildCount() == 1 && name.Content(source) == want && args.NamedChild(0).Type() == "identifier"
+}
+
+func javaMethodReassigns(method *sitter.Node, name string, source []byte) bool {
+	if method == nil || name == "" {
+		return true
+	}
+	var reassigned bool
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || reassigned || current != method && current.Type() == "method_declaration" {
+			return
+		}
+		if current.Type() == "assignment_expression" {
+			left := current.ChildByFieldName("left")
+			if left != nil && left.Type() == "identifier" && left.Content(source) == name {
+				reassigned = true
+				return
+			}
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(method.ChildByFieldName("body"))
+	return reassigned
+}
+
+func javaSiblingMethod(node *sitter.Node, name string, source []byte) *sitter.Node {
+	for current := node; current != nil; current = current.Parent() {
+		if current.Type() != "class_body" {
+			continue
+		}
+		var match *sitter.Node
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			candidate := current.NamedChild(i)
+			if candidate.Type() != "method_declaration" {
+				continue
+			}
+			methodName := candidate.ChildByFieldName("name")
+			if methodName != nil && methodName.Content(source) == name {
+				if match != nil {
+					return nil
+				}
+				match = candidate
+			}
+		}
+		return match
+	}
+	return nil
+}
+
+func javaKnownHTMLTextHelper(node *sitter.Node, name string, source []byte) bool {
+	if node == nil || name == "" {
+		return false
+	}
+	// javaStripComments works on source bytes after this AST check. A comment delimiter inside a string literal
+	// is data, not a comment; stripping it could turn an unsafe replacement text into a trusted entity. The
+	// proof is intentionally unavailable for that ambiguous shape rather than attempting a second Java lexer.
+	// Java also translates Unicode escapes before it recognizes comments, so any raw escape in a candidate
+	// helper could manufacture a return or a comment boundary that this source-level normalizer would miss.
+	if javaStringLiteralContainsCommentDelimiter(node, source) || strings.Contains(node.Content(source), `\u`) {
+		return false
+	}
+	params := node.ChildByFieldName("parameters")
+	if params == nil || params.NamedChildCount() != 1 {
+		return false
+	}
+	parameter := params.NamedChild(0).ChildByFieldName("name")
+	if parameter == nil {
+		return false
+	}
+	param := parameter.Content(source)
+	common := `StringBufferbuf=newStringBuffer();for(inti=0;i<` + param + `.length();i++){charch=` + param + `.charAt(i);`
+	allowOnly := `if(Character.isLetter(ch)||Character.isDigit(ch)||ch=='_'){buf.append(ch);}else{buf.append('?');}`
+	tail := `}returnbuf.toString();}`
+	allowed := `privatestaticString` + name + `(String` + param + `){` + common + allowOnly + tail
+	escaped := `privateString` + name + `(String` + param + `){` + common + `switch(ch){case'<':buf.append("&lt;");break;case'>':buf.append("&gt;");break;case'&':buf.append("&amp;");break;default:` + allowOnly + `}` + tail
+	normalized := javaCompact(javaStripComments(node.Content(source)))
+	return normalized == allowed || normalized == escaped
+}
+
+func javaStringLiteralContainsCommentDelimiter(node *sitter.Node, source []byte) bool {
+	if node == nil {
+		return false
+	}
+	if node.Type() == "string_literal" {
+		text := node.Content(source)
+		return strings.Contains(text, "/*") || strings.Contains(text, "*/") || strings.Contains(text, "//")
+	}
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		if javaStringLiteralContainsCommentDelimiter(node.NamedChild(i), source) {
+			return true
+		}
+	}
+	return false
+}
+
+func javaCompact(source string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, source)
+}
+
+func javaStripComments(source string) string {
+	var out strings.Builder
+	for i := 0; i < len(source); {
+		if i+1 < len(source) && source[i] == '/' && source[i+1] == '/' {
+			i += 2
+			for i < len(source) && source[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if i+1 < len(source) && source[i] == '/' && source[i+1] == '*' {
+			i += 2
+			for i+1 < len(source) && !(source[i] == '*' && source[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(source) {
+				i += 2
+			}
+			continue
+		}
+		out.WriteByte(source[i])
+		i++
+	}
+	return out.String()
 }
 
 // reflectionGap records a dynamic-execution coverage gap for the reflection / dynamic-proxy / script-engine
@@ -476,13 +994,98 @@ func (e *javaFactExtractor) assignmentFact(node *sitter.Node, scope javaScope) {
 	for _, targetID := range targetIDs {
 		e.addValueFlow(valueID, targetID, javaprogram.FlowAssignment, node)
 	}
+	// Nonliteral right-hand sides may have incomplete modeled flow. Java also processes Unicode escapes
+	// before tokenization. Neither case justifies removing an older tainted definition.
+	plainLiteral := right.Type() == "string_literal" && !strings.Contains(string(right.Content(e.source)), `\u`)
 	e.doc.Assignments = append(e.doc.Assignments, javaprogram.Assignment{
-		ScopeID: scope.id, Targets: targets, TargetIDs: targetIDs, Value: value, ValueID: valueID, Pos: e.position(node),
+		ScopeID: scope.id, Targets: targets, TargetIDs: targetIDs, Value: value, ValueID: valueID,
+		StrongUpdate: scope.strongUpdates && plainLiteral && e.isLocalAssignment(scope, left) && javaSimpleNameAssignment(node, left, e.source), Pos: e.position(node),
 	})
+}
+
+// javaSimpleNameAssignment reports the form that replaces one simple name. Compound
+// assignments read the prior value, and qualified or array writes are container-granular, so neither can
+// discard earlier taint definitions.
+func javaSimpleNameAssignment(node, left *sitter.Node, source []byte) bool {
+	if node == nil || left == nil || left.Type() != "identifier" {
+		return false
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child != nil && string(child.Content(source)) == "=" {
+			return true
+		}
+	}
+	return false
+}
+
+// registerLocal records a lexical local declared by a method/lambda parameter or by a local variable
+// declaration. Strong updates use only declarations in the callable body's top-level block: without binding
+// identities in value facts, an inner-block local could otherwise suppress a same-named outer field/value.
+func (e *javaFactExtractor) registerLocal(scopeID, name string, block *sitter.Node) {
+	if name == "" || block == nil || block.Type() != "block" {
+		return
+	}
+	if e.locals[scopeID] == nil {
+		e.locals[scopeID] = map[string][]string{}
+	}
+	e.locals[scopeID][name] = append(e.locals[scopeID][name], javaBlockKey(block))
+}
+
+func (e *javaFactExtractor) registerRootBlock(scopeID string, block *sitter.Node) {
+	if key := javaBlockKey(block); key != "" {
+		e.rootBlocks[scopeID] = key
+	}
+}
+
+func (e *javaFactExtractor) registerLocalDeclarator(scope javaScope, node, nameNode *sitter.Node) {
+	if node == nil || nameNode == nil || (scope.kind != javaprogram.SymbolMethod && scope.kind != javaprogram.SymbolConstructor && scope.kind != javaprogram.SymbolLambda) {
+		return
+	}
+	declaration := node.Parent()
+	if declaration == nil || declaration.Type() != "local_variable_declaration" {
+		return
+	}
+	e.registerLocal(scope.id, e.safeName(nameNode.Content(e.source), nameNode), declaration.Parent())
+}
+
+func (e *javaFactExtractor) isLocalAssignment(scope javaScope, left *sitter.Node) bool {
+	if left == nil || left.Type() != "identifier" {
+		return false
+	}
+	name := e.safeName(left.Content(e.source), left)
+	rootBlock := e.rootBlocks[scope.id]
+	if rootBlock == "" {
+		return false
+	}
+	declared := map[string]bool{}
+	for _, block := range e.locals[scope.id][name] {
+		declared[block] = true
+	}
+	// The nearest declaration wins. An inner local can shadow an outer local/field while its block is active;
+	// only a declaration in the callable root block is safe to use as a strong-update binding.
+	for node := left.Parent(); node != nil; node = node.Parent() {
+		if node.Type() != "block" {
+			continue
+		}
+		block := javaBlockKey(node)
+		if declared[block] {
+			return block == rootBlock
+		}
+	}
+	return false
+}
+
+func javaBlockKey(node *sitter.Node) string {
+	if node == nil || node.Type() != "block" {
+		return ""
+	}
+	return strconv.FormatUint(uint64(node.StartByte()), 10) + ":" + strconv.FormatUint(uint64(node.EndByte()), 10)
 }
 
 func (e *javaFactExtractor) variableDeclaratorFact(node *sitter.Node, scope javaScope) {
 	nameNode := node.ChildByFieldName("name")
+	e.registerLocalDeclarator(scope, node, nameNode)
 	valueNode := node.ChildByFieldName("value")
 	if nameNode == nil || valueNode == nil {
 		return

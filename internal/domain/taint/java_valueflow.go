@@ -158,7 +158,7 @@ func BuildJavaValueGraph(document javaprogram.Document, catalog JavaCatalog) (Ja
 	b := javaValueBuilder{
 		document: document, catalog: catalog,
 		values: map[string]javaprogram.Value{}, symbols: map[string]javaprogram.Symbol{},
-		parents: map[string]string{}, definitions: map[string]map[string][]javaprogram.Value{},
+		parents: map[string]string{}, definitions: map[string]map[string][]javaprogram.Value{}, strongDefinitions: map[string]bool{},
 		returns: map[string][]string{}, imports: map[string]map[string]javaImportBinding{},
 		methodsByName: map[string][]string{}, declaredCallables: map[string]map[string]bool{},
 		classByFQN: map[string][]string{}, methodsByParent: map[string][]string{},
@@ -180,6 +180,7 @@ type javaValueBuilder struct {
 	symbols           map[string]javaprogram.Symbol
 	parents           map[string]string
 	definitions       map[string]map[string][]javaprogram.Value
+	strongDefinitions map[string]bool
 	returns           map[string][]string
 	imports           map[string]map[string]javaImportBinding // scopeID -> localName -> binding
 	methodsByName     map[string][]string                     // "module\x00name" -> symbol IDs
@@ -264,6 +265,14 @@ func (b *javaValueBuilder) index() {
 			b.returns[item.ScopeID] = append(b.returns[item.ScopeID], item.SlotID)
 		}
 	}
+	for _, item := range b.document.Assignments {
+		if !item.StrongUpdate {
+			continue
+		}
+		for _, targetID := range item.TargetIDs {
+			b.strongDefinitions[targetID] = true
+		}
+	}
 }
 
 // javaImportLocal is the local name a single-import binds. `import java.sql.Statement;` binds "Statement";
@@ -299,6 +308,12 @@ func (b *javaValueBuilder) bindReferences() {
 				}
 			}
 			if len(prior) > 0 {
+				// A simple assignment that certainly executes replaces prior values. Conditional, loop,
+				// compound, and container writes have no marker, so all definitions remain at the join.
+				if latest := prior[len(prior)-1]; b.strongDefinitions[latest.ID] {
+					b.addFlow(latest.ID, value.ID)
+					break
+				}
 				for _, definition := range prior {
 					b.addFlow(definition.ID, value.ID)
 				}
@@ -342,6 +357,12 @@ func (b *javaValueBuilder) modelCalls() {
 				continue // an import-gated floor: the anchoring API is not imported in this file
 			}
 			matchedRole = true
+			// HTML-text proof is emitted only by the Java extractor after it has established the complete local
+			// response-write and helper shape. It clears this writer sink only; it is not a value sanitizer and
+			// cannot affect a later write, another sink class, or an older sidecar whose proof field is empty.
+			if model.Class == TaintXSS && call.OutputProof == javaprogram.OutputProofHTMLText {
+				continue
+			}
 			if len(b.sinks) >= maxJavaTaintSinks {
 				b.truncated = true
 				continue

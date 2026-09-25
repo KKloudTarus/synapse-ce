@@ -117,6 +117,7 @@ func dartRootEdges(dir string, lockIndex map[string]string, baseScope string) []
 	var projName, projVersion string
 	section := "" // "dependencies" | "dev_dependencies" | ""
 	prodByTarget, devByTarget := map[string]string{}, map[string]string{}
+	prodSeen, devSeen := map[string]bool{}, map[string]bool{}
 	var prod, dev []string
 	sc := bufio.NewScanner(bytes.NewReader(content))
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
@@ -151,13 +152,19 @@ func dartRootEdges(dir string, lockIndex map[string]string, baseScope string) []
 			continue // an unresolved dep (sdk pseudo, path/git, or absent from the lock) is not a sound edge
 		}
 		if section == "dependencies" {
-			prod = append(prod, t)
-			if rng != "" {
+			if !prodSeen[t] {
+				prodSeen[t] = true
+				prod = append(prod, t)
+			}
+			if rng != "" && prodByTarget[t] == "" {
 				prodByTarget[t] = rng
 			}
 		} else {
-			dev = append(dev, t)
-			if rng != "" {
+			if !devSeen[t] {
+				devSeen[t] = true
+				dev = append(dev, t)
+			}
+			if rng != "" && devByTarget[t] == "" {
 				devByTarget[t] = rng
 			}
 		}
@@ -175,8 +182,16 @@ func dartRootEdges(dir string, lockIndex map[string]string, baseScope string) []
 		edges = append(edges, sbom.Dependency{Ref: root, DependsOn: prod, Scope: baseScope, RequestedRanges: rangesFor(prod, prodByTarget)})
 	}
 	if len(dev) > 0 {
-		sort.Strings(dev)
-		edges = append(edges, sbom.Dependency{Ref: root, DependsOn: dev, Scope: sbom.ScopeDevelopment, RequestedRanges: rangesFor(dev, devByTarget)})
+		filteredDev := dev[:0]
+		for _, target := range dev {
+			if !prodSeen[target] {
+				filteredDev = append(filteredDev, target)
+			}
+		}
+		if len(filteredDev) > 0 {
+			sort.Strings(filteredDev)
+			edges = append(edges, sbom.Dependency{Ref: root, DependsOn: filteredDev, Scope: sbom.ScopeDevelopment, RequestedRanges: rangesFor(filteredDev, devByTarget)})
+		}
 	}
 	return edges
 }

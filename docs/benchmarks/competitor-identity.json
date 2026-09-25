@@ -1,9 +1,10 @@
 {
   "schema": "synapse-competitor-identity-v1",
-  "note": "Pinned identities of the benchmark-only competitor tools used in the owned-vs-competitor differentials. Competitors are comparison data only; they never gate the build. Each differential captures the tool's actual reported version at runtime and logs it against the pinned version here; a mismatch warns but never fails. When a benchmark CI workflow installs a competitor (issue #1043 lane), it must install the version pinned here so the committed head-to-head numbers stay reproducible.",
+  "note": "Pinned identities of the benchmark-only competitor tools used in the owned-vs-competitor differentials. Competitor scores do not control owned-engine accuracy floors. The hosted acceptance workflow requires both comparisons to execute, verifies their versions and immutable artifact identities, and records their differential measurements. Other local test runs may skip a comparator that is unavailable.",
   "competitors": {
     "gitleaks": {
       "version": "8.30.1",
+      "linux_x64_archive_sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
       "ruleset": "default built-in rules (no custom .gitleaks.toml)",
       "source": "https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1",
       "dimension": "secrets",
@@ -11,6 +12,7 @@
     },
     "checkov": {
       "version": "3.3.19",
+      "image": "bridgecrew/checkov@sha256:d3e96adafdb315ca82e792ca8708c01adae85292800fb064c8b309b3d0cb7b80",
       "ruleset": "default built-in policies (Terraform and Kubernetes frameworks)",
       "source": "https://github.com/bridgecrewio/checkov/releases/tag/3.3.19",
       "dimension": "iac-misconfig",

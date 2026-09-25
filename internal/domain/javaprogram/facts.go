@@ -199,25 +199,42 @@ type Argument struct {
 // records a GapUnresolvedCall so absence is not read as proof. Validate stays lenient about this pairing:
 // a valid source file must never have its whole facts document rejected, so a missing gap is not an error.
 type Call struct {
-	ID              string     `json:"id"`
-	CallerID        string     `json:"caller_id"`
-	Callee          Reference  `json:"callee"`
-	Arguments       []Argument `json:"arguments,omitempty"`
-	ResultID        string     `json:"result_id,omitempty"`
-	ReceiverValueID string     `json:"receiver_value_id,omitempty"`
-	Pos             Position   `json:"position"`
-	Await           bool       `json:"await,omitempty"` // unused for Java; kept for model parity
-	New             bool       `json:"new,omitempty"`   // a `new X(...)` constructor call
+	ID              string      `json:"id"`
+	CallerID        string      `json:"caller_id"`
+	Callee          Reference   `json:"callee"`
+	Arguments       []Argument  `json:"arguments,omitempty"`
+	ResultID        string      `json:"result_id,omitempty"`
+	ReceiverValueID string      `json:"receiver_value_id,omitempty"`
+	Pos             Position    `json:"position"`
+	Await           bool        `json:"await,omitempty"` // unused for Java; kept for model parity
+	New             bool        `json:"new,omitempty"`   // a `new X(...)` constructor call
+	OutputProof     OutputProof `json:"output_proof,omitempty"`
 }
 
-// Assignment captures a binding/value relationship without retaining expression text.
+// OutputProof is a source-only, extractor-proven output context. The empty value means no proof. It never
+// carries source text; consumers must treat an absent proof from an older sidecar as unproved.
+type OutputProof string
+
+const (
+	OutputProofNone     OutputProof = ""
+	OutputProofHTMLText OutputProof = "html_text"
+)
+
+func (p OutputProof) Valid() bool {
+	return p == OutputProofNone || p == OutputProofHTMLText
+}
+
+// Assignment captures a binding/value relationship without retaining expression text. StrongUpdate means
+// the extractor proved a local string-literal assignment executes on every path reaching the following
+// statement in the same callable. Consumers may replace earlier bindings only when this marker is present.
 type Assignment struct {
-	ScopeID   string      `json:"scope_id"`
-	Targets   []Reference `json:"targets"`
-	TargetIDs []string    `json:"target_ids,omitempty"`
-	Value     Reference   `json:"value"`
-	ValueID   string      `json:"value_id,omitempty"`
-	Pos       Position    `json:"position"`
+	ScopeID      string      `json:"scope_id"`
+	Targets      []Reference `json:"targets"`
+	TargetIDs    []string    `json:"target_ids,omitempty"`
+	Value        Reference   `json:"value"`
+	ValueID      string      `json:"value_id,omitempty"`
+	StrongUpdate bool        `json:"strong_update,omitempty"`
+	Pos          Position    `json:"position"`
 }
 
 // Return captures a method return expression summary.
@@ -457,7 +474,7 @@ func (d Document) Validate() error {
 	callSet := make(map[string]bool, len(d.Calls))
 	for _, item := range d.Calls {
 		if !validText(item.ID) || callSet[item.ID] || !validScope(item.CallerID) || len(item.Arguments) > maxArguments ||
-			validatePosition(item.Pos, true) != nil || !positionMatchesScope(item.CallerID, item.Pos) {
+			!item.OutputProof.Valid() || validatePosition(item.Pos, true) != nil || !positionMatchesScope(item.CallerID, item.Pos) {
 			return fmt.Errorf("%w: invalid java call fact", shared.ErrValidation)
 		}
 		if err := validateReference(item.Callee); err != nil {

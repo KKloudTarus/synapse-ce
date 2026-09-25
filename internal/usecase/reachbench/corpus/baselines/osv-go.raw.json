@@ -1,0 +1,402 @@
+{
+  "results": [
+    {
+      "source": {
+        "path": "/home/runner/work/synapse-ce/synapse-ce/internal/infrastructure/tools/ssacallgraph/testdata/reachbench/go_osv_jsonparser_called/go.mod",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "github.com/buger/jsonparser",
+            "version": "1.1.1",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-4514",
+                "GHSA-6g7g-w4f8-9c9x"
+              ],
+              "aliases": [
+                "CVE-2026-32285",
+                "GHSA-6g7g-w4f8-9c9x",
+                "GO-2026-4514"
+              ],
+              "experimental_analysis": {
+                "GO-2026-4514": {
+                  "called": true,
+                  "unimportant": false
+                }
+              },
+              "max_severity": "7.5"
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4514.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "github.com/buger/jsonparser",
+                        "symbols": [
+                          "Delete",
+                          "FuzzDelete"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "github.com/buger/jsonparser",
+                    "purl": "pkg:golang/github.com/buger/jsonparser"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.1.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-32285",
+                "GHSA-6g7g-w4f8-9c9x"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4514"
+              },
+              "details": "The Delete function fails to properly validate offsets when processing malformed JSON input. This can lead to a negative slice index and a runtime panic, allowing a denial of service attack.",
+              "id": "GO-2026-4514",
+              "modified": "2026-07-04T10:29:41.642536992Z",
+              "published": "2026-03-16T20:27:18Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://github.com/buger/jsonparser/issues/275"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://github.com/golang/vulndb/issues/4514"
+                }
+              ],
+              "related": [
+                "CGA-2qr9-w23h-h74x",
+                "RHSA-2026:35111",
+                "RHSA-2026:7191"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Denial of service in github.com/buger/jsonparser"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "last_known_affected_version_range": "\u003c= 1.1.1",
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/03/GHSA-6g7g-w4f8-9c9x/GHSA-6g7g-w4f8-9c9x.json"
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "github.com/buger/jsonparser",
+                    "purl": "pkg:golang/github.com/buger/jsonparser"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.1.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-32285",
+                "GO-2026-4514"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-125",
+                  "CWE-129"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-03-18T13:00:19Z",
+                "nvd_published_at": "2026-03-26T20:16:12Z",
+                "severity": "HIGH"
+              },
+              "details": "The Delete function fails to properly validate offsets when processing malformed JSON input. This can lead to a negative slice index and a runtime panic, allowing a denial of service attack.",
+              "id": "GHSA-6g7g-w4f8-9c9x",
+              "modified": "2026-09-10T03:50:59.778995206Z",
+              "published": "2026-03-18T13:00:19Z",
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-32285"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/buger/jsonparser/issues/275"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/golang/vulndb/issues/4514"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/buger/jsonparser/pull/276"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/buger/jsonparser/commit/a69e7e01cd4ad67bdfd3ac2c080b9212af16f4b0"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/buger/jsonparser"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/buger/jsonparser/releases/tag/v1.1.2"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://pkg.go.dev/vuln/GO-2026-4514"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://securityinfinity.com/research/buger-jsonparser-negative-slice-panic-dos-2026"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": "github.com/buger/jsonparser has a denial of service vulnerability"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "source": {
+        "path": "/home/runner/work/synapse-ce/synapse-ce/internal/infrastructure/tools/ssacallgraph/testdata/reachbench/go_osv_jsonparser_uncalled/go.mod",
+        "type": "lockfile"
+      },
+      "packages": [
+        {
+          "package": {
+            "name": "github.com/buger/jsonparser",
+            "version": "1.1.1",
+            "ecosystem": "Go"
+          },
+          "groups": [
+            {
+              "ids": [
+                "GO-2026-4514",
+                "GHSA-6g7g-w4f8-9c9x"
+              ],
+              "aliases": [
+                "CVE-2026-32285",
+                "GHSA-6g7g-w4f8-9c9x",
+                "GO-2026-4514"
+              ],
+              "experimental_analysis": {
+                "GO-2026-4514": {
+                  "called": false,
+                  "unimportant": false
+                }
+              },
+              "max_severity": "7.5"
+            }
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4514.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "github.com/buger/jsonparser",
+                        "symbols": [
+                          "Delete",
+                          "FuzzDelete"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "github.com/buger/jsonparser",
+                    "purl": "pkg:golang/github.com/buger/jsonparser"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.1.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-32285",
+                "GHSA-6g7g-w4f8-9c9x"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4514"
+              },
+              "details": "The Delete function fails to properly validate offsets when processing malformed JSON input. This can lead to a negative slice index and a runtime panic, allowing a denial of service attack.",
+              "id": "GO-2026-4514",
+              "modified": "2026-07-04T10:29:41.642536992Z",
+              "published": "2026-03-16T20:27:18Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://github.com/buger/jsonparser/issues/275"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://github.com/golang/vulndb/issues/4514"
+                }
+              ],
+              "related": [
+                "CGA-2qr9-w23h-h74x",
+                "RHSA-2026:35111",
+                "RHSA-2026:7191"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Denial of service in github.com/buger/jsonparser"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "last_known_affected_version_range": "\u003c= 1.1.1",
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/03/GHSA-6g7g-w4f8-9c9x/GHSA-6g7g-w4f8-9c9x.json"
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "github.com/buger/jsonparser",
+                    "purl": "pkg:golang/github.com/buger/jsonparser"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.1.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-32285",
+                "GO-2026-4514"
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-125",
+                  "CWE-129"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-03-18T13:00:19Z",
+                "nvd_published_at": "2026-03-26T20:16:12Z",
+                "severity": "HIGH"
+              },
+              "details": "The Delete function fails to properly validate offsets when processing malformed JSON input. This can lead to a negative slice index and a runtime panic, allowing a denial of service attack.",
+              "id": "GHSA-6g7g-w4f8-9c9x",
+              "modified": "2026-09-10T03:50:59.778995206Z",
+              "published": "2026-03-18T13:00:19Z",
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-32285"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/buger/jsonparser/issues/275"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/golang/vulndb/issues/4514"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/buger/jsonparser/pull/276"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/buger/jsonparser/commit/a69e7e01cd4ad67bdfd3ac2c080b9212af16f4b0"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/buger/jsonparser"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/buger/jsonparser/releases/tag/v1.1.2"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://pkg.go.dev/vuln/GO-2026-4514"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://securityinfinity.com/research/buger-jsonparser-negative-slice-panic-dos-2026"
+                }
+              ],
+              "schema_version": "1.9.0",
+              "severity": [
+                {
+                  "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                  "type": "CVSS_V3"
+                }
+              ],
+              "summary": "github.com/buger/jsonparser has a denial of service vulnerability"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "experimental_config": {
+    "licenses": {
+      "summary": false,
+      "allowlist": null
+    }
+  }
+}

@@ -152,28 +152,20 @@ func DefaultPythonCatalog() PythonCatalog {
 			// resolution the value-flow engine does not have, and a false positive is the one forbidden outcome.
 		},
 		Sanitizers: []PythonSanitizerModel{
-			{Pattern: pyCall([]string{"html", "markupsafe", "bleach"}, []string{"escape", "clean"}), Classes: []TaintClass{TaintXSS}},
-			// Framework HTML escapers: Django's html.escape and Flask's escape (a markupsafe.escape re-export).
-			// Each converts the value into HTML-context-safe text with no injectable markup, neutralizing ONLY
-			// the XSS class (never SQL or a command). Django's escapejs is deliberately EXCLUDED: it is safe only
-			// inside a whole single/double-quoted JavaScript string literal, so it is not a general HTML-context
-			// XSS neutralizer and modeling it as one could suppress a real flow into an HTML sink.
-			{Pattern: pyCall([]string{"django.utils.html", "flask"}, []string{"escape"}), Classes: []TaintClass{TaintXSS}},
-			{Pattern: pyCall([]string{"shlex"}, []string{"quote"}), Classes: []TaintClass{TaintCommand}},
+			// HTML escapers and bleach.clean are not unconditional XSS walls. An escaped value can still
+			// inject an unquoted attribute, and this value-flow model does not prove output context or
+			// sanitizer options at the generic response sinks.
+			// shlex.quote protects one shell argument only when the final command preserves that
+			// quoting. Embedding the result inside double quotes permits command substitution.
 			{Pattern: pyCall([]string{"werkzeug.utils"}, []string{"secure_filename"}), Classes: []TaintClass{TaintPathTraversal}},
-			// CWE-22: basename strips every leading directory component, so the value can no longer traverse out
-			// of a directory (mirrors the modeled JS path.basename). It neutralizes ONLY path traversal: it does
-			// not make an arbitrary-file-in-cwd read safe (a different concern, not the traversal class) and does
-			// nothing for SQL, command, or XSS. posixpath/ntpath are the platform implementations os.path aliases.
-			{Pattern: pyCall([]string{"os.path", "posixpath", "ntpath"}, []string{"basename"}), Classes: []TaintClass{TaintPathTraversal}},
-			{Pattern: pyCall([]string{"yaml"}, []string{"safe_load"}), Classes: []TaintClass{TaintDeserialization}},
+			// basename preserves ".." as a final component. yaml.safe_load can return a tainted string
+			// that is later passed to an unsafe deserializer; neither clears the corresponding taint.
 			// LDAP FILTER escaping neutralizes only the LDAP class; it does nothing for SQL or a URL. DN
 			// escaping (escape_dn_chars) is deliberately excluded: it escapes distinguished-name components,
 			// not filter metacharacters, so it must not neutralize a search-filter injection finding.
 			{Pattern: pyCall([]string{"ldap.filter", "ldap3.utils.conv"}, []string{"escape_filter_chars"}), Classes: []TaintClass{TaintLDAP}},
-			// CWE-1333: re.escape turns the value into a literal pattern with no regex metacharacters, so it
-			// neutralizes the ReDoS class only.
-			{Pattern: pyCall([]string{"re"}, []string{"escape"}), Classes: []TaintClass{TaintReDoS}},
+			// re.escape leaves literal text that may overlap a static alternative under repetition;
+			// the final pattern structure is required before ReDoS taint can be cleared.
 			{Pattern: pyCall([]string{"builtins"}, []string{"int", "float", "bool", "len"}), Classes: all},
 		},
 	}

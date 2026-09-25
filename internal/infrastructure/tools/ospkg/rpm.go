@@ -5,9 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	// pure-Go sqlite driver (matches CGO_ENABLED=0), for the RHEL9+/Fedora rpmdb.sqlite. NOTE: the crafted-view
 	// non-hang property (see rpmSQLiteComponents + TestCatalogRPMHostileViewTerminates) is driver-behavior-specific –
@@ -38,6 +41,8 @@ const (
 
 var rpmHeaderMagic = [4]byte{0x8e, 0xad, 0xe8, 0x01}
 
+var errIncompleteRPMDB = errors.New("RPM database inventory is incomplete")
+
 // RPM header tags + value types (the subset needed for identity and file ownership).
 const (
 	rpmTagName       = 1000
@@ -50,6 +55,7 @@ const (
 	rpmTagDirNames   = 1118 // string array: the distinct directory prefixes (with trailing slash)
 	rpmTypeInt32     = 4
 	rpmTypeString    = 6
+	rpmTypeBin       = 7
 	rpmTypeStringArr = 8
 	// maxRPMArrayCount caps BASENAMES/DIRNAMES/DIRINDEXES element counts. A real package owns at most a few
 	// hundred thousand files (texlive, linux-firmware); this bounds a hostile header's array claim.
@@ -70,12 +76,39 @@ const (
 	maxRPMOwnershipBytes = 64 << 20
 )
 
-// rpmComponents returns one component per installed RPM package, trying each on-disk backend in turn: the
-// sqlite rpmdb (RHEL9+/Fedora/UBI9) first, then the BerkeleyDB rpmdb (RHEL<=8/CentOS/UBI8/Amazon Linux 2). The
-// first backend that yields packages wins, so a single-backend rootfs is cataloged from whichever DB it has.
-// An error (context cancellation) from any backend is surfaced; otherwise an absent/malformed DB contributes
-// nothing. The ndb backend (openSUSE) is deferred (see bdb.go).
+// rpmComponents returns one component per installed RPM package. CentOS 7 requires exactly one BerkeleyDB
+// database, because a competing backend or truncated inventory would make advisory coverage ambiguous.
+// Other distros try sqlite, BerkeleyDB, then ndb; the first backend that yields packages wins.
+// An error from any backend is surfaced; otherwise an absent or malformed DB contributes nothing.
+func isCentOS7Tag(tag string) bool {
+	return tag == "centos-7" || strings.HasPrefix(tag, "centos-7.")
+}
+
 func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) ([]sbom.Component, error) {
+	if isCentOS7Tag(tag) {
+		// CentOS 7 uses BerkeleyDB. A second RPM backend can hide packages
+		// behind the first nonempty result and make partial advisory coverage
+		// appear complete, so an ambiguous rootfs fails the scan.
+		for _, rel := range []string{rpmDBPath, rpmSqliteSysimagePath, rpmNDBPath, rpmNDBSysimagePath} {
+			if _, err := os.Lstat(filepath.Join(rootfsDir, rel)); err == nil {
+				return nil, fmt.Errorf("CentOS 7 rootfs has an unexpected RPM database backend at %s", rel)
+			} else if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("inspect CentOS 7 RPM database backend %s: %w", rel, err)
+			}
+		}
+		path := filepath.Join(rootfsDir, rpmBDBPath)
+		if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("CentOS 7 BerkeleyDB RPM database is missing or not a regular file")
+		}
+		components, err := rpmBDBComponents(ctx, path, namespace, tag)
+		if err != nil {
+			return nil, err
+		}
+		if len(components) == 0 {
+			return nil, fmt.Errorf("CentOS 7 BerkeleyDB RPM inventory is unreadable or empty")
+		}
+		return components, nil
+	}
 	comps, err := rpmSQLiteComponents(ctx, rootfsDir, namespace, tag)
 	if err != nil || len(comps) > 0 {
 		return comps, err
@@ -99,22 +132,40 @@ func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) ([]sbo
 // rpmSQLiteComponents reads /var/lib/rpm/rpmdb.sqlite and returns one component per installed package. namespace
 // is the PURL namespace (distro id) and tag the distro qualifier (or ""). Best-effort + hardened for an
 // untrusted DB: streamed (one blob at a time), bounded (per-blob size filter + total-byte + row-count budgets),
-// and recover-wrapped so a malformed sqlite yields nil rather than crashing the scan. It is cancellable: an
-// error is returned ONLY on context cancellation (so the pipeline surfaces a timed-out read as a failure, never
-// a silently-truncated success); a hostile-DB read error or panic degrades to (nil, nil). An absent/non-sqlite
-// DB (a Berkeley-DB/ndb rootfs) → (nil, nil), and rpmComponents then tries the BerkeleyDB backend.
+// and recover-wrapped so a malformed sqlite cannot crash the scan. Cancellation
+// and exhausted budgets return errors instead of a silently truncated inventory.
+// An absent/non-sqlite DB (a Berkeley-DB/ndb rootfs) contributes nothing, and
+// rpmComponents then tries the BerkeleyDB backend.
 func rpmSQLiteComponents(ctx context.Context, rootfsDir, namespace, tag string) ([]sbom.Component, error) {
 	var out []sbom.Component
 	path := filepath.Join(rootfsDir, rpmDBPath)
 	err := rpmSQLiteBlobs(ctx, rootfsDir, func(b []byte) {
-		if name, evr, arch, ok := safeParseRPMHeader(b); ok {
-			if c, compOK := osComponent("rpm", namespace, name, evr, arch, tag, ""); compOK {
-				c.Location = path // the rpm DB's path, so the component attributes to the DB's image layer
-				out = append(out, c)
-			}
+		if c, compOK := rpmComponentFromBlob(b, namespace, tag); compOK {
+			c.Location = path // the rpm DB's path, so the component attributes to the DB's image layer
+			out = append(out, c)
 		}
 	})
 	return out, err
+}
+
+func rpmComponentFromBlob(blob []byte, namespace, tag string) (sbom.Component, bool) {
+	if isCentOS7Tag(tag) {
+		name, evr, arch, ok := centOS7BaseSignedIdentity(blob)
+		if ok {
+			c, compOK := osComponent("rpm", namespace, name, evr, arch, tag, "")
+			if !compOK {
+				return sbom.Component{}, false
+			}
+			return sbom.WithVerifiedRPMOrigin(c, "rhel-base"), true
+		}
+		// Keep an unverifiable RPM in inventory but never grant it the CentOS
+		// approximation. This includes EPEL, custom, and malformed headers.
+	}
+	name, evr, arch, ok := safeParseRPMHeader(blob)
+	if !ok {
+		return sbom.Component{}, false
+	}
+	return osComponent("rpm", namespace, name, evr, arch, tag, "")
 }
 
 // rpmSQLiteBlobs walks the sqlite rpmdb and hands each installed package's raw header blob to visit. It probes
@@ -182,7 +233,7 @@ func rpmSQLiteBlobsAt(ctx context.Context, path string, visit func([]byte)) (err
 	count := 0
 	for rows.Next() {
 		if count >= maxPackages || total >= maxDBBytes { // row-count + total-byte budgets (bomb guard)
-			break
+			return errIncompleteRPMDB
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -194,6 +245,9 @@ func rpmSQLiteBlobsAt(ctx context.Context, path string, visit func([]byte)) (err
 		total += int64(len(b))
 		count++
 		visit(b)
+		if count >= maxPackages || total >= maxDBBytes {
+			return errIncompleteRPMDB
+		}
 	}
 	if rows.Err() != nil {
 		return ctx.Err() // discard partials on a hostile-DB read error (matches parseOSDB); surface a cancel

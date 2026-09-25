@@ -1528,32 +1528,32 @@ type Workspace struct {
 	Cleanup    func() error
 }
 
-// OSPackageResult is the outcome of OS-package cataloging: the components plus whether their distro release
-// resolved to an advisory-matchable ecosystem. DistroResolved is false when the OS DB was read but the release
-// could not be keyed (/etc/os-release absent, garbled, or inconsistent with the DB family) – so the pipeline
-// surfaces a completeness warning instead of the packages silently matching zero OS advisories (a falsely-clean
-// OS posture). DistroResolved is meaningful only when Components is non-empty.
+// OSPackageResult is the outcome of OS-package cataloging. DistroResolved is
+// true only when every component can be keyed to an advisory ecosystem. A
+// missing or unsupported release, or a mixture of verified and unsupported
+// CentOS RPMs, keeps it false so the pipeline never reports a falsely-clean OS
+// posture. DistroResolved is meaningful only when Components is non-empty.
 type OSPackageResult struct {
 	Components     []sbom.Component
 	DistroResolved bool
 	// UnsupportedDistro names a distro the cataloger RECOGNIZED but deliberately does not match advisories for
 	// (empty otherwise). It distinguishes a by-design coverage gap from a parse failure: CentOS Stream and
-	// CentOS >=8 are the case today (Stream runs ahead of RHEL and VERSION_ID=8 is ambiguous, so applying a
-	// RHEL fixed version would be a false match). The packages are still cataloged for inventory; the pipeline
-	// surfaces this as a structured coverage=unsupported warning rather than a generic "release could not be
-	// resolved", and never aliases the packages to RHEL or reads them as clean.
+	// CentOS >=8 and the limited CentOS 7 base allowlist are examples. It may
+	// coexist with ApproximateDistro when a CentOS 7 image has verified base
+	// packages while other package origins remain unsupported. The pipeline surfaces a structured
+	// coverage=unsupported warning and never reads the unsupported scope as clean.
 	UnsupportedDistro string
 	// ApproximateDistro names a distro whose packages the cataloger keyed to ANOTHER distro's advisory
 	// ecosystem as a documented, sound approximation (empty otherwise). CentOS Linux 7 is the case today: it is
-	// a downstream rebuild of RHEL 7 (there was never a CentOS Stream 7, so VERSION_ID=7 is unambiguous), so its
-	// packages are keyed to "Red Hat:7". The pipeline surfaces this as a structured coverage=approximate
-	// provenance warning so a Red Hat finding on a CentOS 7 package is never mistaken for native CentOS-feed
-	// coverage; EPEL/SIG/third-party RPMs, absent from RHEL advisories, produce no finding.
+	// a downstream rebuild of RHEL 7 (there was never a CentOS Stream 7, so VERSION_ID=7 is unambiguous), but
+	// only packages with independently verified base-repository origin are keyed
+	// to "Red Hat:7". The pipeline surfaces coverage=approximate even in a mixed
+	// image, so those findings are never mistaken for native CentOS-feed coverage.
 	ApproximateDistro string
 }
 
 // OSPackageCataloger reads a materialized image root filesystem (Workspace.RootFS) and returns the installed
-// OS packages – Debian/Ubuntu dpkg (/var/lib/dpkg/status) and Alpine apk (/lib/apk/db/installed) – as SBOM
+// OS packages – dpkg, apk, or rpm database entries – as SBOM
 // components, each tagged (when the release resolves) with a Syft-style distro qualifier
 // (distro=debian-12/ubuntu-22.04/alpine-3.18.12, from /etc/os-release) so the existing advisory matcher keys
 // them to the right OS ecosystem. It is the owned (detection-independent) alternative to relying on the

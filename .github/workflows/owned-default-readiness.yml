@@ -1,13 +1,8 @@
 name: Owned default readiness
 
-# Hard gate for the owned-only default switch. It answers one question: is the owned engine's committed
-# accuracy evidence current and comparator-relative on THIS revision, so the default may flip.
-#
-# The readiness suite runs on every event so a regression in the parity, ratchet, or coverage-explicitness
-# evidence surfaces immediately. The flip itself is gated separately: only the designated default-changing
-# commit (vars.OWNED_DEFAULT_CANDIDATE_SHA) must additionally prove its evidence is CURRENT, meaning the
-# committed corpus no longer outruns an accepted trusted capture. Asserting that on every ordinary push
-# would make this check permanently red until the capture lands, which would replace a real gate with noise.
+# This gate checks owned-default configuration and committed corpus policy at the
+# exact source revision. Aggregate SCA benchmark status is separately required by
+# branch protection for fresh same-input comparator measurements on that SHA.
 
 on:
   pull_request:
@@ -32,7 +27,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
-      candidate: ${{ steps.candidate.outputs.candidate }}
     steps:
       - id: source
         shell: bash
@@ -44,26 +38,13 @@ jobs:
             *) echo "source revision is not a full SHA" >&2; exit 1 ;;
           esac
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-      - id: candidate
-        shell: bash
-        env:
-          SHA: ${{ steps.source.outputs.sha }}
-          CANDIDATE_SHA: ${{ vars.OWNED_DEFAULT_CANDIDATE_SHA }}
-        run: |
-          set -euo pipefail
-          candidate=false
-          if [ -n "${CANDIDATE_SHA:-}" ] && [ "$SHA" = "$CANDIDATE_SHA" ]; then
-            candidate=true
-          fi
-          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
-
   readiness:
     name: Owned default readiness evidence
     needs: route
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      evidence_current: ${{ steps.currency.outputs.current }}
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Check out exact source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -79,33 +60,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Comparator-relative accuracy and ratchet evidence
+      - name: Validate committed comparator-relative ratchet policy
         shell: bash
-        run: go test -count=1 ./internal/usecase/scabench/...
+        run: bash scripts/require-go-tests.sh TestOwnedRecallParityOnCommittedRatchet "$RUNNER_TEMP/readiness-parity.jsonl" pass ./internal/usecase/scabench/...
+      - name: Historical SCA evidence matches the committed corpus
+        shell: bash
+        run: bash scripts/require-go-tests.sh TestCommittedCorpusEvidenceCurrency "$RUNNER_TEMP/readiness-currency.jsonl" pass ./internal/usecase/scabench/ -run '^TestCommittedCorpusEvidenceCurrency$'
       - name: Owned-only default operates without Syft or Grype
         shell: bash
-        run: go test -count=1 ./internal/usecase/sca/ -run 'TestOwnedOnlyScanNeedsNoSyftOrGrype'
+        run: bash scripts/require-go-tests.sh TestOwnedOnlyScanNeedsNoSyftOrGrype "$RUNNER_TEMP/readiness-owned-only.jsonl" pass ./internal/usecase/sca/ -run '^TestOwnedOnlyScanNeedsNoSyftOrGrype$'
       - name: Unknown and unsupported coverage stays explicit
         shell: bash
-        run: go test -count=1 ./internal/usecase/sca/ -run 'Coverage|Distro'
+        run: bash scripts/require-go-tests.sh TestOSDistroCoverageReadiness,TestOSCoverageWarnings "$RUNNER_TEMP/readiness-coverage.jsonl" pass ./internal/usecase/sca/ -run 'Coverage|Distro'
       - name: Owned dependency-graph and advisory matching evidence
         shell: bash
         run: go test -count=1 ./internal/infrastructure/tools/ownsbom/... ./internal/domain/advisory/...
-      - name: Determine whether committed evidence is current
-        id: currency
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The corpus carries an explicit debt marker while it has outrun the last accepted trusted capture.
-          # Its presence means the committed floors are not yet backed by accepted measurement, so the owned
-          # default must not flip. Clearing the debt is a trusted-capture step, never a code edit.
-          if grep -q 'has moved past its accepted evidence' internal/usecase/scabench/evidence_currency_test.go; then
-            current=false
-          else
-            current=true
-          fi
-          echo "current=$current" >> "$GITHUB_OUTPUT"
-          echo "committed evidence current: $current"
       - name: Record readiness report
         shell: bash
         run: |
@@ -113,10 +82,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/owned-default-readiness"
           {
             echo "revision: ${{ needs.route.outputs.source_sha }}"
-            echo "candidate: ${{ needs.route.outputs.candidate }}"
-            echo "evidence_current: ${{ steps.currency.outputs.current }}"
+            echo "configuration_current: true"
+            echo "fresh_matrix: required-by-Aggregate-SCA-benchmark-status"
           } > "$RUNNER_TEMP/owned-default-readiness/readiness.txt"
       - name: Upload readiness report
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: owned-default-readiness-${{ github.run_id }}-${{ github.run_attempt }}
@@ -135,22 +105,9 @@ jobs:
         env:
           ROUTE: ${{ needs.route.result }}
           READINESS: ${{ needs.readiness.result }}
-          CANDIDATE: ${{ needs.route.outputs.candidate }}
-          CURRENT: ${{ needs.readiness.outputs.evidence_current }}
+          ARTIFACT: ${{ needs.readiness.outputs.artifact }}
         run: |
           set -euo pipefail
           test "$ROUTE" = success
-          # The evidence suite gates every event: a regression in comparator-relative recall, the committed
-          # ratchet, coverage explicitness, or the owned-only default path fails here regardless of candidacy.
           test "$READINESS" = success
-          # The flip itself is gated only on the designated default-changing commit, so this check reports a
-          # real verdict on ordinary pushes instead of standing red until the trusted capture lands.
-          if [ "$CANDIDATE" = true ]; then
-            if [ "$CURRENT" != true ]; then
-              echo "owned default candidate rejected: committed evidence still outruns its accepted trusted capture" >&2
-              exit 1
-            fi
-            echo "owned default candidate accepted: evidence is current"
-          else
-            echo "not the designated owned-default candidate revision; evidence suite passed"
-          fi
+          test -n "$ARTIFACT"

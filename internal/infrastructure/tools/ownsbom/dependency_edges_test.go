@@ -290,6 +290,133 @@ func TestDartNoCompanionNoEdges(t *testing.T) {
 	}
 }
 
+// The graph queries consume the parser output, rather than parser-specific metadata. Keep one
+// end-to-end assertion for every format that can express a transitive chain, so an edge-shape
+// regression cannot silently turn a transitive package into a direct remediation candidate.
+func TestGraphConsumersForElixirJuliaAndRenv(t *testing.T) {
+	tests := []struct {
+		name   string
+		parser EcosystemParser
+		input  ParseInput
+		root   string
+		middle string
+		target string
+	}{
+		{
+			name:   "elixir",
+			parser: Elixir{},
+			input:  ParseInput{Path: "/p/mix.lock", Content: []byte(mixLockFixture)},
+			root:   "pkg:hex/app@1.0.0",
+			middle: "pkg:hex/lib@2.3.1",
+			target: "pkg:hex/core@1.5.0",
+		},
+		{
+			name:   "julia",
+			parser: Julia{},
+			input:  ParseInput{Path: "/p/Manifest.toml", Content: []byte(juliaManifestFixture)},
+			root:   "pkg:julia/App@1.0.0",
+			middle: "pkg:julia/Lib@2.3.1",
+			target: "pkg:julia/Core@1.5.0",
+		},
+		{
+			name:   "renv",
+			parser: Renv{},
+			input:  ParseInput{Path: "/p/renv.lock", Content: []byte(renvEdgesFixture)},
+			root:   "pkg:cran/app@1.0.0",
+			middle: "pkg:cran/lib@2.3.1",
+			target: "pkg:cran/core@1.5.0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comps, deps, err := tt.parser.Parse(context.Background(), tt.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := sbom.IntroducedBy(deps, tt.target); len(got) != 1 || got[0] != tt.root {
+				t.Fatalf("IntroducedBy(%s) = %v, want [%s]", tt.target, got, tt.root)
+			}
+			if path := sbom.PathToRoot(deps, tt.target); len(path) != 3 || path[0] != tt.root || path[1] != tt.middle || path[2] != tt.target {
+				t.Fatalf("PathToRoot(%s) = %v, want [%s %s %s]", tt.target, path, tt.root, tt.middle, tt.target)
+			}
+			ids := componentIDSet(comps)
+			if !sbom.IsDirect(deps, ids, tt.root) {
+				t.Fatalf("%s must be direct", tt.root)
+			}
+			if sbom.IsDirect(deps, ids, tt.middle) || sbom.IsDirect(deps, ids, tt.target) {
+				t.Fatalf("transitive nodes must not be direct: middle=%t target=%t", sbom.IsDirect(deps, ids, tt.middle), sbom.IsDirect(deps, ids, tt.target))
+			}
+		})
+	}
+}
+
+func TestDartGraphConsumersForRootEdges(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "pubspec.yaml"), []byte(dartPubspecFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	comps, deps, err := (Dart{}).Parse(context.Background(), ParseInput{Dir: dir, Path: filepath.Join(dir, "pubspec.lock"), Content: []byte(dartLockFixture)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const root = "pkg:pub/myapp@0.1.0"
+	const direct = "pkg:pub/http@0.13.5"
+	if got := sbom.IntroducedBy(deps, direct); len(got) != 1 || got[0] != root {
+		t.Fatalf("IntroducedBy(%s) = %v, want [%s]", direct, got, root)
+	}
+	if path := sbom.PathToRoot(deps, direct); len(path) != 2 || path[0] != root || path[1] != direct {
+		t.Fatalf("PathToRoot(%s) = %v, want [%s %s]", direct, path, root, direct)
+	}
+	if !sbom.IsDirect(deps, componentIDSet(comps), direct) {
+		t.Fatalf("%s must be direct", direct)
+	}
+}
+
+func TestDartRootEdgesCollapseDuplicatesAndPreferProduction(t *testing.T) {
+	dir := t.TempDir()
+	pubspec := `name: myapp
+version: 0.1.0
+dependencies:
+  http: ^0.13.0
+  http: ^0.13.0
+dev_dependencies:
+  http: ^0.13.0
+`
+	lock := `packages:
+  http:
+    dependency: "direct main"
+    version: "0.13.5"
+`
+	if err := os.WriteFile(filepath.Join(dir, "pubspec.yaml"), []byte(pubspec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, deps, err := (Dart{}).Parse(context.Background(), ParseInput{Dir: dir, Path: filepath.Join(dir, "pubspec.lock"), Content: []byte(lock)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const root = "pkg:pub/myapp@0.1.0"
+	const target = "pkg:pub/http@0.13.5"
+	var required, development int
+	for _, d := range deps {
+		if d.Ref != root {
+			continue
+		}
+		for _, on := range d.DependsOn {
+			if on != target {
+				continue
+			}
+			if d.Scope == sbom.ScopeDevelopment {
+				development++
+			} else {
+				required++
+			}
+		}
+	}
+	if required != 1 || development != 0 {
+		t.Fatalf("http must be one production edge when declarations repeat, got production=%d development=%d", required, development)
+	}
+}
+
 func containsStr(s []string, v string) bool {
 	for _, x := range s {
 		if x == v {
@@ -299,7 +426,7 @@ func containsStr(s []string, v string) bool {
 	return false
 }
 
-// Codex #1036 finding 1: a name in a Julia deps-line COMMENT must not become an edge.
+// A dependency named only in a Julia comment must not become an edge.
 func TestJuliaCommentNotAnEdge(t *testing.T) {
 	fixture := `[[App]]
 version = "1.0.0"
@@ -321,7 +448,7 @@ version = "3.0.0"
 	}
 }
 
-// Codex #1036 finding 3: a dep tuple in an Elixir COMMENT must not become an edge.
+// A dependency tuple in an Elixir comment must not become an edge.
 func TestElixirCommentNotAnEdge(t *testing.T) {
 	fixture := `%{
   "app": {:hex, :app, "1.0.0", "aaa", [:mix], [], "hexpm", "h1"}, # {:lib, "~> 2.0", [hex: :lib]}
@@ -336,7 +463,7 @@ func TestElixirCommentNotAnEdge(t *testing.T) {
 	}
 }
 
-// Codex #1036 finding 4: a YAML inline comment must not leak into a Dart requested range.
+// A YAML inline comment must not leak into a Dart requested range.
 func TestDartRangeStripsComment(t *testing.T) {
 	dir := t.TempDir()
 	pubspec := `name: myapp
@@ -361,7 +488,7 @@ dependencies:
 	}
 }
 
-// Codex #1036 finding 2: an SDK pseudo-dep (flutter, source: sdk) must never become a component or an edge.
+// An SDK pseudo-dependency must not become a component or edge.
 func TestDartSdkDepNoEdge(t *testing.T) {
 	dir := t.TempDir()
 	pubspec := `name: myapp
@@ -399,8 +526,7 @@ dependencies:
 	}
 }
 
-// Codex #1036 re-review: an Elixir dep renamed via `[hex: :real_package]` must resolve to the real package's
-// component, not the (absent) atom name — a false-negative otherwise.
+// An Elixir dependency renamed via `[hex: :real_package]` resolves to the real package component.
 func TestElixirHexRenameResolves(t *testing.T) {
 	fixture := `%{
   "aws_credentials": {:hex, :aws_credentials, "0.3.2", "aaa", [:rebar3], [{:eini, "~> 2.2.4", [hex: :eini_beam, repo: "hexpm", optional: false]}], "hexpm", "h1"},
@@ -426,7 +552,7 @@ func TestElixirHexRenameResolves(t *testing.T) {
 // must yield ONE edge, not a duplicate. The cost of losing the collapse is a duplicated entry in the emitted
 // and serialized dependency list, plus a self-edge that makes a package its own dependent; the graph queries
 // themselves are dedupe-safe (both sbom.IntroducedBy and sbom.PathToRoot walk behind a `visited` set), so this
-// pins the edge list rather than protecting those callers. The #1036 fixtures above never repeat a target, so
+// pins the edge list rather than protecting those callers. The fixtures above never repeat a target, so
 // these cover that class.
 
 func TestJuliaRepeatedAndSelfTargetCollapse(t *testing.T) {
@@ -493,6 +619,16 @@ func TestJuliaMalformedYieldsNoComponents(t *testing.T) {
 	}
 	if len(comps) != 0 || len(deps) != 0 {
 		t.Fatalf("malformed Manifest.toml must yield nothing, got %d comps %d edges", len(comps), len(deps))
+	}
+}
+
+func TestElixirMalformedYieldsNoComponents(t *testing.T) {
+	comps, deps, err := Elixir{}.Parse(context.Background(), ParseInput{Path: "/p/mix.lock", Content: []byte("%{ malformed: [:not, a, hex, lock]}")})
+	if err != nil {
+		t.Fatalf("a malformed Mix line must not fail the whole parser: %v", err)
+	}
+	if len(comps) != 0 || len(deps) != 0 {
+		t.Fatalf("malformed mix.lock must yield no graph, got %d components and %d dependencies", len(comps), len(deps))
 	}
 }
 

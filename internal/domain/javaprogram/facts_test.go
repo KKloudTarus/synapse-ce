@@ -54,6 +54,7 @@ func TestValidateRejectsMalformed(t *testing.T) {
 		{"parent crosses module", func(d *Document) { d.Symbols[2].Module = "other/mod" }},
 		{"flow crosses scope", func(d *Document) { d.Values[1].ScopeID = CanonicalSymbolID("src/main/java/com/acme/App", "App") }},
 		{"call arg value missing", func(d *Document) { d.Calls[0].Arguments[0].ValueID = "nope" }},
+		{"unknown output proof", func(d *Document) { d.Calls[0].OutputProof = OutputProof("script_context") }},
 		{"absolute position", func(d *Document) { d.Modules[0].Pos.File = "/etc/passwd"; d.Modules[0].File = "/etc/passwd" }},
 		{"bad import target", func(d *Document) { d.Imports[0].Module = "java sql" }},
 		{"parsed exceeds seen", func(d *Document) { d.FilesParsed = 2 }},

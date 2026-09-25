@@ -5,6 +5,7 @@ package astwalk
 import (
 	"context"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
@@ -42,6 +43,156 @@ func javaRuleList(rules map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func TestJavaHTMLTextOutputProofIsCallsiteScoped(t *testing.T) {
+	safeBody := `import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+class Example {
+  private java.io.PrintWriter writer;
+  void doGet(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+    String name = req.getParameter("name");
+    String clean = clean(name);
+    writer = resp.getWriter();
+    resp.setContentType("text/html");
+    writer.println("<html>" + clean + "</html>");
+  }
+  private static String clean(String name) {
+    StringBuffer buf = new StringBuffer();
+    for (int i = 0; i < name.length(); i++) {
+      char ch = name.charAt(i);
+      if (Character.isLetter(ch) || Character.isDigit(ch) || ch == '_') { buf.append(ch); } else { buf.append('?'); }
+    }
+    return buf.toString();
+  }
+}`
+	unsafeBodies := map[string]string{
+		"script_context":   strings.Replace(safeBody, `"<html>" + clean + "</html>"`, `"<script>" + clean + "</script>"`, 1),
+		"raw_write_before": strings.Replace(safeBody, `writer.println("<html>" + clean + "</html>");`, "writer.println(name);\n    writer.println(\"<html>\" + clean + \"</html>\");", 1),
+		"partial_encoder":  strings.Replace(safeBody, "else { buf.append('?'); }", "else { buf.append(ch); }", 1),
+		"bypass_return":    strings.Replace(safeBody, "return buf.toString();", "if (name == null) return name; return buf.toString();", 1),
+		"shadowed_result":  strings.Replace(safeBody, "String clean = clean(name);", "{ String clean = clean(name); }\n    String clean = name;", 1),
+		"unicode_escape":   strings.Replace(safeBody, "return buf.toString();", "// \\u000a if (name != null) return name;\n    return buf.toString();", 1),
+		"inner_shadow": strings.Replace(safeBody, `writer.println("<html>" + clean + "</html>");`,
+			`{ String clean = name; writer.println("<html>" + clean + "</html>"); }`, 1),
+		"for_initializer": strings.Replace(
+			strings.Replace(safeBody, "String clean = clean(name);", "for (String clean = clean(name); true;) {", 1),
+			`writer.println("<html>" + clean + "</html>");`, `writer.println("<html>" + clean + "</html>"); break; }`, 1),
+		"class_field": strings.Replace(safeBody, "private java.io.PrintWriter writer;", "private java.io.PrintWriter writer;\n  private String clean;", 1),
+	}
+	cases := map[string]struct {
+		body      string
+		wantProof bool
+		wantRule  bool
+	}{
+		"safe_html_text": {body: safeBody, wantProof: true},
+	}
+	for name, body := range unsafeBodies {
+		cases[name] = struct {
+			body      string
+			wantProof bool
+			wantRule  bool
+		}{body: body, wantRule: true}
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "Example.java", tc.body)
+			doc, err := JavaFactsFor(context.Background(), root)
+			if err != nil {
+				t.Fatalf("JavaFactsFor: %v", err)
+			}
+			proof := false
+			for _, call := range doc.Calls {
+				if call.OutputProof == "html_text" {
+					proof = true
+				}
+			}
+			if proof != tc.wantProof {
+				t.Fatalf("HTML-text proof = %v, want %v", proof, tc.wantProof)
+			}
+			graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+			if err != nil {
+				t.Fatalf("BuildJavaValueGraph: %v", err)
+			}
+			found := false
+			for _, finding := range graph.Vulnerabilities() {
+				if finding.Rule == "java-taint-xss-writer" {
+					found = true
+				}
+			}
+			if found != tc.wantRule {
+				t.Fatalf("XSS writer finding = %v, want %v", found, tc.wantRule)
+			}
+		})
+	}
+}
+
+func TestJavaHTMLTextOutputProofRejectsCommentDelimiterInsideEscapedLiteral(t *testing.T) {
+	escapedHelper := `private String clean(String name) {
+    StringBuffer buf = new StringBuffer();
+    for (int i = 0; i < name.length(); i++) {
+      char ch = name.charAt(i);
+      switch (ch) {
+        case '<': buf.append("&lt;"); break;
+        case '>': buf.append("&gt;"); break;
+        case '&': buf.append("&amp;"); break;
+        default: if (Character.isLetter(ch) || Character.isDigit(ch) || ch == '_') { buf.append(ch); } else { buf.append('?'); }
+      }
+    }
+    return buf.toString();
+  }`
+	body := `import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+class Example {
+  private java.io.PrintWriter writer;
+  void doGet(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+    String name = req.getParameter("name");
+    String clean = clean(name);
+    writer = resp.getWriter();
+    resp.setContentType("text/html");
+    writer.println("<html>" + clean + "</html>");
+  }
+  ` + escapedHelper + `
+}`
+	for name, tc := range map[string]struct {
+		body      string
+		wantProof bool
+		wantRule  bool
+	}{
+		"ordinary_entities": {body: body, wantProof: true},
+		"delimiter_in_literal": {
+			body:     strings.Replace(body, `"&lt;"`, `"&lt;/*<script>alert(1)</script>*/"`, 1),
+			wantRule: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "Example.java", tc.body)
+			doc, err := JavaFactsFor(context.Background(), root)
+			if err != nil {
+				t.Fatalf("JavaFactsFor: %v", err)
+			}
+			proof := false
+			for _, call := range doc.Calls {
+				proof = proof || call.OutputProof == "html_text"
+			}
+			if proof != tc.wantProof {
+				t.Fatalf("HTML-text proof = %v, want %v", proof, tc.wantProof)
+			}
+			graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+			if err != nil {
+				t.Fatalf("BuildJavaValueGraph: %v", err)
+			}
+			found := false
+			for _, finding := range graph.Vulnerabilities() {
+				found = found || finding.Rule == "java-taint-xss-writer"
+			}
+			if found != tc.wantRule {
+				t.Fatalf("XSS writer finding = %v, want %v", found, tc.wantRule)
+			}
+		})
+	}
 }
 
 // TestJavaTaintPositivePerClass proves each modeled sink class fires on a real source->sink flow.
@@ -312,6 +463,244 @@ public class SqlController {
 			if len(rules) != 0 {
 				t.Fatalf("expected zero findings, got %v", javaRuleList(rules))
 			}
+		})
+	}
+}
+
+func TestJavaStrongUpdatesRespectControlFlow(t *testing.T) {
+	const header = `import java.io.PrintWriter;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+public class Controller {
+  void run(HttpServletRequest request, HttpServletResponse response, boolean overwrite) throws Exception {
+`
+	const footer = `  }
+}
+`
+	cases := []struct {
+		name          string
+		body          string
+		markerLine    int
+		strong        bool
+		wantSinkLines []int
+	}{
+		{
+			name: "straight_line_constant_overwrite",
+			body: `    String name = request.getParameter("name");
+    name = "safe";
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 7, strong: true,
+		},
+		{
+			name: "conditional_overwrite_keeps_prior_taint",
+			body: `    String name = request.getParameter("name");
+    if (overwrite) {
+      name = "safe";
+    }
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 8, strong: false, wantSinkLines: []int{11},
+		},
+		{
+			name: "nonliteral_assignment_retains_prior_taint_when_value_flow_is_incomplete",
+			body: `    String name = request.getParameter("name");
+    String clean = "safe";
+    name = clean;
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 8, strong: false, wantSinkLines: []int{10},
+		},
+		{
+			name: "unicode_escaped_literal_is_not_proof_of_strong_update",
+			body: `    String name = request.getParameter("name");
+    name = "\u0061";
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 7, strong: false, wantSinkLines: []int{9},
+		},
+		{
+			name: "short_circuit_overwrite_keeps_prior_taint",
+			body: `    String name = request.getParameter("name");
+    boolean observed = overwrite && ((name = "safe") != null);
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 7, strong: false, wantSinkLines: []int{9},
+		},
+		{
+			name: "labeled_break_can_skip_overwrite",
+			body: `    String name = request.getParameter("name");
+    label: {
+      if (overwrite) break label;
+      name = "safe";
+    }
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`,
+			markerLine: 9, strong: false, wantSinkLines: []int{12},
+		},
+		{
+			name: "sink_before_overwrite_remains",
+			body: `    String name = request.getParameter("name");
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+    name = "safe";
+    writer.println(name);
+`,
+			markerLine: 9, strong: true, wantSinkLines: []int{8},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "Controller.java", header+tc.body+footer)
+			doc, err := JavaFactsFor(context.Background(), root)
+			if err != nil {
+				t.Fatalf("JavaFactsFor: %v", err)
+			}
+			foundMarker := false
+			for _, assignment := range doc.Assignments {
+				if assignment.Pos.Line == tc.markerLine {
+					foundMarker = true
+					if assignment.StrongUpdate != tc.strong {
+						t.Fatalf("assignment at line %d StrongUpdate=%t, want %t", tc.markerLine, assignment.StrongUpdate, tc.strong)
+					}
+				}
+			}
+			if !foundMarker {
+				t.Fatalf("no assignment fact at line %d: %#v", tc.markerLine, doc.Assignments)
+			}
+			graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+			if err != nil {
+				t.Fatalf("BuildJavaValueGraph: %v", err)
+			}
+			gotSinkLines := map[int]bool{}
+			for _, path := range graph.Vulnerabilities() {
+				if path.Rule == "java-taint-xss-writer" {
+					gotSinkLines[path.SinkPos.Line] = true
+				}
+			}
+			wantSinkLines := map[int]bool{}
+			for _, line := range tc.wantSinkLines {
+				wantSinkLines[line] = true
+			}
+			if len(gotSinkLines) != len(wantSinkLines) {
+				t.Fatalf("XSS sink lines=%v, want %v", gotSinkLines, wantSinkLines)
+			}
+			for line := range wantSinkLines {
+				if !gotSinkLines[line] {
+					t.Fatalf("XSS sink lines=%v, want %v", gotSinkLines, wantSinkLines)
+				}
+			}
+		})
+	}
+}
+
+func TestJavaStrongUpdateSharedFieldRetainsTaint(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "Controller.java", `import java.io.PrintWriter;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+public class Controller {
+  private String name;
+  void run(HttpServletRequest request, HttpServletResponse response) throws Exception {
+    name = request.getParameter("name");
+    name = "safe";
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+  }
+}
+`)
+	doc, err := JavaFactsFor(context.Background(), root)
+	if err != nil {
+		t.Fatalf("JavaFactsFor: %v", err)
+	}
+	foundMarker := false
+	marker := false
+	for _, assignment := range doc.Assignments {
+		if assignment.Pos.Line == 8 {
+			foundMarker = true
+			marker = assignment.StrongUpdate
+		}
+	}
+	if !foundMarker {
+		t.Fatalf("missing field overwrite assignment: %#v", doc.Assignments)
+	}
+	if marker {
+		t.Fatalf("a shared field overwrite must not be a strong update: %#v", doc.Assignments)
+	}
+	graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+	if err != nil {
+		t.Fatalf("BuildJavaValueGraph: %v", err)
+	}
+	for _, path := range graph.Vulnerabilities() {
+		if path.Rule == "java-taint-xss-writer" {
+			return
+		}
+	}
+	t.Fatalf("a shared field may be changed by another request before the sink, got no XSS finding")
+}
+
+func TestJavaNestedLocalStrongUpdateDoesNotHideOuterValue(t *testing.T) {
+	const header = `import java.io.PrintWriter;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+public class Controller {
+  private String name;
+  void run(HttpServletRequest request, HttpServletResponse response) throws Exception {
+`
+	const footer = `  }
+}
+`
+	cases := []struct {
+		name  string
+		outer string
+	}{
+		{"shared_field", `    name = request.getParameter("name");`},
+		{"outer_local", `    String name = request.getParameter("name");`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "Controller.java", header+tc.outer+`
+    {
+      String name = "inner";
+      name = "safe";
+    }
+    PrintWriter writer = response.getWriter();
+    writer.println(name);
+`+footer)
+			doc, err := JavaFactsFor(context.Background(), root)
+			if err != nil {
+				t.Fatalf("JavaFactsFor: %v", err)
+			}
+			foundInnerAssignment := false
+			for _, assignment := range doc.Assignments {
+				if assignment.Pos.Line == 10 && assignment.StrongUpdate {
+					t.Fatalf("an inner-block local must not be a strong update: %#v", doc.Assignments)
+				}
+				if assignment.Pos.Line == 10 {
+					foundInnerAssignment = true
+				}
+			}
+			if !foundInnerAssignment {
+				t.Fatalf("missing inner-block assignment: %#v", doc.Assignments)
+			}
+			graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+			if err != nil {
+				t.Fatalf("BuildJavaValueGraph: %v", err)
+			}
+			for _, path := range graph.Vulnerabilities() {
+				if path.Rule == "java-taint-xss-writer" {
+					return
+				}
+			}
+			t.Fatalf("an inner local must not hide the outer tainted value")
 		})
 	}
 }

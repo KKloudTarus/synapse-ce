@@ -124,10 +124,11 @@ type Report struct {
 	Languages     []LanguageScore `json:"languages"`
 }
 
-// Floors is the monotonic ratchet. A language absent from PositiveRecall is reported but not yet gated,
-// allowing a new engine to land its corpus before maintainers calibrate a reviewed floor.
+// Floors is the monotonic per-language ratchet. Every configured language has both a precision and recall
+// floor, so an engine cannot retain recall by classifying every negative case as reachable.
 type Floors struct {
-	PositiveRecall map[string]float64 `json:"positive_recall"`
+	PositivePrecision map[string]float64 `json:"positive_precision"`
+	PositiveRecall    map[string]float64 `json:"positive_recall"`
 }
 
 //go:embed corpus/reachability.json
@@ -146,7 +147,7 @@ func DefaultCorpus() Corpus {
 	return c
 }
 
-// DefaultFloors returns the checked-in recall ratchet.
+// DefaultFloors returns the checked-in precision and recall ratchet.
 func DefaultFloors() Floors {
 	f, err := LoadFloors(bytes.NewReader(defaultFloorsJSON))
 	if err != nil {
@@ -273,15 +274,34 @@ func validateBaselineCase(name string, baseline BaselineCase) error {
 	return nil
 }
 
-// LoadFloors decodes the strict ratchet document and refuses values outside the closed rate interval.
+// LoadFloors decodes the strict ratchet document and requires a precision and recall floor for each
+// configured language. A partial floor document is not a valid way to relax one side of the scorecard.
 func LoadFloors(r io.Reader) (Floors, error) {
 	var f Floors
 	if err := decodeStrict(r, &f, "reachability floors"); err != nil {
 		return Floors{}, err
 	}
-	for language, value := range f.PositiveRecall {
-		if strings.TrimSpace(language) == "" || language != strings.TrimSpace(language) || value < 0 || value > 1 {
-			return Floors{}, fmt.Errorf("invalid reachability recall floor for %q", language)
+	if len(f.PositivePrecision) == 0 || len(f.PositiveRecall) == 0 {
+		return Floors{}, fmt.Errorf("reachability floors require precision and recall entries")
+	}
+	for metric, values := range map[string]map[string]float64{
+		"precision": f.PositivePrecision,
+		"recall":    f.PositiveRecall,
+	} {
+		for language, value := range values {
+			if strings.TrimSpace(language) == "" || language != strings.TrimSpace(language) || value < 0 || value > 1 {
+				return Floors{}, fmt.Errorf("invalid reachability %s floor for %q", metric, language)
+			}
+		}
+	}
+	for language := range f.PositivePrecision {
+		if _, ok := f.PositiveRecall[language]; !ok {
+			return Floors{}, fmt.Errorf("reachability precision floor for %q has no recall floor", language)
+		}
+	}
+	for language := range f.PositiveRecall {
+		if _, ok := f.PositivePrecision[language]; !ok {
+			return Floors{}, fmt.Errorf("reachability recall floor for %q has no precision floor", language)
 		}
 	}
 	return f, nil
@@ -368,13 +388,56 @@ func Evaluate(c Corpus, observations []Observation) (Report, error) {
 	return report, nil
 }
 
-// CheckRatchet reports every recall regression in deterministic order. Floors only rise in review; code must
-// never silently lower a threshold when a new fixture exposes a miss.
+// CheckRatchet reports every score regression for the languages in report. Use
+// CheckRatchetForLanguages when the caller owns a closed expected language set.
 func CheckRatchet(report Report, floors Floors) []string {
-	var breaches []string
+	required := make([]string, 0, len(report.Languages))
 	for _, score := range report.Languages {
-		if floor, ok := floors.PositiveRecall[score.Language]; ok && score.PositiveRecall < floor {
-			breaches = append(breaches, fmt.Sprintf("%s positive reachability recall %.3f is below ratchet floor %.3f", score.Language, score.PositiveRecall, floor))
+		required = append(required, score.Language)
+	}
+	return CheckRatchetForLanguages(report, floors, required)
+}
+
+// CheckRatchetForLanguages reports every precision or recall regression and fails closed if a required
+// language is missing from either the scorecard or one side of the floor. Floors only rise in review; code
+// must never silently lower a threshold when a new fixture exposes a miss.
+func CheckRatchetForLanguages(report Report, floors Floors, required []string) []string {
+	var breaches []string
+	scores := make(map[string]LanguageScore, len(report.Languages))
+	for _, score := range report.Languages {
+		scores[score.Language] = score
+	}
+	seen := make(map[string]struct{}, len(required))
+	for _, language := range required {
+		original := language
+		language = strings.TrimSpace(language)
+		if language == "" || language != original {
+			breaches = append(breaches, "required reachability language is invalid")
+			continue
+		}
+		if _, duplicate := seen[language]; duplicate {
+			breaches = append(breaches, fmt.Sprintf("required reachability language %s is duplicated", language))
+			continue
+		}
+		seen[language] = struct{}{}
+		score, ok := scores[language]
+		if !ok {
+			breaches = append(breaches, fmt.Sprintf("required reachability language %s is missing from scorecard", language))
+			continue
+		}
+		precisionFloor, precisionOK := floors.PositivePrecision[language]
+		recallFloor, recallOK := floors.PositiveRecall[language]
+		if !precisionOK {
+			breaches = append(breaches, fmt.Sprintf("required reachability language %s has no precision floor", language))
+		}
+		if !recallOK {
+			breaches = append(breaches, fmt.Sprintf("required reachability language %s has no recall floor", language))
+		}
+		if precisionOK && score.PositivePrecision < precisionFloor {
+			breaches = append(breaches, fmt.Sprintf("%s positive reachability precision %.3f is below ratchet floor %.3f", language, score.PositivePrecision, precisionFloor))
+		}
+		if recallOK && score.PositiveRecall < recallFloor {
+			breaches = append(breaches, fmt.Sprintf("%s positive reachability recall %.3f is below ratchet floor %.3f", language, score.PositiveRecall, recallFloor))
 		}
 	}
 	sort.Strings(breaches)

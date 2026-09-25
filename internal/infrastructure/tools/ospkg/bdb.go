@@ -81,14 +81,14 @@ const (
 )
 
 // rpmBDBComponents reads a BerkeleyDB-backend rpmdb at dbPath and returns one component per installed package,
-// mirroring rpmSQLiteComponents. Best-effort + hardened for an untrusted DB: an error is returned ONLY on
-// context cancellation (so a timed-out read surfaces as a failure, never a silently-truncated success); an
-// absent/non-BDB/malformed DB or a parse panic degrades to (nil, nil). namespace is the PURL namespace and tag
-// the distro qualifier, both passed straight to osComponent.
+// mirroring rpmSQLiteComponents. An exhausted read budget or parse panic returns
+// an incomplete-inventory error, so partial packages cannot appear fully covered.
+// An absent or non-BDB file contributes nothing. namespace is the PURL namespace
+// and tag the distro qualifier, both passed straight to osComponent.
 func rpmBDBBlobs(ctx context.Context, dbPath string, visit func([]byte)) (err error) {
 	defer func() {
-		if recover() != nil { // the DB is untrusted; a parse panic must degrade to no components
-			err = nil
+		if recover() != nil { // never return a partial package set as a complete inventory
+			err = errIncompleteRPMDB
 		}
 	}()
 	fi, statErr := os.Lstat(dbPath) // regular-file guard: never follow a symlinked DB out of the rootfs
@@ -132,8 +132,8 @@ func rpmBDBBlobs(ctx context.Context, dbPath string, visit func([]byte)) (err er
 	var totalBytes int64
 	count := 0
 	for pgno := uint32(1); pgno <= maxPage; pgno++ {
-		if overflowBudget <= 0 { // hostile DB exhausted the overflow budget: stop the best-effort walk
-			return nil
+		if overflowBudget <= 0 { // hostile DB exhausted the overflow budget
+			return errIncompleteRPMDB
 		}
 		if pgno&0x3f == 0 { // ~every 64 pages: honor cancellation of a large parse
 			if ctxErr := ctx.Err(); ctxErr != nil {
@@ -207,7 +207,7 @@ func rpmBDBBlobs(ctx context.Context, dbPath string, visit func([]byte)) (err er
 				continue // neither inline nor overflow: not a value we can read
 			}
 			if count >= maxPackages || totalBytes >= maxDBBytes { // package-count + total-byte budgets
-				return nil
+				return errIncompleteRPMDB
 			}
 		}
 	}
@@ -219,11 +219,9 @@ func rpmBDBBlobs(ctx context.Context, dbPath string, visit func([]byte)) (err er
 func rpmBDBComponents(ctx context.Context, dbPath, namespace, tag string) ([]sbom.Component, error) {
 	var out []sbom.Component
 	err := rpmBDBBlobs(ctx, dbPath, func(blob []byte) {
-		if name, evr, arch, ok := safeParseRPMHeader(blob); ok {
-			if c, compOK := osComponent("rpm", namespace, name, evr, arch, tag, ""); compOK {
-				c.Location = dbPath // the rpm DB's path, so the component attributes to the DB's image layer
-				out = append(out, c)
-			}
+		if c, compOK := rpmComponentFromBlob(blob, namespace, tag); compOK {
+			c.Location = dbPath // the rpm DB's path, so the component attributes to the DB's image layer
+			out = append(out, c)
 		}
 	})
 	return out, err

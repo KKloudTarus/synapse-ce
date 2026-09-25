@@ -93,7 +93,7 @@ type Service struct {
 	aiReviews                        ports.AITriageReviewRecorder          // optional durable human-review queue sink
 	fpTriageIndependence             ports.AIIndependencePolicy            // deterministic verifier separation-of-duties requirement
 	fpTriageAlerts                   aiTriageAlertPolicy                   // scan-local safety metric baselines
-	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging (dpkg/apk) from an image rootfs
+	osPkgCataloger                   ports.OSPackageCataloger              // optional owned OS-package cataloging from an image rootfs
 	instCataloger                    ports.InstalledPackageCataloger       // optional owned installed-package cataloging (Go binaries, Python dist-info, Java jars, Node.js, Ruby gems) from an image rootfs
 	artifactCataloger                ports.ArtifactCataloger               // optional owned standalone-artifact cataloging (.msi product identity) from the workspace dir
 	suppression                      ports.SuppressionLoader               // optional repo-committed .synapseignore accepted-risk policy
@@ -104,7 +104,7 @@ type Service struct {
 	strictSources                    bool                                  // when true, any detection-source error aborts the scan; default degrades (skip + warn)
 	detectionPriority                string                                // server default detection priority (comprehensive|precise); empty = comprehensive
 	reachability                     ports.ReachabilityRecorder            // optional deterministic Tier-2 reachability proof (Go call-graph)
-	goBinaryReachability             ports.ReachabilityRecorder            // optional raise-only Go-binary .gopclntab symbol reachability (#1038)
+	goBinaryReachability             ports.ReachabilityRecorder            // optional raise-only Go binary reachability
 	pyReachability                   ports.ReachabilityRecorder            // optional deterministic Tier-1 Python import-reachability proof
 	pySymbolReachability             ports.ReachabilityRecorder            // optional deterministic Tier-2 Python semantic call-graph proof
 	rustSymbolReachability           ports.ReachabilityRecorder            // optional deterministic Tier-2 Rust affected-symbol reachability (raise-only)
@@ -370,7 +370,7 @@ func (s *Service) SetFPTriageIndependence(policy string) {
 	s.fpTriageIndependence = normalizeAIIndependencePolicy(ports.AIIndependencePolicy(policy))
 }
 
-// SetOSPackageCataloger configures optional owned OS-package cataloging (dpkg/apk) from a materialized image
+// SetOSPackageCataloger configures optional owned OS-package cataloging from a materialized image
 // rootfs (Workspace.RootFS). nil ⇒ no owned OS cataloging. It only runs when a rootfs was materialized.
 func (s *Service) SetOSPackageCataloger(c ports.OSPackageCataloger) { s.osPkgCataloger = c }
 
@@ -782,7 +782,7 @@ func (s *Service) attachCompliance(result *ScanResult) {
 // reachability tier standing (never a false "not reachable"). A setter keeps NewService call sites unchanged.
 func (s *Service) SetReachability(r ports.ReachabilityRecorder) { s.reachability = r }
 
-// SetGoBinaryReachability wires the raise-only Go-binary .gopclntab symbol reachability recorder (#1038).
+// SetGoBinaryReachability wires the raise-only Go binary reachability recorder.
 func (s *Service) SetGoBinaryReachability(r ports.ReachabilityRecorder) { s.goBinaryReachability = r }
 
 // SetPyReachability configures the optional deterministic Tier-1 Python import-reachability prover: it
@@ -1588,18 +1588,62 @@ func mergeComponents(doc *sbom.SBOM, extra []sbom.Component) int {
 	key := func(c sbom.Component) string {
 		return purlType(c.PURL) + "|" + strings.ToLower(c.Name) + "@" + c.Version + "|" + purlArch(c.PURL)
 	}
-	have := make(map[string]bool, len(doc.Components))
-	for _, c := range doc.Components {
-		have[key(c)] = true
+	type originEvidence struct {
+		verified   sbom.Component
+		hasSigned  bool
+		hasUnknown bool
+	}
+	origins := make(map[string]originEvidence)
+	for _, c := range extra {
+		if purlType(c.PURL) != "rpm" {
+			continue
+		}
+		k := key(c)
+		evidence := origins[k]
+		if sbom.VerifiedRPMOrigin(c) == "rhel-base" {
+			evidence.verified, evidence.hasSigned = c, true
+		} else {
+			evidence.hasUnknown = true
+		}
+		origins[k] = evidence
+	}
+	have := make(map[string][]int, len(doc.Components))
+	for i, c := range doc.Components {
+		have[key(c)] = append(have[key(c)], i)
 	}
 	added := 0
 	for _, c := range extra {
 		k := key(c)
-		if have[k] {
+		evidence := origins[k]
+		if indices, exists := have[k]; exists {
+			admitted := false
+			for _, i := range indices {
+				if evidence.hasSigned && evidence.hasUnknown {
+					// Two installed RPM headers claim the same package identity but
+					// only one proves base origin. Neither may borrow its proof.
+					doc.Components[i] = sbom.WithVerifiedRPMOrigin(doc.Components[i], "")
+				} else if evidence.hasSigned {
+					doc.Components[i] = sbom.TransferVerifiedRPMOrigin(doc.Components[i], evidence.verified)
+					admitted = admitted || sbom.VerifiedRPMOrigin(doc.Components[i]) == "rhel-base" &&
+						sbom.DistroEcosystemForComponent(doc.Components[i]) == "Red Hat:7"
+				}
+			}
+			if evidence.hasSigned && !evidence.hasUnknown && !admitted {
+				// A prior producer can use the same name, version, and arch with
+				// an incompatible distro PURL. Keep its unsupported inventory
+				// entry, but also retain the independently proven installed RPM.
+				have[k] = append(have[k], len(doc.Components))
+				doc.Components = append(doc.Components, evidence.verified)
+				added++
+			}
 			continue
 		}
-		have[k] = true
-		doc.Components = append(doc.Components, c)
+		component := c
+		if evidence.hasSigned && evidence.hasUnknown {
+			component = sbom.WithVerifiedRPMOrigin(component, "")
+		}
+		have[k] = []int{len(doc.Components)}
+		doc.Components = append(doc.Components, component)
 		added++
 	}
 	return added
@@ -3070,30 +3114,45 @@ func inventoryCompletenessState(complete bool) sbom.InventoryCompleteness {
 }
 
 // osCoverageWarnings builds the structured OS-package coverage warnings from the cataloger's signals, so none
-// of the non-clean states is ever silent. At most one of unsupportedDistro / approximateDistro / unresolved is
-// set for a given scan (the cataloger makes them mutually exclusive), but the function tolerates any
-// combination and is pure so the exact warning text is unit-tested without running a scan.
+// of the non-clean states is ever silent. A CentOS 7 rootfs can contain both
+// verified base RPMs and packages whose origin is unsupported; both signals
+// must remain visible even if every cataloged component deduplicates against
+// an earlier SBOM producer.
 //   - unsupportedDistro: a recognized-but-deliberately-unmatched distro (CentOS Stream / CentOS >=8) →
 //     coverage=unsupported, never aliased to another distro's advisories.
 //   - approximateDistro: a distro resolved through another distro's ecosystem (CentOS Linux 7 → Red Hat:7) →
 //     coverage=approximate provenance, so a Red Hat finding on a CentOS 7 package is never mistaken for
 //     native CentOS-feed coverage and the EPEL/SIG/third-party scope limit is explicit.
 //   - unresolved: packages cataloged but the release could not be keyed at all.
-func osCoverageWarnings(osPkgsAdded int, unsupportedDistro, approximateDistro string, unresolved bool) []string {
+func osCoverageWarnings(osPkgsCataloged int, unsupportedDistro, approximateDistro string, unresolved bool) []string {
 	var out []string
 	if unsupportedDistro != "" {
 		out = append(out, fmt.Sprintf(
-			"%d OS package(s) cataloged from %s but coverage=unsupported: %s is deliberately not matched (CentOS Stream runs ahead of RHEL and VERSION_ID=8 is ambiguous, so applying a RHEL fixed version would be a false match) – OS advisories were NOT matched and were NOT aliased to another distro", osPkgsAdded, unsupportedDistro, unsupportedDistro))
+			"%d OS package(s) cataloged from %s with coverage=unsupported outside the reviewed advisory scope; packages without verified origin were NOT matched or treated as clean", osPkgsCataloged, unsupportedDistro))
 	}
 	if approximateDistro != "" {
 		out = append(out, fmt.Sprintf(
-			"OS package(s) cataloged from %s: coverage=approximate, matched against Red Hat 7 advisories (CentOS Linux 7 is a downstream rebuild of RHEL 7) – EPEL/SIG/third-party RPMs are NOT covered by RHEL advisories and were NOT matched", approximateDistro))
+			"OS package(s) cataloged from %s: coverage=approximate for verified base RPMs matched against Red Hat 7 advisories; other RPMs require independent origin proof and remain unsupported", approximateDistro))
 	}
 	if unresolved {
 		out = append(out, fmt.Sprintf(
-			"%d OS package(s) cataloged but the distro release could not be resolved (/etc/os-release absent, garbled, or inconsistent with the package database) – OS advisories were NOT matched", osPkgsAdded))
+			"%d OS package(s) cataloged but the distro release could not be resolved (/etc/os-release absent, garbled, or inconsistent with the package database) – OS advisories were NOT matched", osPkgsCataloged))
 	}
 	return out
+}
+
+func applyOSCoverageCompleteness(completeness *ports.Completeness, unsupportedDistro string, unresolved bool) bool {
+	if unsupportedDistro == "" && !unresolved {
+		return false
+	}
+	completeness.Confident = false
+	const gap = "OS package advisory coverage is incomplete; a low finding count does not mean the image is clean"
+	if completeness.Warning == "" {
+		completeness.Warning = gap
+	} else {
+		completeness.Warning = gap + "; " + completeness.Warning
+	}
+	return true
 }
 
 func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
@@ -3241,38 +3300,46 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			trace.succeed(step, "Artifact cataloging completed", map[string]int{"artifacts_added": mergeComponents(doc, artComps)})
 		}
 	}
-	// Owned OS-package cataloging (dpkg/apk) from a materialized image rootfs: detection-independent OS
-	// packages, added BEFORE detection so they get advisory-matched. Best-effort, and deduped by name@version
+	// Owned OS-package cataloging from a materialized image rootfs: detection-independent OS
+	// packages, added BEFORE detection so they get advisory-matched. Deduped by name@version
 	// so it fills the gap under the owned producer WITHOUT duplicating OS packages the generator already
 	// cataloged from the image layout. A non-image target / disabled or failed extraction leaves RootFS empty,
 	// so this is a no-op there.
-	osPkgsAdded, osDistroUnresolved := 0, false
+	osPkgsCataloged, osDistroUnresolved := 0, false
 	osUnsupportedDistro := ""
 	osApproximateDistro := ""
+	osCatalogFailed := false
 	if s.osPkgCataloger != nil && ws.RootFS != "" {
 		before := countComponents(doc)
 		step = trace.start(stageSBOM, "os-package-catalog", "ospkg-cataloger", "Catalog OS packages from image rootfs", map[string]int{"components": before})
-		if osRes, oerr := s.osPkgCataloger.Catalog(ctx, ws.RootFS); oerr != nil {
-			trace.fail(step, oerr) // surface (never swallow) a cancellation/error rather than reporting success
-		} else {
-			osPkgsAdded = mergeComponents(doc, osRes.Components)
-			// no-silent-gap: packages cataloged but the release could not be keyed to an ecosystem → warn below.
-			// A recognized-but-unsupported distro (CentOS Stream / CentOS >=8) gets a distinct structured warning
-			// instead. A distro keyed by approximation (CentOS Linux 7 → Red Hat:7) is resolved, but gets its own
-			// coverage=approximate provenance warning so the approximation is never silent.
-			if osPkgsAdded > 0 && osRes.UnsupportedDistro != "" {
-				osUnsupportedDistro = osRes.UnsupportedDistro
-			} else {
-				osDistroUnresolved = osPkgsAdded > 0 && !osRes.DistroResolved
+		osRes, oerr := s.osPkgCataloger.Catalog(ctx, ws.RootFS)
+		if oerr != nil {
+			trace.fail(step, oerr)
+			if s.strictSources || ctx.Err() != nil {
+				return nil, fmt.Errorf("catalog image OS packages: %w", oerr)
 			}
-			// Gate on the flag itself, not osPkgsAdded: the cataloger sets ApproximateDistro only when CentOS 7
-			// components were cataloged, and mergeComponents returns 0 new when an identical pkg:rpm/centos PURL
-			// was already added by another cataloger. Keying it to osPkgsAdded would then suppress the
-			// coverage=approximate provenance banner while Red Hat:7 findings still appear.
-			if osRes.ApproximateDistro != "" {
-				osApproximateDistro = osRes.ApproximateDistro
-			}
+			osCatalogFailed = true
+		}
+		osPkgsCataloged = len(osRes.Components)
+		osPkgsAdded := mergeComponents(doc, osRes.Components)
+		if oerr == nil {
 			trace.succeed(step, "OS-package cataloging completed", map[string]int{"os_packages_added": osPkgsAdded})
+		}
+		// no-silent-gap: packages cataloged but the release could not be keyed to an ecosystem → warn below.
+		// A recognized-but-unsupported distro (CentOS Stream / CentOS >=8) gets a distinct structured warning
+		// instead. A distro keyed by approximation (CentOS Linux 7 → Red Hat:7) is resolved, but gets its own
+		// coverage=approximate provenance warning so the approximation is never silent.
+		if osRes.UnsupportedDistro != "" {
+			osUnsupportedDistro = osRes.UnsupportedDistro
+		} else {
+			osDistroUnresolved = osCatalogFailed || (osPkgsCataloged > 0 && !osRes.DistroResolved)
+		}
+		// Gate on the flag itself, not osPkgsAdded: the cataloger sets ApproximateDistro only when CentOS 7
+		// components were cataloged, and mergeComponents returns 0 new when an identical pkg:rpm/centos PURL
+		// was already added by another cataloger. Keying it to osPkgsAdded would then suppress the
+		// coverage=approximate provenance banner while Red Hat:7 findings still appear.
+		if osRes.ApproximateDistro != "" {
+			osApproximateDistro = osRes.ApproximateDistro
 		}
 	}
 	// Owned installed-package cataloging (Go binaries + Python dist-info) from the same materialized rootfs:
@@ -3330,7 +3397,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		// succeeded (alongside a non-nil error), and those must not be discarded.
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, true) // dependency:tree = all non-test scopes → complete
-			mergeResolvedDeps(doc, resolvedDeps)    // fold the resolved edges over syft's maven subgraph
+			mergeResolvedDeps(doc, resolvedDeps)       // fold the resolved edges over syft's maven subgraph
 			mavenResolved = true
 		}
 		switch {
@@ -3362,7 +3429,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		before := countComponents(doc)
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, false) // runtimeClasspath only → keep syft's provided/compileOnly jars
-			mergeResolvedDeps(doc, resolvedDeps)     // fold the resolved edges over syft's maven subgraph
+			mergeResolvedDeps(doc, resolvedDeps)        // fold the resolved edges over syft's maven subgraph
 			gradleResolved = true
 		}
 		switch {
@@ -3653,7 +3720,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// or was resolved only by approximation. osCoverageWarnings turns those signals into structured warnings so
 	// none of the states ever reads as a clean OS posture (a hostile image cannot suppress its own OS vulns by
 	// lying in /etc/os-release, and an approximation is never silent).
-	sourceWarnings = append(sourceWarnings, osCoverageWarnings(osPkgsAdded, osUnsupportedDistro, osApproximateDistro, osDistroUnresolved)...)
+	sourceWarnings = append(sourceWarnings, osCoverageWarnings(osPkgsCataloged, osUnsupportedDistro, osApproximateDistro, osDistroUnresolved)...)
+	if osCatalogFailed {
+		sourceWarnings = append(sourceWarnings, "OS-package cataloging was incomplete; scan results may under-report OS vulnerabilities")
+	}
 	for _, src := range s.sources {
 		p, ok := src.(ports.SourceProvenance)
 		if !ok {
@@ -3744,12 +3814,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		Gate:                     opts.Gate,
 		Comparison:               comparisonFromWorkspace(req, ws),
 	}
-	inventoryAuthoritative := result.Completeness.Confident || (sbomGenErr == nil && len(doc.Components) == 0 && len(unresolvedEco) == 0)
+	osCoverageIncomplete := applyOSCoverageCompleteness(&result.Completeness, osUnsupportedDistro, osDistroUnresolved)
+	inventoryAuthoritative := !osCoverageIncomplete && (result.Completeness.Confident || (sbomGenErr == nil && len(doc.Components) == 0 && len(unresolvedEco) == 0))
 	admission, _ := inventoryAdmissionFrom(ctx)
 	snap.InventoryAdmission = admission
 	snap.InventoryCompleteness = inventoryCompletenessState(inventoryAuthoritative)
 	snap.InventoryAuthoritative = inventoryAuthoritative
-	if inventoryAuthoritative {
+	if osCoverageIncomplete {
+		snap.InventoryAuthorityReason = "os_package_advisory_coverage_incomplete"
+	} else if inventoryAuthoritative {
 		snap.InventoryAuthorityReason = "server_native_inventory_acquisition_complete"
 	} else {
 		snap.InventoryAuthorityReason = "native_inventory_acquisition_incomplete"
@@ -3925,12 +3998,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 
-	// Go-binary affected-symbol reachability (raise-only, #1038): scan any compiled Go binaries under ws.Dir
-	// and RAISE a finding whose affected symbol appears in a binary's .gopclntab. Runs AFTER the call-graph
-	// pass so a stronger source call-graph judgment is preserved (this only ever adds a reachable/raise, never
-	// a not_reachable). Absence of a matching binary or symbol mints nothing (no coverage). Best-effort.
+	// Scan compiled Go binaries under ws.Dir for version-bound, rooted direct-call proof. Runs after the
+	// source call-graph pass so a stronger judgment is preserved. Unproven paths provide no coverage.
 	if opts.scansVulnerabilities() && s.goBinaryReachability != nil {
-		if subs := reachabilitySubjects(result.Findings, result.Vulnerabilities); len(subs) > 0 {
+		if subs := goBinaryReachabilitySubjects(result.Findings, result.Vulnerabilities, result.SBOM); len(subs) > 0 {
 			_, _ = s.goBinaryReachability.Record(ctx, engagementID, ws.Dir, subs)
 		}
 	}

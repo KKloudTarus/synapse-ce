@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/javaprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sastbench"
 )
@@ -67,6 +68,28 @@ func TestSecuribenchScorecard(t *testing.T) {
 	}
 
 	detected := runJavaTaintLineAnchored(t, bin, srcRoot)
+	if exportPath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_PROPOSALS")); exportPath != "" {
+		exportSecuribenchBlindedProposals(t, exportPath, srcRoot, pin, detected)
+	}
+	verdictPath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_VERDICTS"))
+	baselinePath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_BASELINE_REPORT"))
+	diagnosticPath := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT"))
+	if baselinePath != "" && diagnosticPath != "" {
+		t.Fatal("SYNAPSE_POST_TRIAGE_BASELINE_REPORT and SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT are mutually exclusive")
+	}
+	if baselinePath != "" {
+		if verdictPath == "" {
+			t.Fatal("SYNAPSE_POST_TRIAGE_BASELINE_REPORT requires SYNAPSE_POST_TRIAGE_VERDICTS")
+		}
+		writeSecuribenchBaselineReport(t, baselinePath, postTriageSecuribenchReport(t, verdictPath, srcRoot, pin, detected, cases))
+	} else if diagnosticPath != "" {
+		if verdictPath == "" {
+			t.Fatal("SYNAPSE_POST_TRIAGE_DIAGNOSTIC_REPORT requires SYNAPSE_POST_TRIAGE_VERDICTS")
+		}
+		writeSecuribenchDiagnosticReport(t, diagnosticPath, postTriageSecuribenchReport(t, verdictPath, srcRoot, pin, detected, cases))
+	} else if verdictPath != "" {
+		verifySecuribenchPostTriage(t, verdictPath, srcRoot, pin, detected, cases)
+	}
 	scores := sastbench.ScoreByCWE(detected, cases, securibenchScoredCWEs, securibenchLineWindow)
 	for _, s := range scores {
 		t.Logf("securibench %s: total=%d tp=%d fp=%d fn=%d tn=%d precision=%.3f recall=%.3f",
@@ -84,20 +107,21 @@ func TestSecuribenchScorecard(t *testing.T) {
 		t.Fatalf("securibench ratchet regression:\n%s", strings.Join(breaches, "\n"))
 	}
 
-	// Optional competitor head-to-head. When SYNAPSE_SEMGREP_SARIF points at a Semgrep SARIF report over the
-	// same corpus (the benchmark workflow generates it), score Semgrep on the identical answer key and log the
-	// per-CWE comparison. Semgrep is COMPARISON DATA, not a gate: the owned ratchet above stands on its own, and
-	// a Semgrep regression or a missing report never fails this test.
+	// When SYNAPSE_SEMGREP_SARIF points at a Semgrep SARIF report over the same corpus, score Semgrep on the
+	// identical answer key and log the per-CWE comparison. The hosted benchmark always supplies this input and
+	// rejects a missing or invalid report before this test; local scorecard runs may omit it. Semgrep remains
+	// comparison data, so its score never controls the owned-engine ratchet above.
 	if sarifPath := strings.TrimSpace(os.Getenv("SYNAPSE_SEMGREP_SARIF")); sarifPath != "" {
 		compareSecuribenchToSemgrep(t, sarifPath, cases, pin, scores)
 	}
 }
 
-// semgrepPin records the Semgrep CE version and ruleset the recorded head-to-head was measured with, so the
-// comparison is reproducible. Semgrep is comparison-only, so these are documentation, not a gate.
+// semgrepPin records the Semgrep CE version and local ruleset revision used by the required comparison lane.
+// The lane rejects missing or invalid reports, while the resulting comparison remains outside the owned
+// engine's accuracy ratchet.
 const (
 	semgrepCEVersion = "1.177.0"
-	semgrepCERuleset = "p/java"
+	semgrepCERuleset = "semgrep/semgrep-rules@a84ff9cc2453ca91d581380de4b8b3f272f6f4be:java"
 )
 
 // compareSecuribenchToSemgrep scores a Semgrep SARIF report on the same Securibench answer key and logs the
@@ -134,6 +158,17 @@ func compareSecuribenchToSemgrep(t *testing.T, sarifPath string, cases []sastben
 // names are globally unique, so cross-file static-import resolution still works and intra-file flows are
 // preserved) and returns the engine's detections as line-anchored Findings keyed by base filename.
 func runJavaTaintLineAnchored(t *testing.T, bin, srcRoot string) []sastbench.Finding {
+	return runJavaTaintLineAnchoredWithOutputProof(t, bin, srcRoot, true)
+}
+
+// runJavaTaintLineAnchoredWithoutOutputProof replays the same freshly extracted facts with the optional
+// output-context field cleared. It is a diagnostic control for a context-sensitive model: source, parser,
+// all remaining facts, and graph construction are identical to the candidate run.
+func runJavaTaintLineAnchoredWithoutOutputProof(t *testing.T, bin, srcRoot string) []sastbench.Finding {
+	return runJavaTaintLineAnchoredWithOutputProof(t, bin, srcRoot, false)
+}
+
+func runJavaTaintLineAnchoredWithOutputProof(t *testing.T, bin, srcRoot string, retainOutputProof bool) []sastbench.Finding {
 	t.Helper()
 	var files []string
 	err := filepath.Walk(srcRoot, func(path string, info os.FileInfo, err error) error {
@@ -172,6 +207,11 @@ func runJavaTaintLineAnchored(t *testing.T, bin, srcRoot string) []sastbench.Fin
 	}
 	if doc.Truncated {
 		t.Fatalf("securibench facts truncated: the corpus exceeded the provider output cap in one batch; add batching")
+	}
+	if !retainOutputProof {
+		for i := range doc.Calls {
+			doc.Calls[i].OutputProof = javaprogram.OutputProofNone
+		}
 	}
 	g, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
 	if err != nil {

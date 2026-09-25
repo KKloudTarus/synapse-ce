@@ -63,7 +63,7 @@ func TestPythonScanProposesValueFlowWithBoundedEvidence(t *testing.T) {
 	}
 }
 
-func TestPythonScanSanitizerProducesNoXSSProposal(t *testing.T) {
+func TestPythonScanRetainsXSSWithoutOutputContext(t *testing.T) {
 	document := pythonCommandDocument()
 	document.Imports = []pythonprogram.Import{
 		{ScopeID: "python:app:<module>", Module: "html", Pos: pyScanPos(1, 0)},
@@ -81,8 +81,12 @@ func TestPythonScanSanitizerProducesNoXSSProposal(t *testing.T) {
 	}
 	proposals := &fakeProposer{}
 	coordinator, _ := NewPythonCoordinator(&fakePythonFacts{document: document, available: true}, proposals, taint.DefaultPythonCatalog(), &fakeAudit{}, fixedClock{})
-	if n, err := coordinator.Scan(context.Background(), engID, "/work/target"); err != nil || n != 0 || len(proposals.calls) != 0 {
-		t.Fatalf("sanitized XSS must stay clean, proposals=%d calls=%d err=%v", n, len(proposals.calls), err)
+	if n, err := coordinator.Scan(context.Background(), engID, "/work/target"); err != nil || n != 1 || len(proposals.calls) != 1 {
+		t.Fatalf("HTML escaping without output context must retain XSS proposal, proposals=%d calls=%d err=%v", n, len(proposals.calls), err)
+	}
+	claim, ok := proposals.calls[0].claim.(judgment.SASTClaim)
+	if !ok || claim.CWE != "CWE-79" || claim.Rule != "python-taint-xss" {
+		t.Fatalf("retained XSS proposal = %#v", proposals.calls[0].claim)
 	}
 }
 

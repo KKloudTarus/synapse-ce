@@ -15,10 +15,41 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: sast-benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  route:
+    name: Select exact source revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: source
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          sha="$EVENT_SHA"
+          if [ "$EVENT_NAME" = pull_request ]; then
+            sha="$PR_HEAD_SHA"
+          fi
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source revision is not a full lower-case SHA" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
   owasp-scorecard:
     name: OWASP BenchmarkJava scorecard
+    needs: route
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       # Pinned OWASP-Benchmark/BenchmarkJava commit the ratchet floors are calibrated against (v1.2 answer
       # key). Bumping this REQUIRES re-verifying the checksum below and re-calibrating the floors.
@@ -28,7 +59,11 @@ jobs:
       - name: Checkout synapse
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -61,31 +96,43 @@ jobs:
           SYNAPSE_OWASP_BENCHMARK_DIR: ${{ github.workspace }}/owasp-benchmark
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
         run: |
-          set -o pipefail
-          CGO_ENABLED=1 go test -count=1 -v -run TestOWASPBenchmarkScorecard \
-            ./internal/infrastructure/tools/ast/ | tee "${RUNNER_TEMP}/owasp-scorecard.log"
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestOWASPBenchmarkScorecard \
+            "${RUNNER_TEMP}/owasp-scorecard.jsonl" pass ./internal/infrastructure/tools/ast/ \
+            -run '^TestOWASPBenchmarkScorecard$'
 
       - name: Upload scorecard
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: owasp-benchmark-scorecard
-          path: ${{ runner.temp }}/owasp-scorecard.log
-          if-no-files-found: warn
+          name: owasp-benchmark-scorecard-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/owasp-scorecard.jsonl
+          if-no-files-found: error
+          retention-days: 90
 
   securibench-scorecard:
     name: Securibench Micro scorecard
+    needs: route
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       # Pinned too4words/securibench-micro commit the ratchet floors and the test's compiled answer-key digest
       # are calibrated against. Bumping this REQUIRES re-calibrating the floors and re-pinning the digest
       # constant in securibench_integration_test.go (reviewed together).
       SECURIBENCH_REF: 6a5a72488ea830d99f9464fc1f0562c4f864214b
+      # Semgrep is a required, pinned comparison measurement. Its score never controls the owned engine's
+      # ratchet, but the report must be valid and non-empty so every scorecard records a real comparison.
+      SEMGREP_IMAGE: semgrep/semgrep@sha256:d1825c2c72110b5bfbf0602ff68f7f117322597a7c33037a79dba9f897f5f1f0
+      SEMGREP_VERSION: "1.177.0"
+      SEMGREP_RULES_REF: a84ff9cc2453ca91d581380de4b8b3f272f6f4be
     steps:
       - name: Checkout synapse
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -101,32 +148,210 @@ jobs:
           path: securibench
           persist-credentials: false
 
+      - name: Checkout Semgrep Java rules (pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: semgrep/semgrep-rules
+          ref: ${{ env.SEMGREP_RULES_REF }}
+          path: semgrep-rules
+          persist-credentials: false
+
+      - name: Verify Semgrep rules revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C semgrep-rules rev-parse HEAD)" = "$SEMGREP_RULES_REF"
+          test -d semgrep-rules/java
+
+      - name: Run pinned Semgrep CE comparison
+        # This lane intentionally scans local rules from the pinned semgrep-rules checkout. It never resolves
+        # the mutable p/java registry configuration, and network isolation prevents rule or telemetry fetches.
+        shell: bash
+        env:
+          SEMGREP_REPORT_DIR: ${{ runner.temp }}/securibench-semgrep
+        run: |
+          set -euo pipefail
+          mkdir -p "$SEMGREP_REPORT_DIR"
+          version="$(docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp -e SEMGREP_ENABLE_VERSION_CHECK=0 \
+            --entrypoint semgrep "$SEMGREP_IMAGE" --version)"
+          test "$version" = "$SEMGREP_VERSION"
+          set +e
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp -e SEMGREP_ENABLE_VERSION_CHECK=0 -e EIO_BACKEND=posix \
+            -v "$GITHUB_WORKSPACE:/src:ro" -v "$GITHUB_WORKSPACE/semgrep-rules:/rules:ro" -w /src \
+            --entrypoint semgrep "$SEMGREP_IMAGE" scan --oss-only --metrics off --jobs 1 --sarif --no-git-ignore \
+            --config /rules/java /src/securibench/src > "$SEMGREP_REPORT_DIR/semgrep.sarif"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            exit "$status"
+          fi
+          test -s "$SEMGREP_REPORT_DIR/semgrep.sarif"
+          jq -e --arg version "$SEMGREP_VERSION" '
+            .version == "2.1.0" and
+            (.runs | type == "array" and length > 0) and
+            ([.runs[] | select(.tool.driver.semanticVersion == $version) | .results[]?] | length > 0) and
+            (.runs | all(.[]; .invocations | type == "array" and length > 0 and
+              all(.[]; .executionSuccessful == true and (.toolExecutionNotifications | length == 0))))
+          ' "$SEMGREP_REPORT_DIR/semgrep.sarif" > /dev/null
+          target_count="$(find securibench/src -type f -name '*.java' -print | LC_ALL=C sort | wc -l | tr -d ' ')"
+          test "$target_count" -gt 0
+          jq -n \
+            --arg source_sha "${{ needs.route.outputs.source_sha }}" \
+            --arg semgrep_version "$version" \
+            --arg semgrep_image "$SEMGREP_IMAGE" \
+            --arg rules_repository "semgrep/semgrep-rules" \
+            --arg rules_commit "$SEMGREP_RULES_REF" \
+            --arg rules_scope "java" \
+            --arg target_scope "securibench/src/**/*.java" \
+            --argjson target_count "$target_count" \
+            '{source_sha: $source_sha, semgrep_version: $semgrep_version, semgrep_image: $semgrep_image, rules_repository: $rules_repository, rules_commit: $rules_commit, rules_scope: $rules_scope, target_scope: $target_scope, target_count: $target_count}' \
+            > "$SEMGREP_REPORT_DIR/metadata.json"
+
       - name: Build java-facts-capable synapse-ast (CGO)
         run: CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/synapse-ast" ./cmd/synapse-ast
 
-      - name: Run Securibench scorecard + per-CWE ratchet
+      - name: Run Securibench scorecard, per-CWE ratchet, and HTML-text proof
         # The test content-pins the answer key against its compiled securibenchCorpusDigest constant, so a wrong
         # or silently-changed corpus fails loudly. Re-pinning requires editing BOTH SECURIBENCH_REF above AND
         # that constant in source (reviewed with the recalibrated floors).
         env:
           SYNAPSE_SECURIBENCH_DIR: ${{ github.workspace }}/securibench
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
+          SYNAPSE_SEMGREP_SARIF: ${{ runner.temp }}/securibench-semgrep/semgrep.sarif
         run: |
-          set -o pipefail
-          CGO_ENABLED=1 go test -count=1 -v -run TestSecuribenchScorecard \
-            ./internal/infrastructure/tools/ast/ | tee "${RUNNER_TEMP}/securibench-scorecard.log"
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard,TestSecuribenchHTMLTextProofDiagnostic \
+            "${RUNNER_TEMP}/securibench-scorecard.jsonl" pass ./internal/infrastructure/tools/ast/ \
+            -run '^(TestSecuribenchScorecard|TestSecuribenchHTMLTextProofDiagnostic)$'
 
       - name: Upload scorecard
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: securibench-scorecard
-          path: ${{ runner.temp }}/securibench-scorecard.log
-          if-no-files-found: warn
+          name: securibench-scorecard-${{ needs.route.outputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/securibench-scorecard.jsonl
+            ${{ runner.temp }}/securibench-semgrep
+          if-no-files-found: error
+          retention-days: 90
+
+  securibench-post-triage:
+    name: Fresh Securibench proof triage
+    needs: route
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SECURIBENCH_REF: 6a5a72488ea830d99f9464fc1f0562c4f864214b
+      BASELINE_SOURCE_SHA: ad58a4fbd0cb2096f37c2e37e79b7444ec81d230
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Checkout synapse candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.route.outputs.source_sha }}
+          persist-credentials: false
+      - name: Assert exact candidate revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
+      - name: Checkout historical scanner source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.BASELINE_SOURCE_SHA }}
+          path: baseline-source
+          persist-credentials: false
+      - name: Assert exact historical revision
+        shell: bash
+        run: test "$(git -C baseline-source rev-parse HEAD)" = "$BASELINE_SOURCE_SHA"
+      - name: Checkout pinned Securibench Micro
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: too4words/securibench-micro
+          ref: ${{ env.SECURIBENCH_REF }}
+          path: securibench
+          persist-credentials: false
+      - name: Assert exact corpus revision
+        shell: bash
+        run: test "$(git -C securibench rev-parse HEAD)" = "$SECURIBENCH_REF"
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build historical and current Java scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd baseline-source && CGO_ENABLED=1 go build -o "$RUNNER_TEMP/synapse-ast-baseline" ./cmd/synapse-ast)
+          CGO_ENABLED=1 go build -o "$RUNNER_TEMP/synapse-ast-candidate" ./cmd/synapse-ast
+          mkdir -p "$RUNNER_TEMP/post-triage-scorecards"
+          echo "SYNAPSE_POST_TRIAGE_PACKET_SALT=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - name: Test deterministic verifier and safety policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/test_sast_proof_gate.py
+          python3 scripts/test_sast_proof_verifier.py
+          python3 scripts/test_sast_offline_verifier.py
+      - name: Measure historical post-triage baseline
+        shell: bash
+        env:
+          SYNAPSE_SECURIBENCH_DIR: ${{ github.workspace }}/securibench
+          SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast-baseline
+          SYNAPSE_POST_TRIAGE_PROPOSALS: ${{ runner.temp }}/baseline-packet.json
+          SYNAPSE_POST_TRIAGE_RESPONSE: ${{ runner.temp }}/baseline-proof-response.json
+          SYNAPSE_POST_TRIAGE_VERDICTS: ${{ runner.temp }}/baseline-proof-verdict.json
+          SYNAPSE_POST_TRIAGE_BASELINE_REPORT: ${{ runner.temp }}/post-triage-scorecards/baseline-report.json
+        run: |
+          set -euo pipefail
+          unset SYNAPSE_POST_TRIAGE_VERDICTS SYNAPSE_POST_TRIAGE_RESPONSE SYNAPSE_POST_TRIAGE_BASELINE_REPORT
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard "$RUNNER_TEMP/baseline-proposal.jsonl" pass ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$'
+          python3 scripts/sast_proof_verifier.py --packet "$SYNAPSE_POST_TRIAGE_PROPOSALS" --response "$RUNNER_TEMP/baseline-proof-response.json" --verdict "$RUNNER_TEMP/baseline-proof-verdict.json" > "$RUNNER_TEMP/post-triage-scorecards/baseline-proof-summary.txt"
+          export SYNAPSE_POST_TRIAGE_VERDICTS="$RUNNER_TEMP/baseline-proof-verdict.json"
+          export SYNAPSE_POST_TRIAGE_RESPONSE="$RUNNER_TEMP/baseline-proof-response.json"
+          export SYNAPSE_POST_TRIAGE_BASELINE_REPORT="$RUNNER_TEMP/post-triage-scorecards/baseline-report.json"
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard "$RUNNER_TEMP/baseline-scorecard.jsonl" pass ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$'
+          test -s "$SYNAPSE_POST_TRIAGE_BASELINE_REPORT"
+      - name: Verify current post-triage improvement
+        shell: bash
+        env:
+          SYNAPSE_SECURIBENCH_DIR: ${{ github.workspace }}/securibench
+          SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast-candidate
+          SYNAPSE_POST_TRIAGE_PROPOSALS: ${{ runner.temp }}/candidate-packet.json
+          SYNAPSE_POST_TRIAGE_RESPONSE: ${{ runner.temp }}/candidate-proof-response.json
+          SYNAPSE_POST_TRIAGE_VERDICTS: ${{ runner.temp }}/candidate-proof-verdict.json
+          SYNAPSE_POST_TRIAGE_BASELINE: ${{ runner.temp }}/post-triage-scorecards/baseline-report.json
+          SYNAPSE_POST_TRIAGE_BASELINE_ENGINE: synapse-owned + syntactic-proof-v1
+          SYNAPSE_POST_TRIAGE_CANDIDATE_REPORT: ${{ runner.temp }}/post-triage-scorecards/candidate-report.json
+        run: |
+          set -euo pipefail
+          unset SYNAPSE_POST_TRIAGE_VERDICTS SYNAPSE_POST_TRIAGE_RESPONSE SYNAPSE_POST_TRIAGE_BASELINE SYNAPSE_POST_TRIAGE_BASELINE_ENGINE
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard "$RUNNER_TEMP/candidate-proposal.jsonl" pass ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$'
+          python3 scripts/sast_proof_verifier.py --packet "$SYNAPSE_POST_TRIAGE_PROPOSALS" --response "$RUNNER_TEMP/candidate-proof-response.json" --verdict "$RUNNER_TEMP/candidate-proof-verdict.json" > "$RUNNER_TEMP/post-triage-scorecards/candidate-proof-summary.txt"
+          export SYNAPSE_POST_TRIAGE_VERDICTS="$RUNNER_TEMP/candidate-proof-verdict.json"
+          export SYNAPSE_POST_TRIAGE_RESPONSE="$RUNNER_TEMP/candidate-proof-response.json"
+          export SYNAPSE_POST_TRIAGE_BASELINE="$RUNNER_TEMP/post-triage-scorecards/baseline-report.json"
+          export SYNAPSE_POST_TRIAGE_BASELINE_ENGINE="synapse-owned + syntactic-proof-v1"
+          SYNAPSE_POST_TRIAGE_BASELINE_SHA256="$(sha256sum "$SYNAPSE_POST_TRIAGE_BASELINE" | cut -d ' ' -f 1)"
+          export SYNAPSE_POST_TRIAGE_BASELINE_SHA256
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard "$RUNNER_TEMP/candidate-scorecard.jsonl" pass ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$'
+          test -s "$SYNAPSE_POST_TRIAGE_CANDIDATE_REPORT"
+      - name: Upload sanitized post-triage scorecards
+        id: upload
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: securibench-post-triage-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/post-triage-scorecards
+          if-no-files-found: error
+          retention-days: 14
 
   juliet-scorecard:
     name: Juliet Java scorecard
+    needs: route
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       # Pinned find-sec-bugs/juliet-test-suite commit the ratchet floors and the test's compiled answer-key
       # digest are calibrated against. Bumping this REQUIRES re-calibrating the floors and re-pinning the
@@ -136,7 +361,11 @@ jobs:
       - name: Checkout synapse
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
@@ -164,38 +393,111 @@ jobs:
           SYNAPSE_JULIET_DIR: ${{ github.workspace }}/juliet
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
         run: |
-          set -o pipefail
-          CGO_ENABLED=1 go test -count=1 -v -timeout 1800s -run TestJulietScorecard \
-            ./internal/infrastructure/tools/ast/ | tee "${RUNNER_TEMP}/juliet-scorecard.log"
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestJulietScorecard \
+            "${RUNNER_TEMP}/juliet-scorecard.jsonl" pass ./internal/infrastructure/tools/ast/ \
+            -timeout 1800s -run '^TestJulietScorecard$'
 
       - name: Upload scorecard
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: juliet-scorecard
-          path: ${{ runner.temp }}/juliet-scorecard.log
-          if-no-files-found: warn
+          name: juliet-scorecard-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/juliet-scorecard.jsonl
+          if-no-files-found: error
+          retention-days: 90
+
+  adversarial-regressions:
+    name: Python and sanitizer adversarial regressions
+    needs: route
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout synapse
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.route.outputs.source_sha }}
+          persist-credentials: false
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run required adversarial cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            TestJavaLdapEncoderSanitizer
+            TestJavaLdapFilterPartialSanitizationFlags
+            TestJavaCanonicalPathIsNotASanitizer
+            TestPythonHtmlEscapingRetainsUnknownContext
+            TestEncodeURIComponentDoesNotCleanXSS
+            TestEscapeStringRegexpRetainsReDoS
+            TestPythonDisplayFieldSensitivityRefinesDisplayLiteral
+            TestPythonDisplayFieldSensitivityWidensOnDisplayUncertainty
+            TestPythonDisplayFieldSensitivityExtractorDesugars
+            TestPythonShadowedSanitizerImportNotWalled
+            TestPythonShellQuotingDoesNotHideCommandInjection
+            TestPythonBasenameAndSafeLoadRetainDangerousFlows
+            TestPythonEscapedRegexRetainsReDoS
+            TestPythonFrameworkEscapersRetainUnknownContext
+            TestJsTaintContextualEscapersDoNotHideXSS
+            TestJsTaintShellQuotingDoesNotHideCommandInjection
+            TestJsTaintBasenameRetainsParentTraversal
+            TestJsTaintEscapedRegexRetainsReDoS
+            TestJsTaintSanitizedTwin
+            TestJsTaintConfigurableSanitizersNotWalled
+            TestJsTaintCrossClassSanitizerDoesNotClean
+            TestJavaTaintCanonicalizeIsNotASanitizer
+          )
+          pattern="^($(IFS='|'; echo "${required[*]}"))$"
+          CGO_ENABLED=1 go test -count=1 -json -run "$pattern" \
+            ./internal/domain/taint ./internal/infrastructure/tools/astwalk \
+            | tee "${RUNNER_TEMP}/sast-adversarial.jsonl"
+          for name in "${required[@]}"; do
+            jq -e --arg name "$name" 'select(.Action == "pass" and .Test == $name)' \
+              "${RUNNER_TEMP}/sast-adversarial.jsonl" > /dev/null
+          done
+
+      - name: Upload adversarial results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sast-adversarial-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/sast-adversarial.jsonl
+          if-no-files-found: error
+          retention-days: 90
 
   aggregate:
     name: Aggregate SAST benchmark status
-    needs: [owasp-scorecard, securibench-scorecard, juliet-scorecard]
+    needs: [route, owasp-scorecard, securibench-scorecard, securibench-post-triage, juliet-scorecard, adversarial-regressions]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # One status for the three scorecards, so the branch rule has a single context to require
-      # rather than three that can drift apart. `always()` above means this job runs even when a
-      # scorecard failed, which is the point: it reports that failure rather than being skipped
-      # alongside it.
-      - shell: bash
+      - name: Require every scorecard on the selected revision
+        shell: bash
         env:
-          OWASP: ${{ needs.owasp-scorecard.result }}
-          SECURIBENCH: ${{ needs.securibench-scorecard.result }}
-          JULIET: ${{ needs.juliet-scorecard.result }}
+          ROUTE_RESULT: ${{ needs.route.result }}
+          OWASP_RESULT: ${{ needs.owasp-scorecard.result }}
+          SECURIBENCH_RESULT: ${{ needs.securibench-scorecard.result }}
+          POST_TRIAGE_RESULT: ${{ needs.securibench-post-triage.result }}
+          POST_TRIAGE_ARTIFACT: ${{ needs.securibench-post-triage.outputs.artifact }}
+          JULIET_RESULT: ${{ needs.juliet-scorecard.result }}
+          ADVERSARIAL_RESULT: ${{ needs.adversarial-regressions.result }}
+          SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
         run: |
           set -euo pipefail
-          echo "owasp=$OWASP securibench=$SECURIBENCH juliet=$JULIET"
-          test "$OWASP" = success
-          test "$SECURIBENCH" = success
-          test "$JULIET" = success
-
+          test "$ROUTE_RESULT" = success
+          test "$OWASP_RESULT" = success
+          test "$SECURIBENCH_RESULT" = success
+          test "$POST_TRIAGE_RESULT" = success
+          test -n "$POST_TRIAGE_ARTIFACT"
+          test "$JULIET_RESULT" = success
+          test "$ADVERSARIAL_RESULT" = success
+          test "${#SOURCE_SHA}" -eq 40

@@ -42,13 +42,15 @@ A production run requires Linux on amd64; the lifecycle continues to reject ever
 
 `make reachability-benchmark` supplies missing helper binaries automatically. It preserves non-empty `SYNAPSE_TAINT_CALLGRAPH_BIN` and `SYNAPSE_AST_BIN` values, so trusted runners can provide their prebuilt helpers. For each unset path, the target builds the matching helper from the current checkout into a private temporary directory, exports that path only for the lifecycle, and removes the directory at shell exit. It does not write helpers into the checkout.
 
-The target also freezes `SYNAPSE_JSREACH_TIER2_ENABLED=true` and `SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED=true`, so a no-argument local diagnostic uses the same production matrix as the trusted workflow without manual configuration. The workflow therefore only supplies its prebuilt helper paths; it does not configure those feature flags separately.
+The target also freezes `SYNAPSE_JSREACH_TIER2_ENABLED=true` and `SYNAPSE_JVM_REACH_TIER2_POINTS_TO_ENABLED=true`, so a no-argument local diagnostic uses the same production matrix as CI without manual configuration.
 
 Local runs are useful for diagnostic development and require no review trust material. An authoritative baseline or candidate route additionally requires externally provisioned detached-review trust and signatures; a controller envelope alone is never authority.
 
-## GitHub routing and controller input
+## Required hosted CI and optional audit
 
-`.github/workflows/reachability-benchmark.yml` runs for pull requests to `main`, pushes to `main`, a nightly off-minute schedule, and manual dispatch without inputs. It derives one full lower-case source SHA from the event. Pull requests never use the self-hosted trusted runner. Current pre-merge runs remain diagnostic: this repository has no independent pre-merge workflow verifier or bootstrapped workflow trust root. This change does not alter that workflow or claim otherwise.
+`.github/workflows/reachability-benchmark.yml` runs on pull requests to `main`, pushes to `main`, a scheduled run, and manual dispatch. GitHub-hosted jobs run the production lifecycle, the Go owned/OSV/Semgrep comparison, and the Python owned/Semgrep comparison. The OSV result is replayed from a pinned raw capture; Semgrep CE runs from a pinned image without network access. Every required job must succeed and upload an artifact for the aggregate to pass. A missing tool, input, or measurement fails the gate.
+
+`.github/workflows/reachability-audit.yml` is a separate manual lane for formal capture or baseline refresh. Its controller, signatures, and review material do not gate routine pull request or main regression. The remaining sections describe this optional audit route.
 
 For non-pull-request events, the route job permits trusted execution only when all reachability-specific repository settings agree exactly:
 

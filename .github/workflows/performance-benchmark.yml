@@ -3,11 +3,11 @@ name: Performance benchmark
 # Repeatable throughput, latency, and memory measurement for the owned scan target classes: pinned source,
 # pinned SBOM, small image, and large image.
 #
-# Each gate ratchets on MEDIAN BYTES ALLOCATED against its committed baseline under docs/benchmarks/, with a
-# documented tolerance. Allocation is deterministic for a given Go toolchain and input, so it is a stable
-# regression signal on a shared runner. Wall-clock latency (p50/p95) and peak memory are recorded in the
-# baseline and compared only within the same environment digest, so this workflow never claims cross-hardware
-# comparability. A missing or malformed baseline fails the gate rather than disabling it.
+# Each gate enforces a committed allocation ceiling under docs/benchmarks/ and a
+# median latency and throughput ratio across three fixed candidate/control pairs
+# on one runner. Peak resident memory is reported as evidence. VmHWM covers the
+# whole test process, so it cannot isolate one operation. A missing measurement
+# or baseline fails the gate rather than disabling it.
 
 on:
   pull_request:
@@ -26,16 +26,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  route:
+    name: Bind benchmark source revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source revision is not a full lower-case SHA" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
   measure:
     name: Owned performance gates
+    needs: route
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      SYNAPSE_BENCH_RELEASE_DIGEST: ${{ needs.route.outputs.source_sha }}
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.route.outputs.source_sha }}
           persist-credentials: false
           fetch-depth: 1
+      - name: Assert exact checkout revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
+          [[ "$SYNAPSE_BENCH_RELEASE_DIGEST" =~ ^[0-9a-f]{40}$ ]]
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -43,44 +73,141 @@ jobs:
           cache: true
       - name: Image extraction perf gates (small and large target classes)
         shell: bash
-        run: go test -count=1 -v ./internal/infrastructure/acquire/ -run 'TestImageExtractPerfGate|TestImageExtractLargeImagePerfGate'
+        run: bash scripts/require-go-tests.sh TestImageExtractPerfGate,TestImageExtractLargeImagePerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/round-1/image-extraction.jsonl" measurement ./internal/infrastructure/acquire/ -run '^TestImageExtract(PerfGate|LargeImagePerfGate)$'
       - name: Owned SBOM producer perf gate (pinned source class)
         shell: bash
-        run: go test -count=1 -v ./internal/infrastructure/tools/ownsbom/ -run 'Perf'
+        run: bash scripts/require-go-tests.sh TestOwnsbomPerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/round-1/owned-sbom.jsonl" measurement ./internal/infrastructure/tools/ownsbom/ -run '^TestOwnsbomPerfGate$'
       - name: OS package catalog perf gate
         shell: bash
-        run: go test -count=1 -v ./internal/infrastructure/tools/ospkg/ -run 'Perf'
+        run: bash scripts/require-go-tests.sh TestOSPkgCatalogPerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/round-1/os-package-catalog.jsonl" measurement ./internal/infrastructure/tools/ospkg/ -run '^TestOSPkgCatalogPerfGate$'
       - name: SBOM import perf gate (pinned SBOM class)
         shell: bash
-        run: go test -count=1 -v ./internal/usecase/sca/ -run 'TestSBOMImportPerfGate'
+        run: bash scripts/require-go-tests.sh TestSBOMImportPerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/round-1/sbom-import.jsonl" measurement ./internal/usecase/sca/ -run '^TestSBOMImportPerfGate$'
       - name: Secret scan perf gate
         shell: bash
-        run: go test -count=1 -v ./internal/infrastructure/tools/secretscan/ -run 'Perf'
-      - name: Publish committed baselines as the run's evidence
+        run: bash scripts/require-go-tests.sh TestSecretScanPerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/round-1/secret-scan.jsonl" measurement ./internal/infrastructure/tools/secretscan/ -run '^TestSecretScanPerfGate$'
+      - name: Check out pinned control revision on this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASELINE_SOURCE_SHA="ade97553e730ed475967869cf7bd1a7b1dae7f50"
+          test "$(python3 scripts/check_performance_latency.py control-sha --baselines docs/benchmarks)" = "$BASELINE_SOURCE_SHA"
+          test "$BASELINE_SOURCE_SHA" != "${{ needs.route.outputs.source_sha }}"
+          git fetch --no-tags --depth=1 origin refs/tags/benchperf-control-v1
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$BASELINE_SOURCE_SHA"
+          control="$RUNNER_TEMP/performance-control"
+          git worktree add --detach "$control" "$BASELINE_SOURCE_SHA"
+          test "$(git -C "$control" rev-parse HEAD)" = "$BASELINE_SOURCE_SHA"
+          printf '%s\n' "$BASELINE_SOURCE_SHA" > "$RUNNER_TEMP/performance-baselines/control-source-sha.txt"
+      - name: Require allocation ceilings to tighten against previous revision
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) base="$PR_BASE_SHA" ;;
+            push) base="$PUSH_BEFORE_SHA" ;;
+            *)
+              git fetch --no-tags --deepen=1 origin "${{ needs.route.outputs.source_sha }}"
+              base="$(git rev-parse HEAD^)"
+              ;;
+          esac
+          [[ "$base" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags --depth=1 origin "$base"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$base"
+          previous="$RUNNER_TEMP/performance-previous-baselines"
+          mkdir -p "$previous"
+          for path in docs/benchmarks/*perf*.json; do
+            name="$(basename "$path")"
+            git show "$base:docs/benchmarks/$name" > "$previous/$name"
+          done
+          python3 scripts/check_performance_latency.py ratchet \
+            --candidate-baselines docs/benchmarks --previous-baselines "$previous"
+      - name: Measure pinned control on the same hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          control="$RUNNER_TEMP/performance-control"
+          output="$RUNNER_TEMP/performance-baselines/control-measurements/round-1"
+          BASELINE_SOURCE_SHA="$(cat "$RUNNER_TEMP/performance-baselines/control-source-sha.txt")"
+          mkdir -p "$output"
+          cd "$control"
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestImageExtractPerfGate,TestImageExtractLargeImagePerfGate "$output/image-extraction.jsonl" measurement ./internal/infrastructure/acquire/ -run '^TestImageExtract(PerfGate|LargeImagePerfGate)$'
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestOwnsbomPerfGate "$output/owned-sbom.jsonl" measurement ./internal/infrastructure/tools/ownsbom/ -run '^TestOwnsbomPerfGate$'
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestOSPkgCatalogPerfGate "$output/os-package-catalog.jsonl" measurement ./internal/infrastructure/tools/ospkg/ -run '^TestOSPkgCatalogPerfGate$'
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestSBOMImportPerfGate "$output/sbom-import.jsonl" measurement ./internal/usecase/sca/ -run '^TestSBOMImportPerfGate$'
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestSecretScanPerfGate "$output/secret-scan.jsonl" measurement ./internal/infrastructure/tools/secretscan/ -run '^TestSecretScanPerfGate$'
+      - name: Repeat fixed paired performance measurements
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$GITHUB_WORKSPACE"
+          candidate_sha="$SYNAPSE_BENCH_RELEASE_DIGEST"
+          control="$RUNNER_TEMP/performance-control"
+          control_sha="$(cat "$RUNNER_TEMP/performance-baselines/control-source-sha.txt")"
+          run_suite() (
+            checkout="$1"
+            release="$2"
+            output="$3"
+            cd "$checkout"
+            env SYNAPSE_BENCH_RELEASE_DIGEST="$release" bash scripts/require-go-tests.sh TestImageExtractPerfGate,TestImageExtractLargeImagePerfGate "$output/image-extraction.jsonl" measurement ./internal/infrastructure/acquire/ -run '^TestImageExtract(PerfGate|LargeImagePerfGate)$'
+            env SYNAPSE_BENCH_RELEASE_DIGEST="$release" bash scripts/require-go-tests.sh TestOwnsbomPerfGate "$output/owned-sbom.jsonl" measurement ./internal/infrastructure/tools/ownsbom/ -run '^TestOwnsbomPerfGate$'
+            env SYNAPSE_BENCH_RELEASE_DIGEST="$release" bash scripts/require-go-tests.sh TestOSPkgCatalogPerfGate "$output/os-package-catalog.jsonl" measurement ./internal/infrastructure/tools/ospkg/ -run '^TestOSPkgCatalogPerfGate$'
+            env SYNAPSE_BENCH_RELEASE_DIGEST="$release" bash scripts/require-go-tests.sh TestSBOMImportPerfGate "$output/sbom-import.jsonl" measurement ./internal/usecase/sca/ -run '^TestSBOMImportPerfGate$'
+            env SYNAPSE_BENCH_RELEASE_DIGEST="$release" bash scripts/require-go-tests.sh TestSecretScanPerfGate "$output/secret-scan.jsonl" measurement ./internal/infrastructure/tools/secretscan/ -run '^TestSecretScanPerfGate$'
+          )
+          run_suite "$control" "$control_sha" "$RUNNER_TEMP/performance-baselines/control-measurements/round-2"
+          run_suite "$candidate" "$candidate_sha" "$RUNNER_TEMP/performance-baselines/candidate-measurements/round-2"
+          run_suite "$candidate" "$candidate_sha" "$RUNNER_TEMP/performance-baselines/candidate-measurements/round-3"
+          run_suite "$control" "$control_sha" "$RUNNER_TEMP/performance-baselines/control-measurements/round-3"
+      - name: Fail closed on hosted latency and throughput regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_performance_latency.py compare \
+            --candidate-baselines docs/benchmarks \
+            --control-baselines "$RUNNER_TEMP/performance-control/docs/benchmarks" \
+            --candidate-measurements "$RUNNER_TEMP/performance-baselines/candidate-measurements" \
+            --control-measurements "$RUNNER_TEMP/performance-baselines/control-measurements" \
+            --candidate-sha "${{ needs.route.outputs.source_sha }}" \
+            --summary "$RUNNER_TEMP/performance-baselines/comparison-summary.json"
+      - name: Publish committed baselines with measured results
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/performance-baselines"
           cp docs/benchmarks/*perf*.json "$RUNNER_TEMP/performance-baselines/"
+          printf '%s\n' '${{ needs.route.outputs.source_sha }}' > "$RUNNER_TEMP/performance-baselines/source-sha.txt"
+          test "$(find "$RUNNER_TEMP/performance-baselines/candidate-measurements" -name '*.jsonl' -type f | wc -l)" -eq 15
+          test "$(find "$RUNNER_TEMP/performance-baselines/control-measurements" -name '*.jsonl' -type f | wc -l)" -eq 15
+          test -s "$RUNNER_TEMP/performance-baselines/comparison-summary.json"
           ls -1 "$RUNNER_TEMP/performance-baselines"
       - name: Upload performance baselines
+        id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: performance-baselines-${{ github.run_id }}-${{ github.run_attempt }}
+          name: performance-baselines-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
           path: ${{ runner.temp }}/performance-baselines
           if-no-files-found: error
           retention-days: 30
 
   aggregate:
     name: Aggregate performance status
-    needs: [measure]
+    needs: [route, measure]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - shell: bash
         env:
+          ROUTE: ${{ needs.route.result }}
           MEASURE: ${{ needs.measure.result }}
+          ARTIFACT: ${{ needs.measure.outputs.artifact }}
         run: |
           set -euo pipefail
+          test "$ROUTE" = success
           test "$MEASURE" = success
+          test -n "$ARTIFACT"

@@ -7,7 +7,7 @@ The SCA benchmark measures Synapse's owned matcher alongside Grype, Trivy, and O
 A trusted Linux runner uses one command:
 
 ```sh
-go run ./cmd/synapse-sca-cycle run \
+bash scripts/run-sca-cycle-delegated.sh run \
   --corpus-root /workspace/synapse/internal/usecase/scabench/corpus \
   --trusted-input-root /trusted/sca-inputs \
   --output-root /runner-temp/sca-result \
@@ -43,7 +43,7 @@ The RHEL target uses the complete pinned canonical UBI 9.8 SBOM without a scanne
 From the root of a clean Linux checkout, with a prepared review-free offline input root, an existing evidence directory outside the checkout and offline inputs (not group- or world-writable on Linux), and the same delegated cgroup/sandbox prerequisites as the trusted runner. Before hashing or building, the candidate bounds the offline root to 10,000 members, depth 32, 3 GiB per file, and 8 GiB total, with stricter 64 MiB SBOM and 4 MiB environment-attestation file limits:
 
 ```sh
-go run ./cmd/synapse-sca-cycle candidate \
+bash scripts/run-sca-cycle-delegated.sh candidate \
   --offline-input-root /protected/sca-inputs \
   --evidence-root /protected/sca-candidates
 ```
@@ -51,7 +51,7 @@ go run ./cmd/synapse-sca-cycle candidate \
 To replay pinned materialized inputs from an earlier candidate evidence directory, use the bundle directly. The command verifies its archived catalog, bindings, manifest, and every content-addressed object, restores once into the new candidate's retained `capture-input/`, replaces the archived environment attestation with the supplied current-host file, then runs the same diagnostic candidate path. The attestation must be captured independently on the host that performs this run; the command cannot establish its freshness from bytes alone.
 
 ```sh
-go run ./cmd/synapse-sca-cycle candidate \
+bash scripts/run-sca-cycle-delegated.sh candidate \
   --input-bundle /protected/earlier-candidate \
   --environment-attestation /protected/current-host/environment-attestation.json \
   --evidence-root /protected/sca-candidates

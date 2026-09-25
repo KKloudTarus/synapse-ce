@@ -1,14 +1,16 @@
 {
   "schema": "synapse-scan-perf-v2",
   "target": "extractOCIRootFS over a pinned 3-layer OCI layout fixture (272 files)",
-  "release_digest": "(devel)",
+  "release_digest": "ade97553e730ed475967869cf7bd1a7b1dae7f50",
   "dataset_digest": "sha256:57b579f695d75846f64e29e98bf70dd812fecf7133d024e4d80d09b2f3d80040",
-  "environment_digest": "env:c00294cee1639545",
+  "environment_digest": "env:6167211eaebf2628",
   "go_version": "go1.27.0",
   "warmup_samples": 3,
   "samples": 20,
-  "alloc_bytes_median": 9844152,
-  "peak_memory_bytes": 4063232,
-  "latency_p50_millis": 40,
-  "latency_p95_millis": 47
+  "alloc_bytes_median": 9845456,
+  "alloc_ceiling_bytes": 12788266,
+  "peak_memory_bytes": 19001344,
+  "latency_p50_millis": 11,
+  "latency_p95_millis": 12,
+  "throughput_ops_per_second": 88.26451
 }

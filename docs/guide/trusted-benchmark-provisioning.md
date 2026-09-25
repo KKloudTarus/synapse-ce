@@ -1,18 +1,15 @@
-# Trusted benchmark provisioning
+# Optional benchmark audit provisioning
 
-Two benchmark workflows execute on a self-hosted Linux runner because they need a capability hosted
-runners do not provide: a delegated cgroup v2 hierarchy for the strict Bubblewrap sandbox, and a
-retained trusted input tree that is never published. This page records what must exist before either
-can produce non-vacuous evidence, and what each setting means.
+The required `engine-accuracy.yml` and `reachability-benchmark.yml` regression gates run on GitHub-hosted Linux. They do not require this provisioning. The optional manual `engine-accuracy-audit.yml` dispatches from GitHub-hosted Linux to a protected AWS capture worker through SSM; `reachability-audit.yml` uses a self-hosted Linux runner. This page describes those audit routes only. A skipped or unavailable audit route does not count as a benchmark pass.
 
 Nothing here can be applied by a pull request. Repository variables, runner registration, and the
 Actions toggle are account and repository settings; a source change cannot grant itself the capability
 to run. Treat this as the checklist a repository owner works through, and the reference a reviewer uses
 to confirm a claimed trusted run was actually authorized.
 
-## Current state
+## Historical provisioning snapshot
 
-Measured through the GitHub API on 2026-09-23:
+Measured through the GitHub API on 2026-09-23; do not treat these values as current configuration:
 
 ```text
 GET /repos/KKloudTarus/synapse-ce/actions/permissions  -> {"enabled": true}
@@ -41,26 +38,25 @@ Both trusted workflows refuse that by construction. The trust predicate hard-req
 event before anything else is considered:
 
 ```bash
-# .github/workflows/engine-accuracy.yml:50
+# .github/workflows/engine-accuracy-audit.yml:50
 if [ "$EVENT_NAME" != pull_request ] && [ "$ENABLED" = true ] && [ -n "$TRUSTED_SHA" ] \
    && [ "$REF" = "${TRUSTED_REF:-refs/heads/main}" ] && [ "$SHA" = "$TRUSTED_SHA" ]; then
 ```
 
-`reachability-benchmark.yml:59` applies the same event guard. Each self-hosted job then runs only when
-that predicate passed (`engine-accuracy.yml:55-59`, `reachability-benchmark.yml:65-69`), so a fork pull
-request routes untrusted and the self-hosted job never dispatches.
+`reachability-audit.yml:59` applies the same event guard. Each audit benchmark job then runs only when
+that predicate passed, so a fork pull request routes untrusted and neither benchmark job dispatches.
 `internal/infrastructure/reachbench/workflow_policy_test.go:146-166` pins that event truth table as a
 test, so the protection cannot regress silently.
 
 Do not weaken those predicates to make a run happen. A trusted job that dispatches on a pull request is
-an arbitrary-code-execution path on the runner host, not a configuration convenience.
+an arbitrary-code-execution path on the audit infrastructure, not a configuration convenience.
 
 ## Repository variables
 
-Eleven variables are referenced and currently exist. The workflows read them through `vars.*`; an unset
+Ten variables are referenced. The workflows read them through `vars.*`; an unset
 variable evaluates empty and the trust predicate closes. Both trusted-enabled flags currently equal `false`.
 
-### SCA accuracy (`engine-accuracy.yml`)
+### SCA accuracy (`engine-accuracy-audit.yml`)
 
 | Variable | Meaning |
 |---|---|
@@ -69,14 +65,12 @@ variable evaluates empty and the trust predicate closes. Both trusted-enabled fl
 | `ENGINE_ACCURACY_TRUSTED_SHA` | The exact 40-character commit authorized to run. |
 | `SCA_ACCURACY_TRUSTED_INPUT_ROOT` | Absolute path to the prepared pinned input tree. |
 | `SCA_ACCURACY_RAW_RETENTION_ROOT` | Absolute path where protected raw identities are retained until cleanup. |
-| `SCA_ACCURACY_DELEGATED_CGROUP_ROOT` | The runner's delegated systemd service cgroup. |
 
 `ENGINE_ACCURACY_TRUSTED_SHA` pins one commit, so it must be re-pointed for each authorized capture.
-That is deliberate, because it makes an authorized run name its own subject. It also means a stale value
-leaves the benchmark permanently skipped, which the aggregate treats as an untrusted route rather than a
-failure.
+That is deliberate, because it makes an authorized run name its own subject. A stale value
+skips the benchmark and fails the manual audit aggregate; it cannot produce a green capture.
 
-### Reachability accuracy (`reachability-benchmark.yml`)
+### Reachability accuracy (`reachability-audit.yml`)
 
 | Variable | Meaning |
 |---|---|
@@ -98,47 +92,48 @@ evidence.
 
 ### Owned default readiness (`owned-default-readiness.yml`)
 
-| Variable | Meaning |
-|---|---|
-| `OWNED_DEFAULT_CANDIDATE_SHA` | The exact 40-character commit that changes the owned-only default. Leave it unset until such a commit exists. |
+This hosted workflow requires no trusted runner or revision variable. Every PR, main push, and scheduled
+run checks comparator-relative ratchet policy, owned-only operation, coverage explicitness, graph and advisory
+matching, and currency of the committed historical SCA capture. A mismatch fails the readiness job and
+aggregate. Its report records `configuration_current: true` and
+`fresh_matrix: required-by-Aggregate-SCA-benchmark-status`; it does not claim to have run the fresh matrix.
+Require both `Aggregate SCA benchmark status` and `Aggregate readiness status` on the same source SHA before
+changing the default.
 
-This workflow runs no trusted job and needs no runner, so it has no enabled flag and no ref variable. Its
-evidence suite (comparator-relative accuracy, the committed ratchet, coverage explicitness, the owned-only
-path, and graph plus advisory matching) runs on every event regardless of the variable.
+When the corpus changes, promote a new accepted comparison with matching inputs before expecting the
+readiness gate to pass. Historical `ratchet-baseline.json` remains a frozen record of earlier policy.
+Editing the capture record without a corresponding accepted run would manufacture the assurance this
+gate exists to require.
 
-The variable selects the one revision that must additionally prove its committed evidence is **current**,
-meaning the corpus no longer outruns the last accepted trusted capture. The readiness job decides that by
-looking for the acknowledged-debt marker in `internal/usecase/scabench/evidence_currency_test.go` and
-reports `evidence_current` in its uploaded readiness report. While the marker is present the value is
-`false`, and the aggregate rejects the candidate.
+## Audit execution requirements
 
-Currency is deliberately asserted only for the candidate revision. Requiring it on every push would leave
-this check red on every commit until an accepted capture lands, which would replace a real gate with
-standing noise. The same reasoning is recorded inline in `engine-accuracy.yml` for its own trust predicate.
+`engine-accuracy-audit.yml` uses `ubuntu-latest` under the `trusted-benchmarks` environment to assume a
+constrained AWS role and dispatch a fixed SSM document to the protected SCA capture worker. It does not
+register a self-hosted GitHub runner. `reachability-audit.yml` uses
+`[self-hosted, linux, reachability-accuracy-trusted]` under the same environment.
+The protected SSM document must invoke the deployed `scripts/sca-trusted-dispatch.py`
+as root. Before a manual acceptance run, the operator pins the exact source SHA
+and reviewed approval JSON digest in root-owned
+`/etc/synapse-sca/trusted-source-sha` and `trusted-approval-sha256`. The dispatcher
+requires the pinned approval body to authorize exactly the catalog, oracle,
+ratchet, and policy digests in the handoff. The hosted envelope digest alone is
+only a transport check. Provisioning must install the pinned dispatcher and
+build `scripts/verify_sca_publication.go` into
+`/opt/synapse-sca/verify-publication`; this repository does not contain the
+external SSM document body or worker deployment automation.
 
-Clearing the debt is a capture step, never a code edit: run an authorized engine-accuracy capture, promote
-its result to the accepted baseline, then remove the debt constant and its exemption in the currency test.
-Editing the constant without a capture behind it would manufacture the very assurance the gate exists to
-withhold.
-
-## Runner requirements
-
-Two label sets, both Linux, are attached to the `trusted-benchmarks` GitHub environment only on their
-self-hosted `benchmark` jobs:
-
-```text
-[self-hosted, linux, sca-accuracy-trusted]           engine-accuracy.yml
-[self-hosted, linux, reachability-accuracy-trusted]  reachability-benchmark.yml
-environment: trusted-benchmarks                       both trusted benchmark jobs
-```
-
-The SCA runner needs a delegated cgroup v2 hierarchy. `cmd/synapse-sca-cycle` requires
-`SCA_ACCURACY_DELEGATED_CGROUP_ROOT` to be non-empty and passes it to the sandbox runner, which rejects
-any path outside `/sys/fs/cgroup` or outside its `synapse-manager` child, and requires both the `memory`
-and `pids` controllers (`internal/infrastructure/sandbox/cgroup_linux.go:51-89`). This is the capability
-that rules out a hosted runner and rules out running the capture on a non-Linux host at all. The current SCA
-cleanup barrier also invokes `docker container`, `volume`, `image`, and `builder` prune commands. The Docker
-executable and a usable Docker daemon are therefore required today; cleanup failure blocks the cycle.
+The AWS SCA capture worker needs a delegated cgroup v2 hierarchy. Provision its dedicated account with a
+running, lingering systemd user manager that can start transient `Delegate=yes` services. The account must
+receive the `memory` and `pids` controllers and have access to the Docker daemon. The capture worker builds the
+cycle binary outside the checkout and starts it as the main process of its own delegated user service.
+`scripts/sca-cycle-service.sh` derives `SCA_ACCURACY_DELEGATED_CGROUP_ROOT` from that process's cgroup;
+the value is no longer a manually configured GitHub variable. A direct `go run` or ordinary runner-step
+process leaves a parent in the service root, preventing the sandbox from enabling those controllers.
+The launcher stops its service on cancellation and limits its runtime to 40 minutes. The sandbox rejects
+paths outside `/sys/fs/cgroup` or outside its `synapse-manager` child
+(`internal/infrastructure/sandbox/cgroup_linux.go:51-89`). These requirements apply to the AWS worker,
+not the hosted dispatcher. The SCA cleanup barrier also invokes `docker container`, `volume`, `image`, and
+`builder` prune commands; cleanup failure blocks the cycle.
 
 The reachability runner additionally needs the Go toolchain declared by `go.mod`, .NET SDK `8.0.100`,
 and OpenJDK `java`, `javac` and `jar` at `21.0.5`
@@ -232,24 +227,21 @@ its prepared inputs still verify.
 1. Confirm Actions is enabled for the repository.
 2. Protect the authorized branch and the `trusted-benchmarks` environment with independent required
    review. Align the environment branch policy with both trusted-ref variables.
-3. Stand up the two Linux runners with the exact label sets, delegated cgroup v2, Docker for SCA cleanup,
-   namespace support for reachability, and the required toolchains.
+3. Prepare the protected AWS SCA worker with delegated cgroup v2 and Docker, and register the reachability
+   Linux runner with its exact labels, namespace support, and required toolchains.
 4. Build the trusted input tree, including the independent review and the maintainer disposition.
 5. Archive pinned vendor bytes and confirm coverage, or accept that the capture is diagnostic.
 6. Confirm the variables and point `ENGINE_ACCURACY_TRUSTED_SHA` at the exact commit being measured.
-7. Dispatch the workflow and confirm the aggregate reports a successful benchmark with a non-empty
-   artifact. An aggregate that passes with the benchmark skipped means the route was untrusted.
-8. To flip the owned-only default, promote the accepted capture, clear the acknowledged evidence debt,
-   then point `OWNED_DEFAULT_CANDIDATE_SHA` at the default-changing commit and confirm
-   `owned-default-readiness.yml` reports `evidence_current: true` for it. The gate rejects the candidate
-   while the debt marker stands, which is the intended verdict rather than a misconfiguration.
+7. Dispatch the manual audit workflow and require successful route, provenance, benchmark, and a non-empty
+   artifact. A skipped or unauthorized benchmark fails the audit aggregate.
+8. For the owned-only default, require the separate hosted `Aggregate SCA benchmark status` and
+   `Aggregate readiness status` checks on the same candidate SHA. Manual audit provisioning is optional.
 
 ## Verifying a run was genuinely authorized
 
-A green aggregate alone does not prove a trusted capture happened. Check that the trusted job ran rather
-than being skipped and that it carries an uploaded artifact. For engine accuracy, also verify that the run's
+A green manual audit aggregate requires a successful trusted job and uploaded artifact. For engine accuracy,
+also verify that the run's
 commit equals the configured `ENGINE_ACCURACY_TRUSTED_SHA`. Reachability deliberately has no trusted-SHA
 variable: verify its protected ref, selected source SHA, controller evidence, and the required historical
-baseline revision instead. `engine-accuracy.yml` requires a successful benchmark and a non-empty artifact
-whenever the route was trusted, and requires the benchmark to be skipped when it was not, so the two cases
-are distinguishable from the aggregate's own conditions.
+baseline revision instead. `engine-accuracy-audit.yml` requires a successful benchmark and a non-empty artifact
+on an authorized route. An unauthorized dispatch fails the aggregate instead of claiming a pass.

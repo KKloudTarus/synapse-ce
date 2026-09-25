@@ -32,9 +32,13 @@ func TestEvaluateScoresExactLabelsAndPositiveRecall(t *testing.T) {
 	if jsScore.Language != "javascript" || jsScore.Exact != 1 || jsScore.PositiveRecall != 0 || jsScore.PositivePrecision != 1 {
 		t.Fatalf("javascript score = %+v", jsScore)
 	}
-	breaches := CheckRatchet(report, Floors{PositiveRecall: map[string]float64{"go": 1, "javascript": 1}})
-	if len(breaches) != 1 || !strings.Contains(breaches[0], "javascript") {
+	breaches := CheckRatchet(report, Floors{PositivePrecision: map[string]float64{"go": 0.5, "javascript": 1}, PositiveRecall: map[string]float64{"go": 1, "javascript": 1}})
+	if len(breaches) != 1 || !strings.Contains(breaches[0], "javascript") || !strings.Contains(breaches[0], "recall") {
 		t.Fatalf("ratchet breaches = %v", breaches)
+	}
+	breaches = CheckRatchet(report, Floors{PositivePrecision: map[string]float64{"go": 1, "javascript": 1}, PositiveRecall: map[string]float64{"go": 1, "javascript": 0}})
+	if len(breaches) != 1 || !strings.Contains(breaches[0], "go") || !strings.Contains(breaches[0], "precision") {
+		t.Fatalf("precision ratchet breaches = %v", breaches)
 	}
 }
 
@@ -86,12 +90,62 @@ func TestDefaultCorpusAndFloorsFormAGatedContract(t *testing.T) {
 	if len(corpus.Cases) < 2 {
 		t.Fatalf("default corpus has %d cases, want its reachable and unreached Go controls", len(corpus.Cases))
 	}
-	if floor := DefaultFloors().PositiveRecall["go"]; floor != 1 {
-		t.Fatalf("Go recall floor = %v, want 1", floor)
+	type labels struct{ positive, negative bool }
+	byLanguage := map[string]labels{}
+	for _, item := range corpus.Cases {
+		current := byLanguage[item.Language]
+		if positive(item.Expected) {
+			current.positive = true
+		} else {
+			current.negative = true
+		}
+		byLanguage[item.Language] = current
+	}
+	floors := DefaultFloors()
+	required := 0
+	for language, observed := range byLanguage {
+		if !observed.positive || !observed.negative {
+			continue
+		}
+		required++
+		if floor := floors.PositiveRecall[language]; floor != 1 {
+			t.Fatalf("%s recall floor = %v, want 1", language, floor)
+		}
+		if floor := floors.PositivePrecision[language]; floor != 1 {
+			t.Fatalf("%s precision floor = %v, want 1", language, floor)
+		}
+	}
+	if len(floors.PositiveRecall) != required || len(floors.PositivePrecision) != required {
+		t.Fatalf("floor languages precision=%d recall=%d, want %d", len(floors.PositivePrecision), len(floors.PositiveRecall), required)
 	}
 	var encoded bytes.Buffer
 	if err := EncodeReport(&encoded, Report{SchemaVersion: ReportSchemaVersion}); err != nil || !strings.Contains(encoded.String(), ReportSchemaVersion) {
 		t.Fatalf("EncodeReport = %q, %v", encoded.String(), err)
+	}
+}
+
+func TestCheckRatchetForLanguagesFailsClosedOnMissingScoreOrFloor(t *testing.T) {
+	report := Report{Languages: []LanguageScore{{Language: "go", PositivePrecision: 1, PositiveRecall: 1}}}
+	floors := Floors{PositivePrecision: map[string]float64{"go": 1}, PositiveRecall: map[string]float64{"go": 1}}
+	breaches := CheckRatchetForLanguages(report, floors, []string{"go", "python"})
+	if len(breaches) != 1 || !strings.Contains(breaches[0], "python") || !strings.Contains(breaches[0], "missing from scorecard") {
+		t.Fatalf("missing required score must fail closed, got %v", breaches)
+	}
+
+	breaches = CheckRatchetForLanguages(report, Floors{PositivePrecision: map[string]float64{"go": 1}, PositiveRecall: map[string]float64{}}, []string{"go"})
+	if len(breaches) != 1 || !strings.Contains(breaches[0], "no recall floor") {
+		t.Fatalf("missing required floor must fail closed, got %v", breaches)
+	}
+}
+
+func TestLoadFloorsRejectsPartialMetricCoverage(t *testing.T) {
+	_, err := LoadFloors(strings.NewReader(`{"positive_precision":{"go":1},"positive_recall":{}}`))
+	if err == nil || !strings.Contains(err.Error(), "require precision and recall") {
+		t.Fatalf("partial floors error = %v", err)
+	}
+	_, err = LoadFloors(strings.NewReader(`{"positive_precision":{"go":1},"positive_recall":{"python":1}}`))
+	if err == nil || !strings.Contains(err.Error(), "no recall floor") {
+		t.Fatalf("mismatched floor language error = %v", err)
 	}
 }
 

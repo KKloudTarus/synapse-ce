@@ -17,120 +17,105 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  route:
-    name: Authorize trusted benchmark
+  regression:
+    name: Hosted SCA regression
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      source_sha: ${{ steps.source.outputs.sha }}
-      trusted: ${{ steps.trust.outputs.trusted }}
-    steps:
-      - id: source
-        shell: bash
-        run: |
-          set -euo pipefail
-          sha="${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
-          case "$sha" in
-            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-            *) echo "source revision is not a full SHA" >&2; exit 1 ;;
-          esac
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-      - id: trust
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF: ${{ github.ref }}
-          SHA: ${{ steps.source.outputs.sha }}
-          ENABLED: ${{ vars.ENGINE_ACCURACY_TRUSTED_ENABLED }}
-          TRUSTED_REF: ${{ vars.ENGINE_ACCURACY_TRUSTED_REF }}
-          TRUSTED_SHA: ${{ vars.ENGINE_ACCURACY_TRUSTED_SHA }}
-        run: |
-          set -euo pipefail
-          trusted=false
-          if [ "$EVENT_NAME" != pull_request ] && [ "$ENABLED" = true ] && [ -n "$TRUSTED_SHA" ] && [ "$REF" = "${TRUSTED_REF:-refs/heads/main}" ] && [ "$SHA" = "$TRUSTED_SHA" ]; then
-            trusted=true
-          fi
-          echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
-
-  benchmark:
-    name: Trusted fixed benchmark
-    needs: route
-    if: ${{ needs.route.outputs.trusted == 'true' }}
-    runs-on: [self-hosted, linux, sca-accuracy-trusted]
-    environment: trusted-benchmarks
     timeout-minutes: 45
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - name: Check out exact source revision
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ needs.route.outputs.source_sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-          fetch-depth: 1
-      - name: Assert exact checkout revision
-        shell: bash
-        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
-      - name: Run benchmark
+      - name: Measure embedded owned corpus and gate its ratchet
         shell: bash
         env:
-          TRUSTED_INPUT_ROOT: ${{ vars.SCA_ACCURACY_TRUSTED_INPUT_ROOT }}
-          RAW_RETENTION_ROOT: ${{ vars.SCA_ACCURACY_RAW_RETENTION_ROOT }}
-          SCA_ACCURACY_DELEGATED_CGROUP_ROOT: ${{ vars.SCA_ACCURACY_DELEGATED_CGROUP_ROOT }}
+          SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          go run ./cmd/synapse-sca-cycle run --corpus-root "$GITHUB_WORKSPACE/internal/usecase/scabench/corpus" --trusted-input-root "$TRUSTED_INPUT_ROOT" --output-root "$RUNNER_TEMP/sca-accuracy-candidate" --raw-retention-root "$RAW_RETENTION_ROOT" --implementation-commit "${{ needs.route.outputs.source_sha }}" --run-key "${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
-      - name: Upload sanitized result
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          mkdir -p "$RUNNER_TEMP/sca-regression"
+          go run ./cmd/synapse-bench -mode sca-owned -output "$RUNNER_TEMP/sca-regression/owned-accuracy.json"
+          bash scripts/require-go-tests.sh TestDetectionAccuracyGolden "$RUNNER_TEMP/sca-regression/owned-test.jsonl" pass ./internal/usecase/sca -run '^TestDetectionAccuracyGolden$'
+          bash scripts/require-go-tests.sh TestOwnedRecallParityOnCommittedRatchet,TestCommittedCorpusEvidenceCurrency,TestCommittedRatchetCoversEveryBaselineTarget \
+            "$RUNNER_TEMP/sca-regression/corpus-tests.jsonl" pass ./internal/usecase/scabench \
+            -run '^Test(OwnedRecallParityOnCommittedRatchet|CommittedCorpusEvidenceCurrency|CommittedRatchetCoversEveryBaselineTarget)$'
+          python3 -m unittest scripts/test_verify_sca_hosted_regression.py
+          python3 -m unittest scripts/test_extract_sca_hosted_matrix.py
+          go test -count=1 scripts/sca_hosted_score.go scripts/sca_hosted_score_test.go
+          go test -count=1 scripts/sca_hosted_matrix_score.go scripts/sca_hosted_matrix_score_test.go
+          go run scripts/sca_maintainer_authorization_digests.go --corpus-root internal/usecase/scabench/corpus > "$RUNNER_TEMP/sca-regression/inputs.json"
+          python3 scripts/verify_sca_hosted_regression.py \
+            --owned-report "$RUNNER_TEMP/sca-regression/owned-accuracy.json" \
+            --digests "$RUNNER_TEMP/sca-regression/inputs.json" \
+            --capture internal/usecase/scabench/testdata/accepted-capture.json \
+            --source-sha "$SOURCE_SHA" \
+            --output "$RUNNER_TEMP/sca-regression/regression.json"
+          test -s "$RUNNER_TEMP/sca-regression/regression.json"
+      - name: Verify pinned offline SCA matrix inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/sca-hosted-regression-v1.tar.gz"
+          manifest=testdata/sca/hosted-matrix-inputs.manifest.json
+          curl --fail --location --retry 3 --output "$archive" \
+            https://github.com/KKloudTarus/synapse-ce/releases/download/benchmark-sca-inputs-v1/sca-hosted-regression-v1.tar.gz
+          python3 scripts/extract_sca_hosted_matrix.py --archive "$archive" --manifest "$manifest" --output "$RUNNER_TEMP/sca-matrix-inputs"
+      - name: Run fresh same-input owned and competitor matrix offline
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          go build -o "$RUNNER_TEMP/synapse-sca-bench" ./cmd/synapse-sca-bench
+          mkdir -p "$RUNNER_TEMP/sca-matrix-wires"
+          docker run --rm --network none \
+            --volume "$RUNNER_TEMP/sca-matrix-inputs:/inputs:ro" \
+            --volume "$RUNNER_TEMP/sca-matrix-wires:/out" \
+            --volume "$RUNNER_TEMP/synapse-sca-bench:/owned:ro" \
+            --volume "$GITHUB_WORKSPACE/scripts/run_sca_hosted_matrix.sh:/run-sca-matrix.sh:ro" \
+            ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 \
+            bash /run-sca-matrix.sh
+          go run scripts/sca_hosted_matrix_score.go \
+            --catalog internal/usecase/scabench/corpus/catalog.json \
+            --oracle internal/usecase/scabench/corpus/oracle.json \
+            --ratchet internal/usecase/scabench/corpus/ratchet.json \
+            --wire-dir "$RUNNER_TEMP/sca-matrix-wires" \
+            --input-dir "$RUNNER_TEMP/sca-matrix-inputs" \
+            --owned-binary "$RUNNER_TEMP/synapse-sca-bench" \
+            --archive-sha256 "$(jq -r '.archive_sha256' testdata/sca/hosted-matrix-inputs.manifest.json)" \
+            --source-sha "$SOURCE_SHA" \
+            --output "$RUNNER_TEMP/sca-regression/matrix-result.json"
+          jq -e '.passed == true and .target_count == 3 and .cell_count == 12 and .parity == "passed"' "$RUNNER_TEMP/sca-regression/matrix-result.json" > /dev/null
+      - name: Upload sanitized regression result
         id: upload
-        if: ${{ success() }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: engine-accuracy-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
-          path: ${{ runner.temp }}/sca-accuracy-candidate
+          name: engine-accuracy-regression-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sca-regression
           if-no-files-found: error
-          retention-days: 90
-      - name: Teardown candidate workspace
-        if: ${{ always() }}
-        shell: bash
-        run: rm -rf "$RUNNER_TEMP/sca-accuracy-candidate"
+          retention-days: 14
 
   aggregate:
     name: Aggregate SCA benchmark status
-    needs: [route, benchmark]
+    needs: regression
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - shell: bash
+      - name: Require measured regression and artifact
+        shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          TRUSTED: ${{ needs.route.outputs.trusted }}
-          ROUTE: ${{ needs.route.result }}
-          BENCHMARK: ${{ needs.benchmark.result }}
-          ARTIFACT: ${{ needs.benchmark.outputs.artifact }}
+          REGRESSION: ${{ needs.regression.result }}
+          ARTIFACT: ${{ needs.regression.outputs.artifact }}
         run: |
           set -euo pipefail
-          test "$ROUTE" = success
-          # A pull request can never be authorized: the trust predicate hard-requires a non-PR event, so this
-          # pins that invariant rather than restating it hopefully.
-          if [ "$EVENT_NAME" = pull_request ]; then
-            test "$TRUSTED" = false
-          fi
-          # Gate the evidence assertions on trust rather than asserting trust itself. Engine's trust predicate
-          # pins an exact TRUSTED_SHA, so a bare `test "$TRUSTED" = true` on every non-PR event would be
-          # satisfiable by exactly one commit and red for every other push and for the weekly cron. That is
-          # reachability's contract (reachability-benchmark.yml:662-672), and it holds there only because its
-          # predicate authorizes on ref alone -- REACHABILITY_BENCHMARK_TRUSTED_SHA is a forbidden string in
-          # its policy test. Asserting an unreachable positive would replace a weak gate with a permanently
-          # red one, so an authorized run must produce evidence and an unauthorized run must produce none.
-          if [ "$TRUSTED" = true ]; then
-            test "$BENCHMARK" = success
-            test -n "$ARTIFACT"
-          else
-            test "$BENCHMARK" = skipped
-          fi
+          test "$REGRESSION" = success
+          test -n "$ARTIFACT"

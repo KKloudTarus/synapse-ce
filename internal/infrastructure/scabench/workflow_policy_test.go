@@ -10,43 +10,59 @@ import (
 
 func TestEngineAccuracyWorkflowPolicy(t *testing.T) {
 	workflow := readEngineAccuracyWorkflow(t)
-
 	for _, required := range []string{
-		`if [ "$EVENT_NAME" != pull_request ] && [ "$ENABLED" = true ] && [ -n "$TRUSTED_SHA" ] && [ "$REF" = "${TRUSTED_REF:-refs/heads/main}" ] && [ "$SHA" = "$TRUSTED_SHA" ]; then`,
-		"if: ${{ needs.route.outputs.trusted == 'true' }}",
-		"runs-on: [self-hosted, linux, sca-accuracy-trusted]",
-		`if [ "$EVENT_NAME" = pull_request ]; then`,
-		`test "$TRUSTED" = false`,
+		"pull_request:\n    branches: [main]",
+		"push:\n    branches: [main]",
+		"schedule:",
+		"workflow_dispatch:",
+		"runs-on: ubuntu-latest",
+		"-mode sca-owned",
+		"TestDetectionAccuracyGolden",
+		"verify_sca_hosted_regression.py",
+		"accepted-capture.json",
+		"extract_sca_hosted_matrix.py",
+		"manifest=testdata/sca/hosted-matrix-inputs.manifest.json",
+		"sca-hosted-regression-v1.tar.gz",
+		"sca_hosted_score.go",
+		"sca_hosted_matrix_score.go",
+		"run_sca_hosted_matrix.sh",
+		"--network none",
+		".cell_count == 12",
+		`jq -e '.passed == true and .target_count == 3 and .cell_count == 12 and .parity == "passed"'`,
+		"if-no-files-found: error",
+		"needs: regression",
+		`test "$REGRESSION" = success`,
+		`test -n "$ARTIFACT"`,
 	} {
 		if !strings.Contains(workflow, required) {
-			t.Fatalf("workflow must retain trusted-route guard %q", required)
+			t.Fatalf("hosted regression workflow lacks %q", required)
 		}
 	}
-
-	const trustedEnvironment = "environment: trusted-benchmarks"
-	benchmarkStart := strings.Index(workflow, "\n  benchmark:\n")
-	benchmarkEnd := strings.Index(workflow, "\n  aggregate:\n")
-	if benchmarkStart < 0 || benchmarkEnd <= benchmarkStart {
-		t.Fatal("workflow must retain the trusted benchmark job before aggregate")
+	for _, forbidden := range []string{"trusted-benchmarks", "self-hosted", "if: ${{ needs.route.outputs.trusted", "skipped"} {
+		if strings.Contains(workflow, forbidden) {
+			t.Fatalf("hosted regression must not depend on %q", forbidden)
+		}
 	}
-	if got := strings.Count(workflow, trustedEnvironment); got != 1 {
-		t.Fatalf("workflow must declare the trusted environment exactly once: got %d", got)
+	audit := readEngineAccuracyWorkflowFile(t, "engine-accuracy-audit.yml")
+	if !strings.Contains(audit, "on:\n  workflow_dispatch:\n") || strings.Contains(audit, "on:\n  pull_request:") || strings.Contains(audit, "on:\n  push:") {
+		t.Fatal("evidence capture must be manual")
 	}
-	if !strings.Contains(workflow[benchmarkStart:benchmarkEnd], "\n    "+trustedEnvironment+"\n") {
-		t.Fatal("trusted benchmark job must declare the trusted environment")
-	}
-	if strings.Contains(workflow[:benchmarkStart], trustedEnvironment) || strings.Contains(workflow[benchmarkEnd:], trustedEnvironment) {
-		t.Fatal("only the self-hosted trusted benchmark job may declare the trusted environment")
+	if !strings.Contains(audit, "environment: trusted-benchmarks") || !strings.Contains(audit, "scripts/dispatch_sca_trusted_ssm.py dispatch") || !strings.Contains(audit, `test "$TRUSTED" = true`) {
+		t.Fatal("manual audit must retain its guarded SSM capture")
 	}
 }
 
 func readEngineAccuracyWorkflow(t *testing.T) string {
+	return readEngineAccuracyWorkflowFile(t, "engine-accuracy.yml")
+}
+
+func readEngineAccuracyWorkflowFile(t *testing.T, name string) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate engine accuracy workflow policy test source")
 	}
-	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", ".github", "workflows", "engine-accuracy.yml")
+	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", ".github", "workflows", name)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read engine accuracy workflow: %v", err)
