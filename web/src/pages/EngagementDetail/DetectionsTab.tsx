@@ -96,7 +96,7 @@ export function DetectionsTab({ engagementId }: { engagementId: string }) {
       >
         {scope && scope !== 'full' && (
           <div className="border-b border-secondary px-4 py-2 text-xs text-tertiary">
-            Field scope: <span className="font-mono text-secondary">{scope}</span> — some evidence fields are redacted for your role.
+            Field scope: <span className="font-mono text-secondary">{scope}</span>. Some evidence fields are redacted for your role.
           </div>
         )}
         {correlate.error && <div className="px-4 pt-3"><ErrorState message={correlate.error} /></div>}

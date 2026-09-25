@@ -30,8 +30,8 @@ describe('Project Overview components', () => {
     const first = screen.getByText('New high issues')
     const second = screen.getByText('Coverage')
     expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(screen.getByText('2 — expected <= 0')).toBeInTheDocument()
-    expect(screen.getByText('72.3% — expected >= 80%')).toBeInTheDocument()
+    expect(screen.getByText('2, expected <= 0')).toBeInTheDocument()
+    expect(screen.getByText('72.3%, expected >= 80%')).toBeInTheDocument()
   })
 
   it('uses singular copy for one failed gate condition', () => {

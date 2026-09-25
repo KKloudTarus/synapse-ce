@@ -395,7 +395,7 @@ export function RetroHuntBody({ assetId }: { assetId: string }) {
             <Pill>{result.entries.length} transition{result.entries.length === 1 ? '' : 's'}</Pill>
             {result.truncated ? (
               <Pill className="bg-warning-primary/10 text-warning-primary ring-1 ring-inset ring-warning-primary/25">
-                truncated — window capped
+                truncated, window capped
               </Pill>
             ) : (
               <Pill className="bg-success-primary/10 text-success-primary ring-1 ring-inset ring-success-primary/25">complete window</Pill>

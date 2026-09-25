@@ -80,7 +80,7 @@ export function QualityGateBanner({ gate }: { gate: ProjectOverviewGate }) {
                 </div>
                 {/* Screen reader and test compatibility string */}
                 <div className="sr-only">
-                  {formatGateEvidenceValue(condition.metric, condition.actual)} — expected {condition.operator} {formatGateEvidenceValue(condition.metric, condition.threshold)}
+                  {formatGateEvidenceValue(condition.metric, condition.actual)}, expected {condition.operator} {formatGateEvidenceValue(condition.metric, condition.threshold)}
                 </div>
               </li>
             ))}

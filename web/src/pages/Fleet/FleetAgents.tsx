@@ -139,7 +139,7 @@ function RolloutCard({ canAdmin }: { canAdmin: boolean }) {
           {rollout ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Target version" value={rollout.targetVersion || '—'} mono />
-              <Field label="State" value={rollout.paused ? `paused${rollout.pauseReason ? ` — ${rollout.pauseReason}` : ''}` : rollout.promotedToAll ? 'promoted to all' : 'canary'} />
+              <Field label="State" value={rollout.paused ? `paused${rollout.pauseReason ? ` · ${rollout.pauseReason}` : ''}` : rollout.promotedToAll ? 'promoted to all' : 'canary'} />
               <Field label="Canary groups" value={rollout.canaryGroups.length ? rollout.canaryGroups.join(', ') : '—'} />
               <Field label="Updated" value={`${formatFleetTime(rollout.updatedAt)}${rollout.updatedBy ? ` by ${rollout.updatedBy}` : ''}`} />
             </div>
