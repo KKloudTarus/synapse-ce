@@ -93,28 +93,19 @@ evidence.
 
 ### Owned default readiness (`owned-default-readiness.yml`)
 
-| Variable | Meaning |
-|---|---|
-| `OWNED_DEFAULT_CANDIDATE_SHA` | The exact 40-character commit that changes the owned-only default. Leave it unset until such a commit exists. |
+This hosted workflow requires no trusted runner or revision variable. Every PR, main push, and scheduled
+run checks comparator-relative ratchet parity, owned-only operation, coverage explicitness, graph and advisory
+matching, and the committed SCA corpus against the accepted 24-observation capture. The currency test
+compares the canonical catalog, oracle, ratchet, and policy digests to that capture. A mismatch fails the
+readiness job and aggregate; a passing run uploads `evidence_current: true` with the checked source SHA.
+This value states that the input identities are current; it does not substitute for the live owned scanner
+measurement in `engine-accuracy.yml`. Require both aggregate checks on the same commit before changing the
+default.
 
-This workflow runs no trusted job and needs no runner, so it has no enabled flag and no ref variable. Its
-evidence suite (comparator-relative accuracy, the committed ratchet, coverage explicitness, the owned-only
-path, and graph plus advisory matching) runs on every event regardless of the variable.
-
-The variable selects the one revision that must additionally prove its committed evidence is **current**,
-meaning the corpus no longer outruns the last accepted trusted capture. The readiness job decides that by
-looking for the acknowledged-debt marker in `internal/usecase/scabench/evidence_currency_test.go` and
-reports `evidence_current` in its uploaded readiness report. While the marker is present the value is
-`false`, and the aggregate rejects the candidate.
-
-Currency is deliberately asserted only for the candidate revision. Requiring it on every push would leave
-this check red on every commit until an accepted capture lands, which would replace a real gate with
-standing noise. The same reasoning is recorded inline in `engine-accuracy-audit.yml` for its own trust predicate.
-
-Clearing the debt is a capture step, never a code edit: run an authorized engine-accuracy capture, promote
-its result to the accepted baseline, then remove the debt constant and its exemption in the currency test.
-Editing the constant without a capture behind it would manufacture the very assurance the gate exists to
-withhold.
+When the corpus changes, promote a new accepted comparison with matching inputs before expecting the
+readiness gate to pass. Historical `ratchet-baseline.json` remains a frozen record of earlier policy.
+Editing the capture record without a corresponding accepted run would manufacture the assurance this
+gate exists to require.
 
 ## Runner requirements
 
@@ -239,10 +230,9 @@ its prepared inputs still verify.
 6. Confirm the variables and point `ENGINE_ACCURACY_TRUSTED_SHA` at the exact commit being measured.
 7. Dispatch the workflow and confirm the aggregate reports a successful benchmark with a non-empty
    artifact. An aggregate that passes with the benchmark skipped means the route was untrusted.
-8. To flip the owned-only default, promote the accepted capture, clear the acknowledged evidence debt,
-   then point `OWNED_DEFAULT_CANDIDATE_SHA` at the default-changing commit and confirm
-   `owned-default-readiness.yml` reports `evidence_current: true` for it. The gate rejects the candidate
-   while the debt marker stands, which is the intended verdict rather than a misconfiguration.
+8. Before flipping the owned-only default, confirm `owned-default-readiness.yml` and
+   `engine-accuracy.yml` both pass on the default-changing commit; readiness must upload
+   `evidence_current: true` for that exact source SHA.
 
 ## Verifying a run was genuinely authorized
 

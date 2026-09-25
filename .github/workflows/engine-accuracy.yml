@@ -93,7 +93,7 @@ jobs:
           retention-days: 14
 
   aggregate:
-    name: Aggregate benchmark status
+    name: Aggregate SCA benchmark status
     needs: regression
     if: ${{ always() }}
     runs-on: ubuntu-latest
