@@ -161,7 +161,17 @@ type k8sScanResult struct {
 // a document that decodes but does not fit our shape (or has no kind) is skipped and later documents are
 // still scanned; a YAML *stream* syntax error halts parsing of the rest of THIS file (prior results are
 // kept), because yaml.v3 cannot reliably resume mid-stream. Either way the overall scan never fails.
+// k8sOrigin resolves a rendered document back to the file that declared it. A kustomize or Helm render
+// merges many manifests into one stream, so without this every finding from the render carries the
+// aggregator's path, which is the one path a reader cannot open to fix anything. nil means the caller
+// scanned a single file and rel is already right.
+type k8sOrigin func(doc k8sDoc) string
+
 func scanKubernetes(rel string, data []byte) k8sScanResult {
+	return scanKubernetesFrom(rel, data, nil)
+}
+
+func scanKubernetesFrom(rel string, data []byte, origin k8sOrigin) k8sScanResult {
 	out := k8sScanResult{policyNamespaces: make(map[string]struct{})}
 	// Refuse pathologically deep documents BEFORE decoding: yaml.v3 recurses per nesting level with no
 	// depth cap, so a crafted deep document would overflow the goroutine stack (an unrecoverable fatal),
@@ -182,14 +192,20 @@ func scanKubernetes(rel string, data []byte) k8sScanResult {
 		if err := node.Decode(&doc); err != nil || doc.Kind == "" {
 			continue // not a manifest we recognise; try the next document
 		}
-		out.findings = append(out.findings, checkK8sDoc(rel, doc, &node)...)
+		docRel := rel
+		if origin != nil {
+			if from := origin(doc); from != "" {
+				docRel = from
+			}
+		}
+		out.findings = append(out.findings, checkK8sDoc(docRel, doc, &node)...)
 		namespace := k8sNamespace(doc.Metadata.Namespace)
 		if isWorkloadKind(doc.Kind) {
 			resource := clip(doc.Kind)
 			if doc.Metadata.Name != "" {
 				resource += "/" + clip(doc.Metadata.Name)
 			}
-			out.workloads = append(out.workloads, k8sWorkloadFact{namespace: namespace, file: rel, line: firstKeyLine(&node, "kind"), resource: resource})
+			out.workloads = append(out.workloads, k8sWorkloadFact{namespace: namespace, file: docRel, line: firstKeyLine(&node, "kind"), resource: resource})
 		}
 		if doc.Kind == "NetworkPolicy" {
 			out.policyNamespaces[namespace] = struct{}{}
