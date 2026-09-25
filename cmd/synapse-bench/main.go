@@ -1,9 +1,10 @@
-// Command synapse-bench reduces supplied benchmark fixture observations into a deterministic report.
-// It does not execute workloads, provision infrastructure, or contact external services.
+// Command synapse-bench produces deterministic reports from supplied observations or
+// the embedded owned SCA corpus. It does not provision infrastructure or contact external services.
 package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"os"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/accuracyprobe"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/accuracyeval"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/enginecompare"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
@@ -19,7 +22,7 @@ import (
 func main() {
 	inputPath := flag.String("input", "", "versioned benchmark input JSON")
 	outputPath := flag.String("output", "", "output benchmark report JSON (default: stdout)")
-	mode := flag.String("mode", "throughput", "reduction mode: throughput, accuracy, reachability, reachability-osv, reachability-semgrep-ce, reachability-snyk-sample, or compare")
+	mode := flag.String("mode", "throughput", "mode: throughput, accuracy, sca-owned, reachability, reachability-osv, reachability-semgrep-ce, reachability-snyk-sample, or compare")
 	language := flag.String("language", "", "restrict a reachability baseline to one corpus language (e.g. go, python), so its report matches the owned report's language subset and corpus digest")
 	flag.Parse()
 	if flag.NArg() != 0 {
@@ -88,6 +91,15 @@ func run(mode, inputPath, outputPath, language string, stdin io.Reader, stdout i
 		report, err := benchmark.EvaluateAccuracy(input)
 		if err != nil {
 			return fmt.Errorf("evaluate accuracy input: %w", err)
+		}
+		encode = func(w io.Writer) error { return benchmark.EncodeAccuracyReport(w, report) }
+	case "sca-owned":
+		if inputPath != "" {
+			return fmt.Errorf("sca-owned uses the embedded corpus and does not accept -input")
+		}
+		report, err := accuracyeval.Evaluate(context.Background(), accuracyprobe.New())
+		if err != nil {
+			return fmt.Errorf("evaluate owned SCA corpus: %w", err)
 		}
 		encode = func(w io.Writer) error { return benchmark.EncodeAccuracyReport(w, report) }
 	case "reachability":
@@ -195,7 +207,7 @@ func run(mode, inputPath, outputPath, language string, stdin io.Reader, stdout i
 			return enc.Encode(report)
 		}
 	default:
-		return fmt.Errorf("unknown mode %q (want throughput, accuracy, reachability, reachability-osv, reachability-semgrep-ce, reachability-snyk-sample or compare)", mode)
+		return fmt.Errorf("unknown mode %q (want throughput, accuracy, sca-owned, reachability, reachability-osv, reachability-semgrep-ce, reachability-snyk-sample or compare)", mode)
 	}
 
 	outputWriter := stdout

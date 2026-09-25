@@ -1,18 +1,15 @@
-# Trusted benchmark provisioning
+# Optional benchmark audit provisioning
 
-Two benchmark workflows execute on a self-hosted Linux runner because they need a capability hosted
-runners do not provide: a delegated cgroup v2 hierarchy for the strict Bubblewrap sandbox, and a
-retained trusted input tree that is never published. This page records what must exist before either
-can produce non-vacuous evidence, and what each setting means.
+The required `engine-accuracy.yml` and `reachability-benchmark.yml` regression gates run on GitHub-hosted Linux. They do not require this provisioning. The optional manual `engine-accuracy-audit.yml` and `reachability-audit.yml` routes use a self-hosted Linux runner for formal evidence capture. This page describes that audit setup only. A skipped or unavailable audit route does not count as a benchmark pass.
 
 Nothing here can be applied by a pull request. Repository variables, runner registration, and the
 Actions toggle are account and repository settings; a source change cannot grant itself the capability
 to run. Treat this as the checklist a repository owner works through, and the reference a reviewer uses
 to confirm a claimed trusted run was actually authorized.
 
-## Current state
+## Historical provisioning snapshot
 
-Measured through the GitHub API on 2026-09-23:
+Measured through the GitHub API on 2026-09-23; do not treat these values as current configuration:
 
 ```text
 GET /repos/KKloudTarus/synapse-ce/actions/permissions  -> {"enabled": true}
@@ -41,13 +38,13 @@ Both trusted workflows refuse that by construction. The trust predicate hard-req
 event before anything else is considered:
 
 ```bash
-# .github/workflows/engine-accuracy.yml:50
+# .github/workflows/engine-accuracy-audit.yml:50
 if [ "$EVENT_NAME" != pull_request ] && [ "$ENABLED" = true ] && [ -n "$TRUSTED_SHA" ] \
    && [ "$REF" = "${TRUSTED_REF:-refs/heads/main}" ] && [ "$SHA" = "$TRUSTED_SHA" ]; then
 ```
 
-`reachability-benchmark.yml:59` applies the same event guard. Each self-hosted job then runs only when
-that predicate passed (`engine-accuracy.yml:55-59`, `reachability-benchmark.yml:65-69`), so a fork pull
+`reachability-audit.yml:59` applies the same event guard. Each self-hosted job then runs only when
+that predicate passed (`engine-accuracy-audit.yml:55-59`, `reachability-audit.yml:65-69`), so a fork pull
 request routes untrusted and the self-hosted job never dispatches.
 `internal/infrastructure/reachbench/workflow_policy_test.go:146-166` pins that event truth table as a
 test, so the protection cannot regress silently.
@@ -60,7 +57,7 @@ an arbitrary-code-execution path on the runner host, not a configuration conveni
 Ten variables are referenced. The workflows read them through `vars.*`; an unset
 variable evaluates empty and the trust predicate closes. Both trusted-enabled flags currently equal `false`.
 
-### SCA accuracy (`engine-accuracy.yml`)
+### SCA accuracy (`engine-accuracy-audit.yml`)
 
 | Variable | Meaning |
 |---|---|
@@ -71,11 +68,10 @@ variable evaluates empty and the trust predicate closes. Both trusted-enabled fl
 | `SCA_ACCURACY_RAW_RETENTION_ROOT` | Absolute path where protected raw identities are retained until cleanup. |
 
 `ENGINE_ACCURACY_TRUSTED_SHA` pins one commit, so it must be re-pointed for each authorized capture.
-That is deliberate, because it makes an authorized run name its own subject. It also means a stale value
-leaves the benchmark permanently skipped, which the aggregate treats as an untrusted route rather than a
-failure.
+That is deliberate, because it makes an authorized run name its own subject. A stale value
+skips the benchmark and fails the manual audit aggregate; it cannot produce a green capture.
 
-### Reachability accuracy (`reachability-benchmark.yml`)
+### Reachability accuracy (`reachability-audit.yml`)
 
 | Variable | Meaning |
 |---|---|
@@ -113,7 +109,7 @@ reports `evidence_current` in its uploaded readiness report. While the marker is
 
 Currency is deliberately asserted only for the candidate revision. Requiring it on every push would leave
 this check red on every commit until an accepted capture lands, which would replace a real gate with
-standing noise. The same reasoning is recorded inline in `engine-accuracy.yml` for its own trust predicate.
+standing noise. The same reasoning is recorded inline in `engine-accuracy-audit.yml` for its own trust predicate.
 
 Clearing the debt is a capture step, never a code edit: run an authorized engine-accuracy capture, promote
 its result to the accepted baseline, then remove the debt constant and its exemption in the currency test.
@@ -126,8 +122,8 @@ Two label sets, both Linux, are attached to the `trusted-benchmarks` GitHub envi
 self-hosted `benchmark` jobs:
 
 ```text
-[self-hosted, linux, sca-accuracy-trusted]           engine-accuracy.yml
-[self-hosted, linux, reachability-accuracy-trusted]  reachability-benchmark.yml
+[self-hosted, linux, sca-accuracy-trusted]           engine-accuracy-audit.yml
+[self-hosted, linux, reachability-accuracy-trusted]  reachability-audit.yml
 environment: trusted-benchmarks                       both trusted benchmark jobs
 ```
 
@@ -254,6 +250,5 @@ A green aggregate alone does not prove a trusted capture happened. Check that th
 than being skipped and that it carries an uploaded artifact. For engine accuracy, also verify that the run's
 commit equals the configured `ENGINE_ACCURACY_TRUSTED_SHA`. Reachability deliberately has no trusted-SHA
 variable: verify its protected ref, selected source SHA, controller evidence, and the required historical
-baseline revision instead. `engine-accuracy.yml` requires a successful benchmark and a non-empty artifact
-whenever the route was trusted, and requires the benchmark to be skipped when it was not, so the two cases
-are distinguishable from the aggregate's own conditions.
+baseline revision instead. `engine-accuracy-audit.yml` requires a successful benchmark and a non-empty artifact
+on an authorized route. An unauthorized dispatch fails the aggregate instead of claiming a pass.

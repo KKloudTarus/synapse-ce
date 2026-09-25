@@ -155,6 +155,19 @@ func verifySecuribenchPostTriage(t *testing.T, verdictPath, srcRoot, corpusDiges
 	for _, line := range detail {
 		t.Log(line)
 	}
+	if path := strings.TrimSpace(os.Getenv("SYNAPSE_POST_TRIAGE_CANDIDATE_REPORT")); path != "" {
+		f, err := os.Create(securibenchEvidencePath(path))
+		if err != nil {
+			t.Fatalf("create accepted post-triage candidate report: %v", err)
+		}
+		if err := sastbench.EncodeReport(f, candidate); err != nil {
+			_ = f.Close()
+			t.Fatalf("write accepted post-triage candidate report: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close accepted post-triage candidate report: %v", err)
+		}
+	}
 }
 
 func securibenchExpectedCounts(cases []sastbench.LabeledCase) map[string]int {

@@ -1,72 +1,31 @@
-# Benchmark acceptance and retirement
+# Benchmark acceptance
 
-This runbook closes the benchmark work for an exact commit on `main`. It records evidence for the seven
-benchmark workflows without treating a green aggregate as proof that its underlying measurement ran.
+Use one exact `main` commit for EPIC #1034 acceptance. The seven capability workflows remain active after acceptance as normal regression checks. A green aggregate counts only when its required measurements and artifacts ran; a skipped audit job is never benchmark evidence.
 
-## Select the acceptance subject
+## Select the subject
 
-1. Merge the intended changes to `main`, then record its full lower-case 40-character SHA as
-   `ACCEPTANCE_SHA`. Do not accept results from a pull-request merge ref, a later `main` SHA, or a manually
-   selected branch that does not resolve to `ACCEPTANCE_SHA`.
-2. Dispatch every workflow from `main` at that SHA: `engine-accuracy.yml`,
-   `reachability-benchmark.yml`, `security-accuracy.yml`, `dynamic-security-benchmark.yml`,
-   `performance-benchmark.yml`, `sast-benchmark.yml`, and `owned-default-readiness.yml`.
-3. Preserve each run URL, workflow run ID and attempt, event, source SHA, aggregate job URL and conclusion.
-   For the hosted security, dynamic, performance, and SAST lanes, the route job, checkout assertion, and
-   aggregate must all succeed for `ACCEPTANCE_SHA`.
+1. Merge the intended changes to `main` and record its full 40-character SHA as `ACCEPTANCE_SHA`.
+2. Run `engine-accuracy.yml`, `reachability-benchmark.yml`, `security-accuracy.yml`, `dynamic-security-benchmark.yml`, `performance-benchmark.yml`, `sast-benchmark.yml`, and `owned-default-readiness.yml` for that SHA. Use the workflows' `main` push runs or dispatch them from `main` while it still points at `ACCEPTANCE_SHA`.
+3. Record each run URL, attempt, source SHA, aggregate conclusion, artifact ID, artifact SHA-256, and input identity. Reject a pull-request merge ref, a later `main` SHA, a missing artifact, or a skipped required job.
 
-## Collect non-vacuous evidence
+## Check each result
 
-For every run, retain the aggregate log and the logs for every benchmark job. A passing aggregate is valid
-only when all required jobs ran successfully and the workflow's required artifacts are present; a skipped
-trusted job is authorization evidence only, not an accepted measurement.
-
-| Workflow | Evidence required for acceptance |
+| Workflow | Required evidence |
 | --- | --- |
-| `engine-accuracy.yml` | Trusted route is `true`; trusted benchmark job ran; sanitized result artifact is present; its revision equals `ACCEPTANCE_SHA`. |
-| `reachability-benchmark.yml` | Trusted route is `true`; trusted benchmark job ran; controller review and disposition evidence bind the source; sanitized artifact is present. |
-| `security-accuracy.yml` | Route, exact checkout assertion, accuracy job, and aggregate succeeded for `ACCEPTANCE_SHA`. The Gitleaks release asset must verify its recorded SHA-256 and emit its differential; Checkov must run from its recorded OCI digest and emit its differential. |
-| `dynamic-security-benchmark.yml` | Route, exact checkout assertion, accuracy job, and aggregate succeeded for `ACCEPTANCE_SHA`. |
-| `performance-benchmark.yml` | Route, exact checkout assertion, measurement job, aggregate, and SHA-named performance artifact succeeded. Its JSONL results contain passing test events and nonzero sample measurements for every target class alongside the committed baselines. |
-| `sast-benchmark.yml` | Route, exact checkout assertions, all scorecard jobs, aggregate, and SHA-named artifacts succeeded. OWASP, Juliet, and Securibench JSONL results contain passing scorecard test events; pinned Semgrep evidence is present; the Python and sanitizer adversarial gates passed; post-triage precision improved over an accepted committed baseline without losing a true case or breaching a recall floor. |
-| `owned-default-readiness.yml` | Route and readiness job succeeded; download `readiness.txt` and verify `revision: ACCEPTANCE_SHA` and `evidence_current: true`. |
+| `engine-accuracy.yml` | Hosted owned scanner measured the embedded corpus and the three pinned same-SBOM targets, passed committed owned floors and oracle checks, and published a sanitized result. The Grype/Trivy/OSV comparison in the accepted 24-observation capture is labelled frozen; this workflow does not claim a fresh vendor run. |
+| `reachability-benchmark.yml` | Hosted lifecycle, Go owned/competitor scorecards, and Python owned/competitor scorecards succeeded. OSV output is a pinned frozen capture; Semgrep CE runs from the pinned image without network access. Corpus, Unknown accounting, recall, and no-false-suppression gates passed. |
+| `security-accuracy.yml` | Hosted accuracy and Gitleaks/Checkov differentials passed with pinned tools and nonempty artifacts. |
+| `dynamic-security-benchmark.yml` | Hosted DAST and CSPM accuracy jobs, ratchets, and aggregate passed. |
+| `performance-benchmark.yml` | Hosted measurements produced nonzero samples for each required target class and passed committed performance ratchets. |
+| `sast-benchmark.yml` | OWASP, Juliet, Securibench, Semgrep comparison, Python/sanitizer adversarial tests, and fresh deterministic proof-triage precision gate passed. The job generates both historical and current scorecards from pinned scanner and corpus revisions; it does not replay the earlier model-assisted capture. |
+| `owned-default-readiness.yml` | Readiness result names `ACCEPTANCE_SHA`, reports current SCA evidence, comparator-relative parity, unsupported gaps, and graph parity. It cannot infer currency from a skipped audit or source-code marker. |
 
-An ordinary green readiness aggregate does not establish currency: it may be for a revision that is not the
-designated candidate. The final acceptance artifact for `ACCEPTANCE_SHA` must explicitly contain
-`evidence_current: true`.
+For each row, inspect the required job results as well as the aggregate. Preserve the sanitized machine-readable artifact and its digest before retention expires. A benchmark that cannot access a required pinned asset must fail and report why.
 
-The SAST route runs three propose-stage corpora, the pinned Semgrep comparison, and Python and sanitizer
-adversarial regressions. Its green aggregate does not satisfy the SAST row until an accepted post-triage
-improvement gate has been added and passed on `ACCEPTANCE_SHA`. The committed pre-tuning diagnostic control
-is not an accepted baseline.
+The earlier Securibench model transcripts and verifier artifacts are local audit material under `.git/taurus/sast-post-triage-artifacts`; they are not CI inputs or committed benchmark files. The required SAST gate uses `syntactic-proof-v1` on fresh blinded proposals and requires the candidate's measured precision improvement over the pinned historical scanner, while retaining every oracle-positive finding.
 
-Record each downloaded artifact's GitHub artifact ID, SHA-256 digest, retention period, and storage location.
-Record Fable's independent implementation-coverage review against the parent EPIC and every child issue,
-including its findings and disposition. Record a separate independent review of the collected evidence. The
-evidence reviewer must not be the
-person who prepared the trusted input or accepted the benchmark claim. For engine accuracy, retain the
-independent pull-request review and a maintainer disposition from a different identity that bind the exact
-implementation commit; for reachability, retain the controller's corresponding review and disposition
-evidence. An accepted capture must be promoted before removing the owned-default evidence-debt marker.
+## Optional formal capture
 
-## Retire the temporary required checks
+`engine-accuracy-audit.yml` and `reachability-audit.yml` are manual lanes for baseline refresh or formal evidence. They may require protected infrastructure, exact authorization, controller material, or independent review under their own contracts. Their `accepted` result is distinct from the hosted regression result. Do not require an audit run for ordinary PR/main regression, and do not treat an audit run with skipped work as a pass.
 
-Do this only after the independent reviewer accepts the complete evidence set and records any finding as
-fixed, deferred with an owner and date, or rejected with a reason. Capture the repository branch-protection
-and ruleset configuration before changing it. Remove only required checks belonging to these workflows:
-`Aggregate benchmark status` for engine and reachability, `Aggregate security accuracy status`, `Aggregate
-dynamic benchmark status`, `Aggregate performance status`, `Aggregate readiness status`, and `Aggregate SAST
-benchmark status` (or the prior SAST scorecard checks if branch protection still lists them). Preserve all
-unrelated protection and deployment checks.
-
-Disable the seven workflows through the GitHub Actions API with the `disabled_manually` state. Record the
-API response for each workflow, then read each workflow back and verify its state is exactly
-`disabled_manually`. Observe the next natural push to `main` and confirm it produces no run for any disabled
-workflow; do not create a verification commit that changes `ACCEPTANCE_SHA`. Keep the
-acceptance evidence and configuration before/after snapshots with the final EPIC disposition.
-
-## Re-enable
-
-Re-enable a retired workflow only through a reviewed repository configuration change or an authorized
-maintainer action. Restore its required-check entry only after a fresh exact-SHA run has passed with the
-evidence required above.
+Keep the seven required regression workflows and their branch-protection checks enabled after EPIC closure. Record the final `main` run URLs and dispositions in #1034, then close #1043 before closing the parent issue.

@@ -256,24 +256,21 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 	if postTriage.Env["BASELINE_SOURCE_SHA"] != "ad58a4fbd0cb2096f37c2e37e79b7444ec81d230" {
 		t.Fatal("post-triage baseline must pin the historical scanner revision")
 	}
-	for key, want := range map[string]string{
-		"MODEL_ATTESTATION_SHA256":          "f23d47981610b45fabc0750197e44a348ed5000b9afbd0efadbe0f618392e9f9",
-		"BASELINE_MODEL_TRANSCRIPT_SHA256":  "e30ee06ecfe69a6b47dc9899b194ec0dc69aa59af3461150d78dc07cea337041",
-		"CANDIDATE_MODEL_TRANSCRIPT_SHA256": "c451d5cc4b4d3b18b839ab8b5847bd6c015ea8ffe9d8521539527338c0594fcc",
-	} {
-		if postTriage.Env[key] != want {
-			t.Fatalf("post-triage evidence pin %s changed without reviewed evidence", key)
-		}
+	if postTriage.If != "" {
+		t.Fatal("post-triage proof measurement must run for fork pull requests too")
 	}
-	modelEvidence := requireStep(t, postTriage, func(step benchmarkStep) bool {
-		return step.Name == "Pin retained model observation and exchanges"
+	baselineProof := requireStep(t, postTriage, func(step benchmarkStep) bool {
+		return step.Name == "Measure historical post-triage baseline"
 	})
-	for _, want := range []string{
-		`${MODEL_ATTESTATION_SHA256}  ${EVIDENCE_DIR}/model-runtime-attestation.json`,
-		`${BASELINE_MODEL_TRANSCRIPT_SHA256}  ${EVIDENCE_DIR}/baseline-model-transcript.json`,
-		`${CANDIDATE_MODEL_TRANSCRIPT_SHA256}  ${EVIDENCE_DIR}/candidate-model-transcript.json`,
-	} {
-		requireActiveLine(t, modelEvidence.Run, want)
+	candidateProof := requireStep(t, postTriage, func(step benchmarkStep) bool {
+		return step.Name == "Verify current post-triage improvement"
+	})
+	for _, step := range []benchmarkStep{baselineProof, candidateProof} {
+		requireActiveLine(t, step.Run, "python3 scripts/sast_proof_verifier.py")
+		requireActiveLine(t, step.Run, "scripts/require-go-tests.sh TestSecuribenchScorecard")
+	}
+	if !strings.Contains(candidateProof.Run, "SYNAPSE_POST_TRIAGE_BASELINE_SHA256") || !strings.Contains(candidateProof.Run, "candidate-scorecard.jsonl") {
+		t.Fatal("post-triage candidate must compare against the measured historical baseline")
 	}
 	candidateCheckout := requireStep(t, postTriage, func(step benchmarkStep) bool {
 		return step.Name == "Checkout synapse candidate"
@@ -371,8 +368,8 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 	for _, result := range []string{"ROUTE_RESULT", "OWASP_RESULT", "SECURIBENCH_RESULT", "JULIET_RESULT", "ADVERSARIAL_RESULT"} {
 		requireActiveLine(t, step.Run, fmt.Sprintf(`test "$%s" = success`, result))
 	}
-	if !strings.Contains(step.Run, `test "$POST_TRIAGE_RESULT" = success`) || !strings.Contains(step.Run, `test "$POST_TRIAGE_RESULT" = skipped`) {
-		t.Fatal("SAST aggregate must require post-triage replay for same-repository changes and skip it for forks")
+	if !strings.Contains(step.Run, `test "$POST_TRIAGE_RESULT" = success`) || !strings.Contains(step.Run, `test -n "$POST_TRIAGE_ARTIFACT"`) {
+		t.Fatal("SAST aggregate must require measured post-triage proof and its artifact on every route")
 	}
 }
 

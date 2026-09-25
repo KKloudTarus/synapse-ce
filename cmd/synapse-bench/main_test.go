@@ -58,6 +58,20 @@ func TestRunAccuracyMode(t *testing.T) {
 	}
 }
 
+func TestRunSCAOwnedModeMeasuresEmbeddedCorpus(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run("sca-owned", "", "", "", strings.NewReader(""), &stdout); err != nil {
+		t.Fatal(err)
+	}
+	var report benchmark.AccuracyReport
+	if err := jsonUnmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.SchemaVersion != benchmark.AccuracyReportSchemaVersion || report.Cases == 0 || len(report.Groups) == 0 {
+		t.Fatalf("owned SCA regression did not measure the embedded corpus: %+v", report)
+	}
+}
+
 // TestRunReachabilityMode gives owned-engine and OSS-adapter runners the same deterministic reduction
 // contract: a scorecard is accepted only when every checked-in corpus case has an explicit label.
 func TestRunReachabilityMode(t *testing.T) {

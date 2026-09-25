@@ -237,22 +237,15 @@ jobs:
           retention-days: 90
 
   securibench-post-triage:
-    name: Securibench post-triage acceptance
+    name: Fresh Securibench proof triage
     needs: route
-    # Fork PRs cannot receive the private packet salt. Never use pull_request_target for untrusted code.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       SECURIBENCH_REF: 6a5a72488ea830d99f9464fc1f0562c4f864214b
       BASELINE_SOURCE_SHA: ad58a4fbd0cb2096f37c2e37e79b7444ec81d230
-      BASELINE_REPORT_SHA256: 2abf30c9ad35c2a07797df8a65eb230c3c0b18c79b697496845f3fcd30455b0d
-      VERIFIER_CONFIG_SHA256: 87a7645554f1ab9ee50be8dbd733daa4057cb5a9e7ff7bcb7dbf729306de6ecc
-      MODEL_CONFIG_SHA256: 8489b4ac40af63cda41b6f321c00dd65b9c5c0ed3ee652bf91267ccb59cb03ca
-      MODEL_ATTESTATION_SHA256: f23d47981610b45fabc0750197e44a348ed5000b9afbd0efadbe0f618392e9f9
-      BASELINE_MODEL_TRANSCRIPT_SHA256: e30ee06ecfe69a6b47dc9899b194ec0dc69aa59af3461150d78dc07cea337041
-      CANDIDATE_MODEL_TRANSCRIPT_SHA256: c451d5cc4b4d3b18b839ab8b5847bd6c015ea8ffe9d8521539527338c0594fcc
-      EVIDENCE_DIR: docs/benchmarks/securibench-post-triage
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Checkout synapse candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -262,7 +255,6 @@ jobs:
       - name: Assert exact candidate revision
         shell: bash
         run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
-
       - name: Checkout historical scanner source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -272,8 +264,7 @@ jobs:
       - name: Assert exact historical revision
         shell: bash
         run: test "$(git -C baseline-source rev-parse HEAD)" = "$BASELINE_SOURCE_SHA"
-
-      - name: Checkout Securibench Micro
+      - name: Checkout pinned Securibench Micro
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: too4words/securibench-micro
@@ -283,122 +274,78 @@ jobs:
       - name: Assert exact corpus revision
         shell: bash
         run: test "$(git -C securibench rev-parse HEAD)" = "$SECURIBENCH_REF"
-
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build historical and candidate Java scanners
+      - name: Build historical and current Java scanners
         shell: bash
         run: |
           set -euo pipefail
-          (cd baseline-source && CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/synapse-ast-baseline" ./cmd/synapse-ast)
-          CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/synapse-ast-candidate" ./cmd/synapse-ast
-
-      - name: Test offline verifier and proof policy
+          (cd baseline-source && CGO_ENABLED=1 go build -o "$RUNNER_TEMP/synapse-ast-baseline" ./cmd/synapse-ast)
+          CGO_ENABLED=1 go build -o "$RUNNER_TEMP/synapse-ast-candidate" ./cmd/synapse-ast
+          mkdir -p "$RUNNER_TEMP/post-triage-scorecards"
+          echo "SYNAPSE_POST_TRIAGE_PACKET_SALT=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - name: Test deterministic verifier and safety policy
+        shell: bash
         run: |
-          python3 scripts/test_sast_runtime_attestation.py
-          python3 scripts/test_sast_offline_verifier.py
+          set -euo pipefail
           python3 scripts/test_sast_proof_gate.py
+          python3 scripts/test_sast_proof_verifier.py
+          python3 scripts/test_sast_offline_verifier.py
           python3 scripts/test_sast_composite_verifier.py
-
-      - name: Pin one verifier configuration for both scans
-        shell: bash
-        run: |
-          set -euo pipefail
-          for run in baseline candidate; do
-            echo "${VERIFIER_CONFIG_SHA256}  ${EVIDENCE_DIR}/${run}-verdict.config.json" | sha256sum -c -
-            echo "${MODEL_CONFIG_SHA256}  ${EVIDENCE_DIR}/${run}-model-verdict.config.json" | sha256sum -c -
-          done
-          cmp "${EVIDENCE_DIR}/baseline-verdict.config.json" \
-            "${EVIDENCE_DIR}/candidate-verdict.config.json"
-          cmp "${EVIDENCE_DIR}/baseline-model-verdict.config.json" \
-            "${EVIDENCE_DIR}/candidate-model-verdict.config.json"
-
-      - name: Pin retained model observation and exchanges
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "${MODEL_ATTESTATION_SHA256}  ${EVIDENCE_DIR}/model-runtime-attestation.json" | sha256sum -c -
-          echo "${BASELINE_MODEL_TRANSCRIPT_SHA256}  ${EVIDENCE_DIR}/baseline-model-transcript.json" | sha256sum -c -
-          echo "${CANDIDATE_MODEL_TRANSCRIPT_SHA256}  ${EVIDENCE_DIR}/candidate-model-transcript.json" | sha256sum -c -
-
-      - name: Replay and pin historical post-triage baseline
+      - name: Measure historical post-triage baseline
         shell: bash
         env:
-          SYNAPSE_POST_TRIAGE_PACKET_SALT: ${{ secrets.SYNAPSE_POST_TRIAGE_PACKET_SALT }}
           SYNAPSE_SECURIBENCH_DIR: ${{ github.workspace }}/securibench
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast-baseline
           SYNAPSE_POST_TRIAGE_PROPOSALS: ${{ runner.temp }}/baseline-packet.json
-          SYNAPSE_POST_TRIAGE_VERDICTS: docs/benchmarks/securibench-post-triage/baseline-verdict.json
-          SYNAPSE_POST_TRIAGE_RESPONSE: docs/benchmarks/securibench-post-triage/baseline-response.json
-          SYNAPSE_POST_TRIAGE_BASELINE_REPORT: ${{ runner.temp }}/baseline-report.json
+          SYNAPSE_POST_TRIAGE_RESPONSE: ${{ runner.temp }}/baseline-proof-response.json
+          SYNAPSE_POST_TRIAGE_VERDICTS: ${{ runner.temp }}/baseline-proof-verdict.json
+          SYNAPSE_POST_TRIAGE_BASELINE_REPORT: ${{ runner.temp }}/post-triage-scorecards/baseline-report.json
         run: |
           set -euo pipefail
-          [[ "$SYNAPSE_POST_TRIAGE_PACKET_SALT" =~ ^[0-9a-fA-F]{64}$ ]]
-          CGO_ENABLED=1 go test -count=1 -v ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$' \
-            | tee "${RUNNER_TEMP}/baseline-replay.log"
-          echo "${BASELINE_REPORT_SHA256}  ${EVIDENCE_DIR}/baseline-report.json" | sha256sum -c -
-          cmp "${RUNNER_TEMP}/baseline-report.json" "${EVIDENCE_DIR}/baseline-report.json"
-          python3 scripts/sast_offline_verifier.py --mode verify \
-            --packet "${RUNNER_TEMP}/baseline-packet.json" \
-            --response "${EVIDENCE_DIR}/baseline-model-response.json" \
-            --verdict "${EVIDENCE_DIR}/baseline-model-verdict.json" \
-            --raw-transcript "${EVIDENCE_DIR}/baseline-model-transcript.json"
-          python3 scripts/sast_composite_verifier.py --mode verify \
-            --packet "${RUNNER_TEMP}/baseline-packet.json" \
-            --model-response "${EVIDENCE_DIR}/baseline-model-response.json" \
-            --model-verdict "${EVIDENCE_DIR}/baseline-model-verdict.json" \
-            --model-transcript "${EVIDENCE_DIR}/baseline-model-transcript.json" \
-            --response "${EVIDENCE_DIR}/baseline-response.json" \
-            --verdict "${EVIDENCE_DIR}/baseline-verdict.json" \
-            --audit "${EVIDENCE_DIR}/baseline-audit.json"
-
-      - name: Verify candidate post-triage improvement
+          unset SYNAPSE_POST_TRIAGE_VERDICTS SYNAPSE_POST_TRIAGE_RESPONSE SYNAPSE_POST_TRIAGE_BASELINE_REPORT
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard "$RUNNER_TEMP/baseline-proposal.jsonl" pass ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$'
+          python3 scripts/sast_proof_verifier.py --packet "$SYNAPSE_POST_TRIAGE_PROPOSALS" --response "$RUNNER_TEMP/baseline-proof-response.json" --verdict "$RUNNER_TEMP/baseline-proof-verdict.json" > "$RUNNER_TEMP/post-triage-scorecards/baseline-proof-summary.txt"
+          export SYNAPSE_POST_TRIAGE_VERDICTS="$RUNNER_TEMP/baseline-proof-verdict.json"
+          export SYNAPSE_POST_TRIAGE_RESPONSE="$RUNNER_TEMP/baseline-proof-response.json"
+          export SYNAPSE_POST_TRIAGE_BASELINE_REPORT="$RUNNER_TEMP/post-triage-scorecards/baseline-report.json"
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard "$RUNNER_TEMP/baseline-scorecard.jsonl" pass ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$'
+          test -s "$SYNAPSE_POST_TRIAGE_BASELINE_REPORT"
+      - name: Verify current post-triage improvement
         shell: bash
         env:
-          SYNAPSE_POST_TRIAGE_PACKET_SALT: ${{ secrets.SYNAPSE_POST_TRIAGE_PACKET_SALT }}
           SYNAPSE_SECURIBENCH_DIR: ${{ github.workspace }}/securibench
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast-candidate
           SYNAPSE_POST_TRIAGE_PROPOSALS: ${{ runner.temp }}/candidate-packet.json
-          SYNAPSE_POST_TRIAGE_VERDICTS: docs/benchmarks/securibench-post-triage/candidate-verdict.json
-          SYNAPSE_POST_TRIAGE_RESPONSE: docs/benchmarks/securibench-post-triage/candidate-response.json
-          SYNAPSE_POST_TRIAGE_BASELINE: docs/benchmarks/securibench-post-triage/baseline-report.json
-          SYNAPSE_POST_TRIAGE_BASELINE_ENGINE: synapse-owned + offline-local-llama-cpp+syntactic-proof-v1
-          SYNAPSE_POST_TRIAGE_BASELINE_SHA256: ${{ env.BASELINE_REPORT_SHA256 }}
+          SYNAPSE_POST_TRIAGE_RESPONSE: ${{ runner.temp }}/candidate-proof-response.json
+          SYNAPSE_POST_TRIAGE_VERDICTS: ${{ runner.temp }}/candidate-proof-verdict.json
+          SYNAPSE_POST_TRIAGE_BASELINE: ${{ runner.temp }}/post-triage-scorecards/baseline-report.json
+          SYNAPSE_POST_TRIAGE_BASELINE_ENGINE: synapse-owned + syntactic-proof-v1
+          SYNAPSE_POST_TRIAGE_CANDIDATE_REPORT: ${{ runner.temp }}/post-triage-scorecards/candidate-report.json
         run: |
           set -euo pipefail
-          [[ "$SYNAPSE_POST_TRIAGE_PACKET_SALT" =~ ^[0-9a-fA-F]{64}$ ]]
-          CGO_ENABLED=1 go test -count=1 -v ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$' \
-            | tee "${RUNNER_TEMP}/candidate-replay.log"
-          python3 scripts/sast_offline_verifier.py --mode verify \
-            --packet "${RUNNER_TEMP}/candidate-packet.json" \
-            --response "${EVIDENCE_DIR}/candidate-model-response.json" \
-            --verdict "${EVIDENCE_DIR}/candidate-model-verdict.json" \
-            --raw-transcript "${EVIDENCE_DIR}/candidate-model-transcript.json"
-          python3 scripts/sast_composite_verifier.py --mode verify \
-            --packet "${RUNNER_TEMP}/candidate-packet.json" \
-            --model-response "${EVIDENCE_DIR}/candidate-model-response.json" \
-            --model-verdict "${EVIDENCE_DIR}/candidate-model-verdict.json" \
-            --model-transcript "${EVIDENCE_DIR}/candidate-model-transcript.json" \
-            --response "${EVIDENCE_DIR}/candidate-response.json" \
-            --verdict "${EVIDENCE_DIR}/candidate-verdict.json" \
-            --audit "${EVIDENCE_DIR}/candidate-audit.json"
-
-      - name: Upload replay evidence
-        if: always()
+          unset SYNAPSE_POST_TRIAGE_VERDICTS SYNAPSE_POST_TRIAGE_RESPONSE SYNAPSE_POST_TRIAGE_BASELINE SYNAPSE_POST_TRIAGE_BASELINE_ENGINE
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard "$RUNNER_TEMP/candidate-proposal.jsonl" pass ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$'
+          python3 scripts/sast_proof_verifier.py --packet "$SYNAPSE_POST_TRIAGE_PROPOSALS" --response "$RUNNER_TEMP/candidate-proof-response.json" --verdict "$RUNNER_TEMP/candidate-proof-verdict.json" > "$RUNNER_TEMP/post-triage-scorecards/candidate-proof-summary.txt"
+          export SYNAPSE_POST_TRIAGE_VERDICTS="$RUNNER_TEMP/candidate-proof-verdict.json"
+          export SYNAPSE_POST_TRIAGE_RESPONSE="$RUNNER_TEMP/candidate-proof-response.json"
+          export SYNAPSE_POST_TRIAGE_BASELINE="$RUNNER_TEMP/post-triage-scorecards/baseline-report.json"
+          export SYNAPSE_POST_TRIAGE_BASELINE_ENGINE="synapse-owned + syntactic-proof-v1"
+          export SYNAPSE_POST_TRIAGE_BASELINE_SHA256="$(sha256sum "$SYNAPSE_POST_TRIAGE_BASELINE" | cut -d ' ' -f 1)"
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard "$RUNNER_TEMP/candidate-scorecard.jsonl" pass ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$'
+          test -s "$SYNAPSE_POST_TRIAGE_CANDIDATE_REPORT"
+      - name: Upload sanitized post-triage scorecards
+        id: upload
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: securibench-post-triage-${{ needs.route.outputs.source_sha }}
-          path: |
-            ${{ runner.temp }}/baseline-packet.json
-            ${{ runner.temp }}/candidate-packet.json
-            ${{ runner.temp }}/baseline-report.json
-            ${{ runner.temp }}/baseline-replay.log
-            ${{ runner.temp }}/candidate-replay.log
-          if-no-files-found: warn
-          retention-days: 90
+          path: ${{ runner.temp }}/post-triage-scorecards
+          if-no-files-found: error
+          retention-days: 14
 
   juliet-scorecard:
     name: Juliet Java scorecard
@@ -540,22 +487,17 @@ jobs:
           OWASP_RESULT: ${{ needs.owasp-scorecard.result }}
           SECURIBENCH_RESULT: ${{ needs.securibench-scorecard.result }}
           POST_TRIAGE_RESULT: ${{ needs.securibench-post-triage.result }}
+          POST_TRIAGE_ARTIFACT: ${{ needs.securibench-post-triage.outputs.artifact }}
           JULIET_RESULT: ${{ needs.juliet-scorecard.result }}
           ADVERSARIAL_RESULT: ${{ needs.adversarial-regressions.result }}
           SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-          REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           test "$ROUTE_RESULT" = success
           test "$OWASP_RESULT" = success
           test "$SECURIBENCH_RESULT" = success
-          if [ "$EVENT_NAME" = pull_request ] && [ "$HEAD_REPOSITORY" != "$REPOSITORY" ]; then
-            test "$POST_TRIAGE_RESULT" = skipped
-          else
-            test "$POST_TRIAGE_RESULT" = success
-          fi
+          test "$POST_TRIAGE_RESULT" = success
+          test -n "$POST_TRIAGE_ARTIFACT"
           test "$JULIET_RESULT" = success
           test "$ADVERSARIAL_RESULT" = success
           test "${#SOURCE_SHA}" -eq 40
