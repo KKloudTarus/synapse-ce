@@ -249,7 +249,7 @@ func readCurrentBindingReport(path string) (currentBindingReport, error) {
 	if err != nil {
 		return currentBindingReport{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	stat, err := file.Stat()
 	if err != nil {
 		return currentBindingReport{}, err
