@@ -1,7 +1,8 @@
 name: Owned default readiness
 
-# Hard gate for the owned-only default switch. Every run checks the current corpus against the accepted
-# comparison, owned recall parity, and coverage explicitness at the exact source revision.
+# This gate checks owned-default configuration and committed corpus policy at the
+# exact source revision. Aggregate SCA benchmark status is separately required by
+# branch protection for fresh same-input comparator measurements on that SHA.
 
 on:
   pull_request:
@@ -59,10 +60,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Comparator-relative accuracy and ratchet evidence
+      - name: Validate committed comparator-relative ratchet policy
         shell: bash
         run: bash scripts/require-go-tests.sh TestOwnedRecallParityOnCommittedRatchet "$RUNNER_TEMP/readiness-parity.jsonl" pass ./internal/usecase/scabench/...
-      - name: Accepted SCA evidence matches the committed corpus
+      - name: Historical SCA evidence matches the committed corpus
         shell: bash
         run: bash scripts/require-go-tests.sh TestCommittedCorpusEvidenceCurrency "$RUNNER_TEMP/readiness-currency.jsonl" pass ./internal/usecase/scabench/ -run '^TestCommittedCorpusEvidenceCurrency$'
       - name: Owned-only default operates without Syft or Grype
@@ -81,7 +82,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/owned-default-readiness"
           {
             echo "revision: ${{ needs.route.outputs.source_sha }}"
-            echo "evidence_current: true"
+            echo "configuration_current: true"
+            echo "fresh_matrix: required-by-Aggregate-SCA-benchmark-status"
           } > "$RUNNER_TEMP/owned-default-readiness/readiness.txt"
       - name: Upload readiness report
         id: upload
