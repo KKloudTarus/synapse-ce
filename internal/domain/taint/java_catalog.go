@@ -79,6 +79,11 @@ func DefaultJavaCatalog() JavaCatalog {
 			// ProcessBuilder cannot match. Every argument is the command / its parts.
 			javaSinkAll(javaRecv("exec"), TaintCommand, "CWE-78", "java-taint-command-exec"),
 			javaSinkAll(javaRawCtor("ProcessBuilder"), TaintCommand, "CWE-78", "java-taint-command-processbuilder"),
+			// ProcessBuilder can also be filled after construction: new ProcessBuilder() then pb.command(list)
+			// then pb.start(). The command itself arrives at .command(...), so the no-argument constructor
+			// above sees nothing. ".command" is specific enough to floor on a name: it is not a method the JDK
+			// or the common collection types declare.
+			javaSinkAll(javaRecv("command"), TaintCommand, "CWE-78", "java-taint-command-processbuilder-command"),
 
 			// Path traversal (CWE-22). Import-anchored constructors + Paths.get + Files; on-demand import is a
 			// documented gap. Every argument is checked because a path can be assembled from parts
@@ -144,6 +149,21 @@ func DefaultJavaCatalog() JavaCatalog {
 
 			// Code / script execution (CWE-94). ScriptEngine.eval is receiver-typed; ".eval" is specific.
 			javaSink(javaRecv("eval"), TaintCode, "CWE-94", "java-taint-code-scripteval", 0),
+
+			// Spring Expression Language injection (CWE-917). A SpelExpressionParser compiles its argument
+			// into an expression tree that can reach arbitrary types through T(), so untrusted text arriving
+			// at parseExpression or parseRaw is remote code execution, not a string operation. The class is
+			// TaintCode because SpEL injection is expression evaluation of attacker text; the CWE recorded on
+			// the finding is the specific 917. parseExpression and parseRaw are SpEL-specific names, but
+			// parseExpression is also used by a few unrelated expression libraries, so both are import-gated
+			// on org.springframework.expression, the tier used for every other generic-name sink here.
+			javaSink(JavaCallablePattern{
+				RawSuffixes:    []string{"parseExpression", "parseRaw"},
+				RequiresImport: []string{"org.springframework.expression"},
+			}, TaintCode, "CWE-917", "java-taint-spel-parse", 0),
+			// setValue/getValue on an Expression evaluate it against a root object. They are NOT modelled:
+			// by then the attacker text has already been compiled at parseExpression above, so modelling them
+			// would double-report the same flow, and both names are far too generic to carry a sink.
 
 			// LDAP injection (CWE-90). DirContext.search(name, filter, controls) is receiver-typed, and bare
 			// ".search" is far too generic to floor alone (List/String/Stack/... all have search-like names), so
