@@ -107,7 +107,11 @@ def capture(args):
     if pull.get("number") != args.pull_number or pull.get("head", {}).get("sha") != args.source_sha:
         fail("pull request does not currently point to the authorized source SHA")
     expected_body = canonical_body(args.source_sha, digests)
-    accepted_bodies = {expected_body, expected_body.replace("\n", "\r\n")}
+    accepted_bodies = {
+        body + ending
+        for body, newline in ((expected_body, "\n"), (expected_body.replace("\n", "\r\n"), "\r\n"))
+        for ending in ("", newline)
+    }
     expected_issue_url = "%s/repos/%s/issues/%s" % (args.api_base.rstrip("/"), args.repository, args.pull_number)
     candidates = []
     for comment in issue_comments(args.api_base, args.token, args.repository, args.pull_number):

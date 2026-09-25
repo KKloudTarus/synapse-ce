@@ -359,11 +359,17 @@ func TestMaintainerCommentBindsApprovalRejectsMissingConflictingAndDuplicateDige
 	if !maintainerCommentBindsApproval(strings.ReplaceAll(approval.Body, "\n", "\r\n"), implementationCommit, bindings) {
 		t.Fatal("unchanged Windows line endings were rejected")
 	}
+	for _, body := range []string{approval.Body + "\n", strings.ReplaceAll(approval.Body, "\n", "\r\n") + "\r\n"} {
+		if !maintainerCommentBindsApproval(body, implementationCommit, bindings) {
+			t.Fatal("one terminal line ending was rejected")
+		}
+	}
 	for name, body := range map[string]string{
 		"missing":     strings.Replace(approval.Body, "\ncatalog_digest: "+bindings.Catalog, "", 1),
 		"conflicting": strings.Replace(approval.Body, "catalog_digest: "+bindings.Catalog, "catalog_digest: sha256:"+strings.Repeat("5", 64), 1),
 		"duplicate":   approval.Body + "\ncatalog_digest: " + bindings.Catalog,
 		"extra":       approval.Body + "\nquoted example: decision: approved",
+		"blank-line":  approval.Body + "\n\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if maintainerCommentBindsApproval(body, implementationCommit, bindings) {
