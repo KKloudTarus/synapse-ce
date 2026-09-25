@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -165,7 +166,7 @@ func (r *Registry) Generate(ctx context.Context, targetRef string) (*sbom.SBOM, 
 		if rerr != nil {
 			return fmt.Errorf("read %s: %w", path, rerr)
 		}
-		pcomps, pdeps, perr := parser.Parse(ctx, ParseInput{Dir: filepath.Dir(path), Path: path, Content: content})
+		pcomps, pdeps, perr := parser.Parse(ctx, ParseInput{Dir: filepath.Dir(path), Path: path, Content: decodeManifestText(content)})
 		if perr != nil {
 			return fmt.Errorf("parse %s: %w", path, perr)
 		}
@@ -222,5 +223,42 @@ func readManifestFile(path string) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	return content, true
+	return decodeManifestText(content), true
+}
+
+// decodeManifestText normalises a manifest to UTF-8 before any parser sees it. A requirements.txt written
+// on Windows through a PowerShell redirect is UTF-16LE with a byte-order mark, and every parser here reads
+// bytes: the pinned versions are all there and none of them match, so the file yields nothing and the
+// repository reports an empty inventory. Found on a real service whose requirements.txt holds 122 pinned
+// Python dependencies, all of them invisible.
+//
+// Only a byte-order mark converts. A BOM is an explicit declaration by the writer, so acting on it cannot
+// misread a file; guessing an encoding from content could, and a manifest is exactly the wrong place to
+// guess. A UTF-8 BOM is stripped for the same reason: it would otherwise sit on the first key and break the
+// first entry alone, which is worse than failing outright because it looks like a parse that worked.
+func decodeManifestText(content []byte) []byte {
+	switch {
+	case len(content) >= 3 && content[0] == 0xEF && content[1] == 0xBB && content[2] == 0xBF:
+		return content[3:]
+	case len(content) >= 2 && content[0] == 0xFF && content[1] == 0xFE:
+		return utf16ToUTF8(content[2:], true)
+	case len(content) >= 2 && content[0] == 0xFE && content[1] == 0xFF:
+		return utf16ToUTF8(content[2:], false)
+	}
+	return content
+}
+
+// utf16ToUTF8 decodes UTF-16 code units, honouring surrogate pairs. An unpaired surrogate or a trailing odd
+// byte becomes U+FFFD rather than aborting: a manifest with one bad rune should still yield its other
+// entries, which is the same posture the parsers take toward a line they cannot read.
+func utf16ToUTF8(b []byte, little bool) []byte {
+	units := make([]uint16, 0, len(b)/2)
+	for i := 0; i+1 < len(b); i += 2 {
+		if little {
+			units = append(units, uint16(b[i])|uint16(b[i+1])<<8)
+		} else {
+			units = append(units, uint16(b[i])<<8|uint16(b[i+1]))
+		}
+	}
+	return []byte(string(utf16.Decode(units)))
 }
