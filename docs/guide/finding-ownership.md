@@ -159,5 +159,5 @@ policy and snapshot compilation are cached per job, dispatcher selection/deletio
 is batched, and no transaction contains the full dataset. These figures describe
 this development host and are a regression reference, not a capacity guarantee.
 
-See the [HTTP API contract](../ownership-api.md) for pagination, optimistic
+See the [HTTP API contract](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/ownership-api.md) for pagination, optimistic
 concurrency, idempotency and endpoint details.

@@ -40,7 +40,7 @@ When a required capability is missing, Synapse refuses rather than degrading sil
 ## Native worker and signed-egress boundary
 
 Production execution uses the private native EC2 tier selected in
-[ADR 0008](../adr/0008-native-ec2-execution-tier.md). `synapse-worker` is a non-root systemd service with an empty
+[ADR 0008](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0008-native-ec2-execution-tier.md). `synapse-worker` is a non-root systemd service with an empty
 capability set, `NoNewPrivileges`, delegated cgroup v2, strict executable integrity, bounded output, shared
 redaction, and an exact-runner startup check. API, web, and migration workloads remain on EKS. No execution
 component uses a privileged container, broad `SYS_ADMIN`, unrestricted sudo, an SSH daemon, or a public IP.

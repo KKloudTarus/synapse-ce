@@ -179,13 +179,13 @@ storage are private, externally operated dependencies rather than Helm-managed S
 
 Production untrusted-tool execution does **not** run in an EKS Pod. Set `execution.mode=externalNative`
 (the API becomes `dispatch-only` and no worker renders in-cluster) and run native non-root
-`synapse-worker` + root `synapse-egress-broker` services in dedicated private EC2 worker subnets. [ADR 0008](../adr/0008-native-ec2-execution-tier.md)
+`synapse-worker` + root `synapse-egress-broker` services in dedicated private EC2 worker subnets. [ADR 0008](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0008-native-ec2-execution-tier.md)
 supersedes only ADR 0005's worker-placement decision; ADR 0005 still governs the control plane and migration
 order.
 
 Set `SYNAPSE_DB_AUTO_MIGRATE=false`. The Helm pre-install/pre-upgrade migration Job uses the owner identity
 and must complete before API rollout. Back up PostgreSQL and the evidence object store as a quiesced pair and
-use forward-only schema migration as specified by [ADR 0007](../adr/0007-paired-backup-and-forward-only-upgrades.md).
+use forward-only schema migration as specified by [ADR 0007](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0007-paired-backup-and-forward-only-upgrades.md).
 
 ## Kubernetes control plane
 

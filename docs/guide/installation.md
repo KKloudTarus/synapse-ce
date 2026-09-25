@@ -56,7 +56,7 @@ sudo cp "$(go env GOPATH)/bin/"{subfinder,httpx,naabu} /usr/local/bin/
 home directory is mode `0750` on current Ubuntu. The sandbox drops into a user namespace before it
 binds anything, so it cannot traverse that path and the run fails with `bwrap: Can't find source
 path …: Permission denied`. `/usr/local/bin` is inside the curated root. See
-[troubleshooting](troubleshooting.md#a-recon-run-fails-with-ip-netns-attach--no-such-file-or-directory).
+[troubleshooting](troubleshooting.md#a-recon-run-fails-with-ip-netns-attach-no-such-file-or-directory).
 
 ## Install Synapse
 

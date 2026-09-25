@@ -12,7 +12,7 @@ are authored, and the authoritative sources each language draws on.
 Tracking epic: [Code Quality as a product](https://github.com/KKloudTarus/synapse-ce/issues/174) ·
 language rule-pack tracker: [#185](https://github.com/KKloudTarus/synapse-ce/issues/185).
 
-Published catalog coverage: [rules × language × Sonar-equivalent type matrix](../reference/rule-coverage-matrix.md).
+Published catalog coverage: [rules × language × Sonar-equivalent type matrix](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/reference/rule-coverage-matrix.md).
 
 ## Clean-room policy (non-negotiable)
 
