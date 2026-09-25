@@ -283,7 +283,7 @@ export function ScanDebugTimeline({
         <span onClick={(e) => e.stopPropagation()} className="inline-flex items-center">
           <Tooltip
             title="Pipeline Journey"
-            description="Language detection → SBOM (Syft) → Vulnerability/License scan → Finding correlation."
+            description="Language detection → SBOM → Vulnerability/License scan → Finding correlation."
             placement="top"
             delay={0}
             arrow

@@ -41,7 +41,10 @@ export function ComponentsTab({ scan }: { scan: ScanResult | null }) {
 
   if (!scan) return <ScanPrompt icon={Package} what="the component inventory" />
   if (scan.components.length === 0) {
-    return <EmptyState icon={Package} title="No packages" hint="Syft found no packages in this target." />
+    // Named the SBOM producer as Syft, which Synapse does not use: the owned parsers produce the
+    // inventory. An empty result also needs its likely cause, since "no packages" on an
+    // application with dependencies reads as a clean result when it is an unresolved one.
+    return <EmptyState icon={Package} title="No packages" hint="No components were resolved from this target. A manifest without a lockfile cannot be pinned unless manifest resolution is enabled." />
   }
 
   const query = search.trim().toLowerCase()
