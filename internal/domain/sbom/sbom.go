@@ -138,6 +138,11 @@ type Component struct {
 	// whose in-file identity was stripped, where pom.properties recovery cannot.
 	SHA1 string `json:",omitempty"`
 
+	// verifiedRPMOrigin is process-local evidence produced only after ospkg
+	// verifies a pinned RPM signing key. It must never be serialized or inferred
+	// from an imported PURL qualifier.
+	verifiedRPMOrigin string
+
 	// Checksums are the component artifact's integrity digests as recorded by the lockfile / producer
 	// (e.g. npm `integrity` sha512, a Cargo.lock sha256), giving tamper evidence per component. Kept
 	// alongside SHA1 (which is a single legacy hex form); empty when the source records none. Emitted as

@@ -112,7 +112,7 @@ func IdentityFromComponent(component Component) ComponentIdentity {
 		identity.Ecosystem = "Pub"
 		identity.Package = decodedName
 	case "deb", "apk", "rpm":
-		identity.Ecosystem = distroEcosystem(typ, purl)
+		identity.Ecosystem = distroEcosystem(typ, purl, component.verifiedRPMOrigin)
 		identity.Package = decodedName[strings.LastIndexByte(decodedName, '/')+1:]
 		if identity.Ecosystem == "" {
 			identity.Reason = "distro_release_missing_or_unsupported"
@@ -144,7 +144,7 @@ func ComponentFingerprint(identity ComponentIdentity, purl string) string {
 
 // distroEcosystem reads the distro qualifier from an OS-package PURL and maps it to the advisory ecosystem via
 // the shared DistroEcosystem, so this inventory identity and the scan-side matcher key a component identically.
-func distroEcosystem(typ, purl string) string {
+func distroEcosystem(typ, purl, verifiedOrigin string) string {
 	qualifiers := ""
 	if i := strings.IndexByte(purl, '?'); i >= 0 {
 		qualifiers = purl[i+1:]
@@ -153,7 +153,7 @@ func distroEcosystem(typ, purl string) string {
 	if err != nil {
 		return ""
 	}
-	return DistroEcosystem(typ, values.Get("distro"))
+	return DistroEcosystemWithOrigin(typ, values.Get("distro"), verifiedOrigin)
 }
 
 // DistroEcosystem maps an OS package's PURL type and its Syft "distro" qualifier (e.g. "rpm", "amzn-2") to the
@@ -162,10 +162,65 @@ func distroEcosystem(typ, purl string) string {
 // the scan-side matcher (osDistroEcosystem in the ownadvisory feed) call it, so the two can never drift. The
 // qualifier is lowercased first (Syft emits lowercase; a case-variant keys the same). An unmapped distro
 // (CentOS Stream / CentOS >=8, openSUSE Tumbleweed) or a malformed qualifier returns "" (cataloged for
-// inventory, never keyed to an advisory ecosystem, so never a false match). CentOS Linux 7 is the one
-// approximation: it keys to "Red Hat:7" (see the rpm branch).
+// inventory, never keyed to an advisory ecosystem, so never a false match). CentOS Linux 7 needs a separate
+// RHEL-base provenance assertion and therefore stays unmapped here.
 func DistroEcosystem(purlType, distro string) string {
+	return DistroEcosystemWithOrigin(purlType, distro, "")
+}
+
+// WithVerifiedRPMOrigin records scanner-local provenance after cryptographic
+// verification. It is intentionally not encoded in a PURL, so imported SBOM
+// content cannot assert an origin and unlock a distro approximation.
+func WithVerifiedRPMOrigin(component Component, origin string) Component {
+	component.verifiedRPMOrigin = strings.ToLower(strings.TrimSpace(origin))
+	return component
+}
+
+// VerifiedRPMOrigin is process-local evidence carried by a cataloged RPM. It is
+// never populated from serialized SBOM fields or a PURL qualifier.
+func VerifiedRPMOrigin(component Component) string {
+	return component.verifiedRPMOrigin
+}
+
+// TransferVerifiedRPMOrigin preserves the earlier producer's SBOM metadata when
+// the rootfs catalog later proves the same CentOS 7 package's origin. A mismatch
+// cannot promote the earlier component into the RHEL-derived advisory scope.
+func TransferVerifiedRPMOrigin(existing, cataloged Component) Component {
+	if existing.Name != cataloged.Name || existing.Version != cataloged.Version || existing.PURL != cataloged.PURL ||
+		cataloged.verifiedRPMOrigin != "rhel-base" ||
+		DistroEcosystemForComponent(cataloged) != "Red Hat:7" ||
+		distroEcosystem(purlTypeFromPURL(existing.PURL), existing.PURL, "rhel-base") != "Red Hat:7" {
+		return existing
+	}
+	existing.verifiedRPMOrigin = "rhel-base"
+	return existing
+}
+
+// DistroEcosystemForComponent derives the matching ecosystem while honoring
+// process-local provenance. Callers receiving an imported PURL get no origin.
+func DistroEcosystemForComponent(component Component) string {
+	return distroEcosystem(purlTypeFromPURL(component.PURL), component.PURL, component.verifiedRPMOrigin)
+}
+
+func purlTypeFromPURL(purl string) string {
+	if !strings.HasPrefix(purl, "pkg:") {
+		return ""
+	}
+	rest := strings.TrimPrefix(purl, "pkg:")
+	if i := strings.IndexByte(rest, '/'); i > 0 {
+		return strings.ToLower(rest[:i])
+	}
+	return ""
+}
+
+// DistroEcosystemWithOrigin applies the same mapping when the producer can also
+// prove package origin. CentOS Linux 7 is a RHEL-derived approximation only for
+// a base package carrying the exact rhel-base assertion. A distro label and an
+// RPM name/version alone are insufficient: third-party RPMs can collide with a
+// RHEL package identity. Any absent or different origin remains unsupported.
+func DistroEcosystemWithOrigin(purlType, distro, origin string) string {
 	distro = strings.ToLower(distro)
+	origin = strings.ToLower(strings.TrimSpace(origin))
 	if distro == "" {
 		return ""
 	}
@@ -256,15 +311,12 @@ func DistroEcosystem(purlType, distro string) string {
 		case "fedora":
 			return "Fedora:" + major
 		case "centos":
-			// CentOS Linux 7 is a downstream rebuild of RHEL 7 whose base packages carry RHEL-7 NEVRs, and there
-			// was never a "CentOS Stream 7" (Stream began at 8), so VERSION_ID=7 unambiguously means the RHEL 7
-			// rebuild: key it to "Red Hat:7" as a documented approximation (issue #1037). CentOS >=8 is ambiguous
-			// (CentOS Stream and the discontinued CentOS Linux 8 both carry ID=centos and VERSION_ID=8, and Stream
-			// runs ahead of RHEL so a RHEL fixed NEVR would false-match), so it stays unmapped. The rpmvercmp
-			// comparator orders CentOS's ".el7.centos" dist tag against RHEL's ".el7_N" natively, and EPEL/SIG/
-			// third-party RPMs are absent from RHEL advisories (EPEL keeps a namespace disjoint from RHEL), so
-			// they produce no finding rather than a false match.
-			if major == "7" {
+			// CentOS Linux 7 is a RHEL-derived approximation only for a base RPM
+			// whose producer supplied rhel-base provenance. A third-party package can
+			// reuse a RHEL name and NEVR, so the distro label alone cannot establish
+			// coverage. CentOS >=8 remains unsupported because Stream and the retired
+			// CentOS Linux 8 share this identity and Stream runs ahead of RHEL.
+			if major == "7" && origin == "rhel-base" {
 				return "Red Hat:7"
 			}
 		}

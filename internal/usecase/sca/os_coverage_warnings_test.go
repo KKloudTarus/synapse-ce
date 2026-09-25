@@ -3,10 +3,12 @@ package sca
 import (
 	"strings"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // TestOSCoverageWarnings pins the structured OS-package coverage warnings, in particular the CentOS Linux 7
-// coverage=approximate provenance added for #1037: an approximated distro is never silent, an unsupported
+// coverage=approximate provenance: an approximated distro is never silent, an unsupported
 // distro reads as coverage=unsupported (never clean, never aliased), and the two are distinct signals.
 func TestOSCoverageWarnings(t *testing.T) {
 	tests := []struct {
@@ -24,7 +26,7 @@ func TestOSCoverageWarnings(t *testing.T) {
 			pkgs:            12,
 			approximate:     "centos-7",
 			wantCount:       1,
-			wantContains:    []string{"coverage=approximate", "centos-7", "Red Hat 7", "EPEL/SIG/third-party"},
+			wantContains:    []string{"coverage=approximate", "centos-7", "Red Hat 7", "other RPMs"},
 			wantNotContains: []string{"coverage=unsupported"},
 		},
 		{
@@ -34,6 +36,15 @@ func TestOSCoverageWarnings(t *testing.T) {
 			wantCount:       1,
 			wantContains:    []string{"coverage=unsupported", "centos", "NOT matched"},
 			wantNotContains: []string{"coverage=approximate"},
+		},
+		{
+			name:            "mixed CentOS 7 reports both states",
+			pkgs:            2,
+			unsupported:     "centos",
+			approximate:     "centos-7",
+			wantCount:       2,
+			wantContains:    []string{"coverage=unsupported", "coverage=approximate", "other RPMs"},
+			wantNotContains: []string{"OS advisories were NOT matched"},
 		},
 		{
 			name:         "unresolved release",
@@ -48,8 +59,7 @@ func TestOSCoverageWarnings(t *testing.T) {
 			wantCount: 0,
 		},
 		{
-			// The cataloger keeps these mutually exclusive, but the helper must not merge or drop signals if
-			// they are ever set together: each is surfaced on its own line.
+			// The helper must not merge or drop signals when they coexist.
 			name:         "all signals set are each surfaced",
 			pkgs:         3,
 			unsupported:  "centos",
@@ -75,6 +85,30 @@ func TestOSCoverageWarnings(t *testing.T) {
 				if strings.Contains(joined, notWant) {
 					t.Errorf("warnings must not contain %q; got %v", notWant, got)
 				}
+			}
+		})
+	}
+}
+
+func TestApplyOSCoverageCompleteness(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		unsupported string
+		unresolved  bool
+		wantGap     bool
+	}{
+		{name: "resolved"},
+		{name: "bounded CentOS scope", unsupported: "centos", wantGap: true},
+		{name: "unresolved release", unresolved: true, wantGap: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			completeness := ports.Completeness{Confident: true, Warning: "existing warning"}
+			gap := applyOSCoverageCompleteness(&completeness, tc.unsupported, tc.unresolved)
+			if gap != tc.wantGap || completeness.Confident == tc.wantGap {
+				t.Fatalf("gap=%v completeness=%+v", gap, completeness)
+			}
+			if tc.wantGap && (!strings.Contains(completeness.Warning, "incomplete") || !strings.Contains(completeness.Warning, "existing warning")) {
+				t.Fatalf("coverage warning missing from %+v", completeness)
 			}
 		})
 	}

@@ -101,25 +101,26 @@ func TestScanMatchesDebianOSPackage(t *testing.T) {
 
 func TestOsDistroEcosystem(t *testing.T) {
 	cases := map[string]string{
-		"pkg:deb/debian/openssl@1.1?distro=debian-9":             "Debian:9",
-		"pkg:deb/debian/openssl@1.1?arch=amd64&distro=debian-10": "Debian:10",
-		"pkg:apk/alpine/musl@1.2.2-r0?distro=alpine-3.18.12":     "Alpine:v3.18",
-		"pkg:deb/ubuntu/bash@5?distro=ubuntu-22.04":              "Ubuntu:22.04", // mapped: owned OVAL feed keys "Ubuntu:<version>"
-		"pkg:deb/ubuntu/openssl@3?distro=ubuntu-20.04":           "Ubuntu:20.04",
-		"pkg:rpm/rocky/bash@4.4-1?distro=rocky-9.3":              "Rocky Linux:9", // mapped: OSV keys "<Name>:<major>"
-		"pkg:rpm/almalinux/openssl@3?distro=almalinux-8.9":       "AlmaLinux:8",
-		"pkg:rpm/ol/glibc@2?distro=ol-9":                         "Oracle Linux:9",
-		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                  "Red Hat:9", // mapped: owned RedHat CSAF feed keys "Red Hat:<major>"
-		"pkg:rpm/redhat/bash@4.4?distro=redhat-8.9":              "Red Hat:8", // the "redhat" distro id maps the same
-		"pkg:rpm/centos/bash@4.4?distro=centos-9":                "",          // CentOS Stream drifts ahead of RHEL → deliberately unmapped
-		"pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7":   "Red Hat:7", // CentOS Linux 7 is a RHEL 7 rebuild → approximated to "Red Hat:7" (#1037)
-		"pkg:rpm/centos/openssl@1.0.2k-19.el7.centos?distro=centos-7.9.2009": "Red Hat:7", // point release still keys the major 7
-		"pkg:rpm/centos/bash@4.4?distro=centos-8":                "",          // CentOS >=8 (Stream/Linux ambiguous) stays unmapped
-		"pkg:rpm/fedora/bash@5?distro=fedora-39":                 "Fedora:39", // mapped: owned Fedora updateinfo feed keys "Fedora:<major>"
-		"pkg:rpm/sles/libopenssl1_1@1.1.1w-1?distro=sles-15.6":   "SUSE:15.6", // mapped: owned SLE OVAL feed keys "SUSE:<major.minor>" per service pack
-		"pkg:rpm/sles/bash@4.4-1?distro=sles-15":                 "SUSE:15",   // SLE GA (no service pack) keys the bare major
-		"pkg:deb/debian/openssl@1.1":                             "",          // no distro qualifier
-		"pkg:npm/lodash@4.0.0":                                   "",          // not an OS package
+		"pkg:deb/debian/openssl@1.1?distro=debian-9":                                          "Debian:9",
+		"pkg:deb/debian/openssl@1.1?arch=amd64&distro=debian-10":                              "Debian:10",
+		"pkg:apk/alpine/musl@1.2.2-r0?distro=alpine-3.18.12":                                  "Alpine:v3.18",
+		"pkg:deb/ubuntu/bash@5?distro=ubuntu-22.04":                                           "Ubuntu:22.04", // mapped: owned OVAL feed keys "Ubuntu:<version>"
+		"pkg:deb/ubuntu/openssl@3?distro=ubuntu-20.04":                                        "Ubuntu:20.04",
+		"pkg:rpm/rocky/bash@4.4-1?distro=rocky-9.3":                                           "Rocky Linux:9", // mapped: OSV keys "<Name>:<major>"
+		"pkg:rpm/almalinux/openssl@3?distro=almalinux-8.9":                                    "AlmaLinux:8",
+		"pkg:rpm/ol/glibc@2?distro=ol-9":                                                      "Oracle Linux:9",
+		"pkg:rpm/redhat/bash@4.4?distro=rhel-9":                                               "Red Hat:9", // mapped: owned RedHat CSAF feed keys "Red Hat:<major>"
+		"pkg:rpm/redhat/bash@4.4?distro=redhat-8.9":                                           "Red Hat:8", // the "redhat" distro id maps the same
+		"pkg:rpm/centos/bash@4.4?distro=centos-9":                                             "",          // CentOS Stream drifts ahead of RHEL → deliberately unmapped
+		"pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7":                                "",          // no origin proof: a custom RPM could collide with RHEL
+		"pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7&origin=rhel-base":               "",          // a PURL qualifier is not provenance
+		"pkg:rpm/centos/openssl@1.0.2k-19.el7.centos?distro=centos-7.9.2009&origin=rhel-base": "",          // point release remains untrusted
+		"pkg:rpm/centos/bash@4.4?distro=centos-8":                                             "",          // CentOS >=8 (Stream/Linux ambiguous) stays unmapped
+		"pkg:rpm/fedora/bash@5?distro=fedora-39":                                              "Fedora:39", // mapped: owned Fedora updateinfo feed keys "Fedora:<major>"
+		"pkg:rpm/sles/libopenssl1_1@1.1.1w-1?distro=sles-15.6":                                "SUSE:15.6", // mapped: owned SLE OVAL feed keys "SUSE:<major.minor>" per service pack
+		"pkg:rpm/sles/bash@4.4-1?distro=sles-15":                                              "SUSE:15",   // SLE GA (no service pack) keys the bare major
+		"pkg:deb/debian/openssl@1.1":                                                          "",          // no distro qualifier
+		"pkg:npm/lodash@4.0.0":                                                                "",          // not an OS package
 	}
 	for purl, want := range cases {
 		if got := osDistroEcosystem(purl); got != want {
@@ -356,9 +357,9 @@ func TestDistroEcosystemLockstep(t *testing.T) {
 		// Unmapped families must agree on "" (cataloged for inventory, never keyed to an advisory ecosystem).
 		"pkg:rpm/centos/bash@5-1?distro=centos-9",
 		"pkg:rpm/centos/bash@5-1?distro=centos-8", // CentOS >=8 stays unmapped in both functions
-		// CentOS Linux 7 approximation must agree in both functions ("Red Hat:7").
-		"pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7",
-		"pkg:rpm/centos/openssl@1.0.2k-19.el7.centos?distro=centos-7.9.2009",
+		// CentOS Linux 7 approximation requires a RHEL-base provenance assertion.
+		"pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7&origin=rhel-base",
+		"pkg:rpm/centos/openssl@1.0.2k-19.el7.centos?distro=centos-7.9.2009&origin=rhel-base",
 		// Case-variant distro qualifiers must still agree (both functions lowercase the qualifier).
 		"pkg:rpm/amzn/bash@5-1?distro=AMZN-2",
 		"pkg:rpm/opensuse-leap/bash@5-1?distro=OpenSUSE-Leap-15.6",
@@ -394,5 +395,88 @@ func TestOsvEcosystemHexPackagistPub(t *testing.T) {
 		if got := osvEcosystem(purl); got != want {
 			t.Errorf("osvEcosystem(%q)=%q want %q", purl, got, want)
 		}
+	}
+}
+
+// TestScanMatchesHexPackagistPubRanges exercises the whole owned-source path for
+// the three ecosystems added for the advisory-parity work: PURL type -> OSV
+// ecosystem -> advisory-store lookup -> ecosystem comparator. Each case contains
+// an affected and fixed component, so a lookup or comparator regression cannot
+// turn into either a missed finding or a false finding after the boundary.
+func TestScanMatchesHexPackagistPubRanges(t *testing.T) {
+	tests := []struct {
+		name, purlType, ecosystem string
+	}{
+		{name: "Hex", purlType: "hex", ecosystem: "Hex"},
+		{name: "Packagist", purlType: "composer", ecosystem: "Packagist"},
+		{name: "Pub", purlType: "pub", ecosystem: "Pub"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const packageName = "fixture"
+			advisoryRecord := advisory.Advisory{
+				ID: "CVE-2026-1037",
+				Affected: []advisory.AffectedPackage{{
+					Ecosystem: test.ecosystem,
+					Package:   packageName,
+					Ranges: []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{
+						{Introduced: "1.0.0"}, {Fixed: "2.0.0"},
+					}}},
+					FixedVersion: "2.0.0",
+				}},
+			}
+			store := memStore{byKey: map[string][]advisory.Advisory{
+				test.ecosystem + "|" + packageName: {advisoryRecord},
+			}}
+			doc := &sbom.SBOM{Components: []sbom.Component{
+				{Name: packageName, Version: "1.5.0", PURL: "pkg:" + test.purlType + "/fixture@1.5.0"},
+				{Name: packageName, Version: "2.0.0", PURL: "pkg:" + test.purlType + "/fixture@2.0.0"},
+			}}
+			findings, err := New(store).Scan(context.Background(), doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(findings) != 1 {
+				t.Fatalf("findings = %+v, want only the affected component", findings)
+			}
+			if findings[0].Version != "1.5.0" || findings[0].Ecosystem != test.ecosystem || findings[0].FixedVersion != "2.0.0" {
+				t.Fatalf("finding = %+v, want %s affected component and fixed version", findings[0], test.ecosystem)
+			}
+		})
+	}
+}
+
+// TestScanCentOSLinux7UsesRHELProvenance keeps the CentOS exception narrow.
+// Only a RHEL-derived base package can use the approximation. A third-party
+// package with the same name and version, plus CentOS 8 and Stream 9, must not
+// receive the Red Hat advisory.
+func TestScanCentOSLinux7UsesRHELProvenance(t *testing.T) {
+	advisoryRecord := advisory.Advisory{
+		ID: "CVE-2026-1037",
+		Affected: []advisory.AffectedPackage{{
+			Ecosystem: "Red Hat:7", Package: "openssl",
+			Ranges: []advisory.Range{{Type: "ECOSYSTEM", Events: []advisory.Event{
+				{Introduced: "0:1.0.2k-1"}, {Fixed: "0:1.0.2k-20.el7"},
+			}}},
+		}},
+	}
+	store := memStore{byKey: map[string][]advisory.Advisory{
+		"Red Hat:7|openssl": {advisoryRecord},
+	}}
+	doc := &sbom.SBOM{Components: []sbom.Component{
+		sbom.WithVerifiedRPMOrigin(sbom.Component{Name: "openssl", Version: "1.0.2k-19.el7", PURL: "pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7"}, "rhel-base"),
+		{Name: "openssl", Version: "1.0.2k-19.el7", PURL: "pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7"},
+		{Name: "openssl", Version: "1.0.2k-19.el7", PURL: "pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-8"},
+		{Name: "openssl", Version: "1.0.2k-19.el7", PURL: "pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-9"},
+	}}
+	findings, err := New(store).Scan(context.Background(), doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v, want only the CentOS Linux 7 approximation", findings)
+	}
+	if findings[0].Ecosystem != "Red Hat:7" || findings[0].PackagePURL != doc.Components[0].PURL {
+		t.Fatalf("finding must retain RHEL-derived provenance for CentOS 7 only: %+v", findings[0])
 	}
 }

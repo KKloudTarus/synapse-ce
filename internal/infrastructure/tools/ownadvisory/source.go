@@ -139,7 +139,7 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 		if eco == "" {
 			// OS-package PURL (deb/apk/rpm): derive the release-versioned OSV ecosystem
 			// ("Debian:9", "Alpine:v3.18") from the distro qualifier (Epic B).
-			eco = osDistroEcosystem(c.PURL)
+			eco = sbom.DistroEcosystemForComponent(c)
 		}
 		// For rpm components, fold the PURL "epoch=" qualifier into the version and percent-decode it so it
 		// matches the feed's canonical EVR (the RedHat CSAF feed does the same). Decoding is idempotent for an

@@ -216,10 +216,10 @@ func TestCatalogDistroTagRoundTrips(t *testing.T) {
 
 // TestCatalogRPMDistroResolution locks which rpm-family os-release IDs mark DistroResolved, in lockstep with
 // rpmMatchableIDs and osDistroEcosystem: Amazon Linux resolves now that its updateinfo feed exists, Fedora
-// resolves (its updateinfo feed exists), CentOS Linux 7 resolves by RHEL-7 approximation (and is flagged
-// ApproximateDistro), while CentOS Stream / CentOS >=8 stay cataloged-but-unresolved and flagged
-// UnsupportedDistro. It reuses the real BerkeleyDB rpm fixture (the packages are inventory; only the
-// os-release drives the resolved flag).
+// resolves (its updateinfo feed exists). CentOS lacks repository-origin proof in
+// an rpmdb, so every CentOS release stays cataloged-but-unresolved and is flagged
+// UnsupportedDistro. It reuses the real BerkeleyDB rpm fixture (the packages are
+// inventory; only the os-release drives the resolved flag).
 func TestCatalogRPMDistroResolution(t *testing.T) {
 	cases := []struct {
 		id, ver         string
@@ -229,11 +229,11 @@ func TestCatalogRPMDistroResolution(t *testing.T) {
 	}{
 		{id: "amzn", ver: "2", resolved: true},
 		{id: "amzn", ver: "2023", resolved: true},
-		{id: "fedora", ver: "40", resolved: true},                                           // resolves now that the owned Fedora updateinfo feed exists (Fedora:40)
-		{id: "centos", ver: "7", resolved: true, wantApproximate: "centos-7"},               // CentOS Linux 7 → Red Hat:7 approximation (#1037)
-		{id: "centos", ver: "7.9.2009", resolved: true, wantApproximate: "centos-7.9.2009"}, // point release still keys major 7
-		{id: "centos", ver: "8", resolved: false, wantUnsupported: "centos"},                // CentOS >=8 ambiguous (Stream/Linux) → unsupported
-		{id: "centos", ver: "9", resolved: false, wantUnsupported: "centos"},                // CentOS Stream 9 → unsupported
+		{id: "fedora", ver: "40", resolved: true},                                   // resolves now that the owned Fedora updateinfo feed exists (Fedora:40)
+		{id: "centos", ver: "7", resolved: false, wantUnsupported: "centos"},        // no RHEL-base origin proof in the rpmdb
+		{id: "centos", ver: "7.9.2009", resolved: false, wantUnsupported: "centos"}, // point release also needs provenance
+		{id: "centos", ver: "8", resolved: false, wantUnsupported: "centos"},        // CentOS >=8 ambiguous (Stream/Linux) → unsupported
+		{id: "centos", ver: "9", resolved: false, wantUnsupported: "centos"},        // CentOS Stream 9 → unsupported
 	}
 	for _, tc := range cases {
 		t.Run(tc.id+"-"+tc.ver, func(t *testing.T) {
@@ -267,7 +267,7 @@ func TestCatalogRPMDistroResolution(t *testing.T) {
 // TestCatalogRPMResolvedImpliesEcosystem ties the cataloger's independent rpm resolve decision to
 // sbom.DistroEcosystem, the single source of truth the matcher keys on. TestDistroEcosystemLockstep cannot
 // catch this drift (it compares two functions that both delegate to DistroEcosystem), but the cataloger
-// reimplements the resolve decision (cataloger.go, incl. the centos-7 special case). The soundness invariant
+// reimplements the resolve decision. The soundness invariant
 // is one-directional: DistroResolved=true MUST imply DistroEcosystem returns a non-empty key, or the scan
 // reports coverage while the matcher silently keys to nothing (the zero-match the flag exists to prevent). The
 // reverse is allowed: the cataloger is deliberately stricter than DistroEcosystem for a bare-major SLE
@@ -295,10 +295,6 @@ func TestCatalogRPMResolvedImpliesEcosystem(t *testing.T) {
 			eco := sbom.DistroEcosystem("rpm", tc.id+"-"+tc.ver)
 			if res.DistroResolved && eco == "" {
 				t.Errorf("%s-%s: cataloger DistroResolved=true but sbom.DistroEcosystem is empty (drift → silent zero-match)", tc.id, tc.ver)
-			}
-			// The centos-7 approximation must both resolve AND key to a non-empty ecosystem.
-			if tc.id == "centos" && tc.ver[0] == '7' && (!res.DistroResolved || eco == "") {
-				t.Errorf("%s-%s: CentOS 7 must resolve with a non-empty ecosystem, got resolved=%v eco=%q", tc.id, tc.ver, res.DistroResolved, eco)
 			}
 		})
 	}

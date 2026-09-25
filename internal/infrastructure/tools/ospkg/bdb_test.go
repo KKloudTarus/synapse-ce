@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -627,7 +628,7 @@ func buildBDBAmplificationBomb(t *testing.T, npages, valuesPerPage int) []byte {
 }
 
 // TestParseBDBAmplificationBombTerminates locks the aggregate overflow-read budget: a crafted DB with many
-// value entries all referencing one self-looping overflow chain must terminate quickly and emit nothing,
+// value entries all referencing one self-looping overflow chain must terminate quickly and fail closed,
 // rather than doing O(pages^2) page reads (the DoS a broken chain would otherwise drive past the byte/package
 // budgets, since a failed extraction never reaches them).
 func TestParseBDBAmplificationBombTerminates(t *testing.T) {
@@ -644,8 +645,8 @@ func TestParseBDBAmplificationBombTerminates(t *testing.T) {
 	}()
 	select {
 	case r := <-ch:
-		if r.err != nil {
-			t.Errorf("unexpected error: %v", r.err)
+		if !errors.Is(r.err, errIncompleteRPMDB) {
+			t.Errorf("exhausted RPMDB budget must report incomplete inventory: %v", r.err)
 		}
 		if r.n != 0 {
 			t.Errorf("hostile amplification bomb yielded %d components, want 0", r.n)

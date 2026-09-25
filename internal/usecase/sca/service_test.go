@@ -78,6 +78,12 @@ type fakeAcquirer struct {
 	called  bool
 }
 
+type failedOSPackageCataloger struct{ err error }
+
+func (f failedOSPackageCataloger) Catalog(context.Context, string) (ports.OSPackageResult, error) {
+	return ports.OSPackageResult{}, f.err
+}
+
 type cancelingAcquirer struct{}
 
 func (cancelingAcquirer) Acquire(ctx context.Context, _ ports.AcquireRequest) (*ports.Workspace, error) {
@@ -2148,6 +2154,20 @@ func TestImageRootFSSecretAndMisconfigScan(t *testing.T) {
 	}
 	if len(sec2.roots) != 1 || len(mis2.roots) != 1 {
 		t.Errorf("a source scan must run each scanner once, secret=%v misconfig=%v", sec2.roots, mis2.roots)
+	}
+}
+
+func TestImageOSPackageCatalogFailureFailsScan(t *testing.T) {
+	rootfs := t.TempDir()
+	acquirer := &fakeAcquirer{dir: t.TempDir(), rootfs: rootfs}
+	svc := NewService(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, nil, nil, nil, nil, nil, nil, nil, ports.Provenance{}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0, acquirer, &fakeDetector{}, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
+	marker := errors.New("incomplete RPM database")
+	svc.SetOSPackageCataloger(failedOSPackageCataloger{err: marker})
+	if _, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}); !errors.Is(err, marker) {
+		t.Fatalf("OS-package inventory failure must fail the scan, got %v", err)
+	}
+	if acquirer.cleaned != 1 {
+		t.Fatalf("workspace cleanup count = %d, want 1", acquirer.cleaned)
 	}
 }
 

@@ -1,6 +1,9 @@
 package sbom
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIdentityFromComponentUsesAdvisoryKeys(t *testing.T) {
 	tests := []struct {
@@ -24,11 +27,15 @@ func TestIdentityFromComponentUsesAdvisoryKeys(t *testing.T) {
 		{"opensuse leap", "pkg:rpm/opensuse-leap/bash@5.1-1?arch=x86_64&distro=opensuse-leap-15.6", "5.1-1", "openSUSE:15.6", "bash"},
 		{"sle server sp", "pkg:rpm/sles/libopenssl1_1@1.1.1w-150600.3.9?arch=x86_64&distro=sles-15.6", "1.1.1w-150600.3.9", "SUSE:15.6", "libopenssl1_1"},
 		{"fedora", "pkg:rpm/fedora/curl@8.11.0-1.fc43?arch=x86_64&distro=fedora-43", "8.11.0-1.fc43", "Fedora:43", "curl"},
-		{"centos 7 approximation", "pkg:rpm/centos/openssl@1.0.2k-19.el7?arch=x86_64&distro=centos-7", "1.0.2k-19.el7", "Red Hat:7", "openssl"},
-		{"centos 7 point release", "pkg:rpm/centos/openssl@1.0.2k-19.el7.centos?distro=centos-7.9.2009", "1.0.2k-19.el7.centos", "Red Hat:7", "openssl"},
+		{"centos 7 rhel base", "pkg:rpm/centos/openssl@1.0.2k-19.el7?arch=x86_64&distro=centos-7&origin=rhel-base", "1.0.2k-19.el7", "Red Hat:7", "openssl"},
+		{"centos 7 rhel base point release", "pkg:rpm/centos/openssl@1.0.2k-19.el7.centos?distro=centos-7.9.2009&origin=rhel-base", "1.0.2k-19.el7.centos", "Red Hat:7", "openssl"},
 	}
 	for _, test := range tests {
-		identity := IdentityFromComponent(Component{PURL: test.purl, Version: test.version})
+		component := Component{PURL: test.purl, Version: test.version}
+		if strings.HasPrefix(test.name, "centos 7") {
+			component = WithVerifiedRPMOrigin(component, "rhel-base")
+		}
+		identity := IdentityFromComponent(component)
 		if identity.Status != IdentityResolved || identity.Ecosystem != test.ecosystem || identity.Package != test.packageName || identity.Fingerprint == "" {
 			t.Errorf("%s: identity=%+v", test.name, identity)
 		}
@@ -41,8 +48,10 @@ func TestIdentityFromComponentFailsClosed(t *testing.T) {
 		{PURL: "pkg:unknown/foo@1.0", Version: "1.0"},
 		{PURL: "pkg:maven/org/foo@1.0", Version: "2.0"},
 		{PURL: "pkg:deb/debian/openssl@1.0", Version: "1.0"},
-		{PURL: "pkg:rpm/centos/bash@5-1?distro=centos-8", Version: "5-1"}, // CentOS >=8 is ambiguous (Stream/Linux) → unresolved
-		{PURL: "pkg:rpm/centos/bash@5-1?distro=centos-9", Version: "5-1"}, // CentOS Stream 9 → unresolved
+		{PURL: "pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7", Version: "1.0.2k-19.el7"},                  // lacks required RHEL-base provenance
+		{PURL: "pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7&origin=rhel-base", Version: "1.0.2k-19.el7"}, // imported qualifier is an untrusted claim
+		{PURL: "pkg:rpm/centos/bash@5-1?distro=centos-8", Version: "5-1"},                                         // CentOS >=8 is ambiguous (Stream/Linux) → unresolved
+		{PURL: "pkg:rpm/centos/bash@5-1?distro=centos-9", Version: "5-1"},                                         // CentOS Stream 9 → unresolved
 	} {
 		identity := IdentityFromComponent(component)
 		if identity.Status == IdentityResolved || identity.Fingerprint != "" {
