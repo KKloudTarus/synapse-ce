@@ -105,8 +105,27 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # golang/go#81238: on go1.27.0 windows/amd64, exception recovery can write below a goroutine
+      # stack and corrupt the Go heap. It fires on part of the GitHub-hosted Windows pool and has
+      # taken five of the last twelve runs on main with it, always as a corrupted process rather
+      # than a failed assertion: an access violation at an unknown pc, "found pointer to free
+      # object", or a panic value that has been overwritten. A process whose heap is corrupt cannot
+      # report a trustworthy result either way, so that shape of failure is measured again. A
+      # failure with no crash signature is a real failure and stays red on the first run.
       - name: Test
-        run: go test -p 1 -count=1 ./...
+        shell: bash
+        run: |
+          set -o pipefail
+          first="$RUNNER_TEMP/go-test-1.log"
+          if go test -p 1 -count=1 ./... 2>&1 | tee "$first"; then
+            exit 0
+          fi
+          if ! grep -qE 'fatal error:|Exception 0x[0-9a-f]|unexpected fault address|panic called with nil argument' "$first"; then
+            echo "::error::the Windows suite failed without a runtime crash signature; not retried"
+            exit 1
+          fi
+          echo "::warning::runtime heap corruption (golang/go#81238); measuring the suite again"
+          go test -p 1 -count=1 ./... 2>&1 | tee "$RUNNER_TEMP/go-test-2.log"
 
   frontend:
     name: Frontend (web)
