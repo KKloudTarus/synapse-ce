@@ -1828,6 +1828,16 @@ type NPMResolver interface {
 	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
 }
 
+// NPMGraphResolver is the optional graph-aware capability of an NPMResolver, mirroring
+// GradleGraphResolver: it returns the resolved components AND the dependency EDGES. The pipeline needs
+// the edges to tell a direct dependency from a transitive one, to show the path from the project root to
+// a vulnerable package, and to compute a remediation plan. Without them every CVE in a lockfile-less npm
+// project is reported with no path and no direct/transitive classification. Separate from NPMResolver so
+// a components-only resolver still satisfies the base.
+type NPMGraphResolver interface {
+	ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error)
+}
+
 // ManifestResolver resolves a lockfile-less package manifest (composer.json / Gemfile / pyproject.toml,
 // ...) to a pinned component tree by running the ecosystem's own lock tool in a no-scripts, lock-only
 // mode over a throwaway copy. Ecosystem() labels it for tracing. Several may be registered; each is a
@@ -1836,6 +1846,13 @@ type NPMResolver interface {
 type ManifestResolver interface {
 	Ecosystem() string
 	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
+}
+
+// ManifestGraphResolver is the optional graph-aware capability of a ManifestResolver, mirroring
+// NPMGraphResolver: the generated lockfile carries the dependency edges, so a resolver that parses it
+// can return them and give a transitive CVE its path and its introducing direct dependencies.
+type ManifestGraphResolver interface {
+	ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error)
 }
 
 // SBOMEnrichment is what an SBOMEnricher contributed, for honest provenance.

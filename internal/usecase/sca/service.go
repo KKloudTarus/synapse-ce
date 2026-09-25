@@ -986,19 +986,25 @@ func mergeResolvedJVM(doc *sbom.SBOM, resolved []sbom.Component, completeScopes 
 	doc.Components = sbom.DedupeComponents(append(kept, resolved...))
 }
 
-// mergeResolvedJVMDeps replaces syft's pkg:maven dependency edges with the resolver's authoritative tree, so
-// PathToRoot / IsDirect / IntroducedBy run over the resolved graph rather than syft's (which for a pom-only
-// scan has no transitive edges at all). Edges whose parent is a pkg:maven node are the resolver's to own;
-// every other edge (a non-JVM ecosystem) is kept. No-op on an empty resolved edge set, so a components-only
-// resolver leaves the graph untouched.
-func mergeResolvedJVMDeps(doc *sbom.SBOM, resolved []sbom.Dependency) {
+// mergeResolvedDeps replaces the generator's dependency edges with a resolver's authoritative tree, so
+// PathToRoot / IsDirect / IntroducedBy / remediation.Solve run over the resolved graph rather than the
+// generator's (which for a manifest-only scan has no transitive edges at all). The resolver owns every
+// PURL type it emitted an edge for; edges of any other ecosystem are kept. No-op on an empty resolved
+// edge set, so a components-only resolver leaves the graph untouched.
+func mergeResolvedDeps(doc *sbom.SBOM, resolved []sbom.Dependency) {
 	if len(resolved) == 0 {
 		return
 	}
+	owned := make(map[string]struct{}, 2)
+	for _, d := range resolved {
+		if t := purlType(d.Ref); t != "" {
+			owned[t] = struct{}{}
+		}
+	}
 	kept := make([]sbom.Dependency, 0, len(doc.Dependencies))
 	for _, d := range doc.Dependencies {
-		if strings.HasPrefix(d.Ref, "pkg:maven/") {
-			continue // the resolver owns the JVM subgraph
+		if _, ok := owned[purlType(d.Ref)]; ok {
+			continue // the resolver owns this ecosystem's subgraph
 		}
 		kept = append(kept, d)
 	}
@@ -3324,7 +3330,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		// succeeded (alongside a non-nil error), and those must not be discarded.
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, true) // dependency:tree = all non-test scopes → complete
-			mergeResolvedJVMDeps(doc, resolvedDeps)    // fold the resolved edges over syft's maven subgraph
+			mergeResolvedDeps(doc, resolvedDeps)    // fold the resolved edges over syft's maven subgraph
 			mavenResolved = true
 		}
 		switch {
@@ -3356,7 +3362,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		before := countComponents(doc)
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, false) // runtimeClasspath only → keep syft's provided/compileOnly jars
-			mergeResolvedJVMDeps(doc, resolvedDeps)     // fold the resolved edges over syft's maven subgraph
+			mergeResolvedDeps(doc, resolvedDeps)     // fold the resolved edges over syft's maven subgraph
 			gradleResolved = true
 		}
 		switch {
@@ -3376,10 +3382,20 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	npmResolved := false
 	if s.npmResolver != nil {
 		step = trace.start(stageSBOM, "npm-resolve", "npm-resolver", "Resolve npm dependency tree", map[string]int{"components": countComponents(doc)})
-		resolvedComps, nrr := s.npmResolver.Resolve(ctx, ws.Dir)
+		// Prefer the graph-aware resolver, as the Gradle path does: the generated lockfile carries the
+		// edges, and without them every npm CVE here reports no path and no direct/transitive split.
+		var resolvedComps []sbom.Component
+		var resolvedDeps []sbom.Dependency
+		var nrr error
+		if gr, ok := s.npmResolver.(ports.NPMGraphResolver); ok {
+			resolvedComps, resolvedDeps, nrr = gr.ResolveGraph(ctx, ws.Dir)
+		} else {
+			resolvedComps, nrr = s.npmResolver.Resolve(ctx, ws.Dir)
+		}
 		before := countComponents(doc)
 		if len(resolvedComps) > 0 {
 			mergeResolvedNPM(doc, resolvedComps)
+			mergeResolvedDeps(doc, resolvedDeps)
 			npmResolved = true
 		}
 		switch {
@@ -3387,7 +3403,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			npmResolveErr = nrr
 			trace.fail(step, nrr)
 		case npmResolved:
-			trace.succeed(step, "npm dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps)})
+			trace.succeed(step, "npm dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps), "edges": len(resolvedDeps)})
 		default:
 			trace.succeed(step, "npm resolution skipped (no lockless package.json)", map[string]int{"components": countComponents(doc)})
 		}
@@ -3403,17 +3419,25 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 		eco := mr.Ecosystem()
 		step = trace.start(stageSBOM, "manifest-resolve", eco+"-resolver", "Resolve "+eco+" dependency tree", map[string]int{"components": countComponents(doc)})
-		resolvedComps, mrr := mr.Resolve(ctx, ws.Dir)
+		var resolvedComps []sbom.Component
+		var resolvedDeps []sbom.Dependency
+		var mrr error
+		if gr, ok := mr.(ports.ManifestGraphResolver); ok {
+			resolvedComps, resolvedDeps, mrr = gr.ResolveGraph(ctx, ws.Dir)
+		} else {
+			resolvedComps, mrr = mr.Resolve(ctx, ws.Dir)
+		}
 		before := countComponents(doc)
 		if len(resolvedComps) > 0 {
 			mergeResolvedManifest(doc, resolvedComps)
+			mergeResolvedDeps(doc, resolvedDeps)
 		}
 		switch {
 		case mrr != nil:
 			manifestResolveErrs = append(manifestResolveErrs, fmt.Sprintf("%s: %v", eco, mrr))
 			trace.fail(step, mrr)
 		case len(resolvedComps) > 0:
-			trace.succeed(step, eco+" dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps)})
+			trace.succeed(step, eco+" dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps), "edges": len(resolvedDeps)})
 		default:
 			trace.succeed(step, eco+" resolution skipped (no lockless manifest)", map[string]int{"components": countComponents(doc)})
 		}
