@@ -1,7 +1,7 @@
 {
   "schema_version": "synapse-sca-trusted-input-binding-spec-v1",
   "catalog_revision": "same-sbom-linux-20260922",
-  "catalog_digest": "sha256:986038636ed9b6202819515203f6e14f3cf8ee9d0a273ebd02eeed9e96913d25",
+  "catalog_digest": "sha256:2a900b7994d946acd0dbf9b90230cb56a1d21b54c5aae639172a1f625f953d0e",
   "bindings": [
     {
       "reference": "binary:grype:v0.115.0",

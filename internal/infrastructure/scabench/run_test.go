@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -83,6 +84,34 @@ func TestValidateStagedCycleOrderRejectsFalseComparisonAndBrokenReceipt(t *testi
 	run.RawBundles[0][0].RootDigest = sha256Digest([]byte("forged"))
 	if err := ValidateStagedCycleOrder(run, catalog, oracle); err == nil {
 		t.Fatal("broken raw bundle receipt was accepted")
+	}
+}
+
+func TestCaptureCellReturnsValidatedCanonicalObservation(t *testing.T) {
+	catalog, manifest := testFixture(t, bench.EngineGrype)
+	root := t.TempDir()
+	store, err := benchcycle.NewEvidenceStore(root, evidenceStoreLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{result: ports.ToolResult{Stdout: []byte(`{"descriptor":{"name":"grype","version":"1.2.3"},"matches":[{"vulnerability":{"id":"CVE-2024-10000"},"artifact":{"purl":"pkg:npm/a@1.0.0","version":"1.0.0"}},{"vulnerability":{"id":"CVE-2025-0001"},"artifact":{"purl":"pkg:npm/a@1.0.0","version":"1.0.0"}}]}`)}}
+	state := &runState{catalog: catalog, rawRunRoot: root}
+	address := benchcycle.AttemptAddress{CellKey: runCellKey(manifest.TargetID, manifest.Engine), Repetition: 1}
+	observation, identity, path, err := state.captureCell(context.Background(), address, manifest, func(RuntimeLimits) (ports.ToolRunner, error) {
+		return runner, nil
+	}, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validatedIdentity, validatedObservation, _, err := inspectBundleIdentityContext(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(identity, validatedIdentity) || !reflect.DeepEqual(observation, validatedObservation) {
+		t.Fatal("run observation or receipt differs from the validated persisted bundle")
+	}
+	if len(observation.Findings) != 2 || observation.Findings[0].AdvisoryID != "CVE-2025-0001" || observation.Findings[1].AdvisoryID != "CVE-2024-10000" {
+		t.Fatalf("run findings are not in the persisted canonical order: %+v", observation.Findings)
 	}
 }
 

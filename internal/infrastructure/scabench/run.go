@@ -1024,14 +1024,14 @@ func (state *runState) captureCell(ctx context.Context, address benchcycle.Attem
 	if err := ctx.Err(); err != nil {
 		return bench.Observation{}, BundleIdentity{}, "", err
 	}
-	identity, err := BundleIdentityFromPathContext(ctx, path)
+	identity, observation, _, err := inspectBundleIdentityContext(ctx, path)
 	if err != nil {
 		return bench.Observation{}, BundleIdentity{}, "", fmt.Errorf("identify written capture bundle: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return bench.Observation{}, BundleIdentity{}, "", err
 	}
-	return captured.Observation(), identity, path, nil
+	return observation, identity, path, nil
 }
 
 func (state *runState) newEvidenceStore() (*benchcycle.EvidenceStore, error) {
