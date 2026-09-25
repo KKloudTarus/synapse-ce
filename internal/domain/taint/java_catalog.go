@@ -101,6 +101,35 @@ func DefaultJavaCatalog() JavaCatalog {
 			javaSink(javaRecv("executeQuery", "executeUpdate", "executeLargeUpdate", "addBatch",
 				"prepareStatement", "prepareCall"), TaintSQL, "CWE-89", "java-taint-sql-statement", 0),
 
+			// Spring JdbcTemplate (CWE-89). The same receiver-typed floor as the JDBC Statement above: a
+			// JdbcTemplate is a runtime value and is usually reached through a field or helper
+			// (helpers.DatabaseHelper.JDBCtemplate.queryForObject(sql)), so the calling file carries no
+			// import to anchor on. The queryFor* family is named specifically enough to floor on the name:
+			// no common JDK or collection type declares a queryForObject/queryForList/queryForMap. Arg 0 is
+			// the SQL in every overload of every one of them.
+			javaSink(javaRecv("queryForObject", "queryForList", "queryForMap", "queryForRowSet",
+				"queryForStream", "queryForInt", "queryForLong"),
+				TaintSQL, "CWE-89", "java-taint-sql-jdbctemplate-queryfor", 0),
+			// batchUpdate(String... sql) takes the statements themselves as varargs, so every argument is SQL.
+			javaSinkAll(javaRecv("batchUpdate"), TaintSQL, "CWE-89", "java-taint-sql-jdbctemplate-batchupdate"),
+			// jdbcTemplate.query(sql, ...) and .update(sql, ...) are the two most used JdbcTemplate methods in
+			// real Spring code, but bare "query"/"update" are far too generic to floor alone (every repository,
+			// builder and DAO in a codebase has an update). They are IMPORT-GATED on org.springframework.jdbc,
+			// the same tier the javax.naming .search sink uses: they fire only in a file that actually imports
+			// the JdbcTemplate package. Arg 0 is the SQL.
+			javaSink(JavaCallablePattern{
+				RawSuffixes:    []string{"query", "update"},
+				RequiresImport: []string{"org.springframework.jdbc"},
+			}, TaintSQL, "CWE-89", "java-taint-sql-jdbctemplate-query", 0),
+
+			// JPA / Hibernate (CWE-89). EntityManager.createQuery/createNativeQuery and
+			// Session.createQuery/createSQLQuery are receiver-typed, and the names are specific enough to
+			// floor on. Arg 0 is the JPQL or native SQL string. A parameterised query built with
+			// setParameter is a propose-stage false positive here, which is why the verdict is verified
+			// rather than published, exactly as for PreparedStatement above.
+			javaSink(javaRecv("createQuery", "createNativeQuery", "createSQLQuery",
+				"createStoredProcedureQuery"), TaintSQL, "CWE-89", "java-taint-sql-jpa-createquery", 0),
+
 			// SSRF (CWE-918). new URL/URI(spec) is import-anchored; RestTemplate request methods are
 			// receiver-typed (SSRF-specific names; bare "execute" excluded to avoid the SQL/exec collision).
 			javaSink(javaCtor("java.net.URL", "java.net.URI"), TaintSSRF, "CWE-918", "java-taint-ssrf-url", 0),
