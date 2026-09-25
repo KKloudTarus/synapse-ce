@@ -1322,6 +1322,12 @@ func main() {
 		// scope-derived egress policy.
 		reconService.SetSandboxEnforcement(egresspolicy.Compile)
 	}
+	// The run lease is the liveness signal both stale sweepers read, so it is wired whenever
+	// Postgres provides one. The queue branches below only decide who executes a run.
+	if reconRunLock != nil {
+		reconService.SetRunLock(reconRunLock)
+		scaService.SetRunLock(reconRunLock)
+	}
 	var scaWorker *worker.Worker
 	if toolExecution == config.ToolExecutionDispatchOnly {
 		if reconQueue == nil {
@@ -1330,8 +1336,6 @@ func main() {
 		}
 		reconService.SetQueue(reconQueue)
 		scaService.SetQueue(reconQueue)
-		reconService.SetRunLock(reconRunLock)
-		scaService.SetRunLock(reconRunLock)
 		log.Info("all untrusted tool execution deferred to synapse-worker")
 	} else if cfg.ReconViaWorker {
 		// Backward-compatible development posture: recon is durable while offline SCA
@@ -1339,8 +1343,6 @@ func main() {
 		if reconQueue != nil {
 			reconService.SetQueue(reconQueue)
 			scaService.SetQueue(reconQueue)
-			reconService.SetRunLock(reconRunLock)
-			scaService.SetRunLock(reconRunLock)
 			scaWorker = worker.New(reconQueue, map[string]worker.Handler{
 				scauc.ScanJobKind: scaJobHandler{svc: scaService},
 			}, worker.Config{Visibility: cfg.ScanTimeout + time.Minute, MaxAttempts: 3}, log)
@@ -3525,8 +3527,15 @@ func main() {
 
 	if scaWorker != nil {
 		go func() { _ = scaWorker.Run(ctx) }() // in-process SCA worker; drains on shutdown
-		// Stale-scan sweeper: reclaim scan jobs a crash left `running` with no live
-		// owner (stranded without a dead-letter event). Lease-as-liveness, parity with recon.
+	}
+	// Stale-scan sweeper: reclaim scan jobs a crash left `running` with no live owner
+	// (stranded without a dead-letter event). Lease-as-liveness, parity with recon.
+	//
+	// It runs on every Postgres deployment, not only the ones that wire a worker. One
+	// stranded row blocks the engagement permanently: scan_jobs_one_running_per_engagement
+	// rejects the next scan with a conflict, and the API is the only process that runs
+	// when synapse-worker is not deployed.
+	if reconRunLock != nil {
 		go func() {
 			staleFor := cfg.ScanTimeout + 5*time.Minute
 			t := time.NewTicker(5 * time.Minute)
@@ -3536,6 +3545,25 @@ func main() {
 					log.Warn("sca stale-scan sweep failed", "err", err)
 				} else if n > 0 {
 					log.Info("sca stale-scan sweeper reclaimed stranded scans", "count", n)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
+			}
+		}()
+		// Same reclaim for recon: without it a run the API was executing when it restarted
+		// stays `running` in the dashboard forever.
+		go func() {
+			staleFor := cfg.ReconTimeout + 5*time.Minute
+			t := time.NewTicker(5 * time.Minute)
+			defer t.Stop()
+			for {
+				if n, err := reconService.SweepStaleRuns(ctx, staleFor); err != nil && ctx.Err() == nil {
+					log.Warn("recon stale-run sweep failed", "err", err)
+				} else if n > 0 {
+					log.Info("recon stale-run sweeper reclaimed stranded runs", "count", n)
 				}
 				select {
 				case <-ctx.Done():

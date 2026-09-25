@@ -1772,6 +1772,82 @@ func TestSweepStaleScansReclaims(t *testing.T) {
 	}
 }
 
+// blockingAcquirer parks the pipeline inside Acquire until release is closed, so a test can
+// observe the inline scan goroutine while it is unambiguously live.
+type blockingAcquirer struct {
+	dir     string
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (a *blockingAcquirer) Acquire(_ context.Context, _ ports.AcquireRequest) (*ports.Workspace, error) {
+	a.once.Do(func() { close(a.entered) })
+	<-a.release
+	return &ports.Workspace{Dir: a.dir, Cleanup: func() error { return nil }}, nil
+}
+
+// TestStartScanInlineHoldsRunLease pins the liveness signal SweepStaleScans depends on. The
+// sweeper reads an acquirable lease as "no live owner", so an inline scan that never takes the
+// lease is indistinguishable from one a crash stranded. It must hold the lease while it runs
+// and release it when it finishes.
+func TestStartScanInlineHoldsRunLease(t *testing.T) {
+	acq := &blockingAcquirer{dir: "/tmp/ws", entered: make(chan struct{}), release: make(chan struct{})}
+	jobs := newFakeJobStore()
+	lock := memory.NewRunLock()
+	svc := newAsyncSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, acq, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
+	svc.SetRunLock(lock)
+
+	job, err := svc.StartScan(shared.WithTenant(context.Background(), shared.DefaultTenant), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("StartScan: %v", err)
+	}
+	select {
+	case <-acq.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("inline scan never reached the acquirer")
+	}
+
+	if _, ok, lerr := lock.TryLock(context.Background(), job.ID); lerr != nil || ok {
+		t.Fatalf("lease for a live inline scan must be held, got ok=%v err=%v", ok, lerr)
+	}
+
+	close(acq.release)
+	var final ports.ScanJob
+	for i := 0; i < 400; i++ {
+		j, jerr := svc.LatestJob(context.Background(), "e1")
+		if jerr != nil {
+			t.Fatalf("LatestJob: %v", jerr)
+		}
+		final = j
+		if j.Status != ports.ScanRunning {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if final.Status == ports.ScanRunning {
+		t.Fatalf("scan never finished, stage %q", final.Stage)
+	}
+	// The release runs after runScanJob returns, which is after the job reached a terminal
+	// status, so poll rather than assume the goroutine has already unwound.
+	var freed bool
+	for i := 0; i < 400; i++ {
+		release, ok, lerr := lock.TryLock(context.Background(), job.ID)
+		if lerr != nil {
+			t.Fatalf("TryLock: %v", lerr)
+		}
+		if ok {
+			release()
+			freed = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !freed {
+		t.Error("lease must be released once the inline scan finishes, or the next scan of this engagement cannot be swept")
+	}
+}
+
 func TestStartScanOutOfScopeStartsNoJob(t *testing.T) {
 	repo := &fakeEngRepo{eng: engagementWithScope(t, "allowed")}
 	acq := &fakeAcquirer{dir: "/tmp/ws"}

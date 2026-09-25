@@ -2185,6 +2185,21 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		if admission.Generation > 0 {
 			background = context.WithValue(background, inventoryAdmissionContextKey{}, admission)
 		}
+		// Hold the run lease for the inline execution too. SweepStaleScans reads the lease as
+		// its liveness signal, so without this it sees a free lease for a live inline scan and
+		// has only staleFor to tell the two apart. The lease expires when this process dies,
+		// which is what lets the sweeper reclaim the job.
+		if s.runLock != nil {
+			release, ok, lerr := s.runLock.TryLock(background, job.ID)
+			switch {
+			case lerr != nil:
+				s.logger().Warn("run lease unavailable for inline scan; the sweeper falls back to staleFor", "job_id", job.ID, "err", lerr)
+			case !ok:
+				s.logger().Warn("run lease for a new inline scan is already held; the sweeper falls back to staleFor", "job_id", job.ID)
+			default:
+				defer release()
+			}
+		}
 		_ = s.runScanJob(background, actor, engagementID, now, req, opts, job)
 	}()
 	return job, nil
