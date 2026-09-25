@@ -5563,6 +5563,15 @@ func langPackCatalog() []rule.Rule {
 			RemediationEffort:   15,
 		},
 		{
+			Key: rule.Key("go-plaintext-listener"), Name: "HTTP server started without TLS", Language: "Go", Type: rule.TypeSecurityHotspot, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityLow, Tags: []string{"sast", "go"}, CWE: []string{"CWE-319"}, OWASP: []string{"A02:2021"}, Detection: rule.DetectionPattern,
+			Description:         "http.ListenAndServe serves plaintext. It is correct behind a proxy that terminates TLS and wrong when the listener is reachable directly.",
+			Rationale:           "The call itself is not a defect: a service behind an ingress or load balancer that terminates TLS is supposed to speak plaintext on its own port, which is why this is a hotspot at low severity rather than a vulnerability. What it marks is a listener whose transport security depends entirely on something outside this file, so it is worth one look to confirm that something exists. A loopback bind is excluded, because 127.0.0.1 and localhost are not reachable from off the host and a debug or health listener there needs no TLS.\n\nSource: https://cwe.mitre.org/data/definitions/319.html",
+			Remediation:         "Confirm a proxy terminates TLS in front of this listener, or use http.ListenAndServeTLS. Bind to loopback if the listener is only for local health or debug traffic.",
+			CompliantExample:    "http.ListenAndServeTLS(\":443\", certFile, keyFile, nil)",
+			NoncompliantExample: "http.ListenAndServe(\":\"+cfg.HTTP.Port, nil)",
+			RemediationEffort:   15,
+		},
+		{
 			Key: rule.Key("go-tls-old-version"), Name: "Obsolete TLS minimum version", Language: "Go", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"sast", "go"}, CWE: []string{"CWE-327"}, OWASP: []string{}, Detection: rule.DetectionPattern,
 			Description:         "tls.Config pins MinVersion to SSL 3.0 / TLS 1.0 / TLS 1.1.",
 			Rationale:           "TLS below 1.2 has known weaknesses and is deprecated (CWE-327). Require TLS 1.2 or 1.3.\n\nSource: https://cwe.mitre.org/data/definitions/327.html",

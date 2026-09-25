@@ -894,3 +894,23 @@ func builtinRules() []rule {
 	}
 	return append(core, langPackRules()...)
 }
+
+// loopbackListenerRe matches an address literal that is only reachable from the host itself.
+var loopbackListenerRe = regexp.MustCompile(`["'` + "`" + `](?:127\.0\.0\.1|localhost|\[::1\])?:`)
+
+// skipLoopbackListener stands the plaintext-listener hotspot down for a loopback bind, and for a comment.
+// A debug or health listener on 127.0.0.1 is not reachable from off the host, so it needs no TLS and
+// reporting it would be the noise that makes a hotspot rule worth ignoring. An address built from a
+// variable is NOT skipped: it cannot be read here, and the hotspot exists to prompt that one look.
+func skipLoopbackListener(line string) bool {
+	if commentOnlyLine(line) {
+		return true
+	}
+	lower := strings.ToLower(line)
+	for _, host := range []string{`"127.0.0.1:`, `"localhost:`, "`127.0.0.1:", "`localhost:", `"[::1]:`} {
+		if strings.Contains(lower, host) {
+			return true
+		}
+	}
+	return false
+}

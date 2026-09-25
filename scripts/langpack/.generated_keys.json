@@ -633,6 +633,7 @@
 "go-math-rand-import",
 "go-panic-in-code",
 "go-path-traversal-servefile",
+"go-plaintext-listener",
 "go-rand-seed-deprecated",
 "go-rc4-cipher",
 "go-rsa-weak-keysize",
