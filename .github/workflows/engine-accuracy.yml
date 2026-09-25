@@ -62,8 +62,8 @@ jobs:
           SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          archive=internal/usecase/scabench/testdata/hosted-owned-inputs.tar.gz
-          manifest=internal/usecase/scabench/testdata/hosted-owned-inputs.manifest.json
+          archive=testdata/sca/hosted-owned-inputs.tar.gz
+          manifest=testdata/sca/hosted-owned-inputs.manifest.json
           python3 scripts/extract_sca_hosted_inputs.py --archive "$archive" --manifest "$manifest" --output "$RUNNER_TEMP/sca-hosted-inputs"
           go build -o "$RUNNER_TEMP/synapse-sca-bench" ./cmd/synapse-sca-bench
           mkdir -p "$RUNNER_TEMP/sca-hosted-wires"
