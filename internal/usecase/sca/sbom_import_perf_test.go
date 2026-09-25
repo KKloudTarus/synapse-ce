@@ -61,9 +61,12 @@ func TestSBOMImportPerfGate(t *testing.T) {
 	}
 
 	res := benchperf.Measure(cdxImportPerfWarmup, cdxImportPerfSamples, func() { parse() })
+	if err := benchperf.CheckPeakEvidence(res); err != nil {
+		t.Fatal(err)
+	}
 	env := benchperf.EnvironmentDigest()
-	t.Logf("cyclonedx-import perf: env=%s components=%d samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
-		env, cdxImportPerfComponents, cdxImportPerfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
+	t.Logf("cyclonedx-import perf: release=%s env=%s components=%d samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
+		benchperf.ReleaseDigest(), env, cdxImportPerfComponents, cdxImportPerfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
 
 	base, found, err := benchperf.Load(cdxImportPerfBaselinePath, cdxImportPerfSamples)
 	if err != nil {

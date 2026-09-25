@@ -3,6 +3,8 @@ package benchperf
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -53,9 +55,36 @@ func TestLoadValidatesSchemaAndSamples(t *testing.T) {
 		t.Error("zero alloc_bytes_median must error")
 	}
 	// Valid -> loads.
-	b, found, err := Load(write("ok.json", `{"schema":"`+Schema+`","samples":20,"alloc_bytes_median":5}`), 20)
+	b, found, err := Load(write("ok.json", `{"schema":"`+Schema+`","release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5","dataset_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","environment_digest":"env:fixture","go_version":"go1.27.0","warmup_samples":3,"samples":20,"alloc_bytes_median":5,"peak_memory_bytes":6}`), 20)
 	if !found || err != nil || b.AllocBytes != 5 {
 		t.Errorf("valid baseline: found=%v err=%v alloc=%d", found, err, b.AllocBytes)
+	}
+}
+
+func TestLoadRejectsNonReproducibleIdentityAndMissingPeak(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "baseline.json")
+	valid := `{"schema":"` + Schema + `","release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5","dataset_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","environment_digest":"env:fixture","go_version":"go1.27.0","warmup_samples":3,"samples":20,"alloc_bytes_median":5,"peak_memory_bytes":6}`
+	if err := os.WriteFile(path, []byte(valid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(path, 20); err != nil {
+		t.Fatalf("valid baseline rejected: %v", err)
+	}
+	for _, replacement := range []string{
+		`"release_digest":"(devel)"`,
+		`"peak_memory_bytes":0`,
+	} {
+		body := strings.Replace(valid, `"release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5"`, replacement, 1)
+		if replacement == `"peak_memory_bytes":0` {
+			body = strings.Replace(valid, `"peak_memory_bytes":6`, replacement, 1)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Load(path, 20); err == nil {
+			t.Errorf("Load accepted malformed baseline %s", replacement)
+		}
 	}
 }
 
@@ -71,6 +100,27 @@ func TestDatasetDigestStableAndCollisionResistant(t *testing.T) {
 	}
 	if DatasetDigest("x") == DatasetDigest("y") {
 		t.Error("different content must digest differently")
+	}
+}
+
+func TestParseLinuxPeakResidentBytes(t *testing.T) {
+	got, ok := parseLinuxPeakResidentBytes("Name:\ttest\nVmHWM:\t  123 kB\n")
+	if !ok || got != 123*1024 {
+		t.Fatalf("peak = %d, ok=%t", got, ok)
+	}
+	if _, ok := parseLinuxPeakResidentBytes("VmHWM:\tbroken kB\n"); ok {
+		t.Fatal("malformed VmHWM accepted")
+	}
+}
+
+func TestCheckPeakEvidence(t *testing.T) {
+	if err := CheckPeakEvidence(Result{PeakMemoryBytes: 4096}); err != nil {
+		t.Fatalf("nonzero peak evidence: %v", err)
+	}
+	if runtime.GOOS == "linux" {
+		if err := CheckPeakEvidence(Result{}); err == nil {
+			t.Fatal("Linux result without peak evidence must fail")
+		}
 	}
 }
 

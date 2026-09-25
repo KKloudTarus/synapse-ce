@@ -70,9 +70,12 @@ func TestOSPkgCatalogPerfGate(t *testing.T) {
 	}
 
 	res := benchperf.Measure(catalogPerfWarmup, catalogPerfSamples, func() { catalog() })
+	if err := benchperf.CheckPeakEvidence(res); err != nil {
+		t.Fatal(err)
+	}
 	env := benchperf.EnvironmentDigest()
-	t.Logf("ospkg-catalog perf: env=%s components=%d samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
-		env, catalogPerfDebPackages, catalogPerfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
+	t.Logf("ospkg-catalog perf: release=%s env=%s components=%d samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
+		benchperf.ReleaseDigest(), env, catalogPerfDebPackages, catalogPerfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
 
 	base, found, err := benchperf.Load(catalogPerfBaselinePath, catalogPerfSamples)
 	if err != nil {

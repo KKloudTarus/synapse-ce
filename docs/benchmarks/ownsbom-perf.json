@@ -1,14 +1,14 @@
 {
   "schema": "synapse-scan-perf-v2",
   "target": "ownsbom DefaultRegistry.Generate over a pinned source tree (800 npm + 400 go.mod deps, 1200 components)",
-  "release_digest": "(devel)",
+  "release_digest": "7105fde89b19b4b475e5e6c1b9ff776233a82779",
   "dataset_digest": "sha256:e77f2588e6bccbecbe1fb5a899a9deb050f1f44b2eec346c88c0dca269fefd8e",
-  "environment_digest": "env:c00294cee1639545",
+  "environment_digest": "env:6167211eaebf2628",
   "go_version": "go1.27.0",
   "warmup_samples": 3,
   "samples": 20,
-  "alloc_bytes_median": 2928760,
-  "peak_memory_bytes": 4521984,
-  "latency_p50_millis": 5,
-  "latency_p95_millis": 7
+  "alloc_bytes_median": 2926456,
+  "peak_memory_bytes": 13697024,
+  "latency_p50_millis": 3,
+  "latency_p95_millis": 4
 }

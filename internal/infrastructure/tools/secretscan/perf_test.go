@@ -59,9 +59,12 @@ func TestSecretScanPerfGate(t *testing.T) {
 	}
 
 	res := benchperf.Measure(perfWarmup, perfSamples, scan)
+	if err := benchperf.CheckPeakEvidence(res); err != nil {
+		t.Fatal(err)
+	}
 	env := benchperf.EnvironmentDigest()
-	t.Logf("secretscan perf: env=%s samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
-		env, perfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
+	t.Logf("secretscan perf: release=%s env=%s samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
+		benchperf.ReleaseDigest(), env, perfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
 
 	base, found, err := benchperf.Load(perfBaselinePath, perfSamples)
 	if err != nil {
