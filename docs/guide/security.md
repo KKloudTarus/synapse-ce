@@ -158,7 +158,7 @@ explicitly authorized to test.
 Anything Synapse executes **against a target** is additionally governed by the offensive governance
 policy in [`docs/redteam/offensive-policy.md`](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/redteam/offensive-policy.md).
 It is not published on this site because it is a repository artifact that CI verifies against the
-machine-readable register the code enforces — the two must change together, so the reviewed text lives
+machine-readable register the code enforces, the two must change together, so the reviewed text lives
 next to the register rather than in the docs build.
 
 What it settles, and what the three controls above do not:

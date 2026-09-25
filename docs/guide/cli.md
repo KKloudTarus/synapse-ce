@@ -125,10 +125,10 @@ synapse-cli scan <path|image-ref> [flags]
 | `--mode full\|vulnerabilities\|licenses` | What to scan. Default is full. |
 | `--fail-on critical\|high\|medium\|low\|info` | Exit non-zero if a finding at or above this severity is present. Default is high. |
 | `--image` | Treat the argument as a container image reference, pulled daemonlessly in-process, instead of a local path. |
-| `--offline` | Make the scan run without network egress. Detection uses the local sources only — the owned advisory store, plus Grype's pre-synced database when `SYNAPSE_DETECTION_SOURCES` names it (Grype is not in the default set) — and every network-capable resolver and enricher is switched off: npm, composer, poetry, Bundler, Maven, Gradle, the Maven Central JAR SHA-1 lookup, KEV/EPSS, online NVD CVSS backfill, deps.dev and PyPI license metadata, and AI false-positive triage. `SYNAPSE_OFFLINE=true` does the same. Recall drops in exchange; the run makes no outbound request. Target acquisition is the one step outside the flag: a registry `--image` reference or a remote git URL is still fetched, so on an air-gapped runner point the scan at a local path or a local OCI layout. |
+| `--offline` | Make the scan run without network egress. Detection uses the local sources only, the owned advisory store, plus Grype's pre-synced database when `SYNAPSE_DETECTION_SOURCES` names it (Grype is not in the default set), and every network-capable resolver and enricher is switched off: npm, composer, poetry, Bundler, Maven, Gradle, the Maven Central JAR SHA-1 lookup, KEV/EPSS, online NVD CVSS backfill, deps.dev and PyPI license metadata, and AI false-positive triage. `SYNAPSE_OFFLINE=true` does the same. Recall drops in exchange; the run makes no outbound request. Target acquisition is the one step outside the flag: a registry `--image` reference or a remote git URL is still fetched, so on an air-gapped runner point the scan at a local path or a local OCI layout. |
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
 | `--min-confidence low\|medium\|high\|very_high` | Drop findings below this confidence. Findings that carry no confidence (SAST/misconfig) are kept. Useful to cut lower-signal secret matches. |
-| `--base <ref>` | Scope line-anchored findings (SAST, secret, misconfig) to code changed vs this git ref (Clean-as-You-Code), so a repo with a backlog gates the pipeline only on what a change introduces. Dependency/license findings are not line-attributable and are kept — baseline those with `.synapseignore`. Local git repos only (not `--image`). |
+| `--base <ref>` | Scope line-anchored findings (SAST, secret, misconfig) to code changed vs this git ref (Clean-as-You-Code), so a repo with a backlog gates the pipeline only on what a change introduces. Dependency/license findings are not line-attributable and are kept, baseline those with `.synapseignore`. Local git repos only (not `--image`). |
 | `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
 | `--include-test` | Also gate on findings in test, fixture, and example paths. They are reported but gate-exempt by default. |
 | `--verify-secrets` | Actively confirm each detected credential is live by making one minimal read-only API call to its provider's public host (GitHub, GitLab, OpenAI), stamping the finding verified/unverified/unknown. Opt-in and off by default, and IGNORED under `--offline` (which forbids network egress). It sends the raw leaked secret over the network to the public provider host, so use it only against credentials you are authorized to test; a self-managed-instance token is still sent to the public host and yields `unknown`. The secret is never logged or written to output; a verified live credential is raised to `very_high` confidence, and an unverified or unknown verdict never removes a finding. |
@@ -145,7 +145,7 @@ Passing more than one exits `2` rather than silently honoring the last flag.
 ### Suppressing findings with `.synapseignore`
 
 Drop known/accepted findings by committing a `.synapseignore` file at the scan root. Every suppression
-**must** carry a `reason` and an `expires` date (`YYYY-MM-DD`) — after the expiry the suppression stops
+**must** carry a `reason` and an `expires` date (`YYYY-MM-DD`), after the expiry the suppression stops
 applying and the finding reappears (with a warning), so suppressions are periodically re-justified instead
 of rotting. Each entry matches by `rule` (a rule key or advisory id), by `path` (a file glob), or both:
 
@@ -228,19 +228,19 @@ Provider-independent overrides are `SYNAPSE_PR_NUMBER`, `SYNAPSE_PR_TARGET_BRANC
 ## False-positive gate
 
 A scan of a real repository surfaces findings in test files and deliberately-insecure fixtures. Synapse
-handles this in two layers, and neither ever deletes a finding — both are retain-and-mark (the finding
+handles this in two layers, and neither ever deletes a finding, both are retain-and-mark (the finding
 stays in the report, it is only held back from the `--fail-on` gate).
 
-1. **Deterministic test scope.** Findings in test/fixture/example/benchmark/docs paths — including the
+1. **Deterministic test scope.** Findings in test/fixture/example/benchmark/docs paths, including the
    `foo_test.go`, `test_foo.py`, `foo.test.ts`, `foo_spec.rb` file conventions where the test sits beside
-   its source — are classified as background scope and are exempt from the gate by default. Pass
+   its source, are classified as background scope and are exempt from the gate by default. Pass
    `--include-test` to gate on them too. This alone removes the bulk of the noise.
 
 2. **AI critique (opt-in).** Set `SYNAPSE_FP_TRIAGE_ENABLED=true` with an LLM endpoint configured
    (`SYNAPSE_LLM_BASE_URL`, `SYNAPSE_LLM_API_KEY`, and `SYNAPSE_FP_TRIAGE_MODEL` or `SYNAPSE_LLM_MODEL`).
    After the deterministic pass, the model adjudicates the remaining production-scope first-party source
-   findings (SAST/misconfig; secret findings are never sent to the LLM) and returns a typed verdict — `refuted` (suspected false positive),
-   `sound`, or `uncertain` — with a confidence. The proposer only advises: single-model output can never
+   findings (SAST/misconfig; secret findings are never sent to the LLM) and returns a typed verdict, `refuted` (suspected false positive),
+   `sound`, or `uncertain`, with a confidence. The proposer only advises: single-model output can never
    change the gate. Set `SYNAPSE_VERIFIER_MODEL` to a **different model family** to enable consensus. The
    verifier may use its own `SYNAPSE_VERIFIER_BASE_URL`, `SYNAPSE_VERIFIER_API_KEY`, and explicit
    `SYNAPSE_VERIFIER_PROVIDER`; the proposer provider is `SYNAPSE_FP_TRIAGE_PROVIDER` (defaulting to
@@ -513,7 +513,7 @@ synapse-scan:
       - synapse.sarif
 ```
 
-> **Note on native GitLab ingestion.** `artifacts:reports:sast` does **not** accept SARIF — it takes
+> **Note on native GitLab ingestion.** `artifacts:reports:sast` does **not** accept SARIF; it takes
 > GitLab's own report schema (a `gl-sast-report.json`), so pointing `reports: sast:` at a SARIF file
 > does nothing. GitLab ingests SARIF only through `artifacts:reports:sarif`, and that (with the
 > merge-request security widget and the Vulnerability Report) is a **GitLab Ultimate** feature. On
@@ -573,7 +573,7 @@ synapse-cli gate . --new-code-only --base origin/main --coverage coverage.info
 With `--new-code-only` the gate also measures `new_coverage` (line coverage over the added lines the
 report knows about) and `new_duplication` (the share of added lines inside a duplicated block). Each is
 written only when it could be measured: a condition on `coverage`, `new_coverage`, or `new_duplication`
-with no measurement fails as `no data` rather than being judged against a 0 nobody computed — so a
+with no measurement fails as `no data` rather than being judged against a 0 nobody computed, so a
 `new_duplication` condition without `--new-code-only`, or with a diff no report line matches, fails
 rather than silently passing.
 

@@ -75,7 +75,7 @@ because they are not the same capability:
 | Format | Ingest | Export |
 | --- | --- | --- |
 | CycloneDX | Yes, as a scan inventory | Yes |
-| SPDX | — | Yes |
+| SPDX |, | Yes |
 | SARIF | Yes, third-party reports | Yes |
 | OpenVEX | Yes, in-repo `.synapse.vex.json` | Yes |
 | CSAF | Yes, advisory feeds | No |

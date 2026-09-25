@@ -5,12 +5,12 @@
 
 ### Verify Everything. Trust Nothing.
 
-**A governed control plane for the whole security-assessment lifecycle — supply chain, code,
+**A governed control plane for the whole security-assessment lifecycle, supply chain, code,
 cloud, offensive, and runtime defense.**
 
 Turn a fragmented, manual security process into one controlled, auditable workflow: SCA, SAST,
 secret and IaC scanning, reachability, recon and governed exploitation, cloud posture, and a
-distributed blue-team agent fleet — all behind server-side scope enforcement, hardened tool
+distributed blue-team agent fleet, all behind server-side scope enforcement, hardened tool
 execution, tamper-evident evidence, and deterministic reports.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-6d5bff)](LICENSE)
@@ -88,7 +88,7 @@ anything intrusive.
 
 **Offensive**
 - **Recon** in a hardened sandbox, an **attack-path graph** over the asset inventory, **chained
-  exploitation with per-step proof**, and **adversary emulation** with expected-detection output —
+  exploitation with per-step proof**, and **adversary emulation** with expected-detection output,
   all gated by a written offensive policy and a kill switch.
 - **DAST**: authenticated crawling and a first-party check corpus with sessions from the credential vault.
 
@@ -154,7 +154,7 @@ The lasting difference is what sits around the finding:
 - Go 1.26 (pinned in `go.mod`), Node and pnpm (use pnpm, not npm or yarn).
 - No external scanner is required: the owned SBOM producer + owned advisory store are the default
   and run with no third-party tool. Syft (optional, broadest SBOM coverage / cross-check) and Grype
-  (optional, adds the offline database) are supported extras — `make tools` installs both, pinned and
+  (optional, adds the offline database) are supported extras, `make tools` installs both, pinned and
   checksum-verified, into `./bin`.
 - Docker is optional and is the easiest way to run the full stack.
 - The hardened sandbox and live recon need a Linux host. Without them the API still runs

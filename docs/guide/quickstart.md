@@ -76,8 +76,8 @@ Operational API routes require it; liveness `GET /healthz` and dependency readin
 intentionally public so probes work without a credential.
 
 A blank `SYNAPSE_DB_DSN` runs the development persistence: in-memory stores plus a few local files such as
-`data/audit.jsonl`. It is not durable and not suitable for real work, but it is not purely ephemeral
-either. Set a DSN for PostgreSQL. Development applies embedded migrations automatically. Production runs
+`data/audit.jsonl`. It survives a restart and nothing more: use it to try the product, and set a DSN
+for PostgreSQL before any work you need to keep. Development applies embedded migrations automatically. Production runs
 `synapse-migrate` with `SYNAPSE_DB_MIGRATION_DSN` before starting services with `SYNAPSE_DB_AUTO_MIGRATE=false`.
 
 ## 2. Log in

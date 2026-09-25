@@ -10,7 +10,7 @@ architecture rules and safety invariants below; expect a maintainer to ask for c
 they hold.
 
 - **Founder:** [@nghiadaulau](https://github.com/nghiadaulau) · **Co-founder:** [@nnatuan03](https://github.com/nnatuan03)
-- **Lead maintainer:** [@pho-veteran](https://github.com/pho-veteran) — primary reviewer/merger
+- **Lead maintainer:** [@pho-veteran](https://github.com/pho-veteran), primary reviewer/merger
 - Engineers, designer, and AI-engineer contributors are credited in the [README](README.md#team--contributors).
 
 ## Getting started
@@ -68,7 +68,7 @@ If a change would weaken any of these, please open an issue to discuss first.
 Migrations are numbered SQL files in `migrations/`, embedded and **auto-applied at startup via
 goose**. Two rules avoid the duplicate-version startup crash goose raises on collisions:
 
-- **Append a new numbered file — never edit or renumber a shipped migration.** Take the next
+- **Append a new numbered file, never edit or renumber a shipped migration.** Take the next
   free number after the current maximum on `main` at PR time; if two PRs race for the same number,
   the later one rebases and renumbers. goose keys on the leading integer, so a duplicate is a
   hard startup panic, not a git merge conflict (the filenames differ), and a clean merge will not

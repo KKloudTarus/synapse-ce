@@ -152,8 +152,8 @@ user namespaces bubblewrap needs**, so they cannot run the sandboxed execution t
 the ONE privileged component (NET_ADMIN + SYS_ADMIN); the worker and API stay capless.
 
 Single host (one EC2/VM): the offline product runs from `deploy/docker-compose.full.yml` (sandbox off, dev).
-The full product on one box runs the three native roles co-located — `synapse-api` (dispatch-only),
-`synapse-worker`, and root `synapse-egress-broker` — keeping the same privilege split; the API never holds
+The full product on one box runs the three native roles co-located, `synapse-api` (dispatch-only),
+`synapse-worker`, and root `synapse-egress-broker`, keeping the same privilege split; the API never holds
 NET_ADMIN/SYS_ADMIN.
 
 ### The runtime database role must be non-superuser
@@ -339,8 +339,8 @@ have no equivalent HTTP readiness endpoint, so they refuse startup until migrati
 
 ## Metrics and access logging
 
-`SYNAPSE_METRICS_ENABLED` (default `false`) exposes Prometheus metrics — HTTP RED
-(rate/errors/duration), aggregate durable-job queue depth, and SCA scan outcomes — on a
+`SYNAPSE_METRICS_ENABLED` (default `false`) exposes Prometheus metrics, HTTP RED
+(rate/errors/duration), aggregate durable-job queue depth, and SCA scan outcomes, on a
 SEPARATE listener bound by `SYNAPSE_METRICS_ADDR` (default `127.0.0.1:9090`). That
 listener is intentionally uninstrumented and never bearer-protected: keep it loopback-only
 or on a private scrape network, and never put it behind the same public path as the API.
@@ -349,7 +349,7 @@ policy.
 
 `SYNAPSE_ACCESS_LOG_ENABLED` (default `true`) emits one structured `http access` log event
 per request with only bounded, non-sensitive fields (method, matched route, status,
-latency, request id, and — once authenticated — the resolved principal id). It never logs
+latency, request id, and (once authenticated) the resolved principal id). It never logs
 raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or
 secrets.
 
