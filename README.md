@@ -65,8 +65,8 @@ anything intrusive.
 **Software supply chain**
 - **SBOM generation** across many ecosystems (npm, PyPI, Maven, Gradle, Go, Cargo, RubyGems,
   Composer, NuGet, Hex, Dart, pnpm, Poetry, yarn and more) with owned per-ecosystem lockfile parsers.
-- **Vulnerability detection** from a live advisory API and an offline database, cross-correlated
-  and de-duplicated, plus an owned advisory store that ingests OSV, GHSA, CSAF and OVAL for
+- **Vulnerability detection** from Synapse's own advisory store as the primary source, matched
+  alongside a live advisory API, cross-correlated and de-duplicated; the store ingests OSV, GHSA, CSAF and OVAL for
   detection independence.
 - **Risk-based prioritization** ordered by exploitability (CISA KEV, then EPSS, then CVSS), never
   by raw CVSS alone.
