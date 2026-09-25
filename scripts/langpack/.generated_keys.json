@@ -602,6 +602,7 @@
 "cs-zip-extract-slip",
 "cs-zip-slip-fullname",
 "dart-avoid-print",
+"dart-bad-certificate-callback",
 "dart-cleartext-http",
 "dart-empty-catch",
 "dart-hardcoded-secret",

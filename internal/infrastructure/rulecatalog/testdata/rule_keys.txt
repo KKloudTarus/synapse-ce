@@ -847,6 +847,7 @@ css:unknown-property
 css:vendor-prefix-no-standard
 css:zero-with-unit
 dart-avoid-print
+dart-bad-certificate-callback
 dart-cleartext-http
 dart-empty-catch
 dart-hardcoded-secret

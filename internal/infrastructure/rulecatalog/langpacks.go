@@ -5464,6 +5464,15 @@ func langPackCatalog() []rule.Rule {
 			RemediationEffort:   15,
 		},
 		{
+			Key: rule.Key("dart-bad-certificate-callback"), Name: "TLS certificate validation overridden", Language: "Dart", Type: rule.TypeSecurityHotspot, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"sast", "dart"}, CWE: []string{"CWE-295"}, OWASP: []string{"A02:2021"}, Detection: rule.DetectionPattern,
+			Description:         "badCertificateCallback is assigned on an HttpClient, which replaces the platform's certificate check with the app's own decision.",
+			Rationale:           "The callback decides whether to accept a certificate the platform already rejected, and the shape it is almost always written in returns true for every host, which accepts any certificate including an attacker's and removes the protection TLS provides (CWE-295). A build that needs a self-signed certificate should pin that certificate through SecurityContext instead, so only the one expected certificate is trusted.\n\nSource: https://cwe.mitre.org/data/definitions/295.html",
+			Remediation:         "Remove the callback and trust the platform store, or pin the expected certificate with SecurityContext.setTrustedCertificates. Never return true unconditionally.",
+			CompliantExample:    "final context = SecurityContext()..setTrustedCertificates('lets-encrypt.pem');",
+			NoncompliantExample: "client.badCertificateCallback = (cert, host, port) => true;",
+			RemediationEffort:   30,
+		},
+		{
 			Key: rule.Key("go-sql-string-format"), Name: "SQL built with fmt.Sprintf / string concatenation", Language: "Go", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"sast", "go"}, CWE: []string{"CWE-89"}, OWASP: []string{"A03:2021"}, Detection: rule.DetectionPattern,
 			Description:         "A SQL statement passed to Query/Exec is assembled with fmt.Sprintf or +, allowing SQL injection.",
 			Rationale:           "Interpolating values into SQL text lets an attacker alter the query (CWE-89). Use parameter placeholders ($1, ?) and pass the values as arguments.\n\nSource: https://cwe.mitre.org/data/definitions/89.html",
