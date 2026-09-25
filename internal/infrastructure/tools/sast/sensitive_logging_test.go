@@ -21,9 +21,17 @@ func TestSensitiveDataLoggingCoversStandardLoggers(t *testing.T) {
 		"go_printf.go":    "log.Printf(\"auth failed for bearer %s\", bearer)\n",
 		"go_slog.go":      "slog.Info(\"issued\", \"api_key\", k)\n",
 	}
+	// The multi-line shape: the call opens on one line and the sensitive argument arrives on the next.
+	// A line pattern cannot see this, which is how three real findings were missed on a live service.
+	flagged["py_multiline.py"] = "logger.warning(\n    \"token refresh failed for %s\",\n    refresh_token,\n)\n"
+	flagged["py_multiline_kw.py"] = "logger.info(\n    \"issued\",\n    extra={\"api_key\": key},\n)\n"
+
 	// Must stay silent: a logger receiver that only looks like one, and a log line with no sensitive field.
 	quiet := map[string]string{
-		"catalog.py": "catalog.info(\"item %s\", name)\n",
+		// A multi-line call carrying nothing sensitive must stay silent too, so the block test cannot
+		// degrade into "any logger call spanning lines".
+		"plain_multiline.py": "logger.info(\n    \"processed %d orders\",\n    count,\n)\n",
+		"catalog.py":         "catalog.info(\"item %s\", name)\n",
 		"backlog.go": "backlog.debug(\"queued %d\", n)\n",
 		"plain.py":   "logger.info(\"user %s logged in\", username)\n",
 	}

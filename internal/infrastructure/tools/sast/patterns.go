@@ -16,6 +16,9 @@ import (
 // rtype/rquality classify the finding. They are optional: the zero value means a security vulnerability
 // (Vulnerability + Security), which is what the security-focused tier-1 rules are. Correctness/style
 // rules set them explicitly (e.g. Bug+Reliability, CodeSmell+Maintainability).
+// sensitiveLogFieldRe names the fields whose value must not reach a log sink.
+var sensitiveLogFieldRe = regexp.MustCompile(`(?i)(password|passwd|token|secret|credential|api[_-]?key|authorization|bearer|private[_-]?key|resetUrl|reset_url)`)
+
 type rule struct {
 	id       string
 	cwe      string
@@ -721,16 +724,24 @@ func builtinRules() []rule {
 			desc:   "Logging passwords, tokens, secrets, or reset URLs can leak credentials through log pipelines. Redact or omit sensitive fields.",
 			// The receiver and method lists were too narrow to match the standard library of the two
 			// languages this fires most on. Python writes logger.warning / logger.exception /
-			// logging.error, and the old method alternation stopped at "warn", so "warning(" failed:
+			// logging.error, and an earlier method alternation stopped at "warn", so "warning(" failed:
 			// "warn" matched and the following "ing(" could not. Go and Java write log.Printf and
 			// slog.Info. Found on a real service where logger.warning("... token=%s", token) went
 			// unreported while a competitor flagged it.
 			//
 			// "log" carries a word boundary, so catalog.info and backlog.debug do not match.
+			//
+			// The sensitive-field test moved from the line to the bounded block, because the same
+			// service writes several of its log calls with the open paren on one line and the sensitive
+			// argument on the next, which no line pattern can see. For a single-line call the block IS
+			// that line, since its parens balance there, so the one-line behaviour is unchanged.
 			re: regexp.MustCompile(`(?i)\b(logger|logging|log|console|slog|logrus|zap|sugar)\.` +
 				`(info|infof|log|logf|warn|warnf|warning|error|errorf|errf|debug|debugf|exception|critical|fatal|fatalf|trace|print|printf|println)` +
-				`\s*\([^)]*(password|passwd|token|secret|credential|api[_-]?key|authorization|bearer|private[_-]?key|resetUrl|reset_url)`),
+				`\s*\(`),
 			skipFn: commentOnlyLine,
+			blockFn: func(block string) bool {
+				return sensitiveLogFieldRe.MatchString(block)
+			},
 		},
 		{
 			id: "cookie-missing-secure-flag", cwe: "CWE-614", severity: shared.SeverityMedium,
