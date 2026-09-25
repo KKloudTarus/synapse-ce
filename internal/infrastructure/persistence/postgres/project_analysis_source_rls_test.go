@@ -54,7 +54,32 @@ func TestProjectAnalysisSourceAttachmentSucceedsUnderRowLevelSecurity(t *testing
 	}
 	t.Cleanup(func() {
 		c := context.Background()
-		_, _ = pool.Exec(c, `DELETE FROM audit_log WHERE tenant_id=$1`, tenantID.String())
+		// The audit log is append-only, enforced by a trigger, so a plain DELETE is rejected. The
+		// row this test writes is tenant-chained with hash_version 2, and migration 0085 refuses to
+		// roll back while any such row exists, so leaving one behind breaks every down-migration
+		// test that runs after it. CI runs this package a second time against the same database,
+		// which is where that surfaced as a pipeline failure with a green local run.
+		//
+		// Suspending the trigger for the delete is what migration_0081_test.go and
+		// migration_0088_test.go already do for the same reason, and the setting is restored on the
+		// same connection afterwards. The errors are reported rather than swallowed: a cleanup that
+		// silently stops working is what made this invisible in the first place.
+		conn, acquireErr := pool.Acquire(c)
+		if acquireErr != nil {
+			t.Errorf("acquire cleanup connection: %v", acquireErr)
+		} else {
+			if _, err := conn.Exec(c, `SET session_replication_role = replica`); err != nil {
+				t.Errorf("suspend audit append-only trigger: %v", err)
+			} else {
+				if _, err := conn.Exec(c, `DELETE FROM audit_log WHERE tenant_id=$1`, tenantID.String()); err != nil {
+					t.Errorf("clear the tenant-chained audit row: %v", err)
+				}
+				if _, err := conn.Exec(c, `SET session_replication_role = origin`); err != nil {
+					t.Errorf("restore audit append-only trigger: %v", err)
+				}
+			}
+			conn.Release()
+		}
 		_, _ = pool.Exec(c, `DELETE FROM project_analyses WHERE id=$1`, analysisID.String())
 		_, _ = pool.Exec(c, `DELETE FROM projects WHERE id=$1`, projectID.String())
 		_, _ = pool.Exec(c, `DELETE FROM tenants WHERE id=$1`, tenantID.String())
