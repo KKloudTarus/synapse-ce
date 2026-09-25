@@ -231,7 +231,7 @@ func pinnedKeyring(path string) (openpgp.EntityList, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	keys, err := openpgp.ReadArmoredKeyRing(f)
 	if err != nil || len(keys) != 1 {
 		return nil, fmt.Errorf("read one armored key: %w", err)
@@ -345,7 +345,7 @@ func getBounded(client *http.Client, rawURL string, limit int64) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected HTTP status %s", resp.Status)
 	}
@@ -377,13 +377,13 @@ func cachedOrGet(client *http.Client, path, rawURL string) ([]byte, error) {
 		return nil, err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return nil, err
 	}
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return nil, err
 	}
 	if err := tmp.Close(); err != nil {
@@ -404,7 +404,7 @@ func parsePrimary(raw []byte) (primaryMD, error) {
 		if err != nil {
 			return primaryMD{}, err
 		}
-		defer z.Close()
+		defer func() { _ = z.Close() }()
 		r = io.LimitReader(z, maxMetadataBytes)
 	}
 	var primary primaryMD

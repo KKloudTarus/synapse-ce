@@ -66,7 +66,7 @@ func TestSecretScanPerfGate(t *testing.T) {
 	t.Logf("secretscan perf: release=%s env=%s samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s throughput_ops_per_second=%.6f",
 		benchperf.ReleaseDigest(), env, perfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest, res.ThroughputOpsPerSecond)
 
-	base, found, err := benchperf.Load(perfBaselinePath, perfSamples)
+	base, found, err := benchperf.Load(perfBaselinePath, perfWarmup, perfSamples)
 	if err != nil {
 		t.Fatal(err)
 	}

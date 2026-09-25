@@ -39,23 +39,23 @@ func TestLoadValidatesSchemaAndSamples(t *testing.T) {
 		return p
 	}
 	// Missing file -> found=false, no error (the caller reports the disabled-gate error itself).
-	if _, found, err := Load(filepath.Join(dir, "nope.json"), 20); found || err != nil {
+	if _, found, err := Load(filepath.Join(dir, "nope.json"), 3, 20); found || err != nil {
 		t.Errorf("missing baseline: found=%v err=%v, want found=false err=nil", found, err)
 	}
 	// Wrong schema -> error.
-	if _, _, err := Load(write("bad-schema.json", `{"schema":"old-v1","samples":20,"alloc_bytes_median":1}`), 20); err == nil {
+	if _, _, err := Load(write("bad-schema.json", `{"schema":"old-v1","samples":20,"alloc_bytes_median":1}`), 3, 20); err == nil {
 		t.Error("wrong schema must error")
 	}
 	// Sample mismatch -> error.
-	if _, _, err := Load(write("bad-samples.json", `{"schema":"`+Schema+`","samples":10,"alloc_bytes_median":1}`), 20); err == nil {
+	if _, _, err := Load(write("bad-samples.json", `{"schema":"`+Schema+`","samples":10,"alloc_bytes_median":1}`), 3, 20); err == nil {
 		t.Error("sample-count mismatch must error")
 	}
 	// Zero alloc -> error.
-	if _, _, err := Load(write("zero.json", `{"schema":"`+Schema+`","samples":20,"alloc_bytes_median":0}`), 20); err == nil {
+	if _, _, err := Load(write("zero.json", `{"schema":"`+Schema+`","samples":20,"alloc_bytes_median":0}`), 3, 20); err == nil {
 		t.Error("zero alloc_bytes_median must error")
 	}
 	// Valid -> loads.
-	b, found, err := Load(write("ok.json", `{"schema":"`+Schema+`","release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5","dataset_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","environment_digest":"env:fixture","go_version":"go1.27.0","warmup_samples":3,"samples":20,"alloc_bytes_median":5,"peak_memory_bytes":6,"throughput_ops_per_second":7.5}`), 20)
+	b, found, err := Load(write("ok.json", `{"schema":"`+Schema+`","release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5","dataset_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","environment_digest":"env:fixture","go_version":"go1.27.0","warmup_samples":3,"samples":20,"alloc_bytes_median":5,"peak_memory_bytes":6,"throughput_ops_per_second":7.5}`), 3, 20)
 	if !found || err != nil || b.AllocBytes != 5 {
 		t.Errorf("valid baseline: found=%v err=%v alloc=%d", found, err, b.AllocBytes)
 	}
@@ -68,8 +68,11 @@ func TestLoadRejectsNonReproducibleIdentityAndMissingMeasurements(t *testing.T) 
 	if err := os.WriteFile(path, []byte(valid), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Load(path, 20); err != nil {
+	if _, _, err := Load(path, 3, 20); err != nil {
 		t.Fatalf("valid baseline rejected: %v", err)
+	}
+	if _, _, err := Load(path, 4, 20); err == nil || !strings.Contains(err.Error(), "warmup samples") {
+		t.Fatalf("changed live warmup must reject the baseline: %v", err)
 	}
 	for _, replacement := range []string{
 		`"release_digest":"(devel)"`,
@@ -85,7 +88,7 @@ func TestLoadRejectsNonReproducibleIdentityAndMissingMeasurements(t *testing.T) 
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := Load(path, 20); err == nil {
+		if _, _, err := Load(path, 3, 20); err == nil {
 			t.Errorf("Load accepted malformed baseline %s", replacement)
 		}
 	}
@@ -155,7 +158,7 @@ func TestMeasureRunsWarmupAndSamples(t *testing.T) {
 func TestLoadDistinguishesUnreadableFromMissing(t *testing.T) {
 	// A path that exists but is a directory is present-but-unreadable: it must error, not report "missing".
 	dir := t.TempDir()
-	if _, found, err := Load(dir, 20); err == nil || found {
+	if _, found, err := Load(dir, 3, 20); err == nil || found {
 		t.Errorf("an unreadable baseline path must error (found=%v err=%v)", found, err)
 	}
 }

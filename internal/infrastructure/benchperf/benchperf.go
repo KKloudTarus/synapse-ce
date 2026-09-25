@@ -53,10 +53,10 @@ type Baseline struct {
 }
 
 // Load reads the committed baseline at path. found is false when the file is absent (the caller reports the
-// disabled-gate error). It fails with an error on a wrong schema or a sample count that does not match the
-// gate's, because a baseline measured under a different schema or sample count is not comparable, so ratcheting
+// disabled-gate error). It fails with an error on a wrong schema or a warmup/sample count that does not match the
+// gate's, because a baseline measured under a different schema or sampling policy is not comparable, so ratcheting
 // against it would be a stale, meaningless gate.
-func Load(path string, expectedSamples int) (b Baseline, found bool, err error) {
+func Load(path string, expectedWarmup, expectedSamples int) (b Baseline, found bool, err error) {
 	data, rerr := os.ReadFile(path)
 	if errors.Is(rerr, fs.ErrNotExist) {
 		// Absent baseline: the caller reports the disabled-gate error.
@@ -75,6 +75,9 @@ func Load(path string, expectedSamples int) (b Baseline, found bool, err error) 
 	}
 	if b.Samples != expectedSamples {
 		return Baseline{}, true, fmt.Errorf("perf baseline %s was measured with %d samples, gate uses %d (re-baseline)", path, b.Samples, expectedSamples)
+	}
+	if b.WarmupSamples != expectedWarmup {
+		return Baseline{}, true, fmt.Errorf("perf baseline %s was measured with %d warmup samples, gate uses %d (re-baseline)", path, b.WarmupSamples, expectedWarmup)
 	}
 	if err := validateBaseline(b); err != nil {
 		return Baseline{}, true, fmt.Errorf("malformed baseline %s: %w", path, err)
@@ -105,7 +108,7 @@ type Result struct {
 // VmHWM is process-wide, so it is recorded but not used as a per-operation regression ratchet.
 func CheckPeakEvidence(result Result) error {
 	if runtime.GOOS == "linux" && result.PeakMemoryBytes == 0 {
-		return fmt.Errorf("Linux peak resident memory measurement is unavailable")
+		return fmt.Errorf("linux peak resident memory measurement is unavailable")
 	}
 	return nil
 }

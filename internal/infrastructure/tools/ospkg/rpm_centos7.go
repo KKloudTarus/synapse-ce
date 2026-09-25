@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"math/big"
-	"strconv"
-	"strings"
 )
 
 // CentOS 7's stable signing key is pinned by its full fingerprint, published at
@@ -141,19 +139,4 @@ func verifyCentOS7RSAHeader(blob, original []byte) bool {
 	rsaSig := make([]byte, (centOS7Key.N.BitLen()+7)/8)
 	copy(rsaSig[len(rsaSig)-bytes:], sig[24:])
 	return rsa.VerifyPKCS1v15(centOS7Key, crypto.SHA256, digest, rsaSig) == nil
-}
-
-func parseSignedRPMIdentity(original []byte) (name, evr, arch string, ok bool) {
-	return parseRPMHeader(original)
-}
-
-func signedEVR(version, release string, epoch uint32, hasEpoch bool) string {
-	evr := version
-	if release != "" {
-		evr += "-" + release
-	}
-	if hasEpoch && epoch != 0 {
-		evr = strconv.FormatUint(uint64(epoch), 10) + ":" + evr
-	}
-	return strings.TrimSpace(evr)
 }
