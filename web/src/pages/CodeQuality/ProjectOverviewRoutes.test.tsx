@@ -668,3 +668,37 @@ async function settle() {
     await Promise.resolve()
   })
 }
+
+// A local source binding carries no ref, so its analyses are recorded under an empty branch and the
+// server's branch list holds one entry whose name is "". Defaulting to 'main' asked every read for a
+// branch that had no analysis, so a project with a completed analysis and thousands of issues
+// rendered "No completed analysis yet" forever.
+describe('a project bound to a local path', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    const local: Project = { ...buildProject('juice-shop', 'Juice Shop'), sourceBinding: { kind: 'local', value: '/srv/juice-shop', ref: '' } }
+    vi.mocked(api.getProject).mockResolvedValue(local)
+    vi.mocked(api.projectBranches).mockResolvedValue([{ name: '', kind: 'long_lived' }])
+    vi.mocked(api.projectAnalysisStatus).mockResolvedValue(null)
+    vi.mocked(api.projectOverview).mockResolvedValue(buildAnalyzedOverview())
+    vi.mocked(api.listQualityGates).mockResolvedValue([])
+  })
+
+  it('reads the branch the server considers current rather than inventing main', async () => {
+    renderProjectRoute('/code-quality/projects/juice-shop')
+
+    await waitFor(() => expect(api.projectOverview).toHaveBeenCalled())
+    for (const call of vi.mocked(api.projectOverview).mock.calls) {
+      expect(call[1] ?? '').toBe('')
+    }
+    expect(screen.queryByText('No completed analysis yet')).not.toBeInTheDocument()
+  })
+
+  it('keeps the unnamed branch in the selector instead of dropping it', async () => {
+    renderProjectRoute('/code-quality/projects/juice-shop')
+
+    const select = await screen.findByLabelText('Branch')
+    expect(select).toHaveValue('')
+    expect(screen.getByRole('option', { name: /no branch \(default\)/i })).toBeInTheDocument()
+  })
+})

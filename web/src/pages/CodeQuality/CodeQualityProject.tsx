@@ -54,18 +54,24 @@ export function CodeQualityProject() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { data: branchList } = useFetch(() => api.projectBranches(key), { deps: [key, analysisRevision], enabled: !!key })
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const defaultBranch = project?.sourceBinding.ref || 'main'
-  const selectedBranch = searchParams.get('branch') || defaultBranch
+  // A local source binding carries no ref, so its analyses are recorded under an empty branch and
+  // the server's branch list holds one entry whose name is "". Inventing 'main' here asked every
+  // read for a branch that has no analysis, so a project with a completed analysis and thousands of
+  // issues rendered "No completed analysis yet" forever. An empty branch means "whatever the server
+  // considers current", which is what the endpoints answer when the parameter is absent.
+  const defaultBranch = project?.sourceBinding.ref ?? ''
+  const selectedBranch = searchParams.get('branch') ?? defaultBranch
   const branchKinds = useMemo(() => {
     const kinds = new Map<string, 'long_lived' | 'short_lived'>()
     for (const b of branchList ?? []) if (b?.name) kinds.set(b.name, b.kind)
     return kinds
   }, [branchList])
   const branchOptions = useMemo(() => {
-    const set = new Set<string>()
-    if (defaultBranch) set.add(defaultBranch)
-    for (const b of branchList ?? []) if (b?.name) set.add(b.name)
-    if (selectedBranch) set.add(selectedBranch)
+    // The unnamed branch of a local binding belongs in the list: dropping it left the selector
+    // empty and the only reachable analysis unreachable.
+    const set = new Set<string>([defaultBranch])
+    for (const b of branchList ?? []) set.add(b?.name ?? '')
+    set.add(selectedBranch)
     return [...set]
   }, [branchList, defaultBranch, selectedBranch])
   function selectBranch(value: string) {
@@ -277,7 +283,7 @@ export function CodeQualityProject() {
                 >
                   {branchOptions.map((b) => (
                     <option key={b} value={b}>
-                      {b}
+                      {b || 'no branch'}
                       {b === defaultBranch ? ' (default)' : branchKinds.get(b) === 'short_lived' ? ' · short-lived' : ''}
                     </option>
                   ))}
