@@ -1,6 +1,7 @@
 {
   "schema_version": "synapse-go-binary-capture-proposal-v1",
-  "status": "diagnostic_only",
+  "status": "pending_independent_review",
+  "authoritative": false,
   "inventory_delta": {
     "cohort_id": "go",
     "mode_id": "binary",
@@ -17,10 +18,95 @@
       "direct.go.txt": "073fe1a1009d24a145fbe850dcc2f92f8f0acb1af878dfa5cc65adf638ee4a60",
       "go.mod": "154c9cbdb62703690f1d9a569f7974a702ad127fbd463fec3c9ee65934b5ad3b",
       "go.sum": "51107503300d3d4e08ec05ca38b212a804a8110d929c5cf545e28cb46d9171b5",
+      "indirect.go.txt": "3cd85884ba8f077d192909ab53822895f03b5b593755986fa12530d89b66da09",
       "retained.go.txt": "98a975af572390f7b3a6bc19f9cd8c385d12a5c6f573655ee9574935a6d92e8f",
       "retained_called.go.txt": "48ed7dd59078b29c43a09f1df285fe2bd6bbff00e86c3fa03ec2c641bc85808d"
     }
   },
+  "proposed_oracle_mapping": {
+    "status": "pending_independent_review",
+    "authoritative": false,
+    "review_requirement": "An identity distinct from the capture operator must independently verify each source truth and approve the successor oracle before use.",
+    "cases": [
+      {
+        "id": "direct-call",
+        "source_truth": "direct.go.txt: main calls entry; entry calls idna.ToASCII.",
+        "expected_outcome": "reachable",
+        "expected_coverage": "complete"
+      },
+      {
+        "id": "retained-but-uncalled",
+        "source_truth": "retained.go.txt: main only checks the retained function value and never invokes controlUnreached.",
+        "expected_outcome": "present_unreached",
+        "expected_coverage": "complete"
+      },
+      {
+        "id": "retained-and-called",
+        "source_truth": "retained_called.go.txt: main directly invokes controlUnreached, which calls idna.ToASCII.",
+        "expected_outcome": "reachable",
+        "expected_coverage": "complete"
+      },
+      {
+        "id": "indirect-function-value-call",
+        "source_truth": "indirect.go.txt: main invokes the function value only when argv[1] is invoke; invoke calls that value, which converts bücher.example through idna.ToASCII.",
+        "expected_outcome": "conditionally_reachable",
+        "expected_coverage": "partial"
+      },
+      {
+        "id": "empty-root-unavailable",
+        "source_truth": "The materialized analysis root is deliberately empty, so no Go binary is available to inspect.",
+        "expected_outcome": "no_analysis",
+        "expected_coverage": "unavailable"
+      }
+    ]
+  },
+  "candidate_observations": [
+    {
+      "id": "direct-call",
+      "source": "direct.go.txt",
+      "materialization": "linux-amd64-go-build",
+      "query_identity": "pkg:golang/golang.org/x/net@v0.59.0",
+      "observed_outcome": "reachable",
+      "observed_coverage": "complete",
+      "judgment_state": "non_suppressing"
+    },
+    {
+      "id": "retained-but-uncalled",
+      "source": "retained.go.txt",
+      "materialization": "linux-amd64-go-build",
+      "query_identity": "pkg:golang/golang.org/x/net@v0.59.0",
+      "observed_outcome": "no_analysis",
+      "observed_coverage": "unavailable",
+      "judgment_state": "non_suppressing"
+    },
+    {
+      "id": "retained-and-called",
+      "source": "retained_called.go.txt",
+      "materialization": "linux-amd64-go-build",
+      "query_identity": "pkg:golang/golang.org/x/net@v0.59.0",
+      "observed_outcome": "reachable",
+      "observed_coverage": "complete",
+      "judgment_state": "non_suppressing"
+    },
+    {
+      "id": "indirect-function-value-call",
+      "source": "indirect.go.txt",
+      "materialization": "linux-amd64-go-build",
+      "query_identity": "pkg:golang/golang.org/x/net@v0.59.0",
+      "observed_outcome": "no_analysis",
+      "observed_coverage": "unavailable",
+      "judgment_state": "non_suppressing"
+    },
+    {
+      "id": "empty-root-unavailable",
+      "source": "empty-root",
+      "materialization": "empty-analysis-root",
+      "query_identity": "pkg:golang/golang.org/x/net@v0.59.0",
+      "observed_outcome": "no_analysis",
+      "observed_coverage": "unavailable",
+      "judgment_state": "non_suppressing"
+    }
+  ],
   "diagnostic_observations": [
     {
       "id": "direct-call",

@@ -1,0 +1,25 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"golang.org/x/net/idna"
+)
+
+var indirectEntry = func() {
+	value, err := idna.ToASCII("bücher.example")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(value)
+}
+
+func main() {
+	if len(os.Args) == 2 && os.Args[1] == "invoke" {
+		invoke(indirectEntry)
+	}
+}
+
+//go:noinline
+func invoke(call func()) { call() }
