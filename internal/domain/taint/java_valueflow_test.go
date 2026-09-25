@@ -437,3 +437,31 @@ func TestJavaLdapFilterPartialSanitizationFlags(t *testing.T) {
 		t.Errorf("a filter with a raw (unescaped) part must still flag as LDAP injection; got %v", got)
 	}
 }
+
+func TestJavaHTMLTextOutputProofSuppressesOnlyTheProvenXSSWrite(t *testing.T) {
+	p := jPos()
+	values := []javaprogram.Value{
+		{ID: "v-src", ScopeID: jHandID(), Kind: javaprogram.ValueCallResult, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceExpression}, Pos: p},
+		{ID: "v-arg", ScopeID: jHandID(), Kind: javaprogram.ValueReference, Ref: javaprogram.Reference{Kind: javaprogram.ReferenceName, Segments: []string{"name"}}, Pos: p},
+	}
+	flows := []javaprogram.ValueFlow{{FromID: "v-src", ToID: "v-arg", Kind: javaprogram.FlowAssignment, Pos: p}}
+	imports := []javaprogram.Import{{ScopeID: jModID(), Kind: javaprogram.ImportSingle, Module: "javax.servlet.http.HttpServletResponse", Name: "HttpServletResponse", Pos: p}}
+	base := []javaprogram.Call{
+		{ID: "c-src", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"request", "getParameter"}}, ResultID: "v-src", Pos: p},
+		{ID: "c-sink", CallerID: jHandID(), Callee: javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"writer", "println"}},
+			Arguments: []javaprogram.Argument{{Value: javaprogram.Reference{Kind: javaprogram.ReferenceName, Segments: []string{"name"}}, ValueID: "v-arg", Pos: p}}, Pos: p},
+	}
+	withoutProof := javaRules(t, javaSkeleton(nil, values, flows, base, imports))
+	if !withoutProof["java-taint-xss-writer"] {
+		t.Fatalf("writer without proof must remain an XSS finding: %v", withoutProof)
+	}
+	withProof := append([]javaprogram.Call(nil), base...)
+	withProof[1].OutputProof = javaprogram.OutputProofHTMLText
+	if got := javaRules(t, javaSkeleton(nil, values, flows, withProof, imports)); got["java-taint-xss-writer"] {
+		t.Fatalf("proven HTML-text writer remained an XSS finding: %v", got)
+	}
+	withProof[1].Callee = javaprogram.Reference{Kind: javaprogram.ReferenceAttribute, Segments: []string{"rt", "exec"}}
+	if got := javaRules(t, javaSkeleton(nil, values, flows, withProof, imports)); !got["java-taint-command-exec"] {
+		t.Fatalf("HTML-text proof must not suppress a non-XSS sink: %v", got)
+	}
+}

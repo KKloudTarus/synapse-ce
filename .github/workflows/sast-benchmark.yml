@@ -212,7 +212,7 @@ jobs:
       - name: Build java-facts-capable synapse-ast (CGO)
         run: CGO_ENABLED=1 go build -o "${RUNNER_TEMP}/synapse-ast" ./cmd/synapse-ast
 
-      - name: Run Securibench scorecard + per-CWE ratchet
+      - name: Run Securibench scorecard, per-CWE ratchet, and HTML-text proof
         # The test content-pins the answer key against its compiled securibenchCorpusDigest constant, so a wrong
         # or silently-changed corpus fails loudly. Re-pinning requires editing BOTH SECURIBENCH_REF above AND
         # that constant in source (reviewed with the recalibrated floors).
@@ -221,9 +221,9 @@ jobs:
           SYNAPSE_AST_BIN: ${{ runner.temp }}/synapse-ast
           SYNAPSE_SEMGREP_SARIF: ${{ runner.temp }}/securibench-semgrep/semgrep.sarif
         run: |
-          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard \
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard,TestSecuribenchHTMLTextProofDiagnostic \
             "${RUNNER_TEMP}/securibench-scorecard.jsonl" pass ./internal/infrastructure/tools/ast/ \
-            -run '^TestSecuribenchScorecard$'
+            -run '^(TestSecuribenchScorecard|TestSecuribenchHTMLTextProofDiagnostic)$'
 
       - name: Upload scorecard
         if: always()
@@ -334,7 +334,8 @@ jobs:
           export SYNAPSE_POST_TRIAGE_RESPONSE="$RUNNER_TEMP/candidate-proof-response.json"
           export SYNAPSE_POST_TRIAGE_BASELINE="$RUNNER_TEMP/post-triage-scorecards/baseline-report.json"
           export SYNAPSE_POST_TRIAGE_BASELINE_ENGINE="synapse-owned + syntactic-proof-v1"
-          export SYNAPSE_POST_TRIAGE_BASELINE_SHA256="$(sha256sum "$SYNAPSE_POST_TRIAGE_BASELINE" | cut -d ' ' -f 1)"
+          SYNAPSE_POST_TRIAGE_BASELINE_SHA256="$(sha256sum "$SYNAPSE_POST_TRIAGE_BASELINE" | cut -d ' ' -f 1)"
+          export SYNAPSE_POST_TRIAGE_BASELINE_SHA256
           CGO_ENABLED=1 bash scripts/require-go-tests.sh TestSecuribenchScorecard "$RUNNER_TEMP/candidate-scorecard.jsonl" pass ./internal/infrastructure/tools/ast -run '^TestSecuribenchScorecard$'
           test -s "$SYNAPSE_POST_TRIAGE_CANDIDATE_REPORT"
       - name: Upload sanitized post-triage scorecards

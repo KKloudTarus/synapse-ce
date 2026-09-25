@@ -357,6 +357,12 @@ func (b *javaValueBuilder) modelCalls() {
 				continue // an import-gated floor: the anchoring API is not imported in this file
 			}
 			matchedRole = true
+			// HTML-text proof is emitted only by the Java extractor after it has established the complete local
+			// response-write and helper shape. It clears this writer sink only; it is not a value sanitizer and
+			// cannot affect a later write, another sink class, or an older sidecar whose proof field is empty.
+			if model.Class == TaintXSS && call.OutputProof == javaprogram.OutputProofHTMLText {
+				continue
+			}
 			if len(b.sinks) >= maxJavaTaintSinks {
 				b.truncated = true
 				continue

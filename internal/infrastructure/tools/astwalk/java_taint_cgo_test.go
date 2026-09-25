@@ -5,6 +5,7 @@ package astwalk
 import (
 	"context"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
@@ -42,6 +43,156 @@ func javaRuleList(rules map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func TestJavaHTMLTextOutputProofIsCallsiteScoped(t *testing.T) {
+	safeBody := `import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+class Example {
+  private java.io.PrintWriter writer;
+  void doGet(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+    String name = req.getParameter("name");
+    String clean = clean(name);
+    writer = resp.getWriter();
+    resp.setContentType("text/html");
+    writer.println("<html>" + clean + "</html>");
+  }
+  private static String clean(String name) {
+    StringBuffer buf = new StringBuffer();
+    for (int i = 0; i < name.length(); i++) {
+      char ch = name.charAt(i);
+      if (Character.isLetter(ch) || Character.isDigit(ch) || ch == '_') { buf.append(ch); } else { buf.append('?'); }
+    }
+    return buf.toString();
+  }
+}`
+	unsafeBodies := map[string]string{
+		"script_context":   strings.Replace(safeBody, `"<html>" + clean + "</html>"`, `"<script>" + clean + "</script>"`, 1),
+		"raw_write_before": strings.Replace(safeBody, `writer.println("<html>" + clean + "</html>");`, "writer.println(name);\n    writer.println(\"<html>\" + clean + \"</html>\");", 1),
+		"partial_encoder":  strings.Replace(safeBody, "else { buf.append('?'); }", "else { buf.append(ch); }", 1),
+		"bypass_return":    strings.Replace(safeBody, "return buf.toString();", "if (name == null) return name; return buf.toString();", 1),
+		"shadowed_result":  strings.Replace(safeBody, "String clean = clean(name);", "{ String clean = clean(name); }\n    String clean = name;", 1),
+		"unicode_escape":   strings.Replace(safeBody, "return buf.toString();", "// \\u000a if (name != null) return name;\n    return buf.toString();", 1),
+		"inner_shadow": strings.Replace(safeBody, `writer.println("<html>" + clean + "</html>");`,
+			`{ String clean = name; writer.println("<html>" + clean + "</html>"); }`, 1),
+		"for_initializer": strings.Replace(
+			strings.Replace(safeBody, "String clean = clean(name);", "for (String clean = clean(name); true;) {", 1),
+			`writer.println("<html>" + clean + "</html>");`, `writer.println("<html>" + clean + "</html>"); break; }`, 1),
+		"class_field": strings.Replace(safeBody, "private java.io.PrintWriter writer;", "private java.io.PrintWriter writer;\n  private String clean;", 1),
+	}
+	cases := map[string]struct {
+		body      string
+		wantProof bool
+		wantRule  bool
+	}{
+		"safe_html_text": {body: safeBody, wantProof: true},
+	}
+	for name, body := range unsafeBodies {
+		cases[name] = struct {
+			body      string
+			wantProof bool
+			wantRule  bool
+		}{body: body, wantRule: true}
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "Example.java", tc.body)
+			doc, err := JavaFactsFor(context.Background(), root)
+			if err != nil {
+				t.Fatalf("JavaFactsFor: %v", err)
+			}
+			proof := false
+			for _, call := range doc.Calls {
+				if call.OutputProof == "html_text" {
+					proof = true
+				}
+			}
+			if proof != tc.wantProof {
+				t.Fatalf("HTML-text proof = %v, want %v", proof, tc.wantProof)
+			}
+			graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+			if err != nil {
+				t.Fatalf("BuildJavaValueGraph: %v", err)
+			}
+			found := false
+			for _, finding := range graph.Vulnerabilities() {
+				if finding.Rule == "java-taint-xss-writer" {
+					found = true
+				}
+			}
+			if found != tc.wantRule {
+				t.Fatalf("XSS writer finding = %v, want %v", found, tc.wantRule)
+			}
+		})
+	}
+}
+
+func TestJavaHTMLTextOutputProofRejectsCommentDelimiterInsideEscapedLiteral(t *testing.T) {
+	escapedHelper := `private String clean(String name) {
+    StringBuffer buf = new StringBuffer();
+    for (int i = 0; i < name.length(); i++) {
+      char ch = name.charAt(i);
+      switch (ch) {
+        case '<': buf.append("&lt;"); break;
+        case '>': buf.append("&gt;"); break;
+        case '&': buf.append("&amp;"); break;
+        default: if (Character.isLetter(ch) || Character.isDigit(ch) || ch == '_') { buf.append(ch); } else { buf.append('?'); }
+      }
+    }
+    return buf.toString();
+  }`
+	body := `import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+class Example {
+  private java.io.PrintWriter writer;
+  void doGet(HttpServletRequest req, HttpServletResponse resp) throws Exception {
+    String name = req.getParameter("name");
+    String clean = clean(name);
+    writer = resp.getWriter();
+    resp.setContentType("text/html");
+    writer.println("<html>" + clean + "</html>");
+  }
+  ` + escapedHelper + `
+}`
+	for name, tc := range map[string]struct {
+		body      string
+		wantProof bool
+		wantRule  bool
+	}{
+		"ordinary_entities": {body: body, wantProof: true},
+		"delimiter_in_literal": {
+			body:     strings.Replace(body, `"&lt;"`, `"&lt;/*<script>alert(1)</script>*/"`, 1),
+			wantRule: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "Example.java", tc.body)
+			doc, err := JavaFactsFor(context.Background(), root)
+			if err != nil {
+				t.Fatalf("JavaFactsFor: %v", err)
+			}
+			proof := false
+			for _, call := range doc.Calls {
+				proof = proof || call.OutputProof == "html_text"
+			}
+			if proof != tc.wantProof {
+				t.Fatalf("HTML-text proof = %v, want %v", proof, tc.wantProof)
+			}
+			graph, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
+			if err != nil {
+				t.Fatalf("BuildJavaValueGraph: %v", err)
+			}
+			found := false
+			for _, finding := range graph.Vulnerabilities() {
+				found = found || finding.Rule == "java-taint-xss-writer"
+			}
+			if found != tc.wantRule {
+				t.Fatalf("XSS writer finding = %v, want %v", found, tc.wantRule)
+			}
+		})
+	}
 }
 
 // TestJavaTaintPositivePerClass proves each modeled sink class fires on a real source->sink flow.

@@ -82,6 +82,7 @@ func JavaFactsFor(ctx context.Context, root string) (javaprogram.Document, error
 			doc: &doc, module: module, file: rel, source: content, moduleID: moduleID, modulePos: modulePos,
 			values: map[string]bool{}, flows: map[string]bool{}, gapKeys: map[string]bool{}, symbolQual: map[string]bool{},
 			fqnTypes: map[string]bool{}, locals: map[string]map[string][]string{}, rootBlocks: map[string]string{},
+			htmlWriterCount: map[uint32]int{},
 		}
 		doc.Modules = append(doc.Modules, javaprogram.Module{Name: module, File: rel, Package: extractor.packageName(rootNode), Pos: modulePos})
 		doc.Symbols = append(doc.Symbols, javaprogram.Symbol{
@@ -136,6 +137,7 @@ type javaFactExtractor struct {
 	fqnTypes                    map[string]bool // inline fully-qualified type refs, lowered to on-demand imports post-walk
 	locals                      map[string]map[string][]string
 	rootBlocks                  map[string]string
+	htmlWriterCount             map[uint32]int
 }
 
 // enterExpr bounds recursion into an expression subtree of hostile depth. A true return must be paired with
@@ -542,7 +544,416 @@ func (e *javaFactExtractor) callFact(node *sitter.Node, scope javaScope, isNew b
 			call.Arguments = append(call.Arguments, arg)
 		}
 	}
+	if e.htmlTextOutputProof(node, scope) {
+		call.OutputProof = javaprogram.OutputProofHTMLText
+	}
 	e.doc.Calls = append(e.doc.Calls, call)
+}
+
+// htmlTextOutputProof recognizes one closed HTML-text response pattern. It is deliberately much narrower
+// than an output-encoder model: the write must be the only writer.println in its method, text/html must be
+// selected first, and the sole argument must be exactly "<html>" + a locally-proved helper result +
+// "</html>". Any unrecognized AST form leaves OutputProof empty, so downstream taint retains the finding.
+func (e *javaFactExtractor) htmlTextOutputProof(node *sitter.Node, scope javaScope) bool {
+	if node == nil || scope.kind != javaprogram.SymbolMethod || !javaWriterPrintln(node, e.source) {
+		return false
+	}
+	argument, helperName, ok := javaHTMLTextArgument(node, e.source)
+	if !ok || argument == nil || helperName == "" {
+		return false
+	}
+	method := javaEnclosingMethod(node)
+	if method == nil {
+		return false
+	}
+	count, known := e.htmlWriterCount[method.StartByte()]
+	if !known {
+		count = javaCountWriterPrintln(method, e.source)
+		e.htmlWriterCount[method.StartByte()] = count
+	}
+	if count != 1 ||
+		!javaPriorHTMLContentType(method, node, e.source) || !javaPriorWriterAcquisition(method, node, e.source) {
+		return false
+	}
+	resultName, ok := javaHTMLTextResultName(argument, helperName, method, e.source)
+	if !ok || resultName == "" || javaMethodReassigns(method, resultName, e.source) {
+		return false
+	}
+	helper := javaSiblingMethod(node, helperName, e.source)
+	return helper != nil && javaKnownHTMLTextHelper(helper, helperName, e.source)
+}
+
+func javaWriterPrintln(node *sitter.Node, source []byte) bool {
+	if node == nil || node.Type() != "method_invocation" {
+		return false
+	}
+	name := node.ChildByFieldName("name")
+	object := node.ChildByFieldName("object")
+	return name != nil && object != nil && name.Content(source) == "println" && object.Type() == "identifier" && object.Content(source) == "writer"
+}
+
+func javaHTMLTextArgument(node *sitter.Node, source []byte) (*sitter.Node, string, bool) {
+	args := node.ChildByFieldName("arguments")
+	if args == nil || args.NamedChildCount() != 1 {
+		return nil, "", false
+	}
+	argument := args.NamedChild(0)
+	var terms []*sitter.Node
+	javaFlattenStringConcat(argument, source, &terms)
+	if len(terms) != 3 || terms[0].Type() != "string_literal" || terms[1].Type() != "identifier" || terms[2].Type() != "string_literal" ||
+		terms[0].Content(source) != `"<html>"` || terms[2].Content(source) != `"</html>"` {
+		return nil, "", false
+	}
+	return argument, terms[1].Content(source), true
+}
+
+func javaFlattenStringConcat(node *sitter.Node, source []byte, out *[]*sitter.Node) {
+	if node != nil && node.Type() == "binary_expression" {
+		left, right := node.ChildByFieldName("left"), node.ChildByFieldName("right")
+		if left != nil && right != nil && javaBinaryOperator(node, source) == "+" {
+			javaFlattenStringConcat(left, source, out)
+			javaFlattenStringConcat(right, source, out)
+			return
+		}
+	}
+	*out = append(*out, node)
+}
+
+func javaBinaryOperator(node *sitter.Node, source []byte) string {
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child != nil && !child.IsNamed() {
+			return child.Content(source)
+		}
+	}
+	return ""
+}
+
+func javaEnclosingMethod(node *sitter.Node) *sitter.Node {
+	for current := node; current != nil; current = current.Parent() {
+		if current.Type() == "method_declaration" {
+			return current
+		}
+	}
+	return nil
+}
+
+func javaCountWriterPrintln(root *sitter.Node, source []byte) int {
+	if root == nil {
+		return 0
+	}
+	count := 0
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || count > 1 {
+			return
+		}
+		if current != root && current.Type() == "method_declaration" {
+			return
+		}
+		if javaWriterPrintln(current, source) {
+			count++
+		}
+		for i := 0; i < int(current.NamedChildCount()) && count <= 1; i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(root)
+	return count
+}
+
+func javaPriorHTMLContentType(method, before *sitter.Node, source []byte) bool {
+	return javaPriorCall(method, before, source, "resp", "setContentType", `"text/html"`)
+}
+
+func javaPriorWriterAcquisition(method, before *sitter.Node, source []byte) bool {
+	if method == nil || before == nil {
+		return false
+	}
+	matched := false
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || current.StartByte() >= before.StartByte() || matched {
+			return
+		}
+		if current.Type() == "assignment_expression" && javaCompact(current.Content(source)) == "writer=resp.getWriter()" {
+			matched = true
+			return
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(method.ChildByFieldName("body"))
+	return matched
+}
+
+func javaPriorCall(method, before *sitter.Node, source []byte, receiver, name, argument string) bool {
+	if method == nil || before == nil {
+		return false
+	}
+	matched := false
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || current.StartByte() >= before.StartByte() || matched {
+			return
+		}
+		if current.Type() == "method_invocation" {
+			object, methodName, args := current.ChildByFieldName("object"), current.ChildByFieldName("name"), current.ChildByFieldName("arguments")
+			if object != nil && methodName != nil && args != nil && object.Type() == "identifier" && object.Content(source) == receiver &&
+				methodName.Content(source) == name && args.NamedChildCount() == 1 && args.NamedChild(0).Content(source) == argument {
+				matched = true
+				return
+			}
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(method.ChildByFieldName("body"))
+	return matched
+}
+
+func javaHTMLTextResultName(argument *sitter.Node, helperName string, method *sitter.Node, source []byte) (string, bool) {
+	if argument == nil || method == nil {
+		return "", false
+	}
+	sinkBlock := javaEnclosingBlock(argument)
+	if sinkBlock == nil {
+		return "", false
+	}
+	var result string
+	var declaration *sitter.Node
+	valid := false
+	declarations := map[string]int{}
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || current != method && current.Type() == "method_declaration" {
+			return
+		}
+		if current.Type() == "variable_declarator" {
+			name, value := current.ChildByFieldName("name"), current.ChildByFieldName("value")
+			if name != nil {
+				declarations[name.Content(source)]++
+			}
+			if current.StartByte() < argument.StartByte() && name != nil && value != nil && value.Type() == "method_invocation" && javaBareCallNamed(value, helperName, source) {
+				if result != "" {
+					valid = false
+					return
+				}
+				if !javaDirectLocalDeclarationInBlock(current, sinkBlock) {
+					valid = false
+					return
+				}
+				result, declaration, valid = name.Content(source), current, true
+			}
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(method.ChildByFieldName("body"))
+	if !valid || result == "" || declaration == nil || declarations[result] != 1 || javaMethodParameterNamed(method, result, source) ||
+		javaClassFieldNamed(method, result, source) || !javaDirectLocalDeclarationInBlock(declaration, sinkBlock) ||
+		javaCompact(argument.Content(source)) != `"<html>"+`+result+`+"</html>"` {
+		return "", false
+	}
+	return result, true
+}
+
+func javaDirectLocalDeclarationInBlock(declaration, block *sitter.Node) bool {
+	if declaration == nil || block == nil {
+		return false
+	}
+	local := declaration.Parent()
+	return local != nil && local.Type() == "local_variable_declaration" && local.Parent() == block
+}
+
+func javaMethodParameterNamed(method *sitter.Node, name string, source []byte) bool {
+	params := method.ChildByFieldName("parameters")
+	if params == nil {
+		return false
+	}
+	for i := 0; i < int(params.NamedChildCount()); i++ {
+		param := params.NamedChild(i)
+		if paramName := param.ChildByFieldName("name"); paramName != nil && paramName.Content(source) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func javaEnclosingBlock(node *sitter.Node) *sitter.Node {
+	for current := node; current != nil; current = current.Parent() {
+		if current.Type() == "block" {
+			return current
+		}
+	}
+	return nil
+}
+
+func javaClassFieldNamed(method *sitter.Node, name string, source []byte) bool {
+	if method == nil || name == "" {
+		return false
+	}
+	for current := method.Parent(); current != nil; current = current.Parent() {
+		if current.Type() != "class_body" {
+			continue
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			member := current.NamedChild(i)
+			if member.Type() != "field_declaration" {
+				continue
+			}
+			for j := 0; j < int(member.NamedChildCount()); j++ {
+				candidate := member.NamedChild(j)
+				if candidate.Type() != "variable_declarator" {
+					continue
+				}
+				fieldName := candidate.ChildByFieldName("name")
+				if fieldName != nil && fieldName.Content(source) == name {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
+}
+
+func javaBareCallNamed(node *sitter.Node, want string, source []byte) bool {
+	name, object, args := node.ChildByFieldName("name"), node.ChildByFieldName("object"), node.ChildByFieldName("arguments")
+	return name != nil && object == nil && args != nil && args.NamedChildCount() == 1 && name.Content(source) == want && args.NamedChild(0).Type() == "identifier"
+}
+
+func javaMethodReassigns(method *sitter.Node, name string, source []byte) bool {
+	if method == nil || name == "" {
+		return true
+	}
+	var reassigned bool
+	var walk func(*sitter.Node)
+	walk = func(current *sitter.Node) {
+		if current == nil || reassigned || current != method && current.Type() == "method_declaration" {
+			return
+		}
+		if current.Type() == "assignment_expression" {
+			left := current.ChildByFieldName("left")
+			if left != nil && left.Type() == "identifier" && left.Content(source) == name {
+				reassigned = true
+				return
+			}
+		}
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			walk(current.NamedChild(i))
+		}
+	}
+	walk(method.ChildByFieldName("body"))
+	return reassigned
+}
+
+func javaSiblingMethod(node *sitter.Node, name string, source []byte) *sitter.Node {
+	for current := node; current != nil; current = current.Parent() {
+		if current.Type() != "class_body" {
+			continue
+		}
+		var match *sitter.Node
+		for i := 0; i < int(current.NamedChildCount()); i++ {
+			candidate := current.NamedChild(i)
+			if candidate.Type() != "method_declaration" {
+				continue
+			}
+			methodName := candidate.ChildByFieldName("name")
+			if methodName != nil && methodName.Content(source) == name {
+				if match != nil {
+					return nil
+				}
+				match = candidate
+			}
+		}
+		return match
+	}
+	return nil
+}
+
+func javaKnownHTMLTextHelper(node *sitter.Node, name string, source []byte) bool {
+	if node == nil || name == "" {
+		return false
+	}
+	// javaStripComments works on source bytes after this AST check. A comment delimiter inside a string literal
+	// is data, not a comment; stripping it could turn an unsafe replacement text into a trusted entity. The
+	// proof is intentionally unavailable for that ambiguous shape rather than attempting a second Java lexer.
+	// Java also translates Unicode escapes before it recognizes comments, so any raw escape in a candidate
+	// helper could manufacture a return or a comment boundary that this source-level normalizer would miss.
+	if javaStringLiteralContainsCommentDelimiter(node, source) || strings.Contains(node.Content(source), `\u`) {
+		return false
+	}
+	params := node.ChildByFieldName("parameters")
+	if params == nil || params.NamedChildCount() != 1 {
+		return false
+	}
+	parameter := params.NamedChild(0).ChildByFieldName("name")
+	if parameter == nil {
+		return false
+	}
+	param := parameter.Content(source)
+	common := `StringBufferbuf=newStringBuffer();for(inti=0;i<` + param + `.length();i++){charch=` + param + `.charAt(i);`
+	allowOnly := `if(Character.isLetter(ch)||Character.isDigit(ch)||ch=='_'){buf.append(ch);}else{buf.append('?');}`
+	tail := `}returnbuf.toString();}`
+	allowed := `privatestaticString` + name + `(String` + param + `){` + common + allowOnly + tail
+	escaped := `privateString` + name + `(String` + param + `){` + common + `switch(ch){case'<':buf.append("&lt;");break;case'>':buf.append("&gt;");break;case'&':buf.append("&amp;");break;default:` + allowOnly + `}` + tail
+	normalized := javaCompact(javaStripComments(node.Content(source)))
+	return normalized == allowed || normalized == escaped
+}
+
+func javaStringLiteralContainsCommentDelimiter(node *sitter.Node, source []byte) bool {
+	if node == nil {
+		return false
+	}
+	if node.Type() == "string_literal" {
+		text := node.Content(source)
+		return strings.Contains(text, "/*") || strings.Contains(text, "*/") || strings.Contains(text, "//")
+	}
+	for i := 0; i < int(node.NamedChildCount()); i++ {
+		if javaStringLiteralContainsCommentDelimiter(node.NamedChild(i), source) {
+			return true
+		}
+	}
+	return false
+}
+
+func javaCompact(source string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, source)
+}
+
+func javaStripComments(source string) string {
+	var out strings.Builder
+	for i := 0; i < len(source); {
+		if i+1 < len(source) && source[i] == '/' && source[i+1] == '/' {
+			i += 2
+			for i < len(source) && source[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if i+1 < len(source) && source[i] == '/' && source[i+1] == '*' {
+			i += 2
+			for i+1 < len(source) && !(source[i] == '*' && source[i+1] == '/') {
+				i++
+			}
+			if i+1 < len(source) {
+				i += 2
+			}
+			continue
+		}
+		out.WriteByte(source[i])
+		i++
+	}
+	return out.String()
 }
 
 // reflectionGap records a dynamic-execution coverage gap for the reflection / dynamic-proxy / script-engine

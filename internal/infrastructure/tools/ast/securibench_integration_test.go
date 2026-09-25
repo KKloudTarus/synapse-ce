@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/javaprogram"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sastbench"
 )
@@ -157,6 +158,17 @@ func compareSecuribenchToSemgrep(t *testing.T, sarifPath string, cases []sastben
 // names are globally unique, so cross-file static-import resolution still works and intra-file flows are
 // preserved) and returns the engine's detections as line-anchored Findings keyed by base filename.
 func runJavaTaintLineAnchored(t *testing.T, bin, srcRoot string) []sastbench.Finding {
+	return runJavaTaintLineAnchoredWithOutputProof(t, bin, srcRoot, true)
+}
+
+// runJavaTaintLineAnchoredWithoutOutputProof replays the same freshly extracted facts with the optional
+// output-context field cleared. It is a diagnostic control for a context-sensitive model: source, parser,
+// all remaining facts, and graph construction are identical to the candidate run.
+func runJavaTaintLineAnchoredWithoutOutputProof(t *testing.T, bin, srcRoot string) []sastbench.Finding {
+	return runJavaTaintLineAnchoredWithOutputProof(t, bin, srcRoot, false)
+}
+
+func runJavaTaintLineAnchoredWithOutputProof(t *testing.T, bin, srcRoot string, retainOutputProof bool) []sastbench.Finding {
 	t.Helper()
 	var files []string
 	err := filepath.Walk(srcRoot, func(path string, info os.FileInfo, err error) error {
@@ -195,6 +207,11 @@ func runJavaTaintLineAnchored(t *testing.T, bin, srcRoot string) []sastbench.Fin
 	}
 	if doc.Truncated {
 		t.Fatalf("securibench facts truncated: the corpus exceeded the provider output cap in one batch; add batching")
+	}
+	if !retainOutputProof {
+		for i := range doc.Calls {
+			doc.Calls[i].OutputProof = javaprogram.OutputProofNone
+		}
 	}
 	g, err := taint.BuildJavaValueGraph(doc, taint.DefaultJavaCatalog())
 	if err != nil {
