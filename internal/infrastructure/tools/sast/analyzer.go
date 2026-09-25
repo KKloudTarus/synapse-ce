@@ -647,6 +647,9 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			if matched && isPHP && phpRuleOwnsGeneric(r.id, a, ext, phpText, matchText) {
 				continue
 			}
+			if matched && r.blockFn != nil && !r.blockFn(forwardBlock(lines, i)) {
+				continue // the bounded block the match opens answers the question the line could not
+			}
 			if matched {
 				h := ports.SASTRawFinding{
 					File: rel, Line: line, RuleID: r.id, CWE: r.cwe,
@@ -955,4 +958,42 @@ func isSecurityFinding(f ports.SASTRawFinding) bool {
 		return true
 	}
 	return f.RuleQuality == "security"
+}
+
+
+// forwardBlockLines caps how far a blockFn rule reads past its match. A struct or options literal that
+// runs longer than this is not the shape these rules are written for, and an unbounded read would let one
+// pathological file dominate the scan.
+const forwardBlockLines = 24
+
+// forwardBlock returns the brace-balanced text a match at index at opens, bounded by forwardBlockLines. It
+// stops as soon as the braces opened on the first line are closed, so an adjacent literal further down the
+// file cannot answer for this one. When the braces never balance within the cap the whole window is
+// returned, which keeps the rule fail-open (it reports) rather than silently clearing a real finding.
+func forwardBlock(lines []string, at int) string {
+	if at < 0 || at >= len(lines) {
+		return ""
+	}
+	var b strings.Builder
+	depth := 0
+	started := false
+	for i := at; i < len(lines) && i < at+forwardBlockLines; i++ {
+		b.WriteString(lines[i])
+		b.WriteByte('\n')
+		for _, c := range lines[i] {
+			switch c {
+			case '{', '(':
+				depth++
+				started = true
+			case '}', ')':
+				if depth > 0 {
+					depth--
+				}
+			}
+		}
+		if started && depth == 0 {
+			break
+		}
+	}
+	return b.String()
 }

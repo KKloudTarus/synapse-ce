@@ -269,6 +269,7 @@ compose-secret-in-env
 compose-unconfined-security-opt
 compose-userns-host
 contentful-token
+cookie-missing-secure-flag
 cpp-abort
 cpp-access-toctou
 cpp-alloca

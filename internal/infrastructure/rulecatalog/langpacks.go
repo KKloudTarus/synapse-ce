@@ -5574,10 +5574,10 @@ func langPackCatalog() []rule.Rule {
 		{
 			Key: rule.Key("go-math-rand-import"), Name: "math/rand imported (not for security tokens)", Language: "Go", Type: rule.TypeSecurityHotspot, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"sast", "go"}, CWE: []string{"CWE-338"}, OWASP: []string{}, Detection: rule.DetectionPattern,
 			Description:         "The math/rand package is imported; its output is predictable and must not be used for tokens, keys, or IDs.",
-			Rationale:           "math/rand is a deterministic PRNG, unsuitable for anything security-sensitive (CWE-338). Review each use; for secrets use crypto/rand.\n\nSource: https://cwe.mitre.org/data/definitions/338.html",
+			Rationale:           "math/rand is a deterministic PRNG, unsuitable for anything security-sensitive (CWE-338). Review each use; for secrets use crypto/rand. math/rand/v2 has the same property: the v2 API changed, the predictability did not.\n\nSource: https://cwe.mitre.org/data/definitions/338.html",
 			Remediation:         "Use crypto/rand for tokens, salts, keys, and session identifiers.",
 			CompliantExample:    "import \"crypto/rand\"",
-			NoncompliantExample: "import \"math/rand\"",
+			NoncompliantExample: "import \"math/rand/v2\"",
 			RemediationEffort:   15,
 		},
 		{

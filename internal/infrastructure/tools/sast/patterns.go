@@ -27,6 +27,11 @@ type rule struct {
 	exts     map[string]bool
 	rtype    domainrule.Type
 	rquality domainrule.Quality
+	// blockFn, when set, decides whether a line match survives by reading the bounded brace-balanced
+	// block the match opens. It exists for the ABSENCE of a field in a multi-line literal, which a
+	// line pattern cannot see: http.Cookie{...} spread over eight lines is dangerous because Secure
+	// is missing, and no single line says so. nil for every other rule, so the hot path is unchanged.
+	blockFn func(block string) bool
 }
 
 // ruleType returns the finding type, defaulting to a security vulnerability.
@@ -726,6 +731,25 @@ func builtinRules() []rule {
 				`(info|infof|log|logf|warn|warnf|warning|error|errorf|errf|debug|debugf|exception|critical|fatal|fatalf|trace|print|printf|println)` +
 				`\s*\([^)]*(password|passwd|token|secret|credential|api[_-]?key|authorization|bearer|private[_-]?key|resetUrl|reset_url)`),
 			skipFn: commentOnlyLine,
+		},
+		{
+			id: "cookie-missing-secure-flag", cwe: "CWE-614", severity: shared.SeverityMedium,
+			title: "Cookie set without the Secure flag",
+			desc: "A cookie literal sets no Secure field, so the browser will send it over plaintext HTTP as well as HTTPS.",
+			// The existing insecure-cookie-flags rule below catches a flag written as false. This one
+			// catches the far more common shape, the field being absent from a multi-line literal, which
+			// needs the block rather than the line. Found on a real service where four auth-token cookies
+			// were set with Path, Expires and HttpOnly but no Secure.
+			re:     regexp.MustCompile(`(?i)(http\.Cookie\{|new\s+Cookie\(|res\.cookie\s*\(|SetCookie\s*\()`),
+			skipFn: commentOnlyLine,
+			blockFn: func(block string) bool {
+				lower := strings.ToLower(block)
+				// Report only when Secure is absent entirely. A Secure written as false is the other
+				// rule's finding, so leaving it here would double-report one cookie.
+				return !strings.Contains(lower, "secure")
+			},
+			rtype:    domainrule.TypeVulnerability,
+			rquality: domainrule.QualitySecurity,
 		},
 		{
 			id: "insecure-cookie-flags", cwe: "CWE-614", severity: shared.SeverityMedium, title: "Session cookie uses insecure flags",
