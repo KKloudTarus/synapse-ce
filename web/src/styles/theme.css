@@ -435,6 +435,12 @@
     --background-color-error-solid_hover: var(--color-bg-error-solid_hover);
     --background-color-border-brand: var(--color-border-brand);
     --background-color-border-brand_alt: var(--color-border-brand_alt);
+    /* `bg-warning/10` is the tinted-callout idiom used across the app, and it generated nothing.
+       It takes the foreground hue rather than the pale -primary surface, because a tenth of a
+       near-white surface is no tint at all; the surface tokens keep their own meaning. */
+    --background-color-warning: var(--color-fg-warning-primary);
+    --background-color-success: var(--color-fg-success-primary);
+    --background-color-error: var(--color-fg-error-primary);
 
     /* TEXT PROPERTY COLORS */
     --color-text-white: var(--color-white);
@@ -461,6 +467,13 @@
     --text-color-error-primary_hover: var(--color-text-error-primary_hover);
     --text-color-brand-secondary_hover: var(--color-text-brand-secondary_hover);
     --text-color-tooltip-supporting-text: var(--color-tooltip-supporting-text);
+    /* The bare severity names are what most call sites reach for, and none of them existed: a
+       `text-warning` badge rendered in the inherited body colour, which is why a warning pill was
+       indistinguishable from ordinary text. They resolve to the same colour as the -primary
+       spelling. */
+    --text-color-warning: var(--color-text-warning-primary);
+    --text-color-success: var(--color-text-success-primary);
+    --text-color-error: var(--color-text-error-primary);
 
     /* BORDER PROPERTY COLORS */
     --border-color-primary: var(--color-border-primary);
@@ -473,6 +486,15 @@
     --border-color-brand_alt: var(--color-border-brand_alt);
     --border-color-brand-solid: var(--color-bg-brand-solid);
     --border-color-brand-solid_hover: var(--color-bg-brand-solid_hover);
+    /* warning and success had no border token at all, and neither did the -primary spelling for any
+       of the three, so `border-warning/30`, `border-success-primary/25` and `border-error-primary`
+       generated no rule and the element drew no border. They take the same foreground hue the text
+       token uses, which is what a tinted callout border is in this system. */
+    --border-color-warning: var(--color-fg-warning-primary);
+    --border-color-success: var(--color-fg-success-primary);
+    --border-color-warning-primary: var(--color-fg-warning-primary);
+    --border-color-success-primary: var(--color-fg-success-primary);
+    --border-color-error-primary: var(--color-fg-error-primary);
 
     /* RING PROPERTY COLORS */
     --ring-color-primary: var(--color-border-primary);
@@ -485,6 +507,11 @@
     --ring-color-brand_alt: var(--color-border-brand_alt);
     --ring-color-brand-solid: var(--color-bg-brand-solid);
     --ring-color-brand-solid_hover: var(--color-bg-brand-solid_hover);
+    --ring-color-warning: var(--color-fg-warning-primary);
+    --ring-color-success: var(--color-fg-success-primary);
+    --ring-color-warning-primary: var(--color-fg-warning-primary);
+    --ring-color-success-primary: var(--color-fg-success-primary);
+    --ring-color-error-primary: var(--color-fg-error-primary);
 
     /* OUTLINE PROPERTY COLORS */
     --outline-color-primary: var(--color-border-primary);
