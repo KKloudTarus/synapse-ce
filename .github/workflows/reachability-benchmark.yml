@@ -660,14 +660,25 @@ jobs:
           test -n "$GO_ARTIFACT"
           test "$PYTHON_BASELINE" = success
           test -n "$PYTHON_ARTIFACT"
+          # A pull request can never be authorized: the trust predicate hard-requires a non-PR event,
+          # so this pins that invariant rather than restating it hopefully.
           if [ "$EVENT_NAME" = pull_request ]; then
             test "$TRUSTED" = false
-            test "$BENCHMARK" = skipped
             test "$PR_LIFECYCLE" = success
             test -n "$PR_ARTIFACT"
           else
-            test "$TRUSTED" = true
+            test "$PR_LIFECYCLE" = skipped
+          fi
+          # Gate the evidence assertions on trust rather than asserting trust itself, the way
+          # engine-accuracy.yml already does. The trusted benchmark runs on a self-hosted runner and
+          # is switched on by REACHABILITY_BENCHMARK_TRUSTED_ENABLED, which is false; asserting
+          # `TRUSTED = true` on every non-PR event therefore made this status red on every push to
+          # main, which is where it has been since the flag was turned off. An authorized run must
+          # produce evidence and an unauthorized run must produce none; both are green, and a run
+          # that claims authorization without evidence is not.
+          if [ "$TRUSTED" = true ]; then
             test "$BENCHMARK" = success
             test -n "$BENCHMARK_ARTIFACT"
-            test "$PR_LIFECYCLE" = skipped
+          else
+            test "$BENCHMARK" = skipped
           fi

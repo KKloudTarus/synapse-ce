@@ -172,9 +172,17 @@ func TestReachabilityBenchmarkWorkflowPolicy(t *testing.T) {
 		`test "$BENCHMARK" = skipped`,
 		`test "$PR_LIFECYCLE" = success`,
 		`test -n "$PR_ARTIFACT"`,
-		`test "$TRUSTED" = true`,
+		// The evidence assertions are gated on trust rather than asserting trust itself, which is
+		// what engine-accuracy's policy already requires (internal/infrastructure/scabench). The
+		// trusted benchmark runs on a self-hosted runner behind
+		// REACHABILITY_BENCHMARK_TRUSTED_ENABLED; asserting `TRUSTED = true` on every non-PR event
+		// made this status red on every push to main for as long as that flag stayed off. What has
+		// to hold is the pair below: an authorized run produces evidence, an unauthorized one
+		// produces none, so a run cannot claim authorization it did not have.
+		`if [ "$TRUSTED" = true ]; then`,
 		`test "$BENCHMARK" = success`,
 		`test -n "$BENCHMARK_ARTIFACT"`,
+		`test "$BENCHMARK" = skipped`,
 		`test "$PR_LIFECYCLE" = skipped`,
 		`test "$GO_BASELINE" = success`,
 		`test -n "$GO_ARTIFACT"`,
