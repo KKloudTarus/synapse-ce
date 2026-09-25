@@ -131,6 +131,10 @@ func Measure(warmup, samples int, op func()) Result {
 		start := time.Now()
 		op()
 		elapsed := time.Since(start)
+		if elapsed <= 0 {
+			// Fast operations can fall below the timer resolution on Windows.
+			elapsed = time.Nanosecond
+		}
 		latencies = append(latencies, elapsed)
 		timedDuration += elapsed
 		runtime.ReadMemStats(&after)
