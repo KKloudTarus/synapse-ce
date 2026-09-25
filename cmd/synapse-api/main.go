@@ -158,6 +158,8 @@ import (
 	incidenttriage "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidenttriage"
 	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
+	legalholduc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/legalholduc"
+	privacyexport "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacyexport"
 	privacypolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacypolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/processreport"
 	responseobserveruc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/responseobserver"
@@ -463,6 +465,7 @@ func main() {
 		ports.DetectionRecordStore
 		ports.CorrelationDetectionSource
 	} // #423 detection ledger projection
+	var legalHoldStore ports.LegalHoldStore           // #635 legal hold over an engagement's detection data
 	var purpleCoverageStore ports.PurpleCoverageStore // #426 emulated technique vs observed detection
 	var emulationRunStore emulationuc.RunStore        // #426 adversary-emulation run producer
 	var accuracyRunStore ports.AccuracyRunStore       // #860 D8.6 detection-accuracy regression trend
@@ -640,6 +643,7 @@ func main() {
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		vexStatementStore = postgres.NewVEXStatementRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
+		legalHoldStore = postgres.NewLegalHoldRepository(pool)
 		purpleCoverageStore = postgres.NewPurpleRepository(pool)
 		accuracyRunStore = postgres.NewAccuracyRunRepository(pool)
 		emulationRunStore = postgres.NewEmulationRunRepository(pool)
@@ -819,6 +823,7 @@ func main() {
 		vexStatementStore = memory.NewVEXStatementStore()
 		memoryDetectionRecords := memory.NewDetectionRecordStore()
 		detectionRecordStore = memoryDetectionRecords
+		legalHoldStore = memory.NewLegalHoldStore()
 		purpleCoverageStore = memory.NewPurpleStore()
 		accuracyRunStore = memory.NewAccuracyRunStore()
 		emulationRunStore = memory.NewEmulationRunStore()
@@ -2962,6 +2967,27 @@ func main() {
 			if telemetrySvc != nil {
 				telemetrySvc.SetDetectionReconciler(detectSvc)
 			}
+			// Data governance (#635): legal hold, subject-access export and on-demand erasure over the
+			// detection projection this ledger owns. All three existed down to the migration and the
+			// dashboard tab, and no composition root ever built them, so the Data Governance tab could
+			// only report the feature as switched off. They ride the detection ledger because that is
+			// the data they govern.
+			legalHoldSvc, lherr := legalholduc.NewService(legalHoldStore, auditLog, clock.Now)
+			if lherr != nil {
+				log.Error("legal-hold service init failed", "err", lherr)
+				os.Exit(1)
+			}
+			// Retention expiry and erasure both consult the hold before deleting, fail-closed.
+			detectSvc.SetLegalHoldChecker(legalHoldSvc)
+			router.SetLegalHolds(legalHoldSvc)
+			router.SetDataPurge(detectSvc)
+			privacyExportSvc, peerr := privacyexport.NewService(detectionRecordStore, legalHoldSvc, auditLog, clock.Now)
+			if peerr != nil {
+				log.Error("privacy export service init failed", "err", peerr)
+				os.Exit(1)
+			}
+			router.SetPrivacyExport(privacyExportSvc)
+			log.Info("data governance ENABLED (legal hold, subject-access export, on-demand erasure)")
 
 			tenantStore, ok := repo.(ports.DetectionReconciliationTenantStore)
 			if !ok {
