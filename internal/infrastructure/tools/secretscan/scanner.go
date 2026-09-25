@@ -801,6 +801,46 @@ var highEntropyDeferKeywords = []string{
 	"integrity", "digest", "checksum", "sha256", "sha384", "sha512", "sha1", "md5", "fingerprint", "etag",
 }
 
+// resourcePathExtensions are the file extensions whose presence marks a quoted value as a RESOURCE PATH
+// rather than a credential. Kept to source, config and migration artefacts: a credential is never stored as
+// the name of a .java or .xml file, while a long generated migration name is exactly that shape.
+var resourcePathExtensions = []string{
+	".xml", ".sql", ".yaml", ".yml", ".json", ".properties", ".java", ".kt", ".ts", ".js", ".go", ".py",
+	".html", ".csv", ".md", ".txt", ".png", ".jpg", ".svg",
+}
+
+// resourcePathIndicators mark the line as declaring where something lives.
+var resourcePathIndicators = []string{"classpath:", "file=", "file:", "path=", "resource=", "src=", "href=", "include"}
+
+// lineDeclaresResourcePath reports whether the line is a resource declaration whose high-entropy token is a
+// FILE NAME, not a credential. Liquibase and Flyway generate migration names long and varied enough to clear
+// a 4.5 bits/char entropy floor on the base64 alphabet, so a JHipster changelog produces one keyword-free
+// entropy hit per include line and nothing in the old skip list stood them down.
+//
+// Both halves are required, which is what keeps this from swallowing a real secret: the line must name a
+// location AND carry a known non-credential extension. A credential assigned on a line that merely contains
+// the word "file" still fires, and a credential keyword on the line defers to the gating generic-secret rule
+// before this is consulted.
+func lineDeclaresResourcePath(line string) bool {
+	lower := strings.ToLower(line)
+	hasIndicator := false
+	for _, indicator := range resourcePathIndicators {
+		if strings.Contains(lower, indicator) {
+			hasIndicator = true
+			break
+		}
+	}
+	if !hasIndicator {
+		return false
+	}
+	for _, ext := range resourcePathExtensions {
+		if strings.Contains(lower, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 // defaultRules is the owned starter ruleset. Prefix-anchored rules (AWS/GitHub/GitLab/Slack/Google/private
 // key) need no entropy gate; the generic assignment rule is entropy-gated and only MEDIUM to bound FPs.
 func baseDefaultRules() []rule {
@@ -1048,7 +1088,9 @@ func baseDefaultRules() []rule {
 			// keyword-anchored generic-secret rule (which is PROMOTED/gating) rather than quarantining here,
 			// so a keyword-context secret is never demoted to gate-exempt. Also skip benign high-entropy
 			// contexts (SRI/integrity, digests, checksums) that are public hashes, not credentials.
-			lineSkip: func(line string) bool { return hasAnyKeyword(line, highEntropyDeferKeywords) },
+			lineSkip: func(line string) bool {
+				return hasAnyKeyword(line, highEntropyDeferKeywords) || lineDeclaresResourcePath(line)
+			},
 		},
 		{
 			id: "generic-secret", category: "Generic", title: "Hardcoded secret", severity: shared.SeverityMedium,
