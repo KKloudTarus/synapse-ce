@@ -51,6 +51,11 @@ def provenance(overrides=None):
 
 
 class TrustedDispatchTest(unittest.TestCase):
+    def test_run_as_user_uses_absolute_binary_path(self):
+        with patch.object(dispatch, "run") as run:
+            dispatch.as_user("git", "status")
+        self.assertEqual(run.call_args.args[:5], ("/usr/sbin/runuser", "-u", "ec2-user", "--", "git"))
+
     @unittest.skipUnless(os.name == "posix", "Linux file locking is required")
     def test_second_run_cannot_enter_locked_host(self):
         import fcntl

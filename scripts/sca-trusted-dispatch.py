@@ -17,6 +17,7 @@ import tarfile
 SOURCE_SHA_FILE = Path("/etc/synapse-sca/trusted-source-sha")
 APPROVAL_DIGEST_FILE = Path("/etc/synapse-sca/trusted-approval-sha256")
 VERIFIER = Path("/opt/synapse-sca/verify-publication")
+RUNUSER = "/usr/sbin/runuser"
 LOCK_FILE = Path("/run/lock/synapse-sca-trusted.lock")
 SOURCE_REPO = Path("/protected/sca-staging/repo")
 STAGING = Path("/protected/sca-staging/ci-results")
@@ -113,7 +114,7 @@ def run(*args, capture=False, **kwargs):
 
 
 def as_user(*args, capture=False, **kwargs):
-    return run("runuser", "-u", "ec2-user", "--", *args, capture=capture, **kwargs)
+    return run(RUNUSER, "-u", "ec2-user", "--", *args, capture=capture, **kwargs)
 
 
 def prepare_source(source_sha):
@@ -197,7 +198,7 @@ def execute_cycle(run_root, source_sha, run_id, attempt, provenance_digest, reco
     output_root = output_parent / "publication"
     log_path = run_root / "benchmark.log"
     environment = {"PATH": "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin", "HOME": "/home/ec2-user", "XDG_RUNTIME_DIR": "/run/user/1000", "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus", "RUNNER_TEMP": "/protected/sca-staging"}
-    command = ["runuser", "-u", "ec2-user", "--", "bash", "scripts/run-sca-cycle-delegated.sh", "run", "--corpus-root", str(SOURCE_REPO / "internal/usecase/scabench/corpus"), "--trusted-input-root", str(snapshot), "--output-root", str(output_root), "--raw-retention-root", str(RAW_RETENTION), "--implementation-commit", source_sha, "--run-key", f"{run_id}/{attempt}"]
+    command = [RUNUSER, "-u", "ec2-user", "--", "bash", "scripts/run-sca-cycle-delegated.sh", "run", "--corpus-root", str(SOURCE_REPO / "internal/usecase/scabench/corpus"), "--trusted-input-root", str(snapshot), "--output-root", str(output_root), "--raw-retention-root", str(RAW_RETENTION), "--implementation-commit", source_sha, "--run-key", f"{run_id}/{attempt}"]
     with log_path.open("wb") as log:
         completed = subprocess.run(command, cwd=SOURCE_REPO, env=environment, stdout=log, stderr=subprocess.STDOUT, timeout=2500, check=False)
     if completed.returncode:
