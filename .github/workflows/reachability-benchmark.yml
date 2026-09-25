@@ -93,6 +93,19 @@ jobs:
           test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
           export TMPDIR="$RUNNER_TEMP"
           make reachability-benchmark
+      - name: Require complete per-language candidate scorecard
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/synapse-reachability/published/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}/repetition-1/report.json"
+          test -s "$report"
+          jq -e '
+            .candidate.accepted == true and
+            .required_executions > 0 and
+            .required_executions == .observed_executions and
+            (.languages | map(.language) | sort) == ["c_cpp", "dotnet", "go", "javascript", "jvm", "php", "python", "ruby", "runtime", "rust"] and
+            all(.languages[]; .reachability.precision.status != "" and .reachability.recall.status != "" and .coverage_rate.status != "" and .no_analysis_rate.status != "")
+          ' "$report" > /dev/null
       - name: Gate owned language precision and recall ratchets
         shell: bash
         run: |

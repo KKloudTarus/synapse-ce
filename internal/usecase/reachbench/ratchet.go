@@ -215,9 +215,16 @@ func checkCandidateRatchet(candidate MeasurementReport, ratchet CandidateRatchet
 	for _, language := range ratchet.Languages {
 		baselineLanguages[language.Language] = language
 	}
+	candidateLanguageScores := map[string]LanguageSummary{}
 	for _, language := range candidate.Languages {
+		candidateLanguageScores[language.Language] = language
 		if base, ok := baselineLanguages[language.Language]; ok && ratioRegressed(language.Reachability.Recall, base.Recall) {
 			reasons = append(reasons, fmt.Sprintf("language %s reachable recall regressed", language.Language))
+		}
+	}
+	for language := range baselineLanguages {
+		if _, ok := candidateLanguageScores[language]; !ok {
+			reasons = append(reasons, fmt.Sprintf("language %s is missing from candidate scorecard", language))
 		}
 	}
 	if ratioRegressed(candidate.Reachability.Precision, ratchet.Reachability.Precision) {
