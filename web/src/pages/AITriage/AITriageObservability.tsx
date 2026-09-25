@@ -281,7 +281,11 @@ function ModelAndPromptSection({ models, prompts }: { models: AITriageMetricRow[
 }
 
 function CWESection({ rows }: { rows: AITriageMetricRow[] }) {
-  const max = rows[0]?.requestCount ?? 1
+  // The rows arrive ordered by CWE identifier, not by volume, so the first is not the largest.
+  // Reading the maximum off rows[0] made the denominator whichever CWE sorted first: with CWE-611
+  // at 2 requests ahead of CWE-776 at 14, that bar was drawn 700% as wide as its track and ran off
+  // the side of the card. The clamp keeps a future data shape from doing it again.
+  const max = Math.max(1, ...rows.map((row) => row.requestCount))
   return (
     <Card title="By CWE">
       <div className="space-y-2.5 min-w-0">
@@ -301,7 +305,7 @@ function CWESection({ rows }: { rows: AITriageMetricRow[] }) {
             <div className="h-1.5 w-full rounded-full bg-secondary">
               <div
                 className="h-1.5 rounded-full bg-brand-solid transition-all"
-                style={{ width: `${(row.requestCount / max) * 100}%` }}
+                style={{ width: `${Math.min(100, (row.requestCount / max) * 100)}%` }}
               />
             </div>
           </div>

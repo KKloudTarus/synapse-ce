@@ -174,6 +174,23 @@ for (const viewport of VIEWPORTS) {
         })
         .slice(0, 5)
         .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 3).join('.')}`.slice(0, 110))
+      // A child wider than its parent is a broken layout even when the page does not scroll. The
+      // parent clips it, so the document never grows and a page-level check reports the screen as
+      // clean. That is how a progress bar drawn at 700% of its own track, from a denominator taken
+      // off the wrong row, ran off the side of its card through 150 captured screens unnoticed.
+      const overflowsParent = [...main.querySelectorAll('*')]
+        .filter((el) => {
+          const parent = el.parentElement
+          if (!parent) return false
+          const style = getComputedStyle(el)
+          // Absolute and fixed elements are positioned against an ancestor deliberately.
+          if (style.position === 'absolute' || style.position === 'fixed') return false
+          const r = el.getBoundingClientRect()
+          const pr = parent.getBoundingClientRect()
+          return r.width > 0 && r.width > pr.width + 2
+        })
+        .slice(0, 5)
+        .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 3).join('.')}`.slice(0, 110))
       const buttonsWithoutName = [...document.querySelectorAll('button')]
         .filter((b) => !(b.textContent ?? '').trim() && !b.getAttribute('aria-label') && !b.getAttribute('title'))
         .length
@@ -189,6 +206,7 @@ for (const viewport of VIEWPORTS) {
         renderedError,
         scrollsSideways: doc.scrollWidth > doc.clientWidth + 2,
         overflowing,
+        overflowsParent,
         headings: headings.slice(0, 3),
         buttonsWithoutName,
         bodyText: (document.body.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 160),
@@ -248,7 +266,7 @@ writeFileSync(`${OUT}/findings.json`, JSON.stringify(findings, null, 2))
 writeFileSync(`${OUT}/api-calls.json`, JSON.stringify([...apiCalls].sort(), null, 2))
 
 const problems = findings.filter(
-  (f) => f.loadError || f.renderedError?.length || f.stillLoading || f.captureTruncated || f.consoleErrors.length || f.failedRequests.length || f.scrollsSideways || !f.headings.length || f.buttonsWithoutName > 0,
+  (f) => f.loadError || f.renderedError?.length || f.stillLoading || f.captureTruncated || f.consoleErrors.length || f.failedRequests.length || f.scrollsSideways || f.overflowsParent?.length || !f.headings.length || f.buttonsWithoutName > 0,
 )
 console.log(`distinct API routes exercised: ${apiCalls.size} (written to ${OUT}/api-calls.json)`)
 console.log(`screens visited: ${findings.length} (${ROUTES.length} routes x ${VIEWPORTS.length} viewports)`)
@@ -263,6 +281,7 @@ for (const p of problems) {
   if (p.captureTruncated) console.log(`    capture truncated: content is ${p.captureTruncated}px, screenshot holds 12000px`)
   if (!p.headings.length) console.log(`    no h1/h2 heading; body starts: "${p.bodyText.slice(0, 80)}"`)
   if (p.scrollsSideways) console.log(`    scrolls sideways; widest: ${p.overflowing.join(' | ')}`)
+  if (p.overflowsParent?.length) console.log(`    wider than its container (clipped, so the page does not scroll): ${p.overflowsParent.join(' | ')}`)
   if (p.buttonsWithoutName) console.log(`    ${p.buttonsWithoutName} button(s) with no accessible name`)
   for (const e of p.consoleErrors) console.log(`    console: ${e}`)
   for (const r of p.failedRequests) console.log(`    request failed: ${r}`)
