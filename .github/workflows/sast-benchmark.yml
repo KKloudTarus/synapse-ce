@@ -294,7 +294,6 @@ jobs:
           python3 scripts/test_sast_proof_gate.py
           python3 scripts/test_sast_proof_verifier.py
           python3 scripts/test_sast_offline_verifier.py
-          python3 scripts/test_sast_composite_verifier.py
       - name: Measure historical post-triage baseline
         shell: bash
         env:

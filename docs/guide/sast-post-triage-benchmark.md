@@ -35,12 +35,11 @@ verifier. A future change must earn its own fresh CI result.
 
 ## Optional model audit
 
-scripts/sast_offline_verifier.py and scripts/sast_composite_verifier.py remain
-available for an optional local model audit. The composite verifier permits a
-model rejection only when the syntactic proof also validates it. Keep raw model
-exchanges, transcripts, attestation, verdicts, and reports under .git/taurus/;
-they are not committed benchmark inputs or required CI artifacts. The previous
-model-assisted capture is retained locally at
+scripts/sast_offline_verifier.py remains available for an optional local model
+audit. Its model decisions do not satisfy the required deterministic proof gate.
+Keep raw model exchanges, transcripts, attestation, verdicts, and reports under
+`.git/taurus/`; they are not committed benchmark inputs or required CI artifacts.
+The previous model-assisted capture is retained locally at
 .git/taurus/sast-post-triage-artifacts. Do not treat it as the result of the
 required deterministic proof job.
 
