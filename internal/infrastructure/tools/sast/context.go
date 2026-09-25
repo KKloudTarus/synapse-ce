@@ -37,6 +37,14 @@ type routeContext struct {
 type projectContext struct {
 	Files     []projectFile
 	Summaries map[string]functionSummary
+	// callerEvidence memoises projectCallerToCurrentWrapperEvidence by the enclosing function it was
+	// asked about. Without it that walk runs once per FINDING, and it reads every other file in the
+	// project line by line, so a tree with many findings does files x findings x lines of regex work.
+	// On a 455-file TypeScript service that was enough to exhaust the ten-minute scan timeout and
+	// return nothing at all. Every finding inside one function asks the identical question, so one
+	// answer per function is the whole saving. The map is shared because projectContext is copied by
+	// value but its maps are not.
+	callerEvidence map[string]string
 }
 
 type projectFile struct {
@@ -81,8 +89,9 @@ var sanitizerTokens = []string{
 
 func buildProjectContext(ctx context.Context, files []sourceFile) (projectContext, error) {
 	project := projectContext{
-		Files:     make([]projectFile, 0, len(files)),
-		Summaries: map[string]functionSummary{},
+		Files:          make([]projectFile, 0, len(files)),
+		Summaries:      map[string]functionSummary{},
+		callerEvidence: map[string]string{},
 	}
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
@@ -595,15 +604,26 @@ func projectCallerToCurrentWrapperEvidence(lines []string, firstLine, sinkIdx in
 		return ""
 	}
 	wrapper.File = rel
+	key := rel + "\x00" + wrapper.Name
+	if project.callerEvidence != nil {
+		if cached, hit := project.callerEvidence[key]; hit {
+			return cached
+		}
+	}
+	answer := ""
 	for _, file := range project.Files {
 		if file.Rel == rel {
 			continue
 		}
 		if ev := callerEvidenceInFile(wrapper, file); ev != "" {
-			return ev
+			answer = ev
+			break
 		}
 	}
-	return ""
+	if project.callerEvidence != nil {
+		project.callerEvidence[key] = answer
+	}
+	return answer
 }
 
 func callerEvidenceInFile(wrapper functionSummary, file projectFile) string {
