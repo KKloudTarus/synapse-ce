@@ -101,6 +101,14 @@ var seccompAllow = []int{
 	unix.SYS_EPOLL_WAIT, unix.SYS_EPOLL_PWAIT, unix.SYS_EPOLL_PWAIT2, unix.SYS_EVENTFD,
 	unix.SYS_EVENTFD2, unix.SYS_SIGNALFD, unix.SYS_SIGNALFD4, unix.SYS_TIMERFD_CREATE,
 	unix.SYS_TIMERFD_SETTIME, unix.SYS_TIMERFD_GETTIME,
+	// POSIX per-process timers and alarm, which are how a tool bounds its own work. Both were
+	// denied, and GNU timeout uses timer_create with alarm as its fallback, so `timeout 4 cmd`
+	// inside the sandbox warned once on stderr and then did not time out at all: it waited for the
+	// command to finish. A tool relying on timeout for a bound silently lost it, which is a safety
+	// property going missing rather than an inconvenience. These are process-local, create no
+	// namespace and grant nothing, so allowing them takes nothing away from the filter.
+	unix.SYS_TIMER_CREATE, unix.SYS_TIMER_SETTIME, unix.SYS_TIMER_GETTIME,
+	unix.SYS_TIMER_DELETE, unix.SYS_TIMER_GETOVERRUN, unix.SYS_ALARM,
 	// network (TCP/UDP – NOT raw; AF_PACKET blocked by dropping CAP_NET_RAW)
 	unix.SYS_SOCKET, unix.SYS_CONNECT, unix.SYS_ACCEPT, unix.SYS_ACCEPT4, unix.SYS_BIND,
 	unix.SYS_LISTEN, unix.SYS_GETSOCKNAME, unix.SYS_GETPEERNAME, unix.SYS_SOCKETPAIR,
