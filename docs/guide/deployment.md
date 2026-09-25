@@ -255,6 +255,24 @@ and replay after worker or broker restart is refused.
 - Rotate database, object-store, vault, and evidence credentials according to their own dual-read/dual-write
   procedures; do not bundle them into the broker environment. The broker receives only its grant public key.
 
+## Host prerequisites for the execution tier
+
+The execution tier is the only part with kernel requirements, and every one of them fails closed
+rather than degrading, so a host that is missing one refuses the work instead of running it
+unprotected. Provision these before deploying, not after a scan blames the target.
+
+| Requirement | Why | Check |
+| --- | --- | --- |
+| `bubblewrap`, and permission to create a mount namespace | every tool runs confined; a host that cannot create the namespace runs nothing | `synapse-sandbox-check -mode full` |
+| `net.ipv4.ip_forward = 1` | the egress namespace routes through a veth pair; with forwarding off the kernel drops every packet crossing it, so an allowed destination is as unreachable as a denied one | `cat /proc/sys/net/ipv4/ip_forward` |
+| `CAP_NET_ADMIN` and `CAP_SYS_ADMIN` on the broker | building the namespace, the veth pair and the filter rules needs them; only the root broker holds them, never the worker | `getpcaps` on the broker process |
+| a delegated cgroup v2 subtree | the per-run memory and pid limits are applied through it; without one they have nothing to act on | run the tier as a systemd unit, or under `systemd-run --user` |
+| the tool binaries inside the curated read-only root | the sandbox binds `/usr`, `/bin`, `/sbin`, `/lib` and `/lib64` and deliberately omits `/home`, `/root`, `/opt` and `/var`, so a binary under a home directory cannot be reached | `/usr/local/bin` is inside it |
+
+The probe refuses and names the setting when one of these is missing, so the composition root
+degrades to an isolated sandbox rather than pretending to enforce egress. See
+[troubleshooting](troubleshooting.md#recon-and-the-sandbox) for each failure as it appears.
+
 ## Supported network execution posture
 
 Recon has an authoritative signed-grant issuer. Production refuses CSPM and networked SCA/acquisition until their
