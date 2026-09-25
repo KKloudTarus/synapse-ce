@@ -9,10 +9,12 @@
 package secretscan
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -59,6 +61,12 @@ type rule struct {
 	// lineSkip, when set, drops a match based on the whole line it sits on. It is how a rule tells a
 	// delimiter quoted inside other code from the thing it delimits.
 	lineSkip func(line string) bool
+	// maskNotebookOutput makes this rule read a notebook with its cell OUTPUTS blanked.
+	maskNotebookOutput bool
+	// skipValue drops a match on the matched VALUE rather than on its line, for a shape a regex cannot
+	// express. It exists for the keyword-free entropy rule, whose character class includes "/" and so
+	// reads a URL or asset path as base64.
+	skipValue func(secret string) bool
 	// scanComments makes this rule read the file WITH its comments intact. Comments are blanked for
 	// every other rule, because a generic or keyword-anchored pattern fires constantly on documentation
 	// and example values. A provider rule whose unique prefix IS the signal has the opposite problem: a
@@ -459,6 +467,7 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 	original := string(data)
 	data = maskComments(rel, data)
 	text := string(data)
+	var masked []byte // notebook-output-masked view, built once on first demand
 	awsCandidates := make([]awsCandidate, 0, 3)
 	for i := range s.rules {
 		r := &s.rules[i]
@@ -466,6 +475,12 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 		subject := text
 		if r.scanComments {
 			subject = original
+		}
+		if r.maskNotebookOutput {
+			if masked == nil {
+				masked = maskNotebookOutputs(rel, []byte(subject))
+			}
+			subject = string(masked)
 		}
 		if !hasAnyKeyword(subject, r.keywords) {
 			continue
@@ -480,6 +495,9 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			}
 			secret := subject[start:end]
 			if s.allowed(secret, r.allow) {
+				continue
+			}
+			if r.skipValue != nil && r.skipValue(secret) {
 				continue
 			}
 			if r.lineSkip != nil && r.lineSkip(lineOf(subject, start)) {
@@ -813,6 +831,45 @@ var highEntropyDeferKeywords = []string{
 	"integrity", "digest", "checksum", "sha256", "sha384", "sha512", "sha1", "md5", "fingerprint", "etag",
 }
 
+// wordlikePathToken reports whether a slash-bearing candidate is a PATH rather than base64. The
+// keyword-free entropy rule's character class includes "/", so a URL or asset path of the right length
+// clears the 4.5 bits/char floor and is reported as a credential. Found across a real estate: one notebook
+// cell's output held 2.2 MB of a printed catalogue dump, and 1,999 of the 2,844 keyword-free entropy
+// findings in the whole estate came from that single file, all of them CDN asset paths, one repeated 853
+// times.
+//
+// The discriminator is base64's own signature: encoding random bytes produces mixed case throughout, so
+// any run of 8 or more characters holds both an upper and a lower case letter. A path's segments are words
+// and numbers, which do not. A candidate whose every slash-delimited segment lacks that mixed-case run is
+// a path. Segments shorter than 8 are ignored, since a short one carries no evidence either way.
+//
+// This suppresses on the VALUE, so it cannot hide a credential that merely sits on a line near a path, and
+// it leaves the keyword-anchored generic-secret rule untouched: a real token assigned to an api_key is
+// still gated there whatever its shape.
+func wordlikePathToken(secret string) bool {
+	if !strings.Contains(secret, "/") {
+		return false
+	}
+	for _, seg := range strings.Split(secret, "/") {
+		if len(seg) < 8 {
+			continue
+		}
+		var hasUpper, hasLower bool
+		for _, c := range seg {
+			switch {
+			case c >= 'A' && c <= 'Z':
+				hasUpper = true
+			case c >= 'a' && c <= 'z':
+				hasLower = true
+			}
+		}
+		if hasUpper && hasLower {
+			return false
+		}
+	}
+	return true
+}
+
 // resourcePathExtensions are the file extensions whose presence marks a quoted value as a RESOURCE PATH
 // rather than a credential. Kept to source, config and migration artefacts: a credential is never stored as
 // the name of a .java or .xml file, while a long generated migration name is exactly that shape.
@@ -1103,6 +1160,8 @@ func baseDefaultRules() []rule {
 			lineSkip: func(line string) bool {
 				return hasAnyKeyword(line, highEntropyDeferKeywords) || lineDeclaresResourcePath(line)
 			},
+			skipValue:          wordlikePathToken,
+			maskNotebookOutput: true,
 		},
 		{
 			id: "generic-secret", category: "Generic", title: "Hardcoded secret", severity: shared.SeverityMedium,
@@ -1112,7 +1171,13 @@ func baseDefaultRules() []rule {
 			// config key (`app.config['SECRET_KEY_HMAC_2'] = "\u2026"`). The keyword may now carry
 			// an identifier suffix and be wrapped in brackets and quotes. The value guards
 			// (16 characters, entropy 3.5, allow-list) are untouched, so precision is unchanged.
-			re:     regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_]{0,32}["']?\s*\]?\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*\]?\s*[:=]\s*["']([A-Za-z0-9/+=_\-]{16,})["']`),
+			// The value's quote may be BACKSLASH-ESCAPED. A Jupyter notebook stores each cell's source as
+			// JSON-encoded strings, so a credential written in a code cell reads as api_key = \"…\" on
+			// disk, and requiring a bare quote missed every one of them. Notebooks are exactly where a
+			// data team leaves a key, so this was a hole in the GATING rule, not a cosmetic one. The
+			// optional backslash admits one more character in a position that previously allowed only a
+			// quote, so it costs no precision.
+			re:     regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_]{0,32}["']?\s*\]?\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*\]?\s*[:=]\s*\\?["']([A-Za-z0-9/+=_\-]{16,})\\?["']`),
 			group:  1,
 			minEnt: 3.5,
 			allow:  compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
@@ -1301,5 +1366,58 @@ func baseDefaultRules() []rule {
 			// The webhook id (17-20 digits) plus its token (60-110 url-safe base64 chars); ptb./canary. hosts too.
 			re: regexp.MustCompile(`https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/[0-9]{17,20}/[A-Za-z0-9_-]{60,110}`),
 		},
+	}
+}
+
+// maskNotebookOutputs blanks the OUTPUT spans of a Jupyter notebook while preserving byte offsets and
+// newlines, the same contract maskComments keeps, so a match offset and a line count still index the file.
+//
+// Why outputs are different from source: a cell's output is what running the code printed, not what anyone
+// wrote. Profiling a real estate, one notebook's cell output held 2.2 MB of a printed catalogue dump and
+// produced 1,999 of the 2,844 keyword-free entropy findings across all 72 repositories, every one of them
+// an asset path or a crawler key. Chasing those token shapes is the wrong cut; the right one is that
+// program output is not authored content.
+//
+// It is applied ONLY to the keyword-free entropy rule. A provider token printed into an output is still a
+// leaked credential, and the prefix-anchored rules keep reading the whole file, so an AKIA or a ghp_ in a
+// cell output is still reported. What stands down is the rule that cannot tell a catalogue dump from a key.
+func maskNotebookOutputs(rel string, data []byte) []byte {
+	if !strings.HasSuffix(strings.ToLower(rel), ".ipynb") {
+		return data
+	}
+	out := append([]byte(nil), data...)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	depth := 0
+	pendingOutputs := false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return out // a malformed notebook keeps whatever was masked so far, never fails the scan
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			switch t {
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+			}
+		case string:
+			if depth > 0 && t == "outputs" && !pendingOutputs {
+				start := dec.InputOffset()
+				var skip json.RawMessage
+				if err := dec.Decode(&skip); err != nil {
+					return out
+				}
+				end := dec.InputOffset()
+				if start >= 0 && end <= int64(len(out)) && start < end {
+					for i := start; i < end; i++ {
+						if out[i] != '\n' && out[i] != '\r' {
+							out[i] = ' '
+						}
+					}
+				}
+			}
+		}
 	}
 }
