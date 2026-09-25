@@ -1,6 +1,6 @@
 # Optional benchmark audit provisioning
 
-The required `engine-accuracy.yml` and `reachability-benchmark.yml` regression gates run on GitHub-hosted Linux. They do not require this provisioning. The optional manual `engine-accuracy-audit.yml` and `reachability-audit.yml` routes use a self-hosted Linux runner for formal evidence capture. This page describes that audit setup only. A skipped or unavailable audit route does not count as a benchmark pass.
+The required `engine-accuracy.yml` and `reachability-benchmark.yml` regression gates run on GitHub-hosted Linux. They do not require this provisioning. The optional manual `engine-accuracy-audit.yml` dispatches from GitHub-hosted Linux to a protected AWS capture worker through SSM; `reachability-audit.yml` uses a self-hosted Linux runner. This page describes those audit routes only. A skipped or unavailable audit route does not count as a benchmark pass.
 
 Nothing here can be applied by a pull request. Repository variables, runner registration, and the
 Actions toggle are account and repository settings; a source change cannot grant itself the capability
@@ -43,14 +43,13 @@ if [ "$EVENT_NAME" != pull_request ] && [ "$ENABLED" = true ] && [ -n "$TRUSTED_
    && [ "$REF" = "${TRUSTED_REF:-refs/heads/main}" ] && [ "$SHA" = "$TRUSTED_SHA" ]; then
 ```
 
-`reachability-audit.yml:59` applies the same event guard. Each self-hosted job then runs only when
-that predicate passed (`engine-accuracy-audit.yml:55-59`, `reachability-audit.yml:65-69`), so a fork pull
-request routes untrusted and the self-hosted job never dispatches.
+`reachability-audit.yml:59` applies the same event guard. Each audit benchmark job then runs only when
+that predicate passed, so a fork pull request routes untrusted and neither benchmark job dispatches.
 `internal/infrastructure/reachbench/workflow_policy_test.go:146-166` pins that event truth table as a
 test, so the protection cannot regress silently.
 
 Do not weaken those predicates to make a run happen. A trusted job that dispatches on a pull request is
-an arbitrary-code-execution path on the runner host, not a configuration convenience.
+an arbitrary-code-execution path on the audit infrastructure, not a configuration convenience.
 
 ## Repository variables
 
@@ -94,41 +93,36 @@ evidence.
 ### Owned default readiness (`owned-default-readiness.yml`)
 
 This hosted workflow requires no trusted runner or revision variable. Every PR, main push, and scheduled
-run checks comparator-relative ratchet parity, owned-only operation, coverage explicitness, graph and advisory
-matching, and the committed SCA corpus against the accepted 24-observation capture. The currency test
-compares the canonical catalog, oracle, ratchet, and policy digests to that capture. A mismatch fails the
-readiness job and aggregate; a passing run uploads `evidence_current: true` with the checked source SHA.
-This value states that the input identities are current; it does not substitute for the live owned scanner
-measurement in `engine-accuracy.yml`. Require both aggregate checks on the same commit before changing the
-default.
+run checks comparator-relative ratchet policy, owned-only operation, coverage explicitness, graph and advisory
+matching, and currency of the committed historical SCA capture. A mismatch fails the readiness job and
+aggregate. Its report records `configuration_current: true` and
+`fresh_matrix: required-by-Aggregate-SCA-benchmark-status`; it does not claim to have run the fresh matrix.
+Require both `Aggregate SCA benchmark status` and `Aggregate readiness status` on the same source SHA before
+changing the default.
 
 When the corpus changes, promote a new accepted comparison with matching inputs before expecting the
 readiness gate to pass. Historical `ratchet-baseline.json` remains a frozen record of earlier policy.
 Editing the capture record without a corresponding accepted run would manufacture the assurance this
 gate exists to require.
 
-## Runner requirements
+## Audit execution requirements
 
-Two label sets, both Linux, are attached to the `trusted-benchmarks` GitHub environment only on their
-self-hosted `benchmark` jobs:
+`engine-accuracy-audit.yml` uses `ubuntu-latest` under the `trusted-benchmarks` environment to assume a
+constrained AWS role and dispatch a fixed SSM document to the protected SCA capture worker. It does not
+register a self-hosted GitHub runner. `reachability-audit.yml` uses
+`[self-hosted, linux, reachability-accuracy-trusted]` under the same environment.
 
-```text
-[self-hosted, linux, sca-accuracy-trusted]           engine-accuracy-audit.yml
-[self-hosted, linux, reachability-accuracy-trusted]  reachability-audit.yml
-environment: trusted-benchmarks                       both trusted benchmark jobs
-```
-
-The SCA runner needs a delegated cgroup v2 hierarchy. Provision the dedicated runner account with a
+The AWS SCA capture worker needs a delegated cgroup v2 hierarchy. Provision its dedicated account with a
 running, lingering systemd user manager that can start transient `Delegate=yes` services. The account must
-receive the `memory` and `pids` controllers and have access to the Docker daemon. The workflow builds the
+receive the `memory` and `pids` controllers and have access to the Docker daemon. The capture worker builds the
 cycle binary outside the checkout and starts it as the main process of its own delegated user service.
 `scripts/sca-cycle-service.sh` derives `SCA_ACCURACY_DELEGATED_CGROUP_ROOT` from that process's cgroup;
 the value is no longer a manually configured GitHub variable. A direct `go run` or ordinary runner-step
 process leaves a parent in the service root, preventing the sandbox from enabling those controllers.
 The launcher stops its service on cancellation and limits its runtime to 40 minutes. The sandbox rejects
 paths outside `/sys/fs/cgroup` or outside its `synapse-manager` child
-(`internal/infrastructure/sandbox/cgroup_linux.go:51-89`). These requirements rule out a hosted runner and
-a non-Linux capture. The SCA cleanup barrier also invokes `docker container`, `volume`, `image`, and
+(`internal/infrastructure/sandbox/cgroup_linux.go:51-89`). These requirements apply to the AWS worker,
+not the hosted dispatcher. The SCA cleanup barrier also invokes `docker container`, `volume`, `image`, and
 `builder` prune commands; cleanup failure blocks the cycle.
 
 The reachability runner additionally needs the Go toolchain declared by `go.mod`, .NET SDK `8.0.100`,
@@ -223,21 +217,20 @@ its prepared inputs still verify.
 1. Confirm Actions is enabled for the repository.
 2. Protect the authorized branch and the `trusted-benchmarks` environment with independent required
    review. Align the environment branch policy with both trusted-ref variables.
-3. Stand up the two Linux runners with the exact label sets, delegated cgroup v2, Docker for SCA cleanup,
-   namespace support for reachability, and the required toolchains.
+3. Prepare the protected AWS SCA worker with delegated cgroup v2 and Docker, and register the reachability
+   Linux runner with its exact labels, namespace support, and required toolchains.
 4. Build the trusted input tree, including the independent review and the maintainer disposition.
 5. Archive pinned vendor bytes and confirm coverage, or accept that the capture is diagnostic.
 6. Confirm the variables and point `ENGINE_ACCURACY_TRUSTED_SHA` at the exact commit being measured.
-7. Dispatch the workflow and confirm the aggregate reports a successful benchmark with a non-empty
-   artifact. An aggregate that passes with the benchmark skipped means the route was untrusted.
-8. Before flipping the owned-only default, confirm `owned-default-readiness.yml` and
-   `engine-accuracy.yml` both pass on the default-changing commit; readiness must upload
-   `evidence_current: true` for that exact source SHA.
+7. Dispatch the manual audit workflow and require successful route, provenance, benchmark, and a non-empty
+   artifact. A skipped or unauthorized benchmark fails the audit aggregate.
+8. For the owned-only default, require the separate hosted `Aggregate SCA benchmark status` and
+   `Aggregate readiness status` checks on the same candidate SHA. Manual audit provisioning is optional.
 
 ## Verifying a run was genuinely authorized
 
-A green aggregate alone does not prove a trusted capture happened. Check that the trusted job ran rather
-than being skipped and that it carries an uploaded artifact. For engine accuracy, also verify that the run's
+A green manual audit aggregate requires a successful trusted job and uploaded artifact. For engine accuracy,
+also verify that the run's
 commit equals the configured `ENGINE_ACCURACY_TRUSTED_SHA`. Reachability deliberately has no trusted-SHA
 variable: verify its protected ref, selected source SHA, controller evidence, and the required historical
 baseline revision instead. `engine-accuracy-audit.yml` requires a successful benchmark and a non-empty artifact

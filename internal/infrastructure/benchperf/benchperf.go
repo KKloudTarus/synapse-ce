@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"runtime"
 	"sort"
@@ -48,7 +49,7 @@ type Baseline struct {
 	PeakMemoryBytes        uint64  `json:"peak_memory_bytes"`
 	LatencyP50Millis       int64   `json:"latency_p50_millis"`
 	LatencyP95Millis       int64   `json:"latency_p95_millis"`
-	ThroughputOpsPerSecond float64 `json:"throughput_ops_per_second,omitempty"`
+	ThroughputOpsPerSecond float64 `json:"throughput_ops_per_second"`
 }
 
 // Load reads the committed baseline at path. found is false when the file is absent (the caller reports the
@@ -180,6 +181,9 @@ func validateBaseline(b Baseline) error {
 	}
 	if b.AllocBytes == 0 || b.PeakMemoryBytes == 0 {
 		return fmt.Errorf("alloc_bytes_median and peak_memory_bytes must be non-zero")
+	}
+	if b.ThroughputOpsPerSecond <= 0 || math.IsInf(b.ThroughputOpsPerSecond, 0) || math.IsNaN(b.ThroughputOpsPerSecond) {
+		return fmt.Errorf("throughput_ops_per_second must be a positive finite measurement")
 	}
 	return nil
 }

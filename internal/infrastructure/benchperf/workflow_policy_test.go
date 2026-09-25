@@ -162,6 +162,14 @@ func TestSecurityAccuracyComparatorInputsAreImmutableAndRequired(t *testing.T) {
 func TestPerformanceBenchmarkRequiresEvidenceArtifact(t *testing.T) {
 	workflow := readHostedBenchmarkWorkflow(t, "performance-benchmark.yml")
 	measure := requireJob(t, workflow, "measure")
+	control := requireStep(t, measure, func(step benchmarkStep) bool {
+		return step.Name == "Check out pinned control revision on this runner"
+	})
+	requireActiveLine(t, control.Run, `BASELINE_SOURCE_SHA="ade97553e730ed475967869cf7bd1a7b1dae7f50"`)
+	requireActiveLine(t, control.Run, `test "$(python3 scripts/check_performance_latency.py control-sha --baselines docs/benchmarks)" = "$BASELINE_SOURCE_SHA"`)
+	requireActiveLine(t, control.Run, `test "$BASELINE_SOURCE_SHA" != "${{ needs.route.outputs.source_sha }}"`)
+	requireActiveLine(t, control.Run, `git fetch --no-tags --depth=1 origin refs/tags/benchperf-control-v1`)
+	requireActiveLine(t, control.Run, `test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$BASELINE_SOURCE_SHA"`)
 	if measure.Outputs["artifact"] != "${{ steps.upload.outputs.artifact-id }}" {
 		t.Fatal("measurement job must expose the uploaded artifact ID")
 	}
@@ -203,7 +211,7 @@ func TestHostedBenchmarkPatternGatesRequirePassingTestEvents(t *testing.T) {
 		{"performance-benchmark.yml", "measure", "SBOM import perf gate (pinned SBOM class)", "TestSBOMImportPerfGate", "measurement"},
 		{"performance-benchmark.yml", "measure", "Secret scan perf gate", "TestSecretScanPerfGate", "measurement"},
 		{"sast-benchmark.yml", "owasp-scorecard", "Run OWASP scorecard + recall ratchet", "TestOWASPBenchmarkScorecard", "pass"},
-		{"sast-benchmark.yml", "securibench-scorecard", "Run Securibench scorecard + per-CWE ratchet", "TestSecuribenchScorecard", "pass"},
+		{"sast-benchmark.yml", "securibench-scorecard", "Run Securibench scorecard, per-CWE ratchet, and HTML-text proof", "TestSecuribenchScorecard,TestSecuribenchHTMLTextProofDiagnostic", "pass"},
 		{"sast-benchmark.yml", "juliet-scorecard", "Run Juliet scorecard + per-CWE ratchet", "TestJulietScorecard", "pass"},
 		{"reachability-benchmark.yml", "go-oss-baselines", "Gate owned engine recall and parity", "TestGoReachabilityCorpus", "pass"},
 		{"reachability-benchmark.yml", "python-oss-baselines", "Gate owned Python engine recall and parity", "TestPythonReachabilityCorpus", "pass"},
@@ -325,10 +333,13 @@ func TestSASTBenchmarkScorecardsBindExactSourceRevision(t *testing.T) {
 		t.Fatal("Securibench Semgrep lane must not resolve mutable registry rules")
 	}
 	runScorecard := requireStep(t, securibench, func(step benchmarkStep) bool {
-		return step.Name == "Run Securibench scorecard + per-CWE ratchet"
+		return step.Name == "Run Securibench scorecard, per-CWE ratchet, and HTML-text proof"
 	})
 	if runScorecard.Env["SYNAPSE_SEMGREP_SARIF"] != "${{ runner.temp }}/securibench-semgrep/semgrep.sarif" {
 		t.Fatal("Securibench scorecard must parse the required Semgrep SARIF report")
+	}
+	if !strings.Contains(runScorecard.Run, "TestSecuribenchHTMLTextProofDiagnostic") {
+		t.Fatal("Securibench scorecard must require the HTML-text proof diagnostic")
 	}
 	upload := requireStep(t, securibench, func(step benchmarkStep) bool {
 		return step.Uses == "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"

@@ -5,8 +5,8 @@ name: Performance benchmark
 #
 # Each gate ratchets on MEDIAN BYTES ALLOCATED against its committed baseline under docs/benchmarks/, with a
 # documented tolerance. Allocation is deterministic for a given Go toolchain and input, so it is a stable
-# regression signal on a shared runner. Wall-clock latency (p50/p95) and peak memory are recorded in the
-# baseline and compared only within the same environment digest, so this workflow never claims cross-hardware
+# regression signal on a shared runner. Linux peak resident memory and wall-clock latency are recorded for
+# context; VmHWM covers the whole test process, so it cannot isolate this operation. The workflow never claims cross-hardware
 # comparability. A missing or malformed baseline fails the gate rather than disabling it.
 
 on:
@@ -49,6 +49,8 @@ jobs:
     needs: route
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      SYNAPSE_BENCH_RELEASE_DIGEST: ${{ needs.route.outputs.source_sha }}
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
@@ -60,7 +62,10 @@ jobs:
           fetch-depth: 1
       - name: Assert exact checkout revision
         shell: bash
-        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
+          [[ "$SYNAPSE_BENCH_RELEASE_DIGEST" =~ ^[0-9a-f]{40}$ ]]
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -68,19 +73,57 @@ jobs:
           cache: true
       - name: Image extraction perf gates (small and large target classes)
         shell: bash
-        run: bash scripts/require-go-tests.sh TestImageExtractPerfGate,TestImageExtractLargeImagePerfGate "$RUNNER_TEMP/performance-baselines/measurements/image-extraction.jsonl" measurement ./internal/infrastructure/acquire/ -run '^TestImageExtract(PerfGate|LargeImagePerfGate)$'
+        run: bash scripts/require-go-tests.sh TestImageExtractPerfGate,TestImageExtractLargeImagePerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/image-extraction.jsonl" measurement ./internal/infrastructure/acquire/ -run '^TestImageExtract(PerfGate|LargeImagePerfGate)$'
       - name: Owned SBOM producer perf gate (pinned source class)
         shell: bash
-        run: bash scripts/require-go-tests.sh TestOwnsbomPerfGate "$RUNNER_TEMP/performance-baselines/measurements/owned-sbom.jsonl" measurement ./internal/infrastructure/tools/ownsbom/ -run '^TestOwnsbomPerfGate$'
+        run: bash scripts/require-go-tests.sh TestOwnsbomPerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/owned-sbom.jsonl" measurement ./internal/infrastructure/tools/ownsbom/ -run '^TestOwnsbomPerfGate$'
       - name: OS package catalog perf gate
         shell: bash
-        run: bash scripts/require-go-tests.sh TestOSPkgCatalogPerfGate "$RUNNER_TEMP/performance-baselines/measurements/os-package-catalog.jsonl" measurement ./internal/infrastructure/tools/ospkg/ -run '^TestOSPkgCatalogPerfGate$'
+        run: bash scripts/require-go-tests.sh TestOSPkgCatalogPerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/os-package-catalog.jsonl" measurement ./internal/infrastructure/tools/ospkg/ -run '^TestOSPkgCatalogPerfGate$'
       - name: SBOM import perf gate (pinned SBOM class)
         shell: bash
-        run: bash scripts/require-go-tests.sh TestSBOMImportPerfGate "$RUNNER_TEMP/performance-baselines/measurements/sbom-import.jsonl" measurement ./internal/usecase/sca/ -run '^TestSBOMImportPerfGate$'
+        run: bash scripts/require-go-tests.sh TestSBOMImportPerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/sbom-import.jsonl" measurement ./internal/usecase/sca/ -run '^TestSBOMImportPerfGate$'
       - name: Secret scan perf gate
         shell: bash
-        run: bash scripts/require-go-tests.sh TestSecretScanPerfGate "$RUNNER_TEMP/performance-baselines/measurements/secret-scan.jsonl" measurement ./internal/infrastructure/tools/secretscan/ -run '^TestSecretScanPerfGate$'
+        run: bash scripts/require-go-tests.sh TestSecretScanPerfGate "$RUNNER_TEMP/performance-baselines/candidate-measurements/secret-scan.jsonl" measurement ./internal/infrastructure/tools/secretscan/ -run '^TestSecretScanPerfGate$'
+      - name: Check out pinned control revision on this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASELINE_SOURCE_SHA="ade97553e730ed475967869cf7bd1a7b1dae7f50"
+          test "$(python3 scripts/check_performance_latency.py control-sha --baselines docs/benchmarks)" = "$BASELINE_SOURCE_SHA"
+          test "$BASELINE_SOURCE_SHA" != "${{ needs.route.outputs.source_sha }}"
+          git fetch --no-tags --depth=1 origin refs/tags/benchperf-control-v1
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$BASELINE_SOURCE_SHA"
+          control="$RUNNER_TEMP/performance-control"
+          git worktree add --detach "$control" "$BASELINE_SOURCE_SHA"
+          test "$(git -C "$control" rev-parse HEAD)" = "$BASELINE_SOURCE_SHA"
+          printf '%s\n' "$BASELINE_SOURCE_SHA" > "$RUNNER_TEMP/performance-baselines/control-source-sha.txt"
+      - name: Measure pinned control on the same hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          control="$RUNNER_TEMP/performance-control"
+          output="$RUNNER_TEMP/performance-baselines/control-measurements"
+          BASELINE_SOURCE_SHA="$(cat "$RUNNER_TEMP/performance-baselines/control-source-sha.txt")"
+          mkdir -p "$output"
+          cd "$control"
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestImageExtractPerfGate,TestImageExtractLargeImagePerfGate "$output/image-extraction.jsonl" measurement ./internal/infrastructure/acquire/ -run '^TestImageExtract(PerfGate|LargeImagePerfGate)$'
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestOwnsbomPerfGate "$output/owned-sbom.jsonl" measurement ./internal/infrastructure/tools/ownsbom/ -run '^TestOwnsbomPerfGate$'
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestOSPkgCatalogPerfGate "$output/os-package-catalog.jsonl" measurement ./internal/infrastructure/tools/ospkg/ -run '^TestOSPkgCatalogPerfGate$'
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestSBOMImportPerfGate "$output/sbom-import.jsonl" measurement ./internal/usecase/sca/ -run '^TestSBOMImportPerfGate$'
+          SYNAPSE_BENCH_RELEASE_DIGEST="$BASELINE_SOURCE_SHA" bash scripts/require-go-tests.sh TestSecretScanPerfGate "$output/secret-scan.jsonl" measurement ./internal/infrastructure/tools/secretscan/ -run '^TestSecretScanPerfGate$'
+      - name: Fail closed on hosted latency regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_performance_latency.py compare \
+            --candidate-baselines docs/benchmarks \
+            --control-baselines "$RUNNER_TEMP/performance-control/docs/benchmarks" \
+            --candidate-measurements "$RUNNER_TEMP/performance-baselines/candidate-measurements" \
+            --control-measurements "$RUNNER_TEMP/performance-baselines/control-measurements" \
+            --candidate-sha "${{ needs.route.outputs.source_sha }}" \
+            --summary "$RUNNER_TEMP/performance-baselines/latency-summary.json"
       - name: Publish committed baselines with measured results
         shell: bash
         run: |
@@ -88,7 +131,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/performance-baselines"
           cp docs/benchmarks/*perf*.json "$RUNNER_TEMP/performance-baselines/"
           printf '%s\n' '${{ needs.route.outputs.source_sha }}' > "$RUNNER_TEMP/performance-baselines/source-sha.txt"
-          test "$(find "$RUNNER_TEMP/performance-baselines/measurements" -name '*.jsonl' -type f | wc -l)" -eq 5
+          test "$(find "$RUNNER_TEMP/performance-baselines/candidate-measurements" -name '*.jsonl' -type f | wc -l)" -eq 5
+          test "$(find "$RUNNER_TEMP/performance-baselines/control-measurements" -name '*.jsonl' -type f | wc -l)" -eq 5
+          test -s "$RUNNER_TEMP/performance-baselines/latency-summary.json"
           ls -1 "$RUNNER_TEMP/performance-baselines"
       - name: Upload performance baselines
         id: upload
