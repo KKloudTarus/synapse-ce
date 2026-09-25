@@ -183,8 +183,8 @@ func TestFrozenTemplateStaticContractRejectsSubstitution(t *testing.T) {
 	encoded := canonicalTestJSON(t, input)
 	writeCanonicalTestFile(t, filepath.Join(root, "baseline-input.json"), input)
 	runner := &Runner{}
-	if _, err := runner.loadInputTemplate(root, BundleAsset{Path: "baseline-input.json", Digest: benchmark.SHA256Digest(encoded)}, measurement.BaselineMeasurement); err == nil {
-		t.Fatal("template loader accepted a static contract substitution")
+	if _, err := runner.loadInputTemplate(root, BundleAsset{Path: "baseline-input.json", Digest: benchmark.SHA256Digest(encoded)}, measurement.BaselineMeasurement); err == nil || !strings.Contains(err.Error(), "frozen default contract") {
+		t.Fatalf("template loader accepted a static contract substitution: %v", err)
 	}
 }
 

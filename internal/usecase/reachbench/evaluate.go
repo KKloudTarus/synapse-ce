@@ -3,7 +3,6 @@ package reachbench
 import (
 	"fmt"
 	"math/big"
-	"sort"
 
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 )
@@ -48,10 +47,7 @@ func EvaluateMeasurement(input MeasurementInput) (MeasurementReport, error) {
 	}
 	if input.Purpose == CandidateAcceptance {
 		report.Candidate = CandidateDisposition{Evaluated: true}
-		report.Candidate.Reasons = checkCandidateRatchet(report, *input.Ratchet, input.Exceptions)
-		report.Candidate.Reasons = append(report.Candidate.Reasons, successorCandidateAcceptanceReasons(input, report)...)
-		sort.Strings(report.Candidate.Reasons)
-		report.Candidate.Reasons = deduplicateStrings(report.Candidate.Reasons)
+		report.Candidate.Reasons = CheckCandidateAcceptance(report, *input.Ratchet, input.Exceptions)
 		report.Candidate.Accepted = len(report.Candidate.Reasons) == 0
 	}
 	id, err := DigestMeasurementReport(report)
@@ -60,21 +56,6 @@ func EvaluateMeasurement(input MeasurementInput) (MeasurementReport, error) {
 	}
 	report.ID = id
 	return canonicalReport(report), nil
-}
-
-func successorCandidateAcceptanceReasons(input MeasurementInput, candidate MeasurementReport) []string {
-	if input.Policy.ID != goBinaryVersionedProfileID+"-policy" {
-		return nil
-	}
-	profile, err := ResolveReachabilityProfile(input)
-	if err != nil {
-		return []string{"successor candidate acceptance does not match the registered profile"}
-	}
-	reasons := checkSuccessorOutcomeDebt(candidate, input.Baseline, input.Oracle)
-	if !profile.Authoritative {
-		reasons = append(reasons, "successor reachability profile is pending independent review")
-	}
-	return reasons
 }
 
 func buildLogicalCases(input MeasurementInput) ([]logicalCase, error) {

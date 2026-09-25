@@ -715,7 +715,7 @@ func fixtureToolchainFamily(kind FixtureBuildKind) string {
 
 func fixtureBuildCommands(fixtureID string, kind FixtureBuildKind) []string {
 	switch fixtureID {
-	case "go-binary-input", "go-binary-versioned-direct-call", "go-binary-versioned-retained-but-uncalled", "go-binary-versioned-retained-and-called", "go-binary-versioned-indirect-function-value-call":
+	case "go-binary-input":
 		if kind == FixtureBuildGoBinary {
 			return []string{"go"}
 		}

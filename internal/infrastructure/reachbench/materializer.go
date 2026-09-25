@@ -338,14 +338,24 @@ func frozenFixtureSpecification(supplied reachcontract.FixtureSpecification) (re
 	if err != nil {
 		return reachcontract.FixtureSpecification{}, "", fmt.Errorf("validate reachability fixture specification: %w", err)
 	}
-	registered, err := reachcontract.ResolveRegisteredFixtureSpecification(reachcontract.ArtifactReference{ID: supplied.ID, Digest: suppliedDigest})
+	contract, err := reachcontract.LoadReachabilityBenchmark()
 	if err != nil {
-		return reachcontract.FixtureSpecification{}, "", fmt.Errorf("load registered reachability fixture specification: %w", err)
+		return reachcontract.FixtureSpecification{}, "", fmt.Errorf("load frozen reachability fixture specification: %w", err)
 	}
-	if !sameCanonical(supplied, registered) {
-		return reachcontract.FixtureSpecification{}, "", fmt.Errorf("reachability fixture specification does not match registered identity %q", supplied.ID)
+	for _, fixture := range contract.Fixtures.Fixtures {
+		if fixture.ID != supplied.ID {
+			continue
+		}
+		frozenDigest, err := reachcontract.DigestFixtureSpecification(fixture)
+		if err != nil {
+			return reachcontract.FixtureSpecification{}, "", fmt.Errorf("digest frozen reachability fixture specification: %w", err)
+		}
+		if frozenDigest != suppliedDigest {
+			return reachcontract.FixtureSpecification{}, "", fmt.Errorf("reachability fixture specification digest mismatch for %q", supplied.ID)
+		}
+		return cloneMaterializedSpecification(fixture), frozenDigest, nil
 	}
-	return cloneMaterializedSpecification(registered), suppliedDigest, nil
+	return reachcontract.FixtureSpecification{}, "", fmt.Errorf("unknown frozen reachability fixture %q", supplied.ID)
 }
 
 func prepareMaterializationRoot(workRoot, cellKey string) (string, error) {
@@ -420,7 +430,7 @@ func materializeFixtureInputs(ctx context.Context, root string, specification re
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		contents, err := reachcontract.ReadRegisteredFixtureFile(file)
+		contents, err := reachcontract.ReadFixtureFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("read reachability fixture input %q: %w", file.Path, err)
 		}

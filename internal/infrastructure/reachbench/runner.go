@@ -90,13 +90,6 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 	if err := validateEnvelopeMeasurement(envelope, template, bundleRef); err != nil {
 		return Result{}, err
 	}
-	profile, err := measurement.ResolveReachabilityProfile(template)
-	if err != nil {
-		return Result{}, fmt.Errorf("resolve reachability benchmark profile: %w", err)
-	}
-	if err := requireProfileAuthority(profile, authoritative); err != nil {
-		return Result{}, err
-	}
 	var allowlistResult *BaselineAllowlistResult
 	if envelope.Route == RouteProtectedBaseline {
 		result, resultErr := runner.verifyBaselineAllowlist(ctx, bundleRoot, bundle.BaselineAllowlist, facts, envelope.Analyzer)
@@ -105,7 +98,7 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 		}
 		allowlistResult = &result
 	}
-	cells, err := enumerateCellsForProfile(template, profile)
+	cells, err := enumerateCells(template)
 	if err != nil {
 		return Result{}, err
 	}
@@ -166,7 +159,6 @@ func (runner *Runner) Run(ctx context.Context, args []string) (result Result, ru
 				Analyzer:                     envelope.Analyzer,
 				Snapshot:                     template.ActiveSnapshot,
 				WorkRoot:                     workspace.WorkRoot(),
-				profile:                      profile,
 				attempt:                      attempt.Address,
 				evidence:                     evidence,
 				projectionConformanceControl: projectionConformanceControl,
@@ -465,22 +457,7 @@ func (runner *Runner) loadInputTemplate(root string, asset BundleAsset, purpose 
 }
 
 func enumerateCells(input measurement.MeasurementInput) ([]ExecutionCell, error) {
-	profile, err := measurement.ResolveReachabilityProfile(input)
-	if err != nil {
-		return nil, err
-	}
-	return enumerateCellsForProfile(input, profile)
-}
-
-func requireProfileAuthority(profile measurement.ReachabilityProfile, authoritative bool) error {
-	if authoritative && !profile.Authoritative {
-		return errors.New("reachability benchmark profile is pending independent review")
-	}
-	return nil
-}
-
-func enumerateCellsForProfile(input measurement.MeasurementInput, profile measurement.ReachabilityProfile) ([]ExecutionCell, error) {
-	fixtures := profile.Fixtures
+	fixtures := measurement.DefaultFixtureManifest()
 	cohorts := make(map[string]measurement.ProductionCohort, len(input.Inventory.Cohorts))
 	for _, cohort := range input.Inventory.Cohorts {
 		cohorts[cohort.ID+"\x00"+cohort.Mode] = cohort

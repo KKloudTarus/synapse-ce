@@ -163,7 +163,6 @@ type CaptureRequest struct {
 	Snapshot   measurement.SnapshotIdentity `json:"snapshot"`
 	WorkRoot   string                       `json:"-"`
 
-	profile                      measurement.ReachabilityProfile
 	attempt                      benchcycle.AttemptAddress
 	evidence                     *benchcycle.EvidenceStore
 	projectionConformanceControl bool

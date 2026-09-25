@@ -1,8 +1,0 @@
-package main
-
-import "golang.org/x/net/idna"
-
-func main() { entry() }
-
-//go:noinline
-func entry() { _, _ = idna.ToASCII("example.test") }

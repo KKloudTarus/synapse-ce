@@ -202,19 +202,9 @@ func (capture *ProductionCapture) Capture(ctx context.Context, request CaptureRe
 	if !ok {
 		return CaptureResult{}, fmt.Errorf("production capture does not support %s/%s", request.Cell.CohortID, request.Cell.ModeID)
 	}
-	fixtures := capture.fixtures
-	if request.profile.Fixtures.ID != "" {
-		fixtures = request.profile.Fixtures
-	}
-	resolved, err := fixtures.ResolveFixtureSubject(request.Cell.Fixture, request.Cell.SubjectID)
+	resolved, err := capture.fixtures.ResolveFixtureSubject(request.Cell.Fixture, request.Cell.SubjectID)
 	if err != nil {
 		return CaptureResult{}, fmt.Errorf("resolve production capture fixture subject: %w", err)
-	}
-	if request.profile.Fixtures.ID != "" {
-		registered, err := request.profile.ResolveFixtureSpecification(request.Cell.Fixture)
-		if err != nil || !sameCanonical(registered, resolved.Specification) {
-			return CaptureResult{}, errors.New("production capture fixture does not match selected benchmark profile")
-		}
 	}
 	fixture, err := capture.materializer.Materialize(ctx, FixtureMaterializationRequest{
 		Specification: resolved.Specification,
