@@ -3282,13 +3282,10 @@ func main() {
 	// coverage, never not_reachable.
 	// Its proof actors stay out of the deterministic set, so it can raise urgency but can never suppress.
 	if cfg.GoBinaryReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACH_GOBIN", "go-binary reachability") {
-		goBinAnalyzer := gobinreach.NewEntryCallAnalyzer()
-		coord, cerr := reachproof.NewCoordinatorForLanguage(goBinAnalyzer, judgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageGoBinary)
-		if cerr != nil {
+		if cerr := installGoBinaryReachability(scaService, judgmentSvc, auditLog, clock); cerr != nil {
 			log.Error("go-binary reachability coordinator init failed", "err", cerr)
 			os.Exit(1)
 		}
-		scaService.SetGoBinaryReachability(coord.WithRaiseOnly())
 		log.Info("Go-binary affected-symbol reachability ENABLED (raise-only, PCLNTAB calls from main.main)")
 	}
 
@@ -3673,6 +3670,21 @@ func main() {
 		log.Error("server error", "err", err)
 		os.Exit(1)
 	}
+}
+
+// installGoBinaryReachability wires the API scan pipeline to the raise-only Go-binary
+// proof coordinator. Keeping this composition step named makes the production root
+// directly executable by the binding benchmark.
+func installGoBinaryReachability(scaService *scauc.Service, judgmentSvc *analysisuc.Service, auditLog ports.AuditLogger, clock ports.Clock) error {
+	if scaService == nil {
+		return fmt.Errorf("%w: Go-binary reachability requires an SCA service", shared.ErrValidation)
+	}
+	coord, err := reachproof.NewCoordinatorForLanguage(gobinreach.NewEntryCallAnalyzer(), judgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageGoBinary)
+	if err != nil {
+		return err
+	}
+	scaService.SetGoBinaryReachability(coord.WithRaiseOnly())
+	return nil
 }
 
 // scaJobHandler binds the SCA service to the worker's Handler + DeadLetterer interfaces:

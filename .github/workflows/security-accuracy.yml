@@ -55,6 +55,8 @@ jobs:
     needs: route
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     env:
       # Release-asset checksum and OCI manifest digest are immutable comparison provenance for the versions above.
       GITLEAKS_LINUX_X64_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
@@ -135,6 +137,19 @@ jobs:
       - name: Cross-dimension aggregation preserves per-dimension semantics
         shell: bash
         run: bash scripts/require-go-tests.sh TestAggregatePreservesPerDimensionSemantics "$RUNNER_TEMP/security-aggregation.jsonl" pass ./internal/usecase/benchagg/...
+      - name: Build sanitized benchmark result
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
+        run: python3 scripts/collect_benchmark_accuracy.py security-accuracy "$SOURCE_SHA" "$RUNNER_TEMP" "$RUNNER_TEMP/security-accuracy-result.json"
+      - name: Upload sanitized benchmark result
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: security-accuracy-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/security-accuracy-result.json
+          if-no-files-found: error
+          retention-days: 30
 
   aggregate:
     name: Aggregate security accuracy status
@@ -147,9 +162,11 @@ jobs:
         env:
           ROUTE: ${{ needs.route.result }}
           ACCURACY: ${{ needs.accuracy.result }}
+          ARTIFACT: ${{ needs.accuracy.outputs.artifact }}
         run: |
           set -euo pipefail
           test "$ROUTE" = success
           # This workflow owns no trusted path, so its verdict is the SHA-bound accuracy job itself. Reporting
           # through an aggregator keeps the required-check name stable if a trusted lane is added later.
           test "$ACCURACY" = success
+          test -n "$ARTIFACT"

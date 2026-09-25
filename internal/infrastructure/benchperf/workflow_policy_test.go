@@ -108,8 +108,8 @@ func TestHostedBenchmarkAggregatesFailClosed(t *testing.T) {
 	for _, tc := range []struct {
 		workflow, job, result, artifact string
 	}{
-		{"security-accuracy.yml", "accuracy", "ACCURACY", ""},
-		{"dynamic-security-benchmark.yml", "accuracy", "ACCURACY", ""},
+		{"security-accuracy.yml", "accuracy", "ACCURACY", "ARTIFACT"},
+		{"dynamic-security-benchmark.yml", "accuracy", "ACCURACY", "ARTIFACT"},
 		{"performance-benchmark.yml", "measure", "MEASURE", "ARTIFACT"},
 		{"owned-default-readiness.yml", "readiness", "READINESS", "ARTIFACT"},
 	} {
@@ -129,6 +129,31 @@ func TestHostedBenchmarkAggregatesFailClosed(t *testing.T) {
 					t.Fatal("aggregate must receive the measured artifact ID")
 				}
 				requireActiveLine(t, step.Run, `test -n "$`+tc.artifact+`"`)
+			}
+		})
+	}
+}
+
+func TestSecurityBenchmarkResultsRequireSanitizedArtifact(t *testing.T) {
+	for _, name := range []string{"security-accuracy.yml", "dynamic-security-benchmark.yml"} {
+		t.Run(name, func(t *testing.T) {
+			accuracy := requireJob(t, readHostedBenchmarkWorkflow(t, name), "accuracy")
+			if accuracy.Outputs["artifact"] != "${{ steps.upload.outputs.artifact-id }}" {
+				t.Fatal("accuracy job must expose the uploaded artifact ID")
+			}
+			result := requireStep(t, accuracy, func(step benchmarkStep) bool {
+				return step.Name == "Build sanitized benchmark result"
+			})
+			requireActiveLine(t, result.Run, "python3 scripts/collect_benchmark_accuracy.py")
+			upload := requireStep(t, accuracy, func(step benchmarkStep) bool { return step.ID == "upload" })
+			if upload.Uses != "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" {
+				t.Fatal("benchmark result must use the pinned upload action")
+			}
+			if !strings.Contains(upload.With["name"], sourceSHA) || !strings.Contains(upload.With["name"], "${{ github.run_id }}") || !strings.Contains(upload.With["name"], "${{ github.run_attempt }}") || upload.With["if-no-files-found"] != "error" {
+				t.Fatal("artifact must bind the run, attempt, and source SHA and fail when absent")
+			}
+			if strings.Contains(upload.With["path"], "jsonl") {
+				t.Fatal("raw test output must not be uploaded")
 			}
 		})
 	}

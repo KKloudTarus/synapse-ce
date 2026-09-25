@@ -52,6 +52,8 @@ jobs:
     needs: route
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -73,6 +75,19 @@ jobs:
       - name: CSPM posture accuracy over the fixture inventory
         shell: bash
         run: bash scripts/require-go-tests.sh TestCSPMOwnedAccuracy "$RUNNER_TEMP/cspm-accuracy.jsonl" pass ./internal/domain/cloudposture/ -run '^TestCSPMOwnedAccuracy$'
+      - name: Build sanitized benchmark result
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.route.outputs.source_sha }}
+        run: python3 scripts/collect_benchmark_accuracy.py dynamic-security-benchmark "$SOURCE_SHA" "$RUNNER_TEMP" "$RUNNER_TEMP/dynamic-security-result.json"
+      - name: Upload sanitized benchmark result
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dynamic-security-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/dynamic-security-result.json
+          if-no-files-found: error
+          retention-days: 30
 
   aggregate:
     name: Aggregate dynamic benchmark status
@@ -85,7 +100,9 @@ jobs:
         env:
           ROUTE: ${{ needs.route.result }}
           ACCURACY: ${{ needs.accuracy.result }}
+          ARTIFACT: ${{ needs.accuracy.outputs.artifact }}
         run: |
           set -euo pipefail
           test "$ROUTE" = success
           test "$ACCURACY" = success
+          test -n "$ARTIFACT"

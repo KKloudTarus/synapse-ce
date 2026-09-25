@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -469,12 +470,10 @@ func main() {
 			os.Exit(1)
 		}
 		if cfg.GoBinaryReachabilityEnabled {
-			coord, cerr := reachproof.NewCoordinatorForLanguage(gobinreach.NewEntryCallAnalyzer(), scaJudgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageGoBinary)
-			if cerr != nil {
+			if cerr := installGoBinaryReachability(scaService, scaJudgmentSvc, auditLog, clock); cerr != nil {
 				log.Error("worker go-binary reachability coordinator init failed", "err", cerr)
 				os.Exit(1)
 			}
-			scaService.SetGoBinaryReachability(coord.WithRaiseOnly())
 			log.Info("worker Go-binary affected-symbol reachability ENABLED (raise-only, PCLNTAB calls from main.main)")
 		}
 	}
@@ -1148,6 +1147,20 @@ func main() {
 	)
 
 	runWorkerRuntime(ctx, cfg, queue, handlers, maintenanceTasks, leaderStore, auditLog, clock, ids, visibility, log)
+}
+
+// installGoBinaryReachability wires the worker scan pipeline to the raise-only
+// Go-binary proof coordinator. It is deliberately owned by this composition root.
+func installGoBinaryReachability(scaService *scauc.Service, judgmentSvc *analysisuc.Service, auditLog ports.AuditLogger, clock ports.Clock) error {
+	if scaService == nil {
+		return fmt.Errorf("%w: Go-binary reachability requires an SCA service", shared.ErrValidation)
+	}
+	coord, err := reachproof.NewCoordinatorForLanguage(gobinreach.NewEntryCallAnalyzer(), judgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageGoBinary)
+	if err != nil {
+		return err
+	}
+	scaService.SetGoBinaryReachability(coord.WithRaiseOnly())
+	return nil
 }
 
 func runWorkerRuntime(

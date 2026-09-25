@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
@@ -15,6 +17,12 @@ var errUnsupportedReachbenchPlatform = errors.New("reachability production captu
 
 type lifecycleRunner interface {
 	Run(context.Context, []string) (Result, error)
+}
+
+// CurrentGoBinaryScorecardResult identifies one sanitized hosted scorecard.
+type CurrentGoBinaryScorecardResult struct {
+	Path      string
+	Scorecard CurrentGoBinaryScorecard
 }
 
 type productionLaunchDependencies struct {
@@ -29,6 +37,38 @@ func RunFromEnvironment(ctx context.Context, args []string) (Result, error) {
 		return Result{}, err
 	}
 	return runWithProductionDependencies(ctx, args, defaultProductionLaunchDependencies())
+}
+
+// RunCurrentGoBinaryScorecardFromEnvironment measures the current production
+// Go-binary bindings separately from the historical trusted lifecycle assets.
+func RunCurrentGoBinaryScorecardFromEnvironment(ctx context.Context) (CurrentGoBinaryScorecardResult, error) {
+	if err := requireReachbenchPlatform(runtime.GOOS, runtime.GOARCH); err != nil {
+		return CurrentGoBinaryScorecardResult{}, err
+	}
+	dependencies := DefaultDependencies()
+	runner := &Runner{dependencies: dependencies}
+	harness, err := runner.deriveHarness(ctx)
+	if err != nil {
+		return CurrentGoBinaryScorecardResult{}, fmt.Errorf("derive current Go-binary scorecard source: %w", err)
+	}
+	runKey, _, err := runner.deriveRunKey()
+	if err != nil {
+		return CurrentGoBinaryScorecardResult{}, fmt.Errorf("derive current Go-binary scorecard run key: %w", err)
+	}
+	parts := filepath.FromSlash(runKey)
+	root := filepath.Join(os.TempDir(), "synapse-reachability", "current-go-binary", parts)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return CurrentGoBinaryScorecardResult{}, fmt.Errorf("create current Go-binary scorecard root: %w", err)
+	}
+	scorecard, err := RunCurrentGoBinaryScorecard(ctx, RevisionIdentity{ID: AnalyzerSubjectID, Commit: harness.Commit, Tree: harness.Tree}, os.Getenv("SYNAPSE_GOBIN_BINDING_REPORT_DIR"))
+	if err != nil {
+		return CurrentGoBinaryScorecardResult{}, err
+	}
+	path := filepath.Join(root, "scorecard.json")
+	if err := WriteCurrentGoBinaryScorecard(path, scorecard); err != nil {
+		return CurrentGoBinaryScorecardResult{}, err
+	}
+	return CurrentGoBinaryScorecardResult{Path: path, Scorecard: scorecard}, nil
 }
 
 func requireReachbenchPlatform(goos, goarch string) error {

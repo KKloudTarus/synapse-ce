@@ -13,14 +13,40 @@ import (
 //go:embed inventory/production.json
 var defaultProductionInventoryJSON []byte
 
-// DefaultProductionInventory returns the checked-in full production inventory. Its not_assessed state is honest:
-// current v1 legacy fixtures do not exercise each production binding or case required by this contract.
+// DefaultProductionInventory returns the frozen historical inventory consumed by
+// the trusted lifecycle assets. It remains byte-stable for replay.
 func DefaultProductionInventory() ProductionInventory {
 	inventory, err := LoadProductionInventory(bytes.NewReader(defaultProductionInventoryJSON))
 	if err != nil {
 		panic("reachbench: embedded production inventory is invalid: " + err.Error())
 	}
 	return inventory
+}
+
+// CurrentProductionInventory declares the bindings exercised by the hosted
+// current-contract scorecards. It does not alter the historical replay inventory.
+func CurrentProductionInventory() (ProductionInventory, error) {
+	inventory, err := LoadProductionInventory(bytes.NewReader(defaultProductionInventoryJSON))
+	if err != nil {
+		return ProductionInventory{}, fmt.Errorf("load current production inventory: %w", err)
+	}
+	inventory.ID = "synapse-ce-current-go-binary-inventory-v1"
+	for cohortIndex := range inventory.Cohorts {
+		cohort := &inventory.Cohorts[cohortIndex]
+		if cohort.ID != "go" || cohort.Mode != "binary" {
+			continue
+		}
+		for bindingIndex := range cohort.Bindings {
+			binding := &cohort.Bindings[bindingIndex]
+			if binding.ID == "worker" {
+				binding.State, binding.Reason = BindingEnabled, ""
+			}
+		}
+	}
+	if err := inventory.Validate(); err != nil {
+		return ProductionInventory{}, fmt.Errorf("validate current production inventory: %w", err)
+	}
+	return canonicalInventory(inventory), nil
 }
 
 // LoadProductionInventory strictly decodes and validates the production inventory manifest.

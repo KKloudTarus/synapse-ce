@@ -41,6 +41,7 @@ jobs:
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
       ratchet_artifact: ${{ steps.upload_ratchet.outputs.artifact-id }}
+      current_go_binary_artifact: ${{ steps.upload_current_go_binary.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -93,6 +94,28 @@ jobs:
           test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
           export TMPDIR="$RUNNER_TEMP"
           make reachability-benchmark
+      - name: Score current Go-binary API and worker bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          export TMPDIR="$RUNNER_TEMP"
+          export SYNAPSE_GOBIN_BINDING_REPORT_DIR="$RUNNER_TEMP/synapse-reachability/current-go-binary/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}/binding-reports"
+          mkdir -p "$SYNAPSE_GOBIN_BINDING_REPORT_DIR"
+          go test -count=1 -run '^TestCurrentGoBinaryBindingBenchmark$' ./cmd/synapse-api ./cmd/synapse-worker
+          test -s "$SYNAPSE_GOBIN_BINDING_REPORT_DIR/api.json"
+          test -s "$SYNAPSE_GOBIN_BINDING_REPORT_DIR/worker.json"
+          go run ./cmd/synapse-reachability-cycle current-go-binary-scorecard
+          scorecard="$RUNNER_TEMP/synapse-reachability/current-go-binary/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}/scorecard.json"
+          test -s "$scorecard"
+          jq -e '
+            .schema_version == "synapse-reachability-current-go-binary-scorecard-v1" and
+            .source.commit == "${{ needs.route.outputs.source_sha }}" and
+            .inventory_id == "synapse-ce-current-go-binary-inventory-v1" and
+            (.inventory_digest | test("^sha256:[0-9a-f]{64}$")) and
+            .oracle_cases == 5 and .required_cells == 10 and .observed_cells == 10 and .decision == "pass" and
+            ([.bindings[].binding_id] | sort) == ["api", "worker"] and
+            all(.bindings[]; .ratchet_passed == true and .false_suppressions == 0 and .dropped_findings == 0 and .positive_cells == 2 and .correct_positives == 2 and .no_analysis_cells == 3 and .correct_no_analysis == 3 and .reachable_precision == 1 and .reachable_recall == 1 and .coverage_rate == 0.4 and .no_analysis_rate == 0.6 and (.cases | length) == 5 and all(.cases[]; .finding_retained == true and .gate_exempted == false))
+          ' "$scorecard" > /dev/null
       - name: Require complete per-language candidate scorecard
         shell: bash
         run: |
@@ -141,6 +164,15 @@ jobs:
         with:
           name: reachability-owned-ratchet-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
           path: ${{ runner.temp }}/reachability-ratchet
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload current Go-binary scorecard
+        id: upload_current_go_binary
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: reachability-current-go-binary-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/synapse-reachability/current-go-binary/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}/scorecard.json
           if-no-files-found: error
           retention-days: 14
 
@@ -274,6 +306,7 @@ jobs:
           LIFECYCLE: ${{ needs.lifecycle.result }}
           LIFECYCLE_ARTIFACT: ${{ needs.lifecycle.outputs.artifact }}
           RATCHET_ARTIFACT: ${{ needs.lifecycle.outputs.ratchet_artifact }}
+          CURRENT_GO_BINARY_ARTIFACT: ${{ needs.lifecycle.outputs.current_go_binary_artifact }}
           GO_BASELINE: ${{ needs.go-oss-baselines.result }}
           GO_ARTIFACT: ${{ needs.go-oss-baselines.outputs.artifact }}
           PYTHON_BASELINE: ${{ needs.python-oss-baselines.result }}
@@ -284,6 +317,7 @@ jobs:
           test "$LIFECYCLE" = success
           test -n "$LIFECYCLE_ARTIFACT"
           test -n "$RATCHET_ARTIFACT"
+          test -n "$CURRENT_GO_BINARY_ARTIFACT"
           test "$GO_BASELINE" = success
           test -n "$GO_ARTIFACT"
           test "$PYTHON_BASELINE" = success

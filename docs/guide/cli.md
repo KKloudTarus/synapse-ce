@@ -14,6 +14,13 @@ binary runs the fixed same-SBOM accuracy workflow; the prepare binary validates
 pinned inputs before capture. Their input and artifact contracts are documented
 in [SCA accuracy benchmark](sca-accuracy-benchmark.md).
 
+`synapse-reachability-cycle current-go-binary-scorecard` assembles the hosted
+Go-binary regression result from the API and worker binding reports. It requires
+Linux/amd64 and `SYNAPSE_GOBIN_BINDING_REPORT_DIR` pointing to a directory with
+`api.json` and `worker.json` from the binding tests. It writes a sanitized scorecard
+under the process temp directory; a missing or malformed report exits nonzero. The
+hosted workflow then checks the scorecard ratchet and uploads it as an artifact.
+
 ## Assessment lifecycle administration
 
 These are separate operator binaries, not `synapse-cli` subcommands. `make build`
