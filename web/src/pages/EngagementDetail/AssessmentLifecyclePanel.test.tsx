@@ -68,6 +68,29 @@ describe('AssessmentLifecyclePanel', () => {
     vi.mocked(api.me).mockResolvedValue({ id: 'admin-1', name: 'Admin', role: 'admin', features: { assessmentLifecycleRead: true, assessmentLifecycleUIDefault: true } })
   })
 
+  // Cycles are opt-in, so an Assessment in none is ordinary and the API says so with a 404.
+  // Rendering that as an error put a red "not found: assessment ... does not belong to any cycle"
+  // banner across the header of every engagement that had never been added to a Cycle, which
+  // reads as an outage on a screen that is working correctly.
+  it('shows nothing, not an error, when the assessment is in no cycle', async () => {
+    vi.mocked(api.assessmentLifecycle).mockRejectedValue(new ApiError(404, 'not found: assessment "assessment-2" does not belong to any cycle'))
+    const { container } = renderPanel()
+
+    await waitFor(() => expect(api.assessmentLifecycle).toHaveBeenCalled())
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText(/does not belong to any cycle/)).toBeNull()
+  })
+
+  // A real failure still has to surface: "no Cycle" and "the Cycle could not be read" are
+  // different answers and must not look alike.
+  it('still reports a failure that is not a missing cycle', async () => {
+    vi.mocked(api.assessmentLifecycle).mockRejectedValue(new ApiError(500, 'lifecycle projection unavailable'))
+    renderPanel()
+
+    expect(await screen.findByText('lifecycle projection unavailable')).toBeInTheDocument()
+  })
+
   it('does not request lifecycle data when tenant UI rollout is disabled', async () => {
     vi.mocked(api.me).mockResolvedValue({ id: 'admin-1', name: 'Admin', role: 'admin', features: { assessmentLifecycleRead: true, assessmentLifecycleUIDefault: false } })
     const { container } = renderPanel()

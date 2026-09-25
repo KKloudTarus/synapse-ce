@@ -16,17 +16,33 @@ import type { AssessmentClosureManifest, AssessmentCycleMember, AssessmentLifecy
 
 type Drawer = 'retest' | 'reparent' | 'select_head' | null
 const RETEST_REQUIREMENTS = 'Re-test creation requires operate permission and a completed Assessment in an open Cycle. Completed Cycles must be reopened first. No dates or authorization details are needed to create the draft; configure execution authorization before scanning.'
+// Distinguishes "this Assessment is in no Cycle", which is ordinary, from a Cycle that exists but
+// cannot be read, which is not.
+const NO_CYCLE = 'no-cycle'
+
 const actionLinkClass = cn(buttonStyles.common.root, buttonStyles.sizes.sm.root, buttonStyles.colors.secondary.root)
 
 export function AssessmentLifecyclePanel({ assessmentId, engagementStatus }: { assessmentId: string; engagementStatus: string }) {
   const meFetch = useFetch(() => api.me().catch(() => null), { deps: [] })
   const lifecycleUIEnabled = meFetch.data?.features?.assessmentLifecycleUIDefault === true
-  const lifecycleFetch = useFetch(() => api.assessmentLifecycle(assessmentId), { enabled: lifecycleUIEnabled, deps: [assessmentId, lifecycleUIEnabled, engagementStatus] })
+  const lifecycleFetch = useFetch<AssessmentLifecycle | typeof NO_CYCLE>(
+    () => api.assessmentLifecycle(assessmentId).catch((error) => {
+      // Cycles are opt-in, so an Assessment that belongs to none is the ordinary case and the API
+      // says so with a 404. Treating that as a failure drew a red "not found: assessment ... does
+      // not belong to any cycle" banner across the header of every engagement that had never been
+      // added to one, which reads as an outage on a screen that is working correctly.
+      if (error instanceof ApiError && error.status === 404) return NO_CYCLE
+      throw error
+    }),
+    { enabled: lifecycleUIEnabled, deps: [assessmentId, lifecycleUIEnabled, engagementStatus] },
+  )
   const [drawer, setDrawer] = useState<Drawer>(null)
   const [expandedAssessmentId, setExpandedAssessmentId] = useState<string | null>(null)
   const detailsId = useId()
   const detailsExpanded = expandedAssessmentId === assessmentId
-  const lifecycle = lifecycleFetch.data
+  // Compared inline so the union narrows; a separate boolean is not a type guard.
+  const lifecycle = lifecycleFetch.data === NO_CYCLE ? null : lifecycleFetch.data
+  const noCycle = lifecycleFetch.data === NO_CYCLE
   const manifestFetch = useFetch(() => api.listAssessmentClosureManifests(lifecycle?.cycle.id ?? ''), {
     enabled: lifecycleUIEnabled && Boolean(lifecycle?.cycle.activeClosureManifestId), deps: [lifecycleUIEnabled, lifecycle?.cycle.activeClosureManifestId, lifecycle?.cycle.id],
   })
@@ -35,6 +51,10 @@ export function AssessmentLifecyclePanel({ assessmentId, engagementStatus }: { a
   if (meFetch.loading || !lifecycleUIEnabled) return null
   if (lifecycleFetch.loading && !lifecycle) return <Spinner label="Loading Assessment lifecycle…" />
   if (lifecycleFetch.error) return <ErrorState message={lifecycleFetch.error} />
+  // Nothing to show rather than an empty box on every engagement: a Cycle is opt-in, and the
+  // Assessment Cycles screen is where one is created. The distinction from the case below matters:
+  // there is no Cycle here, as opposed to a Cycle whose projection cannot be read.
+  if (noCycle) return null
   if (!lifecycle) return <EmptyState icon={GitBranch01} title="Lifecycle migration pending" hint="This Assessment does not yet have a readable Cycle projection." />
 
   const role = meFetch.data?.role ?? ''
