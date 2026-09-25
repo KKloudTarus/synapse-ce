@@ -1,6 +1,7 @@
 import * as RSelect from '@radix-ui/react-select'
-import { Check, ChevronDown, InfoCircle, Loading01 } from '@untitledui/icons'
-import { useId, type ButtonHTMLAttributes, type ComponentType, type InputHTMLAttributes, type ReactNode } from 'react'
+import { Check, ChevronDown, HelpCircle, InfoCircle, Loading01 } from '@untitledui/icons'
+import { Tooltip, TooltipTrigger } from './base/tooltip/tooltip'
+import { cloneElement, isValidElement, useId, type ButtonHTMLAttributes, type ComponentType, type InputHTMLAttributes, type ReactElement, type ReactNode } from 'react'
 import { sevSoft, VERDICT_STYLE } from '../lib/severity'
 import type { Severity, Verdict } from '../lib/types'
 
@@ -174,15 +175,55 @@ export function Field({
   htmlFor?: string
   children: ReactNode
 }) {
+  const generated = useId()
+  const controlId = htmlFor ?? generated
+  // The control is associated by id rather than by being wrapped, because the hint's tooltip
+  // trigger is a button and a <label> that wraps a button labels the button too: every
+  // getByLabelText for such a field matched two elements, and a click on the icon would have
+  // activated the input. The id is supplied here when the caller did not set one.
+  const hintId = `${controlId}-hint`
+  // Only when this generated the id. A caller that passed htmlFor has wired the association to a
+  // control of its own, and the child here may be a wrapper rather than the control: putting the
+  // id on that wrapper made it collide with the real input's id, and the label then pointed at a
+  // div. Left alone, the caller's own wiring keeps working.
+  const control =
+    htmlFor === undefined && isValidElement(children) && (children.props as { id?: string }).id === undefined
+      ? cloneElement(children as ReactElement<{ id?: string; 'aria-describedby'?: string }>, {
+          id: controlId,
+          'aria-describedby': hint === undefined ? undefined : hintId,
+        })
+      : children
   return (
-    <label htmlFor={htmlFor} className="block space-y-1.5">
-      {/* Block, so the label always sits above its control. As an inline span it shared a line with
-          any inline-level control (the Select trigger is inline-flex), which put the label hard
-          against the box while every Input field stacked normally. */}
-      <span className="block text-[11px] font-semibold uppercase tracking-wider text-tertiary">{label}</span>
-      {children}
-      {hint && <span className="block text-xs text-quaternary">{hint}</span>}
-    </label>
+    <div className="block space-y-1.5">
+      {/* The hint sits beside the label, not under the control. Below it, a field carrying a note
+          was taller than the fields next to it, so a row of inputs aligned to its bottom edge no
+          longer lined up: on the relationship form the imported-reference box sat visibly above
+          the two cycle-id boxes purely because it had one. It also read as fine print. */}
+      <div className="flex items-center gap-1">
+        <label htmlFor={controlId} className="block text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+          {label}
+        </label>
+        {hint && (
+          <>
+            {/* The icon is a pointer affordance only. The hint reaches assistive technology through
+                the control's aria-describedby below, which is the field it belongs to, so giving
+                this button its own accessible name would put the same text on screen twice and
+                make every getByLabelText for the field match the button as well. */}
+            <span aria-hidden="true" className="inline-flex">
+              <Tooltip title={hint} placement="top">
+                <TooltipTrigger className="inline-flex items-center justify-center rounded text-quaternary hover:text-secondary">
+                  <HelpCircle className="size-3.5" aria-hidden="true" />
+                </TooltipTrigger>
+              </Tooltip>
+            </span>
+            <span id={hintId} className="sr-only">
+              {hint}
+            </span>
+          </>
+        )}
+      </div>
+      {control}
+    </div>
   )
 }
 
