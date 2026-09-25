@@ -1,4 +1,9 @@
 {
+  "positive_precision": {
+    "go": 1,
+    "python": 1,
+    "javascript": 1
+  },
   "positive_recall": {
     "go": 1,
     "python": 1,

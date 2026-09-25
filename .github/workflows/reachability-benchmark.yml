@@ -40,6 +40,7 @@ jobs:
     timeout-minutes: 45
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
+      ratchet_artifact: ${{ steps.upload_ratchet.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -92,6 +93,25 @@ jobs:
           test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
           export TMPDIR="$RUNNER_TEMP"
           make reachability-benchmark
+      - name: Gate owned language precision and recall ratchets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/reachability-ratchet"
+          bash scripts/require-go-tests.sh TestDefaultCorpusAndFloorsFormAGatedContract,TestCheckRatchetForLanguagesFailsClosedOnMissingScoreOrFloor,TestLoadFloorsRejectsPartialMetricCoverage \
+            "$RUNNER_TEMP/reachability-ratchet/contract.jsonl" pass ./internal/usecase/reachbench \
+            -run '^(TestDefaultCorpusAndFloorsFormAGatedContract|TestCheckRatchetForLanguagesFailsClosedOnMissingScoreOrFloor|TestLoadFloorsRejectsPartialMetricCoverage)$'
+          bash scripts/require-go-tests.sh TestGoReachabilityCorpus \
+            "$RUNNER_TEMP/reachability-ratchet/go.jsonl" pass ./internal/infrastructure/tools/ssacallgraph \
+            -run '^TestGoReachabilityCorpus$'
+          CGO_ENABLED=1 bash scripts/require-go-tests.sh TestPythonReachabilityCorpus,TestJSReachabilityCorpus \
+            "$RUNNER_TEMP/reachability-ratchet/astwalk.jsonl" pass ./internal/infrastructure/tools/astwalk \
+            -run '^(TestPythonReachabilityCorpus|TestJSReachabilityCorpus)$'
+          evidence="$RUNNER_TEMP/synapse-reachability/published/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}"
+          test -d "$evidence"
+          for scorecard in contract go astwalk; do
+            test -s "$RUNNER_TEMP/reachability-ratchet/$scorecard.jsonl"
+          done
       - name: Upload SHA-bound lifecycle evidence
         id: upload
         if: ${{ always() }}
@@ -99,6 +119,15 @@ jobs:
         with:
           name: reachability-lifecycle-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
           path: ${{ runner.temp }}/synapse-reachability/published/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload owned language ratchet scorecards
+        id: upload_ratchet
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: reachability-owned-ratchet-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/reachability-ratchet
           if-no-files-found: error
           retention-days: 14
 
@@ -231,6 +260,7 @@ jobs:
           ROUTE: ${{ needs.route.result }}
           LIFECYCLE: ${{ needs.lifecycle.result }}
           LIFECYCLE_ARTIFACT: ${{ needs.lifecycle.outputs.artifact }}
+          RATCHET_ARTIFACT: ${{ needs.lifecycle.outputs.ratchet_artifact }}
           GO_BASELINE: ${{ needs.go-oss-baselines.result }}
           GO_ARTIFACT: ${{ needs.go-oss-baselines.outputs.artifact }}
           PYTHON_BASELINE: ${{ needs.python-oss-baselines.result }}
@@ -240,6 +270,7 @@ jobs:
           test "$ROUTE" = success
           test "$LIFECYCLE" = success
           test -n "$LIFECYCLE_ARTIFACT"
+          test -n "$RATCHET_ARTIFACT"
           test "$GO_BASELINE" = success
           test -n "$GO_ARTIFACT"
           test "$PYTHON_BASELINE" = success
