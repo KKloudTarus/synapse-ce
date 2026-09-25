@@ -107,9 +107,10 @@ Offline governance utilities. None participates in a live scan.
 
 ## Tool integration
 
-Light, pure-Go tools run in process as libraries. Heavy or capability-sensitive tools are
-shelled out to pinned binaries via argv arrays: Syft and Grype for SBOM and vulnerabilities,
-and recon tools where enabled. The same rule isolates heavy analysis of untrusted source. The
+Light, pure-Go tools run in process as libraries. The SBOM producer and the advisory store are
+among them: both are Synapse's own, so a stock scan shells out to no third-party scanner. Heavy or
+capability-sensitive tools are shelled out to pinned binaries via argv arrays: the recon tools, and
+Syft or Grype when an operator opts into either as a cross-check. The same rule isolates heavy analysis of untrusted source. The
 call-graph builder runs only inside the sandboxed `synapse-callgraph` binary, never in the
 server process.
 

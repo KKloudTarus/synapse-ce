@@ -82,6 +82,7 @@ nav:
       - Code quality benchmark: code-quality-benchmark.md
       - Operations drill evidence: operations-drill-evidence.md
       - Detection RulePack lifecycle: rulepack.md
+      - Troubleshooting: troubleshooting.md
   - Integrate:
       - CLI: cli.md
       - MCP integration: mcp-integration.md

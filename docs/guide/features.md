@@ -159,6 +159,27 @@ delete. An accepted finding is still reported, persisted, and evidence-sealed. O
   per-control PASS or FAIL. It reads every finding, including accepted ones, so acceptance can
   never flip a control to PASS.
 
+## Data governance: hold, export, and erasure
+
+The detection projection carries data about identifiable hosts and users, so it is governed
+separately from the findings and separately again from the evidence chain, which is permanent by
+design and never touched by any of this.
+
+- **Legal hold.** Placing a hold on an engagement exempts its detection data from retention
+  expiry and refuses on-demand deletion while the hold stands. Placing and releasing both demand a
+  reason and are written to the append-only audit log, so preservation is attributable. Retention
+  expiry and erasure both consult the hold and fail closed: a checker error blocks the deletion
+  rather than allowing it.
+- **Subject-access export.** A read-only bundle of what the control plane holds for one
+  engagement, the detections plus any active holds. The export is itself an audited access,
+  because a subject-access request is a governance event.
+- **On-demand erasure.** Deletes an engagement's detection projection now, legal-hold-checked,
+  audited with the actor and a required reason. It removes the queryable projection only; the
+  hash-chained evidence is preserved, so erasure never breaks the chain that proves what was done.
+
+Requires the fleet and its detection ingest, because the detection projection is the data being
+governed. The [Data governance screen](ui-walkthrough.md#data-governance) documents the flow.
+
 ## License compliance
 
 Declared licenses are resolved to SPDX ids, including full SPDX expressions with AND, OR, and

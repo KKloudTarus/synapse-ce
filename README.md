@@ -174,7 +174,7 @@ tar -xzf synapse.tar.gz synapse-cli
 ./synapse-cli scan ./path/to/project --fail-on high
 ```
 
-Or scan with zero install using the container image (bundles `synapse-cli` plus syft and grype):
+Or scan with zero install using the container image (bundles `synapse-cli`, plus syft and grype for the opt-in cross-check):
 
 Container images are not published by the current release workflow. Use a release archive or build
 `deploy/Dockerfile` locally when a containerized CLI is required.
@@ -234,7 +234,7 @@ Full details, including the port table and what this profile deliberately does n
 
 ```bash
 make install                       # Go modules + web deps
-make tools                         # syft + grype into ./bin
+make tools                         # optional: syft + grype for the opt-in cross-check
 export PATH="$PWD/bin:$PATH"
 
 export SYNAPSE_API_TOKEN="$(openssl rand -hex 32)"   # required for operational API routes; /healthz and /readyz are public

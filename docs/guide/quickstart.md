@@ -45,12 +45,16 @@ Or run it natively for development:
 
 ```bash
 make install
-make tools
-export PATH="$PWD/bin:$PATH"
 
 export SYNAPSE_API_TOKEN="$(openssl rand -hex 32)"   # required, no anonymous access
 make dev                                             # API on :8080, dashboard on :5173
 ```
+
+`make tools` is not in that list on purpose: a scan needs no third-party scanner binary. The SBOM
+comes from Synapse's own per-ecosystem parsers and the vulnerability data from its own advisory
+store. Run `make tools` only to add Syft and Grype as an opt-in cross-check, and `make tools RECON=1`
+to add the recon tools, which do shell out. See [installation](installation.md#install-the-external-tools)
+for where the recon binaries have to live for the sandbox to reach them.
 
 To back the native API with PostgreSQL instead of the in-memory stores, start the dependency stack and export both DSNs. Its one-shot `postgres-init` container creates the `synapse_app` role that the API connects as.
 

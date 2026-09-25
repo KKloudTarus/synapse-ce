@@ -7,7 +7,8 @@ Synapse ships as a set of Go binaries plus a web dashboard. The provided Compose
 ## Full stack with Docker Compose
 
 The `deploy/docker-compose.full.yml` stack runs everything: PostgreSQL, an S3-compatible object
-store, the API server with Syft and Grype bundled, and the web dashboard.
+store, the API server, and the web dashboard. The image also carries Syft and Grype for the opt-in
+cross-check; neither is used by a default scan.
 
 The stack requires explicit database credentials and complete runtime/migration DSNs. There are no defaults for them, and that is the point: a database password committed to a public repository is a password every reader of the repository has. Generate them once. From the repository root:
 

@@ -694,6 +694,12 @@ pipeline stages with their timings.
 
 Scan health, the pipeline journey with per-stage timings, risk analysis and inventory counts.
 
+1. Read the header: status, the asset, how many targets are in scope, and the authorization window.
+2. Press **Run scan** to start one, or **Scan settings** to choose the mode and which analyzers run.
+3. Expand **Pipeline Journey Track** to see every step of the last scan with its counts and duration; a step that failed says why here.
+4. A banner above the tabs reports an incomplete inventory, for example a manifest that could not be resolved. Treat it as an unresolved result, not a clean one.
+5. **Build report** renders from stored data only; **Export** and **Import** move a CI bundle in and out.
+
 === "Desktop"
 
     ![engagements_engagement_overview at desktop width](assets/ui/desktop_engagements_engagement_overview.webp)
@@ -707,6 +713,12 @@ Scan health, the pipeline journey with per-stage timings, risk analysis and inve
 `/engagements/{id}/findings`
 
 Every finding, ranked. Columns: **Pri**, **Severity**, **Finding & Details**, **Scope**, **Status**.
+
+1. Filter by severity, kind, status and producer; the search box matches title, rule and path.
+2. Sort by pressing a column header. The page size control offers 25, 50 or 100.
+3. Open a finding to read its evidence, its judgment history, and the retests recorded against it.
+4. Change status or severity from the finding, and record the reason; the change is written to the append-only audit log.
+5. The count beside the tab is the filtered total, so it moves as you narrow.
 
 === "Desktop"
 
@@ -722,6 +734,11 @@ Every finding, ranked. Columns: **Pri**, **Severity**, **Finding & Details**, **
 
 Findings ingested from another tool, kept distinct from what Synapse detected.
 
+1. This tab holds third-party findings brought in as SARIF, kept apart from what Synapse produced so provenance stays clear.
+2. Read the import summary for what was accepted and what was refused.
+3. `synapse-cli validate-sarif` reports what the server would accept without writing anything; use it before importing.
+4. Nothing here is merged into the native finding set; it is governed separately.
+
 === "Desktop"
 
     ![engagements_engagement_imported at desktop width](assets/ui/desktop_engagements_engagement_imported.webp)
@@ -735,6 +752,13 @@ Findings ingested from another tool, kept distinct from what Synapse detected.
 `/engagements/{id}/comparison`
 
 Two immutable snapshots compared. `Finalize snapshot` creates one from selected scan runs.
+
+1. Press **Configure comparison** and choose two finalized snapshots: a baseline and a current.
+2. Pick the scope, which decides whether the comparison covers all findings, security findings only, or vulnerabilities only.
+3. Press **Run comparison**. The result is immutable and addressed by its own id, so the same link always shows the same answer.
+4. Read the ratios first: new, fixed, unchanged, and the ones that could not be compared.
+5. Filter the compared findings by presence, severity, change flag and review state, then open one to see both observations side by side.
+6. An Assessment in no Cycle can still compare its own snapshots; the Cycle only adds sibling Assessments as baselines.
 
 === "Desktop"
 
@@ -750,6 +774,12 @@ Two immutable snapshots compared. `Finalize snapshot` creates one from selected 
 
 Deadlines per finding: **Tier / score**, **Mitigate by**, **Remediate by**, **Workflow**, **Policy**. `Transition` records a state change with its audit reason, and shows the prior transitions and deadline assessments.
 
+1. The panel states the risk-based deadline for each finding and whether it is met, at risk, or breached.
+2. Open **Transition history** on a finding to see who moved it, when, and the reason they recorded.
+3. Open **Deadline assessments** to see how the deadline was derived, not just what it is.
+4. Accepting a risk requires a reason and an expiry; both are audited and the acceptance lapses on its own.
+5. The tab is empty and says so when `SYNAPSE_SLA_ENABLED` is off.
+
 === "Desktop"
 
     ![engagements_engagement_sla at desktop width](assets/ui/desktop_engagements_engagement_sla.webp)
@@ -763,6 +793,11 @@ Deadlines per finding: **Tier / score**, **Mitigate by**, **Remediate by**, **Wo
 `/engagements/{id}/risk-stories`
 
 Per-asset risk narrative assembled from the findings.
+
+1. A risk story groups findings, assets and detections that describe one attack narrative rather than one defect.
+2. Each story names the asset it is about and the evidence that correlated it.
+3. Stories are produced by correlation over the scan and fleet data, so an engagement with neither shows none.
+4. Open a story to reach the findings underneath it.
 
 === "Desktop"
 
@@ -778,6 +813,11 @@ Per-asset risk narrative assembled from the findings.
 
 Vulnerability posture for this engagement, with an acknowledge / resolve queue.
 
+1. **Reconciled occurrences** lists every place a vulnerability was observed for this engagement, after reconciliation against the advisory store.
+2. The **Action queue** holds the ones still awaiting a decision.
+3. Press **Acknowledge** to record that the occurrence is known and accepted for now, or **Resolve** to close it.
+4. Both write to the audit log with the actor; neither edits the finding's evidence.
+
 === "Desktop"
 
     ![engagements_engagement_vuln-posture at desktop width](assets/ui/desktop_engagements_engagement_vuln-posture.webp)
@@ -791,6 +831,11 @@ Vulnerability posture for this engagement, with an acknowledge / resolve queue.
 `/engagements/{id}/components`
 
 The software bill of materials: every package the scan cataloged.
+
+1. Every component the scan resolved, with its version, PURL and licenses.
+2. Search by name, version, PURL or license.
+3. An empty list on an application that has dependencies is an unresolved result, not a clean one: a manifest without a lockfile cannot be pinned unless manifest resolution is enabled.
+4. Components come from Synapse's own per-ecosystem parsers; no third-party scanner is involved by default.
 
 === "Desktop"
 
@@ -806,6 +851,12 @@ The software bill of materials: every package the scan cataloged.
 
 Advisory matches against the cataloged packages.
 
+1. Each row is a vulnerability matched against a resolved component, with severity, CVSS, EPSS and whether it is in CISA KEV.
+2. **Direct** says whether the project depends on the affected package itself or reaches it through another one.
+3. **Path** shows the route from a direct dependency to the vulnerable package, which is what makes a transitive finding actionable.
+4. The fix column carries the fixed version and how confident the upgrade is.
+5. Search matches the identifier, the component and the description.
+
 === "Desktop"
 
     ![engagements_engagement_vulns at desktop width](assets/ui/desktop_engagements_engagement_vulns.webp)
@@ -819,6 +870,10 @@ Advisory matches against the cataloged packages.
 `/engagements/{id}/licenses`
 
 License obligations per component, with the policy verdict.
+
+1. Every distinct license found across the resolved components, classified against the policy.
+2. Search by SPDX id or name.
+3. A component whose license could not be determined is listed as unknown rather than assumed permissive.
 
 === "Desktop"
 
@@ -834,6 +889,12 @@ License obligations per component, with the policy verdict.
 
 The dependency tree, loaded as its own chunk because only this tab needs it.
 
+1. Choose a mode: **finding** traces the path to a vulnerable package, **explorer** walks out from one package, **license** shows what a license reaches, **blast** shows what depends on a package.
+2. In finding mode, step through the vulnerabilities with the selector; the graph redraws for each.
+3. In explorer mode, pick a focus package and a depth.
+4. Solid edges were observed in the lockfile; the graph is empty when the scan resolved no dependency edges.
+5. Pan and zoom with the controls; the minimap shows where you are in a large graph.
+
 === "Desktop"
 
     ![engagements_engagement_graph at desktop width](assets/ui/desktop_engagements_engagement_graph.webp)
@@ -847,6 +908,11 @@ The dependency tree, loaded as its own chunk because only this tab needs it.
 `/engagements/{id}/scanruns`
 
 Every run with its provenance lanes, and the drift between runs.
+
+1. Every scan this engagement has run, newest first, with its status, duration and the tool versions it pinned.
+2. Select two runs and press **Compare A and B** to see what changed between them.
+3. The diff separates findings that appeared, findings that went away, and changes caused by the advisory database moving rather than the code.
+4. Each run links to the evidence it sealed.
 
 === "Desktop"
 
@@ -862,6 +928,12 @@ Every run with its provenance lanes, and the drift between runs.
 
 Credentials in scope for this engagement, vault-backed.
 
+1. Stores the credentials a scan or probe needs, by placeholder name, so no secret ever reaches argv or a log.
+2. Press **Add a credential**, give it a placeholder name and the secret value, and save.
+3. Reference it elsewhere as `{{secret:NAME}}`; the server substitutes it at execution time.
+4. A stored value is never shown again, and **Delete** asks for confirmation.
+5. Secrets are scrubbed from tool output, from sealed evidence, and from a tool's error before any of them is stored.
+
 === "Desktop"
 
     ![engagements_engagement_credentials at desktop width](assets/ui/desktop_engagements_engagement_credentials.webp)
@@ -875,6 +947,11 @@ Credentials in scope for this engagement, vault-backed.
 `/engagements/{id}/quality`
 
 The code-quality view scoped to this engagement.
+
+1. The latest code-quality analysis for the project bound to this engagement: the quality gate verdict and the issue counts by kind and severity.
+2. The gate says which condition failed, with the threshold and the actual value.
+3. Follow through to the Code Quality project for the file-level detail.
+4. The tab says the capability is unavailable rather than showing an empty result when code quality is not configured.
 
 === "Desktop"
 
@@ -890,6 +967,10 @@ The code-quality view scoped to this engagement.
 
 The threat model for the target.
 
+1. Holds an ingested threat model: trust boundaries, components, data flows and the assets they touch.
+2. Read the counts first, then the boundary crossings, which are where a data flow leaves a trust boundary.
+3. Nothing is inferred here; the model is what was ingested.
+
 === "Desktop"
 
     ![engagements_engagement_threats at desktop width](assets/ui/desktop_engagements_engagement_threats.webp)
@@ -903,6 +984,12 @@ The threat model for the target.
 `/engagements/{id}/recon`
 
 Recon runs. A run is proposed, gated on scope and authorization, then approved by a human.
+
+1. Live recon is off until it is enabled in **Settings**, and the tab says so with a link there.
+2. Choose a **Tool** and an **in-scope target**; only targets inside the engagement's scope are offered, and the server checks scope and the authorization window again before anything runs.
+3. Press **Launch**. The run appears in **Runs** with its containment posture, which names the sandbox and how egress was restricted.
+4. Open **Live log** to watch the tool's output as it arrives.
+5. Every run seals its output into the evidence chain, including a failed one, and records the connect attempts the kernel observed.
 
 === "Desktop"
 
@@ -918,6 +1005,12 @@ Recon runs. A run is proposed, gated on scope and authorization, then approved b
 
 Which detections cover which attack techniques.
 
+1. **Detection coverage** compares the techniques an emulation exercised against the detections that fired.
+2. **Detection gaps to close** lists techniques that ran and were not detected, which is the list worth acting on.
+3. Pick a **Target asset** and press **Run emulation** to run benign technique variants.
+4. Each technique declares the detection it expects, so a gap is a statement about a control, not about the tool.
+5. **Coverage by emulation run** keeps the history so improvement is visible.
+
 === "Desktop"
 
     ![engagements_engagement_purple at desktop width](assets/ui/desktop_engagements_engagement_purple.webp)
@@ -931,6 +1024,12 @@ Which detections cover which attack techniques.
 `/engagements/{id}/rehearsal`
 
 Attack-chain rehearsal against the modelled path.
+
+1. A rehearsal proves an exploitation chain is permitted and that its chain of custody is sound. It executes against a no-host simulation and never touches a host.
+2. Add each step with its technique, target, blast radius (read-only or state-changing) and, for a state-changing step, its cleanup.
+3. Press **Run no-host rehearsal**. Each step is admitted against the engagement's rules of engagement before it runs.
+4. Every step seals its own evidence and is confirmed by a verifier distinct from the proposer.
+5. The offensive kill switch halts a running rehearsal.
 
 === "Desktop"
 
@@ -946,6 +1045,12 @@ Attack-chain rehearsal against the modelled path.
 
 The AI session transcript: the goal, each tool call, and the token cost.
 
+1. Write the **Agent goal** and press **Start agent**.
+2. The agent proposes; it never confirms its own claim, and no model sits in the report path.
+3. Watch the **Transcript** for each tool call, its result, and the tokens spent.
+4. With the approval mode set to manual, an action that needs approval waits for a decision rather than proceeding.
+5. Past sessions stay in **Sessions** with their decisions and plans.
+
 === "Desktop"
 
     ![engagements_engagement_agent at desktop width](assets/ui/desktop_engagements_engagement_agent.webp)
@@ -959,6 +1064,12 @@ The AI session transcript: the goal, each tool call, and the token cost.
 `/engagements/{id}/cspm`
 
 Cloud posture findings; an unknown-state resource stays NotAssessed.
+
+1. Choose the provider (AWS, Azure or GCP) and press **Run posture scan**.
+2. **Latest run** reports the assets read, the findings raised, and the coverage issues, which are the places the scan could not see.
+3. Coverage issues matter as much as findings: an unreadable account is not a compliant one.
+4. Each run links to the evidence it sealed.
+5. The tab stays off until `SYNAPSE_CSPM_ENABLED` is set.
 
 === "Desktop"
 
@@ -974,6 +1085,12 @@ Cloud posture findings; an unknown-state resource stays NotAssessed.
 
 Dynamic testing. A scan or probe is proposed and a distinct reviewer approves it.
 
+1. **Runtime verification** turns a finding into a probe: press **Propose probe**, fill in the URL, method, expected status and optional expected body.
+2. A proposal is a claim, not an action. Press **Approve** or **Deny**, with a reason; only an approved probe can run.
+3. Press **Run probe**. It executes under a kernel-enforced egress allowlist, so it can only reach what the scope permits.
+4. **Authenticated DAST scan** follows the same propose, approve, run shape for a full scan.
+5. The result records what was observed, which is what confirms or refutes the finding.
+
 === "Desktop"
 
     ![engagements_engagement_dast at desktop width](assets/ui/desktop_engagements_engagement_dast.webp)
@@ -987,6 +1104,11 @@ Dynamic testing. A scan or probe is proposed and a distinct reviewer approves it
 `/engagements/{id}/detections`
 
 Runtime detections correlated to this engagement.
+
+1. Detections shipped by the fleet agents for this engagement, sealed once into the evidence chain.
+2. Press correlate to fold the newest detections into incidents.
+3. A truncated evidence window says so rather than silently showing part of the picture.
+4. Follow a detection to its provenance to see the chain behind it.
 
 === "Desktop"
 
@@ -1002,6 +1124,11 @@ Runtime detections correlated to this engagement.
 
 Where each detection came from and what it was derived from.
 
+1. The durable chain behind each detection: what produced it, which key signed it, and whether the chain still verifies.
+2. A broken chain is stated plainly; it blocks the report rather than degrading it quietly.
+3. An expired provenance record is distinguished from a broken one.
+4. Use this tab when you need to defend a detection, not just read it.
+
 === "Desktop"
 
     ![engagements_engagement_detection-provenance at desktop width](assets/ui/desktop_engagements_engagement_detection-provenance.webp)
@@ -1015,6 +1142,12 @@ Where each detection came from and what it was derived from.
 `/engagements/{id}/reviews`
 
 The propose / verify / confirm record, with the hash-chained evidence ledger.
+
+1. Every analysis or AI claim arrives as a proposal that a distinct verifier must confirm.
+2. Open a judgment to read the evidence score and the rationale recorded with it.
+3. Confirm or refute it; a proposer can never confirm its own claim.
+4. **Auto-verify all** runs the verifier over the queue where the policy allows it.
+5. An empty queue means nothing is awaiting a human decision, not that nothing was proposed.
 
 === "Desktop"
 
@@ -1030,6 +1163,11 @@ The propose / verify / confirm record, with the hash-chained evidence ledger.
 
 The evidence ledger itself. A broken chain blocks the report.
 
+1. The hash-chained, append-only record for this engagement, newest first.
+2. Press **Capture** to add a note or a file; both become part of the chain.
+3. The chain is verified on read; a break is reported and blocks the report rather than being hidden.
+4. Nothing here can be edited or deleted, which is the point.
+
 === "Desktop"
 
     ![engagements_engagement_evidence at desktop width](assets/ui/desktop_engagements_engagement_evidence.webp)
@@ -1043,6 +1181,13 @@ The evidence ledger itself. A broken chain blocks the report.
 `/engagements/{id}/data-governance`
 
 Retention and handling for the data this engagement holds.
+
+1. **Legal hold** preserves this engagement's detection data against retention expiry and on-demand deletion. Press **Place a hold** with a reason; the reason is required and audited.
+2. A held engagement refuses deletion, so place the hold before you need it.
+3. **Release hold** lifts it, and is audited the same way.
+4. **Data export** generates the governance bundle for a subject-access request: the detections held for this engagement plus any active holds. Press **Download JSON** to take it away.
+5. **Danger zone** deletes the detection projection on demand. It requires a reason, asks for confirmation, refuses while a hold is in place, and never touches the evidence chain.
+6. The tab needs `SYNAPSE_FLEET_ENABLED` and `SYNAPSE_FLEET_DETECTION_INGEST_ENABLED`, because the detection projection is the data it governs.
 
 === "Desktop"
 
@@ -1058,6 +1203,11 @@ Retention and handling for the data this engagement holds.
 
 AI-drafted write-ups, unconfirmed until a human accepts them.
 
+1. Drafts a description and a remediation for a finding, as a proposal a human decides on.
+2. Open the finding the draft is about to judge it in context.
+3. Edit the draft, then **Save**, **Accept** or **Reject**.
+4. Nothing reaches the report until it is accepted; no model writes into the report path.
+
 === "Desktop"
 
     ![engagements_engagement_writeup-drafts at desktop width](assets/ui/desktop_engagements_engagement_writeup-drafts.webp)
@@ -1071,6 +1221,12 @@ AI-drafted write-ups, unconfirmed until a human accepts them.
 `/engagements/{id}/settings`
 
 Scope, authorization window, rules of engagement, and the engagement lifecycle.
+
+1. **Scope** lists what is in and out of scope. The execution layer checks it server-side before any tool runs, so this is a control, not a label. Press **Save scope**.
+2. **Authorization window** bounds when execution is permitted. Press **Save window**.
+3. **Live reconnaissance** is the switch that makes execution against a real target possible. Enabling it re-confirms the acceptable-use policy version and records a lab-authorization attestation; both go to the append-only audit log. Disabling needs neither.
+4. **Offensive rules of engagement** set the maximum blast radius, from prohibited through low, medium and high. Unset means offensive actions are refused. Press **Save RoE**.
+5. **Asset assignment** binds the engagement to a business asset; **Lifecycle** activates, completes or archives it.
 
 === "Desktop"
 
@@ -1091,6 +1247,11 @@ business key.
 
 Criticality, owner, lifecycle and posture for one business asset.
 
+1. **Asset profile** carries what the asset is: type, criticality, lifecycle and owner. Press the edit control to change them, then **Save**.
+2. Criticality drives the remediation deadline an SLA policy derives, so it is a governance field rather than a label.
+3. **Recent engagements** links to the assessments that covered this asset.
+4. Lifecycle moves the asset through its stages; the control offers only the transitions the current state allows.
+
 === "Desktop"
 
     ![assets_payments-api at desktop width](assets/ui/desktop_assets_payments-api.webp)
@@ -1104,6 +1265,11 @@ Criticality, owner, lifecycle and posture for one business asset.
 `/assets/{key}/components`
 
 The projects and technical assets that make up this business asset.
+
+1. **Projects / repositories** lists the code identities bound to this asset.
+2. **Technical / fleet assets** lists the hosts, workloads, images and exposures the fleet has attributed to it.
+3. Together they are the denominator for coverage: what should be assessed, not what happens to have been.
+4. Add a component with the selector and mark one **Primary** when the asset has an obvious main repository.
 
 === "Desktop"
 
@@ -1119,6 +1285,10 @@ The projects and technical assets that make up this business asset.
 
 Every assessment that covered this asset.
 
+1. Every engagement assigned to this asset, with its status and dates.
+2. An asset with no engagement says so plainly, which is the state worth noticing on a critical asset.
+3. Follow one through to its findings.
+
 === "Desktop"
 
     ![assets_payments-api_engagements at desktop width](assets/ui/desktop_assets_payments-api_engagements.webp)
@@ -1132,6 +1302,10 @@ Every assessment that covered this asset.
 `/assets/{key}/findings`
 
 Findings aggregated across those assessments.
+
+1. The current findings across every engagement that covered this asset, so one screen answers "what is open against this asset".
+2. Filter and page through them; the list is server-paged, so a large estate stays fast.
+3. Severity and status are the finding's own, not a copy, so acting here acts on the finding.
 
 === "Desktop"
 
@@ -1147,6 +1321,11 @@ Findings aggregated across those assessments.
 
 Which components were assessed, by what, and how recently.
 
+1. Each expected component with its coverage verdict against the freshness target named in the panel title.
+2. A component never assessed and one assessed too long ago are different verdicts, and both differ from one that is current.
+3. The counts beside the title break the estate down by verdict.
+4. Coverage is computed against the components declared on the asset, so an incomplete component list produces a flattering number.
+
 === "Desktop"
 
     ![assets_payments-api_coverage at desktop width](assets/ui/desktop_assets_payments-api_coverage.webp)
@@ -1160,6 +1339,9 @@ Which components were assessed, by what, and how recently.
 `/assets/{key}/history`
 
 The assessment history for the asset.
+
+1. The assessment history for this asset over time: which engagement, when, and what it found.
+2. Use it to answer how long an asset has gone without assessment, which the coverage verdict summarises but does not date.
 
 === "Desktop"
 
@@ -1179,6 +1361,12 @@ The assessment history for the asset.
 
 Project health, the managed gate verdict, and the trend.
 
+1. The quality gate verdict for the selected branch, with each condition, its threshold and the actual value.
+2. The ratings are **Security**, **Reliability** and **Maintainability**, beside coverage and duplication.
+3. Switch between **Overall Code** and **New Code**; a gate usually fails on new code, which is the code you can still change.
+4. The branch selector offers the branches that have analyses. A project bound to a local path has no branch name and shows "no branch".
+5. Press **Run analysis** to start one, or **Coverage** to upload a coverage report the analysis cannot produce itself.
+
 === "Desktop"
 
     ![code-quality_projects_juice-shop at desktop width](assets/ui/desktop_code-quality_projects_juice-shop.webp)
@@ -1192,6 +1380,11 @@ Project health, the managed gate verdict, and the trend.
 `/code-quality/projects/{key}/hotspots`
 
 Code needing a security review decision.
+
+1. A hotspot is code that needs a human to decide whether it is a vulnerability in this context, not a finding asserting that it is.
+2. Select one to read the code around it with the rule that raised it.
+3. Record the decision: it is safe here, or it is a real vulnerability. The decision and its rationale are kept.
+4. The review percentage on the Overview counts these decisions, so an unreviewed project reads 0% however clean it is.
 
 === "Desktop"
 
@@ -1207,6 +1400,11 @@ Code needing a security review decision.
 
 Every issue with its rule, severity and status. The inspector shows the review history behind the current status before you reclassify.
 
+1. Filter by kind, severity, status, rule and path; the search box matches title, rule and path together.
+2. Open an issue to read it against its source, with the rule's explanation beside it.
+3. Change its status and record the rationale; the history is kept and shown in the inspector above the form.
+4. The code lens shows the issue in place rather than as a line number you have to go and find.
+
 === "Desktop"
 
     ![code-quality_projects_juice-shop_issues at desktop width](assets/ui/desktop_code-quality_projects_juice-shop_issues.webp)
@@ -1220,6 +1418,10 @@ Every issue with its rule, severity and status. The inspector shows the review h
 `/code-quality/projects/{key}/code`
 
 The analysed source, annotated with its findings.
+
+1. Browse the source the analysis captured, directory by directory.
+2. Per-file measures sit beside the tree, so you can see which file carries the issues.
+3. A file is present only when the analysis published its source; a project that has not published shows none.
 
 === "Desktop"
 
@@ -1235,6 +1437,11 @@ The analysed source, annotated with its findings.
 
 The dependency tree with risky paths marked.
 
+1. The project's dependency tree, resolved from its manifests and lockfiles.
+2. Search by package, version or PURL.
+3. Filter to what you are looking for, then expand a node to walk the tree.
+4. Export the SBOM to take the inventory away in a standard format.
+
 === "Desktop"
 
     ![code-quality_projects_juice-shop_dependencies at desktop width](assets/ui/desktop_code-quality_projects_juice-shop_dependencies.webp)
@@ -1248,6 +1455,11 @@ The dependency tree with risky paths marked.
 `/code-quality/projects/{key}/measures`
 
 The measured metrics for the analysis.
+
+1. Choose a **Measures domain** to switch between reliability, security, maintainability, coverage, duplication and size.
+2. The list is a file tree: press a directory to descend, and the breadcrumb takes you back.
+3. Filter files or directories by name.
+4. Sort by a metric to find the worst files in that domain, which is usually the fastest route to the work worth doing.
 
 === "Desktop"
 
@@ -1263,6 +1475,10 @@ The measured metrics for the analysis.
 
 Two analyses compared.
 
+1. Pick two targets, a base and a compare; they must be different.
+2. **Swap base and compare** reverses the direction without re-picking.
+3. The result reports what moved between them, metric by metric, rather than two independent snapshots you have to diff by eye.
+
 === "Desktop"
 
     ![code-quality_projects_juice-shop_compare at desktop width](assets/ui/desktop_code-quality_projects_juice-shop_compare.webp)
@@ -1277,6 +1493,9 @@ Two analyses compared.
 
 One analysis in detail.
 
+1. The details of one analysis: when it ran, what produced it, and the gate it was evaluated against.
+2. Use it to answer why a gate verdict came out as it did, including which conditions were evaluated.
+
 === "Desktop"
 
     ![code-quality_projects_juice-shop_analysis at desktop width](assets/ui/desktop_code-quality_projects_juice-shop_analysis.webp)
@@ -1290,6 +1509,10 @@ One analysis in detail.
 `/code-quality/projects/{key}/activity`
 
 The analysis history, which is where a CI push lands.
+
+1. The analysis history for the project, newest first.
+2. Each entry carries its gate verdict, so a regression is visible as a change rather than an isolated result.
+3. Follow an entry to its analysis details.
 
 === "Desktop"
 
