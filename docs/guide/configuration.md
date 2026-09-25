@@ -476,7 +476,7 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | `SYNAPSE_JAVATAINT_ENABLED` | `false` | Java value-flow taint proposals (OFF by default). Needs judgments and `synapse-ast`; source-only, so the sandbox is optional. |
 | `SYNAPSE_TAINT_RULES_FILE` | empty | Optional YAML file of custom Python and JavaScript taint rules (`python.sources` / `python.sinks` and `js.sources` / `js.sinks`) merged additively into the built-in catalogs at startup. A custom source/sink is import-anchored (`modules` + `names`); a sink also names a taint `class`, a `cwe`, a `rule` id, and a zero-based `argument`. Custom rules only ADD detection (a new source or sink); there are no custom sanitizers, so they cannot suppress a built-in flow. A malformed or invalid file fails startup rather than silently dropping rules. |
 | `SYNAPSE_CROSSCHECK_ENABLED` | `true` | Detection-source disagreement judgments. |
-| `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `true` | Dual-producer SBOM cross-check. |
+| `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `false` | Dual-producer SBOM cross-check: a second producer runs beside the primary and components only one emits become ungated judgments for review. Opt-in, because the owned parsers are the primary producer and the only second producer is Syft, so enabling it makes the deployment depend on a Syft binary. |
 | `SYNAPSE_GOMODGRAPH_ENABLED` | `true` | Transitive Go dependency edges via `go mod graph`. |
 | `SYNAPSE_WRITEUP_DRAFTS_ENABLED` | `false` | Agent write-up draft tool. A distinct human signs off. |
 

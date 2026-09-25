@@ -130,7 +130,11 @@ func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.Adv
 		acquirer = localAcquirer
 		log.Info("SCA tools (syft/grype) run sandboxed-isolated; network acquisition is fail-closed pending signed scan grants")
 	} else {
-		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – syft/grype/git run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
+		// Named syft and grype, which the default configuration no longer runs: the owned parsers are
+		// the SBOM producer and the detection sources are advisory data. What the warning is actually
+		// about is any external binary the scan shells out to, which is git plus whichever third-party
+		// tools an operator has opted back in.
+		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – git and any opted-in external scan tools run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
 	}
 	// SBOM producer select: default ownsbom (the detection-independent owned parsers across 23 ecosystems,
 	// emitting dependency-graph edges; pure-Go, no exec, so no sandbox) or the pinned Syft binary as an

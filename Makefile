@@ -33,7 +33,7 @@ install: ## Install Go + web dependencies
 	$(GO) mod download
 	cd web && pnpm install
 
-tools: ## Install external scan binaries (syft+grype into ./bin; add RECON=1 for recon tools)
+tools: ## Install optional third-party scan binaries for benchmarking and opt-in cross-check (syft+grype into ./bin; NOT needed to scan: the owned parsers and advisory store are the defaults; add RECON=1 for recon tools)
 	scripts/install-tools.sh $(if $(RECON),--recon,)
 
 dev: ## Run API + web dev servers together

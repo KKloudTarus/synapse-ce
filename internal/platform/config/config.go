@@ -769,10 +769,13 @@ type Config struct {
 	CrossCheckEnabled bool
 	// SBOMCrossCheckEnabled turns on SBOM-PRODUCER cross-check judgments: a 2nd SBOM producer runs
 	// alongside the primary and components only one producer emits are minted as ungated CapCorrelation
-	// judgments (subject = component) for human review. On by default (effective-by-default policy,
-	// TestAnalysisDefaultsOn); best-effort — it degrades to a no-op when a second producer is unavailable (the
-	// owned producer alone needs no external tool) — set SYNAPSE_SBOM_CROSSCHECK_ENABLED=false to opt out.
-	// Requires JudgmentsEnabled (it mints judgments).
+	// judgments (subject = component) for human review.
+	//
+	// OFF by default, unlike the other best-effort analysis capabilities. The owned parsers are the
+	// primary producer, so the only second producer is Syft, and defaulting this on made a stock
+	// deployment reach for a third-party binary Synapse does not otherwise need. The cross-check keeps
+	// its value as an opt-in independence check; it is not a condition of scanning.
+	// Requires JudgmentsEnabled (it mints judgments) and a Syft binary on PATH.
 	SBOMCrossCheckEnabled bool
 	// WriteupDraftsEnabled turns on the propose_writeup_draft agent tool: the agent can DRAFT a
 	// finding's write-up prose as a proposal; a human edits/signs off out of band. Off by default; opt-in.
@@ -971,7 +974,7 @@ func Load() Config {
 		CppReachabilityEnabled:                      getbool("SYNAPSE_REACH_CPP", true),
 		GoBinaryReachabilityEnabled:                 getbool("SYNAPSE_REACH_GOBIN", true),
 		CrossCheckEnabled:                           getbool("SYNAPSE_CROSSCHECK_ENABLED", true),
-		SBOMCrossCheckEnabled:                       getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", true),
+		SBOMCrossCheckEnabled:                       getbool("SYNAPSE_SBOM_CROSSCHECK_ENABLED", false),
 		WriteupDraftsEnabled:                        getbool("SYNAPSE_WRITEUP_DRAFTS_ENABLED", false), // needs agent → opt-in
 		FleetAssetsEnabled:                          getbool("SYNAPSE_FLEET_ASSETS_ENABLED", false),
 		CSPMEnabled:                                 getbool("SYNAPSE_CSPM_ENABLED", false),

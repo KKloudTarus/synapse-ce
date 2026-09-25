@@ -599,7 +599,10 @@ func TestAnalysisDefaultsOn(t *testing.T) {
 		"Misconfig": c.MisconfigEnabled, "Suppression": c.SuppressionEnabled, "VEX": c.VEXEnabled,
 		"Compliance": c.ComplianceEnabled, "ScanCache": c.ScanCacheEnabled, "ImageRootFS": c.ImageRootFSEnabled,
 		"OwnedAdvisory": c.OwnedAdvisoryEnabled, "Reachability": c.ReachabilityEnabled,
-		"CrossCheck": c.CrossCheckEnabled, "SBOMCrossCheck": c.SBOMCrossCheckEnabled,
+		// SBOMCrossCheck is deliberately absent: its second producer is Syft, so it is opt-in rather
+		// than effective-by-default (see TestExternalSetupDefaultsOff). CrossCheck stays on because it
+		// diffs detection sources, which are advisory data and need no third-party binary.
+		"CrossCheck": c.CrossCheckEnabled,
 		"GoModGraph": c.GoModGraphEnabled,
 		// Source-only Tier-1 import reachability (D4.2): default ON. Each fails to "unknown" on any coverage
 		// gap and only ever produces a bounded, independently-confirmed priority de-escalation, never a
@@ -633,6 +636,7 @@ func TestExternalSetupDefaultsOff(t *testing.T) {
 		"SYNAPSE_PYREACH_TIER2_ENABLED", "SYNAPSE_SECRET_HISTORY_ENABLED", "SYNAPSE_JVM_REACHABILITY_ENABLED",
 		"SYNAPSE_MAVEN_RESOLVE_ENABLED", "SYNAPSE_GRADLE_RESOLVE_ENABLED", "SYNAPSE_JARHASH_ONLINE_ENABLED",
 		"SYNAPSE_WRITEUP_DRAFTS_ENABLED", "SYNAPSE_OFFLINE", "SYNAPSE_IGNORE_UNFIXED",
+		"SYNAPSE_SBOM_CROSSCHECK_ENABLED",
 	} {
 		t.Setenv(k, "")
 	}
@@ -646,6 +650,9 @@ func TestExternalSetupDefaultsOff(t *testing.T) {
 		"MavenResolve": c.MavenResolveEnabled, "GradleResolve": c.GradleResolveEnabled,
 		"JarHashOnline": c.JarHashOnlineEnabled, "WriteupDrafts": c.WriteupDraftsEnabled,
 		"Offline": c.Offline, "IgnoreUnfixed": c.IgnoreUnfixed, "JVMReachability": c.JVMReachabilityEnabled,
+		// The owned parsers are the primary SBOM producer, so the only second producer is Syft. On by
+		// default this made a stock deployment depend on a third-party binary to scan normally.
+		"SBOMCrossCheck": c.SBOMCrossCheckEnabled,
 	}
 	for name, v := range off {
 		if v {

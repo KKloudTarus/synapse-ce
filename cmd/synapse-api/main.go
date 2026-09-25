@@ -3351,6 +3351,9 @@ func main() {
 		// (owned parsers vs Syft) are diffed. The primary kind is resolved through the same
 		// scacompose.ResolveSBOMProducerKind the producer-select switch uses, so an empty (default) value
 		// resolves to ownsbom-primary here too and the secondary is Syft, never ownsbom-vs-ownsbom.
+		//
+		// Reached only when the operator opts in. With the owned parsers as the primary the secondary is
+		// always Syft, so this is the one place a default scan would have needed a third-party binary.
 		primaryKind, pkErr := scacompose.ResolveSBOMProducerKind(cfg)
 		if pkErr != nil {
 			log.Error("resolve SBOM producer kind for cross-check", "err", pkErr)
