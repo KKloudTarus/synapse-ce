@@ -416,33 +416,62 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	if err != nil {
 		return ports.SASTSourceReport{}, err
 	}
-	out := make([]ports.SASTRawFinding, 0, maxFindings)
+	// The report budget is spent on SECURITY findings before code-quality ones. Walk order alone used to
+	// decide, and on a real 971-file Spring service that meant 417 low-severity code smells consumed the
+	// budget and a CWE-327 weak-hash call in a later directory was never reported. The scan said so (the
+	// caller gets Truncated and a lower-bound warning), but an honest lower bound that drops the security
+	// finding and keeps "print used instead of a logger" is still spending the budget on the wrong thing.
+	//
+	// Both buckets are filled across the WHOLE tree, so no file is left unscanned for want of budget; only
+	// the quality bucket is trimmed at the end, and only once security has taken what it needs.
+	security := make([]ports.SASTRawFinding, 0, maxFindings)
+	quality := make([]ports.SASTRawFinding, 0, maxFindings)
 	seen := make(map[string]bool, maxFindings)
+	droppedQuality := false
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return ports.SASTSourceReport{}, err
 		}
 		// The per-file cap is applied BEFORE the tree-wide one so a single generated or vendored file
 		// that matches thousands of times cannot spend the whole report budget on itself.
-		limit := min(maxFindingsPerFile, maxFindings-len(out))
+		limit := min(maxFindingsPerFile, maxFindings-len(security))
+		if limit <= 0 {
+			// Security alone has filled the report. Anything further would be dropped, so stop rather
+			// than pay to scan it, and say the result is a lower bound.
+			truncated = true
+			break
+		}
 		hits, status, scanErr := a.scanLines(ctx, file.Rel, file.Ext, file.Lines, project, seen, limit)
-		out = append(out, hits...)
 		if scanErr != nil {
 			return ports.SASTSourceReport{}, scanErr
 		}
-		truncated = truncated || status.findingsTruncated || status.lineLimitReached || status.statementLimitReached
-		if len(out) >= maxFindings {
-			// Only truncated when a file was actually left unscanned. Landing exactly on the
-			// budget with the last file complete is a complete scan, and reporting it as a lower
-			// bound would make every caller distrust a result that is in fact exhaustive.
-			truncated = truncated || file.Rel != files[len(files)-1].Rel
-			break
+		for _, hit := range hits {
+			if isSecurityFinding(hit) {
+				security = append(security, hit)
+				continue
+			}
+			if len(quality) < maxFindings {
+				quality = append(quality, hit)
+			} else {
+				droppedQuality = true
+			}
 		}
+		truncated = truncated || status.findingsTruncated || status.lineLimitReached || status.statementLimitReached
 	}
 	if err := ctx.Err(); err != nil {
 		return ports.SASTSourceReport{}, err
 	}
-	return ports.SASTSourceReport{Findings: dedupeFindings(out), Truncated: truncated, SkippedFiles: skippedFiles}, nil
+	out := security
+	if room := maxFindings - len(out); room > 0 {
+		if room < len(quality) {
+			droppedQuality = true
+			quality = quality[:room]
+		}
+		out = append(out, quality...)
+	} else if len(quality) > 0 {
+		droppedQuality = true
+	}
+	return ports.SASTSourceReport{Findings: dedupeFindings(out), Truncated: truncated || droppedQuality, SkippedFiles: skippedFiles}, nil
 }
 
 func sourceLinesBytes(lines []string) int64 {
@@ -914,4 +943,16 @@ func dedupeFindings(in []ports.SASTRawFinding) []ports.SASTRawFinding {
 		out = append(out, h)
 	}
 	return out
+}
+
+// isSecurityFinding reports whether a raw hit is a security weakness rather than a maintainability or
+// reliability smell, so the report budget can be spent on security first. RuleType carries the rule's own
+// classification and an empty value means a security vulnerability, which is the documented default in
+// ports.SASTRawFinding. A security_hotspot counts: it is a control worth a human look, not a style note.
+func isSecurityFinding(f ports.SASTRawFinding) bool {
+	switch f.RuleType {
+	case "", "vulnerability", "security_hotspot":
+		return true
+	}
+	return f.RuleQuality == "security"
 }
