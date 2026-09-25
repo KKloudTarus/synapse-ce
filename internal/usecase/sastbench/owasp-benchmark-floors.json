@@ -1,10 +1,11 @@
 {
   "recall": {
-    "cmdi": 0.40,
-    "sqli": 0.28,
-    "pathtraver": 0.40,
+    "cmdi": 0.44,
+    "sqli": 0.48,
+    "pathtraver": 0.43,
     "ldapi": 0.50,
-    "xpathi": 0.55
+    "xpathi": 0.59,
+    "xss": 0.63
   },
-  "precision_tripwire": 0.30
+  "precision_tripwire": 0.50
 }
