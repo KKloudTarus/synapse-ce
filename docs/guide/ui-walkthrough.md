@@ -57,15 +57,26 @@ VITE_API_PROXY_TARGET=http://localhost:8080 pnpm dev   # in one shell
 UI_AUDIT_TOKEN=<api token> pnpm ui:audit               # in another
 ```
 
-`pnpm ui:audit` also reports what a screenshot cannot show: a rendered error, horizontal
-overflow at phone width, a missing page heading, a button with no accessible name, and any
-failed API call. Pass `UI_ROUTES` to sweep detail screens and sub-tabs.
+`pnpm ui:audit` also reports what a screenshot cannot show: a rendered error, a screen still
+loading, a capture that ran past the cap, a missing page heading, content clipped where a user
+cannot reach it, a focusable control inside `aria-hidden`, a button with no accessible name, and
+a failed API call. Pass `UI_ROUTES` to sweep detail screens and sub-tabs, and
+`UI_AUDIT_NAV_TIMEOUT` / `UI_AUDIT_SETTLE_TIMEOUT` when the backend is remote: an engagement's
+scan result is measured in megabytes, and against a slow link the default budget photographs the
+screen before its data arrives.
+
+Each of those checks is written to fire only on something a user would notice. A wide table in
+its own scroller, a full-bleed bar, a truncated id whose row carries the full value in a title,
+and a closed drawer held out of the tab order by `inert` are all correct, and a check that
+reports them buries the ones that are not. A 404 from a tenant-scoped read is absence, not
+failure, and is reported as such: this engagement has no imported SBOM, no published source, no
+threat model, no Assessment Cycle.
 
 ## What the sweep measured
 
 `pnpm ui:audit` also records every `/api/v1` request the app makes while it drives the screens, so
 API coverage can be read from what the product actually calls rather than from a static scan of the
-client. Loading all 75 screens exercised **96 of the 371 registered routes**.
+client. Loading all 75 screens exercised **98 of the 371 registered routes**.
 
 The other 275 are not unreachable; they need something a page load does not do:
 
@@ -76,9 +87,17 @@ The other 275 are not unreachable; they need something a page load does not do:
 
 So this number bounds coverage from below, and does not answer "is anything unreachable" on its own.
 That question was answered separately by auditing every method in `web/src/lib/api` against its
-consumers: 328 methods, of which 10 have no caller. None is an unmapped capability. Two are
+consumers: 331 methods, of which 12 have no caller. None is an unmapped capability. Two are
 superseded (`reopenAssessmentCycle` lost to the preview-and-commit flow, `listNotificationDeliveries`
-to its paged replacement) and eight are single-record GETs whose list already carries the row.
+to its paged replacement) and the rest are single-record reads whose list already carries the row
+(`assessmentSnapshot`, `findingSLA`, `getDastRun`, `getProjectIssue`, `ownershipPolicy`,
+`ownershipTeam`, `projectAnalysis`, `reconRun`, `vulnerabilityAdvisory`) or a duplicate accessor
+(`listCapabilities`).
+
+Run the same audit yourself against a sweep's output: `api-calls.json` in the capture directory
+holds every route the app requested, and the registered set comes from the `mux.HandleFunc`
+literals across `internal/adapter/httpapi`. The count from this pass was 371 registered, 98
+exercised, and **nothing the frontend calls that no route serves**.
 
 Where that audit found a real gap, the gap was closed rather than recorded: user administration,
 the assessment-cycle archive, snapshot finalize, issue review history, and the SLA decision record
