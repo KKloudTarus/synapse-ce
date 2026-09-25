@@ -667,7 +667,36 @@ func (r *Runner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolResult
 	// both sinks, since they consume this ToolResult.
 	res.Stdout = redact.Bytes(res.Stdout, secrets)
 	res.Stderr = redact.Bytes(res.Stderr, secrets)
-	return res, runErr
+	// The error travels to the same sinks as the output: a recon run's error field, the job
+	// record, the operator's screen. It was the one path out of here that no scrubber covered,
+	// which matters because the runner now quotes the tool's first stderr line in an
+	// initialization failure, and a tool that dies holding an injected token can print it.
+	return res, redactErr(runErr, secrets)
+}
+
+// redactedError scrubs an error's message while keeping the original in the chain, so
+// errors.Is and errors.As still see what they were written against.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+// redactErr removes resolved secrets from an error's message. It returns err unchanged when
+// there is nothing to scrub, so the common path allocates nothing and the error identity is
+// preserved exactly.
+func redactErr(err error, secrets [][]byte) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	clean := string(redact.Bytes([]byte(msg), secrets))
+	if clean == msg {
+		return err
+	}
+	return &redactedError{msg: clean, err: err}
 }
 
 // childEnv builds the minimal, controlled environment handed to bwrap (and through it to
