@@ -74,3 +74,34 @@ describe('AssetGraph', () => {
     await waitFor(() => expect(screen.queryByText('Add a relationship')).not.toBeInTheDocument())
   })
 })
+
+describe('AssetGraph paging', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.me).mockResolvedValue(null as never)
+  })
+
+  // Every edge used to render at once, so a large estate produced a page several screens deep.
+  it('pages the relationship list instead of rendering the whole estate', async () => {
+    const assets = Array.from({ length: 60 }, (_, i) => ({
+      id: `asset-${i}`, kind: 'host', key: `machine/${i}`, name: `host-${i}`, attributes: {},
+    }))
+    const edges = Array.from({ length: 59 }, (_, i) => ({
+      tenantId: 'default', from: `asset-${i}`, to: `asset-${i + 1}`, kind: 'runs', provenance: `obs-${i}`, confidence: 'observed',
+    }))
+    vi.mocked(api.listTechnicalAssets).mockResolvedValue(assets as never)
+    vi.mocked(api.fleetAssetEdges).mockResolvedValue(edges as never)
+
+    render(<AssetGraph />)
+
+    expect(await screen.findByText('59 relationships')).toBeInTheDocument()
+    // 25 edges on a page, each drawing its two endpoints, so the 26th edge's source is off-page.
+    expect(screen.getByText('host-0')).toBeInTheDocument()
+    expect(screen.queryAllByText('host-30')).toHaveLength(0)
+    expect(screen.getByText(/Page/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/ }))
+    await waitFor(() => expect(screen.getAllByText('host-30').length).toBeGreaterThan(0))
+    expect(screen.queryByText('host-0')).not.toBeInTheDocument()
+  })
+})

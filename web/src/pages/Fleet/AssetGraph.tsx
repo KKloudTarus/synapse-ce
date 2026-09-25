@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Dataflow03, SearchLg } from '@untitledui/icons'
 import { api } from '../../lib/api'
 import type { AssetEdge, AssetEdgeConfidence, AssetEdgeKind } from '../../lib/api'
@@ -6,6 +6,7 @@ import type { TechnicalAsset } from '../../lib/types'
 import { Button, Card, EmptyState, ErrorState, InfoNote, Input, Pill, Select, Spinner, cn } from '../../components/ui'
 import { FeatureDisabledState, isFeatureDisabled } from '../../components/synapse/FeatureDisabledState'
 import { useFetch } from '../../hooks'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../EngagementDetail/components/FindingsTable'
 
 const EDGE_KINDS: AssetEdgeKind[] = ['runs', 'exposes', 'depends_on', 'can_assume', 'reaches', 'affected_by', 'mounts']
 const KIND_LABEL: Record<string, string> = {
@@ -146,6 +147,15 @@ export function AssetGraph() {
     })
   }, [edges, filter, byId])
 
+  // Every edge used to render at once, so an estate with a few hundred relationships produced a page
+  // several screens deep with nothing to page through it.
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [page, setPage] = useState(1)
+  const pageCount = Math.max(1, Math.ceil(visible.length / pageSize))
+  const activePage = Math.min(page, pageCount)
+  const rows = visible.slice((activePage - 1) * pageSize, activePage * pageSize)
+  useEffect(() => { setPage(1) }, [filter, pageSize])
+
   const error = ea || ee
   if (error && isFeatureDisabled(error)) {
     return (
@@ -194,7 +204,20 @@ export function AssetGraph() {
           ) : (
             <div className="space-y-2">
               <div className="text-xs text-quaternary">{visible.length === (edges?.length ?? 0) ? `${edges?.length ?? 0} relationships` : `${visible.length} of ${edges?.length ?? 0} relationships`}</div>
-              {visible.map((e, i) => <EdgeRow key={`${e.from}-${e.to}-${e.kind}-${e.provenance}-${i}`} edge={e} byId={byId} />)}
+              {rows.map((e, i) => <EdgeRow key={`${e.from}-${e.to}-${e.kind}-${e.provenance}-${i}`} edge={e} byId={byId} />)}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-secondary pt-3">
+                <span className="text-xs tabular-nums text-tertiary">
+                  Showing <span className="font-semibold text-primary">{(activePage - 1) * pageSize + 1}</span> to{' '}
+                  <span className="font-semibold text-primary">{Math.min(activePage * pageSize, visible.length)}</span> of{' '}
+                  <span className="font-semibold text-primary">{visible.length}</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <Select value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))} size="sm" ariaLabel="Relationships per page" className="w-28" options={PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: `${size} / page` }))} />
+                  <Button variant="secondary" disabled={activePage <= 1} onClick={() => setPage(activePage - 1)}>Previous</Button>
+                  <span className="text-xs tabular-nums text-tertiary">Page <span className="font-semibold text-primary">{activePage}</span> of <span className="font-semibold text-primary">{pageCount}</span></span>
+                  <Button variant="secondary" disabled={activePage >= pageCount} onClick={() => setPage(activePage + 1)}>Next</Button>
+                </div>
+              </div>
             </div>
           )}
         </div>

@@ -20,8 +20,15 @@ describe('ownership API contract', () => {
     )
 
     const [url, init] = fetchSpy.mock.calls[0]
-    expect(url).toBe('/api/v1/ownership/findings?engagement_id=eng%2Fa&my_teams=true&severity=critical&cursor=finding%2F1&limit=100')
+    expect(url).toBe('/api/v1/ownership/findings?engagement_id=eng%2Fa&my_teams=true&severity=critical&cursor=finding%2F1&limit=25')
     expect(init).toMatchObject({ credentials: 'same-origin' })
+  })
+
+  it('asks for the page size the caller chose', async () => {
+    fetchSpy.mockResolvedValueOnce(response({ items: [], total: 0 }))
+    await ownershipApi.ownershipInbox({}, undefined, undefined, 50)
+
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/ownership/findings?limit=50')
   })
 
   it('sends an exact idempotency key and frozen preview id for reroute', async () => {
