@@ -3413,6 +3413,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// sandbox-gated in production. Merge like npm: drop the generator's unversioned placeholders of that
 	// ecosystem, keep versioned, dedup.
 	var manifestResolveErrs []string
+	var manifestResolvedEco []string
 	for _, mr := range s.manifestResolvers {
 		if ctx.Err() != nil {
 			break
@@ -3431,6 +3432,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if len(resolvedComps) > 0 {
 			mergeResolvedManifest(doc, resolvedComps)
 			mergeResolvedDeps(doc, resolvedDeps)
+			manifestResolvedEco = append(manifestResolvedEco, eco)
 		}
 		switch {
 		case mrr != nil:
@@ -3703,6 +3705,19 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if gradleResolved {
 		unresolvedEco = removeEcosystem(unresolvedEco, "gradle")
 		lockfiles = append(append([]string{}, lockfiles...), "gradle-dependency-tree")
+	}
+	// The same marker for the resolvers that pin a lockfile-less manifest. Resolution IS a
+	// resolving source: it runs the ecosystem's own lock tool and the versions it returns are
+	// as pinned as a committed lockfile's. Without this a scan that resolved every component
+	// still reported "Only 1171 of 1171 components have pinned versions; some dependencies are
+	// unresolved", which tells an operator the opposite of what happened.
+	if npmResolved {
+		unresolvedEco = removeEcosystem(unresolvedEco, "npm")
+		lockfiles = append(append([]string{}, lockfiles...), "npm-resolved-tree")
+	}
+	for _, eco := range manifestResolvedEco {
+		unresolvedEco = removeEcosystem(unresolvedEco, eco)
+		lockfiles = append(append([]string{}, lockfiles...), eco+"-resolved-tree")
 	}
 
 	result := &ScanResult{
