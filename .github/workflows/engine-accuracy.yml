@@ -100,7 +100,7 @@ jobs:
         run: rm -rf "$RUNNER_TEMP/sca-accuracy-candidate"
 
   aggregate:
-    name: Aggregate benchmark status
+    name: Aggregate SCA benchmark status
     needs: [route, benchmark]
     if: ${{ always() }}
     runs-on: ubuntu-latest
