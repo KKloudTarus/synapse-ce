@@ -69,9 +69,8 @@ func New() *Cataloger { return &Cataloger{} }
 
 var _ ports.OSPackageCataloger = (*Cataloger)(nil)
 
-// Catalog reads the OS-package databases under rootfsDir. Best-effort per ecosystem (an absent/unreadable DB
-// contributes nothing); returns an error only on context cancellation. DistroResolved is false when packages
-// were emitted but the release could not be keyed to an advisory ecosystem.
+// Catalog reads the OS-package databases under rootfsDir. A database error returns
+// any components already collected and an error for the caller's strictness policy.
 func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackageResult, error) {
 	if err := ctx.Err(); err != nil {
 		return ports.OSPackageResult{}, err
@@ -158,11 +157,15 @@ func (Cataloger) Catalog(ctx context.Context, rootfsDir string) (ports.OSPackage
 		}
 	}
 	rpmComps, err := rpmComponents(ctx, rootfsDir, rpmNS, rpmTag)
-	if err != nil { // only a context cancellation; a hostile/malformed DB degrades to no components
-		return ports.OSPackageResult{}, err
+	if err != nil {
+		res.DistroResolved = false
+		if id == "centos" {
+			res.UnsupportedDistro = id
+		}
+		return res, err
 	}
 	if len(rpmComps) > 0 {
-		if id == "centos" && strings.HasPrefix(rpmTag, "centos-7") {
+		if id == "centos" && isCentOS7Tag(rpmTag) {
 			// Two RPMDB entries can share a PURL while only one has verified
 			// base origin. Treat that identity as unsupported for every consumer,
 			// including callers that use the catalog without the SCA merger.

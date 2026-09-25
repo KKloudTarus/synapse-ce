@@ -9,20 +9,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchperf"
 )
 
-// catalog_perf_test.go is the owned OS-package-cataloging performance gate (#1040 A6). OS-package cataloging
-// is the dominant per-image detection cost after rootfs assembly, so it is measured as its own target class:
-// repeated cataloging of a pinned fixture rootfs (a large dpkg status DB), ratcheting on BYTES ALLOCATED per
-// catalog via the shared benchperf contract. Allocation is deterministic for a given Go toolchain and input,
-// so unlike wall-clock latency it gives a stable cross-machine regression signal; the 30% tolerance absorbs the
-// small differences a different Go minor version can introduce. Wall-clock latency is recorded and compared only
-// within the same environment digest. It measures cataloging in isolation (a fixture rootfs), not OCI layer
-// extraction, which is environment-specific and belongs in the trusted CI-workflow lane. The baseline lives at
-// docs/benchmarks/ospkg-catalog-perf.json.
+// This gate catalogs a pinned dpkg fixture independently from image extraction.
+// It uses the committed allocation ceiling; hosted CI compares latency and
+// throughput with a same-runner control.
 
 const (
-	catalogPerfSamples      = 20
-	catalogPerfWarmup       = 3
-	catalogPerfAllocTolFrac = 0.30
+	catalogPerfSamples = 20
+	catalogPerfWarmup  = 3
 	// catalogPerfDebPackages sizes the pinned workload; a fixed count keeps the scanned bytes and the cataloged
 	// component set stable across runs and platforms.
 	catalogPerfDebPackages  = 1500
@@ -87,10 +80,10 @@ func TestOSPkgCatalogPerfGate(t *testing.T) {
 	if datasetDigest != base.DatasetDigest {
 		t.Fatalf("fixture drift: workload digest %s != committed %s (the measured workload changed)", datasetDigest, base.DatasetDigest)
 	}
-	ceil := benchperf.AllocCeiling(base.AllocBytes, catalogPerfAllocTolFrac)
+	ceil := base.AllocCeilingBytes
 	if res.MedianAllocBytes > ceil {
-		t.Errorf("ospkg-catalog allocations regressed: median %d bytes exceeds baseline %d + %.0f%% = %d",
-			res.MedianAllocBytes, base.AllocBytes, catalogPerfAllocTolFrac*100, ceil)
+		t.Errorf("ospkg-catalog allocations regressed: median %d bytes exceeds committed ceiling %d",
+			res.MedianAllocBytes, ceil)
 	}
 	if base.EnvironmentDigest == env {
 		t.Logf("latency vs same-environment baseline: p50 %s (baseline %dms), p95 %s (baseline %dms)",

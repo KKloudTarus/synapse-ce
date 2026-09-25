@@ -335,9 +335,9 @@ func TestScanSourceMatchUsesUpstreamVersionNotBinary(t *testing.T) {
 // TestDistroEcosystemLockstep pins the scan-side matcher key (osDistroEcosystem, this package) to the
 // inventory/correlation identity key (sbom.IdentityFromComponent). Both derive the advisory ecosystem for an
 // OS-package PURL and MUST agree, or a component keyed one way at scan time and another in the correlation path
-// would silently miss its advisories (a false negative) or hit a foreign ecosystem's (a false match). Both now
-// delegate to the shared sbom.DistroEcosystem, so they cannot drift; this table is the regression guard that
-// keeps it that way (and documents the exact keys, case-variants, and unmapped families).
+// would silently miss its advisories (a false negative) or hit a foreign ecosystem's (a false match).
+// The ordinary PURL rows use the shared mapping; verified CentOS 7 rows exercise the process-local
+// origin and remediation identity used by the scan itself.
 func TestDistroEcosystemLockstep(t *testing.T) {
 	purls := []string{
 		"pkg:deb/debian/openssl@1.0?distro=debian-12",
@@ -357,9 +357,6 @@ func TestDistroEcosystemLockstep(t *testing.T) {
 		// Unmapped families must agree on "" (cataloged for inventory, never keyed to an advisory ecosystem).
 		"pkg:rpm/centos/bash@5-1?distro=centos-9",
 		"pkg:rpm/centos/bash@5-1?distro=centos-8", // CentOS >=8 stays unmapped in both functions
-		// CentOS Linux 7 approximation requires a RHEL-base provenance assertion.
-		"pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=centos-7&origin=rhel-base",
-		"pkg:rpm/centos/openssl@1.0.2k-19.el7.centos?distro=centos-7.9.2009&origin=rhel-base",
 		// Case-variant distro qualifiers must still agree (both functions lowercase the qualifier).
 		"pkg:rpm/amzn/bash@5-1?distro=AMZN-2",
 		"pkg:rpm/opensuse-leap/bash@5-1?distro=OpenSUSE-Leap-15.6",
@@ -378,6 +375,19 @@ func TestDistroEcosystemLockstep(t *testing.T) {
 		identity := sbom.IdentityFromComponent(sbom.Component{PURL: purl})
 		if scanKey != identity.Ecosystem {
 			t.Errorf("lockstep drift for %s: osDistroEcosystem=%q but IdentityFromComponent.Ecosystem=%q", purl, scanKey, identity.Ecosystem)
+		}
+	}
+	for _, distro := range []string{"centos-7", "centos-7.9.2009"} {
+		component := sbom.WithVerifiedRPMOrigin(sbom.Component{
+			Name: "openssl", Version: "1.0.2k-19.el7",
+			PURL: "pkg:rpm/centos/openssl@1.0.2k-19.el7?distro=" + distro,
+		}, "rhel-base")
+		identity, coherent := coherentPURLIdentity(component)
+		if got := sbom.IdentityFromComponent(component).Ecosystem; !coherent || got != "Red Hat:7" || identity.Ecosystem != got {
+			t.Errorf("verified %s scan identity=%+v coherent=%t catalog ecosystem=%q", distro, identity, coherent, got)
+		}
+		if got := sbom.DistroEcosystemForComponent(sbom.Component{PURL: component.PURL}); got != "" {
+			t.Errorf("unverified %s ecosystem = %q, want empty", distro, got)
 		}
 	}
 }
@@ -476,7 +486,8 @@ func TestScanCentOSLinux7UsesRHELProvenance(t *testing.T) {
 	if len(findings) != 1 {
 		t.Fatalf("findings = %+v, want only the CentOS Linux 7 approximation", findings)
 	}
-	if findings[0].Ecosystem != "Red Hat:7" || findings[0].PackagePURL != doc.Components[0].PURL {
+	if findings[0].Ecosystem != "Red Hat:7" || findings[0].PackagePURL != doc.Components[0].PURL ||
+		findings[0].FixedVersion != "0:1.0.2k-20.el7" || len(findings[0].FixedVersions) != 1 {
 		t.Fatalf("finding must retain RHEL-derived provenance for CentOS 7 only: %+v", findings[0])
 	}
 }

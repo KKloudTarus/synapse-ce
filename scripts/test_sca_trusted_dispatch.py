@@ -22,9 +22,21 @@ def encoded(record):
     return json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
 
-def provenance(overrides=None):
-    approval = encoded({"implementation_commit": SHA})
-    authorization = encoded({"implementation_commit": SHA})
+def provenance(overrides=None, authorization_overrides=None):
+    digests = {name: "sha256:" + char * 64 for name, char in
+               (("catalog", "1"), ("oracle", "2"), ("ratchet", "3"), ("policy", "4"))}
+    body = "\n".join(("decision: approved", "implementation_commit: " + SHA,
+                      *(name + "_digest: " + digests[name] for name in digests)))
+    approval = encoded({"schema_version": "github-maintainer-issue-comment-capture-v1",
+                        "implementation_commit": SHA, "decision": "approved", "id": "17",
+                        "login": "pho-veteran", "body": body})
+    authorization_record = {"schema_version": "maintainer-authorization-v2",
+                            "implementation_commit": SHA, "decision": "approved", "approval_id": "17",
+                            "approval_digest": dispatch.digest(approval), "maintainer_login": "pho-veteran",
+                            **{name + "_digest": value for name, value in digests.items()}}
+    if authorization_overrides:
+        authorization_record.update(authorization_overrides)
+    authorization = encoded(authorization_record)
     handoff = {
         "schema_version": "synapse-sca-maintainer-authorization-handoff-v1",
         "repository": "KKloudTarus/synapse-ce",
@@ -97,6 +109,12 @@ class TrustedDispatchTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 dispatch.load_provenance(SHA, RUN, ATTEMPT)
 
+    def test_pinned_approval_rejects_forged_authorization_inputs(self):
+        supplied = provenance(authorization_overrides={"catalog_digest": "sha256:" + "9" * 64})
+        with patch.dict(os.environ, supplied, clear=False):
+            with self.assertRaisesRegex(ValueError, "does not authorize these input digests"):
+                dispatch.load_provenance(SHA, RUN, ATTEMPT)
+
     def test_publication_requires_accepted_gate_and_all_observations(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -141,7 +159,7 @@ class TrustedDispatchTest(unittest.TestCase):
                  patch.object(dispatch, "execute_cycle", side_effect=ValueError("cycle failed")):
                 with self.assertRaisesRegex(ValueError, "cycle failed"):
                     dispatch.execute(SHA, RUN, ATTEMPT, "sha256:" + "b" * 64,
-                                     {"approval": (b"approval", {})}, "run")
+                                     {"approval": (b"approval", {}), "authorization": (b"authorization", {})}, "run")
             self.assertEqual(list(staging.iterdir()), [])
 
 

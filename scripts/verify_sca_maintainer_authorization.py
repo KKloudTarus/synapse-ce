@@ -68,7 +68,7 @@ def require_digests(raw):
     return raw
 
 
-def api_get(api_base, token, path):
+def api_get(api_base, token, path, allow_not_found=False):
     request = urllib.request.Request(
         api_base.rstrip("/") + path,
         headers={
@@ -80,7 +80,11 @@ def api_get(api_base, token, path):
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             return json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as error:
+    except urllib.error.HTTPError as error:
+        if allow_not_found and error.code == 404:
+            return None
+        fail("GitHub API GET %s failed: %s" % (path, error))
+    except (urllib.error.URLError, json.JSONDecodeError) as error:
         fail("GitHub API GET %s failed: %s" % (path, error))
 
 
@@ -123,14 +127,24 @@ def capture(args):
     }
     expected_issue_url = "%s/repos/%s/issues/%s" % (args.api_base.rstrip("/"), args.repository, args.pull_number)
     candidates = []
+    permissions = {}
     for comment in issue_comments(args.api_base, args.token, args.repository, args.pull_number):
-        if isinstance(comment.get("body"), str) and comment["body"] in accepted_bodies:
+        if not isinstance(comment.get("body"), str) or comment["body"] not in accepted_bodies:
+            continue
+        author = comment.get("user")
+        login = author.get("login") if isinstance(author, dict) else None
+        if not isinstance(login, str) or not login:
+            continue
+        if login not in permissions:
+            permission = api_get(args.api_base, args.token, "/repos/%s/collaborators/%s/permission" % (args.repository, urllib.parse.quote(login, safe="")), True)
+            permissions[login] = isinstance(permission, dict) and (permission.get("permission") == "admin" or permission.get("role_name") == "maintain")
+        if permissions[login]:
             candidates.append(comment)
     if len(candidates) != 1:
         fail("exactly one current issue comment must bind the final decision and inputs")
     comment = candidates[0]
     comment_id = comment.get("id")
-    login = comment.get("user", {}).get("login")
+    login = comment["user"]["login"]
     html_url = comment.get("html_url")
     if not isinstance(comment_id, int) or comment_id <= 0 or not isinstance(login, str) or not login:
         fail("matched issue comment lacks an immutable ID or author")
@@ -141,9 +155,6 @@ def capture(args):
     if created_at != updated_at:
         fail("maintainer authorization comment has been edited")
     parse_timestamp(created_at)
-    permission = api_get(args.api_base, args.token, "/repos/%s/collaborators/%s/permission" % (args.repository, urllib.parse.quote(login, safe="")))
-    if permission.get("permission") != "admin" and permission.get("role_name") != "maintain":
-        fail("comment author does not currently hold admin or maintain permission")
     approval = {
         "schema_version": SCHEMA,
         "id": str(comment_id),

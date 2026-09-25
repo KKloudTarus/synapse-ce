@@ -16,17 +16,22 @@ Use one exact `main` commit for EPIC #1034 acceptance. The seven capability work
 | `reachability-benchmark.yml` | Hosted lifecycle, Go owned/competitor scorecards, and Python owned/competitor scorecards succeeded. OSV output is a pinned frozen capture; Semgrep CE runs from the pinned image without network access. Corpus, Unknown accounting, recall, and no-false-suppression gates passed. |
 | `security-accuracy.yml` | Hosted accuracy and Gitleaks/Checkov differentials passed with pinned tools and nonempty artifacts. |
 | `dynamic-security-benchmark.yml` | Hosted DAST and CSPM accuracy jobs, ratchets, and aggregate passed. |
-| `performance-benchmark.yml` | Hosted measurements produced nonzero samples for each required target class. Allocation ratchets consume the six committed numeric baselines. Each baseline records measured throughput. Latency is compared with the fixed, reviewed control revision measured on the same hosted runner; the six committed baseline JSONs bind its SHA, dataset, and sampling policy. p95 and peak memory are recorded in the artifact. |
+| `performance-benchmark.yml` | Hosted measurements produced nonzero samples for each required target class in three fixed candidate/control pairs. Allocation gates use six committed ceilings that cannot increase over the PR base; the separate measured allocation and throughput statistics remain truthful. Latency and throughput use median paired ratios against the fixed, reviewed control revision on the same hosted runner. The baseline JSONs bind its SHA, dataset, and sampling policy. p95 and peak memory are recorded in the artifact. |
 | `sast-benchmark.yml` | OWASP, Juliet, Securibench, Semgrep comparison, Python/sanitizer adversarial tests, and fresh deterministic proof-triage precision gate passed. The job generates both historical and current scorecards from pinned scanner and corpus revisions; it does not replay the earlier model-assisted capture. |
 | `owned-default-readiness.yml` | Readiness result names `ACCEPTANCE_SHA`, reports current SCA evidence, comparator-relative parity, unsupported gaps, and graph parity. It cannot infer currency from a skipped audit or source-code marker. |
 
 For each row, inspect the required job results as well as the aggregate. Preserve the sanitized machine-readable artifact and its digest before retention expires. A benchmark that cannot access a required pinned asset must fail and report why.
 
-The performance gate applies the committed allocation ceilings directly. Its latency ceiling is
-`max(1.5 × control p50, control p50 + 5 ms)` using a pinned control revision run beside the candidate on
-the same hosted runner. The committed latency numbers record the reviewed control measurement; they are not
-cross-hardware thresholds. Changing the control revision requires a reviewed workflow pin and matching
-remeasured baseline JSONs. p95 and process-wide peak memory remain reported diagnostics.
+The performance gate applies the committed allocation ceilings directly and
+rejects an increase over the previous revision (the PR base, pre-push commit,
+or current commit's parent). It measures three fixed candidate/control
+pairs on the same runner, alternating which revision runs first, and rejects a
+median p50 ratio above 1.5 or a median throughput ratio below 1/1.5. Every pair must complete; a failed test or missing
+measurement fails the aggregate. The committed latency numbers record the
+reviewed control measurement, not cross-hardware thresholds. Changing the control
+revision requires a reviewed workflow pin and matching remeasured baseline JSONs.
+p95 and process-wide peak memory remain reported diagnostics. Throughput is measured
+over total timed duration while the latency ratchet uses median sample latency.
 
 The earlier Securibench model transcripts and verifier artifacts are local audit material under `.git/taurus/sast-post-triage-artifacts`; they are not CI inputs or committed benchmark files. The required SAST gate uses `syntactic-proof-v1` on fresh blinded proposals and requires the candidate's measured precision improvement over the pinned historical scanner, while retaining every oracle-positive finding.
 

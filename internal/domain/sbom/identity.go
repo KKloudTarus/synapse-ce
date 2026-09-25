@@ -158,8 +158,8 @@ func distroEcosystem(typ, purl, verifiedOrigin string) string {
 
 // DistroEcosystem maps an OS package's PURL type and its Syft "distro" qualifier (e.g. "rpm", "amzn-2") to the
 // advisory ecosystem key ("Amazon Linux:2"), the exact key the owned distro feed writes and the matcher keys
-// on. It is the SINGLE source of truth for OS-package ecosystem keying: both the inventory identity here and
-// the scan-side matcher (osDistroEcosystem in the ownadvisory feed) call it, so the two can never drift. The
+// on. The inventory identity and scan-side matcher share this mapping through
+// DistroEcosystemForComponent, which also accepts scanner-local CentOS 7 origin. The
 // qualifier is lowercased first (Syft emits lowercase; a case-variant keys the same). An unmapped distro
 // (CentOS Stream / CentOS >=8, openSUSE Tumbleweed) or a malformed qualifier returns "" (cataloged for
 // inventory, never keyed to an advisory ecosystem, so never a false match). CentOS Linux 7 needs a separate

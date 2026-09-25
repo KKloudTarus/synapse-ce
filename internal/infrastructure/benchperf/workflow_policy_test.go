@@ -50,6 +50,7 @@ func (needs *workflowNeeds) UnmarshalYAML(value *yaml.Node) error {
 type benchmarkStep struct {
 	ID   string            `yaml:"id"`
 	Name string            `yaml:"name"`
+	If   string            `yaml:"if"`
 	Uses string            `yaml:"uses"`
 	With map[string]string `yaml:"with"`
 	Env  map[string]string `yaml:"env"`
@@ -99,6 +100,36 @@ func TestHostedBenchmarkWorkflowsBindExactSourceRevision(t *testing.T) {
 				t.Fatal("aggregate must receive route result")
 			}
 			requireActiveLine(t, aggregateStep.Run, `test "$ROUTE" = success`)
+		})
+	}
+}
+
+func TestHostedBenchmarkAggregatesFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		workflow, job, result, artifact string
+	}{
+		{"security-accuracy.yml", "accuracy", "ACCURACY", ""},
+		{"dynamic-security-benchmark.yml", "accuracy", "ACCURACY", ""},
+		{"performance-benchmark.yml", "measure", "MEASURE", "ARTIFACT"},
+		{"owned-default-readiness.yml", "readiness", "READINESS", "ARTIFACT"},
+	} {
+		t.Run(tc.workflow, func(t *testing.T) {
+			aggregate := requireJob(t, readHostedBenchmarkWorkflow(t, tc.workflow), "aggregate")
+			requireNeeds(t, aggregate, "route", tc.job)
+			if aggregate.If != "${{ always() }}" {
+				t.Fatal("aggregate must report even when its benchmark was skipped")
+			}
+			step := requireOnlyRunStep(t, aggregate)
+			if step.Env[tc.result] != "${{ needs."+tc.job+".result }}" {
+				t.Fatal("aggregate must receive the measured job result")
+			}
+			requireActiveLine(t, step.Run, `test "$`+tc.result+`" = success`)
+			if tc.artifact != "" {
+				if step.Env[tc.artifact] != "${{ needs."+tc.job+".outputs.artifact }}" {
+					t.Fatal("aggregate must receive the measured artifact ID")
+				}
+				requireActiveLine(t, step.Run, `test -n "$`+tc.artifact+`"`)
+			}
 		})
 	}
 }
@@ -170,6 +201,16 @@ func TestPerformanceBenchmarkRequiresEvidenceArtifact(t *testing.T) {
 	requireActiveLine(t, control.Run, `test "$BASELINE_SOURCE_SHA" != "${{ needs.route.outputs.source_sha }}"`)
 	requireActiveLine(t, control.Run, `git fetch --no-tags --depth=1 origin refs/tags/benchperf-control-v1`)
 	requireActiveLine(t, control.Run, `test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$BASELINE_SOURCE_SHA"`)
+	ratchet := requireStep(t, measure, func(step benchmarkStep) bool {
+		return step.Name == "Require allocation ceilings to tighten against previous revision"
+	})
+	if ratchet.If != "" {
+		t.Fatal("allocation ceiling ratchet must run for every event")
+	}
+	for _, line := range []string{`pull_request) base="$PR_BASE_SHA"`, `push) base="$PUSH_BEFORE_SHA"`,
+		`base="$(git rev-parse HEAD^)"`, `python3 scripts/check_performance_latency.py ratchet`} {
+		requireActiveLine(t, ratchet.Run, line)
+	}
 	if measure.Outputs["artifact"] != "${{ steps.upload.outputs.artifact-id }}" {
 		t.Fatal("measurement job must expose the uploaded artifact ID")
 	}

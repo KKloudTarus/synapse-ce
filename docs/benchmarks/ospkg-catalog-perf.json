@@ -8,6 +8,7 @@
   "warmup_samples": 3,
   "samples": 20,
   "alloc_bytes_median": 3772560,
+  "alloc_ceiling_bytes": 4829468,
   "peak_memory_bytes": 18108416,
   "latency_p50_millis": 3,
   "latency_p95_millis": 4,

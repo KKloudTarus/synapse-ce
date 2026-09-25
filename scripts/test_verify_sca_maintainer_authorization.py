@@ -146,10 +146,38 @@ class CaptureTests(unittest.TestCase):
             original = VERIFIER.api_get
             VERIFIER.api_get = lambda *_: responses.pop(0)
             try:
-                with self.assertRaisesRegex(ValueError, "admin or maintain"):
+                with self.assertRaisesRegex(ValueError, "exactly one current issue comment"):
                     VERIFIER.capture(args)
             finally:
                 VERIFIER.api_get = original
+
+    def test_unprivileged_duplicate_cannot_block_maintainer_comment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args, digests = self.args(temporary)
+            body = VERIFIER.canonical_body(SHA, digests)
+            comment = {
+                "body": body, "issue_url": "https://api.github.test/repos/%s/issues/1320" % REPOSITORY,
+                "created_at": TIME, "updated_at": TIME,
+            }
+            responses = [
+                {"number": 1320, "head": {"sha": SHA}},
+                [{**comment, "id": 15, "user": None,
+                  "html_url": "https://github.com/%s/pull/1320#issuecomment-15" % REPOSITORY},
+                 {**comment, "id": 16, "user": {"login": "outsider"},
+                  "html_url": "https://github.com/%s/pull/1320#issuecomment-16" % REPOSITORY},
+                 {**comment, "id": 17, "user": {"login": "pho-veteran"},
+                  "html_url": "https://github.com/%s/pull/1320#issuecomment-17" % REPOSITORY}],
+                None,  # GitHub reports 404 for a deleted or non-collaborator author.
+                {"permission": "admin"},
+            ]
+            original = VERIFIER.api_get
+            VERIFIER.api_get = lambda *_: responses.pop(0)
+            try:
+                VERIFIER.capture(args)
+            finally:
+                VERIFIER.api_get = original
+            approval = json.loads((pathlib.Path(args.out_dir) / "approval.json").read_text(encoding="utf-8"))
+            self.assertEqual(approval["id"], "17")
 
     def test_capture_emits_authorization_bound_to_live_comment(self):
         with tempfile.TemporaryDirectory() as temporary:

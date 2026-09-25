@@ -343,7 +343,10 @@ func rawFinding(a advisory.Advisory, c sbom.Component, fixed string, symbols []s
 }
 
 func coherentPURLIdentity(c sbom.Component) (sbom.ComponentIdentity, bool) {
-	purlIdentity := sbom.IdentityFromComponent(sbom.Component{PURL: c.PURL})
+	// Preserve only the scanner-local provenance along with the PURL. The
+	// component's name and version are checked against that PURL below.
+	purlIdentity := sbom.IdentityFromComponent(sbom.WithVerifiedRPMOrigin(
+		sbom.Component{PURL: c.PURL}, sbom.VerifiedRPMOrigin(c)))
 	if purlIdentity.Status != sbom.IdentityResolved {
 		return sbom.ComponentIdentity{}, false
 	}
@@ -506,9 +509,10 @@ func rpmCanonicalEVR(version, epoch string) string {
 
 // osDistroEcosystem derives the release-versioned ecosystem key for an OS-package PURL from its purl type and
 // "distro" qualifier (Syft emits e.g. distro=debian-9 / ubuntu-22.04 / amzn-2). It delegates to the shared
-// sbom.DistroEcosystem so the scan-side matcher key and the inventory identity key (sbom.IdentityFromComponent)
-// can never drift; TestDistroEcosystemLockstep pins the two. An unmapped/malformed distro yields "" (skip,
-// never a false match).
+// sbom.DistroEcosystem for PURL-only identities. Verified CentOS 7 origin is
+// process-local and the scan uses sbom.DistroEcosystemForComponent instead;
+// TestDistroEcosystemLockstep covers both paths. An unmapped/malformed distro
+// yields "" (skip, never a false match).
 func redHatMinorEcosystem(purl string) string {
 	if purlType(purl) != "rpm" {
 		return ""

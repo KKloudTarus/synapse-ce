@@ -245,6 +245,26 @@ func TestCatalogCentOS7RejectsAmbiguousRPMBackends(t *testing.T) {
 	}
 }
 
+func TestCatalogCentOS7MissingRPMDBPreservesOtherPackages(t *testing.T) {
+	root := writeRootfs(t, map[string]string{
+		"etc/os-release":      "ID=centos\nVERSION_ID=7\n",
+		"var/lib/dpkg/status": "Package: example\nVersion: 1.0\nArchitecture: amd64\nStatus: install ok installed\n\n",
+	})
+	result, err := New().Catalog(t.Context(), root)
+	if err == nil || len(result.Components) != 1 || result.Components[0].Name != "example" ||
+		result.UnsupportedDistro != "centos" || result.DistroResolved {
+		t.Fatalf("missing RPMDB must preserve prior inventory with unsupported coverage: result=%+v err=%v", result, err)
+	}
+}
+
+func TestCentOS7TagDoesNotIncludeLaterMajor(t *testing.T) {
+	for tag, want := range map[string]bool{"centos-7": true, "centos-7.9.2009": true, "centos-70": false, "centos-8": false} {
+		if got := isCentOS7Tag(tag); got != want {
+			t.Errorf("isCentOS7Tag(%q) = %t, want %t", tag, got, want)
+		}
+	}
+}
+
 func TestCatalogCentOS7DoesNotBorrowOriginForUnsignedDuplicateIdentity(t *testing.T) {
 	root := writeRootfs(t, map[string]string{"etc/os-release": "ID=centos\nVERSION_ID=7\n"})
 	dbPath := filepath.Join(root, rpmBDBPath)

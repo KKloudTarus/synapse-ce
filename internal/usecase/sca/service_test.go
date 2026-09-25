@@ -2163,11 +2163,25 @@ func TestImageOSPackageCatalogFailureFailsScan(t *testing.T) {
 	svc := NewService(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, nil, nil, nil, nil, nil, nil, nil, ports.Provenance{}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0, acquirer, &fakeDetector{}, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
 	marker := errors.New("incomplete RPM database")
 	svc.SetOSPackageCataloger(failedOSPackageCataloger{err: marker})
+	svc.SetStrictSources(true)
 	if _, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}); !errors.Is(err, marker) {
 		t.Fatalf("OS-package inventory failure must fail the scan, got %v", err)
 	}
 	if acquirer.cleaned != 1 {
 		t.Fatalf("workspace cleanup count = %d, want 1", acquirer.cleaned)
+	}
+}
+
+func TestImageOSPackageCatalogFailureDegradesScanByDefault(t *testing.T) {
+	acquirer := &fakeAcquirer{dir: t.TempDir(), rootfs: t.TempDir()}
+	svc := NewService(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, nil, nil, nil, nil, nil, nil, nil, ports.Provenance{}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAudit{}, shared.SeverityHigh, 0, acquirer, &fakeDetector{}, fakeSBOM{}, []ports.DetectionSource{fakeVuln{}}, nil, fakeLic{}, nil)
+	svc.SetOSPackageCataloger(failedOSPackageCataloger{err: errors.New("incomplete RPM database")})
+	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("default scan should surface incomplete coverage: %v", err)
+	}
+	if result.Completeness.Confident || !strings.Contains(strings.Join(result.SourceWarnings, " "), "OS-package cataloging was incomplete") {
+		t.Fatalf("catalog failure must be visible and non-confident: completeness=%+v warnings=%v", result.Completeness, result.SourceWarnings)
 	}
 }
 

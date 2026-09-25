@@ -1,10 +1,6 @@
-// Package benchperf is the shared contract for the owned-scanner performance gates (#1040 A6). Every gate
-// measures repeated scans of a pinned workload and ratchets on BYTES ALLOCATED per scan against a committed
-// baseline JSON under docs/benchmarks. Allocation is deterministic for a given Go toolchain and input (it does
-// not depend on CPU count or clock speed), so it gives a stable cross-machine regression signal; latency is
-// CPU-dependent and only recorded. Before this package each gate carried its own copy of the baseline struct,
-// loader, ratchet, and measurement loop; centralizing them removes that duplication and lets every baseline
-// record the same identity and statistics fields the #1040 amendment requires.
+// Package benchperf measures pinned workloads and checks committed allocation
+// ceilings. Hosted CI separately compares latency and throughput with a control
+// revision on the same runner.
 package benchperf
 
 import (
@@ -28,14 +24,15 @@ import (
 const Schema = "synapse-scan-perf-v2"
 
 // Baseline is the committed reference measurement for one performance gate. It records the measurement identity
-// and statistics the #1040 amendment requires, so a checked-in baseline is self-describing and reproducible:
+// and statistics needed to reproduce a checked-in baseline:
 //   - EnvironmentDigest / GoVersion: where it was measured (latency is only comparable within the same env).
 //   - ReleaseDigest: the immutable source revision that produced the baseline, so a stale build is identifiable.
 //   - DatasetDigest: a content hash of the pinned workload; a gate asserts its live workload matches, so a
 //     regression can never be masked by the fixture silently drifting.
 //   - WarmupSamples / Samples: the sampling and warm-up policy.
-//   - AllocBytes: the cross-environment gated statistic (median bytes allocated). PeakMemoryBytes and
-//     latencies are recorded for context. VmHWM is process-wide and depends on other tests in the process.
+//   - AllocBytes: the measured median bytes allocated. AllocCeilingBytes is the
+//     independently ratcheted gate. PeakMemoryBytes and latencies are recorded
+//     separately; VmHWM is process-wide and depends on other tests in the process.
 type Baseline struct {
 	Schema                 string  `json:"schema"`
 	Target                 string  `json:"target"`
@@ -46,6 +43,7 @@ type Baseline struct {
 	WarmupSamples          int     `json:"warmup_samples"`
 	Samples                int     `json:"samples"`
 	AllocBytes             uint64  `json:"alloc_bytes_median"`
+	AllocCeilingBytes      uint64  `json:"alloc_ceiling_bytes"`
 	PeakMemoryBytes        uint64  `json:"peak_memory_bytes"`
 	LatencyP50Millis       int64   `json:"latency_p50_millis"`
 	LatencyP95Millis       int64   `json:"latency_p95_millis"`
@@ -83,12 +81,6 @@ func Load(path string, expectedWarmup, expectedSamples int) (b Baseline, found b
 		return Baseline{}, true, fmt.Errorf("malformed baseline %s: %w", path, err)
 	}
 	return b, true, nil
-}
-
-// AllocCeiling is the ratchet's upper bound: the baseline allocation plus the tolerance fraction. Factored out
-// so the gate's decision is unit-tested without running a scan.
-func AllocCeiling(baseline uint64, tolFrac float64) uint64 {
-	return uint64(float64(baseline) * (1 + tolFrac))
 }
 
 // Result is one measurement run's statistics.
@@ -186,8 +178,8 @@ func validateBaseline(b Baseline) error {
 	if b.WarmupSamples < 0 {
 		return fmt.Errorf("warmup_samples must not be negative")
 	}
-	if b.AllocBytes == 0 || b.PeakMemoryBytes == 0 {
-		return fmt.Errorf("alloc_bytes_median and peak_memory_bytes must be non-zero")
+	if b.AllocBytes == 0 || b.AllocCeilingBytes == 0 || b.PeakMemoryBytes == 0 {
+		return fmt.Errorf("alloc_bytes_median, alloc_ceiling_bytes and peak_memory_bytes must be non-zero")
 	}
 	if b.ThroughputOpsPerSecond <= 0 || math.IsInf(b.ThroughputOpsPerSecond, 0) || math.IsNaN(b.ThroughputOpsPerSecond) {
 		return fmt.Errorf("throughput_ops_per_second must be a positive finite measurement")

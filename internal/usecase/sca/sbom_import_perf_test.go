@@ -8,19 +8,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchperf"
 )
 
-// sbom_import_perf_test.go is the owned SBOM-INGEST performance gate (#1040 A6, the "pinned SBOM" target
-// class). It measures repeated parsing of a pinned client-supplied CycloneDX SBOM into the owned component
-// model and ratchets on BYTES ALLOCATED per parse via the shared benchperf contract. Allocation is
-// deterministic for a given Go toolchain and input, so unlike wall-clock latency it gives a stable
-// cross-machine regression signal; the 30% tolerance absorbs the small differences a different Go minor version
-// can introduce. Wall-clock latency is recorded and compared only within the same environment digest. The
-// baseline lives at docs/benchmarks/cyclonedx-import-perf.json. (This gate is in the usecase layer; it imports
-// the infrastructure benchperf package only from a _test.go file, which the architecture test does not police.)
+// The pinned CycloneDX import workload uses the committed allocation ceiling.
+// Hosted CI compares latency and throughput with a same-runner control.
 
 const (
-	cdxImportPerfSamples      = 20
-	cdxImportPerfWarmup       = 3
-	cdxImportPerfAllocTolFrac = 0.30
+	cdxImportPerfSamples = 20
+	cdxImportPerfWarmup  = 3
 	// cdxImportPerfComponents sizes the pinned SBOM; a fixed count keeps the parsed component set stable.
 	cdxImportPerfComponents   = 1500
 	cdxImportPerfBaselinePath = "../../../docs/benchmarks/cyclonedx-import-perf.json"
@@ -78,10 +71,10 @@ func TestSBOMImportPerfGate(t *testing.T) {
 	if datasetDigest != base.DatasetDigest {
 		t.Fatalf("fixture drift: workload digest %s != committed %s (the measured workload changed)", datasetDigest, base.DatasetDigest)
 	}
-	ceil := benchperf.AllocCeiling(base.AllocBytes, cdxImportPerfAllocTolFrac)
+	ceil := base.AllocCeilingBytes
 	if res.MedianAllocBytes > ceil {
-		t.Errorf("cyclonedx-import allocations regressed: median %d bytes exceeds baseline %d + %.0f%% = %d",
-			res.MedianAllocBytes, base.AllocBytes, cdxImportPerfAllocTolFrac*100, ceil)
+		t.Errorf("cyclonedx-import allocations regressed: median %d bytes exceeds committed ceiling %d",
+			res.MedianAllocBytes, ceil)
 	}
 	if base.EnvironmentDigest == env {
 		t.Logf("latency vs same-environment baseline: p50 %s (baseline %dms), p95 %s (baseline %dms)",

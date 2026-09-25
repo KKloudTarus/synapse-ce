@@ -105,6 +105,25 @@ def load_provenance(source_sha, run_id, attempt):
         fail("handoff verification has expired")
     if approval.get("implementation_commit") != source_sha or authorization.get("implementation_commit") != source_sha:
         fail("approval source mismatch")
+    if approval.get("schema_version") != "github-maintainer-issue-comment-capture-v1" or approval.get("decision") != "approved":
+        fail("approval record is not an approved maintainer capture")
+    if authorization.get("schema_version") != "maintainer-authorization-v2" or authorization.get("decision") != "approved" or \
+            authorization.get("approval_id") != approval.get("id") or \
+            authorization.get("approval_digest") != digest(records["approval"][0]) or \
+            authorization.get("maintainer_login") != approval.get("login"):
+        fail("authorization is not bound to the pinned approval")
+    input_digests = {}
+    for name in ("catalog", "oracle", "ratchet", "policy"):
+        value = authorization.get(name + "_digest")
+        if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
+            fail("authorization has an invalid input digest")
+        input_digests[name] = value
+    expected_body = "\n".join(("decision: approved", "implementation_commit: " + source_sha,
+                               *(name + "_digest: " + input_digests[name] for name in ("catalog", "oracle", "ratchet", "policy"))))
+    accepted_bodies = {expected_body, expected_body + "\n", expected_body.replace("\n", "\r\n"),
+                       expected_body.replace("\n", "\r\n") + "\r\n"}
+    if approval.get("body") not in accepted_bodies:
+        fail("pinned maintainer approval does not authorize these input digests")
     return expected_digest, records
 
 

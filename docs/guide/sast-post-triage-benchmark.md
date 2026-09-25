@@ -28,8 +28,9 @@ Local replay outputs belong under .git/taurus/, outside the tracked source tree.
 The proof verifier is identified as syntactic-proof-v1. It does not claim to
 reproduce an earlier model-assisted run.
 
-The last local replay measured CWE-79 precision from 0.750 on the historical
-scanner to 0.772 on the candidate, with recall 0.629 in both and zero proven
+The last hosted scorecards measured CWE-79
+precision from 0.750 (78 TP, 26 FP) on the historical scanner to 0.788
+(78 TP, 21 FP) on the candidate, with recall 0.629 in both and zero proven
 rejections. The gain therefore comes from scanner behavior, not the proof
 verifier. A future change must earn its own fresh CI result.
 

@@ -8,7 +8,11 @@ enforcement is exercised, not bypassed. Nothing is persisted.
 
 Build it with `make build`. The binary lands at `./bin/synapse-cli`.
 
-The benchmark-only operator binaries `synapse-sca-bench` and `synapse-sca-cycle` are intentionally outside product composition. The latter runs the fixed same-SBOM accuracy workflow in one trusted-Linux command; its frozen-input, review, artifact, and cleanup contract is documented in [SCA accuracy benchmark](sca-accuracy-benchmark.md).
+The benchmark-only operator binaries `synapse-sca-bench`, `synapse-sca-cycle`, and
+`synapse-sca-prepare` are intentionally outside product composition. The cycle
+binary runs the fixed same-SBOM accuracy workflow; the prepare binary validates
+pinned inputs before capture. Their input and artifact contracts are documented
+in [SCA accuracy benchmark](sca-accuracy-benchmark.md).
 
 ## Assessment lifecycle administration
 

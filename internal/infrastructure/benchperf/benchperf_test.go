@@ -9,26 +9,6 @@ import (
 	"time"
 )
 
-func TestAllocCeilingRatchet(t *testing.T) {
-	const base = 1_000_000
-	ceil := AllocCeiling(base, 0.30) // 1,300,000
-	cases := []struct {
-		name    string
-		median  uint64
-		regress bool
-	}{
-		{"well under", 900_000, false},
-		{"at ceiling", ceil, false}, // strict '>' at the call site: exactly at the ceiling passes
-		{"just over ceiling", ceil + 1, true},
-		{"gross regression", 2_000_000, true},
-	}
-	for _, c := range cases {
-		if got := c.median > ceil; got != c.regress {
-			t.Errorf("%s: median %d vs ceiling %d, regressed=%v want %v", c.name, c.median, ceil, got, c.regress)
-		}
-	}
-}
-
 func TestLoadValidatesSchemaAndSamples(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) string {
@@ -55,7 +35,7 @@ func TestLoadValidatesSchemaAndSamples(t *testing.T) {
 		t.Error("zero alloc_bytes_median must error")
 	}
 	// Valid -> loads.
-	b, found, err := Load(write("ok.json", `{"schema":"`+Schema+`","release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5","dataset_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","environment_digest":"env:fixture","go_version":"go1.27.0","warmup_samples":3,"samples":20,"alloc_bytes_median":5,"peak_memory_bytes":6,"throughput_ops_per_second":7.5}`), 3, 20)
+	b, found, err := Load(write("ok.json", `{"schema":"`+Schema+`","release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5","dataset_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","environment_digest":"env:fixture","go_version":"go1.27.0","warmup_samples":3,"samples":20,"alloc_bytes_median":5,"alloc_ceiling_bytes":6,"peak_memory_bytes":6,"throughput_ops_per_second":7.5}`), 3, 20)
 	if !found || err != nil || b.AllocBytes != 5 {
 		t.Errorf("valid baseline: found=%v err=%v alloc=%d", found, err, b.AllocBytes)
 	}
@@ -64,7 +44,7 @@ func TestLoadValidatesSchemaAndSamples(t *testing.T) {
 func TestLoadRejectsNonReproducibleIdentityAndMissingMeasurements(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "baseline.json")
-	valid := `{"schema":"` + Schema + `","release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5","dataset_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","environment_digest":"env:fixture","go_version":"go1.27.0","warmup_samples":3,"samples":20,"alloc_bytes_median":5,"peak_memory_bytes":6,"throughput_ops_per_second":7.5}`
+	valid := `{"schema":"` + Schema + `","release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5","dataset_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","environment_digest":"env:fixture","go_version":"go1.27.0","warmup_samples":3,"samples":20,"alloc_bytes_median":5,"alloc_ceiling_bytes":6,"peak_memory_bytes":6,"throughput_ops_per_second":7.5}`
 	if err := os.WriteFile(path, []byte(valid), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -77,11 +57,14 @@ func TestLoadRejectsNonReproducibleIdentityAndMissingMeasurements(t *testing.T) 
 	for _, replacement := range []string{
 		`"release_digest":"(devel)"`,
 		`"peak_memory_bytes":0`,
+		`"alloc_ceiling_bytes":0`,
 		`"throughput_ops_per_second":0`,
 	} {
 		body := strings.Replace(valid, `"release_digest":"7105fde8c2a9186803861275f3f5dd287293f3e5"`, replacement, 1)
 		if replacement == `"peak_memory_bytes":0` {
 			body = strings.Replace(valid, `"peak_memory_bytes":6`, replacement, 1)
+		} else if replacement == `"alloc_ceiling_bytes":0` {
+			body = strings.Replace(valid, `"alloc_ceiling_bytes":6`, replacement, 1)
 		} else if replacement == `"throughput_ops_per_second":0` {
 			body = strings.Replace(valid, `"throughput_ops_per_second":7.5`, replacement, 1)
 		}

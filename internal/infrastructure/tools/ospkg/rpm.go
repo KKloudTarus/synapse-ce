@@ -80,8 +80,12 @@ const (
 // database, because a competing backend or truncated inventory would make advisory coverage ambiguous.
 // Other distros try sqlite, BerkeleyDB, then ndb; the first backend that yields packages wins.
 // An error from any backend is surfaced; otherwise an absent or malformed DB contributes nothing.
+func isCentOS7Tag(tag string) bool {
+	return tag == "centos-7" || strings.HasPrefix(tag, "centos-7.")
+}
+
 func rpmComponents(ctx context.Context, rootfsDir, namespace, tag string) ([]sbom.Component, error) {
-	if strings.HasPrefix(tag, "centos-7") {
+	if isCentOS7Tag(tag) {
 		// CentOS 7 uses BerkeleyDB. A second RPM backend can hide packages
 		// behind the first nonempty result and make partial advisory coverage
 		// appear complete, so an ambiguous rootfs fails the scan.
@@ -145,7 +149,7 @@ func rpmSQLiteComponents(ctx context.Context, rootfsDir, namespace, tag string) 
 }
 
 func rpmComponentFromBlob(blob []byte, namespace, tag string) (sbom.Component, bool) {
-	if strings.HasPrefix(tag, "centos-7") {
+	if isCentOS7Tag(tag) {
 		name, evr, arch, ok := centOS7BaseSignedIdentity(blob)
 		if ok {
 			c, compOK := osComponent("rpm", namespace, name, evr, arch, tag, "")

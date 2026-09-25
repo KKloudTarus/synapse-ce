@@ -13,20 +13,13 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/benchperf"
 )
 
-// imagerootfs_perf_test.go is the owned image-extraction performance gate (#1040 A6). It measures repeated
-// extractions of a pinned, in-repo OCI layout fixture and ratchets on BYTES ALLOCATED per extraction (via the
-// shared benchperf contract). extractOCIRootFS reads a LOCAL OCI layout (no network, no registry), so the
-// workload is fully deterministic: the same layers, in the same order, with the same whiteouts and overwrites,
-// produce the same assembled tree every run. Allocation is deterministic for a given Go toolchain and input, so
-// it gives a stable cross-machine regression signal; the 30% tolerance absorbs the small differences a Go minor
-// version can introduce while catching a real regression. Wall-clock latency is CPU-dependent, so it is only
-// recorded and compared within the same environment. A committed dataset digest (a content hash of the squashed
-// tree) is asserted every run, so a regression can never be masked by the fixture silently drifting.
+// This gate extracts a pinned local OCI layout without registry access. It
+// checks the dataset digest and committed allocation ceiling; hosted CI compares
+// latency and throughput with a same-runner control.
 
 const (
-	imgPerfSamples      = 20
-	imgPerfWarmup       = 3
-	imgPerfAllocTolFrac = 0.30 // allow 30% growth in allocated bytes before the ratchet trips
+	imgPerfSamples = 20
+	imgPerfWarmup  = 3
 )
 
 const (
@@ -226,10 +219,10 @@ func measureImageExtractGate(t *testing.T, label, layout string, expected int, d
 	if datasetDigest != base.DatasetDigest {
 		t.Fatalf("fixture drift [%s]: extracted-tree digest %s != committed %s (the measured workload changed)", label, datasetDigest, base.DatasetDigest)
 	}
-	ceil := benchperf.AllocCeiling(base.AllocBytes, imgPerfAllocTolFrac)
+	ceil := base.AllocCeilingBytes
 	if res.MedianAllocBytes > ceil {
-		t.Errorf("image-extract [%s] allocations regressed: median %d bytes exceeds baseline %d + %.0f%% = %d",
-			label, res.MedianAllocBytes, base.AllocBytes, imgPerfAllocTolFrac*100, ceil)
+		t.Errorf("image-extract [%s] allocations regressed: median %d bytes exceeds committed ceiling %d",
+			label, res.MedianAllocBytes, ceil)
 	}
 	if base.EnvironmentDigest == env {
 		t.Logf("latency vs same-environment baseline: p50 %s (baseline %dms), p95 %s (baseline %dms)",

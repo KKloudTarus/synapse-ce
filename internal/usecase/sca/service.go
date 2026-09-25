@@ -3305,35 +3305,41 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// so it fills the gap under the owned producer WITHOUT duplicating OS packages the generator already
 	// cataloged from the image layout. A non-image target / disabled or failed extraction leaves RootFS empty,
 	// so this is a no-op there.
-	osPkgsAdded, osPkgsCataloged, osDistroUnresolved := 0, 0, false
+	osPkgsCataloged, osDistroUnresolved := 0, false
 	osUnsupportedDistro := ""
 	osApproximateDistro := ""
+	osCatalogFailed := false
 	if s.osPkgCataloger != nil && ws.RootFS != "" {
 		before := countComponents(doc)
 		step = trace.start(stageSBOM, "os-package-catalog", "ospkg-cataloger", "Catalog OS packages from image rootfs", map[string]int{"components": before})
-		if osRes, oerr := s.osPkgCataloger.Catalog(ctx, ws.RootFS); oerr != nil {
+		osRes, oerr := s.osPkgCataloger.Catalog(ctx, ws.RootFS)
+		if oerr != nil {
 			trace.fail(step, oerr)
-			return nil, fmt.Errorf("catalog image OS packages: %w", oerr)
-		} else {
-			osPkgsCataloged = len(osRes.Components)
-			osPkgsAdded = mergeComponents(doc, osRes.Components)
-			// no-silent-gap: packages cataloged but the release could not be keyed to an ecosystem → warn below.
-			// A recognized-but-unsupported distro (CentOS Stream / CentOS >=8) gets a distinct structured warning
-			// instead. A distro keyed by approximation (CentOS Linux 7 → Red Hat:7) is resolved, but gets its own
-			// coverage=approximate provenance warning so the approximation is never silent.
-			if osPkgsCataloged > 0 && osRes.UnsupportedDistro != "" {
-				osUnsupportedDistro = osRes.UnsupportedDistro
-			} else {
-				osDistroUnresolved = osPkgsCataloged > 0 && !osRes.DistroResolved
+			if s.strictSources || ctx.Err() != nil {
+				return nil, fmt.Errorf("catalog image OS packages: %w", oerr)
 			}
-			// Gate on the flag itself, not osPkgsAdded: the cataloger sets ApproximateDistro only when CentOS 7
-			// components were cataloged, and mergeComponents returns 0 new when an identical pkg:rpm/centos PURL
-			// was already added by another cataloger. Keying it to osPkgsAdded would then suppress the
-			// coverage=approximate provenance banner while Red Hat:7 findings still appear.
-			if osRes.ApproximateDistro != "" {
-				osApproximateDistro = osRes.ApproximateDistro
-			}
+			osCatalogFailed = true
+		}
+		osPkgsCataloged = len(osRes.Components)
+		osPkgsAdded := mergeComponents(doc, osRes.Components)
+		if oerr == nil {
 			trace.succeed(step, "OS-package cataloging completed", map[string]int{"os_packages_added": osPkgsAdded})
+		}
+		// no-silent-gap: packages cataloged but the release could not be keyed to an ecosystem → warn below.
+		// A recognized-but-unsupported distro (CentOS Stream / CentOS >=8) gets a distinct structured warning
+		// instead. A distro keyed by approximation (CentOS Linux 7 → Red Hat:7) is resolved, but gets its own
+		// coverage=approximate provenance warning so the approximation is never silent.
+		if osRes.UnsupportedDistro != "" {
+			osUnsupportedDistro = osRes.UnsupportedDistro
+		} else {
+			osDistroUnresolved = osCatalogFailed || (osPkgsCataloged > 0 && !osRes.DistroResolved)
+		}
+		// Gate on the flag itself, not osPkgsAdded: the cataloger sets ApproximateDistro only when CentOS 7
+		// components were cataloged, and mergeComponents returns 0 new when an identical pkg:rpm/centos PURL
+		// was already added by another cataloger. Keying it to osPkgsAdded would then suppress the
+		// coverage=approximate provenance banner while Red Hat:7 findings still appear.
+		if osRes.ApproximateDistro != "" {
+			osApproximateDistro = osRes.ApproximateDistro
 		}
 	}
 	// Owned installed-package cataloging (Go binaries + Python dist-info) from the same materialized rootfs:
@@ -3391,7 +3397,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		// succeeded (alongside a non-nil error), and those must not be discarded.
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, true) // dependency:tree = all non-test scopes → complete
-			mergeResolvedDeps(doc, resolvedDeps)    // fold the resolved edges over syft's maven subgraph
+			mergeResolvedDeps(doc, resolvedDeps)       // fold the resolved edges over syft's maven subgraph
 			mavenResolved = true
 		}
 		switch {
@@ -3423,7 +3429,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		before := countComponents(doc)
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, false) // runtimeClasspath only → keep syft's provided/compileOnly jars
-			mergeResolvedDeps(doc, resolvedDeps)     // fold the resolved edges over syft's maven subgraph
+			mergeResolvedDeps(doc, resolvedDeps)        // fold the resolved edges over syft's maven subgraph
 			gradleResolved = true
 		}
 		switch {
@@ -3715,6 +3721,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// none of the states ever reads as a clean OS posture (a hostile image cannot suppress its own OS vulns by
 	// lying in /etc/os-release, and an approximation is never silent).
 	sourceWarnings = append(sourceWarnings, osCoverageWarnings(osPkgsCataloged, osUnsupportedDistro, osApproximateDistro, osDistroUnresolved)...)
+	if osCatalogFailed {
+		sourceWarnings = append(sourceWarnings, "OS-package cataloging was incomplete; scan results may under-report OS vulnerabilities")
+	}
 	for _, src := range s.sources {
 		p, ok := src.(ports.SourceProvenance)
 		if !ok {

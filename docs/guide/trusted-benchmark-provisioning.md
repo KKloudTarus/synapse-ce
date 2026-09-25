@@ -111,6 +111,16 @@ gate exists to require.
 constrained AWS role and dispatch a fixed SSM document to the protected SCA capture worker. It does not
 register a self-hosted GitHub runner. `reachability-audit.yml` uses
 `[self-hosted, linux, reachability-accuracy-trusted]` under the same environment.
+The protected SSM document must invoke the deployed `scripts/sca-trusted-dispatch.py`
+as root. Before a manual acceptance run, the operator pins the exact source SHA
+and reviewed approval JSON digest in root-owned
+`/etc/synapse-sca/trusted-source-sha` and `trusted-approval-sha256`. The dispatcher
+requires the pinned approval body to authorize exactly the catalog, oracle,
+ratchet, and policy digests in the handoff. The hosted envelope digest alone is
+only a transport check. Provisioning must install the pinned dispatcher and
+build `scripts/verify_sca_publication.go` into
+`/opt/synapse-sca/verify-publication`; this repository does not contain the
+external SSM document body or worker deployment automation.
 
 The AWS SCA capture worker needs a delegated cgroup v2 hierarchy. Provision its dedicated account with a
 running, lingering systemd user manager that can start transient `Delegate=yes` services. The account must
