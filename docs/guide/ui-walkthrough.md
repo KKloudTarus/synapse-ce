@@ -20,13 +20,34 @@ real, produced by running the product rather than seeded into its tables:
   proposer verify its own claim;
 - a `kind` Kubernetes cluster reporting through `synapse-cluster-agent`: 2 enrolled agents,
   5 namespaces, 64 assets, 6 workloads with their image digests, 66 coverage rows;
-- a host reporting through `synapse-agent`;
+- a host reporting through `synapse-agent`, plus three EDR sensors whose sealed detections
+  correlate into incidents;
 - six business assets and eight users.
 
-The Code screen was captured a second time, after `synapse-cli publish-source` was repaired. It
-could not publish anything before that, so the screen showed "Source preview unavailable: Not
-retained" beside a caption promising annotated source. It now shows the file the analysis
-inventoried, with its findings against the line numbers.
+Two screens are empty for a reason worth stating rather than staging. Coverage Windows materialises
+from sensor-state observations, and the eBPF sensors cannot load in this container, so the agent
+reports "no runtime evidence collected" and there is nothing to window. The AI triage review queue
+holds findings the proposer suspects are false positives; the triaged scan returned ten verdicts of
+"sound" and none suspected, so there is nothing awaiting a human decision.
+
+Every screen was captured again once all nineteen capabilities were switched on, because the first
+pass documented a product with seven of them off. Three capture faults were fixed first, each of
+which had put something untrue in this guide:
+
+- The screenshots held one viewport, not the screen. The app scrolls inside a container rather than
+  the document, so asking for a full-page capture changed nothing and every image stopped at the
+  fold. The sweep now measures the page-level scroller and grows the viewport to it, which is why
+  the longer screens here run to several thousand pixels.
+- Risk Stories was published as a spinner. `networkidle` is not "the screen has rendered": a tab
+  that starts its own fetch after hydration is still loading when the network goes quiet. The sweep
+  waits for the main region to stop saying it is loading, and reports a screen that never stops
+  rather than photographing it.
+- Four screens were captured while the API was restarting and show the signed-out state. The
+  heading check caught them and they were retaken.
+
+The Code screen changed for a different reason: `synapse-cli publish-source` could not publish
+anything until it was repaired, so it read "Source preview unavailable: Not retained" beside a
+caption promising annotated source.
 
 Regenerate them with the dev server running and a token the backend accepts:
 
