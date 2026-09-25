@@ -65,6 +65,19 @@ func DefaultJavaCatalog() JavaCatalog {
 			"RequestParam", "RequestBody", "PathVariable", "RequestHeader", "CookieValue",
 			"ModelAttribute", "MatrixVariable", "RequestPart",
 		},
+		// Methods that absorb an argument into their receiver. Java assembles a query, a command or a
+		// response across statements (sb.append(part) then sb.toString(), argList.add(part) then
+		// pb.command(argList)), so without these the receiver stays clean and every downstream sink reads an
+		// untainted value. Restricted to container and builder mutators whose NAME carries that contract on
+		// its own, because the receiver is a runtime value the source-only facts cannot type. Bean setters
+		// are deliberately excluded: setFoo covers every object in a codebase, and admitting it would
+		// propagate taint into unrelated aggregates far beyond what this propose-only floor can defend.
+		ReceiverMutators: []string{
+			"append", "insert",
+			"add", "addAll", "addFirst", "addLast",
+			"push", "offer", "offerFirst", "offerLast",
+			"put", "putAll", "putIfAbsent",
+		},
 		Sources: []JavaSourceModel{
 			// Servlet request accessors return attacker-controlled data. Receiver-typed
 			// (HttpServletRequest is a runtime value), so matched by the method-name floor.

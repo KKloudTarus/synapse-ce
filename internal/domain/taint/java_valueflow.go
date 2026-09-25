@@ -88,6 +88,13 @@ type JavaCatalog struct {
 	Sources           []JavaSourceModel
 	Sinks             []JavaSinkModel
 	Sanitizers        []JavaSanitizerModel
+	// ReceiverMutators are method names whose contract is to ABSORB an argument into the receiver:
+	// sb.append(part), list.add(element), map.put(key, value). Without them an argument only reaches the
+	// call's result, so a value built up across statements (the normal way Java assembles a query, a command
+	// or a response) leaves the receiver clean and every downstream sink sees an untainted value. Membership
+	// is by method name because the receiver is a runtime value the source-only facts cannot type, the same
+	// floor the receiver-typed sinks use.
+	ReceiverMutators []string
 }
 
 // JavaTypedValueSource is one source slot for one taint class.
@@ -500,10 +507,32 @@ func (b *javaValueBuilder) bindCall(call javaprogram.Call, callee javaprogram.Sy
 }
 
 func (b *javaValueBuilder) propagateCallInputs(call javaprogram.Call) {
+	mutatesReceiver := b.isReceiverMutator(call)
 	for _, argument := range call.Arguments {
 		b.addFlow(argument.ValueID, call.ResultID)
+		if mutatesReceiver {
+			// sb.append(tainted) / list.add(tainted) / map.put(k, tainted): the receiver now carries the
+			// argument, so taint must reach it. The result edge above is not enough, because the receiver is
+			// what the next statement reads (sb.toString(), the list handed to ProcessBuilder.command).
+			b.addFlow(argument.ValueID, call.ReceiverValueID)
+		}
 	}
 	b.addFlow(call.ReceiverValueID, call.ResultID)
+}
+
+// isReceiverMutator reports whether the call's method name is one whose contract absorbs an argument into
+// the receiver. Matched on the callee's LAST segment only: the receiver is a runtime value whose type the
+// source-only facts cannot resolve, so this is the same name floor the receiver-typed sinks stand on, and it
+// is deliberately restricted to container and builder mutators whose name carries that contract on its own.
+func (b *javaValueBuilder) isReceiverMutator(call javaprogram.Call) bool {
+	if call.ReceiverValueID == "" || len(b.catalog.ReceiverMutators) == 0 {
+		return false
+	}
+	segments := call.Callee.Segments
+	if len(segments) == 0 {
+		return false
+	}
+	return containsString(b.catalog.ReceiverMutators, segments[len(segments)-1])
 }
 
 // resolveCatalogCallee resolves the callee's base identifier to an import and returns the anchored
