@@ -228,7 +228,14 @@ for (const viewport of VIEWPORTS) {
               // continues, and a title attribute hands over the full string. A 32-character id in a
               // fixed-width column is the common case and is not a defect. What remains is text cut
               // off with no ellipsis and no way to read the rest.
-              if (getComputedStyle(el).textOverflow === 'ellipsis') return false
+              // The ellipsis, like the title, is usually set on the box that clips rather than on
+              // the text inside it: `truncate` on the row, a plain span within. An ellipsis is the
+              // platform's "there is more here", and every truncated row in this app opens to the
+              // full record, so it is an affordance rather than lost content.
+              for (let t = el; t; t = t.parentElement) {
+                if (getComputedStyle(t).textOverflow === 'ellipsis') return false
+                if (t === a) break
+              }
               // The title may sit on the row rather than on the clipped span, and often does:
               // hovering anywhere in the row is what hands over the full value.
               if (el.closest('[title]')) return false

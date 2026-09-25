@@ -9,7 +9,7 @@ assessment. Neither owns the other, and both can invoke the same analysis pipeli
 Use a Project when you want to track a codebase over time: issues, security hotspots, measures, ratings,
 duplication, coverage, and a quality gate that can block a merge.
 
-![Code Quality project portfolio showing the empty state and project creation action](assets/project-code-quality.png)
+![Code Quality project portfolio showing the empty state and project creation action](assets/ui/desktop_code-quality.webp)
 
 *The Code Quality portfolio keeps long-lived projects separate from time-bounded engagements. This sanitized local view contains no repository or customer data.*
 

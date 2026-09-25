@@ -8,30 +8,29 @@ Seventy-five screens including the detail pages and their sub-tabs, each capture
 
 ## How these were captured
 
-Against a real `synapse-api` on a real PostgreSQL, driven through a browser so every request
-hit the live backend; the mock service worker was off. Every feature flag was on. The data is
-real, produced by running the product rather than seeded into its tables:
+Against a real `synapse-api` on a real PostgreSQL with row-level security enforced, driven through
+a browser so every request hit the live backend; the mock service worker was off. The data is real,
+produced by running the product rather than seeded into its tables:
 
-- an engagement scanned against a clone of OWASP Juice Shop, 2,776 findings;
-- a code-quality project with an analysis pushed by `synapse-cli`, 2,762 issues, managed gate
-  failed, 154 findings at or above high;
-- an AI agent session against OpenAI that spent 10,982 tokens and called the `list_findings`
-  tool, with a distinct verifier model, because the Judgment primitive refuses to let a
-  proposer verify its own claim;
-- a `kind` Kubernetes cluster reporting through `synapse-cluster-agent`: 2 enrolled agents,
-  5 namespaces, 64 assets, 6 workloads with their image digests, 66 coverage rows;
-- a host reporting through `synapse-agent`, plus three EDR sensors whose sealed detections
-  correlate into incidents;
-- six business assets and eight users.
+- an engagement scanned against a clone of OWASP Juice Shop: **2,862 findings**, and a supply chain
+  of **1,171 components over 733 dependency edges**, so each of its **86 vulnerabilities carries a
+  path** from a direct dependency rather than appearing as an unattributed transitive;
+- a code-quality project analysed from the same source: **2,768 issues**, with the managed quality
+  gate failed on new code at 21 critical and 137 high;
+- a live reconnaissance run: `httpx` against a host inside the engagement's scope, returning its
+  server banner and detected technologies, executed sandboxed-live with egress restricted to that
+  single destination;
+- three fleet agents shipping signed detections that correlate into **three incidents**;
+- a placed legal hold, with erasure refused for as long as it stands;
+- four business assets.
 
-Two screens are empty for a reason worth stating rather than staging. Coverage Windows materialises
-from sensor-state observations, and the eBPF sensors cannot load in this container, so the agent
-reports "no runtime evidence collected" and there is nothing to window. The AI triage review queue
-holds findings the proposer suspects are false positives; the triaged scan returned ten verdicts of
-"sound" and none suspected, so there is nothing awaiting a human decision.
+Seventeen of the nineteen capabilities were on. Cloud posture and OIDC browser login were off,
+because each needs credentials this host had no reason to hold, and the screens behind them say so
+rather than showing an empty result. Coverage Windows is empty for a stated reason of its own: it
+materialises from sensor-state observations, and the eBPF sensors cannot load here, so the agent
+reports no runtime evidence and there is nothing to window.
 
-Every screen was captured again once all nineteen capabilities were switched on, because the first
-pass documented a product with seven of them off. Three capture faults were fixed first, each of
+Capture faults were fixed before any of this was published, each of
 which had put something untrue in this guide:
 
 - The screenshots held one viewport, not the screen. The app scrolls inside a container rather than

@@ -9,7 +9,7 @@ call. A finding is never deleted and never leaves the report.
 This guide covers the runtime review workflow. For offline datasets, comparison gates, promotion, rollback,
 and drift detection, see [AI triage evaluation](ai-triage-evaluation.md).
 
-![AI triage human-review queue with severity, CWE, project, and state filters](assets/ai-triage-review-queue.png)
+![AI triage human-review queue with severity, CWE, project, and state filters](assets/ui/desktop_ai-triage_reviews.webp)
 
 *The review queue is the human decision boundary. This sanitized empty state was captured from a local stack and contains no findings, credentials, or customer identifiers.*
 
