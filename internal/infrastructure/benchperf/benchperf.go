@@ -36,18 +36,19 @@ const Schema = "synapse-scan-perf-v2"
 //   - AllocBytes: the cross-environment gated statistic (median bytes allocated). PeakMemoryBytes and
 //     latencies are recorded for context. VmHWM is process-wide and depends on other tests in the process.
 type Baseline struct {
-	Schema            string `json:"schema"`
-	Target            string `json:"target"`
-	ReleaseDigest     string `json:"release_digest"`
-	DatasetDigest     string `json:"dataset_digest"`
-	EnvironmentDigest string `json:"environment_digest"`
-	GoVersion         string `json:"go_version"`
-	WarmupSamples     int    `json:"warmup_samples"`
-	Samples           int    `json:"samples"`
-	AllocBytes        uint64 `json:"alloc_bytes_median"`
-	PeakMemoryBytes   uint64 `json:"peak_memory_bytes"`
-	LatencyP50Millis  int64  `json:"latency_p50_millis"`
-	LatencyP95Millis  int64  `json:"latency_p95_millis"`
+	Schema                 string  `json:"schema"`
+	Target                 string  `json:"target"`
+	ReleaseDigest          string  `json:"release_digest"`
+	DatasetDigest          string  `json:"dataset_digest"`
+	EnvironmentDigest      string  `json:"environment_digest"`
+	GoVersion              string  `json:"go_version"`
+	WarmupSamples          int     `json:"warmup_samples"`
+	Samples                int     `json:"samples"`
+	AllocBytes             uint64  `json:"alloc_bytes_median"`
+	PeakMemoryBytes        uint64  `json:"peak_memory_bytes"`
+	LatencyP50Millis       int64   `json:"latency_p50_millis"`
+	LatencyP95Millis       int64   `json:"latency_p95_millis"`
+	ThroughputOpsPerSecond float64 `json:"throughput_ops_per_second,omitempty"`
 }
 
 // Load reads the committed baseline at path. found is false when the file is absent (the caller reports the
@@ -94,6 +95,9 @@ type Result struct {
 	PeakMemoryBytes uint64
 	LatencyP50      time.Duration
 	LatencyP95      time.Duration
+	// ThroughputOpsPerSecond is serial completed operations divided by their
+	// total timed duration; warmups and per-sample GC are excluded.
+	ThroughputOpsPerSecond float64
 }
 
 // CheckPeakEvidence requires a Linux peak-resident measurement for the published result.
@@ -115,24 +119,32 @@ func Measure(warmup, samples int, op func()) Result {
 	latencies := make([]time.Duration, 0, samples)
 	allocBytes := make([]uint64, 0, samples)
 	var peak uint64
+	var timedDuration time.Duration
 	for i := 0; i < samples; i++ {
 		var before, after runtime.MemStats
 		runtime.GC()
 		runtime.ReadMemStats(&before)
 		start := time.Now()
 		op()
-		latencies = append(latencies, time.Since(start))
+		elapsed := time.Since(start)
+		latencies = append(latencies, elapsed)
+		timedDuration += elapsed
 		runtime.ReadMemStats(&after)
 		allocBytes = append(allocBytes, after.TotalAlloc-before.TotalAlloc)
 		if hwm, ok := linuxPeakResidentBytes(); ok && hwm > peak {
 			peak = hwm
 		}
 	}
+	var throughput float64
+	if timedDuration > 0 {
+		throughput = float64(samples) / timedDuration.Seconds()
+	}
 	return Result{
-		MedianAllocBytes: MedianU64(allocBytes),
-		PeakMemoryBytes:  peak,
-		LatencyP50:       PercentileDur(latencies, 50),
-		LatencyP95:       PercentileDur(latencies, 95),
+		MedianAllocBytes:       MedianU64(allocBytes),
+		PeakMemoryBytes:        peak,
+		LatencyP50:             PercentileDur(latencies, 50),
+		LatencyP95:             PercentileDur(latencies, 95),
+		ThroughputOpsPerSecond: throughput,
 	}
 }
 

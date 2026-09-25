@@ -82,8 +82,8 @@ func TestOwnsbomPerfGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := benchperf.EnvironmentDigest()
-	t.Logf("ownsbom perf: release=%s env=%s components=%d samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s",
-		benchperf.ReleaseDigest(), env, ownsbomPerfNPMPackages+ownsbomPerfGoModules, ownsbomPerfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest)
+	t.Logf("ownsbom perf: release=%s env=%s components=%d samples=%d alloc_bytes(median)=%d peak_mem=%d latency_p50=%s latency_p95=%s dataset=%s throughput_ops_per_second=%.6f",
+		benchperf.ReleaseDigest(), env, ownsbomPerfNPMPackages+ownsbomPerfGoModules, ownsbomPerfSamples, res.MedianAllocBytes, res.PeakMemoryBytes, res.LatencyP50, res.LatencyP95, datasetDigest, res.ThroughputOpsPerSecond)
 
 	base, found, err := benchperf.Load(ownsbomPerfBaselinePath, ownsbomPerfSamples)
 	if err != nil {

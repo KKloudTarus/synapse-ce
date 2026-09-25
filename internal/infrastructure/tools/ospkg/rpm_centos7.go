@@ -37,8 +37,14 @@ func centOS7SignedIdentity(blob []byte) (name, evr, arch string, ok bool) {
 }
 
 func centOS7BaseSignedIdentity(blob []byte) (name, evr, arch string, ok bool) {
-	original, name, evr, arch, ok := centOS7SignedHeader(blob)
-	if !ok || !centOS7BaseHeaderAllowed(original, name, evr, arch) {
+	original, _, _, ok := rpmImmutableRegion(blob)
+	if !ok {
+		return "", "", "", false
+	}
+	name, evr, arch, ok = parseRPMHeader(original)
+	// A digest miss is common in mixed images; check it before public-key work.
+	// Membership alone never grants provenance: the signature must also verify.
+	if !ok || !centOS7BaseHeaderAllowed(original, name, evr, arch) || !verifyCentOS7RSAHeader(blob, original) {
 		return "", "", "", false
 	}
 	return name, evr, arch, true

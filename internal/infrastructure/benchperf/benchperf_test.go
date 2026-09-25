@@ -144,6 +144,9 @@ func TestMeasureRunsWarmupAndSamples(t *testing.T) {
 		// p95 >= p50 by definition of the percentile picker.
 		t.Errorf("p95 %s must be >= p50 %s", res.LatencyP95, res.LatencyP50)
 	}
+	if res.ThroughputOpsPerSecond <= 0 {
+		t.Errorf("five timed operations must yield positive throughput, got %v", res.ThroughputOpsPerSecond)
+	}
 }
 
 func TestLoadDistinguishesUnreadableFromMissing(t *testing.T) {
