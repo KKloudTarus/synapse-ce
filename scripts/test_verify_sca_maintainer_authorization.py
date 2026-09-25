@@ -175,6 +175,27 @@ class CaptureTests(unittest.TestCase):
             self.assertEqual(authorization["approval_id"], "17")
             self.assertEqual(authorization["implementation_commit"], SHA)
 
+    def test_capture_preserves_unedited_windows_line_endings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args, digests = self.args(temporary)
+            body = VERIFIER.canonical_body(SHA, digests).replace("\n", "\r\n")
+            responses = [
+                {"number": 1320, "head": {"sha": SHA}},
+                [{"id": 17, "body": body, "user": {"login": "pho-veteran"},
+                  "html_url": "https://github.com/%s/pull/1320#issuecomment-17" % REPOSITORY,
+                  "issue_url": "https://api.github.test/repos/%s/issues/1320" % REPOSITORY,
+                  "created_at": TIME, "updated_at": TIME}],
+                {"permission": "admin"},
+            ]
+            original = VERIFIER.api_get
+            VERIFIER.api_get = lambda *_: responses.pop(0)
+            try:
+                VERIFIER.capture(args)
+            finally:
+                VERIFIER.api_get = original
+            approval = json.loads((pathlib.Path(args.out_dir) / "approval.json").read_bytes())
+            self.assertEqual(approval["body"], body)
+
     def test_capture_accepts_maintain_role_name_with_write_base_permission(self):
         with tempfile.TemporaryDirectory() as temporary:
             args, digests = self.args(temporary)

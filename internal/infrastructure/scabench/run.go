@@ -1771,7 +1771,8 @@ func validateMaintainerAuthorizationEvidence(approval, authorization []byte, imp
 }
 
 func maintainerCommentBindsApproval(body, implementationCommit string, bindings InputDigests) bool {
-	return body == canonicalMaintainerApprovalComment(implementationCommit, bindings)
+	expected := canonicalMaintainerApprovalComment(implementationCommit, bindings)
+	return body == expected || body == strings.ReplaceAll(expected, "\n", "\r\n")
 }
 
 func canonicalMaintainerApprovalComment(implementationCommit string, bindings InputDigests) string {

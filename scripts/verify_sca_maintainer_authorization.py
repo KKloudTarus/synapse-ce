@@ -107,10 +107,11 @@ def capture(args):
     if pull.get("number") != args.pull_number or pull.get("head", {}).get("sha") != args.source_sha:
         fail("pull request does not currently point to the authorized source SHA")
     expected_body = canonical_body(args.source_sha, digests)
+    accepted_bodies = {expected_body, expected_body.replace("\n", "\r\n")}
     expected_issue_url = "%s/repos/%s/issues/%s" % (args.api_base.rstrip("/"), args.repository, args.pull_number)
     candidates = []
     for comment in issue_comments(args.api_base, args.token, args.repository, args.pull_number):
-        if comment.get("body") == expected_body:
+        if isinstance(comment.get("body"), str) and comment["body"] in accepted_bodies:
             candidates.append(comment)
     if len(candidates) != 1:
         fail("exactly one current issue comment must bind the final decision and inputs")
@@ -140,7 +141,7 @@ def capture(args):
         "updated_at": updated_at,
         "decision": "approved",
         "implementation_commit": args.source_sha,
-        "body": expected_body,
+        "body": comment["body"],
     }
     approval_bytes = canonical_json(approval)
     captured_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
