@@ -75,6 +75,15 @@ var seccompAllow = []int{
 	unix.SYS_KILL, unix.SYS_TGKILL, unix.SYS_TKILL, unix.SYS_PAUSE,
 	// process lifecycle / threads – NOTE: clone + clone3 are handled specially in
 	// buildSeccompProgram (flag-filtered to block CLONE_NEW*), NOT listed here.
+	//
+	// vfork is allowed because it is exactly the clone the filter already permits:
+	// CLONE_VM|CLONE_VFORK|SIGCHLD, carrying no CLONE_NEW* bit and so creating no namespace.
+	// glibc's vfork() issues the vfork syscall directly rather than routing through clone, so
+	// leaving it off the list denied it while the identical clone was allowed. That is an
+	// inconsistency, not a boundary: a shell spawning an external command uses vfork for a simple
+	// command, so every tool that shells out failed inside the sandbox with "Cannot fork" while
+	// the same command inside a pipeline, which forks, worked.
+	unix.SYS_VFORK,
 	unix.SYS_EXECVE, unix.SYS_EXECVEAT, unix.SYS_EXIT,
 	unix.SYS_EXIT_GROUP, unix.SYS_WAIT4, unix.SYS_WAITID, unix.SYS_SET_TID_ADDRESS,
 	unix.SYS_SET_ROBUST_LIST, unix.SYS_GET_ROBUST_LIST, unix.SYS_RSEQ, unix.SYS_GETPID,
