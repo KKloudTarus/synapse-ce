@@ -12,7 +12,7 @@ Start with [the readiness checks](#readiness-checks) if you do not yet know whic
 
 ## Readiness checks
 
-Run these three before diagnosing anything specific. Each one answers a different question.
+Run these four before diagnosing anything specific. Each one answers a different question.
 
 ```bash
 # 1. Which optional subsystems does this server actually serve?
@@ -22,9 +22,17 @@ curl -s -H "Authorization: Bearer $SYNAPSE_API_TOKEN" \
 # 2. Can this host run the sandbox and reach the network under it?
 synapse-cli doctor .
 
-# 3. Is the server serving at all, and under which identity?
+# 3. Are the sandbox controls actually enforced on this host?
+synapse-sandbox-check -mode full -output -
+
+# 4. Is the server serving at all?
 curl -s http://localhost:8080/healthz
 ```
+
+`synapse-sandbox-check` reports each control (filesystem confinement, effective capabilities, the
+memory limit, network isolation, binary integrity) as enforced or not, and `-strict` makes an
+unenforced control a non-zero exit. It is the fastest way to tell a host problem from a Synapse
+problem, because every sandbox failure below shows up here first.
 
 `capabilities` is the authority on what is switched on. A screen that renders is not proof the
 feature behind it is reachable: several surfaces render their own "switched off" state, and one

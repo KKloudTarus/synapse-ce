@@ -85,6 +85,8 @@ Each isolates a capability-sensitive or untrusted-input workload out of the serv
 | `synapse-ast` | tree-sitter AST parsing of untrusted source. Exit code 3 means the backend is unavailable in a CGO-free build. |
 | `synapse-cspm` | Cloud posture collection for AWS, Azure, and GCP. Read-only, with credentials passed by inherited file descriptor. |
 | `synapse-dast-helper` | Governed DAST crawling and checks under kernel-enforced egress confinement. |
+| `synapse-egress-broker` | The root-owned broker that attaches and configures a run's network namespace. It is the only component that runs `ip` and `iptables`, so the worker never holds that privilege. See [deployment](deployment.md). |
+| `synapse-sandbox-check` | Conformance check for the sandbox on this host: filesystem confinement, effective capabilities, the memory limit, network isolation, and binary integrity. `-mode startup` on boot, `-mode full` to exercise every control, `-strict` to fail when one is unenforced. |
 
 **Fleet agents**
 
