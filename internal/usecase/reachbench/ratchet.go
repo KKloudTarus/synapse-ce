@@ -151,6 +151,13 @@ func (ratchet CandidateRatchet) Validate() error {
 
 // CheckCandidateAcceptance enforces strict C2 improvement and every mandatory non-offsettable guard.
 func CheckCandidateAcceptance(candidate MeasurementReport, ratchet CandidateRatchet, exceptions ExceptionManifest) []string {
+	if candidate.Policy.ID == goBinaryVersionedProfileID+"-policy" {
+		return []string{"successor acceptance requires baseline and oracle context"}
+	}
+	return checkCandidateRatchet(candidate, ratchet, exceptions)
+}
+
+func checkCandidateRatchet(candidate MeasurementReport, ratchet CandidateRatchet, exceptions ExceptionManifest) []string {
 	reasons := make([]string, 0)
 	if err := ratchet.Validate(); err != nil {
 		reasons = append(reasons, "candidate ratchet is structurally invalid")

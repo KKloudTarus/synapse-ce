@@ -1,0 +1,15 @@
+package main
+
+import "golang.org/x/net/idna"
+
+var retainedControls = []func(){controlUnreached}
+
+func main() {
+	controlUnreached()
+	if retainedControls[0] == nil {
+		panic("missing control")
+	}
+}
+
+//go:noinline
+func controlUnreached() { _, _ = idna.ToASCII("example.test") }

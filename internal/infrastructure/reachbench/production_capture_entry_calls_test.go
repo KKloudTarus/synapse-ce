@@ -345,8 +345,8 @@ func TestVersionedGoBinaryProposalCannotChangeFrozenTrustedInventory(t *testing.
 	if !changed {
 		t.Fatal("frozen inventory has no Go-binary worker binding")
 	}
-	if err := validateFrozenTemplateStaticContract(input); err == nil || !strings.Contains(err.Error(), "inventory") {
-		t.Fatalf("modified trusted inventory error = %v, want frozen inventory rejection", err)
+	if err := validateFrozenTemplateStaticContract(input); err == nil {
+		t.Fatal("modified trusted inventory resolved to a registered benchmark profile")
 	}
 }
 
