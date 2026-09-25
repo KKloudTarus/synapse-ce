@@ -175,6 +175,15 @@ func DefaultJavaCatalog() JavaCatalog {
 			// sink would hide a context-mismatched XSS.
 			javaSink(JavaCallablePattern{RawSuffixes: []string{"println", "print", "write"}, RequiresImport: []string{"javax.servlet", "jakarta.servlet"}},
 				TaintXSS, "CWE-79", "java-taint-xss-writer", 0),
+			// The formatting writers are the same response-body sink with a different shape, and they are
+			// split out because their tainted argument is not fixed at index 0: printf(format, args...) puts
+			// it there, printf(Locale, format, args...) puts it at 1, and in both overloads every remaining
+			// argument is interpolated into the same output. So every argument is checked rather than one
+			// index. A Locale or a constant format is never tainted, so over-checking costs nothing here, the
+			// same reasoning the path-traversal sinks above already use. Import-gated on the servlet API like
+			// the writer sink, for the same reason: a bare .format is far too generic to floor on.
+			javaSinkAll(JavaCallablePattern{RawSuffixes: []string{"printf", "format"}, RequiresImport: []string{"javax.servlet", "jakarta.servlet"}},
+				TaintXSS, "CWE-79", "java-taint-xss-writer-format"),
 		},
 		// A sanitizer is only modeled when it has SOUND, class-specific, single-call semantics AND an import
 		// anchor: an over-matching sanitizer SUPPRESSES a real flow (a false negative, worse than a propose-only
