@@ -34,6 +34,13 @@ type routeContext struct {
 	Middleware string
 }
 
+// maxCallerEvidenceFiles bounds how many other files one caller-evidence walk reads. Memoising the walk
+// per enclosing function took a 455-file service from a ten-minute timeout with zero output down to 284
+// seconds; the residual cost is that a tree with many distinct sink-holding functions still multiplies
+// that walk by the number of functions. 150 keeps the common case whole (most projects are smaller than
+// that) and caps the pathological one.
+const maxCallerEvidenceFiles = 150
+
 type projectContext struct {
 	Files     []projectFile
 	Summaries map[string]functionSummary
@@ -611,10 +618,19 @@ func projectCallerToCurrentWrapperEvidence(lines []string, firstLine, sinkIdx in
 		}
 	}
 	answer := ""
+	// Bounded: the walk reads whole files line by line, and on a large tree the tail of the list is
+	// almost never where the caller lives. Stopping early can only make a finding's CONTEXT poorer, never
+	// drop the finding itself, because this function enriches an already-produced finding rather than
+	// deciding one. That is what makes a bound safe here, where it would not be on a detection path.
+	read := 0
 	for _, file := range project.Files {
 		if file.Rel == rel {
 			continue
 		}
+		if read >= maxCallerEvidenceFiles {
+			break
+		}
+		read++
 		if ev := callerEvidenceInFile(wrapper, file); ev != "" {
 			answer = ev
 			break
