@@ -112,10 +112,18 @@ func (r *ExecRunner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolRe
 
 	if runCtx.Err() == context.DeadlineExceeded {
 		res.TimedOut = true
-		return res, fmt.Errorf("toolrunner: %q exceeded its %s timeout", spec.Name, timeout)
 	}
+	// A start error is the cause; a deadline reached afterwards is its symptom. Cancel() asks the
+	// process to stop, but a run wrapped in `systemd-run --scope` keeps a child of that scope alive
+	// until the scope goes away, so a failed initialization usually does reach the deadline.
+	// Reporting the timeout first hid the real reason behind "exceeded its 30s timeout": an egress
+	// setup failure was indistinguishable from a tool that simply ran too long, which is the
+	// difference between a diagnosis and a mystery. TimedOut still records that the deadline was hit.
 	if startErr != nil {
 		return res, fmt.Errorf("toolrunner: initialize %q after start: %w", spec.Name, startErr)
+	}
+	if res.TimedOut {
+		return res, fmt.Errorf("toolrunner: %q exceeded its %s timeout", spec.Name, timeout)
 	}
 	if runErr != nil {
 		var ee *exec.ExitError
