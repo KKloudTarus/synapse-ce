@@ -59,6 +59,13 @@ type rule struct {
 	// lineSkip, when set, drops a match based on the whole line it sits on. It is how a rule tells a
 	// delimiter quoted inside other code from the thing it delimits.
 	lineSkip func(line string) bool
+	// scanComments makes this rule read the file WITH its comments intact. Comments are blanked for
+	// every other rule, because a generic or keyword-anchored pattern fires constantly on documentation
+	// and example values. A provider rule whose unique prefix IS the signal has the opposite problem: a
+	// real AKIA or ghp_ token committed inside a comment is a leaked credential that is still live, and
+	// masking it reports a clean file. A prefix cannot be produced by prose, so admitting comments for
+	// these rules costs no precision.
+	scanComments bool
 }
 
 // Scanner implements ports.SecretScanner with an owned ruleset.
@@ -455,10 +462,15 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 	awsCandidates := make([]awsCandidate, 0, 3)
 	for i := range s.rules {
 		r := &s.rules[i]
-		if !hasAnyKeyword(text, r.keywords) {
+		// maskComments preserves byte offsets, so a match offset and a line count index either string.
+		subject := text
+		if r.scanComments {
+			subject = original
+		}
+		if !hasAnyKeyword(subject, r.keywords) {
 			continue
 		}
-		for _, m := range r.re.FindAllStringSubmatchIndex(text, -1) {
+		for _, m := range r.re.FindAllStringSubmatchIndex(subject, -1) {
 			if len(*out) >= limit {
 				return true
 			}
@@ -466,11 +478,11 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			if r.group > 0 && len(m) > 2*r.group+1 && m[2*r.group] >= 0 {
 				start, end = m[2*r.group], m[2*r.group+1]
 			}
-			secret := text[start:end]
+			secret := subject[start:end]
 			if s.allowed(secret, r.allow) {
 				continue
 			}
-			if r.lineSkip != nil && r.lineSkip(lineOf(text, start)) {
+			if r.lineSkip != nil && r.lineSkip(lineOf(subject, start)) {
 				continue
 			}
 			if inlineAllow(lineOf(original, start)) {
@@ -479,7 +491,7 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			if r.minEnt > 0 && shannon(secret) < r.minEnt {
 				continue
 			}
-			line := 1 + strings.Count(text[:start], "\n")
+			line := 1 + strings.Count(subject[:start], "\n")
 			key := r.id + ":" + rel + ":" + strconv.Itoa(line)
 			if seen[key] {
 				continue
