@@ -114,7 +114,13 @@ for (const viewport of VIEWPORTS) {
     const expected404 = /\/api\/auth\/session$/
     page.on('console', (m) => {
       if (m.type() !== 'error') return
-      if (expected404.test(m.location()?.url ?? '')) return
+      const at = m.location()?.url ?? ''
+      if (expected404.test(at)) return
+      // Chromium logs "Failed to load resource: 404" for a read the screen renders as its empty
+      // state, which is the same absence the response handler below files separately. Left in, it
+      // marked every engagement screen as having something to look at, for four reads that are
+      // working as designed.
+      if (at.includes('/api/v1') && /\b404\b/.test(m.text())) return
       consoleErrors.push(m.text().slice(0, 200))
     })
     page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${String(e).slice(0, 200)}`))
@@ -223,7 +229,9 @@ for (const viewport of VIEWPORTS) {
               // fixed-width column is the common case and is not a defect. What remains is text cut
               // off with no ellipsis and no way to read the rest.
               if (getComputedStyle(el).textOverflow === 'ellipsis') return false
-              if (el.getAttribute('title')) return false
+              // The title may sit on the row rather than on the clipped span, and often does:
+              // hovering anywhere in the row is what hands over the full value.
+              if (el.closest('[title]')) return false
               return true
             }
           }
