@@ -2,12 +2,25 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestTrustedRunUsesCancellationContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var stdout, stderr bytes.Buffer
+	if code := executeCLIContext(ctx, []string{"run"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("canceled trusted run exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), context.Canceled.Error()) {
+		t.Fatalf("canceled trusted run error = %q, want context cancellation", stderr.String())
+	}
+}
 
 func TestExecuteCLIRoutesCandidateAndTrustedCommands(t *testing.T) {
 	for _, tc := range []struct {

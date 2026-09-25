@@ -52,15 +52,21 @@ jobs:
           fi
           echo "trusted=$trusted" >> "$GITHUB_OUTPUT"
 
-  benchmark:
-    name: Trusted fixed benchmark
+  provenance:
+    name: Verify maintainer authorization
     needs: route
     if: ${{ needs.route.outputs.trusted == 'true' }}
-    runs-on: [self-hosted, linux, sca-accuracy-trusted]
+    runs-on: ubuntu-latest
     environment: trusted-benchmarks
-    timeout-minutes: 45
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      handoff_sha256: ${{ steps.capture.outputs.handoff_sha256 }}
     steps:
       - name: Check out exact source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -76,14 +82,138 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Run benchmark
+      - name: Compute frozen input digests
         shell: bash
-        env:
-          TRUSTED_INPUT_ROOT: ${{ vars.SCA_ACCURACY_TRUSTED_INPUT_ROOT }}
-          RAW_RETENTION_ROOT: ${{ vars.SCA_ACCURACY_RAW_RETENTION_ROOT }}
         run: |
           set -euo pipefail
-          bash scripts/run-sca-cycle-delegated.sh run --corpus-root "$GITHUB_WORKSPACE/internal/usecase/scabench/corpus" --trusted-input-root "$TRUSTED_INPUT_ROOT" --output-root "$RUNNER_TEMP/sca-accuracy-candidate" --raw-retention-root "$RAW_RETENTION_ROOT" --implementation-commit "${{ needs.route.outputs.source_sha }}" --run-key "${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+          go run scripts/sca_maintainer_authorization_digests.go --corpus-root internal/usecase/scabench/corpus > "$RUNNER_TEMP/sca-input-digests.json"
+      - name: Verify live maintainer authorization
+        id: capture
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_sca_maintainer_authorization.py capture \
+            --repository "${{ github.repository }}" \
+            --pull-number 1320 \
+            --source-sha "${{ needs.route.outputs.source_sha }}" \
+            --digests "$RUNNER_TEMP/sca-input-digests.json" \
+            --workflow-run-id "${{ github.run_id }}" \
+            --workflow-run-attempt "${{ github.run_attempt }}" \
+            --out-dir "$RUNNER_TEMP/sca-maintainer-authorization"
+          echo "handoff_sha256=sha256:$(sha256sum "$RUNNER_TEMP/sca-maintainer-authorization/handoff.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Upload immutable authorization handoff
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sca-maintainer-authorization-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.route.outputs.source_sha }}
+          path: ${{ runner.temp }}/sca-maintainer-authorization
+          if-no-files-found: error
+          retention-days: 1
+
+  benchmark:
+    name: Trusted fixed benchmark
+    needs: [route, provenance]
+    if: ${{ needs.route.outputs.trusted == 'true' && needs.provenance.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: trusted-benchmarks
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Check out exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.route.outputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Assert exact checkout revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
+      - name: Download same-run authorization handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.provenance.outputs.artifact }}
+          path: ${{ runner.temp }}/sca-maintainer-authorization
+      - name: Verify same-run authorization handoff
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ needs.provenance.outputs.artifact }}
+          ARTIFACT_DIGEST: ${{ needs.provenance.outputs.artifact_digest }}
+          HANDOFF_SHA256: ${{ needs.provenance.outputs.handoff_sha256 }}
+        run: |
+          set -euo pipefail
+          test -n "$ARTIFACT_ID"
+          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "invalid authorization artifact digest" >&2; exit 1; }
+          test "$HANDOFF_SHA256" = "sha256:$(sha256sum "$RUNNER_TEMP/sca-maintainer-authorization/handoff.json" | cut -d ' ' -f 1)"
+          python3 scripts/verify_sca_maintainer_authorization.py verify-handoff \
+            --repository "${{ github.repository }}" \
+            --pull-number 1320 \
+            --source-sha "${{ needs.route.outputs.source_sha }}" \
+            --workflow-run-id "${{ github.run_id }}" \
+            --workflow-run-attempt "${{ github.run_attempt }}" \
+            --handoff-dir "$RUNNER_TEMP/sca-maintainer-authorization" \
+            --max-age-seconds 900
+      - name: Build fixed SSM provenance envelope
+        id: envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/dispatch_sca_trusted_ssm.py envelope \
+            --provenance-dir "$RUNNER_TEMP/sca-maintainer-authorization" \
+            --source-sha "${{ needs.route.outputs.source_sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --run-attempt "${{ github.run_attempt }}" \
+            --output "$RUNNER_TEMP/sca-provenance-envelope.json"
+          python3 - "$RUNNER_TEMP/sca-provenance-envelope.json" >> "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import pathlib
+          import sys
+          envelope = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          print("base64=" + envelope["base64"])
+          print("sha256=" + envelope["sha256"])
+          PY
+      - name: Assume constrained AWS SSM role
+        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838
+        with:
+          role-to-assume: arn:aws:iam::116378167742:role/synapse-epic1034-ci-oidc-20260925
+          role-session-name: sca-accuracy-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: us-east-1
+          role-duration-seconds: 3600
+      - name: Dispatch fixed trusted benchmark through SSM
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sca-accuracy-candidate"
+          python3 scripts/dispatch_sca_trusted_ssm.py dispatch \
+            --document synapse-sca-trusted-20260925 \
+            --instance-id i-0c53bf1e69ea15698 \
+            --region us-east-1 \
+            --source-sha "${{ needs.route.outputs.source_sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --run-attempt "${{ github.run_attempt }}" \
+            --provenance-base64 "${{ steps.envelope.outputs.base64 }}" \
+            --provenance-sha256 "${{ steps.envelope.outputs.sha256 }}" \
+            --mode run \
+            --timeout-seconds 2800 \
+            --summary-path "$RUNNER_TEMP/sca-accuracy-candidate/dispatch-summary.json"
+      - name: Verify versioned acceptance report and publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/dispatch_sca_trusted_ssm.py verify-report \
+            --summary-path "$RUNNER_TEMP/sca-accuracy-candidate/dispatch-summary.json" \
+            --output-dir "$RUNNER_TEMP/sca-accuracy-candidate" \
+            --bucket synapse-sca-benchmark-evidence-116378167742-20260923-e1b6fb88 \
+            --region us-east-1 \
+            --source-sha "${{ needs.route.outputs.source_sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --run-attempt "${{ github.run_attempt }}" \
+            --provenance-sha256 "${{ steps.envelope.outputs.sha256 }}"
       - name: Upload sanitized result
         id: upload
         if: ${{ success() }}
@@ -99,8 +229,8 @@ jobs:
         run: rm -rf "$RUNNER_TEMP/sca-accuracy-candidate"
 
   aggregate:
-    name: Aggregate SCA benchmark status
-    needs: [route, benchmark]
+    name: Aggregate benchmark status
+    needs: [route, provenance, benchmark]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -110,6 +240,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           TRUSTED: ${{ needs.route.outputs.trusted }}
           ROUTE: ${{ needs.route.result }}
+          PROVENANCE: ${{ needs.provenance.result }}
           BENCHMARK: ${{ needs.benchmark.result }}
           ARTIFACT: ${{ needs.benchmark.outputs.artifact }}
         run: |
@@ -128,6 +259,7 @@ jobs:
           # its policy test. Asserting an unreachable positive would replace a weak gate with a permanently
           # red one, so an authorized run must produce evidence and an unauthorized run must produce none.
           if [ "$TRUSTED" = true ]; then
+            test "$PROVENANCE" = success
             test "$BENCHMARK" = success
             test -n "$ARTIFACT"
           else

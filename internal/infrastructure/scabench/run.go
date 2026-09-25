@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +36,11 @@ const (
 	maxRawBundleArtifacts                  = 5 + 1 + fixedCapabilitySourceArtifacts
 	reviewCaptureSchemaVersion             = "review-v1"
 	dispositionCaptureSchemaVersion        = "disposition-v1"
+	maintainerApprovalCaptureSchemaVersion = "github-maintainer-issue-comment-capture-v1"
+	maintainerAuthorizationSchemaVersion   = "maintainer-authorization-v2"
+	maintainerApprovalRepositoryOwner      = "KKloudTarus"
+	maintainerApprovalRepositoryName       = "synapse-ce"
+	maintainerApprovalPullNumber           = "1320"
 	trustedEnvironmentAttestationReference = "environment-attestation:al2023-amd64-trusted-sandbox-v1"
 	trustedEnvironmentAttestationLocator   = "evidence-assets/environment/environment-attestation.json"
 )
@@ -245,6 +251,41 @@ type dispositionCapture struct {
 	Body                 string `json:"body"`
 }
 
+// maintainerApprovalCapture is a sanitized GitHub issue-comment capture. Trusted
+// provisioning verifies API provenance before placing it in the protected input root;
+// this runner validates only the captured record and its exact benchmark bindings.
+type maintainerApprovalCapture struct {
+	SchemaVersion        string `json:"schema_version"`
+	ID                   string `json:"id"`
+	URL                  string `json:"url"`
+	HeadURL              string `json:"head_url"`
+	Login                string `json:"login"`
+	CreatedAt            string `json:"created_at"`
+	UpdatedAt            string `json:"updated_at"`
+	Decision             string `json:"decision"`
+	ImplementationCommit string `json:"implementation_commit"`
+	Body                 string `json:"body"`
+}
+
+// maintainerAuthorizationCapture records the maintainer's direct acceptance of a
+// captured GitHub approval. It binds the exact final implementation and every
+// frozen scoring input. TranscribedBy identifies the delegated evidence entry.
+type maintainerAuthorizationCapture struct {
+	SchemaVersion        string `json:"schema_version"`
+	ApprovalID           string `json:"approval_id"`
+	ApprovalDigest       string `json:"approval_digest"`
+	MaintainerLogin      string `json:"maintainer_login"`
+	ImplementationCommit string `json:"implementation_commit"`
+	CatalogDigest        string `json:"catalog_digest"`
+	OracleDigest         string `json:"oracle_digest"`
+	RatchetDigest        string `json:"ratchet_digest"`
+	PolicyDigest         string `json:"policy_digest"`
+	Decision             string `json:"decision"`
+	TranscribedBy        string `json:"transcribed_by"`
+	TranscribedAt        string `json:"transcribed_at"`
+	Body                 string `json:"body"`
+}
+
 type cycleCell struct {
 	key      string
 	manifest CaptureManifest
@@ -298,6 +339,9 @@ func Run(ctx context.Context, input RunInput, runnerFactory RunnerFactory) (resu
 		return RunResult{}, err
 	}
 	if err := state.validateRatchetBindings(); err != nil {
+		return RunResult{}, err
+	}
+	if err := state.bindFinalReviewEvidence(); err != nil {
 		return RunResult{}, err
 	}
 	store, err := state.newEvidenceStore()
@@ -497,7 +541,13 @@ func (state *runState) loadFrozenInputs() error {
 		return err
 	}
 	state.expectedStates = states
-	review, disposition, err := readReviewEvidence(state.input.TrustedInputRoot, state.input.ImplementationCommit)
+	return nil
+}
+
+// bindFinalReviewEvidence validates authorization only after the owned binary,
+// catalog, and ratchet have reached their final published identities.
+func (state *runState) bindFinalReviewEvidence() error {
+	review, disposition, err := readReviewEvidence(state.input.TrustedInputRoot, state.input.ImplementationCommit, state.inputDigests)
 	if err != nil {
 		return err
 	}
@@ -508,6 +558,9 @@ func (state *runState) loadFrozenInputs() error {
 func ownedBuildArguments(binaryPath string) []string {
 	return []string{
 		"build",
+		"-buildvcs=false",
+		"-trimpath",
+		"-mod=readonly",
 		"-ldflags", "-X " + ownedBenchmarkVersionLinkerSymbol + "=" + ownedBenchmarkVersion,
 		"-o", binaryPath,
 		"./cmd/synapse-sca-bench",
@@ -520,6 +573,7 @@ func (state *runState) buildAndBindOwnedBinary(ctx context.Context) error {
 		return fmt.Errorf("create owned binary directory: %w", err)
 	}
 	command := exec.CommandContext(ctx, "go", ownedBuildArguments(binaryPath)...)
+	command.Env = ownedBuildEnvironment()
 	command.Stdout = nil
 	command.Stderr = nil
 	if err := command.Run(); err != nil {
@@ -527,6 +581,10 @@ func (state *runState) buildAndBindOwnedBinary(ctx context.Context) error {
 	}
 	_, err := state.bindOwnedBinaryDigest(binaryPath)
 	return err
+}
+
+func ownedBuildEnvironment() []string {
+	return candidateOwnedBuildEnvironment()
 }
 
 func (state *runState) bindOwnedBinaryDigest(binaryPath string) (string, error) {
@@ -1325,10 +1383,10 @@ func validateStagedRun(ctx context.Context, run RunResult, catalog bench.Catalog
 		run.InputDigests.Policy != sha256Digest(files["cycle-policy.json"]) || run.InputDigests.Review != sha256Digest(files["reviews/review.json"]) || run.InputDigests.Disposition != sha256Digest(files["reviews/disposition.json"]) {
 		return errors.New("staged run input digests do not bind staged artifacts")
 	}
-	if err := validateReviewEvidence(files["reviews/review.json"], files["reviews/disposition.json"], run.ImplementationCommit); err != nil {
+	if err := validateReviewEvidenceWithBindings(files["reviews/review.json"], files["reviews/disposition.json"], run.ImplementationCommit, InputDigests{Catalog: catalogDigest, Oracle: oracleDigest, Ratchet: ratchetDigest, Policy: sha256Digest(files["cycle-policy.json"])}); err != nil {
 		return fmt.Errorf("validate staged review evidence: %w", err)
 	}
-	if err := validateStagedCycleOrder(run, catalog, oracle); err != nil {
+	if err := ValidateStagedCycleOrder(run, catalog, oracle); err != nil {
 		return err
 	}
 	final, resultBytes, report, err := reduceRepetitionsContext(ctx, catalog, oracle, ratchet, run.Observations)
@@ -1380,7 +1438,12 @@ func validateStagedArtifactSet(catalog bench.Catalog, files map[string][]byte) e
 	return nil
 }
 
-func validateStagedCycleOrder(run RunResult, catalog bench.Catalog, oracle bench.Oracle) error {
+// ValidateStagedCycleOrder checks the fixed cycle's cell order and paired bundle claims.
+// The protected publication verifier uses the same contract as the staging path.
+func ValidateStagedCycleOrder(run RunResult, catalog bench.Catalog, oracle bench.Oracle) error {
+	if err := validateFixedTargetMatrix(catalog); err != nil {
+		return err
+	}
 	if len(run.Observations) != fixedRepetitions || len(run.RawBundles) != fixedRepetitions || len(run.Comparisons) != fixedMatrixCells {
 		return errors.New("staged run has an incomplete fixed cycle")
 	}
@@ -1403,13 +1466,63 @@ func validateStagedCycleOrder(run RunResult, catalog bench.Catalog, oracle bench
 				if observation.TargetID != target.ID || observation.Engine != engine || observation.State != expectedStates[key] || identity.TargetID != target.ID || identity.Engine != engine {
 					return fmt.Errorf("staged run cell %q is out of canonical order", key)
 				}
+				if err := validateBundleReceipt(identity, observation); err != nil {
+					return fmt.Errorf("staged run cell %q has an invalid bundle receipt: %w", key, err)
+				}
 			}
 			comparison := run.Comparisons[index]
-			if comparison.TargetID != target.ID || comparison.Engine != engine || comparison.ExpectedState != expectedStates[key] || !comparison.SemanticEqual || len(comparison.UnclassifiedDifferences) != 0 {
+			if comparison.SchemaVersion != semanticBundleComparisonSchema || comparison.TargetID != target.ID || comparison.Engine != engine || comparison.ExpectedState != expectedStates[key] || !comparison.SemanticEqual || len(comparison.UnclassifiedDifferences) != 0 {
 				return fmt.Errorf("staged comparison for %q is invalid", key)
+			}
+			if !reflect.DeepEqual(comparison.Left, run.RawBundles[0][index]) || !reflect.DeepEqual(comparison.Right, run.RawBundles[1][index]) {
+				return fmt.Errorf("staged comparison for %q differs from bundle receipts", key)
+			}
+			left, right := run.Observations[0][index], run.Observations[1][index]
+			left.RawOutputDigest, right.RawOutputDigest = "", ""
+			if comparison.LeftClaim.ExpectedState != expectedStates[key] || comparison.RightClaim.ExpectedState != expectedStates[key] || !reflect.DeepEqual(comparison.LeftClaim.Observation, left) || !reflect.DeepEqual(comparison.RightClaim.Observation, right) || !reflect.DeepEqual(comparison.LeftClaim, comparison.RightClaim) {
+				return fmt.Errorf("staged comparison for %q differs from observed claims", key)
 			}
 			index++
 		}
+	}
+	return nil
+}
+
+func validateBundleReceipt(identity BundleIdentity, observation bench.Observation) error {
+	if !validDigest(identity.ManifestDigest) || !validDigest(identity.RootDigest) || !validDigest(identity.NormalizedObservationDigest) ||
+		!validDigest(identity.RawOutputDigest) || !validDigest(identity.ProcessEvidenceDigest) || !validDigest(identity.EnvironmentDigest) || !validDigest(identity.SBOMDigest) ||
+		identity.RawOutputDigest != observation.RawOutputDigest || identity.EnvironmentDigest != observation.EnvironmentDigest || identity.SBOMDigest != observation.SBOMDigest {
+		return errors.New("bundle digests are absent or differ from the observation")
+	}
+	if len(identity.Files) == 0 || len(identity.Files) > maxRawBundleArtifacts {
+		return errors.New("bundle file receipt is incomplete")
+	}
+	rootMaterial := make([]byte, 0, len(identity.Files)*80)
+	observationDigest, evidenceDigest := "", ""
+	for index, file := range identity.Files {
+		if file.Name == "" || (index > 0 && identity.Files[index-1].Name >= file.Name) || !validDigest(file.Digest) || file.Size < 0 {
+			return errors.New("bundle file receipt is invalid or unordered")
+		}
+		rootMaterial = append(rootMaterial, file.Name...)
+		rootMaterial = append(rootMaterial, 0)
+		rootMaterial = append(rootMaterial, file.Digest...)
+		rootMaterial = append(rootMaterial, 0)
+		switch file.Name {
+		case "observation.json":
+			observationDigest = file.Digest
+		case "evidence.json":
+			evidenceDigest = file.Digest
+		}
+	}
+	if identity.NormalizedObservationDigest != observationDigest || identity.ProcessEvidenceDigest != evidenceDigest {
+		return errors.New("bundle observation or evidence digest differs from its file receipt")
+	}
+	manifest, err := bench.CanonicalJSON(identity.Files)
+	if err != nil {
+		return err
+	}
+	if identity.ManifestDigest != sha256Digest(manifest) || identity.RootDigest != sha256Digest(rootMaterial) {
+		return errors.New("bundle file receipt digest is invalid")
 	}
 	return nil
 }
@@ -1538,7 +1651,7 @@ func validateFixedTargetMatrix(catalog bench.Catalog) error {
 	return nil
 }
 
-func readReviewEvidence(root, implementationCommit string) ([]byte, []byte, error) {
+func readReviewEvidence(root, implementationCommit string, bindings InputDigests) ([]byte, []byte, error) {
 	reviewPath, err := singleJSONFile(root, "repository/reviews/github")
 	if err != nil {
 		return nil, nil, fmt.Errorf("read independent review: %w", err)
@@ -1555,13 +1668,30 @@ func readReviewEvidence(root, implementationCommit string) ([]byte, []byte, erro
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := validateReviewEvidence(review, disposition, implementationCommit); err != nil {
+	if err := validateReviewEvidenceWithBindings(review, disposition, implementationCommit, bindings); err != nil {
 		return nil, nil, err
 	}
 	return review, disposition, nil
 }
 
 func validateReviewEvidence(review, disposition []byte, implementationCommit string) error {
+	return validateReviewEvidenceWithBindings(review, disposition, implementationCommit, InputDigests{})
+}
+
+func validateReviewEvidenceWithBindings(review, disposition []byte, implementationCommit string, bindings InputDigests) error {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(review, &envelope); err != nil {
+		return err
+	}
+	var schemaVersion string
+	if raw, ok := envelope["schema_version"]; ok {
+		if err := json.Unmarshal(raw, &schemaVersion); err != nil {
+			return err
+		}
+	}
+	if schemaVersion == maintainerApprovalCaptureSchemaVersion {
+		return validateMaintainerAuthorizationEvidence(review, disposition, implementationCommit, bindings)
+	}
 	var reviewRecord reviewCapture
 	var dispositionRecord dispositionCapture
 	if err := strictDecodeBytes(review, &reviewRecord); err != nil {
@@ -1593,6 +1723,94 @@ func validateReviewEvidence(review, disposition []byte, implementationCommit str
 	}
 	if err := validateGitHubPRURL(dispositionRecord.URL, dispositionRecord.ID, "issuecomment-"); err != nil {
 		return fmt.Errorf("maintainer disposition URL is invalid: %w", err)
+	}
+	return nil
+}
+
+func validateMaintainerAuthorizationEvidence(approval, authorization []byte, implementationCommit string, bindings InputDigests) error {
+	var approvalRecord maintainerApprovalCapture
+	var authorizationRecord maintainerAuthorizationCapture
+	if err := strictDecodeBytes(approval, &approvalRecord); err != nil {
+		return err
+	}
+	if err := strictDecodeBytes(authorization, &authorizationRecord); err != nil {
+		return err
+	}
+	if approvalRecord.SchemaVersion != maintainerApprovalCaptureSchemaVersion || strings.TrimSpace(approvalRecord.ID) == "" || strings.TrimSpace(approvalRecord.URL) == "" || strings.TrimSpace(approvalRecord.HeadURL) == "" || strings.TrimSpace(approvalRecord.Login) == "" || approvalRecord.Decision != "approved" || approvalRecord.ImplementationCommit != implementationCommit || approvalRecord.CreatedAt != approvalRecord.UpdatedAt || !maintainerCommentBindsApproval(approvalRecord.Body, implementationCommit, bindings) {
+		return errors.New("maintainer approval capture is incomplete, stale, or does not bind the final inputs")
+	}
+	if _, err := time.Parse(time.RFC3339, approvalRecord.CreatedAt); err != nil {
+		return errors.New("maintainer approval capture timestamp is invalid")
+	}
+	if err := validateExpectedGitHubIssueCommentURL(approvalRecord.URL, approvalRecord.ID); err != nil {
+		return fmt.Errorf("maintainer approval capture URL is invalid: %w", err)
+	}
+	if err := validateExpectedGitHubCommitURL(approvalRecord.HeadURL, implementationCommit); err != nil {
+		return fmt.Errorf("maintainer approval capture head URL is invalid: %w", err)
+	}
+	if authorizationRecord.SchemaVersion != maintainerAuthorizationSchemaVersion || authorizationRecord.ApprovalID != approvalRecord.ID || authorizationRecord.ApprovalDigest != sha256Digest(approval) || authorizationRecord.MaintainerLogin != approvalRecord.Login || authorizationRecord.ImplementationCommit != implementationCommit || authorizationRecord.CatalogDigest != bindings.Catalog || authorizationRecord.OracleDigest != bindings.Oracle || authorizationRecord.RatchetDigest != bindings.Ratchet || authorizationRecord.PolicyDigest != bindings.Policy || authorizationRecord.Decision != "approved" || strings.TrimSpace(authorizationRecord.TranscribedBy) == "" || strings.TrimSpace(authorizationRecord.Body) == "" {
+		return errors.New("maintainer authorization does not bind the captured approval and final benchmark inputs")
+	}
+	if _, err := time.Parse(time.RFC3339, authorizationRecord.TranscribedAt); err != nil {
+		return errors.New("maintainer authorization transcription timestamp is invalid")
+	}
+	for _, binding := range []struct {
+		name  string
+		value string
+	}{
+		{"catalog", bindings.Catalog},
+		{"oracle", bindings.Oracle},
+		{"ratchet", bindings.Ratchet},
+		{"policy", bindings.Policy},
+	} {
+		if !validSHA256Digest(binding.value) {
+			return fmt.Errorf("maintainer authorization requires a valid %s digest", binding.name)
+		}
+	}
+	return nil
+}
+
+func maintainerCommentBindsApproval(body, implementationCommit string, bindings InputDigests) bool {
+	return body == canonicalMaintainerApprovalComment(implementationCommit, bindings)
+}
+
+func canonicalMaintainerApprovalComment(implementationCommit string, bindings InputDigests) string {
+	return strings.Join([]string{
+		"decision: approved",
+		"implementation_commit: " + implementationCommit,
+		"catalog_digest: " + bindings.Catalog,
+		"oracle_digest: " + bindings.Oracle,
+		"ratchet_digest: " + bindings.Ratchet,
+		"policy_digest: " + bindings.Policy,
+	}, "\n")
+}
+
+func validateExpectedGitHubIssueCommentURL(rawURL, id string) error {
+	if err := validateGitHubPRURL(rawURL, id, "issuecomment-"); err != nil {
+		return err
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	expectedPath := "/" + maintainerApprovalRepositoryOwner + "/" + maintainerApprovalRepositoryName + "/pull/" + maintainerApprovalPullNumber
+	if parsed.Path != expectedPath {
+		return errors.New("URL must identify the expected GitHub pull request")
+	}
+	return nil
+}
+
+func validateExpectedGitHubCommitURL(rawURL, implementationCommit string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "https" || parsed.Host != "github.com" || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.RawPath != "" || parsed.Fragment != "" {
+		return errors.New("head URL must be a credential-free canonical HTTPS github.com URL")
+	}
+	expectedPath := "/" + maintainerApprovalRepositoryOwner + "/" + maintainerApprovalRepositoryName + "/commit/" + implementationCommit
+	if parsed.Path != expectedPath {
+		return errors.New("head URL must identify the exact expected GitHub commit")
 	}
 	return nil
 }
@@ -1712,4 +1930,13 @@ func digestFile(path string) (string, error) {
 func sha256Digest(body []byte) string {
 	hash := sha256.Sum256(body)
 	return "sha256:" + hex.EncodeToString(hash[:])
+}
+
+func validSHA256Digest(value string) bool {
+	if len(value) != len("sha256:")+sha256.Size*2 || !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	digest := strings.TrimPrefix(value, "sha256:")
+	decoded, err := hex.DecodeString(digest)
+	return err == nil && hex.EncodeToString(decoded) == digest
 }
