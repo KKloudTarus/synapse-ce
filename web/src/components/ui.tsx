@@ -209,9 +209,13 @@ export function Field({
                 the control's aria-describedby below, which is the field it belongs to, so giving
                 this button its own accessible name would put the same text on screen twice and
                 make every getByLabelText for the field match the button as well. */}
+            {/* excludeFromTabOrder keeps the trigger out of the tab order as well as out of the
+                accessibility tree. A focusable element inside aria-hidden is a WAI-ARIA violation:
+                a keyboard user lands on a control that reports no name and no role. Reaching the
+                field already announces the hint through aria-describedby below. */}
             <span aria-hidden="true" className="inline-flex">
               <Tooltip title={hint} placement="top">
-                <TooltipTrigger className="inline-flex items-center justify-center rounded text-quaternary hover:text-secondary">
+                <TooltipTrigger excludeFromTabOrder className="inline-flex items-center justify-center rounded text-quaternary hover:text-secondary">
                   <HelpCircle className="size-3.5" aria-hidden="true" />
                 </TooltipTrigger>
               </Tooltip>

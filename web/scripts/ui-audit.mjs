@@ -185,15 +185,32 @@ for (const viewport of VIEWPORTS) {
           const style = getComputedStyle(el)
           // Absolute and fixed elements are positioned against an ancestor deliberately.
           if (style.position === 'absolute' || style.position === 'fixed') return false
+          // A wide table, diagram or code block inside its own horizontal scroller is the intended
+          // pattern, not a clipped layout: the content is reachable by scrolling that container.
+          // Without this the check reported every such table, which is most of the dashboard's
+          // tables, and the reports it buried were the ones where the content really is unreachable.
+          const px = getComputedStyle(parent).overflowX
+          if (px === 'auto' || px === 'scroll') return false
           const r = el.getBoundingClientRect()
           const pr = parent.getBoundingClientRect()
           return r.width > 0 && r.width > pr.width + 2
         })
         .slice(0, 5)
         .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 3).join('.')}`.slice(0, 110))
+      // A button under aria-hidden is out of the accessibility tree, so "no accessible name" is
+      // what it is meant to be and counting it buries the buttons that are genuinely unnamed. The
+      // rule that does apply to it is the opposite one, checked next: it must not be focusable.
+      const hiddenFromAT = (el) => el.closest('[aria-hidden="true"]') !== null
       const buttonsWithoutName = [...document.querySelectorAll('button')]
-        .filter((b) => !(b.textContent ?? '').trim() && !b.getAttribute('aria-label') && !b.getAttribute('title'))
+        .filter((b) => !hiddenFromAT(b))
+        .filter((b) => !(b.textContent ?? '').trim() && !b.getAttribute('aria-label') && !b.getAttribute('title') && !b.getAttribute('aria-labelledby'))
         .length
+      // WAI-ARIA forbids a focusable element inside aria-hidden: a keyboard user tabs onto a
+      // control that reports no name and no role, which is worse than either alone.
+      const focusableUnderAriaHidden = [...document.querySelectorAll('[aria-hidden="true"] a[href], [aria-hidden="true"] button, [aria-hidden="true"] input, [aria-hidden="true"] select, [aria-hidden="true"] textarea, [aria-hidden="true"] [tabindex]')]
+        .filter((el) => el.tabIndex >= 0)
+        .slice(0, 5)
+        .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 2).join('.')}`.slice(0, 90))
       // A screen that catches its own exception and renders it as text passes every other check
       // here: no console error, no failed request. That is how an Integrations screen showing
       // "Cannot read properties of null (reading 'map')" was captured and reported as clean.
@@ -209,6 +226,7 @@ for (const viewport of VIEWPORTS) {
         overflowsParent,
         headings: headings.slice(0, 3),
         buttonsWithoutName,
+        focusableUnderAriaHidden,
         bodyText: (document.body.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 160),
       }
     })
@@ -283,6 +301,7 @@ for (const p of problems) {
   if (p.scrollsSideways) console.log(`    scrolls sideways; widest: ${p.overflowing.join(' | ')}`)
   if (p.overflowsParent?.length) console.log(`    wider than its container (clipped, so the page does not scroll): ${p.overflowsParent.join(' | ')}`)
   if (p.buttonsWithoutName) console.log(`    ${p.buttonsWithoutName} button(s) with no accessible name`)
+  if (p.focusableUnderAriaHidden?.length) console.log(`    focusable inside aria-hidden (a tab stop with no name or role): ${p.focusableUnderAriaHidden.join(' | ')}`)
   for (const e of p.consoleErrors) console.log(`    console: ${e}`)
   for (const r of p.failedRequests) console.log(`    request failed: ${r}`)
 }
