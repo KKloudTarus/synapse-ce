@@ -4842,7 +4842,15 @@ func computeCompleteness(doc *sbom.SBOM, lockfiles, unresolvedEco []string) port
 			strings.Join(unresolvedEco, ", "), unresolvedRemediation(unresolvedEco))
 	case c.Confident:
 	case total == 0:
-		c.Warning = "No components resolved – the target has no recognized dependency manifests."
+		// Two different situations reach zero components, and the message used to assert only the first.
+		// A repository whose requirements.txt lists bare package names, or whose lockfile holds nothing but
+		// workspace and catalog references, HAS a recognised manifest; nothing in it pins a version, so
+		// nothing can become a component an advisory could match. Telling that reader there is no manifest
+		// sends them looking for a missing file instead of at the versions they never pinned.
+		c.Warning = "No components resolved. Either the target has no recognized dependency manifest, or the " +
+			"manifests it has pin no versions (bare package names in a requirements.txt, or a lockfile holding " +
+			"only workspace/catalog references, resolve to nothing an advisory can match). A low finding count " +
+			"here does NOT mean clean."
 	case appTotal > 0 && appRatio < 0.8 && len(lockfiles) == 0:
 		// Application dependencies are present without a lockfile (whether or not OS packages
 		// are too): their versions are unresolved and under-reported. Reported over the APP
