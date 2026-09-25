@@ -104,8 +104,17 @@ def capture(args):
         fail("GitHub API token is required")
     digests = require_digests(load_json(args.digests))
     pull = api_get(args.api_base, args.token, "/repos/%s/pulls/%s" % (args.repository, args.pull_number))
-    if pull.get("number") != args.pull_number or pull.get("head", {}).get("sha") != args.source_sha:
-        fail("pull request does not currently point to the authorized source SHA")
+    if pull.get("number") != args.pull_number:
+        fail("pull request number is not the authorized one")
+    head_matches = pull.get("head", {}).get("sha") == args.source_sha
+    merged_main_matches = (
+        pull.get("merged") is True
+        and pull.get("merge_commit_sha") == args.source_sha
+        and pull.get("base", {}).get("ref") == "main"
+        and pull.get("base", {}).get("repo", {}).get("full_name") == args.repository
+    )
+    if not (head_matches or merged_main_matches):
+        fail("pull request head or merged main commit does not match the authorized source SHA")
     expected_body = canonical_body(args.source_sha, digests)
     accepted_bodies = {
         body + ending

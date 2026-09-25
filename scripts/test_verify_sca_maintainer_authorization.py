@@ -237,6 +237,42 @@ class CaptureTests(unittest.TestCase):
                 VERIFIER.api_get = original
             self.assertTrue((pathlib.Path(args.out_dir) / "approval.json").exists())
 
+    def test_capture_accepts_exact_merged_main_commit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args, digests = self.args(temporary)
+            responses = [
+                {"number": 1320, "head": {"sha": "b" * 40}, "merged": True,
+                 "merge_commit_sha": SHA, "base": {"ref": "main", "repo": {"full_name": REPOSITORY}}},
+                [{"id": 17, "body": VERIFIER.canonical_body(SHA, digests),
+                  "user": {"login": "pho-veteran"},
+                  "html_url": "https://github.com/%s/pull/1320#issuecomment-17" % REPOSITORY,
+                  "issue_url": "https://api.github.test/repos/%s/issues/1320" % REPOSITORY,
+                  "created_at": TIME, "updated_at": TIME}],
+                {"permission": "admin"},
+            ]
+            original = VERIFIER.api_get
+            VERIFIER.api_get = lambda *_: responses.pop(0)
+            try:
+                VERIFIER.capture(args)
+            finally:
+                VERIFIER.api_get = original
+            approval = json.loads((pathlib.Path(args.out_dir) / "approval.json").read_bytes())
+            self.assertEqual(approval["implementation_commit"], SHA)
+
+    def test_capture_rejects_unmerged_or_wrong_base_commit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            args, _ = self.args(temporary)
+            for merged, base in ((False, "main"), (True, "other")):
+                response = {"number": 1320, "head": {"sha": "b" * 40}, "merged": merged,
+                            "merge_commit_sha": SHA, "base": {"ref": base, "repo": {"full_name": REPOSITORY}}}
+                original = VERIFIER.api_get
+                VERIFIER.api_get = lambda *_: response
+                try:
+                    with self.assertRaisesRegex(ValueError, "merged main commit"):
+                        VERIFIER.capture(args)
+                finally:
+                    VERIFIER.api_get = original
+
 
 if __name__ == "__main__":
     unittest.main()

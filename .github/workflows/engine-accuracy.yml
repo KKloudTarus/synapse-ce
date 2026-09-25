@@ -148,7 +148,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$ARTIFACT_ID"
-          [[ "$ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "invalid authorization artifact digest" >&2; exit 1; }
+          [[ "$ARTIFACT_DIGEST" =~ ^(sha256:)?[0-9a-f]{64}$ ]] || { echo "invalid authorization artifact digest" >&2; exit 1; }
           test "$HANDOFF_SHA256" = "sha256:$(sha256sum "$RUNNER_TEMP/sca-maintainer-authorization/handoff.json" | cut -d ' ' -f 1)"
           python3 scripts/verify_sca_maintainer_authorization.py verify-handoff \
             --repository "${{ github.repository }}" \
