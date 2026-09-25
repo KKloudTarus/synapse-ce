@@ -20,7 +20,7 @@ jobs:
   regression:
     name: Hosted SCA regression
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
@@ -46,8 +46,9 @@ jobs:
             "$RUNNER_TEMP/sca-regression/corpus-tests.jsonl" pass ./internal/usecase/scabench \
             -run '^Test(OwnedRecallParityOnCommittedRatchet|CommittedCorpusEvidenceCurrency|CommittedRatchetCoversEveryBaselineTarget)$'
           python3 -m unittest scripts/test_verify_sca_hosted_regression.py
-          python3 -m unittest scripts/test_extract_sca_hosted_inputs.py
+          python3 -m unittest scripts/test_extract_sca_hosted_matrix.py
           go test -count=1 scripts/sca_hosted_score.go scripts/sca_hosted_score_test.go
+          go test -count=1 scripts/sca_hosted_matrix_score.go scripts/sca_hosted_matrix_score_test.go
           go run scripts/sca_maintainer_authorization_digests.go --corpus-root internal/usecase/scabench/corpus > "$RUNNER_TEMP/sca-regression/inputs.json"
           python3 scripts/verify_sca_hosted_regression.py \
             --owned-report "$RUNNER_TEMP/sca-regression/owned-accuracy.json" \
@@ -56,32 +57,42 @@ jobs:
             --source-sha "$SOURCE_SHA" \
             --output "$RUNNER_TEMP/sca-regression/regression.json"
           test -s "$RUNNER_TEMP/sca-regression/regression.json"
-      - name: Replay current owned scanner on the pinned three-target corpus
+      - name: Verify pinned offline SCA matrix inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/sca-hosted-regression-v1.tar.gz"
+          manifest=testdata/sca/hosted-matrix-inputs.manifest.json
+          curl --fail --location --retry 3 --output "$archive" \
+            https://github.com/KKloudTarus/synapse-ce/releases/download/benchmark-sca-inputs-v1/sca-hosted-regression-v1.tar.gz
+          python3 scripts/extract_sca_hosted_matrix.py --archive "$archive" --manifest "$manifest" --output "$RUNNER_TEMP/sca-matrix-inputs"
+      - name: Run fresh same-input owned and competitor matrix offline
         shell: bash
         env:
           SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          archive=testdata/sca/hosted-owned-inputs.tar.gz
-          manifest=testdata/sca/hosted-owned-inputs.manifest.json
-          python3 scripts/extract_sca_hosted_inputs.py --archive "$archive" --manifest "$manifest" --output "$RUNNER_TEMP/sca-hosted-inputs"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           go build -o "$RUNNER_TEMP/synapse-sca-bench" ./cmd/synapse-sca-bench
-          mkdir -p "$RUNNER_TEMP/sca-hosted-wires"
-          "$RUNNER_TEMP/synapse-sca-bench" --owned-helper --database "$RUNNER_TEMP/sca-hosted-inputs/databases/owned-debian" --database-format oval --sbom "$RUNNER_TEMP/sca-hosted-inputs/sboms/debian-12-13-slim-amd64.cdx.json" > "$RUNNER_TEMP/sca-hosted-wires/debian-12-13-slim-amd64.json"
-          "$RUNNER_TEMP/synapse-sca-bench" --owned-helper --database "$RUNNER_TEMP/sca-hosted-inputs/databases/owned-redhat" --database-format csaf-json --sbom "$RUNNER_TEMP/sca-hosted-inputs/sboms/rhel-9-8-ubi-amd64.cdx.json" > "$RUNNER_TEMP/sca-hosted-wires/rhel-9-8-ubi-amd64.json"
-          "$RUNNER_TEMP/synapse-sca-bench" --owned-helper --database "$RUNNER_TEMP/sca-hosted-inputs/databases/owned-sles" --database-format oval --sbom "$RUNNER_TEMP/sca-hosted-inputs/sboms/sles-15-6-bci-base-45-31-amd64.cdx.json" > "$RUNNER_TEMP/sca-hosted-wires/sles-15-6-bci-base-45-31-amd64.json"
-          go run scripts/sca_hosted_score.go \
+          mkdir -p "$RUNNER_TEMP/sca-matrix-wires"
+          docker run --rm --network none \
+            --volume "$RUNNER_TEMP/sca-matrix-inputs:/inputs:ro" \
+            --volume "$RUNNER_TEMP/sca-matrix-wires:/out" \
+            --volume "$RUNNER_TEMP/synapse-sca-bench:/owned:ro" \
+            --volume "$GITHUB_WORKSPACE/scripts/run_sca_hosted_matrix.sh:/run-sca-matrix.sh:ro" \
+            ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 \
+            bash /run-sca-matrix.sh
+          go run scripts/sca_hosted_matrix_score.go \
             --catalog internal/usecase/scabench/corpus/catalog.json \
             --oracle internal/usecase/scabench/corpus/oracle.json \
             --ratchet internal/usecase/scabench/corpus/ratchet.json \
-            --accepted-capture internal/usecase/scabench/testdata/accepted-capture.json \
-            --wire-dir "$RUNNER_TEMP/sca-hosted-wires" \
-            --input-dir "$RUNNER_TEMP/sca-hosted-inputs" \
-            --binary "$RUNNER_TEMP/synapse-sca-bench" \
-            --archive-sha256 "$(jq -r '.archive_sha256' "$manifest")" \
+            --wire-dir "$RUNNER_TEMP/sca-matrix-wires" \
+            --input-dir "$RUNNER_TEMP/sca-matrix-inputs" \
+            --owned-binary "$RUNNER_TEMP/synapse-sca-bench" \
+            --archive-sha256 "$(jq -r '.archive_sha256' testdata/sca/hosted-matrix-inputs.manifest.json)" \
             --source-sha "$SOURCE_SHA" \
-            --output "$RUNNER_TEMP/sca-regression/owned-replay.json"
-          jq -e '.passed == true and .target_count == 3' "$RUNNER_TEMP/sca-regression/owned-replay.json" > /dev/null
+            --output "$RUNNER_TEMP/sca-regression/matrix-result.json"
+          jq -e '.passed == true and .target_count == 3 and .cell_count == 12 and .parity == "passed"' "$RUNNER_TEMP/sca-regression/matrix-result.json" > /dev/null
       - name: Upload sanitized regression result
         id: upload
         if: ${{ always() }}

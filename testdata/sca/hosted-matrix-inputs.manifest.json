@@ -1,0 +1,87 @@
+{
+  "archive_bytes": 766306765,
+  "archive_sha256": "sha256:a3aa25cd9b120d1a68fe9cccfe95064e347b079cfc0af0acd8d1ffd96e602bfa",
+  "members": {
+    "capability/rhel-9-8-ubi-amd64.json": {
+      "bytes": 30975,
+      "sha256": "sha256:69908d25af7a492e4bbf07a5aa364fc13a20ee0794f5cebb5d47d6cdf079a937"
+    },
+    "capability/sles-15-6-bci-base-45-31-amd64.json": {
+      "bytes": 27175,
+      "sha256": "sha256:85c00918e1957dab4325119b76635ef3827be74aa42f55726d1a4aba14ff37d6"
+    },
+    "databases/grype/6/import.json": {
+      "bytes": 97,
+      "sha256": "sha256:2b74c53fb6bb588a87c6fe3f816cecec5f52b7a53d30df8cb91af77e664a1f04"
+    },
+    "databases/grype/6/vulnerability.db": {
+      "bytes": 2244804608,
+      "sha256": "sha256:8a9f43e359142f97ca9d1ec3603b2dbe406934aeb49bde17448b3dceece7f796"
+    },
+    "databases/osv/osv-scalibr/Debian/all.zip": {
+      "bytes": 71476973,
+      "sha256": "sha256:51c37052bb0fca31d35707c9ee742ad22bf6a0a98fabf8ff690728c5bac0f0d4"
+    },
+    "databases/owned-debian/debian-bookworm-oval.xml.bz2": {
+      "bytes": 8591982,
+      "sha256": "sha256:0e870d4a3398245140b3625e180967e1ddb595d7830aac9ab965832be103cbcd"
+    },
+    "databases/owned-redhat/cve-2025-66382.json": {
+      "bytes": 172345,
+      "sha256": "sha256:5963259ec337ca3d6c6c695efd310d9023e429b73b58e9baf024937792433968"
+    },
+    "databases/owned-redhat/cve-2026-11822.json": {
+      "bytes": 689588,
+      "sha256": "sha256:6a9486b7c453b6bad9303d286a09f62694ea06c5767c46a9a50fc9e1017fce5f"
+    },
+    "databases/owned-redhat/cve-2026-22185.json": {
+      "bytes": 104415,
+      "sha256": "sha256:5a9ca00fdf9276d14ebc66d24dcf5eebaca01bc51368cf18fdc2b8750a6025da"
+    },
+    "databases/owned-sles/sles-15-sp6-affected-oval.xml.gz": {
+      "bytes": 17899839,
+      "sha256": "sha256:1c13f8779ddf1726ba6edcedc6e0fb14e92268cc6b1dd0e673d6debcfad27774"
+    },
+    "databases/trivy/db/metadata.json": {
+      "bytes": 152,
+      "sha256": "sha256:27124945d8f37f232648c6cee09eba38ee8d59d86cfe0b96c8259144999e5e42"
+    },
+    "databases/trivy/db/trivy.db": {
+      "bytes": 1434042368,
+      "sha256": "sha256:779370a79257ff2384790625b52f6daace2fed7be5fd2ffa158710f179587dc6"
+    },
+    "repository/capability/osv-scanner-v2.5.1/ecosystem.go": {
+      "bytes": 4970,
+      "sha256": "sha256:80530bad1a13c3043275ddf005450afc0d1a0041562e52341e4f5df969abd9cb"
+    },
+    "repository/capability/osv-scanner-v2.5.1/purl_to_package.go": {
+      "bytes": 3570,
+      "sha256": "sha256:079452dc6e62d3ac21eb87546ca88a45b44eb251d721fbe620f392f4556e7bd7"
+    },
+    "sboms/debian-12-13-slim-amd64.cdx.json": {
+      "bytes": 1015879,
+      "sha256": "sha256:ec433747b3b08774982c4134e83182fee8d6c5c724c330645c841cda8f811a76"
+    },
+    "sboms/rhel-9-8-ubi-amd64.cdx.json": {
+      "bytes": 2316493,
+      "sha256": "sha256:56d7cee1dfea52f90ea6934881975dee06c0e9ee453d0f92f89f350b5f3e0431"
+    },
+    "sboms/sles-15-6-bci-base-45-31-amd64.cdx.json": {
+      "bytes": 981352,
+      "sha256": "sha256:06f67f9ca5a10efcde95196e616d905329518d627214e838443d06b0660b8603"
+    },
+    "tools/grype": {
+      "bytes": 88416418,
+      "sha256": "sha256:05ffd2c28a607e48fb2269d9aac5b3d53e8a51bbac501946644745eae2119907"
+    },
+    "tools/osv-scanner": {
+      "bytes": 57725090,
+      "sha256": "sha256:f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be"
+    },
+    "tools/trivy": {
+      "bytes": 168456354,
+      "sha256": "sha256:d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791"
+    }
+  },
+  "schema_version": "synapse-sca-hosted-matrix-inputs-v1"
+}
