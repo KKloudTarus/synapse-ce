@@ -714,7 +714,17 @@ func builtinRules() []rule {
 		{
 			id: "sensitive-data-logging", cwe: "CWE-532", severity: shared.SeverityMedium, title: "Sensitive data written to logs",
 			desc:   "Logging passwords, tokens, secrets, or reset URLs can leak credentials through log pipelines. Redact or omit sensitive fields.",
-			re:     regexp.MustCompile(`(?i)\b(logger|console)\.(info|log|warn|error|debug)\s*\([^)]*(password|token|secret|resetUrl)`),
+			// The receiver and method lists were too narrow to match the standard library of the two
+			// languages this fires most on. Python writes logger.warning / logger.exception /
+			// logging.error, and the old method alternation stopped at "warn", so "warning(" failed:
+			// "warn" matched and the following "ing(" could not. Go and Java write log.Printf and
+			// slog.Info. Found on a real service where logger.warning("... token=%s", token) went
+			// unreported while a competitor flagged it.
+			//
+			// "log" carries a word boundary, so catalog.info and backlog.debug do not match.
+			re: regexp.MustCompile(`(?i)\b(logger|logging|log|console|slog|logrus|zap|sugar)\.` +
+				`(info|infof|log|logf|warn|warnf|warning|error|errorf|errf|debug|debugf|exception|critical|fatal|fatalf|trace|print|printf|println)` +
+				`\s*\([^)]*(password|passwd|token|secret|credential|api[_-]?key|authorization|bearer|private[_-]?key|resetUrl|reset_url)`),
 			skipFn: commentOnlyLine,
 		},
 		{
