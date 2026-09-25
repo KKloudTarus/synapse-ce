@@ -21,6 +21,12 @@ const BASE = process.env.UI_AUDIT_BASE ?? 'http://localhost:5173'
 const OUT = process.env.UI_AUDIT_OUT ?? mkdtempSync(join(tmpdir(), 'uiaudit-'))
 // The dev server proxies /api to the real backend, so the audit needs a real token: a fake one
 // walks 64 copies of the sign-in page and reports them as clean.
+// A screen that pulls a large document over a slow link needs longer than a local backend does:
+// an engagement's scan result is measured in megabytes, and against a remote server it can take
+// 25 seconds to arrive. With the default budget the capture ran before the data landed and the
+// Supply Chain tab was photographed showing its "run a scan" prompt on an engagement that had one.
+const NAV_TIMEOUT = Number(process.env.UI_AUDIT_NAV_TIMEOUT ?? 25000)
+const SETTLE_TIMEOUT = Number(process.env.UI_AUDIT_SETTLE_TIMEOUT ?? 15000)
 const TOKEN = process.env.UI_AUDIT_TOKEN ?? ''
 if (!TOKEN) {
   console.error('set UI_AUDIT_TOKEN to a token the backend accepts')
@@ -95,6 +101,7 @@ for (const viewport of VIEWPORTS) {
     const page = await context.newPage()
     const consoleErrors = []
     const failedRequests = []
+    const absentReads = []
     // Chromium probes /favicon.ico on every navigation whatever the page declares, so its 404 is
     // browser behaviour and not something on the screen. Left in, it flagged all 150 screens and
     // buried the findings that matter.
@@ -128,14 +135,19 @@ for (const viewport of VIEWPORTS) {
     page.on('response', (r) => {
       const url = r.url()
       if (url.includes('/api/') && r.status() >= 400 && !url.endsWith('/api/auth/session')) {
-        failedRequests.push(`HTTP ${r.status()} ${r.request().method()} ${url.replace(BASE, '')}`)
+        // A 404 from a tenant-scoped read is this engagement having none of that thing, and several
+        // screens render it as their empty state on purpose: no imported SBOM, no published source,
+        // no threat model, no Assessment Cycle. Recording it as a failure put four lines on every
+        // engagement screen and buried the failures that are not absence. Kept, and separated.
+        const bucket = r.status() === 404 ? absentReads : failedRequests
+        bucket.push(`HTTP ${r.status()} ${r.request().method()} ${url.replace(BASE, '')}`)
       }
     })
 
     const slug = route.replace(/\//g, '_') || '_root'
     let loadError = null
     try {
-      await page.goto(BASE + route, { waitUntil: 'networkidle', timeout: 25000 })
+      await page.goto(BASE + route, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT })
     } catch (e) {
       loadError = String(e).slice(0, 160)
     }
@@ -152,7 +164,7 @@ for (const viewport of VIEWPORTS) {
         const main = document.querySelector('main') ?? document.body
         if (main.querySelector('[aria-busy="true"], [role="progressbar"]')) return false
         return !/^\s*(Loading|Đang tải)\b/im.test(main.innerText ?? '')
-      }, null, { timeout: 15000 })
+      }, null, { timeout: SETTLE_TIMEOUT })
     } catch {
       stillLoading = true
     }
@@ -185,15 +197,37 @@ for (const viewport of VIEWPORTS) {
           const style = getComputedStyle(el)
           // Absolute and fixed elements are positioned against an ancestor deliberately.
           if (style.position === 'absolute' || style.position === 'fixed') return false
-          // A wide table, diagram or code block inside its own horizontal scroller is the intended
-          // pattern, not a clipped layout: the content is reachable by scrolling that container.
-          // Without this the check reported every such table, which is most of the dashboard's
-          // tables, and the reports it buried were the ones where the content really is unreachable.
-          const px = getComputedStyle(parent).overflowX
-          if (px === 'auto' || px === 'scroll') return false
           const r = el.getBoundingClientRect()
           const pr = parent.getBoundingClientRect()
-          return r.width > 0 && r.width > pr.width + 2
+          if (!(r.width > 0 && r.width > pr.width + 2)) return false
+          // Being wider than the parent is only a bug when something actually clips it. A wide
+          // table in its own horizontal scroller is reachable by scrolling; a full-bleed bar that
+          // negative-margins past its parent's padding is reachable because nothing clips it, and
+          // the page-level sideways-scroll check above catches the case where the page grows. Walk
+          // up and report only what a clipping ancestor cuts off, which is the content a user
+          // cannot get to by any means. Without this the check reported every wide table and every
+          // full-bleed bar, and buried the cases that are genuinely unreachable.
+          for (let a = parent; a && a !== document.documentElement; a = a.parentElement) {
+            const ox = getComputedStyle(a).overflowX
+            if (ox === 'auto' || ox === 'scroll') return false
+            if (ox === 'hidden' || ox === 'clip') {
+              const ar = a.getBoundingClientRect()
+              // A one-pixel clipping box is the visually-hidden pattern: a native control kept
+              // operable for assistive technology under a custom-drawn one. Clipping it is the
+              // whole point.
+              if (ar.width <= 1 || ar.height <= 1) return false
+              const cut = r.right > ar.right + 2 || r.left < ar.left - 2
+              if (!cut) return false
+              // Clipped on purpose, with the whole value still available: an ellipsis says the text
+              // continues, and a title attribute hands over the full string. A 32-character id in a
+              // fixed-width column is the common case and is not a defect. What remains is text cut
+              // off with no ellipsis and no way to read the rest.
+              if (getComputedStyle(el).textOverflow === 'ellipsis') return false
+              if (el.getAttribute('title')) return false
+              return true
+            }
+          }
+          return false
         })
         .slice(0, 5)
         .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 3).join('.')}`.slice(0, 110))
@@ -206,9 +240,13 @@ for (const viewport of VIEWPORTS) {
         .filter((b) => !(b.textContent ?? '').trim() && !b.getAttribute('aria-label') && !b.getAttribute('title') && !b.getAttribute('aria-labelledby'))
         .length
       // WAI-ARIA forbids a focusable element inside aria-hidden: a keyboard user tabs onto a
-      // control that reports no name and no role, which is worse than either alone.
+      // control that reports no name and no role, which is worse than either alone. `inert` is the
+      // exception, and the important one: it removes a subtree from the tab order as well as from
+      // the accessibility tree, which is exactly what a closed drawer wants and what the mobile
+      // navigation does. tabIndex still reads 0 inside an inert subtree, so without this the check
+      // reported the closed drawer on all 150 screens and buried anything real.
       const focusableUnderAriaHidden = [...document.querySelectorAll('[aria-hidden="true"] a[href], [aria-hidden="true"] button, [aria-hidden="true"] input, [aria-hidden="true"] select, [aria-hidden="true"] textarea, [aria-hidden="true"] [tabindex]')]
-        .filter((el) => el.tabIndex >= 0)
+        .filter((el) => el.tabIndex >= 0 && !el.closest('[inert]'))
         .slice(0, 5)
         .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 2).join('.')}`.slice(0, 90))
       // A screen that catches its own exception and renders it as text passes every other check
@@ -272,6 +310,7 @@ for (const viewport of VIEWPORTS) {
       captureTruncated,
       consoleErrors: [...new Set(consoleErrors)].slice(0, 4),
       failedRequests: [...new Set(failedRequests)].slice(0, 4),
+      absentReads: [...new Set(absentReads)].slice(0, 4),
       ...probe,
     })
     await page.close()
@@ -284,7 +323,7 @@ writeFileSync(`${OUT}/findings.json`, JSON.stringify(findings, null, 2))
 writeFileSync(`${OUT}/api-calls.json`, JSON.stringify([...apiCalls].sort(), null, 2))
 
 const problems = findings.filter(
-  (f) => f.loadError || f.renderedError?.length || f.stillLoading || f.captureTruncated || f.consoleErrors.length || f.failedRequests.length || f.scrollsSideways || f.overflowsParent?.length || !f.headings.length || f.buttonsWithoutName > 0,
+  (f) => f.loadError || f.renderedError?.length || f.stillLoading || f.captureTruncated || f.consoleErrors.length || f.failedRequests.length || f.scrollsSideways || f.overflowsParent?.length || !f.headings.length || f.buttonsWithoutName > 0 || f.focusableUnderAriaHidden?.length,
 )
 console.log(`distinct API routes exercised: ${apiCalls.size} (written to ${OUT}/api-calls.json)`)
 console.log(`screens visited: ${findings.length} (${ROUTES.length} routes x ${VIEWPORTS.length} viewports)`)
@@ -304,4 +343,5 @@ for (const p of problems) {
   if (p.focusableUnderAriaHidden?.length) console.log(`    focusable inside aria-hidden (a tab stop with no name or role): ${p.focusableUnderAriaHidden.join(' | ')}`)
   for (const e of p.consoleErrors) console.log(`    console: ${e}`)
   for (const r of p.failedRequests) console.log(`    request failed: ${r}`)
+  for (const r of p.absentReads ?? []) console.log(`    absent (the screen renders this as empty): ${r}`)
 }
