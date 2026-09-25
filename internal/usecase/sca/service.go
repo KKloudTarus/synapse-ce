@@ -394,11 +394,30 @@ func (s *Service) SetSBOMCache(c ports.SBOMCache) { s.sbomCache = c }
 // binary that carries the owned parsers/enrichers. It deliberately excludes advisory/KEV/EPSS DB versions
 // (they don't change the generated SBOM). Empty when no producer version is known, which keeps the cache
 // off rather than serving an SBOM that can't be soundly version-keyed.
+// sbomGeneratorKey names the SBOM producer's version by the role it fills rather than by one
+// implementation of it. The owned parsers are the default producer, and filing their version under
+// "syft" made the manifest contradict itself: `"syft": "ownsbom/0.8.0"`, naming a tool that did not
+// run. legacySBOMGeneratorKey is still read so manifests written before this compare unchanged.
+const sbomGeneratorKey = "sbom-generator"
+const legacySBOMGeneratorKey = "syft"
+
+// sbomGeneratorVersion reads the producer version under either key. The value is the same string in
+// both, so a stored manifest and a fresh one still hash and diff identically.
+func sbomGeneratorVersion(tv map[string]string) string {
+	if tv == nil {
+		return ""
+	}
+	if v := tv[sbomGeneratorKey]; v != "" {
+		return v
+	}
+	return tv[legacySBOMGeneratorKey]
+}
+
 func sbomProducerVersion(tv map[string]string) string {
 	if tv == nil {
 		return ""
 	}
-	v := tv["syft"] + "\x00" + tv["go-enry"] + "\x00" + tv["synapse"]
+	v := sbomGeneratorVersion(tv) + "\x00" + tv["go-enry"] + "\x00" + tv["synapse"]
 	if strings.Trim(v, "\x00") == "" {
 		return ""
 	}
@@ -3539,7 +3558,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		toolVersions[k] = v
 	}
 	if doc.GeneratorVersion != "" {
-		toolVersions["syft"] = doc.GeneratorVersion
+		toolVersions[sbomGeneratorKey] = doc.GeneratorVersion
 	}
 	// Detection-source provenance: record each source's tool + DB version so
 	// a result is reproducible/explainable ("why did this differ from last month?").
@@ -5201,7 +5220,7 @@ func explainDrift(a, b ports.ScanManifest) []string {
 		}
 	}
 	cmp("grype-db", a.GrypeDBVersion, b.GrypeDBVersion)
-	cmp("syft", a.ToolVersions["syft"], b.ToolVersions["syft"])
+	cmp("sbom generator", sbomGeneratorVersion(a.ToolVersions), sbomGeneratorVersion(b.ToolVersions))
 	cmp("grype", a.ToolVersions["grype"], b.ToolVersions["grype"])
 	cmp("kev-catalog", a.ToolVersions["kev-catalog"], b.ToolVersions["kev-catalog"])
 	cmp("epss-date", a.ToolVersions["epss-date"], b.ToolVersions["epss-date"])
@@ -5277,7 +5296,7 @@ func buildManifest(toolVersions map[string]string, vulnDBSnapshot, grypeDB strin
 			m.UnpinnedInputs = append(m.UnpinnedInputs, label)
 		}
 	}
-	pin("syft", toolVersions["syft"] != "")
+	pin(sbomGeneratorKey, sbomGeneratorVersion(toolVersions) != "")
 	pin("grype-db", grypeDB != "")
 	pin("kev-catalog", toolVersions["kev-catalog"] != "")
 	pin("epss", toolVersions["epss-date"] != "")
