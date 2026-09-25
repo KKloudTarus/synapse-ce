@@ -139,6 +139,7 @@ jobs:
         with:
           artifact-ids: ${{ needs.provenance.outputs.artifact }}
           path: ${{ runner.temp }}/sca-maintainer-authorization
+          merge-multiple: true
       - name: Verify same-run authorization handoff
         shell: bash
         env:
