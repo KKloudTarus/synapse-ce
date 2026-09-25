@@ -142,6 +142,23 @@ for (const viewport of VIEWPORTS) {
     // Let late fetches settle without failing the run when a stream keeps the network busy.
     await page.waitForTimeout(1200)
 
+    // networkidle is not "the screen has rendered": a tab that mounts its own fetch after hydration
+    // is still drawing a spinner when the network has gone quiet. A screenshot taken then documents
+    // the loading state, which is how a "Loading…" frame was published as the Risk Stories screen.
+    // Wait for the main region to stop saying it is loading, then record it if it never stops.
+    let stillLoading = false
+    try {
+      await page.waitForFunction(() => {
+        const main = document.querySelector('main') ?? document.body
+        if (main.querySelector('[aria-busy="true"], [role="progressbar"]')) return false
+        return !/^\s*(Loading|Đang tải)\b/im.test(main.innerText ?? '')
+      }, null, { timeout: 15000 })
+    } catch {
+      stillLoading = true
+    }
+    // A screen that settles late still needs a beat for the rendered content to paint.
+    await page.waitForTimeout(600)
+
     const probe = await page.evaluate(() => {
       const doc = document.documentElement
       // Scoped to the main region, as ui-probe already does. Over the whole document the sidebar's
@@ -178,7 +195,34 @@ for (const viewport of VIEWPORTS) {
       }
     })
 
-    await page.screenshot({ path: `${OUT}/${viewport.name}${slug}.png`, fullPage: false })
+    // The app scrolls inside a container, not the document, so the document is exactly as tall as
+    // the viewport and fullPage alone still captured only the first screen: every published
+    // screenshot stopped at the fold. Grow the viewport to the tallest inner scroll height first,
+    // so the capture holds the whole screen.
+    const contentHeight = await page.evaluate(() => {
+      // The page-level scroller only. An inner panel that sets its own max-height is meant to
+      // scroll inside the page, and growing the viewport never reveals it: those heights are
+      // written in vh, so the panel grows with the viewport and the measurement chases itself.
+      // Taking the tallest descendant instead of the page scroller drove the Settings capture to
+      // the 8000px cap for a screen whose own content is under a thousand pixels tall.
+      const main = document.querySelector('main')
+      if (!main) return document.documentElement.scrollHeight
+      // The chrome around the scroller (sidebar header, tab bar) still has to fit above it.
+      return main.scrollHeight + (window.innerHeight - main.clientHeight)
+    })
+    // Capped: a virtualised table can report a scrollHeight no screenshot should try to hold.
+    // Recorded when it bites, so a truncated capture is visible rather than silently short.
+    const SHOT_CAP = 12000
+    const shotHeight = Math.min(Math.max(contentHeight, viewport.height), SHOT_CAP)
+    const captureTruncated = contentHeight > SHOT_CAP ? contentHeight : 0
+    if (shotHeight > viewport.height) {
+      await page.setViewportSize({ width: viewport.width, height: shotHeight })
+      await page.waitForTimeout(700)
+    }
+    await page.screenshot({ path: `${OUT}/${viewport.name}${slug}.png`, fullPage: true })
+    if (shotHeight > viewport.height) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    }
 
     if (/Sign in with your organization|Welcome back/.test(probe.bodyText)) {
       probe.headings = []
@@ -188,6 +232,8 @@ for (const viewport of VIEWPORTS) {
       route,
       viewport: viewport.name,
       loadError,
+      stillLoading,
+      captureTruncated,
       consoleErrors: [...new Set(consoleErrors)].slice(0, 4),
       failedRequests: [...new Set(failedRequests)].slice(0, 4),
       ...probe,
@@ -202,7 +248,7 @@ writeFileSync(`${OUT}/findings.json`, JSON.stringify(findings, null, 2))
 writeFileSync(`${OUT}/api-calls.json`, JSON.stringify([...apiCalls].sort(), null, 2))
 
 const problems = findings.filter(
-  (f) => f.loadError || f.renderedError?.length || f.consoleErrors.length || f.failedRequests.length || f.scrollsSideways || !f.headings.length || f.buttonsWithoutName > 0,
+  (f) => f.loadError || f.renderedError?.length || f.stillLoading || f.captureTruncated || f.consoleErrors.length || f.failedRequests.length || f.scrollsSideways || !f.headings.length || f.buttonsWithoutName > 0,
 )
 console.log(`distinct API routes exercised: ${apiCalls.size} (written to ${OUT}/api-calls.json)`)
 console.log(`screens visited: ${findings.length} (${ROUTES.length} routes x ${VIEWPORTS.length} viewports)`)
@@ -213,6 +259,8 @@ for (const p of problems) {
   console.log(`${p.viewport.padEnd(7)} ${p.route}`)
   if (p.loadError) console.log(`    load error: ${p.loadError}`)
   if (p.renderedError?.length) console.log(`    ERROR ON SCREEN: ${p.renderedError.join(' | ')}`)
+  if (p.stillLoading) console.log(`    STILL LOADING after 15s; the screenshot shows a spinner, not the screen`)
+  if (p.captureTruncated) console.log(`    capture truncated: content is ${p.captureTruncated}px, screenshot holds 12000px`)
   if (!p.headings.length) console.log(`    no h1/h2 heading; body starts: "${p.bodyText.slice(0, 80)}"`)
   if (p.scrollsSideways) console.log(`    scrolls sideways; widest: ${p.overflowing.join(' | ')}`)
   if (p.buttonsWithoutName) console.log(`    ${p.buttonsWithoutName} button(s) with no accessible name`)
