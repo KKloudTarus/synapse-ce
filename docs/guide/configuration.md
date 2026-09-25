@@ -411,7 +411,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_SANDBOX_ENABLED` | `false` | Run tool execution and acquisition in the bubblewrap sandbox. Production requires `true`; if bubblewrap is missing, startup fails closed. |
+| `SYNAPSE_SANDBOX_ENABLED` | `false` | Run tool execution and acquisition in the bubblewrap sandbox. Production requires `true`; if bubblewrap is missing, startup fails closed. Kernel egress enforcement additionally needs `net.ipv4.ip_forward=1` on the host: the sandbox namespace reaches the network over a veth, and with forwarding off the kernel drops every packet leaving it, so a destination the policy allows is as unreachable as one it denies. The egress probe refuses rather than enabling enforcement that blocks everything. |
 | `SYNAPSE_SANDBOX_MEM_MAX` | `536870912` | Per-run memory limit in bytes. |
 | `SYNAPSE_SANDBOX_PIDS_MAX` | `256` | Per-run pid limit. |
 | `SYNAPSE_TOOL_HASHES` | (TOFU) | Authoritative sha256 pins. The sandbox refuses a binary whose hash does not match. |
