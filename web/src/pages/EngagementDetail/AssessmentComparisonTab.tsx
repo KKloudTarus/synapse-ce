@@ -70,7 +70,17 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
   const [expandedItemId, setExpandedItemId] = useState('')
   const [cursorHistory, setCursorHistory] = useState<string[]>([])
 
-  const context = useFetch(() => Promise.all([api.assessmentLifecycle(assessmentId), api.assessmentSnapshots(assessmentId)]), { deps: [assessmentId] })
+  // The lifecycle is only consulted to offer the sibling Assessments of a Cycle as a baseline. Cycles
+  // are opt-in, so most Assessments are in none and the API says so with a 404. Letting that reject the
+  // pair failed the whole tab with `not found: assessment "..." does not belong to any cycle`, hiding a
+  // comparison that works: this Assessment's own snapshots can still be compared against each other.
+  const context = useFetch(() => Promise.all([
+    api.assessmentLifecycle(assessmentId).catch((error) => {
+      if (error instanceof ApiError && error.status === 404) return null
+      throw error
+    }),
+    api.assessmentSnapshots(assessmentId),
+  ]), { deps: [assessmentId] })
   // Finalizing requires PermOperate (router.go: POST /engagements/{id}/snapshots/finalize). Offering
   // the control to a reviewer or a read-only account only produces a 403 after they have picked
   // runs. The server still enforces; this keeps the UI honest about what the account can do.
@@ -160,7 +170,9 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
 
   if (context.loading && !context.data) return <Spinner label="Loading assessment comparison context…" />
   if (context.error) return <ErrorState message={context.error} />
-  if (!lifecycle || !currentSnapshots?.items.length) return <>
+  // A comparison needs finalized snapshots, not a Cycle: gating on the lifecycle sent every engagement
+  // outside a Cycle to this empty state even when it had snapshots to compare.
+  if (!currentSnapshots?.items.length) return <>
     <EmptyState
       icon={GitBranch01}
       title="No immutable snapshots to compare"
@@ -283,7 +295,7 @@ function SnapshotInline({ snapshot }: { snapshot: AssessmentSnapshot | null }) {
   return <span className="whitespace-nowrap font-mono text-xs text-tertiary">Snapshot {snapshot.snapshotNumber} · {snapshot.id.slice(0, 8)}</span>
 }
 
-function ComparisonConfigModal({ lifecycle, assessmentId, mode, baselineAssessmentId, assessmentIds, baselineSnapshotId, currentSnapshotId, baselineSnapshots, baselineError, currentSnapshots, scope, creating, error, onSetParam, onCompare, onClose }: { lifecycle: AssessmentLifecycle; assessmentId: string; mode: AssessmentComparisonMode; baselineAssessmentId: string; assessmentIds: string[]; baselineSnapshotId: string; currentSnapshotId: string; baselineSnapshots: AssessmentSnapshotListResponse | null | undefined; baselineError: string; currentSnapshots: AssessmentSnapshotListResponse; scope: AssessmentComparisonScope; creating: boolean; error: string; onSetParam: (key: string, value: string, clearComparison?: boolean) => void; onCompare: () => void; onClose: () => void }) {
+function ComparisonConfigModal({ lifecycle, assessmentId, mode, baselineAssessmentId, assessmentIds, baselineSnapshotId, currentSnapshotId, baselineSnapshots, baselineError, currentSnapshots, scope, creating, error, onSetParam, onCompare, onClose }: { lifecycle: AssessmentLifecycle | null; assessmentId: string; mode: AssessmentComparisonMode; baselineAssessmentId: string; assessmentIds: string[]; baselineSnapshotId: string; currentSnapshotId: string; baselineSnapshots: AssessmentSnapshotListResponse | null | undefined; baselineError: string; currentSnapshots: AssessmentSnapshotListResponse; scope: AssessmentComparisonScope; creating: boolean; error: string; onSetParam: (key: string, value: string, clearComparison?: boolean) => void; onCompare: () => void; onClose: () => void }) {
   const ready = Boolean(baselineAssessmentId && baselineSnapshotId && currentSnapshotId && baselineSnapshots)
   const invalidPair = !baselineSnapshotId || !currentSnapshotId || baselineSnapshotId === currentSnapshotId
   const baseline = baselineSnapshots?.items.find((item) => item.id === baselineSnapshotId) ?? null
@@ -567,7 +579,9 @@ function ReviewDrawer({ comparison, item, onClose, onReplacement }: { comparison
 }
 
 function comparisonAssessmentIds(lifecycle: AssessmentLifecycle | null, assessmentId: string, mode: AssessmentComparisonMode) {
-  if (!lifecycle) return []
+  // No Cycle means no sibling Assessments to offer, and this Assessment is still comparable against
+  // its own earlier snapshots, which is the only pair most engagements ever need.
+  if (!lifecycle) return [assessmentId]
   if (mode === 'neutral_diff') return lifecycle.members.map((member) => member.assessmentId)
   const byId = new Map(lifecycle.members.map((member) => [member.assessmentId, member]))
   const result: string[] = []
@@ -659,7 +673,7 @@ function coverageCounts(baseline: AssessmentSnapshot | null, current: Assessment
 function formatRatio(value: AssessmentComparisonRatio) { return value.naReason || value.denominator <= 0 ? 'N/A' : `${Math.round((value.numerator / value.denominator) * 100)}%` }
 function trendLabel(delta: number) { return delta === 0 ? 'No net change' : `${formatSignedNumber(delta)} ${delta > 0 ? 'increase' : 'reduction'}` }
 function snapshotOption(snapshot: AssessmentSnapshot) { return { value: snapshot.id, label: `Snapshot ${snapshot.snapshotNumber} · ${snapshot.id.slice(0, 8)} · ${snapshot.provenance} · ${snapshot.lifecycle}` } }
-function memberLabel(lifecycle: AssessmentLifecycle, id: string, includeId = true) { const member = lifecycle.members.find((value) => value.assessmentId === id); const label = member?.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial assessment'; return includeId ? `${label} · ${id}` : label }
+function memberLabel(lifecycle: AssessmentLifecycle | null, id: string, includeId = true) { const member = lifecycle?.members.find((value) => value.assessmentId === id); const label = member?.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial assessment'; return includeId ? `${label} · ${id}` : label }
 function setOrDelete(params: URLSearchParams, key: string, value: string) { if (value) params.set(key, value); else params.delete(key) }
 function option(value: string) { return { value, label: labelize(value) } }
 function labelize(value: string) { return value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown' }

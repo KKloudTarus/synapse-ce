@@ -147,3 +147,35 @@ describe('AssessmentComparisonTab', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Previous comparison page' })).toBeDisabled())
   })
 })
+
+describe('AssessmentComparisonTab without a Cycle', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.me).mockResolvedValue({ id: 'operator', name: 'Operator', role: 'member' })
+    vi.mocked(api.assessmentSnapshots).mockResolvedValue({ items: [snapshot('snapshot-1', 1), snapshot('snapshot-2', 2)], defaultSnapshotId: 'snapshot-2', defaultVersion: 2, nextCursor: '' })
+  })
+
+  // Cycles are opt-in, so an Assessment in none is ordinary and the lifecycle endpoint answers 404.
+  // That used to reject the pair of reads this tab makes and fail the whole screen with
+  // `not found: assessment "..." does not belong to any cycle`, on a comparison that works: this
+  // Assessment's own snapshots can still be compared against each other.
+  it('still offers the comparison when the Assessment belongs to no Cycle', async () => {
+    const { ApiError } = await import('../../lib/api')
+    vi.mocked(api.assessmentLifecycle).mockRejectedValue(new ApiError(404, 'not found: assessment "assessment-1" does not belong to any cycle'))
+
+    renderComparison()
+
+    expect(await screen.findByRole('dialog', { name: 'Configure comparison' })).toBeInTheDocument()
+    expect(screen.queryByText(/does not belong to any cycle/i)).not.toBeInTheDocument()
+  })
+
+  // A lifecycle read that fails for any other reason is still a failure and must say so.
+  it('surfaces a lifecycle read that fails for another reason', async () => {
+    const { ApiError } = await import('../../lib/api')
+    vi.mocked(api.assessmentLifecycle).mockRejectedValue(new ApiError(500, 'cycle projection unavailable'))
+
+    renderComparison()
+
+    expect(await screen.findByText(/cycle projection unavailable/i)).toBeInTheDocument()
+  })
+})
