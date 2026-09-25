@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Button, Card, ErrorState, Field, Input, Pill, Spinner } from '../../components/ui'
+import { Button, Card, ErrorState, Field, Input, Pill, Select, Spinner } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { api } from '../../lib/api'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../EngagementDetail/components/FindingsTable'
 import type { OwnershipAction, OwnershipBulkResult, OwnershipCapability, OwnershipFilter, OwnershipFinding } from '../../lib/api/ownership'
 import type { CurrentUser } from '../../lib/types'
 import { OwnershipPanel } from './OwnershipPanel'
@@ -45,7 +46,11 @@ function Inbox({ capability, user }: { capability: OwnershipCapability; user: Cu
     ...(params.get('scope') === 'unresolved' ? { unresolved: true } : {}),
   }
   const serialized = JSON.stringify(filter)
-  const page = useFetch((signal) => api.ownershipInbox(filter, cursor, signal), { deps: [serialized, cursor] })
+  // The inbox asked for 100 rows with no way to ask for fewer, so a full page ran several screens
+  // deep and the pager sat below all of it. 25 is what every other findings table opens with.
+  const sizeParam = Number(params.get('page_size'))
+  const pageSize = (PAGE_SIZE_OPTIONS as readonly number[]).includes(sizeParam) ? sizeParam : DEFAULT_PAGE_SIZE
+  const page = useFetch((signal) => api.ownershipInbox(filter, cursor, signal, pageSize), { deps: [serialized, cursor, pageSize] })
   const requestKey = useOwnershipRequestKey()
   function change(name: string, value: string) {
     const next = new URLSearchParams(params)
@@ -94,7 +99,7 @@ function Inbox({ capability, user }: { capability: OwnershipCapability; user: Cu
         <td className="p-3"><Pill>{item.assignment.mode}</Pill><p className="mt-1 text-xs text-secondary">{item.reason.replaceAll('_', ' ')}</p></td>
         <td className="p-3"><Button variant="secondary" onClick={() => setOpened(item)}>View ownership</Button></td>
       </tr>)}</tbody></table>{items.length === 0 && <p className="p-8 text-center text-secondary">No findings match these filters.</p>}</div>}
-      <div className="flex items-center justify-between border-t border-secondary p-3"><span className="text-xs text-tertiary">{items.length} shown · ordered by finding ID</span><div className="flex gap-2"><Button variant="secondary" disabled={!previous.length || page.loading || busy} onClick={() => { setCursor(previous[previous.length - 1]); setPrevious((old) => old.slice(0, -1)); setSelected([]) }}>Previous</Button><Button variant="secondary" disabled={!page.data?.next || page.loading || busy} onClick={() => { setPrevious((old) => [...old, cursor]); setCursor(page.data?.next); setSelected([]) }}>Next</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-secondary p-3"><span className="text-xs text-tertiary">{items.length} shown · ordered by finding ID</span><div className="flex items-center gap-2"><Select value={String(pageSize)} onValueChange={(value) => change('page_size', value)} size="sm" ariaLabel="Findings per page" className="w-28" options={PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: `${size} / page` }))} /><Button variant="secondary" disabled={!previous.length || page.loading || busy} onClick={() => { setCursor(previous[previous.length - 1]); setPrevious((old) => old.slice(0, -1)); setSelected([]) }}>Previous</Button><Button variant="secondary" disabled={!page.data?.next || page.loading || busy} onClick={() => { setPrevious((old) => [...old, cursor]); setCursor(page.data?.next); setSelected([]) }}>Next</Button></div></div>
     </Card>
     {canTriage(user) && chosen.length > 0 && <Card title={`Update ${chosen.length} selected findings`}><div className="space-y-3">
       <Field label="Bulk action"><Choice value={action} onChange={(event) => { setAction(event.target.value as OwnershipAction); setOutcomes([]) }} disabled={busy}><option value="claim">Claim for myself</option><option value="assign">Assign team / person</option><option value="transfer">Transfer team</option><option value="clear">Clear and keep manual protection</option><option value="release">Release to automatic routing</option></Choice></Field>

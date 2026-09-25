@@ -117,6 +117,19 @@ type AssetRepository interface {
 
 // BusinessAssetRepository persists the business-level Asset model without changing the existing
 // technical/fleet Asset API. All methods are tenant-scoped and PostgreSQL implementations run
+// BusinessAssetQuery is the filter, ordering and page a business-asset listing asks the store for.
+// Query and Owner are case-insensitive substring matches, Query against "<key> <name>"; the typed
+// fields match exactly, and an empty value means "do not filter on this".
+type BusinessAssetQuery struct {
+	Query       string
+	Type        asset.BusinessAssetType
+	Criticality asset.Criticality
+	Lifecycle   asset.BusinessAssetLifecycle
+	Owner       string
+	Limit       int
+	Offset      int
+}
+
 // through WithTenant so RLS and composite foreign keys remain the final isolation boundary.
 type BusinessAssetRepository interface {
 	CreateBusinessAsset(ctx context.Context, a *asset.BusinessAsset) error
@@ -124,6 +137,17 @@ type BusinessAssetRepository interface {
 	GetBusinessAssetByID(ctx context.Context, tenantID, id shared.ID) (*asset.BusinessAsset, error)
 	GetBusinessAssetByKey(ctx context.Context, tenantID shared.ID, key string) (*asset.BusinessAsset, error)
 	ListBusinessAssets(ctx context.Context, tenantID shared.ID) ([]*asset.BusinessAsset, error)
+	// ListBusinessAssetsPage applies the filter, the ordering, and the page in the store. It exists
+	// because ListBusinessAssets ships every row for the tenant: filtering and paginating above the
+	// repository makes a five-row page cost a full scan and a full row transfer.
+	//
+	// It returns the page and the count of rows matching the filter before the page is applied.
+	ListBusinessAssetsPage(ctx context.Context, tenantID shared.ID, query BusinessAssetQuery) ([]*asset.BusinessAsset, int, error)
+	// CountBusinessAssetsByCriticality returns the tenant's asset count per criticality. It exists
+	// so a dashboard can state an estate-wide figure without listing the estate: ListBusinessAssets
+	// ships every row regardless of the page asked for, so answering a count with it costs a full
+	// scan and a full row transfer per request.
+	CountBusinessAssetsByCriticality(ctx context.Context, tenantID shared.ID) (map[asset.Criticality]int, error)
 	ReplaceBusinessAssetProjects(ctx context.Context, tenantID, assetID shared.ID, links []asset.ComponentMembership) error
 	ListBusinessAssetProjects(ctx context.Context, tenantID, assetID shared.ID) ([]asset.ComponentMembership, error)
 	ReplaceBusinessAssetTechnicalAssets(ctx context.Context, tenantID, assetID shared.ID, links []asset.ComponentMembership) error
@@ -1804,6 +1828,16 @@ type NPMResolver interface {
 	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
 }
 
+// NPMGraphResolver is the optional graph-aware capability of an NPMResolver, mirroring
+// GradleGraphResolver: it returns the resolved components AND the dependency EDGES. The pipeline needs
+// the edges to tell a direct dependency from a transitive one, to show the path from the project root to
+// a vulnerable package, and to compute a remediation plan. Without them every CVE in a lockfile-less npm
+// project is reported with no path and no direct/transitive classification. Separate from NPMResolver so
+// a components-only resolver still satisfies the base.
+type NPMGraphResolver interface {
+	ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error)
+}
+
 // ManifestResolver resolves a lockfile-less package manifest (composer.json / Gemfile / pyproject.toml,
 // ...) to a pinned component tree by running the ecosystem's own lock tool in a no-scripts, lock-only
 // mode over a throwaway copy. Ecosystem() labels it for tracing. Several may be registered; each is a
@@ -1812,6 +1846,13 @@ type NPMResolver interface {
 type ManifestResolver interface {
 	Ecosystem() string
 	Resolve(ctx context.Context, dir string) ([]sbom.Component, error)
+}
+
+// ManifestGraphResolver is the optional graph-aware capability of a ManifestResolver, mirroring
+// NPMGraphResolver: the generated lockfile carries the dependency edges, so a resolver that parses it
+// can return them and give a transitive CVE its path and its introducing direct dependencies.
+type ManifestGraphResolver interface {
+	ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error)
 }
 
 // SBOMEnrichment is what an SBOMEnricher contributed, for honest provenance.

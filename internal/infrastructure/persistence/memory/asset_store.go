@@ -239,6 +239,52 @@ func (s *AssetStore) ListBusinessAssets(_ context.Context, tenantID shared.ID) (
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out, nil
 }
+func (s *AssetStore) ListBusinessAssetsPage(ctx context.Context, tenantID shared.ID, query ports.BusinessAssetQuery) ([]*asset.BusinessAsset, int, error) {
+	all, err := s.ListBusinessAssets(ctx, tenantID)
+	if err != nil {
+		return nil, 0, err
+	}
+	text, owner := strings.ToLower(strings.TrimSpace(query.Query)), strings.ToLower(strings.TrimSpace(query.Owner))
+	matched := make([]*asset.BusinessAsset, 0, len(all))
+	for _, a := range all {
+		if text != "" && !strings.Contains(strings.ToLower(a.Key+" "+a.Name), text) {
+			continue
+		}
+		if query.Type != "" && a.Type != query.Type || query.Criticality != "" && a.Criticality != query.Criticality || query.Lifecycle != "" && a.Lifecycle != query.Lifecycle {
+			continue
+		}
+		if owner != "" && !strings.Contains(strings.ToLower(a.Owner), owner) {
+			continue
+		}
+		matched = append(matched, a)
+	}
+	total := len(matched)
+	if query.Limit <= 0 {
+		return []*asset.BusinessAsset{}, total, nil
+	}
+	offset := query.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > total {
+		offset = total
+	}
+	end := min(offset+query.Limit, total)
+	return matched[offset:end], total, nil
+}
+
+func (s *AssetStore) CountBusinessAssetsByCriticality(_ context.Context, tenantID shared.ID) (map[asset.Criticality]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[asset.Criticality]int{}
+	for _, a := range s.businessAssets {
+		if a.TenantID == tenantID {
+			out[a.Criticality]++
+		}
+	}
+	return out, nil
+}
+
 func copyLinks(in []asset.ComponentMembership) []asset.ComponentMembership {
 	return append([]asset.ComponentMembership(nil), in...)
 }

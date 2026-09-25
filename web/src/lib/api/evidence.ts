@@ -1,5 +1,5 @@
 import type { EvidenceItem, EvidenceLedger } from '../types'
-import { blobDownload, req } from './client'
+import { ApiError, blobDownload, req } from './client'
 
 function mapEvidenceItem(r: any): EvidenceItem {
   return {
@@ -38,8 +38,12 @@ export const evidenceApi = {
         head: r.head ?? '',
         attestation: r.attestation ? { key_id: r.attestation.key_id, algorithm: r.attestation.algorithm } : undefined,
       }
-    } catch {
-      return null
+    } catch (error) {
+      // No ledger yet answers 404 and is a real "nothing recorded" answer. Every other failure
+      // means the chain could not be checked, which is not the same as a chain that is intact, so
+      // it reaches the caller instead of being flattened into null.
+      if (error instanceof ApiError && error.status === 404) return null
+      throw error
     }
   },
 

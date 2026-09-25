@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { Assets } from './Assets'
 
-vi.mock('../../lib/api', () => ({ api: { listBusinessAssets: vi.fn(), createBusinessAsset: vi.fn() } }))
+vi.mock('../../lib/api', () => ({ api: { listBusinessAssets: vi.fn(), createBusinessAsset: vi.fn(), businessAssetCounts: vi.fn() } }))
 
 const asset = {
   id: 'a1',
@@ -22,8 +22,13 @@ const asset = {
   posture: 'unknown',
 }
 
+const counts = { byCriticality: { critical: 37, high: 10, medium: 5, low: 68 }, total: 120 }
+
 describe('Assets', () => {
-  beforeEach(() => vi.resetAllMocks())
+  beforeEach(() => {
+    vi.resetAllMocks()
+    vi.mocked(api.businessAssetCounts).mockResolvedValue(counts)
+  })
 
   it('renders honest empty and filtered states', async () => {
     vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [], total: 0, limit: 24, offset: 0 })
@@ -58,5 +63,82 @@ describe('Assets', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create Asset' }))
     await waitFor(() => expect(api.createBusinessAsset).toHaveBeenCalled())
     expect(await screen.findByText('Asset detail route')).toBeInTheDocument()
+  })
+
+  // Counting only the visible page under-reported critical assets across a multi-page estate, which
+  // on a security inventory reads as fewer critical assets than exist.
+  it('reports the estate-wide critical count, not the visible page', async () => {
+    vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [asset], total: 120, limit: 24, offset: 0 })
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+    expect(await screen.findByText('120')).toBeInTheDocument()
+    // 37 is the estate-wide aggregate, not the single critical row on this page.
+    expect(await screen.findByText('37')).toBeInTheDocument()
+    // Page-scoped figures state their scope so they are not read as estate-wide.
+    expect(screen.getByText('Needs attention on this page')).toBeInTheDocument()
+  })
+
+  // Using a filtered list request as a counter cost a second full scan of the tenant's assets on
+  // every filter change, measured at 2.09x the page-view cost at 100k assets.
+  it('never issues a second list request to count criticality', async () => {
+    vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [asset], total: 120, limit: 24, offset: 0 })
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+
+    await screen.findByText('37')
+    expect(api.listBusinessAssets).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(api.listBusinessAssets).mock.calls.every(([query]) => !String(query ?? '').includes('criticality=critical'))).toBe(true)
+    expect(api.businessAssetCounts).toHaveBeenCalledTimes(1)
+  })
+
+  // Changing a filter must not refetch the estate-wide histogram: it does not depend on the filter.
+  it('does not refetch the count when a filter changes', async () => {
+    vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [asset], total: 120, limit: 24, offset: 0 })
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+
+    await screen.findByText('37')
+    fireEvent.change(screen.getByLabelText('Search assets'), { target: { value: 'mobile' } })
+    await waitFor(() => expect(vi.mocked(api.listBusinessAssets).mock.calls.length).toBeGreaterThan(1))
+    expect(api.businessAssetCounts).toHaveBeenCalledTimes(1)
+  })
+
+  // The two leading figures are scoped differently: the total follows the filter and the critical
+  // count covers the estate. Unlabelled and side by side they read as one scope, so a search
+  // narrowing the list to two rows showed "Total assets 2" next to "Critical 37".
+  it('names the scope of each figure once a filter narrows the list', async () => {
+    vi.mocked(api.listBusinessAssets)
+      .mockResolvedValueOnce({ items: [asset], total: 120, limit: 24, offset: 0 })
+      .mockResolvedValue({ items: [asset], total: 2, limit: 24, offset: 0 })
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+
+    await screen.findByText('37')
+    expect(screen.getByText('Total assets')).toBeInTheDocument()
+    expect(screen.getByText('Critical')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Search assets'), { target: { value: 'mobile' } })
+
+    expect(await screen.findByText('Matching this filter')).toBeInTheDocument()
+    expect(screen.getByText('Critical in all assets')).toBeInTheDocument()
+    expect(screen.queryByText('Total assets')).not.toBeInTheDocument()
+  })
+
+  // A count that failed to load used to render as 0, which on a security inventory is a false
+  // all-clear and is the exact bug class this screen was changed to remove.
+  it('says the critical count is unavailable when its request fails', async () => {
+    vi.mocked(api.businessAssetCounts).mockRejectedValue(new Error('count query failed'))
+    vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [asset], total: 120, limit: 24, offset: 0 })
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+
+    expect(await screen.findByText('120')).toBeInTheDocument()
+    expect(await screen.findByText('Unavailable')).toBeInTheDocument()
+  })
+
+  it('says every count is unavailable when the inventory request fails', async () => {
+    vi.mocked(api.businessAssetCounts).mockRejectedValue(new Error('count query failed'))
+    vi.mocked(api.listBusinessAssets).mockRejectedValue(new Error('inventory unavailable'))
+    render(<MemoryRouter><Assets /></MemoryRouter>)
+
+    await screen.findByText('inventory unavailable')
+    // Total, critical, and the two page-scoped figures all read Unavailable rather than 0.
+    expect(screen.getAllByText('Unavailable').length).toBe(4)
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
   })
 })

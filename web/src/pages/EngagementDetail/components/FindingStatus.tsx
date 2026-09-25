@@ -78,7 +78,7 @@ export function FindingStatusControl({
         size="sm"
         ariaLabel={
           readOnly && readOnlyReason
-            ? `Triage status for ${finding.title} — ${readOnlyReason}`
+            ? `Triage status for ${finding.title}: ${readOnlyReason}`
             : `Triage status for ${finding.title}`
         }
         className="min-w-[9.5rem]"

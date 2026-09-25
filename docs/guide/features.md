@@ -12,9 +12,12 @@ coverage: Go, npm, Yarn, pnpm, PyPI, Poetry, Pipfile, uv, Cargo, Maven, Gradle, 
 NuGet, Swift, Dart, Hex/Elixir, Conda, R (renv), Julia, and Conan. It can also ingest a
 client-supplied CycloneDX SBOM as the scan inventory.
 
-**Multi-source detection.** Components are matched against a live advisory API and an offline
-database. Results are cross-correlated and de-duplicated, and each finding records the scanner
-and database version as evidence. An owned advisory store can ingest OSV, GHSA, CSAF, and
+**Multi-source detection.** The primary source is Synapse's own advisory store, matched alongside
+a live advisory API; an offline third-party database is an opt-in cross-check rather than a
+dependency. Results are cross-correlated and de-duplicated, and each finding records the source
+and database version as evidence. Dropping the third-party database does not quietly lower
+OS-package recall: a scan whose OS-package distro the owned store does not cover is marked
+not-confident rather than reported clean. The owned store ingests OSV, GHSA, CSAF, and
 Ubuntu, Debian, Oracle Linux, AlmaLinux, openSUSE, and SUSE Linux Enterprise OVAL feeds plus Amazon Linux and Fedora updateinfo, Rocky Linux Apollo OSV, and apk secdb (Alpine, Wolfi, Chainguard) so that detection does not depend on one provider. A freshness check warns
 when a dated database is stale, and a `precise` detection mode routes single-source,
 uncorroborated findings into a needs-verify queue instead of failing the build on them.
@@ -113,7 +116,7 @@ inside the hardened sandbox with server-side scope and authorization:
   executor is a deliberate, review-gated extension point. The rehearsal route and the offensive kill
   switch are wired when the fleet transport is enabled.
 - **Adversary emulation** runs benign technique variants that declare the detection each technique
-  should produce — the offensive half of the purple-team ledger.
+  should produce, the offensive half of the purple-team ledger.
 
 ## Runtime defense (blue team)
 
@@ -158,6 +161,27 @@ delete. An accepted finding is still reported, persisted, and evidence-sealed. O
 - **Compliance benchmark.** Re-projects findings onto a control specification and reports
   per-control PASS or FAIL. It reads every finding, including accepted ones, so acceptance can
   never flip a control to PASS.
+
+## Data governance: hold, export, and erasure
+
+The detection projection carries data about identifiable hosts and users, so it is governed
+separately from the findings and separately again from the evidence chain, which is permanent by
+design and never touched by any of this.
+
+- **Legal hold.** Placing a hold on an engagement exempts its detection data from retention
+  expiry and refuses on-demand deletion while the hold stands. Placing and releasing both demand a
+  reason and are written to the append-only audit log, so preservation is attributable. Retention
+  expiry and erasure both consult the hold and fail closed: a checker error blocks the deletion
+  rather than allowing it.
+- **Subject-access export.** A read-only bundle of what the control plane holds for one
+  engagement, the detections plus any active holds. The export is itself an audited access,
+  because a subject-access request is a governance event.
+- **On-demand erasure.** Deletes an engagement's detection projection now, legal-hold-checked,
+  audited with the actor and a required reason. It removes the queryable projection only; the
+  hash-chained evidence is preserved, so erasure never breaks the chain that proves what was done.
+
+Requires the fleet and its detection ingest, because the detection projection is the data being
+governed. The [Data governance screen](ui-walkthrough.md#data-governance) documents the flow.
 
 ## License compliance
 
@@ -221,7 +245,7 @@ write-up drafts.
 Reachability is the strongest anti-hallucination signal: a deterministic proof supersedes any LLM
 opinion. The Go path builds a real call graph (Tier-2) and proves whether a vulnerable symbol is
 actually called. For **Python** (`SYNAPSE_PYREACH_ENABLED`), a source-only scanner proves whether a
-declared PyPI package is imported by first-party code at all — a declared-but-never-imported package
+declared PyPI package is imported by first-party code at all, a declared-but-never-imported package
 (a dead dependency) becomes a deterministic **Tier-1 `not_reachable`** judgment that the OpenVEX
 export turns into a `vulnerable_code_not_in_execute_path` justification. It is honestly tiered
 (import-level, weaker than a call path) and conservative: a target that uses dynamic imports
@@ -247,7 +271,7 @@ unsafe-deserialization semantics.
 
 Every hit is a gated `CapSAST` proposal at score zero under `system:python-taint-scan`; this pass has no
 verification or self-confirmation path. The audit witness contains only bounded relative positions and
-closed catalog metadata—never source contents or literal values. Parser/resolution gaps are recorded as
+closed catalog metadata, never source contents or literal values. Parser/resolution gaps are recorded as
 incomplete coverage: a real positive path may still be proposed, but absence of a path is never published
 as a clean judgment. Scan JSON exposes this distinction in `analysis_coverage` as `complete`, `partial`,
 `unavailable`, or `not_applicable`, with closed failure reasons, bounded counters, and an aggregated gap
@@ -274,7 +298,7 @@ The reviewed catalog covers request-derived input and command/code, filesystem, 
 regular-expression, template, deserialization, XPath, and log-injection sinks. Each positive witness mints
 only a score-zero, gated `CapSAST` proposal under `system:js-taint-scan`; a distinct verifier must confirm
 it. Incomplete or unavailable analysis is surfaced as coverage/warnings and can never create a clean
-result. Bounded audit and SARIF traces contain positions and catalog metadata only—never source contents,
+result. Bounded audit and SARIF traces contain positions and catalog metadata only, never source contents,
 literal values, or internal value identifiers. The feature requires judgments plus a CGO-enabled
 `synapse-ast`; because it is source-only, target-compilation sandboxing is not required.
 
@@ -282,7 +306,7 @@ literal values, or internal value identifiers. The feature requires judgments pl
 
 A gated SAST hypothesis can be confirmed at runtime by a **safe HTTP probe**. When a distinct
 verifier's runtime probe confirms the hypothesis, the confirmed judgment is projected into a
-`Kind=dast` finding — the dynamically-proven twin of the `Kind=sast` projection (a statically or
+`Kind=dast` finding, the dynamically-proven twin of the `Kind=sast` projection (a statically or
 LLM-confirmed hypothesis stays `Kind=sast`). A DAST finding records `reachability = reachable`,
 because the probe demonstrated the sink is actually reachable and exploitable.
 
@@ -290,7 +314,7 @@ The runtime probe never runs unguarded. It executes only through the governed wo
 requires, server-side: the target inside the engagement's authorization scope and window; the
 sandbox with **kernel-enforced egress confinement** (the probe is refused when the host cannot
 enforce the egress allowlist); and explicit HITL approval before any packet is sent. The verifier
-records only a structured, closed-token result (a proof class plus a rationale) — raw probe output
+records only a structured, closed-token result (a proof class plus a rationale), raw probe output
 lives in sealed, hash-chained evidence, never in the model transcript. The agent can only *propose*
 the hypothesis; a **distinct** verifier confirms it, so a claim can never confirm itself.
 

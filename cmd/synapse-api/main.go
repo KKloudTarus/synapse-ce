@@ -158,6 +158,8 @@ import (
 	incidenttriage "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidenttriage"
 	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
 	keyregistry "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/keyregistry"
+	legalholduc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/legalholduc"
+	privacyexport "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacyexport"
 	privacypolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/privacypolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/processreport"
 	responseobserveruc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/responseobserver"
@@ -463,6 +465,7 @@ func main() {
 		ports.DetectionRecordStore
 		ports.CorrelationDetectionSource
 	} // #423 detection ledger projection
+	var legalHoldStore ports.LegalHoldStore           // #635 legal hold over an engagement's detection data
 	var purpleCoverageStore ports.PurpleCoverageStore // #426 emulated technique vs observed detection
 	var emulationRunStore emulationuc.RunStore        // #426 adversary-emulation run producer
 	var accuracyRunStore ports.AccuracyRunStore       // #860 D8.6 detection-accuracy regression trend
@@ -640,6 +643,7 @@ func main() {
 		importedFindingStore = postgres.NewImportedFindingRepository(pool)
 		vexStatementStore = postgres.NewVEXStatementRepository(pool)
 		detectionRecordStore = postgres.NewDetectionRecordRepository(pool)
+		legalHoldStore = postgres.NewLegalHoldRepository(pool)
 		purpleCoverageStore = postgres.NewPurpleRepository(pool)
 		accuracyRunStore = postgres.NewAccuracyRunRepository(pool)
 		emulationRunStore = postgres.NewEmulationRunRepository(pool)
@@ -819,6 +823,7 @@ func main() {
 		vexStatementStore = memory.NewVEXStatementStore()
 		memoryDetectionRecords := memory.NewDetectionRecordStore()
 		detectionRecordStore = memoryDetectionRecords
+		legalHoldStore = memory.NewLegalHoldStore()
 		purpleCoverageStore = memory.NewPurpleStore()
 		accuracyRunStore = memory.NewAccuracyRunStore()
 		emulationRunStore = memory.NewEmulationRunStore()
@@ -1322,6 +1327,12 @@ func main() {
 		// scope-derived egress policy.
 		reconService.SetSandboxEnforcement(egresspolicy.Compile)
 	}
+	// The run lease is the liveness signal both stale sweepers read, so it is wired whenever
+	// Postgres provides one. The queue branches below only decide who executes a run.
+	if reconRunLock != nil {
+		reconService.SetRunLock(reconRunLock)
+		scaService.SetRunLock(reconRunLock)
+	}
 	var scaWorker *worker.Worker
 	if toolExecution == config.ToolExecutionDispatchOnly {
 		if reconQueue == nil {
@@ -1330,8 +1341,6 @@ func main() {
 		}
 		reconService.SetQueue(reconQueue)
 		scaService.SetQueue(reconQueue)
-		reconService.SetRunLock(reconRunLock)
-		scaService.SetRunLock(reconRunLock)
 		log.Info("all untrusted tool execution deferred to synapse-worker")
 	} else if cfg.ReconViaWorker {
 		// Backward-compatible development posture: recon is durable while offline SCA
@@ -1339,8 +1348,6 @@ func main() {
 		if reconQueue != nil {
 			reconService.SetQueue(reconQueue)
 			scaService.SetQueue(reconQueue)
-			reconService.SetRunLock(reconRunLock)
-			scaService.SetRunLock(reconRunLock)
 			scaWorker = worker.New(reconQueue, map[string]worker.Handler{
 				scauc.ScanJobKind: scaJobHandler{svc: scaService},
 			}, worker.Config{Visibility: cfg.ScanTimeout + time.Minute, MaxAttempts: 3}, log)
@@ -2960,6 +2967,27 @@ func main() {
 			if telemetrySvc != nil {
 				telemetrySvc.SetDetectionReconciler(detectSvc)
 			}
+			// Data governance (#635): legal hold, subject-access export and on-demand erasure over the
+			// detection projection this ledger owns. All three existed down to the migration and the
+			// dashboard tab, and no composition root ever built them, so the Data Governance tab could
+			// only report the feature as switched off. They ride the detection ledger because that is
+			// the data they govern.
+			legalHoldSvc, lherr := legalholduc.NewService(legalHoldStore, auditLog, clock.Now)
+			if lherr != nil {
+				log.Error("legal-hold service init failed", "err", lherr)
+				os.Exit(1)
+			}
+			// Retention expiry and erasure both consult the hold before deleting, fail-closed.
+			detectSvc.SetLegalHoldChecker(legalHoldSvc)
+			router.SetLegalHolds(legalHoldSvc)
+			router.SetDataPurge(detectSvc)
+			privacyExportSvc, peerr := privacyexport.NewService(detectionRecordStore, legalHoldSvc, auditLog, clock.Now)
+			if peerr != nil {
+				log.Error("privacy export service init failed", "err", peerr)
+				os.Exit(1)
+			}
+			router.SetPrivacyExport(privacyExportSvc)
+			log.Info("data governance ENABLED (legal hold, subject-access export, on-demand erasure)")
 
 			tenantStore, ok := repo.(ports.DetectionReconciliationTenantStore)
 			if !ok {
@@ -3351,6 +3379,9 @@ func main() {
 		// (owned parsers vs Syft) are diffed. The primary kind is resolved through the same
 		// scacompose.ResolveSBOMProducerKind the producer-select switch uses, so an empty (default) value
 		// resolves to ownsbom-primary here too and the secondary is Syft, never ownsbom-vs-ownsbom.
+		//
+		// Reached only when the operator opts in. With the owned parsers as the primary the secondary is
+		// always Syft, so this is the one place a default scan would have needed a third-party binary.
 		primaryKind, pkErr := scacompose.ResolveSBOMProducerKind(cfg)
 		if pkErr != nil {
 			log.Error("resolve SBOM producer kind for cross-check", "err", pkErr)
@@ -3522,8 +3553,15 @@ func main() {
 
 	if scaWorker != nil {
 		go func() { _ = scaWorker.Run(ctx) }() // in-process SCA worker; drains on shutdown
-		// Stale-scan sweeper: reclaim scan jobs a crash left `running` with no live
-		// owner (stranded without a dead-letter event). Lease-as-liveness, parity with recon.
+	}
+	// Stale-scan sweeper: reclaim scan jobs a crash left `running` with no live owner
+	// (stranded without a dead-letter event). Lease-as-liveness, parity with recon.
+	//
+	// It runs on every Postgres deployment, not only the ones that wire a worker. One
+	// stranded row blocks the engagement permanently: scan_jobs_one_running_per_engagement
+	// rejects the next scan with a conflict, and the API is the only process that runs
+	// when synapse-worker is not deployed.
+	if reconRunLock != nil {
 		go func() {
 			staleFor := cfg.ScanTimeout + 5*time.Minute
 			t := time.NewTicker(5 * time.Minute)
@@ -3533,6 +3571,25 @@ func main() {
 					log.Warn("sca stale-scan sweep failed", "err", err)
 				} else if n > 0 {
 					log.Info("sca stale-scan sweeper reclaimed stranded scans", "count", n)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+				}
+			}
+		}()
+		// Same reclaim for recon: without it a run the API was executing when it restarted
+		// stays `running` in the dashboard forever.
+		go func() {
+			staleFor := cfg.ReconTimeout + 5*time.Minute
+			t := time.NewTicker(5 * time.Minute)
+			defer t.Stop()
+			for {
+				if n, err := reconService.SweepStaleRuns(ctx, staleFor); err != nil && ctx.Err() == nil {
+					log.Warn("recon stale-run sweep failed", "err", err)
+				} else if n > 0 {
+					log.Info("recon stale-run sweeper reclaimed stranded runs", "count", n)
 				}
 				select {
 				case <-ctx.Done():

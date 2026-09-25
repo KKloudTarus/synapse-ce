@@ -21,7 +21,7 @@ describe('ChainRehearsalTab', () => {
       </ToastProvider>,
     )
     // The simulation framing is explicit, not implied.
-    expect(await screen.findByText(/Simulation, not real exploitation/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no-host simulation/i)).toBeInTheDocument()
     // With an empty step, the run is disabled and no rehearsal starts blindly.
     expect(screen.getByRole('button', { name: /run no-host rehearsal/i })).toBeDisabled()
     expect(api.rehearseChain).not.toHaveBeenCalled()

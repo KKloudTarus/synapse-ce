@@ -96,3 +96,60 @@ func TestMergeResolvedJVMEmptyResolvedIsNoOp(t *testing.T) {
 		t.Fatalf("empty resolved set must leave syft's pkg:maven intact, got %+v", doc.Components)
 	}
 }
+
+// mergeResolvedDeps must replace only the ecosystems the resolver emitted edges for. A monorepo with
+// both a package.json and a Gemfile runs two resolvers in sequence, and the second must not erase the
+// first one's graph.
+func TestMergeResolvedDepsReplacesOnlyTheResolversOwnEcosystem(t *testing.T) {
+	doc := &sbom.SBOM{Dependencies: []sbom.Dependency{
+		// the generator's stale npm view – the npm resolver owns and replaces this
+		{Ref: "pkg:npm/a@1.0.0", DependsOn: []string{"pkg:npm/stale@0.0.1"}},
+		// another ecosystem's edges, resolved earlier – these must survive
+		{Ref: "pkg:gem/rails@7.0.0", DependsOn: []string{"pkg:gem/rack@2.2.0"}},
+	}}
+	resolved := []sbom.Dependency{
+		{Ref: "pkg:npm/a@1.0.0", DependsOn: []string{"pkg:npm/b@2.0.0"}},
+		{Ref: "pkg:npm/b@2.0.0", DependsOn: []string{"pkg:npm/c@3.0.0"}},
+	}
+
+	mergeResolvedDeps(doc, resolved)
+
+	var gemKept, staleKept bool
+	npm := 0
+	for _, d := range doc.Dependencies {
+		switch {
+		case d.Ref == "pkg:gem/rails@7.0.0":
+			gemKept = true
+		case d.Ref == "pkg:npm/a@1.0.0":
+			npm++
+			for _, target := range d.DependsOn {
+				if target == "pkg:npm/stale@0.0.1" {
+					staleKept = true
+				}
+			}
+		case d.Ref == "pkg:npm/b@2.0.0":
+			npm++
+		}
+	}
+	if !gemKept {
+		t.Error("an ecosystem the resolver emitted no edge for must keep its graph")
+	}
+	if staleKept {
+		t.Error("the generator's npm edges must be replaced, not merged, or a stale target survives")
+	}
+	if npm != 2 {
+		t.Errorf("resolved npm edges = %d, want 2", npm)
+	}
+}
+
+// An empty resolved edge set means the resolver is components-only (or did not run), so the generator's
+// graph is the only one there is and must be left intact.
+func TestMergeResolvedDepsEmptyResolvedIsNoOp(t *testing.T) {
+	doc := &sbom.SBOM{Dependencies: []sbom.Dependency{
+		{Ref: "pkg:npm/a@1.0.0", DependsOn: []string{"pkg:npm/b@2.0.0"}},
+	}}
+	mergeResolvedDeps(doc, nil)
+	if len(doc.Dependencies) != 1 {
+		t.Fatalf("empty resolved set must be a no-op, got %+v", doc.Dependencies)
+	}
+}

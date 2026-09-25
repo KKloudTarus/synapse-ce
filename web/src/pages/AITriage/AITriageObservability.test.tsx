@@ -45,3 +45,36 @@ describe('AITriageObservability', () => {
     expect(screen.getByText('75.0%')).toBeInTheDocument()
   })
 })
+
+describe('AITriageObservability CWE bars', () => {
+  // The rows arrive ordered by CWE identifier, not by volume. Taking the denominator from the
+  // first row made it whichever CWE sorted first, so a later row with more requests was drawn
+  // wider than its own track and ran off the side of the card: with CWE-611 at 2 requests ahead of
+  // CWE-776 at 14, that bar was 700% wide.
+  it('scales every bar against the largest count, not the first row', async () => {
+    vi.mocked(api.aiTriageObservability).mockResolvedValue({
+      ...dashboard,
+      byCWE: [
+        { ...row, value: 'CWE-611', requestCount: 2 },
+        { ...row, value: 'CWE-776', requestCount: 14 },
+        { ...row, value: 'CWE-915', requestCount: 4 },
+      ],
+    })
+    render(<AITriageObservability />)
+
+    const smallest = await screen.findByText('CWE-611')
+    const section = smallest.closest('div.min-w-0')?.parentElement as HTMLElement
+    const widths = Array.from(section.querySelectorAll<HTMLElement>('div.bg-brand-solid')).map(
+      (bar) => Number.parseFloat(bar.style.width),
+    )
+
+    expect(widths).toHaveLength(3)
+    for (const width of widths) {
+      expect(width).toBeLessThanOrEqual(100)
+    }
+    // Largest is the full track; the others are its honest proportion.
+    expect(Math.max(...widths)).toBe(100)
+    expect(widths[0]).toBeCloseTo((2 / 14) * 100, 5)
+    expect(widths[2]).toBeCloseTo((4 / 14) * 100, 5)
+  })
+})

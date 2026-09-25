@@ -118,3 +118,32 @@ function cycle(status: 'open' | 'completed', version: number, activeClosureManif
 function jsonResponse(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
 }
+
+describe('archiveAssessmentCycle', () => {
+  // Archiving is terminal and CAS-guarded, so the precondition header is the whole safety story.
+  it('sends the Cycle version as If-Match and the caller-supplied idempotency key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ cycle: {}, members: [], branch_heads: [] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await assessmentCyclesApi.archiveAssessmentCycle('cycle/1', 7, 'archive-request-1')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/assessment-cycles/cycle%2F1/archive', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ 'Idempotency-Key': 'archive-request-1', 'If-Match': '7' }),
+    }))
+  })
+
+  it('mints a key when the caller does not supply one', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ cycle: {}, members: [], branch_heads: [] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await assessmentCyclesApi.archiveAssessmentCycle('cycle-1', 1)
+
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>
+    expect(headers['Idempotency-Key']).toBeTruthy()
+  })
+})

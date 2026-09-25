@@ -40,7 +40,7 @@ When a required capability is missing, Synapse refuses rather than degrading sil
 ## Native worker and signed-egress boundary
 
 Production execution uses the private native EC2 tier selected in
-[ADR 0008](../adr/0008-native-ec2-execution-tier.md). `synapse-worker` is a non-root systemd service with an empty
+[ADR 0008](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0008-native-ec2-execution-tier.md). `synapse-worker` is a non-root systemd service with an empty
 capability set, `NoNewPrivileges`, delegated cgroup v2, strict executable integrity, bounded output, shared
 redaction, and an exact-runner startup check. API, web, and migration workloads remain on EKS. No execution
 component uses a privileged container, broad `SYS_ADMIN`, unrestricted sudo, an SSH daemon, or a public IP.
@@ -158,7 +158,7 @@ explicitly authorized to test.
 Anything Synapse executes **against a target** is additionally governed by the offensive governance
 policy in [`docs/redteam/offensive-policy.md`](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/redteam/offensive-policy.md).
 It is not published on this site because it is a repository artifact that CI verifies against the
-machine-readable register the code enforces — the two must change together, so the reviewed text lives
+machine-readable register the code enforces, the two must change together, so the reviewed text lives
 next to the register rather than in the docs build.
 
 What it settles, and what the three controls above do not:

@@ -5,12 +5,12 @@
 
 ### Verify Everything. Trust Nothing.
 
-**A governed control plane for the whole security-assessment lifecycle — supply chain, code,
+**A governed control plane for the whole security-assessment lifecycle, supply chain, code,
 cloud, offensive, and runtime defense.**
 
 Turn a fragmented, manual security process into one controlled, auditable workflow: SCA, SAST,
 secret and IaC scanning, reachability, recon and governed exploitation, cloud posture, and a
-distributed blue-team agent fleet — all behind server-side scope enforcement, hardened tool
+distributed blue-team agent fleet, all behind server-side scope enforcement, hardened tool
 execution, tamper-evident evidence, and deterministic reports.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-6d5bff)](LICENSE)
@@ -65,8 +65,8 @@ anything intrusive.
 **Software supply chain**
 - **SBOM generation** across many ecosystems (npm, PyPI, Maven, Gradle, Go, Cargo, RubyGems,
   Composer, NuGet, Hex, Dart, pnpm, Poetry, yarn and more) with owned per-ecosystem lockfile parsers.
-- **Vulnerability detection** from a live advisory API and an offline database, cross-correlated
-  and de-duplicated, plus an owned advisory store that ingests OSV, GHSA, CSAF and OVAL for
+- **Vulnerability detection** from Synapse's own advisory store as the primary source, matched
+  alongside a live advisory API, cross-correlated and de-duplicated; the store ingests OSV, GHSA, CSAF and OVAL for
   detection independence.
 - **Risk-based prioritization** ordered by exploitability (CISA KEV, then EPSS, then CVSS), never
   by raw CVSS alone.
@@ -88,7 +88,7 @@ anything intrusive.
 
 **Offensive**
 - **Recon** in a hardened sandbox, an **attack-path graph** over the asset inventory, **chained
-  exploitation with per-step proof**, and **adversary emulation** with expected-detection output —
+  exploitation with per-step proof**, and **adversary emulation** with expected-detection output,
   all gated by a written offensive policy and a kill switch.
 - **DAST**: authenticated crawling and a first-party check corpus with sessions from the credential vault.
 
@@ -154,7 +154,7 @@ The lasting difference is what sits around the finding:
 - Go 1.26 (pinned in `go.mod`), Node and pnpm (use pnpm, not npm or yarn).
 - No external scanner is required: the owned SBOM producer + owned advisory store are the default
   and run with no third-party tool. Syft (optional, broadest SBOM coverage / cross-check) and Grype
-  (optional, adds the offline database) are supported extras — `make tools` installs both, pinned and
+  (optional, adds the offline database) are supported extras, `make tools` installs both, pinned and
   checksum-verified, into `./bin`.
 - Docker is optional and is the easiest way to run the full stack.
 - The hardened sandbox and live recon need a Linux host. Without them the API still runs
@@ -174,7 +174,7 @@ tar -xzf synapse.tar.gz synapse-cli
 ./synapse-cli scan ./path/to/project --fail-on high
 ```
 
-Or scan with zero install using the container image (bundles `synapse-cli` plus syft and grype):
+Or scan with zero install using the container image (bundles `synapse-cli`, plus syft and grype for the opt-in cross-check):
 
 Container images are not published by the current release workflow. Use a release archive or build
 `deploy/Dockerfile` locally when a containerized CLI is required.
@@ -234,7 +234,7 @@ Full details, including the port table and what this profile deliberately does n
 
 ```bash
 make install                       # Go modules + web deps
-make tools                         # syft + grype into ./bin
+make tools                         # optional: syft + grype for the opt-in cross-check
 export PATH="$PWD/bin:$PATH"
 
 export SYNAPSE_API_TOKEN="$(openssl rand -hex 32)"   # required for operational API routes; /healthz and /readyz are public

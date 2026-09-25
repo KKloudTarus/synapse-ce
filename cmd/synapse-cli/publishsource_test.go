@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 )
 
@@ -39,14 +38,16 @@ func TestPublishSourceFromAnalysisStreamsOnlyRetainableInventory(t *testing.T) {
 	analysis := projectanalysis.Analysis{
 		ID: "analysis", ProjectKey: "project",
 		SourceRevision: projectanalysis.SourceRevision{Kind: projectanalysis.ScanKindLocal, Head: "workspace"},
-		Snapshot: measure.Snapshot{Nodes: []measure.Node{
-			{Path: "", Kind: measure.NodeProject},
-			{Path: "src/main.go", Kind: measure.NodeFile},
-			// Deliberately model scanner inventory drift: credential denylist still wins.
-			{Path: ".env", Kind: measure.NodeFile},
-			{Path: "keys/private.pem", Kind: measure.NodeFile},
-		}},
 	}
+	// The inventory comes from the code-files endpoint, which is what the real server serves. The
+	// analysis response carries no measure snapshot, and a fixture that supplied one let this test
+	// pass while the subcommand could not publish anything against a real deployment.
+	analysisFiles := map[string]any{"files": []map[string]any{
+		{"path": "src/main.go"},
+		// Deliberately model scanner inventory drift: credential denylist still wins.
+		{"path": ".env"},
+		{"path": "keys/private.pem"},
+	}}
 	var (
 		mu       sync.Mutex
 		uploaded []string
@@ -59,6 +60,8 @@ func TestPublishSourceFromAnalysisStreamsOnlyRetainableInventory(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/project/analyses/analysis":
 			_ = json.NewEncoder(w).Encode(analysis)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/project/analyses/analysis/code/files":
+			_ = json.NewEncoder(w).Encode(analysisFiles)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/project/analyses/analysis/source":
 			if r.Header.Get("Content-Type") != "application/x-tar" || r.Header.Get("X-Synapse-Tool-Version") != "test-version" {
 				t.Errorf("publish headers content-type=%q version=%q", r.Header.Get("Content-Type"), r.Header.Get("X-Synapse-Tool-Version"))
@@ -120,7 +123,6 @@ func TestPublishSourceFromAnalysisPropagatesServerRefusal(t *testing.T) {
 	analysis := projectanalysis.Analysis{
 		ID: "analysis", ProjectKey: "project",
 		SourceRevision: projectanalysis.SourceRevision{Kind: projectanalysis.ScanKindLocal, Head: "workspace"},
-		Snapshot:       measure.Snapshot{Nodes: []measure.Node{{Path: "main.go", Kind: measure.NodeFile}}},
 	}
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o600); err != nil {
@@ -128,6 +130,10 @@ func TestPublishSourceFromAnalysisPropagatesServerRefusal(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
+			if strings.HasSuffix(r.URL.Path, "/code/files") {
+				_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"path": "main.go"}}})
+				return
+			}
 			_ = json.NewEncoder(w).Encode(analysis)
 			return
 		}

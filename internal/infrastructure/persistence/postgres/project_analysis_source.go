@@ -58,7 +58,12 @@ func (r *ProjectAnalysisStore) AttachSourceWithAudit(ctx context.Context, tenant
 		if _, err := tx.Exec(ctx, `UPDATE project_analyses SET payload=$4 WHERE tenant_id=$1 AND project_id=$2 AND id=$3`, tenantID.String(), projectID.String(), analysisID.String(), updated); err != nil {
 			return fmt.Errorf("attach project analysis source: %w", err)
 		}
-		return appendAudit(ctx, tx, audit)
+		// appendOn, not appendAudit: the raw writer stamps tenant_id '' and no hash_version, and
+		// the audit_log policy admits a row only when tenant_id is the bound tenant and
+		// hash_version is 2. Under RLS every source publication therefore failed its audit append
+		// and rolled the whole attachment back. appendOn makes that choice once, by asking whether
+		// the policy is active, and requireTenant has already bound the tenant here.
+		return appendOn(ctx, tx, tenantID, true, audit)
 	})
 	if err != nil {
 		// Once COMMIT has been sent, a transport failure can make its durable outcome unknowable.

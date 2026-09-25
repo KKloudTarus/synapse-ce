@@ -6,7 +6,7 @@ import type {
   AssessmentRelationshipDecisionAction,
   AssessmentRelationshipStatus,
 } from '../../lib/types'
-import { Button, Card, EmptyState, ErrorState, Input, Pill, Select, Spinner } from '../../components/ui'
+import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner } from '../../components/ui'
 
 const STATUS_OPTIONS = [
   { value: 'open', label: 'Open candidates' },
@@ -129,16 +129,18 @@ export function AssessmentRelationships() {
 
       <Card title="Generate candidate">
         <form className="grid gap-4 lg:grid-cols-[1fr_1fr_1.4fr_auto] lg:items-end" onSubmit={generate}>
-          <label className="space-y-1.5 text-sm font-medium text-secondary">
-            Predecessor Cycle ID
+          {/* These three were hand-rolled labels, and the third carried its note as a line under the
+              input. That made it taller than the other two, so a row meant to align on its inputs
+              aligned on the bottom of the tallest box and the third field sat visibly high. Field
+              puts the note in a tooltip beside the label, where every other form in the dashboard
+              puts one, and the three boxes line up because they are now the same height. */}
+          <Field label="Predecessor Cycle ID">
             <Input required value={predecessorCycleId} onChange={(event) => setPredecessorCycleId(event.target.value)} autoComplete="off" />
-          </label>
-          <label className="space-y-1.5 text-sm font-medium text-secondary">
-            Successor Cycle ID
+          </Field>
+          <Field label="Successor Cycle ID">
             <Input required value={successorCycleId} onChange={(event) => setSuccessorCycleId(event.target.value)} autoComplete="off" />
-          </label>
-          <label className="space-y-1.5 text-sm font-medium text-secondary">
-            Imported reference SHA-256 (optional)
+          </Field>
+          <Field label="Imported reference SHA-256 (optional)" hint="Raw imported metadata is never submitted or stored.">
             <Input
               value={importedReferenceHash}
               onChange={(event) => setImportedReferenceHash(event.target.value)}
@@ -146,10 +148,8 @@ export function AssessmentRelationships() {
               minLength={64}
               maxLength={64}
               autoComplete="off"
-              aria-describedby="relationship-reference-hint"
             />
-            <span id="relationship-reference-hint" className="block text-xs font-normal text-quaternary">Raw imported metadata is never submitted or stored.</span>
-          </label>
+          </Field>
           <Button type="submit" loading={generating}>Generate</Button>
         </form>
       </Card>

@@ -55,8 +55,12 @@ export function JudgmentReviewTab({ engagementId }: { engagementId: string }) {
     setSelected(null)
     setNotice('')
     focusReviewTrigger()
+    // The ledger is hash-chained evidence, so a failed refresh must not pass for a current one.
+    // Keep the last known ledger on screen but say plainly that it is stale, rather than leaving the
+    // operator to read an out-of-date chain as the post-decision state.
     const nextLedger = await api.evidenceLedger(engagementId).catch(() => null)
     if (nextLedger) setLedger(nextLedger)
+    else setNotice('The decision was recorded, but the evidence ledger could not be refreshed. The ledger shown is stale.')
   }
 
   async function conflict() {

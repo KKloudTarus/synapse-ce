@@ -85,6 +85,8 @@ Each isolates a capability-sensitive or untrusted-input workload out of the serv
 | `synapse-ast` | tree-sitter AST parsing of untrusted source. Exit code 3 means the backend is unavailable in a CGO-free build. |
 | `synapse-cspm` | Cloud posture collection for AWS, Azure, and GCP. Read-only, with credentials passed by inherited file descriptor. |
 | `synapse-dast-helper` | Governed DAST crawling and checks under kernel-enforced egress confinement. |
+| `synapse-egress-broker` | The root-owned broker that attaches and configures a run's network namespace. It is the only component that runs `ip` and `iptables`, so the worker never holds that privilege. See [deployment](deployment.md). |
+| `synapse-sandbox-check` | Conformance check for the sandbox on this host: filesystem confinement, effective capabilities, the memory limit, network isolation, and binary integrity. `-mode startup` on boot, `-mode full` to exercise every control, `-strict` to fail when one is unenforced. |
 
 **Fleet agents**
 
@@ -107,9 +109,10 @@ Offline governance utilities. None participates in a live scan.
 
 ## Tool integration
 
-Light, pure-Go tools run in process as libraries. Heavy or capability-sensitive tools are
-shelled out to pinned binaries via argv arrays: Syft and Grype for SBOM and vulnerabilities,
-and recon tools where enabled. The same rule isolates heavy analysis of untrusted source. The
+Light, pure-Go tools run in process as libraries. The SBOM producer and the advisory store are
+among them: both are Synapse's own, so a stock scan shells out to no third-party scanner. Heavy or
+capability-sensitive tools are shelled out to pinned binaries via argv arrays: the recon tools, and
+Syft or Grype when an operator opts into either as a cross-check. The same rule isolates heavy analysis of untrusted source. The
 call-graph builder runs only inside the sandboxed `synapse-callgraph` binary, never in the
 server process.
 

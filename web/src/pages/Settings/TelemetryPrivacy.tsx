@@ -121,7 +121,7 @@ export function TelemetryPrivacy() {
   const [refresh, setRefresh] = useState(0)
   const { data, loading, error } = useParallelFetch<[PrivacyAssignment | null, PrivacyAssignment[]]>(
     () => Promise.all([api.activePrivacyPolicy(), api.privacyPolicyHistory()]),
-    { deps: [refresh] },
+    { deps: [refresh], keepPreviousData: true },
   )
   const active = data?.[0] ?? null
   const history = useMemo(() => data?.[1] ?? [], [data])

@@ -22,7 +22,7 @@ export function QualityProfiles() {
 
   const { data: profiles, error: err } = useFetch<QualityProfile[]>(
     () => api.listQualityProfiles(),
-    { deps: [refresh] },
+    { deps: [refresh], keepPreviousData: true },
   )
 
   // Auto-select first profile when profiles load or if current selection is invalid

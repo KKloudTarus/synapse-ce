@@ -71,11 +71,40 @@ func NewApplier(cmdPrefix ...string) (*Applier, error) {
 // creating and tearing down a throwaway namespace. Returns nil when usable, so the
 // composition root can enable egress only when it will succeed (else degrade to isolated).
 func (a *Applier) Probe(ctx context.Context) error {
+	if err := checkIPForwarding(); err != nil {
+		return err
+	}
 	ns, err := a.Setup(ctx, "synprobe", 63, ports.EgressPolicy{})
 	if err != nil {
 		return err
 	}
 	return ns.Teardown(ctx)
+}
+
+// ipForwardSysctl is where the kernel records whether it will route between interfaces.
+const ipForwardSysctl = "/proc/sys/net/ipv4/ip_forward"
+
+// checkIPForwarding refuses to report egress enforcement usable when the kernel will not forward.
+//
+// Setup builds the namespace, the veth pair, the MASQUERADE rule and the FORWARD accepts without
+// complaint whether or not forwarding is on, because none of those need it. With it off the kernel
+// simply drops every packet crossing the veth, so an allow-list that names a destination blocks it
+// exactly as it blocks everything else. That failure is worse than an outright refusal: enforcement
+// looks configured and correct while nothing in scope is reachable, and the tool reports the
+// destination as unreachable rather than as denied.
+func checkIPForwarding() error {
+	raw, err := os.ReadFile(ipForwardSysctl)
+	if err != nil {
+		// A kernel that does not expose the knob is not a kernel this can vouch for either way;
+		// let Setup speak instead of guessing.
+		return nil
+	}
+	if strings.TrimSpace(string(raw)) == "0" {
+		return fmt.Errorf("%w: net.ipv4.ip_forward is 0, so the kernel drops every packet leaving the "+
+			"sandbox namespace and an in-scope destination is as unreachable as an out-of-scope one; "+
+			"set net.ipv4.ip_forward=1 on the host to use egress enforcement", ErrUnavailable)
+	}
+	return nil
 }
 
 // RecoverStale removes broker-owned namespace state left behind by a prior broker

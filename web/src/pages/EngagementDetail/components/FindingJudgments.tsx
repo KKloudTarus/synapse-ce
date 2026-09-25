@@ -112,10 +112,21 @@ export function Reachability({ j }: { j: Judgment }) {
 }
 
 export function ExplainJudgments({ engagementId, findingId }: { engagementId: string; findingId: string }) {
-  const { data: judgments } = useFetch(
-    () => api.judgments(engagementId).catch(() => [] as Judgment[]),
+  const { data: judgments, error } = useFetch(
+    () => api.judgments(engagementId),
     { deps: [engagementId] },
   )
+
+  // Catching the failure into an empty array made the whole panel disappear, and a missing
+  // analysis panel reads as a finding nobody has analysed rather than an analysis nobody could
+  // load. The judgment record is the propose-verify-confirm trail, so its absence is not neutral.
+  if (error) {
+    return (
+      <p className="rounded-lg border border-secondary bg-primary p-3 text-[11px] text-tertiary shadow-2xs">
+        The AI triage and analysis record could not be loaded: {error}
+      </p>
+    )
+  }
 
   const relevant = (judgments ?? []).filter(
     (j) =>

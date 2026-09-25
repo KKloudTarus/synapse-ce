@@ -175,3 +175,27 @@ jobs:
           name: juliet-scorecard
           path: ${{ runner.temp }}/juliet-scorecard.log
           if-no-files-found: warn
+
+  aggregate:
+    name: Aggregate SAST benchmark status
+    needs: [owasp-scorecard, securibench-scorecard, juliet-scorecard]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # One status for the three scorecards, so the branch rule has a single context to require
+      # rather than three that can drift apart. `always()` above means this job runs even when a
+      # scorecard failed, which is the point: it reports that failure rather than being skipped
+      # alongside it.
+      - shell: bash
+        env:
+          OWASP: ${{ needs.owasp-scorecard.result }}
+          SECURIBENCH: ${{ needs.securibench-scorecard.result }}
+          JULIET: ${{ needs.juliet-scorecard.result }}
+        run: |
+          set -euo pipefail
+          echo "owasp=$OWASP securibench=$SECURIBENCH juliet=$JULIET"
+          test "$OWASP" = success
+          test "$SECURIBENCH" = success
+          test "$JULIET" = success
+

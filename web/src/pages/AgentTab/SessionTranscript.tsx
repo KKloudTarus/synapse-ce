@@ -124,7 +124,7 @@ export function SessionTranscript({
       {terminal(status) && (
         <div className="mt-3 border-t border-secondary pt-3">
           <p className="mb-1.5 text-xs text-tertiary">
-            This run is {status}. The agent runs one goal per session — start a follow-up run to continue this
+            This run is {status}. The agent runs one goal per session. Start a follow-up run to continue this
             line of work (it opens a fresh session).
           </p>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -332,7 +332,7 @@ function safeParse(s: string): unknown {
 }
 
 function toolSummary(parsed: unknown, raw: string): string {
-  const suffix = ' — click to expand'
+  const suffix = ' (click to expand)'
   if (Array.isArray(parsed)) return `${parsed.length} item${parsed.length === 1 ? '' : 's'}${suffix}`
   if (parsed && typeof parsed === 'object') {
     const o = parsed as Record<string, unknown>

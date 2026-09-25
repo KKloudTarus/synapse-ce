@@ -118,53 +118,64 @@ func (r *Resolver) WithRegistryHosts(hosts []string) *Resolver {
 	return r
 }
 
-var _ ports.ManifestResolver = (*Resolver)(nil)
+var (
+	_ ports.ManifestResolver      = (*Resolver)(nil)
+	_ ports.ManifestGraphResolver = (*Resolver)(nil)
+)
 
-// Resolve returns the resolved component tree for the ecosystem's lockfile-less manifest under dir. It is
-// a no-op (nil, nil) when the ecosystem is unknown, there is no manifest, or a committed lockfile is
-// present. A missing tool or any resolution error returns (nil, err) — surfaced as a source warning,
-// never failing the scan; components are returned only on success. Only the top-level dir is inspected.
+// Resolve returns the resolved component tree, discarding the dependency edges. ResolveGraph is the
+// fuller call; this one satisfies ports.ManifestResolver for a caller that only wants the inventory.
 func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, error) {
+	comps, _, err := r.ResolveGraph(ctx, dir)
+	return comps, err
+}
+
+// ResolveGraph returns the resolved component tree AND its dependency edges for the ecosystem's
+// lockfile-less manifest under dir. It is a no-op (nil, nil, nil) when the ecosystem is unknown, there is
+// no manifest, or a committed lockfile is present. A missing tool or any resolution error returns an
+// error — surfaced as a source warning, never failing the scan; results are returned only on success.
+// Only the top-level dir is inspected.
+func (r *Resolver) ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if r.spec.manifest == "" { // unknown ecosystem
-		return nil, nil
+		return nil, nil, nil
 	}
 	manifest := filepath.Join(dir, r.spec.manifest)
 	if fi, err := os.Stat(manifest); err != nil || !fi.Mode().IsRegular() {
-		return nil, nil
+		return nil, nil, nil
 	}
 	for _, ln := range r.spec.lockfiles {
 		if fi, err := os.Stat(filepath.Join(dir, ln)); err == nil && fi.Mode().IsRegular() {
-			return nil, nil // a committed lockfile is parsed directly; resolution would be redundant
+			return nil, nil, nil // a committed lockfile is parsed directly; resolution would be redundant
 		}
 	}
 
 	work, err := os.MkdirTemp("", "synapse-manifestresolve-")
 	if err != nil {
-		return nil, fmt.Errorf("%s resolve: temp dir: %w", r.spec.ecosystem, err)
+		return nil, nil, fmt.Errorf("%s resolve: temp dir: %w", r.spec.ecosystem, err)
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 	data, err := os.ReadFile(manifest)
 	if err != nil {
-		return nil, fmt.Errorf("%s resolve: read %s: %w", r.spec.ecosystem, r.spec.manifest, err)
+		return nil, nil, fmt.Errorf("%s resolve: read %s: %w", r.spec.ecosystem, r.spec.manifest, err)
 	}
 	if err := os.WriteFile(filepath.Join(work, r.spec.manifest), data, 0o600); err != nil {
-		return nil, fmt.Errorf("%s resolve: stage %s: %w", r.spec.ecosystem, r.spec.manifest, err)
+		return nil, nil, fmt.Errorf("%s resolve: stage %s: %w", r.spec.ecosystem, r.spec.manifest, err)
 	}
 	if err := r.run(ctx, work); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	lock, err := os.ReadFile(filepath.Join(work, r.spec.produced))
 	if err != nil {
-		return nil, fmt.Errorf("%s resolve: no %s produced: %w", r.spec.ecosystem, r.spec.produced, err)
+		return nil, nil, fmt.Errorf("%s resolve: no %s produced: %w", r.spec.ecosystem, r.spec.produced, err)
 	}
-	comps, _, err := r.spec.parse(ctx, ownsbom.ParseInput{Dir: dir, Path: manifest, Content: lock})
+	comps, deps, err := r.spec.parse(ctx, ownsbom.ParseInput{Dir: dir, Path: manifest, Content: lock})
 	if err != nil {
-		return nil, fmt.Errorf("%s resolve: parse generated lock: %w", r.spec.ecosystem, err)
+		return nil, nil, fmt.Errorf("%s resolve: parse generated lock: %w", r.spec.ecosystem, err)
 	}
-	return comps, nil
+	return comps, deps, nil
 }
 
 func (r *Resolver) allowedHosts() []string {
@@ -189,6 +200,11 @@ func (r *Resolver) run(ctx context.Context, work string) error {
 			Workdir:      work,
 			Env:          env,
 			EgressPolicy: &ports.EgressPolicy{AllowDomains: r.allowedHosts()},
+			// The identity the scan bound to ctx. Left empty the sandbox refuses the run, which is
+			// the correct outcome: a tool must not reach a registry under an authorization that
+			// ties back to no control-plane record.
+			EgressExecutionKind: ports.EgressExecutionFrom(ctx).Kind,
+			EgressExecutionID:   ports.EgressExecutionFrom(ctx).ID,
 		})
 		if err != nil {
 			return fmt.Errorf("%s resolve (sandboxed): %w: %s", r.spec.ecosystem, err, truncate(string(res.Stderr), 300))

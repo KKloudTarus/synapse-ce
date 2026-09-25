@@ -66,7 +66,7 @@ export const ownershipApi = {
   ownershipRun: (run: string, signal?: AbortSignal): Promise<OwnershipRun> => req(`/ownership/runs/${id(run)}`, { signal }),
   ownershipRunItems: (run: string, cursor?: string, signal?: AbortSignal): Promise<OwnershipPage<OwnershipRunItem>> => req(`/ownership/runs/${id(run)}/items${query({ cursor, limit: 100 })}`, { signal }),
   controlOwnershipRun: (run: string, revision: number, action: 'cancel' | 'retry'): Promise<void> => req(`/ownership/runs/${id(run)}/${action}`, mutate('POST', { revision })),
-  ownershipInbox: (filter: OwnershipFilter, cursor?: string, signal?: AbortSignal): Promise<OwnershipPage<OwnershipFinding> & { total: number }> => req(`/ownership/findings${query({ ...filter, cursor, limit: 100 })}`, { signal }),
+  ownershipInbox: (filter: OwnershipFilter, cursor?: string, signal?: AbortSignal, limit = 25): Promise<OwnershipPage<OwnershipFinding> & { total: number }> => req(`/ownership/findings${query({ ...filter, cursor, limit })}`, { signal }),
   findingOwnership: (eng: string, fid: string, signal?: AbortSignal): Promise<OwnershipCurrent> => req(findingPath(eng, fid), { signal }),
   findingOwnershipHistory: (eng: string, fid: string, cursor?: string): Promise<OwnershipPage<OwnershipDecision>> => req(`${findingPath(eng, fid)}/history${query({ cursor, limit: 50 })}`),
   assignOwnership: (eng: string, fid: string, input: OwnershipAssignmentInput, key: string): Promise<OwnershipDecision> => req(findingPath(eng, fid), mutate('POST', input, key)),

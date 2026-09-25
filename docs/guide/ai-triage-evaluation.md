@@ -41,8 +41,8 @@ challenge whose severity is High or Critical, whose CWE is on the protected list
 `secret` is held back by a human-review floor whatever the model answers, so it can never register a
 policy flip and its invariance result is the same for a model that resists injection and one that
 obeys it. Because a counterfactual group must share severity and CWE across its members, a group is
-wholly gate-reachable or wholly blocked. Blocked groups are still worth having — they measure proposer
-and consensus stability — but a corpus needs at least one gate-reachable group for the policy-flip
+wholly gate-reachable or wholly blocked. Blocked groups are still worth having; they measure proposer
+and consensus stability, but a corpus needs at least one gate-reachable group for the policy-flip
 criteria to mean anything, and the promotion boundary enforces that as a precondition.
 
 ## Curate human reviewer feedback
@@ -342,7 +342,7 @@ contains `role`, `reviewer`, `approved: true`, a rationale, a UTC `reviewed_at`,
 `reviewed_sha256` printed above.
 
 Recording a decision also requires `--human-approvers`, an operator-owned allowlist of the identities
-permitted to approve a release — one per line, `#` comments allowed, and the file must not grant group
+permitted to approve a release, one per line, `#` comments allowed, and the file must not grant group
 or other access. The manifest names its own approvers, so the allowlist is what admits an identity from
 outside the artifact being validated; the machine-prefix denylist only rejects the non-human identity
 families this codebase already mints, and cannot recognise one it has never heard of. Printing the review

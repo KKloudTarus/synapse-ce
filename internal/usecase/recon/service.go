@@ -438,7 +438,18 @@ func (s *Service) Start(ctx context.Context, actor string, engagementID shared.I
 		return run, nil
 	}
 	if err := s.dispatcher.Submit(func(wctx context.Context) {
-		s.execute(shared.WithTenant(wctx, tenantID), actor, run.ID, toolName, target)
+		runCtx := shared.WithTenant(wctx, tenantID)
+		// Hold the run lease for the inline execution too. SweepStaleRuns reads the lease as
+		// its liveness signal, so without this it sees a free lease for a live inline run and
+		// can only fall back to staleFor. The lease expires when this process dies, which is
+		// what lets the sweeper reclaim the run. A lease this process cannot take leaves that
+		// staleFor fallback in place; the run still executes.
+		if s.runLock != nil {
+			if release, ok, lerr := s.runLock.TryLock(runCtx, run.ID.String()); lerr == nil && ok {
+				defer release()
+			}
+		}
+		s.execute(runCtx, actor, run.ID, toolName, target)
 	}); err != nil {
 		s.finishFailed(ctx, &run, "queue", "could not queue run: "+err.Error())
 		return run, fmt.Errorf("enqueue run: %w", err)

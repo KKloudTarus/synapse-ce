@@ -1,67 +1,219 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
+import type { User } from '../../lib/types'
 import { ToastProvider } from '../../components/synapse/Toast'
 import { Team } from './Team'
 
-vi.mock('../../lib/api', () => ({
-  api: {
-    createUser: vi.fn(),
-    listUsers: vi.fn(),
-  },
-  ApiError: class ApiError extends Error {
-    constructor(
-      public status: number,
-      message: string,
-    ) {
-      super(message)
-    }
-  },
-}))
+vi.mock('../../lib/api', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/api')>('../../lib/api')
+  return {
+    ...actual,
+    api: {
+      listUsers: vi.fn(),
+      createUser: vi.fn(),
+      updateUser: vi.fn(),
+      setUserDisabled: vi.fn(),
+      rotateUserAPIKey: vi.fn(),
+    },
+  }
+})
 
-vi.mock('../../hooks', () => ({
-  useUserList: () => ({ data: [], loading: false, error: null, forbidden: false, refetch: vi.fn() }),
-}))
-
-vi.mock('../../lib/clipboard', () => ({ copyText: vi.fn().mockResolvedValue(undefined) }))
+const alice: User = { id: 'u-1', name: 'Alice', role: 'member', disabled: false, createdAt: null }
+const bob: User = { id: 'u-2', name: 'Bob', role: 'admin', disabled: true, createdAt: null }
 
 function renderTeam() {
-  render(
-    <ToastProvider>
-      <Team />
-    </ToastProvider>,
-  )
+  return render(<ToastProvider><Team /></ToastProvider>)
 }
 
-describe('Team', () => {
+describe('Team administration', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    vi.mocked(api.listUsers).mockResolvedValue([alice, bob])
   })
 
-  it('announces a member add and says the API key is shown once', async () => {
+  it('lists members with their role and disabled state', async () => {
+    renderTeam()
+
+    expect(await screen.findByText('Alice')).toBeInTheDocument()
+    expect(screen.getByText('Bob')).toBeInTheDocument()
+    expect(screen.getByText('disabled')).toBeInTheDocument()
+  })
+
+  // The server has always accepted a role change; the dashboard could not express one, so an
+  // operator could add a person to the tenant but never adjust what they can do.
+  it('changes a member role only after an explicit save', async () => {
+    vi.mocked(api.updateUser).mockResolvedValue({ ...alice, role: 'reviewer' })
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change role' })[0])
+    const editor = screen.getByRole('group', { name: /Role for Alice/ })
+    fireEvent.click(within(editor).getByLabelText('Reviewer'))
+
+    // Selecting is not committing: a privilege change takes a deliberate save.
+    expect(api.updateUser).not.toHaveBeenCalled()
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save role' }))
+
+    // Only the role travels: echoing a name from a roster snapshot would revert a rename another
+    // admin made after this screen loaded.
+    await waitFor(() => expect(api.updateUser).toHaveBeenCalledWith('u-1', 'reviewer'))
+  })
+
+  it('offers every role the server accepts, not just admin and member', async () => {
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change role' })[0])
+    const editor = screen.getByRole('group', { name: /Role for Alice/ })
+    for (const label of ['Member', 'Consultant', 'Reviewer', 'Read only', 'Admin']) {
+      expect(within(editor).getByLabelText(label)).toBeInTheDocument()
+    }
+  })
+
+  it('cannot save a role that is already the current one', async () => {
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change role' })[0])
+    const editor = screen.getByRole('group', { name: /Role for Alice/ })
+    expect(within(editor).getByRole('button', { name: 'Save role' })).toBeDisabled()
+  })
+
+  // Revoking access is the action that matters most on a security control plane.
+  it('disables an active member and re-enables a disabled one', async () => {
+    vi.mocked(api.setUserDisabled).mockResolvedValue({ ...alice, disabled: true })
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getByRole('button', { name: 'Disable' }))
+    await waitFor(() => expect(api.setUserDisabled).toHaveBeenCalledWith('u-1', true))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
+    await waitFor(() => expect(api.setUserDisabled).toHaveBeenCalledWith('u-2', false))
+  })
+
+  // The rotated key is returned exactly once, so it is masked until asked for, and it must not
+  // outlive the moment: left rendered it stayed readable in the DOM long after the admin moved on,
+  // which makes the "shown once" copy beside it untrue.
+  it('masks the rotated key until it is revealed', async () => {
+    vi.mocked(api.rotateUserAPIKey).mockResolvedValue({ user: alice, apiKey: 'sk-rotated-123' })
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: /Rotate key/ })[0])
+
+    expect(await screen.findByText(/is shown once/)).toBeInTheDocument()
+    expect(screen.queryByText('sk-rotated-123')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal' }))
+    expect(screen.getByText('sk-rotated-123')).toBeInTheDocument()
+  })
+
+  it('drops the rotated key when it is dismissed', async () => {
+    vi.mocked(api.rotateUserAPIKey).mockResolvedValue({ user: alice, apiKey: 'sk-rotated-123' })
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: /Rotate key/ })[0])
+    fireEvent.click(await screen.findByRole('button', { name: "Dismiss Alice's new API key" }))
+
+    expect(screen.queryByText(/is shown once/)).not.toBeInTheDocument()
+  })
+
+  // A key shown for one action is stale context beside the next one, and leaving it on screen is
+  // what let it outlive the admin's attention.
+  it('drops the rotated key when another action on the row starts', async () => {
+    vi.mocked(api.rotateUserAPIKey).mockResolvedValue({ user: alice, apiKey: 'sk-rotated-123' })
+    vi.mocked(api.setUserDisabled).mockResolvedValue({ ...alice, disabled: true })
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: /Rotate key/ })[0])
+    await screen.findByText(/is shown once/)
+    fireEvent.click(screen.getByRole('button', { name: 'Disable' }))
+
+    await waitFor(() => expect(screen.queryByText(/is shown once/)).not.toBeInTheDocument())
+  })
+
+  it('surfaces a failed action instead of leaving the row unchanged', async () => {
+    vi.mocked(api.setUserDisabled).mockRejectedValue(new Error('insufficient permissions'))
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getByRole('button', { name: 'Disable' }))
+
+    // The row itself carries the failure, not only the transient toast, so the operator can still
+    // read why the action did not take effect after the toast has gone.
+    const shown = await screen.findAllByText('insufficient permissions')
+    expect(shown.some((node) => node.className.includes('text-critical'))).toBe(true)
+  })
+
+  // The roster refetches after any action on any row, and this row keeps its React key across
+  // that refetch. An editor left open with its selection seeded from the old role would see Save
+  // re-enable itself the moment another admin moved the member, and pressing it would write back
+  // a role the operator never chose.
+  it('never saves a role after the member moved underneath the open editor', async () => {
+    vi.mocked(api.setUserDisabled).mockResolvedValue({ ...bob, disabled: false })
+    vi.mocked(api.listUsers)
+      .mockResolvedValueOnce([alice, bob])
+      .mockResolvedValue([{ ...alice, role: 'admin' }, bob])
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change role' })[0])
+    const editor = screen.getByRole('group', { name: /Role for Alice/ })
+    expect(within(editor).getByRole('button', { name: 'Save role' })).toBeDisabled()
+
+    // Another admin promotes Alice; any action on any row brings the new roster in.
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
+    await waitFor(() => expect(api.listUsers).toHaveBeenCalledTimes(2))
+
+    await waitFor(() =>
+      expect(within(editor).getByRole('button', { name: 'Save role' })).toBeDisabled(),
+    )
+    expect(screen.getByText(/was moved to admin elsewhere/)).toBeInTheDocument()
+    expect(api.updateUser).not.toHaveBeenCalled()
+  })
+
+  // The key a newly created member is issued is returned exactly once, so it gets the same
+  // treatment as a rotated one rather than being printed into the row.
+  it('masks a new member key until it is revealed, and drops it on dismiss', async () => {
     vi.mocked(api.createUser).mockResolvedValue({
-      user: { id: 'u-1', name: 'Ada', role: 'member', disabled: false },
-      apiKey: 'syn_live_abc123',
-    } as never)
-
+      user: { id: 'u-3', name: 'Carol', role: 'member', disabled: false, createdAt: null },
+      apiKey: 'sk-created-456',
+    })
     renderTeam()
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada' } })
+
+    await screen.findByText('Alice')
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Carol' } })
     fireEvent.click(screen.getByRole('button', { name: /Add/ }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Ada added as member')
-    expect(screen.getByText(/Shown once/)).toBeInTheDocument()
-    expect(screen.getByText(/cannot be retrieved again/)).toBeInTheDocument()
-    expect(screen.getByText('syn_live_abc123')).toBeInTheDocument()
+    await waitFor(() => expect(api.createUser).toHaveBeenCalledWith('Carol', 'member'))
+    // The panel is identified by its dismiss control: the "shown once" copy also appears in the
+    // toast, and the point here is what the row itself holds.
+    expect(await screen.findByRole('button', { name: "Dismiss Carol's API key" })).toBeInTheDocument()
+    expect(screen.queryByText('sk-created-456')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal' }))
+    expect(screen.getByText('sk-created-456')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: "Dismiss Carol's API key" }))
+    expect(screen.queryByText('sk-created-456')).not.toBeInTheDocument()
   })
 
-  it('announces a failed add as an alert', async () => {
-    vi.mocked(api.createUser).mockRejectedValue(new Error('duplicate name'))
-
+  it('refuses an empty name and surfaces a failed add', async () => {
+    vi.mocked(api.createUser).mockRejectedValue(new Error('name already taken'))
     renderTeam()
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada' } })
-    fireEvent.click(screen.getByRole('button', { name: /Add/ }))
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('duplicate name'))
-    expect(screen.queryByText(/Shown once/)).not.toBeInTheDocument()
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+    expect(await screen.findByText('Name required')).toBeInTheDocument()
+    expect(api.createUser).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Carol' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add/ }))
+    // Inline beside the field, not only in the toast, so the reason survives the toast.
+    const shown = await screen.findAllByText('name already taken')
+    expect(shown.some((node) => node.className.includes('text-critical'))).toBe(true)
   })
 })

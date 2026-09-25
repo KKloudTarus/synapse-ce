@@ -29,6 +29,8 @@ type businessAssetService interface {
 	Coverage(context.Context, shared.ID, shared.ID) (businessassetuc.Coverage, error)
 	Posture(context.Context, shared.ID, shared.ID) (businessassetuc.Posture, error)
 	History(context.Context, shared.ID, shared.ID) ([]businessassetuc.HistoryItem, error)
+	CriticalityCounts(context.Context, shared.ID) (map[asset.Criticality]int, error)
+	ListPage(context.Context, shared.ID, businessassetuc.Filter, int, int) ([]*asset.BusinessAsset, int, error)
 }
 
 func (rt *Router) SetBusinessAssets(service businessAssetService) { rt.businessAssets = service }
@@ -85,17 +87,19 @@ func (rt *Router) listBusinessAssets(w http.ResponseWriter, r *http.Request) {
 		}
 		offset = n
 	}
-	items, err := rt.businessAssets.List(r.Context(), requestTenant(r), businessassetuc.Filter{Query: r.URL.Query().Get("q"), Type: asset.BusinessAssetType(r.URL.Query().Get("type")), Criticality: asset.Criticality(r.URL.Query().Get("criticality")), Lifecycle: asset.BusinessAssetLifecycle(r.URL.Query().Get("lifecycle")), Owner: r.URL.Query().Get("owner")})
+	// The filter and the page are applied in the store. Listing the whole estate here and slicing
+	// it made a five-row page cost a full scan and a full row transfer for the tenant.
+	filter := businessassetuc.Filter{Query: r.URL.Query().Get("q"), Type: asset.BusinessAssetType(r.URL.Query().Get("type")), Criticality: asset.Criticality(r.URL.Query().Get("criticality")), Lifecycle: asset.BusinessAssetLifecycle(r.URL.Query().Get("lifecycle")), Owner: r.URL.Query().Get("owner")}
+	items, total, err := rt.businessAssets.ListPage(r.Context(), requestTenant(r), filter, limit, offset)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return
 	}
-	if offset > len(items) {
-		offset = len(items)
+	if offset > total {
+		offset = total
 	}
-	end := min(offset+limit, len(items))
-	out := make([]businessAssetListItem, 0, end-offset)
-	for _, a := range items[offset:end] {
+	out := make([]businessAssetListItem, 0, len(items))
+	for _, a := range items {
 		posture, pErr := rt.businessAssets.Posture(r.Context(), requestTenant(r), a.ID)
 		if pErr != nil {
 			writeError(w, rt.log, pErr)
@@ -103,8 +107,25 @@ func (rt *Router) listBusinessAssets(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, businessAssetListItem{BusinessAsset: a, Posture: posture.Rating, PostureExplanation: posture.Explanation})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(items), "limit": limit, "offset": offset})
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "total": total, "limit": limit, "offset": offset})
 }
+// businessAssetCounts answers the estate-wide criticality histogram from one aggregate, so the
+// inventory can state a tenant-wide figure without issuing a second list request per filter change.
+func (rt *Router) businessAssetCounts(w http.ResponseWriter, r *http.Request) {
+	counts, err := rt.businessAssets.CriticalityCounts(r.Context(), requestTenant(r))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	byCriticality := make(map[string]int, len(counts))
+	total := 0
+	for criticality, count := range counts {
+		byCriticality[string(criticality)] = count
+		total += count
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"by_criticality": byCriticality, "total": total})
+}
+
 func (rt *Router) getBusinessAsset(w http.ResponseWriter, r *http.Request) {
 	a, err := rt.businessAssets.Get(r.Context(), requestTenant(r), shared.ID(r.PathValue("assetID")))
 	if err != nil {

@@ -8,8 +8,8 @@
 | --- | --- |
 | Go 1.26 | Pinned in `go.mod`. Builds cgo-free, so the container image is distroless. |
 | Node 22 and pnpm | For the web dashboard. Use pnpm, not npm or yarn. |
-| Syft | Required for any scan. Generates the SBOM. |
-| Grype | Optional. Adds the offline vulnerability database. Missing means detection degrades to the live source only. |
+| Syft | Optional. An opt-in second SBOM producer, used to cross-check the owned parsers. Not needed to scan: `SYNAPSE_SBOM_PRODUCER` defaults to `ownsbom`. |
+| Grype | Optional. Adds an offline vulnerability database as an opt-in detection source beside the owned advisory store. |
 | PostgreSQL | Optional for development, required for durable persistence, the fleet, scheduled provider work, and the owned advisory store. |
 | S3 or MinIO | Optional. For evidence artifacts. |
 | Docker | Optional. The easiest way to run the full stack on any OS. |
@@ -35,15 +35,28 @@ to get full parity on any OS is the container, which is Linux inside.
 
 ## Install the external tools
 
-Synapse shells out to pinned tool binaries. Install them with the provided target:
+A scan needs none of these. The SBOM comes from Synapse's own per-ecosystem parsers and the
+vulnerability data from its own advisory store, so a stock install shells out to no third-party
+scanner at all. Install them only for the opt-in cross-check:
 
 ```bash
 make tools            # installs syft and grype into ./bin, checksum-verified
 export PATH="$PWD/bin:$PATH"
 ```
 
-Add recon tools on Linux with `make tools RECON=1`. The container image already bundles syft
-and grype.
+Recon is different: live recon really does shell out, so its tools must be present and, because the
+sandbox binds a curated read-only root, they must sit somewhere it can reach.
+
+```bash
+make tools RECON=1                              # subfinder, httpx, naabu via `go install`
+sudo cp "$(go env GOPATH)/bin/"{subfinder,httpx,naabu} /usr/local/bin/
+```
+
+`go install` writes into `$(go env GOPATH)/bin`, which is usually under a home directory, and a
+home directory is mode `0750` on current Ubuntu. The sandbox drops into a user namespace before it
+binds anything, so it cannot traverse that path and the run fails with `bwrap: Can't find source
+path …: Permission denied`. `/usr/local/bin` is inside the curated root. See
+[troubleshooting](troubleshooting.md#a-recon-run-fails-with-ip-netns-attach-no-such-file-or-directory).
 
 ## Install Synapse
 

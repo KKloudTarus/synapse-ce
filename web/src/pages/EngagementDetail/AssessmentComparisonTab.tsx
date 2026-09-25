@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowDown, ArrowNarrowRight, ArrowUp, CheckCircle, ChevronLeft, ChevronRight, FilterLines, GitBranch01, InfoCircle, RefreshCw01, SearchLg, ShieldTick, Sliders04, SwitchVertical01, XClose } from '@untitledui/icons'
+import { AlertCircle, ArrowDown, ArrowNarrowRight, ArrowUp, Camera01, CheckCircle, ChevronLeft, ChevronRight, FilterLines, GitBranch01, InfoCircle, RefreshCw01, SearchLg, ShieldTick, Sliders04, SwitchVertical01, XClose } from '@untitledui/icons'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Dialog, Modal, ModalOverlay } from '../../components/application/modals/modal'
@@ -11,6 +11,7 @@ import { api, ApiError } from '../../lib/api'
 import { sevRank } from '../../lib/severity'
 import type { AssessmentComparison, AssessmentComparisonChangeFlag, AssessmentComparisonItem, AssessmentComparisonMode, AssessmentComparisonRatio, AssessmentComparisonScope, AssessmentComparisonSummary, AssessmentLifecycle, AssessmentSnapshot, AssessmentSnapshotListResponse, Severity } from '../../lib/types'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS, type SortDirection } from './components/FindingsTable'
+import { FinalizeSnapshotDialog } from './FinalizeSnapshotDialog'
 
 const ALL = 'all'
 const PRESENCE = ['all', 'new', 'still_detected', 'not_detected_under_comparable_coverage', 'not_evaluated', 'reopened', 'needs_review'].map(option)
@@ -65,16 +66,35 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
   const [createError, setCreateError] = useState('')
   const [selectedItem, setSelectedItem] = useState<AssessmentComparisonItem | null>(null)
   const [configOpen, setConfigOpen] = useState(!comparisonId)
+  const [finalizeOpen, setFinalizeOpen] = useState(false)
   const [expandedItemId, setExpandedItemId] = useState('')
   const [cursorHistory, setCursorHistory] = useState<string[]>([])
 
-  const context = useFetch(() => Promise.all([api.assessmentLifecycle(assessmentId), api.assessmentSnapshots(assessmentId)]), { deps: [assessmentId] })
+  // The lifecycle is only consulted to offer the sibling Assessments of a Cycle as a baseline. Cycles
+  // are opt-in, so most Assessments are in none and the API says so with a 404. Letting that reject the
+  // pair failed the whole tab with `not found: assessment "..." does not belong to any cycle`, hiding a
+  // comparison that works: this Assessment's own snapshots can still be compared against each other.
+  const context = useFetch(() => Promise.all([
+    api.assessmentLifecycle(assessmentId).catch((error) => {
+      if (error instanceof ApiError && error.status === 404) return null
+      throw error
+    }),
+    api.assessmentSnapshots(assessmentId),
+  ]), { deps: [assessmentId] })
+  // Finalizing requires PermOperate (router.go: POST /engagements/{id}/snapshots/finalize). Offering
+  // the control to a reviewer or a read-only account only produces a 403 after they have picked
+  // runs. The server still enforces; this keeps the UI honest about what the account can do.
+  const meFetch = useFetch(() => api.me(), { deps: [] })
+  const canOperate = ['admin', 'consultant', 'member'].includes(meFetch.data?.role ?? '')
   const lifecycle = context.data?.[0] ?? null
   const currentSnapshots = context.data?.[1] ?? null
   const assessmentIds = useMemo(() => comparisonAssessmentIds(lifecycle, assessmentId, mode), [assessmentId, lifecycle, mode])
   const baselineAssessmentId = assessmentIds.includes(baselineAssessmentParam) ? baselineAssessmentParam : (assessmentIds[0] ?? '')
   const baselineFetch = useFetch(() => api.assessmentSnapshots(baselineAssessmentId), { enabled: Boolean(baselineAssessmentId), deps: [baselineAssessmentId] })
   const baselineSnapshots = baselineAssessmentId === assessmentId ? currentSnapshots : baselineFetch.data
+  // Without this the config modal sits on "Preparing comparison options…" forever when the baseline
+  // snapshot list fails, so a broken comparison is indistinguishable from a slow one.
+  const baselineError = baselineAssessmentId === assessmentId ? '' : (baselineFetch.error ?? '')
 
   useEffect(() => {
     if (!currentSnapshots || !baselineSnapshots || !baselineAssessmentId) return
@@ -150,7 +170,17 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
 
   if (context.loading && !context.data) return <Spinner label="Loading assessment comparison context…" />
   if (context.error) return <ErrorState message={context.error} />
-  if (!lifecycle || !currentSnapshots?.items.length) return <EmptyState icon={GitBranch01} title="No immutable snapshots to compare" hint="Finalize at least one assessment snapshot before creating a comparison." />
+  // A comparison needs finalized snapshots, not a Cycle: gating on the lifecycle sent every engagement
+  // outside a Cycle to this empty state even when it had snapshots to compare.
+  if (!currentSnapshots?.items.length) return <>
+    <EmptyState
+      icon={GitBranch01}
+      title="No immutable snapshots to compare"
+      hint={canOperate ? 'Finalize at least one assessment snapshot before creating a comparison.' : 'Finalizing a snapshot requires the operate capability, which this account does not hold.'}
+      action={canOperate ? <Button onClick={() => setFinalizeOpen(true)}><Camera01 className="size-4" />Finalize snapshot</Button> : undefined}
+    />
+    {finalizeOpen ? <FinalizeSnapshotDialog assessmentId={assessmentId} expectedDefaultVersion={currentSnapshots?.defaultVersion ?? 0} onClose={() => setFinalizeOpen(false)} onFinalized={() => { setFinalizeOpen(false); context.refetch() }} /> : null}
+  </>
 
   const scopeDetails = SCOPES.find((item) => item.value === scope) ?? SCOPES[0]
   const hasAdvancedFilters = Boolean(producer || findingKind || reviewState !== ALL || disposition !== ALL)
@@ -192,8 +222,9 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
   }
 
   return <div className="space-y-5">
-    {!comparisonId ? <EmptyState icon={GitBranch01} title="Configure a comparison" hint="Choose two immutable snapshots and the finding scope you want to inspect." action={<Button onClick={() => setConfigOpen(true)}><Sliders04 className="size-4" />Configure comparison</Button>} /> : <ComparisonPairBar mode={mode} baseline={baselineSnapshot} current={currentSnapshot} baselineLabel={baselineAssessmentId ? memberLabel(lifecycle, baselineAssessmentId, false) : 'Baseline'} currentLabel={memberLabel(lifecycle, assessmentId, false)} onConfigure={() => setConfigOpen(true)} />}
+    {!comparisonId ? <EmptyState icon={GitBranch01} title="Configure a comparison" hint="Choose two immutable snapshots and the finding scope you want to inspect." action={<div className="flex flex-wrap justify-center gap-2"><Button onClick={() => setConfigOpen(true)}><Sliders04 className="size-4" />Configure comparison</Button>{canOperate ? <Button variant="secondary" onClick={() => setFinalizeOpen(true)}><Camera01 className="size-4" />Finalize snapshot</Button> : null}</div>} /> : <ComparisonPairBar mode={mode} baseline={baselineSnapshot} current={currentSnapshot} baselineLabel={baselineAssessmentId ? memberLabel(lifecycle, baselineAssessmentId, false) : 'Baseline'} currentLabel={memberLabel(lifecycle, assessmentId, false)} onConfigure={() => setConfigOpen(true)} />}
     {comparisonId ? <CoverageBanner baseline={baselineSnapshot} current={currentSnapshot} /> : null}
+    {finalizeOpen ? <FinalizeSnapshotDialog assessmentId={assessmentId} expectedDefaultVersion={currentSnapshots.defaultVersion} onClose={() => setFinalizeOpen(false)} onFinalized={() => { setFinalizeOpen(false); context.refetch() }} /> : null}
     {comparisonId && comparisonFetch.loading && !comparison ? <Spinner label="Loading immutable comparison…" /> : null}
     {comparisonFetch.error ? <ErrorState message={comparisonFetch.error} /> : null}
     {comparison ? <ComparisonState comparison={comparison} onRefresh={comparisonFetch.refetch} /> : null}
@@ -222,7 +253,7 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
         <ComparisonPagination page={cursorHistory.length + 1} pageSize={pageSize} count={visibleItems.length} canPrevious={cursorHistory.length > 0} canNext={Boolean(scopedItemPage?.nextCursor)} onPrevious={previousPage} onNext={nextPage} onPageSizeChange={(value) => setParam('comparison_size', String(value))} />
       </Card>
     </> : null}
-    {configOpen ? <ComparisonConfigModal lifecycle={lifecycle} assessmentId={assessmentId} mode={mode} baselineAssessmentId={baselineAssessmentId} assessmentIds={assessmentIds} baselineSnapshotId={baselineSnapshotId} currentSnapshotId={currentSnapshotId} baselineSnapshots={baselineSnapshots} currentSnapshots={currentSnapshots} scope={scope} creating={creating} error={createError} onSetParam={setParam} onCompare={createComparison} onClose={() => setConfigOpen(false)} /> : null}
+    {configOpen ? <ComparisonConfigModal lifecycle={lifecycle} assessmentId={assessmentId} mode={mode} baselineAssessmentId={baselineAssessmentId} assessmentIds={assessmentIds} baselineSnapshotId={baselineSnapshotId} currentSnapshotId={currentSnapshotId} baselineSnapshots={baselineSnapshots} baselineError={baselineError} currentSnapshots={currentSnapshots} scope={scope} creating={creating} error={createError} onSetParam={setParam} onCompare={createComparison} onClose={() => setConfigOpen(false)} /> : null}
     {selectedItem ? <ReviewDrawer comparison={comparison} item={selectedItem} onClose={() => setSelectedItem(null)} onReplacement={(id) => { setSelectedItem(null); setParams((next) => { next.set('comparison_id', id); next.delete('comparison_cursor'); return next }) }} /> : null}
   </div>
 }
@@ -264,7 +295,7 @@ function SnapshotInline({ snapshot }: { snapshot: AssessmentSnapshot | null }) {
   return <span className="whitespace-nowrap font-mono text-xs text-tertiary">Snapshot {snapshot.snapshotNumber} · {snapshot.id.slice(0, 8)}</span>
 }
 
-function ComparisonConfigModal({ lifecycle, assessmentId, mode, baselineAssessmentId, assessmentIds, baselineSnapshotId, currentSnapshotId, baselineSnapshots, currentSnapshots, scope, creating, error, onSetParam, onCompare, onClose }: { lifecycle: AssessmentLifecycle; assessmentId: string; mode: AssessmentComparisonMode; baselineAssessmentId: string; assessmentIds: string[]; baselineSnapshotId: string; currentSnapshotId: string; baselineSnapshots: AssessmentSnapshotListResponse | null | undefined; currentSnapshots: AssessmentSnapshotListResponse; scope: AssessmentComparisonScope; creating: boolean; error: string; onSetParam: (key: string, value: string, clearComparison?: boolean) => void; onCompare: () => void; onClose: () => void }) {
+function ComparisonConfigModal({ lifecycle, assessmentId, mode, baselineAssessmentId, assessmentIds, baselineSnapshotId, currentSnapshotId, baselineSnapshots, baselineError, currentSnapshots, scope, creating, error, onSetParam, onCompare, onClose }: { lifecycle: AssessmentLifecycle | null; assessmentId: string; mode: AssessmentComparisonMode; baselineAssessmentId: string; assessmentIds: string[]; baselineSnapshotId: string; currentSnapshotId: string; baselineSnapshots: AssessmentSnapshotListResponse | null | undefined; baselineError: string; currentSnapshots: AssessmentSnapshotListResponse; scope: AssessmentComparisonScope; creating: boolean; error: string; onSetParam: (key: string, value: string, clearComparison?: boolean) => void; onCompare: () => void; onClose: () => void }) {
   const ready = Boolean(baselineAssessmentId && baselineSnapshotId && currentSnapshotId && baselineSnapshots)
   const invalidPair = !baselineSnapshotId || !currentSnapshotId || baselineSnapshotId === currentSnapshotId
   const baseline = baselineSnapshots?.items.find((item) => item.id === baselineSnapshotId) ?? null
@@ -277,7 +308,7 @@ function ComparisonConfigModal({ lifecycle, assessmentId, mode, baselineAssessme
           <button type="button" onClick={onClose} disabled={creating} aria-label="Close comparison configuration" className="flex size-9 shrink-0 items-center justify-center rounded-lg text-tertiary hover:bg-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 disabled:opacity-50"><XClose className="size-4" aria-hidden="true" /></button>
         </header>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
-          {!ready ? <div className="flex min-h-64 items-center justify-center"><Spinner label="Preparing comparison options…" /></div> : <>
+          {baselineError ? <div className="min-h-64 p-4"><ErrorState message={baselineError} /></div> : !ready ? <div className="flex min-h-64 items-center justify-center"><Spinner label="Preparing comparison options…" /></div> : <>
           <section className="grid gap-4 rounded-xl border border-secondary bg-secondary/20 p-4 md:grid-cols-2" aria-label="Comparison behavior">
             <Field label="Comparison mode" hint="Lifecycle mode classifies fixed, new and re-opened findings."><Select disabled={creating} ariaLabel="Comparison mode" value={mode} onValueChange={(value) => onSetParam('comparison_mode', value, true)} options={[{ value: 'lifecycle', label: 'Scan → re-scan lifecycle' }, { value: 'neutral_diff', label: 'Neutral snapshot diff' }]} className="w-full" /></Field>
             <Field label="Result scope" hint="This changes presentation scope, not the immutable snapshots."><Select disabled={creating} ariaLabel="Comparison result scope" value={scope} onValueChange={(value) => onSetParam('comparison_scope', value)} options={SCOPES} className="w-full" /></Field>
@@ -548,7 +579,9 @@ function ReviewDrawer({ comparison, item, onClose, onReplacement }: { comparison
 }
 
 function comparisonAssessmentIds(lifecycle: AssessmentLifecycle | null, assessmentId: string, mode: AssessmentComparisonMode) {
-  if (!lifecycle) return []
+  // No Cycle means no sibling Assessments to offer, and this Assessment is still comparable against
+  // its own earlier snapshots, which is the only pair most engagements ever need.
+  if (!lifecycle) return [assessmentId]
   if (mode === 'neutral_diff') return lifecycle.members.map((member) => member.assessmentId)
   const byId = new Map(lifecycle.members.map((member) => [member.assessmentId, member]))
   const result: string[] = []
@@ -640,7 +673,7 @@ function coverageCounts(baseline: AssessmentSnapshot | null, current: Assessment
 function formatRatio(value: AssessmentComparisonRatio) { return value.naReason || value.denominator <= 0 ? 'N/A' : `${Math.round((value.numerator / value.denominator) * 100)}%` }
 function trendLabel(delta: number) { return delta === 0 ? 'No net change' : `${formatSignedNumber(delta)} ${delta > 0 ? 'increase' : 'reduction'}` }
 function snapshotOption(snapshot: AssessmentSnapshot) { return { value: snapshot.id, label: `Snapshot ${snapshot.snapshotNumber} · ${snapshot.id.slice(0, 8)} · ${snapshot.provenance} · ${snapshot.lifecycle}` } }
-function memberLabel(lifecycle: AssessmentLifecycle, id: string, includeId = true) { const member = lifecycle.members.find((value) => value.assessmentId === id); const label = member?.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial assessment'; return includeId ? `${label} · ${id}` : label }
+function memberLabel(lifecycle: AssessmentLifecycle | null, id: string, includeId = true) { const member = lifecycle?.members.find((value) => value.assessmentId === id); const label = member?.assessmentType === 'retest' ? `Re-test #${member.retestNumber}` : 'Initial assessment'; return includeId ? `${label} · ${id}` : label }
 function setOrDelete(params: URLSearchParams, key: string, value: string) { if (value) params.set(key, value); else params.delete(key) }
 function option(value: string) { return { value, label: labelize(value) } }
 function labelize(value: string) { return value ? value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown' }

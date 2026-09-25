@@ -45,12 +45,16 @@ Or run it natively for development:
 
 ```bash
 make install
-make tools
-export PATH="$PWD/bin:$PATH"
 
 export SYNAPSE_API_TOKEN="$(openssl rand -hex 32)"   # required, no anonymous access
 make dev                                             # API on :8080, dashboard on :5173
 ```
+
+`make tools` is not in that list on purpose: a scan needs no third-party scanner binary. The SBOM
+comes from Synapse's own per-ecosystem parsers and the vulnerability data from its own advisory
+store. Run `make tools` only to add Syft and Grype as an opt-in cross-check, and `make tools RECON=1`
+to add the recon tools, which do shell out. See [installation](installation.md#install-the-external-tools)
+for where the recon binaries have to live for the sandbox to reach them.
 
 To back the native API with PostgreSQL instead of the in-memory stores, start the dependency stack and export both DSNs. Its one-shot `postgres-init` container creates the `synapse_app` role that the API connects as.
 
@@ -72,8 +76,8 @@ Operational API routes require it; liveness `GET /healthz` and dependency readin
 intentionally public so probes work without a credential.
 
 A blank `SYNAPSE_DB_DSN` runs the development persistence: in-memory stores plus a few local files such as
-`data/audit.jsonl`. It is not durable and not suitable for real work, but it is not purely ephemeral
-either. Set a DSN for PostgreSQL. Development applies embedded migrations automatically. Production runs
+`data/audit.jsonl`. It survives a restart and nothing more: use it to try the product, and set a DSN
+for PostgreSQL before any work you need to keep. Development applies embedded migrations automatically. Production runs
 `synapse-migrate` with `SYNAPSE_DB_MIGRATION_DSN` before starting services with `SYNAPSE_DB_AUTO_MIGRATE=false`.
 
 ## 2. Log in

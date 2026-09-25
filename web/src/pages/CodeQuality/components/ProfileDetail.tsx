@@ -453,7 +453,7 @@ function RuleActivationBox({
         role="checkbox"
         aria-checked={active}
         aria-disabled="true"
-        aria-label={`${name} — ${active ? 'active' : 'inactive'} (read-only)`}
+        aria-label={`${name}: ${active ? 'active' : 'inactive'} (read-only)`}
         className="mt-0.5 shrink-0 cursor-not-allowed"
       >
         {box}

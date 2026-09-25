@@ -1,7 +1,7 @@
 import { LayoutGrid01 } from '@untitledui/icons'
-import { EmptyState } from '../../components/ui'
+import { EmptyState, ErrorState, StaleNotice } from '../../components/ui'
 import type { Finding, ScanJob, ScanResult, Severity } from '../../lib/types'
-import type { Tab } from './index'
+import type { Tab } from './tabs'
 import { CompositionProvenanceCard } from './components/OverviewComposition'
 import { ScanHealth } from './components/OverviewHealth'
 import { RiskAnalysisZone } from './components/OverviewRisk'
@@ -23,17 +23,26 @@ export { CompositionProvenanceCard, CompTile, CardEmpty } from './components/Ove
 
 export function OverviewTab({
   findings,
+  findingsError,
+  scanError,
   scan,
   job,
   onSelectSeverity,
   onGoTab,
 }: {
   findings: Finding[] | null
+  /** Set when the findings request failed, so the risk zone does not read as "no findings". */
+  findingsError?: string | null
+  /** Set when the latest-scan request failed, which is not the same as no scan having been run. */
+  scanError?: string | null
   scan: ScanResult | null
   job: ScanJob | null
   onSelectSeverity: (s: Severity | 'all') => void
   onGoTab: (t: Tab) => void
 }) {
+  // Only when there is nothing to keep. A failed refresh over a scan already on screen is a
+  // notice above the scan, not a replacement for it.
+  if (scanError && !scan) return <ErrorState message={scanError} />
   if (!scan) {
     return (
       <EmptyState
@@ -46,10 +55,12 @@ export function OverviewTab({
   const open = findings ?? []
   return (
     <div className="space-y-4">
+      {scanError ? <StaleNotice message={scanError} /> : null}
       {/* Zone 1: Health + Quality + Provenance Strip */}
       <ScanHealth scan={scan} job={job} />
 
       {/* Zone 2: Risk Analysis & Remediation Priorities */}
+      {findingsError ? <ErrorState message={findingsError} /> : null}
       <RiskAnalysisZone
         findings={open}
         scan={scan}

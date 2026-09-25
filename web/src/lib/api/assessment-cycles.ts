@@ -271,10 +271,13 @@ export const assessmentCyclesApi = {
     return { items: (value.items ?? []).map(mapMember), nextCursor: value.next_cursor ?? '' }
   },
 
-  archiveAssessmentCycle: async (cycleId: string, version: number): Promise<AssessmentCycleDetail> =>
+  // The key is a parameter so a caller can hold one steady across retries. Minting a fresh key per
+  // attempt turns the operator's own retry of a lost response into a new request, which the
+  // version precondition then rejects as if someone else had acted.
+  archiveAssessmentCycle: async (cycleId: string, version: number, idempotencyKey = newIdempotencyKey()): Promise<AssessmentCycleDetail> =>
     mapDetail(await req(`/assessment-cycles/${id(cycleId)}/archive`, {
       method: 'POST',
-      headers: { 'Idempotency-Key': newIdempotencyKey(), 'If-Match': String(version) },
+      headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': String(version) },
       body: '{}',
     })),
 

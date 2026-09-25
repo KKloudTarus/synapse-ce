@@ -89,3 +89,51 @@ describe('FindingsTab', () => {
     errorSpy.mockRestore()
   })
 })
+
+describe('FindingsTab refresh failure', () => {
+  // A refetch that fails used to replace the table with an error, throwing away what the operator
+  // was reading over a transient outage. The table stays and the screen says it is not current.
+  it('keeps the findings it has and says the refresh failed', async () => {
+    render(
+      <MemoryRouter>
+        <FindingsTab
+          findings={[finding('f-1')]}
+          findingsError="findings service unavailable"
+          scan={null}
+          engagementId="eng-1"
+          filter="all"
+          setFilter={() => {}}
+          focusedFindingId=""
+          onUpdated={() => {}}
+          onReload={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Finding f-1')).toBeInTheDocument()
+    expect(screen.getByText(/Could not refresh: findings service unavailable/)).toBeInTheDocument()
+  })
+
+  // With nothing to keep there is nothing to be stale about, and a security screen must not read
+  // as "this engagement has no findings" when it could not load them.
+  it('shows the failure alone when it has no findings to keep', () => {
+    render(
+      <MemoryRouter>
+        <FindingsTab
+          findings={null}
+          findingsError="findings service unavailable"
+          scan={null}
+          engagementId="eng-1"
+          filter="all"
+          setFilter={() => {}}
+          focusedFindingId=""
+          onUpdated={() => {}}
+          onReload={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('findings service unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/Could not refresh/)).not.toBeInTheDocument()
+  })
+})

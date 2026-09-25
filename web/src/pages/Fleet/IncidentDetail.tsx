@@ -120,9 +120,9 @@ function RiskPanel({ incident, canOperate, onReassessed }: { incident: Incident;
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-3">
-            <ScoreBar label="Risk" value={risk.risk} tone="risk" hint="Escalation — from Threat/Exposure/Behavior factors only" />
+            <ScoreBar label="Risk" value={risk.risk} tone="risk" hint="Escalation, from Threat/Exposure/Behavior factors only" />
             <ScoreBar label="Confidence" value={risk.confidence} hint="Evidence strength; bounded by coverage" />
-            <ScoreBar label="Coverage" value={risk.coverage} hint="Telemetry completeness — never lowers Risk" />
+            <ScoreBar label="Coverage" value={risk.coverage} hint="Telemetry completeness, never lowers Risk" />
           </div>
 
           <div>
@@ -201,7 +201,7 @@ function ResponsesCard({ incident }: { incident: Incident }) {
                 r.verified ? 'bg-accent/10 text-accent ring-accent/30' : 'bg-medium/10 text-medium ring-medium/30',
               )}
             >
-              {r.verified ? 'Verified' : 'Applied — unverified'}
+              {r.verified ? 'Verified' : 'Applied, unverified'}
             </span>
           </div>
         ))}
@@ -329,7 +329,7 @@ function AnalystActions({
         )}
 
         {canReview && (
-          <Field label="Disposition" hint="Analyst verdict — requires review permission.">
+          <Field label="Disposition" hint="Analyst verdict, requires review permission.">
             <Select
               value={incident.disposition}
               onValueChange={(v) => disposition.mutate(v as IncidentDisposition)}

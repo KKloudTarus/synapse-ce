@@ -31,7 +31,11 @@ type projectGateResponse struct {
 }
 
 type projectAnalysisResponse struct {
-	ID             string                             `json:"id"`
+	ID string `json:"id"`
+	// The project this analysis belongs to. The CLI's publish-source checks it before streaming a
+	// working tree, so that it cannot be talked into uploading one project's source against
+	// another project's analysis id.
+	ProjectKey     string                             `json:"project_key"`
 	CreatedAt      time.Time                          `json:"created_at"`
 	Origin         projectanalysis.Origin             `json:"origin"`
 	CI             *projectanalysis.CIContext         `json:"ci,omitempty"`
@@ -60,7 +64,7 @@ func projectAnalysisDTO(analysis projectanalysis.Analysis) projectAnalysisRespon
 		origin = projectanalysis.OriginServer // every analysis before the import route was a server analysis
 	}
 	return projectAnalysisResponse{
-		ID: analysis.ID, CreatedAt: analysis.CreatedAt, Origin: origin, CI: analysis.CI, SourceRef: analysis.SourceRef, SourceCommit: analysis.SourceCommit,
+		ID: analysis.ID, ProjectKey: analysis.ProjectKey, CreatedAt: analysis.CreatedAt, Origin: origin, CI: analysis.CI, SourceRef: analysis.SourceRef, SourceCommit: analysis.SourceCommit,
 		SourceRevision: analysis.SourceRevision, Capabilities: analysis.Capabilities,
 		Gate: gate, GateInfo: analysis.GateInfo, Issues: analysis.Issues, NewCode: analysis.NewCode, Delta: analysis.Delta,
 		Measures: analysis.Measures, Coverage: analysis.Coverage, Duplication: analysis.Duplication, Rating: analysis.Rating,

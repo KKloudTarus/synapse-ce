@@ -1,10 +1,39 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
-import XLSXModule from 'xlsx-js-style'
 import type { ScanResult, Severity, Vulnerability } from './types'
 
 type ExcelWs = Record<string, any>
 type ExcelWb = any
-const XLSX = XLSXModule as any
+
+// xlsx-js-style and fflate are only needed once the user actually exports a workbook, and together
+// they dominate this module's size. Loading them on demand keeps them out of the chunk every
+// engagement screen pays for on first paint. Both bindings are assigned before any sheet builder
+// runs: every builder below is module-private and reachable only through the exported async entry
+// points, each of which awaits the load first. The promise is cached so a second export does not
+// re-import, and a failed load is not cached, so a retry can still succeed.
+let XLSX: any
+let strFromU8: typeof import('fflate').strFromU8
+let strToU8: typeof import('fflate').strToU8
+let unzipSync: typeof import('fflate').unzipSync
+let zipSync: typeof import('fflate').zipSync
+
+let enginePromise: Promise<void> | null = null
+
+function loadExcelEngine(): Promise<void> {
+  if (!enginePromise) {
+    enginePromise = Promise.all([import('xlsx-js-style'), import('fflate')])
+      .then(([xlsxModule, fflate]) => {
+        XLSX = (xlsxModule as any).default ?? xlsxModule
+        strFromU8 = fflate.strFromU8
+        strToU8 = fflate.strToU8
+        unzipSync = fflate.unzipSync
+        zipSync = fflate.zipSync
+      })
+      .catch((cause) => {
+        enginePromise = null
+        throw cause
+      })
+  }
+  return enginePromise
+}
 
 export type ExcelExportMode = 'service' | 'summary'
 
@@ -809,14 +838,15 @@ function patchWorkbookTabColors(bytes: Uint8Array, tabColors: string[]): Uint8Ar
   return zipSync(files)
 }
 
-export function buildStyledExcelWorkbook(scan: ScanResult, mode: ExcelExportMode = 'service') {
+export async function buildStyledExcelWorkbook(scan: ScanResult, mode: ExcelExportMode = 'service') {
+  await loadExcelEngine()
   const wb = XLSX.utils.book_new() as ExcelWb
   const tabColors = mode === 'summary' ? appendExcelSummarySheets(wb, scan) : appendExcelServiceSheets(wb, scan)
   return { wb, tabColors }
 }
 
-export function buildStyledExcelBytes(scan: ScanResult, mode: ExcelExportMode = 'service'): Uint8Array {
-  const { wb, tabColors } = buildStyledExcelWorkbook(scan, mode)
+export async function buildStyledExcelBytes(scan: ScanResult, mode: ExcelExportMode = 'service'): Promise<Uint8Array> {
+  const { wb, tabColors } = await buildStyledExcelWorkbook(scan, mode)
   const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer
   const patched = patchWorkbookTabColors(new Uint8Array(bytes), tabColors)
   const blobBytes = new Uint8Array(patched.byteLength)
@@ -824,8 +854,8 @@ export function buildStyledExcelBytes(scan: ScanResult, mode: ExcelExportMode = 
   return blobBytes
 }
 
-export function downloadStyledExcel(filename: string, scan: ScanResult, mode: ExcelExportMode = 'service'): void {
-  const blobBytes = buildStyledExcelBytes(scan, mode)
+export async function downloadStyledExcel(filename: string, scan: ScanResult, mode: ExcelExportMode = 'service'): Promise<void> {
+  const blobBytes = await buildStyledExcelBytes(scan, mode)
   const blob = new Blob([blobBytes.buffer as ArrayBuffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })

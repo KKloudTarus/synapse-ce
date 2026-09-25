@@ -396,6 +396,11 @@ func (r *Resolver) run(ctx context.Context, dir, goal string) ([]byte, error) {
 			// mvn must reach the Maven repository for POM/metadata resolution; confine egress to it
 			// (Central + any configured mirror). Default-deny blocks a POM redirecting mvn elsewhere.
 			EgressPolicy: &ports.EgressPolicy{AllowDomains: r.allowedHosts()},
+			// The identity the scan bound to ctx. Left empty the sandbox refuses the run, which is
+			// the correct outcome: a tool must not reach a registry under an authorization that
+			// ties back to no control-plane record.
+			EgressExecutionKind: ports.EgressExecutionFrom(ctx).Kind,
+			EgressExecutionID:   ports.EgressExecutionFrom(ctx).ID,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("sandboxed: %w: %s", err, truncate(string(res.Stderr), 300))

@@ -74,14 +74,15 @@ export function ChainRehearsalTab({ engagementId }: { engagementId: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-2 rounded-xl border border-warning-primary/40 bg-warning-primary/10 p-3">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-primary" aria-hidden="true" />
-        <p className="text-xs text-secondary">
-          <span className="font-semibold text-warning-primary">Simulation, not real exploitation.</span> A
-          rehearsal admits each step through this engagement's rules of engagement, seals per-step evidence,
-          and has a distinct verifier confirm it, but executes with a no-host simulation. It proves the chain
-          is permitted and its chain of custody is sound; it never touches a host. A running rehearsal is
-          haltable by the offensive kill switch.
+      {/* One warning surface. The body used to be text-secondary on a warning-tinted panel, so only the
+          bold lead read as a warning and the rest read as grey fine print on a near-black box. */}
+      <div className="flex items-start gap-2 rounded-xl border border-warning-primary/40 bg-warning-primary/10 p-3 text-xs text-warning-primary">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <p>
+          <span className="font-semibold">A rehearsal executes against a no-host simulation.</span> It admits
+          each step through this engagement's rules of engagement, seals per-step evidence, and has a distinct
+          verifier confirm it, so it proves the chain is permitted and its chain of custody is sound. It never
+          touches a host, and the offensive kill switch halts a running rehearsal.
         </p>
       </div>
 

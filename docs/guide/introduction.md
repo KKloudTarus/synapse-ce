@@ -38,10 +38,14 @@ keeps tokens out of logs, transcripts, and source.
    outside it.
 2. **Acquire.** The target (a path, a git ref, or a container image) is pulled into an
    isolated workspace, size-bounded.
-3. **SBOM.** Synapse generates a software bill of materials across many ecosystems, or ingests
-   a client-supplied CycloneDX SBOM as the inventory.
-4. **Detect.** Components are matched against a live advisory source, an offline database, and
-   an optional owned advisory store. Results are cross-correlated and de-duplicated.
+3. **SBOM.** Synapse's own per-ecosystem parsers produce a software bill of materials, with the
+   dependency edges between components, or a client-supplied CycloneDX SBOM is ingested as the
+   inventory instead. A target that declares a manifest but commits no lockfile has nothing to
+   pin, so manifest resolution runs the ecosystem's own lock tool over a throwaway copy, inside
+   the sandbox and reaching only the registry.
+4. **Detect.** Components are matched against Synapse's own advisory store, the primary source,
+   alongside a live advisory API. An offline third-party database is available as an opt-in
+   cross-check rather than a dependency. Results are cross-correlated and de-duplicated.
 5. **Prioritize.** Findings are ordered by real risk: known-exploited catalog first, then
    exploit-prediction score, then CVSS. Reachability can de-prioritize a finding on code that
    is never called.
@@ -71,7 +75,7 @@ because they are not the same capability:
 | Format | Ingest | Export |
 | --- | --- | --- |
 | CycloneDX | Yes, as a scan inventory | Yes |
-| SPDX | — | Yes |
+| SPDX |, | Yes |
 | SARIF | Yes, third-party reports | Yes |
 | OpenVEX | Yes, in-repo `.synapse.vex.json` | Yes |
 | CSAF | Yes, advisory feeds | No |

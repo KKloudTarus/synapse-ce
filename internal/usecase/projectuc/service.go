@@ -470,7 +470,16 @@ func (s *Service) GetAnalysis(ctx context.Context, tenantID shared.ID, key, id s
 	if err != nil {
 		return projectanalysis.Analysis{}, err
 	}
-	return s.analyses.Get(ctx, tenantID, p.ID, shared.ID(id))
+	analysis, err := s.analyses.Get(ctx, tenantID, p.ID, shared.ID(id))
+	if err != nil {
+		return projectanalysis.Analysis{}, err
+	}
+	// The store keys analyses by project id and never persists the key, so an analysis read back
+	// carries no project identity of its own. Resolving it required the project, so the key is
+	// known here, and a caller that asked for a named project can check it got that project's
+	// analysis rather than taking the answer on trust.
+	analysis.ProjectKey = p.Key
+	return analysis, nil
 }
 
 // RecordProjectAnalysis is called by SCA only after a successful pipeline and

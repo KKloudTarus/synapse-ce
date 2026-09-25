@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import { Card, Pill, SevBadge, Spinner, cn } from '../../../components/ui'
 import { sevRank } from '../../../lib/severity'
 import type { Finding, ScanResult, Severity } from '../../../lib/types'
-import type { Tab } from '../index'
+import type { Tab } from '../tabs'
 import { CardEmpty } from './OverviewComposition'
 
 const RING_RADII = [114, 100, 86, 72, 58]

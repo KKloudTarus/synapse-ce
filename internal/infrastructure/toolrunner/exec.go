@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -112,10 +113,27 @@ func (r *ExecRunner) Run(ctx context.Context, spec ports.ToolSpec) (ports.ToolRe
 
 	if runCtx.Err() == context.DeadlineExceeded {
 		res.TimedOut = true
-		return res, fmt.Errorf("toolrunner: %q exceeded its %s timeout", spec.Name, timeout)
 	}
+	// A start error is the cause; a deadline reached afterwards is its symptom. Cancel() asks the
+	// process to stop, but a run wrapped in `systemd-run --scope` keeps a child of that scope alive
+	// until the scope goes away, so a failed initialization usually does reach the deadline.
+	// Reporting the timeout first hid the real reason behind "exceeded its 30s timeout": an egress
+	// setup failure was indistinguishable from a tool that simply ran too long, which is the
+	// difference between a diagnosis and a mystery. TimedOut still records that the deadline was hit.
+	// The initialization step runs against a process that has already started, so when that process
+	// dies during it, the step fails for a reason that describes its own symptom. A recon run read
+	// `ip netns attach syn0 33852: Bind /proc/33852/ns/net failed: No such file or directory`, which
+	// says the sandbox pid had vanished and nothing about why; the cause was one line the sandbox had
+	// already written to stderr (`bwrap: Can't find source path …: Permission denied`), sealed into
+	// evidence where an operator reading the run's error never sees it. Carry it into the error.
 	if startErr != nil {
+		if reason := firstLine(res.Stderr); reason != "" {
+			return res, fmt.Errorf("toolrunner: initialize %q after start: %w (%s wrote: %s)", spec.Name, startErr, spec.Name, reason)
+		}
 		return res, fmt.Errorf("toolrunner: initialize %q after start: %w", spec.Name, startErr)
+	}
+	if res.TimedOut {
+		return res, fmt.Errorf("toolrunner: %q exceeded its %s timeout", spec.Name, timeout)
 	}
 	if runErr != nil {
 		var ee *exec.ExitError
@@ -152,4 +170,21 @@ func (w *capWriter) Write(p []byte) (int, error) {
 	}
 	w.buf.Write(p)
 	return len(p), nil
+}
+
+// firstLine returns the first non-empty line of stderr, bounded, for use in an error message. A
+// tool that fails at startup says why on its first line; the rest is noise in an error string.
+func firstLine(stderr []byte) string {
+	const max = 240
+	for _, line := range bytes.Split(stderr, []byte{'\n'}) {
+		trimmed := strings.TrimSpace(string(line))
+		if trimmed == "" {
+			continue
+		}
+		if len(trimmed) > max {
+			return trimmed[:max] + "…"
+		}
+		return trimmed
+	}
+	return ""
 }

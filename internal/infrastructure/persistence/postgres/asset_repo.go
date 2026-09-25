@@ -250,6 +250,126 @@ func (r *AssetRepository) ListBusinessAssets(ctx context.Context, tenantID share
 	return out, err
 }
 
+// businessAssetFilterSQL builds the shared WHERE clause. POSITION is used rather than LIKE so the
+// caller's text needs no wildcard escaping and the match is exactly strings.Contains over the
+// lower-cased value, which is what the in-memory twin does.
+func businessAssetFilterSQL(tenantID shared.ID, query ports.BusinessAssetQuery) (string, []any) {
+	args := []any{tenantID.String()}
+	where := `tenant_id=$1`
+	add := func(clause string, value any) {
+		args = append(args, value)
+		where += fmt.Sprintf(clause, len(args))
+	}
+	if q := strings.TrimSpace(query.Query); q != "" {
+		add(` AND POSITION(lower($%d) IN lower("key" || ' ' || name)) > 0`, strings.ToLower(q))
+	}
+	if query.Type != "" {
+		add(` AND asset_type=$%d`, string(query.Type))
+	}
+	if query.Criticality != "" {
+		add(` AND criticality=$%d`, string(query.Criticality))
+	}
+	if query.Lifecycle != "" {
+		add(` AND lifecycle=$%d`, string(query.Lifecycle))
+	}
+	if owner := strings.TrimSpace(query.Owner); owner != "" {
+		add(` AND POSITION(lower($%d) IN lower(owner)) > 0`, strings.ToLower(owner))
+	}
+	return where, args
+}
+
+// countingRow appends a trailing column to a scan, so the page query can carry its own total
+// without a second statement and a second snapshot.
+type countingRow struct {
+	row   rowScanner
+	total *int
+}
+
+func (c countingRow) Scan(dest ...any) error { return c.row.Scan(append(dest, c.total)...) }
+
+// ListBusinessAssetsPage filters, orders and pages in the database. The count is of rows matching
+// the filter before the page is applied, so a caller can report a total without fetching it.
+//
+// The count rides along on the page query as a window aggregate rather than being read by a
+// separate statement. WithTenant runs at READ COMMITTED, where each statement takes its own
+// snapshot, so a separate COUNT could answer 1 while the SELECT beside it returned nothing, and
+// the inventory would render "1 result" over an empty table.
+//
+// Ordering is by byte value, not by the database's collation. The in-memory twin sorts Go
+// strings, and a Postgres initialised with ICU orders "_infra" before "Billing" where Go does the
+// reverse, which would put different rows on page N depending on which store answered.
+func (r *AssetRepository) ListBusinessAssetsPage(ctx context.Context, tenantID shared.ID, query ports.BusinessAssetQuery) ([]*asset.BusinessAsset, int, error) {
+	out := []*asset.BusinessAsset{}
+	total := 0
+	where, args := businessAssetFilterSQL(tenantID, query)
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		// A non-positive limit means "no page": the caller wants the count only.
+		if query.Limit <= 0 {
+			return tx.QueryRow(ctx, `SELECT COUNT(*) FROM fleet_business_services WHERE `+where, args...).Scan(&total)
+		}
+		offset := query.Offset
+		if offset < 0 {
+			offset = 0
+		}
+		pageArgs := append(append([]any{}, args...), query.Limit, offset)
+		rows, err := tx.Query(ctx,
+			`SELECT `+businessAssetCols+`, COUNT(*) OVER() FROM fleet_business_services WHERE `+where+
+				fmt.Sprintf(` ORDER BY "key" COLLATE "C" LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2),
+			pageArgs...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			a, err := scanBusinessAsset(countingRow{row: rows, total: &total})
+			if err != nil {
+				return err
+			}
+			out = append(out, a)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		// An empty page carries no window aggregate. That is either an offset past the end or a
+		// filter that matches nothing, and only a count can tell them apart.
+		if len(out) == 0 {
+			return tx.QueryRow(ctx, `SELECT COUNT(*) FROM fleet_business_services WHERE `+where, args...).Scan(&total)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// CountBusinessAssetsByCriticality aggregates in the database rather than shipping rows. Postgres
+// answers it from fleet_business_services without materialising the assets, so the cost does not
+// grow with the size of the response the caller wanted.
+func (r *AssetRepository) CountBusinessAssetsByCriticality(ctx context.Context, tenantID shared.ID) (map[asset.Criticality]int, error) {
+	out := map[asset.Criticality]int{}
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT criticality, COUNT(*) FROM fleet_business_services WHERE tenant_id=$1 GROUP BY criticality`, tenantID.String())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var criticality string
+			var count int
+			if err := rows.Scan(&criticality, &count); err != nil {
+				return err
+			}
+			out[asset.Criticality(criticality)] = count
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *AssetRepository) ReplaceBusinessAssetProjects(ctx context.Context, tenantID, assetID shared.ID, links []asset.ComponentMembership) error {
 	return r.replaceBusinessAssetLinks(ctx, tenantID, assetID, "business_asset_projects", "project_id", links)
 }

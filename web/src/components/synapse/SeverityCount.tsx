@@ -30,19 +30,22 @@ export function SeverityBuckets({
   const buckets: SeverityCountTone[] = ['critical', 'high', 'medium', 'low']
   const unrated = total === undefined ? 0 : Math.max(0, total - buckets.reduce((n, b) => n + counts[b], 0))
   return (
+    // The groups wrap rather than run on: with an unrated bucket present this line is wider than
+    // the table cell that holds it, and nowrap made it spill into the next column, so a row read as
+    // "1 unratedNot scanned". Each group still keeps its own number and label together.
     <span
-      className={cn('inline-flex items-baseline gap-2.5 whitespace-nowrap tabular-nums', className)}
+      className={cn('inline-flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 tabular-nums', className)}
       title={`${total ?? buckets.reduce((n, b) => n + counts[b], 0)} open: ${buckets.map((b) => `${counts[b]} ${b}`).join(', ')}${unrated ? `, ${unrated} unrated` : ''}`}
     >
       {total !== undefined && <span className={cn('font-mono text-sm font-semibold', total ? 'text-primary' : 'text-quaternary')}>{total}</span>}
       {buckets.map((b) => (
-        <span key={b} className="inline-flex items-baseline gap-1">
+        <span key={b} className="inline-flex items-baseline gap-1 whitespace-nowrap">
           <SeverityCount count={counts[b]} tone={b} />
           <span className="text-[10px] uppercase text-quaternary">{SHORT[b]}</span>
         </span>
       ))}
       {unrated > 0 && (
-        <span className="inline-flex items-baseline gap-1">
+        <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
           <span className="font-mono text-sm text-tertiary">{unrated}</span>
           <span className="text-[10px] uppercase text-quaternary">unrated</span>
         </span>

@@ -1,23 +1,23 @@
-# Code Quality Rules — authoring guide
+# Code Quality Rules: authoring guide
 
 [Documentation home](README.md) · Previous: [Features](features.md) · Next: [Configuration](configuration.md)
 
 This guide is for contributors adding or reviewing **code-quality rules**. Synapse's code-quality
 engine (see the [Features](features.md) guide) turns parsed source into `Kind=quality` /
 `Kind=reliability` findings and the A–E ratings. Each language ships a built-in **"Synapse way"**
-quality profile — **generated automatically from the catalog rules for that language** (every rule whose
+quality profile, **generated automatically from the catalog rules for that language** (every rule whose
 `Language` matches, at its default severity). This page defines how those rules are modelled, how they
 are authored, and the authoritative sources each language draws on.
 
 Tracking epic: [Code Quality as a product](https://github.com/KKloudTarus/synapse-ce/issues/174) ·
 language rule-pack tracker: [#185](https://github.com/KKloudTarus/synapse-ce/issues/185).
 
-Published catalog coverage: [rules × language × Sonar-equivalent type matrix](../reference/rule-coverage-matrix.md).
+Published catalog coverage: [rules × language × Sonar-equivalent type matrix](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/reference/rule-coverage-matrix.md).
 
 ## Clean-room policy (non-negotiable)
 
-We author **100% of our rule content ourselves**. We survey prior art — the public rule taxonomies of
-mature analyzers, and each language's own linters — to understand *structure and coverage*, never to
+We author **100% of our rule content ourselves**. We survey prior art, the public rule taxonomies of
+mature analyzers, and each language's own linters, to understand *structure and coverage*, never to
 copy. Specifically:
 
 - **Do** derive rules from a language's **authoritative, openly-published** sources: official style
@@ -28,7 +28,7 @@ copy. Specifically:
   detection (AST query, structured parser check, token/line pattern, or metric threshold).
 - **Do not** copy any third-party rule's text, description, examples, or detection code, and **do not**
   attribute our rules to a specific commercial product. Cite the *concept's* origin (a CWE id, a
-  style-guide section, a linter category) — not another tool's rule prose.
+  style-guide section, a linter category), not another tool's rule prose.
 
 When a rule maps to a well-known weakness, cite the **CWE** (e.g. `CWE-89` for SQL injection). When it
 maps to a language idiom, cite the **style-guide section** or the **linter category** it belongs to.
@@ -43,17 +43,17 @@ Every rule carries a **type**, an impacted **software quality**, and a **severit
 | --- | --- |
 | `bug` | Code that is or will be wrong at runtime (a defect). |
 | `vulnerability` | A security weakness that is exploitable as written. |
-| `code_smell` | Maintainability issue — correct today, costly to change. |
+| `code_smell` | Maintainability issue, correct today, costly to change. |
 | `security_hotspot` | Security-sensitive code that **needs human review** (not asserted exploitable). |
 
-**Software quality** (which rating it moves — from ISO/IEC 25010; a rule may touch more than one):
-**Security**, **Reliability**, **Maintainability**. This is how a rule feeds the A–E ratings — every
+**Software quality** (which rating it moves, from ISO/IEC 25010; a rule may touch more than one):
+**Security**, **Reliability**, **Maintainability**. This is how a rule feeds the A–E ratings: every
 new rule declares the quality it impacts so the rating engine stays honest.
 
-**Severity** (Synapse's own scale — do not fork it): `critical` · `high` · `medium` · `low` · `info`.
+**Severity** (Synapse's own scale, do not fork it): `critical` · `high` · `medium` · `low` · `info`.
 
 `security_hotspot` findings flow through the **review workflow** (To review → Acknowledged / Fixed /
-Safe), not the exploitability gate — see the hotspots issue
+Safe) rather than the exploitability gate; see the hotspots issue
 [#179](https://github.com/KKloudTarus/synapse-ce/issues/179).
 
 ## Depth: parity targets + rule categories
@@ -122,7 +122,7 @@ supplies line counts for many more. A language whose grammar is registered is re
 authoring. **VB.NET** ships 140 deterministic pattern rules for `.vb` files but has no bundled grammar;
 where relevant, C#/.NET concepts are re-authored for VB syntax. Structured-config languages (Docker,
 CloudFormation, Terraform, Kubernetes, Azure Resource Manager) use the misconfig analyzer, and
-XML/Secrets/Text use token/parse — none needs a grammar. The matrix below records each language's parser
+XML/Secrets/Text use token/parse; none needs a grammar. The matrix below records each language's parser
 status.
 
 ## Authoring workflow
@@ -147,19 +147,19 @@ plumbing):
 
 - **Built-in profile (generated, immutable).** For each language, `qualityprofile.BuiltIn` activates
   every catalog rule for that `Language` at its default severity, under the key `synapse-way-<slug>`. It
-  is never stored and never edited — it always reflects the current catalogue.
+  is never stored and never edited; it always reflects the current catalogue.
 - **Custom profile (copy, editable).** A user copies a built-in into a tenant-scoped custom profile,
   then **deactivates** rules or **overrides** severities. Deactivating/overriding is `PermOperate`-gated
   and audited; it never touches SCA advisory findings (a profile can only affect first-party catalog
   rules, so it can't suppress a dependency vulnerability).
 - **Assignment.** A profile is assigned per language per project. At analysis time the assigned profiles
   are resolved into one overlay that drops deactivated rules and applies severity overrides before the
-  findings are classified, rated, and gated — so **analyses honor the assigned profile**.
+  findings are classified, rated, and gated, so **analyses honor the assigned profile**.
 - **Gate.** Metrics feed the Quality Gate ([#184](https://github.com/KKloudTarus/synapse-ce/issues/184)):
   the whole-codebase and Clean-as-You-Code (`new_*`) counts, ratings, hotspots-reviewed, and the
   coverage/duplication metrics (`coverage`, `new_coverage`, `duplication_density`, `new_duplication`).
 
-The acceptance invariant — *every shipped language has a non-empty built-in profile* — is enforced by a
+The acceptance invariant (*every shipped language has a non-empty built-in profile*) is enforced by a
 test over the real catalogue (`internal/infrastructure/rulecatalog` → `qualityprofile.BuiltIn` per
 language), so adding the first rule for a new language automatically gives it a "Synapse way" profile.
 
@@ -197,7 +197,7 @@ families above. Ship families incrementally toward the target; every rule is cle
 | XML | ~30 | XXE + schema/well-formedness |
 | IPython Notebooks | +~15 | notebook-specific (reuses the Python pack over cells) |
 | Text | ~8 | any-file: bidi-unicode, BOM, generic secrets |
-| Flex | deferred | legacy ActionScript — low priority |
+| Flex | deferred | legacy ActionScript, low priority |
 
 Every source below is openly published; cite the concept origin per rule.
 
@@ -239,9 +239,9 @@ ActionScript). Further candidates: Shell, Dart, YAML-generic.
 
 When reviewing a language pack, check each rule:
 
-- **Correct** — does the detection actually match the described defect, with acceptable false-positive
+- **Correct**: does the detection actually match the described defect, with acceptable false-positive
   rate? Prefer AST over regex where precision matters.
-- **Sourced** — does the rationale cite a concrete, openly-published source link?
-- **Typed + rated** — right type, impacted software quality, and severity on Synapse's scale?
-- **Tested** — a compliant + non-compliant golden fixture?
-- **Original** — our own wording and detection (clean-room)?
+- **Sourced**: does the rationale cite a concrete, openly-published source link?
+- **Typed + rated**: right type, impacted software quality, and severity on Synapse's scale?
+- **Tested**: a compliant + non-compliant golden fixture?
+- **Original**: our own wording and detection (clean-room)?

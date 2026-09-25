@@ -216,6 +216,65 @@ describe('EngagementDetail Page Shell', () => {
     expect(screen.queryByRole('button', { name: 'Comparison' })).not.toBeInTheDocument()
   })
 
+  // Findings are the engagement's core record. Catching the request into an empty array rendered a
+  // findings-service outage as "this engagement has no findings", with a zero on the tab bar.
+  it('surfaces a findings outage instead of an engagement with no findings', async () => {
+    vi.mocked(api.findings).mockRejectedValue(new Error('findings service unavailable'))
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456/findings']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+          <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('findings service unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/No findings/i)).not.toBeInTheDocument()
+  })
+
+  // 404 is the ordinary "no scan yet" state. Any other failure is an outage and must not be
+  // presented as an engagement that has simply never been scanned.
+  it('separates a scan outage from an engagement that has never been scanned', async () => {
+    vi.mocked(api.latestScan).mockRejectedValue(new Error('scan store unavailable'))
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+          <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('scan store unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('No scan yet')).not.toBeInTheDocument()
+  })
+
+  // Every tab except Overview and Findings is a lazy chunk behind one Suspense boundary. Switching
+  // to a static tab would still pass if a lazy chunk never resolved, so this asserts a lazy tab
+  // actually mounts and renders its own content.
+  it('mounts a lazily loaded tab through the Suspense boundary', async () => {
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+          <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await screen.findByRole('tablist', { name: 'Engagement Views' })
+    fireEvent.click(screen.getByRole('tab', { name: /Supply Chain/i }))
+
+    // ComponentsTab lives in its own chunk; its own empty state proves the chunk resolved and
+    // mounted, rather than the Suspense fallback staying on screen.
+    expect(await screen.findByText('Run a scan to populate the component inventory')).toBeInTheDocument()
+    expect(screen.queryByText('Loading tab…')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'tab-supply-chain')
+    })
+  })
+
   it('moves between tabs with the arrow keys and keeps one tab stop', async () => {
     render(
       <MemoryRouter initialEntries={['/engagements/eng-123456']}>

@@ -260,16 +260,21 @@ function DependencyTreeRow({
 
   return (
     <div className="flex items-center" style={{ paddingLeft: `${Math.min(level, 20) * 18}px` }}>
-      <button
-        type="button"
-        aria-label={hasChildren ? `${open ? 'Collapse' : 'Expand'} ${node.name}` : undefined}
-        tabIndex={hasChildren ? 0 : -1}
-        disabled={!hasChildren}
-        onClick={() => onToggle(node.id)}
-        className="inline-flex size-7 shrink-0 items-center justify-center rounded text-quaternary hover:bg-secondary hover:text-primary disabled:opacity-30"
-      >
-        <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} aria-hidden="true" />
-      </button>
+      {/* A leaf gets a spacer, not a disabled button. On this project's tree that removed 1178
+          nameless buttons from the DOM: a control that can never be pressed and carries no name is
+          noise for a screen reader and weight in a list this long. */}
+      {hasChildren ? (
+        <button
+          type="button"
+          aria-label={`${open ? 'Collapse' : 'Expand'} ${node.name}`}
+          onClick={() => onToggle(node.id)}
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded text-quaternary hover:bg-secondary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+        >
+          <ChevronRight className={cn('size-3.5 transition-transform', open && 'rotate-90')} aria-hidden="true" />
+        </button>
+      ) : (
+        <span className="inline-block size-7 shrink-0" aria-hidden="true" />
+      )}
       <button
         type="button"
         onClick={() => onSelect(node.id)}

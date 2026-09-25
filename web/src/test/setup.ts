@@ -1,6 +1,13 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { afterEach } from 'vitest'
+
+// Testing Library's findBy*/waitFor wait 1s by default, which is their own budget and not the
+// 15s vitest testTimeout. The suite builds 135 jsdom environments and runs them in parallel, so
+// a query that resolves in a few milliseconds on an idle machine can miss that 1s on a saturated
+// one: an alerting test failed on an 86s run and passed on a 51s one, with nothing else changed.
+// This only lengthens how long the same condition is waited for; no assertion changes.
+configure({ asyncUtilTimeout: 5000 })
 
 // Under an opaque origin jsdom exposes a non-functional Web Storage object whose
 // methods are missing, so tests that call localStorage.clear() throw. Install a

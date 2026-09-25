@@ -6,6 +6,7 @@ import type {
   AssetPosture,
   BusinessAsset,
   BusinessAssetInput,
+  BusinessAssetCounts,
   BusinessAssetPage,
   TechnicalAsset,
 } from '../types'
@@ -61,8 +62,25 @@ export const assetsApi = {
     return { items: (raw.items ?? []).map(mapBusinessAsset), total: raw.total ?? 0, limit: raw.limit ?? 50, offset: raw.offset ?? 0 }
   },
 
-  getBusinessAsset: async (id: string): Promise<BusinessAsset> =>
-    mapBusinessAsset(await req(`/appsec/assets/${encodeURIComponent(id)}`)),
+  // Estate-wide criticality histogram from one database aggregate. Using a filtered list request
+  // as a counter made every filter change cost a second full scan of the tenant's assets.
+  businessAssetCounts: async (signal?: AbortSignal): Promise<BusinessAssetCounts> => {
+    const raw = await req('/appsec/asset-counts', signal ? { signal } : undefined)
+    const byCriticality = (raw?.by_criticality ?? {}) as Record<string, number>
+    return {
+      byCriticality: {
+        critical: Number(byCriticality.critical ?? 0),
+        high: Number(byCriticality.high ?? 0),
+        medium: Number(byCriticality.medium ?? 0),
+        low: Number(byCriticality.low ?? 0),
+      },
+      total: Number(raw?.total ?? 0),
+    }
+  },
+
+  // Accepts an asset id or a tenant-scoped business key: the handler resolves both.
+  getBusinessAsset: async (idOrKey: string, signal?: AbortSignal): Promise<BusinessAsset> =>
+    mapBusinessAsset(await req(`/appsec/assets/${encodeURIComponent(idOrKey)}`, signal ? { signal } : undefined)),
 
   createBusinessAsset: async (input: BusinessAssetInput): Promise<BusinessAsset> =>
     mapBusinessAsset(await req('/appsec/assets', { method: 'POST', body: JSON.stringify(input) })),

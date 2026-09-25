@@ -76,7 +76,7 @@ function LegalHoldCard({ engagementId, canReview }: { engagementId: string; canR
         <p className="text-sm text-tertiary">Loading…</p>
       ) : error && !data ? (
         <div className="space-y-3">
-          <ErrorState message={`Could not load legal-hold status: ${error}. Hold status is unknown — do not proceed to deletion until this resolves.`} />
+          <ErrorState message={`Could not load legal-hold status: ${error}. Hold status is unknown. Do not proceed to deletion until this resolves.`} />
           <Button variant="secondary" onClick={refetch}>Retry</Button>
         </div>
       ) : hold ? (
@@ -171,7 +171,7 @@ function DataDeletionCard({ engagementId, canReview }: { engagementId: string; c
   })
 
   return (
-    <Card title="Danger zone — delete detection data" className="border-critical/30">
+    <Card title="Danger zone: delete detection data" className="border-critical/30">
       <p className="mb-3 text-sm text-tertiary">
         Permanently deletes this engagement’s detection projection (right-to-erasure). It is refused while a legal
         hold is active, audited with the reason, and it never touches the immutable evidence chain — only the

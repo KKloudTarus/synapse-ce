@@ -9,7 +9,7 @@ assessment. Neither owns the other, and both can invoke the same analysis pipeli
 Use a Project when you want to track a codebase over time: issues, security hotspots, measures, ratings,
 duplication, coverage, and a quality gate that can block a merge.
 
-![Code Quality project portfolio showing the empty state and project creation action](assets/project-code-quality.png)
+![Code Quality project portfolio showing the empty state and project creation action](assets/ui/desktop_code-quality.webp)
 
 *The Code Quality portfolio keeps long-lived projects separate from time-bounded engagements. This sanitized local view contains no repository or customer data.*
 
@@ -164,7 +164,7 @@ changed lines without first repaying all existing debt.
 may have nothing to measure: no coverage report was supplied, the analysis had no diff, or the diff touched
 no line the report knows about. A condition on one of these then fails closed and is reported as
 **unmeasured** (`"unmeasured": true` in the API, `no data` in the CLI) rather than being judged against a
-0 nobody computed — a `new_duplication <= 3` condition does not pass on the strength of a missing
+0 nobody computed, a `new_duplication <= 3` condition does not pass on the strength of a missing
 measurement. `new_coverage` is line coverage over the lines the diff added; `new_duplication` is the share
 of those lines that sit inside a duplicated block. The measures snapshot's `new_code_coverage` carries the
 specific reason when it is unavailable: `no_coverage_report`, `no_changed_lines`, or

@@ -240,11 +240,29 @@ export function AgentsSection() {
 }
 
 // --- Desired-capability gaps (#633) ---
-// A supplementary, self-degrading section: the desired-capabilities service is optional, so a fetch
-// error (feature off ⇒ 404) simply yields no gaps and the section renders nothing. Only UNCOVERED
-// rows are gaps, so a fully-covered estate also shows nothing here — no false "all clear" card.
+// A supplementary section for an optional service. Feature-off (404) legitimately means there is
+// nothing to show, so the section stays silent; only UNCOVERED rows are gaps, so a fully-covered
+// estate also shows nothing here and no false "all clear" card is rendered.
+//
+// Every OTHER failure is surfaced. Swallowing them too would render this section empty during an
+// outage, which an operator reads as "no capability gaps" when the truth is that coverage is
+// unknown. An unknown gap set must stay visibly unknown rather than degrade into a clean result.
 function DesiredGapsSection() {
-  const { data } = useFetch<FleetDesiredGap[]>(() => api.fleetDesiredGaps().catch(() => []), { deps: [] })
+  const { data, error } = useFetch<FleetDesiredGap[]>(
+    () =>
+      api.fleetDesiredGaps().catch((e) => {
+        if (isFeatureDisabled(e)) return []
+        throw e
+      }),
+    { deps: [] },
+  )
+  if (error) {
+    return (
+      <Card title="Desired-capability gaps" bodyClass="p-0">
+        <ErrorState message={error} />
+      </Card>
+    )
+  }
   const gaps = (data ?? []).filter((g) => !g.covered)
   if (gaps.length === 0) return null
 

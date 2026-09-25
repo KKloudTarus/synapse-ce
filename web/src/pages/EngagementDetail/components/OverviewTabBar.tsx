@@ -14,7 +14,7 @@ import {
   Target04,
 } from '@untitledui/icons'
 import { cn } from '../../../components/ui'
-import type { Tab } from '../index'
+import type { Tab } from '../tabs'
 
 export interface TabCounts {
   findings: number

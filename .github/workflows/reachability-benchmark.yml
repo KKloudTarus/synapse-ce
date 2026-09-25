@@ -634,7 +634,7 @@ jobs:
           retention-days: 14
 
   aggregate:
-    name: Aggregate benchmark status
+    name: Aggregate reachability benchmark status
     needs: [route, benchmark, pr-lifecycle, go-oss-baselines, python-oss-baselines]
     if: ${{ always() }}
     runs-on: ubuntu-latest

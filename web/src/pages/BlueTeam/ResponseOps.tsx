@@ -179,7 +179,7 @@ function PlanApply({ onApplied }: { onApplied: () => void }) {
           applyResult.pending ? 'border-warning-primary bg-warning-secondary' : 'border-utility-green-300 bg-success-secondary')}>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <span className={cn('font-semibold', applyResult.pending ? 'text-warning-primary' : 'text-success-primary')}>
-              {applyResult.pending ? 'Recorded — awaiting a second human approval' : 'Applied through the admission gate'}
+              {applyResult.pending ? 'Recorded, awaiting a second human approval' : 'Applied through the admission gate'}
             </span>
             <span className="font-mono text-xs text-tertiary">action {applyResult.record.id}</span>
             {applyResult.record.evidenceId && <span className="font-mono text-xs text-tertiary">evidence {applyResult.record.evidenceId}</span>}

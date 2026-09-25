@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
@@ -16,6 +17,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/acquire"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/fptriagecache"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/cache/sbomcache"
+	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/secretverify"
@@ -124,13 +126,40 @@ func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.Adv
 		// request is rejected before Bubblewrap starts until scan grants have an authoritative
 		// execution aggregate and issuer branch.
 		scaSandbox.SetBinaryRegistry(binregistry.New(cfg.ToolHashes, true))
+		// The manifest resolvers run on this same runner and DO carry an egress policy, because
+		// resolving a lockfile-less manifest means asking the registry. Without an applier here the
+		// sandbox refused each of them with "egress policy but egress enforcement is not
+		// configured", so a project with a manifest and no lockfile resolved to nothing and the
+		// scan called it "no recognized dependency manifests".
+		//
+		// Attaching the applier opens nothing on its own: the egress path engages only for a spec
+		// that carries a policy, so syft, grype and git stay in a closed netns exactly as before.
+		// Probed rather than assumed, and degraded with a warning, the way recon does it: the
+		// applier needs CAP_NET_ADMIN and CAP_SYS_ADMIN, which an unprivileged API lacks.
+		if app, aerr := egressinfra.NewApplier(); aerr == nil {
+			probeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			perr := app.Probe(probeCtx)
+			cancel()
+			if perr == nil {
+				scaSandbox.SetEgress(app)
+				log.Info("manifest resolution can reach its registries (sandboxed, scope-restricted netns)")
+			} else {
+				log.Warn("sandbox egress not usable here – a manifest without a lockfile cannot be resolved and its components will be missing", "err", perr)
+			}
+		} else {
+			log.Warn("sandbox egress applier unavailable (no ip/iptables) – a manifest without a lockfile cannot be resolved", "err", aerr)
+		}
 		syftGen = syftGen.WithRunner(scaSandbox)
 		grypeSrc = grypeSrc.WithRunner(scaSandbox)
 		localAcquirer = localAcquirer.WithSandbox(scaSandbox, false)
 		acquirer = localAcquirer
 		log.Info("SCA tools (syft/grype) run sandboxed-isolated; network acquisition is fail-closed pending signed scan grants")
 	} else {
-		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – syft/grype/git run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
+		// Named syft and grype, which the default configuration no longer runs: the owned parsers are
+		// the SBOM producer and the detection sources are advisory data. What the warning is actually
+		// about is any external binary the scan shells out to, which is git plus whichever third-party
+		// tools an operator has opted back in.
+		log.Warn("SANDBOX DISABLED (SYNAPSE_SANDBOX_ENABLED is off) – git and any opted-in external scan tools run UNSANDBOXED with NO seccomp/rootfs/egress/cgroup containment; dev only, never production")
 	}
 	// SBOM producer select: default ownsbom (the detection-independent owned parsers across 23 ecosystems,
 	// emitting dependency-graph edges; pure-Go, no exec, so no sandbox) or the pinned Syft binary as an

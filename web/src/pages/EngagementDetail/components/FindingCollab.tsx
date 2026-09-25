@@ -110,6 +110,14 @@ export function RetestPanel({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  // The fetcher mirrors its result into `list` so submit() can append to it, which means a
+  // different finding has to drop the copy: on failure the fetcher returns an empty array
+  // without touching `list`, and the previous finding's retests would stay on screen under
+  // this one's heading.
+  useEffect(() => {
+    setList([])
+  }, [engagementId, finding.id])
+
   useFetch(
     () => api.findingRetests(engagementId, finding.id).then((r) => { setList(r); return r }).catch(() => [] as Retest[]),
     { deps: [engagementId, finding.id] },
@@ -181,6 +189,13 @@ export function CommentsPanel({ engagementId, findingId }: { engagementId: strin
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  // Same reason as the retest list: `comments` is a copy that outlives the request it came
+  // from, so a different finding starts from the loading state rather than from the previous
+  // finding's thread.
+  useEffect(() => {
+    setComments(null)
+  }, [engagementId, findingId])
 
   const { refetch: reload } = useFetch(
     () => api.findingComments(engagementId, findingId).then((c) => { setComments(c); return c }).catch(() => { setComments([]); return [] }),

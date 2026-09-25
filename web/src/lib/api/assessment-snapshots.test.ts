@@ -35,4 +35,21 @@ describe('assessmentSnapshotsApi', () => {
     expect(result.snapshot.dimensions[0].target.schemaVersion).toBe(1)
     expect(result.snapshot.supersededAt).toBeNull()
   })
+
+  // The dialog omits lane keys so the server expands a run to all of its provenance lanes. The
+  // property must be absent from the JSON body, not present as null.
+  it('omits lane_keys entirely when the caller selects a whole run', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ snapshot: {}, default_version: 3 }), {
+      status: 201, headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await assessmentSnapshotsApi.finalizeAssessmentSnapshot('assessment-1', {
+      selectedRuns: [{ runId: 'run-1' }], expectedDefaultVersion: 2, idempotencyKey: 'key-1',
+    })
+
+    const body = fetchMock.mock.calls[0][1].body as string
+    expect(JSON.parse(body)).toEqual({ selected_runs: [{ run_id: 'run-1' }] })
+    expect(body).not.toContain('lane_keys')
+  })
 })

@@ -69,24 +69,35 @@ func (r *Resolver) WithRegistryHosts(hosts []string) *Resolver {
 	return r
 }
 
-var _ ports.NPMResolver = (*Resolver)(nil)
+var (
+	_ ports.NPMResolver      = (*Resolver)(nil)
+	_ ports.NPMGraphResolver = (*Resolver)(nil)
+)
 
-// Resolve returns the resolved pkg:npm component tree for a package.json under dir with no committed
-// lockfile. It is a no-op (nil, nil) when there is no package.json or a committed lockfile is already
-// present. A missing npm binary or any resolution error returns (nil, err), which the SCA service surfaces
-// as a source warning (never failing the scan); components are returned only on success (never partial).
-// Only the top-level dir is inspected (a monorepo with package.json in subfolders is not walked here).
+// Resolve returns the resolved pkg:npm component tree, discarding the dependency edges. ResolveGraph is
+// the fuller call; this one satisfies ports.NPMResolver for a caller that only wants the inventory.
 func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, error) {
+	comps, _, err := r.ResolveGraph(ctx, dir)
+	return comps, err
+}
+
+// ResolveGraph returns the resolved pkg:npm component tree AND its dependency edges for a package.json
+// under dir with no committed lockfile. It is a no-op (nil, nil, nil) when there is no package.json or a
+// committed lockfile is already present. A missing npm binary or any resolution error returns an error,
+// which the SCA service surfaces as a source warning (never failing the scan); results are returned only
+// on success (never partial). Only the top-level dir is inspected (a monorepo with package.json in
+// subfolders is not walked here).
+func (r *Resolver) ResolveGraph(ctx context.Context, dir string) ([]sbom.Component, []sbom.Dependency, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pkgJSON := filepath.Join(dir, "package.json")
 	if fi, err := os.Stat(pkgJSON); err != nil || !fi.Mode().IsRegular() {
-		return nil, nil // not an npm project (root)
+		return nil, nil, nil // not an npm project (root)
 	}
 	for _, ln := range lockfileNames {
 		if fi, err := os.Stat(filepath.Join(dir, ln)); err == nil && fi.Mode().IsRegular() {
-			return nil, nil // a committed lockfile is parsed directly; resolution would be redundant
+			return nil, nil, nil // a committed lockfile is parsed directly; resolution would be redundant
 		}
 	}
 
@@ -94,29 +105,29 @@ func (r *Resolver) Resolve(ctx context.Context, dir string) ([]sbom.Component, e
 	// cache; keep both inside the temp dir so nothing leaks onto the host.
 	work, err := os.MkdirTemp("", "synapse-npmresolve-")
 	if err != nil {
-		return nil, fmt.Errorf("npm resolve: temp dir: %w", err)
+		return nil, nil, fmt.Errorf("npm resolve: temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 	data, err := os.ReadFile(pkgJSON)
 	if err != nil {
-		return nil, fmt.Errorf("npm resolve: read package.json: %w", err)
+		return nil, nil, fmt.Errorf("npm resolve: read package.json: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(work, "package.json"), data, 0o600); err != nil {
-		return nil, fmt.Errorf("npm resolve: stage package.json: %w", err)
+		return nil, nil, fmt.Errorf("npm resolve: stage package.json: %w", err)
 	}
 
 	if err := r.run(ctx, work); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	lock, err := os.ReadFile(filepath.Join(work, "package-lock.json"))
 	if err != nil {
-		return nil, fmt.Errorf("npm resolve: no package-lock.json produced: %w", err)
+		return nil, nil, fmt.Errorf("npm resolve: no package-lock.json produced: %w", err)
 	}
-	comps, _, err := ownsbom.NPM{}.Parse(ctx, ownsbom.ParseInput{Dir: dir, Path: pkgJSON, Content: lock})
+	comps, deps, err := ownsbom.NPM{}.Parse(ctx, ownsbom.ParseInput{Dir: dir, Path: pkgJSON, Content: lock})
 	if err != nil {
-		return nil, fmt.Errorf("npm resolve: parse generated lock: %w", err)
+		return nil, nil, fmt.Errorf("npm resolve: parse generated lock: %w", err)
 	}
-	return comps, nil
+	return comps, deps, nil
 }
 
 // args resolves the lockfile only, with all script execution and interactive/telemetry noise disabled.
@@ -147,6 +158,11 @@ func (r *Resolver) run(ctx context.Context, work string) error {
 			Workdir:      work, // the one writable bind (package.json copy + generated lock + cache)
 			Env:          env,
 			EgressPolicy: &ports.EgressPolicy{AllowDomains: r.allowedHosts()},
+			// The identity the scan bound to ctx. Left empty the sandbox refuses the run, which is
+			// the correct outcome: a tool must not reach a registry under an authorization that
+			// ties back to no control-plane record.
+			EgressExecutionKind: ports.EgressExecutionFrom(ctx).Kind,
+			EgressExecutionID:   ports.EgressExecutionFrom(ctx).ID,
 		})
 		if err != nil {
 			return fmt.Errorf("npm resolve (sandboxed): %w: %s", err, truncate(string(res.Stderr), 300))

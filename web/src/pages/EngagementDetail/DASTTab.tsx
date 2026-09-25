@@ -308,7 +308,7 @@ export function DASTTab({ engagementId }: { engagementId: string }) {
             </dl>
           )}
           {proposal.rationale && <p className="mt-2 text-sm text-tertiary">{proposal.rationale}</p>}
-          {proposal.decisionReason && <p className="mt-1 text-xs text-quaternary">decision: {proposal.decisionReason}{proposal.decidedBy ? ` — ${proposal.decidedBy}` : ''}</p>}
+          {proposal.decisionReason && <p className="mt-1 text-xs text-quaternary">decision: {proposal.decisionReason}{proposal.decidedBy ? ` · ${proposal.decidedBy}` : ''}</p>}
 
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-secondary pt-3">
             {proposal.decisionState === 'pending' && canReview && (

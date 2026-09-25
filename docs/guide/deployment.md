@@ -7,7 +7,8 @@ Synapse ships as a set of Go binaries plus a web dashboard. The provided Compose
 ## Full stack with Docker Compose
 
 The `deploy/docker-compose.full.yml` stack runs everything: PostgreSQL, an S3-compatible object
-store, the API server with Syft and Grype bundled, and the web dashboard.
+store, the API server, and the web dashboard. The image also carries Syft and Grype for the opt-in
+cross-check; neither is used by a default scan.
 
 The stack requires explicit database credentials and complete runtime/migration DSNs. There are no defaults for them, and that is the point: a database password committed to a public repository is a password every reader of the repository has. Generate them once. From the repository root:
 
@@ -151,8 +152,8 @@ user namespaces bubblewrap needs**, so they cannot run the sandboxed execution t
 the ONE privileged component (NET_ADMIN + SYS_ADMIN); the worker and API stay capless.
 
 Single host (one EC2/VM): the offline product runs from `deploy/docker-compose.full.yml` (sandbox off, dev).
-The full product on one box runs the three native roles co-located — `synapse-api` (dispatch-only),
-`synapse-worker`, and root `synapse-egress-broker` — keeping the same privilege split; the API never holds
+The full product on one box runs the three native roles co-located, `synapse-api` (dispatch-only),
+`synapse-worker`, and root `synapse-egress-broker`, keeping the same privilege split; the API never holds
 NET_ADMIN/SYS_ADMIN.
 
 ### The runtime database role must be non-superuser
@@ -178,13 +179,13 @@ storage are private, externally operated dependencies rather than Helm-managed S
 
 Production untrusted-tool execution does **not** run in an EKS Pod. Set `execution.mode=externalNative`
 (the API becomes `dispatch-only` and no worker renders in-cluster) and run native non-root
-`synapse-worker` + root `synapse-egress-broker` services in dedicated private EC2 worker subnets. [ADR 0008](../adr/0008-native-ec2-execution-tier.md)
+`synapse-worker` + root `synapse-egress-broker` services in dedicated private EC2 worker subnets. [ADR 0008](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0008-native-ec2-execution-tier.md)
 supersedes only ADR 0005's worker-placement decision; ADR 0005 still governs the control plane and migration
 order.
 
 Set `SYNAPSE_DB_AUTO_MIGRATE=false`. The Helm pre-install/pre-upgrade migration Job uses the owner identity
 and must complete before API rollout. Back up PostgreSQL and the evidence object store as a quiesced pair and
-use forward-only schema migration as specified by [ADR 0007](../adr/0007-paired-backup-and-forward-only-upgrades.md).
+use forward-only schema migration as specified by [ADR 0007](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0007-paired-backup-and-forward-only-upgrades.md).
 
 ## Kubernetes control plane
 
@@ -254,6 +255,24 @@ and replay after worker or broker restart is refused.
 - Rotate database, object-store, vault, and evidence credentials according to their own dual-read/dual-write
   procedures; do not bundle them into the broker environment. The broker receives only its grant public key.
 
+## Host prerequisites for the execution tier
+
+The execution tier is the only part with kernel requirements, and every one of them fails closed
+rather than degrading, so a host that is missing one refuses the work instead of running it
+unprotected. Provision these before deploying, not after a scan blames the target.
+
+| Requirement | Why | Check |
+| --- | --- | --- |
+| `bubblewrap`, and permission to create a mount namespace | every tool runs confined; a host that cannot create the namespace runs nothing | `synapse-sandbox-check -mode full` |
+| `net.ipv4.ip_forward = 1` | the egress namespace routes through a veth pair; with forwarding off the kernel drops every packet crossing it, so an allowed destination is as unreachable as a denied one | `cat /proc/sys/net/ipv4/ip_forward` |
+| `CAP_NET_ADMIN` and `CAP_SYS_ADMIN` on the broker | building the namespace, the veth pair and the filter rules needs them; only the root broker holds them, never the worker | `getpcaps` on the broker process |
+| a delegated cgroup v2 subtree | the per-run memory and pid limits are applied through it; without one they have nothing to act on | run the tier as a systemd unit, or under `systemd-run --user` |
+| the tool binaries inside the curated read-only root | the sandbox binds `/usr`, `/bin`, `/sbin`, `/lib` and `/lib64` and deliberately omits `/home`, `/root`, `/opt` and `/var`, so a binary under a home directory cannot be reached | `/usr/local/bin` is inside it |
+
+The probe refuses and names the setting when one of these is missing, so the composition root
+degrades to an isolated sandbox rather than pretending to enforce egress. See
+[troubleshooting](troubleshooting.md#recon-and-the-sandbox) for each failure as it appears.
+
 ## Supported network execution posture
 
 Recon has an authoritative signed-grant issuer. Production refuses CSPM and networked SCA/acquisition until their
@@ -320,8 +339,8 @@ have no equivalent HTTP readiness endpoint, so they refuse startup until migrati
 
 ## Metrics and access logging
 
-`SYNAPSE_METRICS_ENABLED` (default `false`) exposes Prometheus metrics — HTTP RED
-(rate/errors/duration), aggregate durable-job queue depth, and SCA scan outcomes — on a
+`SYNAPSE_METRICS_ENABLED` (default `false`) exposes Prometheus metrics, HTTP RED
+(rate/errors/duration), aggregate durable-job queue depth, and SCA scan outcomes, on a
 SEPARATE listener bound by `SYNAPSE_METRICS_ADDR` (default `127.0.0.1:9090`). That
 listener is intentionally uninstrumented and never bearer-protected: keep it loopback-only
 or on a private scrape network, and never put it behind the same public path as the API.
@@ -330,7 +349,7 @@ policy.
 
 `SYNAPSE_ACCESS_LOG_ENABLED` (default `true`) emits one structured `http access` log event
 per request with only bounded, non-sensitive fields (method, matched route, status,
-latency, request id, and — once authenticated — the resolved principal id). It never logs
+latency, request id, and (once authenticated) the resolved principal id). It never logs
 raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or
 secrets.
 

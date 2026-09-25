@@ -394,11 +394,30 @@ func (s *Service) SetSBOMCache(c ports.SBOMCache) { s.sbomCache = c }
 // binary that carries the owned parsers/enrichers. It deliberately excludes advisory/KEV/EPSS DB versions
 // (they don't change the generated SBOM). Empty when no producer version is known, which keeps the cache
 // off rather than serving an SBOM that can't be soundly version-keyed.
+// sbomGeneratorKey names the SBOM producer's version by the role it fills rather than by one
+// implementation of it. The owned parsers are the default producer, and filing their version under
+// "syft" made the manifest contradict itself: `"syft": "ownsbom/0.8.0"`, naming a tool that did not
+// run. legacySBOMGeneratorKey is still read so manifests written before this compare unchanged.
+const sbomGeneratorKey = "sbom-generator"
+const legacySBOMGeneratorKey = "syft"
+
+// sbomGeneratorVersion reads the producer version under either key. The value is the same string in
+// both, so a stored manifest and a fresh one still hash and diff identically.
+func sbomGeneratorVersion(tv map[string]string) string {
+	if tv == nil {
+		return ""
+	}
+	if v := tv[sbomGeneratorKey]; v != "" {
+		return v
+	}
+	return tv[legacySBOMGeneratorKey]
+}
+
 func sbomProducerVersion(tv map[string]string) string {
 	if tv == nil {
 		return ""
 	}
-	v := tv["syft"] + "\x00" + tv["go-enry"] + "\x00" + tv["synapse"]
+	v := sbomGeneratorVersion(tv) + "\x00" + tv["go-enry"] + "\x00" + tv["synapse"]
 	if strings.Trim(v, "\x00") == "" {
 		return ""
 	}
@@ -967,19 +986,25 @@ func mergeResolvedJVM(doc *sbom.SBOM, resolved []sbom.Component, completeScopes 
 	doc.Components = sbom.DedupeComponents(append(kept, resolved...))
 }
 
-// mergeResolvedJVMDeps replaces syft's pkg:maven dependency edges with the resolver's authoritative tree, so
-// PathToRoot / IsDirect / IntroducedBy run over the resolved graph rather than syft's (which for a pom-only
-// scan has no transitive edges at all). Edges whose parent is a pkg:maven node are the resolver's to own;
-// every other edge (a non-JVM ecosystem) is kept. No-op on an empty resolved edge set, so a components-only
-// resolver leaves the graph untouched.
-func mergeResolvedJVMDeps(doc *sbom.SBOM, resolved []sbom.Dependency) {
+// mergeResolvedDeps replaces the generator's dependency edges with a resolver's authoritative tree, so
+// PathToRoot / IsDirect / IntroducedBy / remediation.Solve run over the resolved graph rather than the
+// generator's (which for a manifest-only scan has no transitive edges at all). The resolver owns every
+// PURL type it emitted an edge for; edges of any other ecosystem are kept. No-op on an empty resolved
+// edge set, so a components-only resolver leaves the graph untouched.
+func mergeResolvedDeps(doc *sbom.SBOM, resolved []sbom.Dependency) {
 	if len(resolved) == 0 {
 		return
 	}
+	owned := make(map[string]struct{}, 2)
+	for _, d := range resolved {
+		if t := purlType(d.Ref); t != "" {
+			owned[t] = struct{}{}
+		}
+	}
 	kept := make([]sbom.Dependency, 0, len(doc.Dependencies))
 	for _, d := range doc.Dependencies {
-		if strings.HasPrefix(d.Ref, "pkg:maven/") {
-			continue // the resolver owns the JVM subgraph
+		if _, ok := owned[purlType(d.Ref)]; ok {
+			continue // the resolver owns this ecosystem's subgraph
 		}
 		kept = append(kept, d)
 	}
@@ -2166,6 +2191,21 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		if admission.Generation > 0 {
 			background = context.WithValue(background, inventoryAdmissionContextKey{}, admission)
 		}
+		// Hold the run lease for the inline execution too. SweepStaleScans reads the lease as
+		// its liveness signal, so without this it sees a free lease for a live inline scan and
+		// has only staleFor to tell the two apart. The lease expires when this process dies,
+		// which is what lets the sweeper reclaim the job.
+		if s.runLock != nil {
+			release, ok, lerr := s.runLock.TryLock(background, job.ID)
+			switch {
+			case lerr != nil:
+				s.logger().Warn("run lease unavailable for inline scan; the sweeper falls back to staleFor", "job_id", job.ID, "err", lerr)
+			case !ok:
+				s.logger().Warn("run lease for a new inline scan is already held; the sweeper falls back to staleFor", "job_id", job.ID)
+			default:
+				defer release()
+			}
+		}
 		_ = s.runScanJob(background, actor, engagementID, now, req, opts, job)
 	}()
 	return job, nil
@@ -3057,6 +3097,15 @@ func osCoverageWarnings(osPkgsAdded int, unsupportedDistro, approximateDistro st
 }
 
 func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
+	// A manifest resolver reaches a package registry, so it runs sandboxed under an egress policy,
+	// and the sandbox refuses a policy that carries no authoritative execution identity. Without
+	// this the resolvers failed for exactly that reason whenever the sandbox was on, which is the
+	// configuration production requires: a project with a manifest but no lockfile then resolved
+	// to nothing and the scan reported it as having no recognized dependency manifests.
+	//
+	// The evidence record is the binding, because it is the control-plane row this scan already
+	// writes and the one an auditor would reconcile a network authorization against.
+	ctx = ports.WithEgressExecution(ctx, "sca", evidenceID.String())
 	var err error
 	req, err = s.pinUploadedSource(ctx, engagementID, req)
 	if err != nil {
@@ -3281,7 +3330,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		// succeeded (alongside a non-nil error), and those must not be discarded.
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, true) // dependency:tree = all non-test scopes → complete
-			mergeResolvedJVMDeps(doc, resolvedDeps)    // fold the resolved edges over syft's maven subgraph
+			mergeResolvedDeps(doc, resolvedDeps)    // fold the resolved edges over syft's maven subgraph
 			mavenResolved = true
 		}
 		switch {
@@ -3313,7 +3362,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		before := countComponents(doc)
 		if len(resolvedComps) > 0 {
 			mergeResolvedJVM(doc, resolvedComps, false) // runtimeClasspath only → keep syft's provided/compileOnly jars
-			mergeResolvedJVMDeps(doc, resolvedDeps)     // fold the resolved edges over syft's maven subgraph
+			mergeResolvedDeps(doc, resolvedDeps)     // fold the resolved edges over syft's maven subgraph
 			gradleResolved = true
 		}
 		switch {
@@ -3333,10 +3382,20 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	npmResolved := false
 	if s.npmResolver != nil {
 		step = trace.start(stageSBOM, "npm-resolve", "npm-resolver", "Resolve npm dependency tree", map[string]int{"components": countComponents(doc)})
-		resolvedComps, nrr := s.npmResolver.Resolve(ctx, ws.Dir)
+		// Prefer the graph-aware resolver, as the Gradle path does: the generated lockfile carries the
+		// edges, and without them every npm CVE here reports no path and no direct/transitive split.
+		var resolvedComps []sbom.Component
+		var resolvedDeps []sbom.Dependency
+		var nrr error
+		if gr, ok := s.npmResolver.(ports.NPMGraphResolver); ok {
+			resolvedComps, resolvedDeps, nrr = gr.ResolveGraph(ctx, ws.Dir)
+		} else {
+			resolvedComps, nrr = s.npmResolver.Resolve(ctx, ws.Dir)
+		}
 		before := countComponents(doc)
 		if len(resolvedComps) > 0 {
 			mergeResolvedNPM(doc, resolvedComps)
+			mergeResolvedDeps(doc, resolvedDeps)
 			npmResolved = true
 		}
 		switch {
@@ -3344,7 +3403,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			npmResolveErr = nrr
 			trace.fail(step, nrr)
 		case npmResolved:
-			trace.succeed(step, "npm dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps)})
+			trace.succeed(step, "npm dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps), "edges": len(resolvedDeps)})
 		default:
 			trace.succeed(step, "npm resolution skipped (no lockless package.json)", map[string]int{"components": countComponents(doc)})
 		}
@@ -3354,23 +3413,33 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// sandbox-gated in production. Merge like npm: drop the generator's unversioned placeholders of that
 	// ecosystem, keep versioned, dedup.
 	var manifestResolveErrs []string
+	var manifestResolvedEco []string
 	for _, mr := range s.manifestResolvers {
 		if ctx.Err() != nil {
 			break
 		}
 		eco := mr.Ecosystem()
 		step = trace.start(stageSBOM, "manifest-resolve", eco+"-resolver", "Resolve "+eco+" dependency tree", map[string]int{"components": countComponents(doc)})
-		resolvedComps, mrr := mr.Resolve(ctx, ws.Dir)
+		var resolvedComps []sbom.Component
+		var resolvedDeps []sbom.Dependency
+		var mrr error
+		if gr, ok := mr.(ports.ManifestGraphResolver); ok {
+			resolvedComps, resolvedDeps, mrr = gr.ResolveGraph(ctx, ws.Dir)
+		} else {
+			resolvedComps, mrr = mr.Resolve(ctx, ws.Dir)
+		}
 		before := countComponents(doc)
 		if len(resolvedComps) > 0 {
 			mergeResolvedManifest(doc, resolvedComps)
+			mergeResolvedDeps(doc, resolvedDeps)
+			manifestResolvedEco = append(manifestResolvedEco, eco)
 		}
 		switch {
 		case mrr != nil:
 			manifestResolveErrs = append(manifestResolveErrs, fmt.Sprintf("%s: %v", eco, mrr))
 			trace.fail(step, mrr)
 		case len(resolvedComps) > 0:
-			trace.succeed(step, eco+" dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps)})
+			trace.succeed(step, eco+" dependency tree resolved", map[string]int{"components_before": before, "components": countComponents(doc), "resolved": len(resolvedComps), "edges": len(resolvedDeps)})
 		default:
 			trace.succeed(step, eco+" resolution skipped (no lockless manifest)", map[string]int{"components": countComponents(doc)})
 		}
@@ -3539,7 +3608,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		toolVersions[k] = v
 	}
 	if doc.GeneratorVersion != "" {
-		toolVersions["syft"] = doc.GeneratorVersion
+		toolVersions[sbomGeneratorKey] = doc.GeneratorVersion
 	}
 	// Detection-source provenance: record each source's tool + DB version so
 	// a result is reproducible/explainable ("why did this differ from last month?").
@@ -3636,6 +3705,19 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if gradleResolved {
 		unresolvedEco = removeEcosystem(unresolvedEco, "gradle")
 		lockfiles = append(append([]string{}, lockfiles...), "gradle-dependency-tree")
+	}
+	// The same marker for the resolvers that pin a lockfile-less manifest. Resolution IS a
+	// resolving source: it runs the ecosystem's own lock tool and the versions it returns are
+	// as pinned as a committed lockfile's. Without this a scan that resolved every component
+	// still reported "Only 1171 of 1171 components have pinned versions; some dependencies are
+	// unresolved", which tells an operator the opposite of what happened.
+	if npmResolved {
+		unresolvedEco = removeEcosystem(unresolvedEco, "npm")
+		lockfiles = append(append([]string{}, lockfiles...), "npm-resolved-tree")
+	}
+	for _, eco := range manifestResolvedEco {
+		unresolvedEco = removeEcosystem(unresolvedEco, eco)
+		lockfiles = append(append([]string{}, lockfiles...), eco+"-resolved-tree")
 	}
 
 	result := &ScanResult{
@@ -5201,7 +5283,7 @@ func explainDrift(a, b ports.ScanManifest) []string {
 		}
 	}
 	cmp("grype-db", a.GrypeDBVersion, b.GrypeDBVersion)
-	cmp("syft", a.ToolVersions["syft"], b.ToolVersions["syft"])
+	cmp("sbom generator", sbomGeneratorVersion(a.ToolVersions), sbomGeneratorVersion(b.ToolVersions))
 	cmp("grype", a.ToolVersions["grype"], b.ToolVersions["grype"])
 	cmp("kev-catalog", a.ToolVersions["kev-catalog"], b.ToolVersions["kev-catalog"])
 	cmp("epss-date", a.ToolVersions["epss-date"], b.ToolVersions["epss-date"])
@@ -5277,7 +5359,7 @@ func buildManifest(toolVersions map[string]string, vulnDBSnapshot, grypeDB strin
 			m.UnpinnedInputs = append(m.UnpinnedInputs, label)
 		}
 	}
-	pin("syft", toolVersions["syft"] != "")
+	pin(sbomGeneratorKey, sbomGeneratorVersion(toolVersions) != "")
 	pin("grype-db", grypeDB != "")
 	pin("kev-catalog", toolVersions["kev-catalog"] != "")
 	pin("epss", toolVersions["epss-date"] != "")

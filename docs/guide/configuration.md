@@ -61,20 +61,20 @@ value. Any authenticated role may read it.
 | --- | --- | --- |
 | `SYNAPSE_METRICS_ENABLED` | `false` | Expose Prometheus metrics on a SEPARATE listener (`SYNAPSE_METRICS_ADDR`). Off by default; the listener is never bearer-protected and is never itself instrumented. |
 | `SYNAPSE_METRICS_ADDR` | `127.0.0.1:9090` | Metrics listener address. Loopback-only by default; widen it only onto a private scrape network, never a public interface. |
-| `SYNAPSE_ACCESS_LOG_ENABLED` | `true` | Emit one structured `http access` log event per request (method, matched route, status, latency, request id, and — once authenticated — the resolved principal id). Never logs raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or secrets. |
+| `SYNAPSE_ACCESS_LOG_ENABLED` | `true` | Emit one structured `http access` log event per request (method, matched route, status, latency, request id, and (once authenticated) the resolved principal id). Never logs raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or secrets. |
 
 Metric names and label cardinality:
 
 | Metric | Type | Labels | Description |
 | --- | --- | --- | --- |
-| `synapse_http_requests_total` | counter | `method`, `route`, `status_class` | Total HTTP requests. `route` is the matched `net/http` `ServeMux` pattern (e.g. `GET /api/v1/engagements/{id}`), never the raw path — path *values* collapse into one bounded label. An unmatched request reports `route="unmatched"`. `status_class` is `2xx`/`3xx`/`4xx`/`5xx`. |
+| `synapse_http_requests_total` | counter | `method`, `route`, `status_class` | Total HTTP requests. `route` is the matched `net/http` `ServeMux` pattern (e.g. `GET /api/v1/engagements/{id}`), never the raw path, path *values* collapse into one bounded label. An unmatched request reports `route="unmatched"`. `status_class` is `2xx`/`3xx`/`4xx`/`5xx`. |
 | `synapse_http_request_duration_seconds` | histogram | `method`, `route`, `status_class` | Request handling latency. |
 | `synapse_job_queue_queued` | gauge | none | Aggregate queued durable jobs, across every tenant. Present only when the configured job queue supports aggregate stats (Postgres and in-memory both do). |
 | `synapse_job_queue_in_flight` | gauge | none | Aggregate claimed/in-flight durable jobs, across every tenant. |
 | `synapse_job_queue_oldest_active_age_seconds` | gauge | none | Age of the oldest still-queued-or-claimed job (`ports.JobStats.OldestActiveAt`), `0` when the queue is empty. |
 | `synapse_job_queue_scrape_errors_total` | counter | none | Failed attempts to read aggregate durable job queue stats for a scrape. The three `synapse_job_queue_*` gauges above are omitted from that scrape (never a stale or bogus value) when this increments. |
 | `synapse_sca_scan_duration_seconds` | histogram | `outcome` | Completed synchronous or asynchronous SCA execution duration. For an async scan, measured from worker execution start, not from `StartScan`/enqueue time. Queue failures, dead letters, stale sweeps, and blocked gates do not record a duration. |
-| `synapse_sca_scan_outcomes_total` | counter | `outcome` | Terminal SCA outcomes: `success`, `failed`, or `blocked`. Queue failures, dead letters, and stale sweeps count as `failed` without a duration. `blocked` is recorded only for an execution-gate denial reached after a genuine scan attempt — never for a pre-gate validation failure. |
+| `synapse_sca_scan_outcomes_total` | counter | `outcome` | Terminal SCA outcomes: `success`, `failed`, or `blocked`. Queue failures, dead letters, and stale sweeps count as `failed` without a duration. `blocked` is recorded only for an execution-gate denial reached after a genuine scan attempt, never for a pre-gate validation failure. |
 | `synapse_finding_lineage_operations_total` | counter | `outcome`, `method`, `reason` | Finding correlation and human-review outcomes. Every label is reduced to a fixed allowlist. |
 | `synapse_finding_lineage_backfill_items_total` | counter | `outcome` | Backfill item outcomes: `observation_created`, `provisional_candidate_created`, `skipped`, or `unknown`. |
 | `synapse_finding_lineage_backfill_runs_total` | counter | `state` | Backfill terminal states: `completed`, `cancelled`, `failed`, or `unknown`. |
@@ -311,7 +311,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_FLEET_DETECTION_INGEST_ENABLED` | `false` | Accept signed agent detection batches (A4, `POST /api/v1/fleet/detections`); sealed once into the evidence chain. |
 | `SYNAPSE_FLEET_DETECTION_RECONCILE_INTERVAL` | `1m` | How often the tenant-scoped reconciler repairs pending attributed detections. |
 | `SYNAPSE_FLEET_CORRELATION_ENABLED` | `false` | Correlation orchestration: folds an engagement's sealed detections into incidents, auto-scoring each when tri-score is enabled. Runs on every detection batch that seals new detections, and on demand through `POST /api/v1/fleet/engagements/{id}/correlate`. |
-| `SYNAPSE_FLEET_CORRELATION_WINDOW` | `30m` | Session gap for correlation — detections on one (asset, host) more than this apart start a new incident. |
+| `SYNAPSE_FLEET_CORRELATION_WINDOW` | `30m` | Session gap for correlation, detections on one (asset, host) more than this apart start a new incident. |
 | `SYNAPSE_FLEET_CORRELATION_ALLOWED_LATENESS` | `5m` | Delay between maximum observed event time and the monotonic watermark. A newly seen detection behind the previous watermark is isolated with a visible coverage note rather than silently rewriting a finalized session. |
 | `SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT` | `100` | Cap on detections one incident reflects individually before a storm is suppressed to a single note. |
 | `SYNAPSE_FLEET_CORRELATION_PAGE_SIZE` | `100` | Source materialization and staged consumption rows per bounded invocation (1–1000). |
@@ -326,7 +326,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE` | `false` | Let the webhook client dial private and link-local receivers. The SSRF guard refuses them otherwise. |
 | `SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED` | `false` | Allow UNSIGNED alert delivery when no secret is set. Default false: a configured webhook requires `SYNAPSE_ALERT_WEBHOOK_SECRET` so a receiver can trust the alert is genuine. Set true only for a development receiver that does not verify the signature. |
 | `SYNAPSE_NOTIFICATIONS_ENABLED` | `false` | Enable tenant-managed Webhook, Slack, and Email channels, durable rule fan-out, delivery history, and the worker source scheduler. Requires PostgreSQL, a running `synapse-worker`, and a stable shared `SYNAPSE_VAULT_MASTER_KEY`. |
-| `SYNAPSE_OWNERSHIP_MODE` | `off` | Finding ownership rollout: `off`, `observe`, or `enforce`; invalid values stop startup. Enabled modes require PostgreSQL. The API admits durable preview/reroute runs and `synapse-worker` captures scan provenance, dispatches dirty findings, and consumes routing jobs. `observe` evaluates without automatic assignment; `enforce` enables automatic assignment and release-to-auto. Memory mode reports `postgres_required`. See [ownership API](../ownership-api.md). |
+| `SYNAPSE_OWNERSHIP_MODE` | `off` | Finding ownership rollout: `off`, `observe`, or `enforce`; invalid values stop startup. Enabled modes require PostgreSQL. The API admits durable preview/reroute runs and `synapse-worker` captures scan provenance, dispatches dirty findings, and consumes routing jobs. `observe` evaluates without automatic assignment; `enforce` enables automatic assignment and release-to-auto. Memory mode reports `postgres_required`. See [ownership API](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/ownership-api.md). |
 | `SYNAPSE_NOTIFICATION_SMTP_HOST` | (unset) | Operator-managed SMTP relay host used by every tenant Email channel. Tenants can select recipients but cannot select the relay. |
 | `SYNAPSE_NOTIFICATION_SMTP_PORT` | `587` | SMTP relay port. |
 | `SYNAPSE_NOTIFICATION_SMTP_FROM` | (unset) | Envelope and message sender for notification email. Required before an Email channel can deliver. |
@@ -411,7 +411,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_SANDBOX_ENABLED` | `false` | Run tool execution and acquisition in the bubblewrap sandbox. Production requires `true`; if bubblewrap is missing, startup fails closed. |
+| `SYNAPSE_SANDBOX_ENABLED` | `false` | Run tool execution and acquisition in the bubblewrap sandbox. Production requires `true`; if bubblewrap is missing, startup fails closed. Kernel egress enforcement additionally needs `net.ipv4.ip_forward=1` on the host: the sandbox namespace reaches the network over a veth, and with forwarding off the kernel drops every packet leaving it, so a destination the policy allows is as unreachable as one it denies. The egress probe refuses rather than enabling enforcement that blocks everything. |
 | `SYNAPSE_SANDBOX_MEM_MAX` | `536870912` | Per-run memory limit in bytes. |
 | `SYNAPSE_SANDBOX_PIDS_MAX` | `256` | Per-run pid limit. |
 | `SYNAPSE_TOOL_HASHES` | (TOFU) | Authoritative sha256 pins. The sandbox refuses a binary whose hash does not match. |
@@ -476,7 +476,7 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 | `SYNAPSE_JAVATAINT_ENABLED` | `false` | Java value-flow taint proposals (OFF by default). Needs judgments and `synapse-ast`; source-only, so the sandbox is optional. |
 | `SYNAPSE_TAINT_RULES_FILE` | empty | Optional YAML file of custom Python and JavaScript taint rules (`python.sources` / `python.sinks` and `js.sources` / `js.sinks`) merged additively into the built-in catalogs at startup. A custom source/sink is import-anchored (`modules` + `names`); a sink also names a taint `class`, a `cwe`, a `rule` id, and a zero-based `argument`. Custom rules only ADD detection (a new source or sink); there are no custom sanitizers, so they cannot suppress a built-in flow. A malformed or invalid file fails startup rather than silently dropping rules. |
 | `SYNAPSE_CROSSCHECK_ENABLED` | `true` | Detection-source disagreement judgments. |
-| `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `true` | Dual-producer SBOM cross-check. |
+| `SYNAPSE_SBOM_CROSSCHECK_ENABLED` | `false` | Dual-producer SBOM cross-check: a second producer runs beside the primary and components only one emits become ungated judgments for review. Opt-in, because the owned parsers are the primary producer and the only second producer is Syft, so enabling it makes the deployment depend on a Syft binary. |
 | `SYNAPSE_GOMODGRAPH_ENABLED` | `true` | Transitive Go dependency edges via `go mod graph`. |
 | `SYNAPSE_WRITEUP_DRAFTS_ENABLED` | `false` | Agent write-up draft tool. A distinct human signs off. |
 

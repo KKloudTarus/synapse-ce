@@ -4,7 +4,7 @@ import { Button, Card, EmptyState, ErrorState, Field, Input, Select, Spinner, cn
 import { useParallelFetch, usePolling } from '../../hooks'
 import { api, streamReconLogs } from '../../lib/api'
 import type { Engagement, ReconRun, ReconTool } from '../../lib/types'
-import type { Tab } from './index'
+import type { Tab } from './tabs'
 
 export function ReconTab({ eng, onGoTab }: { eng: Engagement; onGoTab: (t: Tab) => void }) {
   const [active, setActive] = useState<string | null>(null)
