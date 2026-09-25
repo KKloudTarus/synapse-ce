@@ -93,6 +93,13 @@ class EnvelopeTests(unittest.TestCase):
             saved = json.loads((root / "summary.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["report_version_id"], "report-version")
             self.assertIn("--document-version", calls[0])
+            parameters_index = calls[0].index("--parameters")
+            self.assertEqual(json.loads(calls[0][parameters_index + 1]), {
+                "sourceSha": [args.source_sha], "runId": [args.run_id],
+                "runAttempt": [args.run_attempt], "provenanceBase64": [args.provenance_base64],
+                "provenanceSha256": [args.provenance_sha256], "mode": [args.mode],
+            })
+            self.assertEqual(calls[0][parameters_index + 2], "--query")
             self.assertEqual([call[1] for call in calls].count("get-command-invocation"), 3)
 
     def test_report_requires_exact_versioned_artifacts_and_passing_run(self):

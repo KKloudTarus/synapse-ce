@@ -75,16 +75,18 @@ def dispatch(args):
         fail("provenance SHA-256 is invalid")
     if args.mode != "run":
         fail("only run mode is authorized")
+    parameters = {
+        "sourceSha": [args.source_sha],
+        "runId": [args.run_id],
+        "runAttempt": [args.run_attempt],
+        "provenanceBase64": [args.provenance_base64],
+        "provenanceSha256": [args.provenance_sha256],
+        "mode": [args.mode],
+    }
     command_id = aws([
         "ssm", "send-command", "--region", args.region, "--document-name", args.document,
         "--document-version", "1",
-        "--instance-ids", args.instance_id, "--parameters",
-        "sourceSha=" + args.source_sha,
-        "runId=" + args.run_id,
-        "runAttempt=" + args.run_attempt,
-        "provenanceBase64=" + args.provenance_base64,
-        "provenanceSha256=" + args.provenance_sha256,
-        "mode=" + args.mode,
+        "--instance-ids", args.instance_id, "--parameters", json.dumps(parameters, separators=(",", ":")),
         "--query", "Command.CommandId", "--output", "text",
     ])
     if not command_id or command_id == "None":
