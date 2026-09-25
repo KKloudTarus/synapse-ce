@@ -3076,6 +3076,15 @@ func osCoverageWarnings(osPkgsAdded int, unsupportedDistro, approximateDistro st
 }
 
 func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
+	// A manifest resolver reaches a package registry, so it runs sandboxed under an egress policy,
+	// and the sandbox refuses a policy that carries no authoritative execution identity. Without
+	// this the resolvers failed for exactly that reason whenever the sandbox was on, which is the
+	// configuration production requires: a project with a manifest but no lockfile then resolved
+	// to nothing and the scan reported it as having no recognized dependency manifests.
+	//
+	// The evidence record is the binding, because it is the control-plane row this scan already
+	// writes and the one an auditor would reconcile a network authorization against.
+	ctx = ports.WithEgressExecution(ctx, "sca", evidenceID.String())
 	var err error
 	req, err = s.pinUploadedSource(ctx, engagementID, req)
 	if err != nil {

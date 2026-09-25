@@ -147,6 +147,11 @@ func (r *Resolver) run(ctx context.Context, work string) error {
 			Workdir:      work, // the one writable bind (package.json copy + generated lock + cache)
 			Env:          env,
 			EgressPolicy: &ports.EgressPolicy{AllowDomains: r.allowedHosts()},
+			// The identity the scan bound to ctx. Left empty the sandbox refuses the run, which is
+			// the correct outcome: a tool must not reach a registry under an authorization that
+			// ties back to no control-plane record.
+			EgressExecutionKind: ports.EgressExecutionFrom(ctx).Kind,
+			EgressExecutionID:   ports.EgressExecutionFrom(ctx).ID,
 		})
 		if err != nil {
 			return fmt.Errorf("npm resolve (sandboxed): %w: %s", err, truncate(string(res.Stderr), 300))
