@@ -1291,7 +1291,11 @@ func baseDefaultRules() []rule {
 		{
 			id: "gcp-service-account-key", category: "GCP", title: "GCP service account key", severity: shared.SeverityHigh,
 			keywords: []string{"service_account"},
-			re:       regexp.MustCompile(`"type"\s*:\s*"service_account"`),
+			// The type marker alone is the FORMAT, not the credential. Every page documenting how to paste a
+			// service-account JSON carries it, and 10 of one repository's findings were exactly that, each
+			// sitting beside `"private_key": "..."`. A real key file carries PEM material in that field, so
+			// both the marker and the material are required, in either order, within a bounded span (Go caps a repeat at 1000, and a real key file puts the two fields about 200 characters apart).
+			re: regexp.MustCompile(`"type"\s*:\s*"service_account"[\s\S]{0,1000}?"private_key"\s*:\s*"(?:\\n)?-----BEGIN|"private_key"\s*:\s*"(?:\\n)?-----BEGIN[\s\S]{0,1000}?"type"\s*:\s*"service_account"`),
 		},
 		{
 			id: "azure-storage-key", category: "Azure", title: "Azure storage account key", severity: shared.SeverityHigh,

@@ -292,3 +292,27 @@ func TestConnectionStringStillReadsRealAccount(t *testing.T) {
 		}
 	}
 }
+
+// The GCP type marker alone is the documented FORMAT, not a credential. Every page explaining how to paste a
+// service-account JSON carries it, and 10 of one repository's findings were exactly that, each beside a
+// `"private_key": "..."` ellipsis.
+func TestGCPKeyNeedsKeyMaterial(t *testing.T) {
+	documented := "{\n  \"type\": \"service_account\",\n  \"project_id\": \"...\",\n  \"private_key_id\": \"...\",\n  \"private_key\": \"...\",\n  \"client_email\": \"...\"\n}\n"
+	for _, id := range scanOneFile(t, "databases.mdx", documented) {
+		if id == "gcp-service-account-key" {
+			t.Errorf("the documented key format is not a credential")
+		}
+	}
+
+	real := `{"type": "service_account", "project_id": "p", "private_key_id": "k", "private_key": "-----BEGIN PRIVATE KEY-----\nMIIsyntheticFixtureBodyNotARealKey\n-----END PRIVATE KEY-----\n"}`
+	found := false
+	hits := scanOneFile(t, "key.json", real)
+	for _, id := range hits {
+		if id == "gcp-service-account-key" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a real service-account key file must be reported; rules that fired: %v", hits)
+	}
+}

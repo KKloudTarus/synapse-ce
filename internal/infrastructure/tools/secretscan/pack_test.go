@@ -17,7 +17,9 @@ func TestDetectorPackTriggers(t *testing.T) {
 		content string
 	}{
 		{"aws-secret-access-key", "a.env", "aws_secret_access_key = \"" + hex32 + "wJalrXbP" + "\""}, // 40 chars, entropy >= 4.0
-		{"gcp-service-account-key", "key.json", "{\"type\": " + "\"service_account\"}"},
+		// A real service-account key file carries the type marker AND PEM material. The marker alone is the
+		// documented FORMAT, which TestGCPKeyNeedsKeyMaterial pins as not reportable.
+		{"gcp-service-account-key", "key.json", `{"type": "service_account", "project_id": "p", "private_key_id": "k", "private_key": "-----BEGIN PRIVATE KEY-----\nMIIsyntheticFixtureBodyNotARealKey\n-----END PRIVATE KEY-----\n"}`},
 		{"azure-storage-key", "b.env", "AccountKey=" + strings.Repeat("Ab3Dz9", 14) + "ABCD" + "=="},
 		{"github-fine-grained-pat", "c.txt", "t = \"github_pat_" + strings.Repeat("aB3dE6", 6) + "\""},
 		{"npm-token", "d.npmrc", "_authToken=npm_" + strings.Repeat("aB3dE6", 6)},
