@@ -467,3 +467,147 @@ func TestJVMReachRoots(t *testing.T) {
 		})
 	}
 }
+
+// A leaked credential is ONE thing to rotate however many commits carry it, so every git-history sighting of
+// the same credential collapses into one finding whose description carries the spread. Keying each sighting
+// separately turned 50 leaked credentials in one live repository into 581 rows.
+func TestBuildSecretFindingsCollapsesHistorySightingsOfOneCredential(t *testing.T) {
+	now := time.Now().UTC()
+	raws := []ports.SecretRawFinding{
+		{File: "config/app.yml", Line: 12, RuleID: "generic-secret", Category: "Generic", Title: "Hardcoded secret",
+			Severity: shared.SeverityMedium, Match: "abc***xyz", FromHistory: true, Fingerprint: "fp-one",
+			Commit: "aaaaaaaaaaaa", FirstSeen: "2024-03-02T00:00:00Z"},
+		{File: "config/app.yml", Line: 40, RuleID: "generic-secret", Category: "Generic", Title: "Hardcoded secret",
+			Severity: shared.SeverityMedium, Match: "abc***xyz", FromHistory: true, Fingerprint: "fp-one",
+			Commit: "bbbbbbbbbbbb", FirstSeen: "2024-01-05T00:00:00Z"},
+		{File: "deploy/values.yml", Line: 7, RuleID: "generic-secret", Category: "Generic", Title: "Hardcoded secret",
+			Severity: shared.SeverityMedium, Match: "abc***xyz", FromHistory: true, Fingerprint: "fp-one",
+			Commit: "cccccccccccc", FirstSeen: "2024-06-09T00:00:00Z"},
+		// A DIFFERENT credential stays its own finding.
+		{File: "config/app.yml", Line: 13, RuleID: "generic-secret", Category: "Generic", Title: "Hardcoded secret",
+			Severity: shared.SeverityMedium, Match: "def***uvw", FromHistory: true, Fingerprint: "fp-two",
+			Commit: "aaaaaaaaaaaa"},
+	}
+	got := buildSecretFindings("eng1", raws, now, shared.SeverityLow, false)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 findings (one per credential), got %d: %+v", len(got), got)
+	}
+	first := got[0]
+	if !strings.Contains(first.Description, "appears 3 times") {
+		t.Errorf("description should state the occurrence count, got %q", first.Description)
+	}
+	if !strings.Contains(first.Description, "across 2 files") {
+		t.Errorf("description should state the file spread, got %q", first.Description)
+	}
+	if !strings.Contains(first.Description, "in 3 commits") {
+		t.Errorf("description should state the commit spread, got %q", first.Description)
+	}
+	// The EARLIEST sighting is what tells an operator how long the value has been exposed.
+	if !strings.Contains(first.Description, "Earliest sighting: 2024-01-05T00:00:00Z") {
+		t.Errorf("description should carry the earliest sighting, got %q", first.Description)
+	}
+	// The representative is the EARLIEST sighting, so the key is canonical rather than scan-order dependent,
+	// and it carries no digest of the credential: a dedup key ships in exports.
+	if first.DedupKey != "secret:generic-secret:config/app.yml:40:history:bbbbbbbbbbbb" {
+		t.Errorf("the earliest sighting must be the representative, got %q", first.DedupKey)
+	}
+	if strings.Contains(first.DedupKey, "fp-one") {
+		t.Errorf("the dedup key must not carry the credential fingerprint: %q", first.DedupKey)
+	}
+	if got[1].DedupKey == first.DedupKey {
+		t.Errorf("a different credential must key separately, got %q", got[1].DedupKey)
+	}
+}
+
+// A working-tree hit is a LINE TO EDIT, so two locations stay two findings even when the value is identical.
+func TestBuildSecretFindingsKeepsWorkingTreeLocationsSeparate(t *testing.T) {
+	now := time.Now().UTC()
+	raws := []ports.SecretRawFinding{
+		{File: "a.yml", Line: 1, RuleID: "generic-secret", Category: "Generic", Title: "Hardcoded secret",
+			Severity: shared.SeverityMedium, Match: "abc***xyz", Fingerprint: "fp-one"},
+		{File: "b.yml", Line: 2, RuleID: "generic-secret", Category: "Generic", Title: "Hardcoded secret",
+			Severity: shared.SeverityMedium, Match: "abc***xyz", Fingerprint: "fp-one"},
+	}
+	got := buildSecretFindings("eng1", raws, now, shared.SeverityLow, false)
+	if len(got) != 2 {
+		t.Fatalf("two working-tree locations must stay two findings, got %d", len(got))
+	}
+	for _, f := range got {
+		if strings.Contains(f.Description, "appears") {
+			t.Errorf("a working-tree finding must carry no history spread: %q", f.Description)
+		}
+	}
+}
+
+// A history hit whose commit attribution could not be resolved has no fingerprint only if the detector
+// produced none; with a fingerprint it still collapses, and the spread text is omitted for a single sighting.
+func TestBuildSecretFindingsSingleHistorySightingHasNoSpreadNoise(t *testing.T) {
+	now := time.Now().UTC()
+	raws := []ports.SecretRawFinding{
+		{File: "a.yml", Line: 1, RuleID: "generic-secret", Category: "Generic", Title: "Hardcoded secret",
+			Severity: shared.SeverityMedium, Match: "abc***xyz", FromHistory: true, Fingerprint: "fp-one"},
+	}
+	got := buildSecretFindings("eng1", raws, now, shared.SeverityLow, false)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(got))
+	}
+	if strings.Contains(got[0].Description, "appears") {
+		t.Errorf("a single sighting needs no spread sentence: %q", got[0].Description)
+	}
+}
+
+// The representative must not depend on the order the scanner happened to walk the history, or the dedup key
+// churns between scans and a finding's triage state is lost.
+func TestGroupHistorySightingsRepresentativeIsOrderIndependent(t *testing.T) {
+	a := ports.SecretRawFinding{File: "z.yml", Line: 9, RuleID: "generic-secret", FromHistory: true,
+		Fingerprint: "fp", Commit: "cccc", FirstSeen: "2025-05-05T00:00:00Z"}
+	b := ports.SecretRawFinding{File: "a.yml", Line: 1, RuleID: "generic-secret", FromHistory: true,
+		Fingerprint: "fp", Commit: "aaaa", FirstSeen: "2024-01-01T00:00:00Z"}
+	c := ports.SecretRawFinding{File: "m.yml", Line: 5, RuleID: "generic-secret", FromHistory: true,
+		Fingerprint: "fp", Commit: "bbbb", FirstSeen: "2024-09-09T00:00:00Z"}
+
+	want := ""
+	for _, order := range [][]ports.SecretRawFinding{{a, b, c}, {c, b, a}, {b, c, a}, {a, c, b}} {
+		spreads, skip := groupHistorySightings(order)
+		var rep ports.SecretRawFinding
+		n := 0
+		for i, sr := range order {
+			if skip[i] {
+				continue
+			}
+			rep = sr
+			n++
+			if got := spreads[i].occurrences; got != 3 {
+				t.Errorf("occurrences = %d, want 3", got)
+			}
+			if got := spreads[i].firstSeen; got != "2024-01-01T00:00:00Z" {
+				t.Errorf("firstSeen = %q, want the earliest", got)
+			}
+		}
+		if n != 1 {
+			t.Fatalf("expected exactly one representative, got %d", n)
+		}
+		key := rep.Commit + ":" + rep.File
+		if want == "" {
+			want = key
+		}
+		if key != want {
+			t.Errorf("representative changed with input order: got %q, want %q", key, want)
+		}
+	}
+	if want != "aaaa:a.yml" {
+		t.Errorf("the earliest-dated sighting must be the representative, got %q", want)
+	}
+}
+
+// A sighting with no resolved date cannot be placed in time, so an attributed one is preferred.
+func TestGroupHistorySightingsPrefersAttributedSighting(t *testing.T) {
+	unattributed := ports.SecretRawFinding{File: "a.yml", Line: 1, RuleID: "generic-secret", FromHistory: true, Fingerprint: "fp"}
+	attributed := ports.SecretRawFinding{File: "z.yml", Line: 9, RuleID: "generic-secret", FromHistory: true,
+		Fingerprint: "fp", Commit: "dddd", FirstSeen: "2024-02-02T00:00:00Z"}
+	order := []ports.SecretRawFinding{unattributed, attributed}
+	_, skip := groupHistorySightings(order)
+	if !skip[0] || skip[1] {
+		t.Errorf("the attributed sighting must represent the leak; skip=%v", skip)
+	}
+}

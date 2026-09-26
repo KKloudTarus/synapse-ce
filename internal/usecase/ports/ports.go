@@ -2259,6 +2259,10 @@ type SecretRawFinding struct {
 	Commit    string
 	Author    string
 	FirstSeen string
+	// Fingerprint is a stable, non-reversible identity for the matched credential: the hex SHA-256 of the
+	// raw value. It exists so that two sightings of the SAME credential can be recognised as one leak
+	// without the value itself ever leaving the detector. Empty when the detector computed none.
+	Fingerprint string
 }
 
 // SecretScanReport is the bounded output of a deterministic secret scan. Truncated means the scan was incomplete due to a child-file failure or safety cap, so Findings is a lower bound.

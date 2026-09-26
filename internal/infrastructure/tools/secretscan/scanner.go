@@ -531,14 +531,15 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 				verified = verdict(vf, r.id, secret)
 			}
 			*out = append(*out, ports.SecretRawFinding{
-				File:     rel,
-				Line:     line,
-				RuleID:   r.id,
-				Category: r.category,
-				Title:    r.title,
-				Severity: r.severity,
-				Match:    redactMatch(secret),
-				Verified: verified,
+				File:        rel,
+				Line:        line,
+				RuleID:      r.id,
+				Category:    r.category,
+				Title:       r.title,
+				Severity:    r.severity,
+				Match:       redactMatch(secret),
+				Verified:    verified,
+				Fingerprint: secretFingerprint(secret),
 			})
 		}
 	}
@@ -793,6 +794,18 @@ func (s *Scanner) allowed(secret string, ruleAllow []*regexp.Regexp) bool {
 		}
 	}
 	return false
+}
+
+// secretFingerprint is a stable, non-reversible identity for a matched credential. It exists so the same
+// credential seen in many git blobs is recognised as ONE leak: the remediation is one rotation, however many
+// commits carry it. SHA-256 is used because the value must never be recoverable from the finding, and the
+// digest is domain-separated so a fingerprint cannot be confused with any other digest in the system.
+func secretFingerprint(s string) string {
+	if s == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("synapse-secret-fingerprint:" + s))
+	return hex.EncodeToString(sum[:])
 }
 
 // redactMatch masks a secret to a short, non-usable preview. A private-key block is replaced wholesale.
