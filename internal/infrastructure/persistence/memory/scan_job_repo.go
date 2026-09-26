@@ -29,7 +29,9 @@ func (s *ScanJobStore) CreateRunning(_ context.Context, j ports.ScanJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, current := range s.byID {
-		if current.EngagementID == j.EngagementID && current.Status == ports.ScanRunning {
+		// CI imports are already complete in the pipeline. Their short-lived running
+		// state must not reserve the engagement's asynchronous scan slot.
+		if j.Kind != "ci-import" && current.Kind != "ci-import" && current.EngagementID == j.EngagementID && current.Status == ports.ScanRunning {
 			return shared.ErrConflict
 		}
 	}

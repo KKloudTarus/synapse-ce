@@ -131,7 +131,7 @@ func TestImportAnalysisRecordsAPipelineResult(t *testing.T) {
 
 // TestImportAnalysisMarksTheJobFailedWhenTheResultIsRejected: the job row is written before the
 // recorder runs so the history shows the run. A payload the recorder refuses (here a duplicate
-// canonical path in the inventory) must leave a failed job with the reason, never a succeeded
+// canonical path in the inventory) must leave a failed job with a safe reason, never a succeeded
 // ci-import job with no analysis behind it.
 func TestImportAnalysisMarksTheJobFailedWhenTheResultIsRejected(t *testing.T) {
 	ctx := context.Background()
@@ -151,8 +151,8 @@ func TestImportAnalysisMarksTheJobFailedWhenTheResultIsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("latest job: %v", err)
 	}
-	if job.Status != ports.ScanFailed || job.Stage != "import-rejected" || !strings.Contains(job.Error, "duplicate canonical file path") {
-		t.Fatalf("job = %+v, want a failed ci-import job carrying the rejection", job)
+	if job.Status != ports.ScanFailed || job.Stage != "import-rejected" || job.Error != "CI import analysis rejected" || job.FinishedAt == nil {
+		t.Fatalf("job = %+v, want a failed ci-import job with a safe rejection reason and completion timestamp", job)
 	}
 	if list, _, err := analyses.List(ctx, "tenant", contexts[0].ProjectID, "", 5, time.Now().Add(time.Hour), ""); err != nil || len(list) != 0 {
 		t.Fatalf("analyses = %v, %v; want none recorded", list, err)
