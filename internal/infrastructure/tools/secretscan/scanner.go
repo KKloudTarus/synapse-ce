@@ -63,6 +63,11 @@ type rule struct {
 	lineSkip func(line string) bool
 	// maskNotebookOutput makes this rule read a notebook with its cell OUTPUTS blanked.
 	maskNotebookOutput bool
+	// maskPEMBodies makes this rule read the file with the BODY of every PEM block blanked. A key block is
+	// ONE credential, and the private-key rule already reports it at its header; without this, each of the
+	// 49 base64 body lines of an SSH key in an ArgoCD manifest became its own finding, so one key was
+	// reported 50 times where gitleaks reports it once.
+	maskPEMBodies bool
 	// skipValue drops a match on the matched VALUE rather than on its line, for a shape a regex cannot
 	// express. It exists for the keyword-free entropy rule, whose character class includes "/" and so
 	// reads a URL or asset path as base64.
@@ -487,6 +492,9 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			}
 			subject = string(masked)
 		}
+		if r.maskPEMBodies {
+			subject = string(maskPEMBlockBodies([]byte(subject)))
+		}
 		if !hasAnyKeyword(subject, r.keywords) {
 			continue
 		}
@@ -674,6 +682,39 @@ func lineOf(text string, at int) string {
 		return text[start:]
 	}
 	return text[start : at+end]
+}
+
+// maskPEMBlockBodies blanks the base64 BODY of every PEM block while preserving byte offsets and newlines,
+// so a match offset and a line count still index the same positions. The BEGIN and END armour lines are kept:
+// the private-key rule matches the header and must still see it.
+//
+// A key block is ONE credential. Without this every base64 line of it also satisfied the keyword-free entropy
+// rule, so a 49-line SSH key inside an ArgoCD repository manifest produced 49 entropy findings beside the one
+// private-key finding, and the same block in git history doubled that to 100. The remediation is one rotation.
+func maskPEMBlockBodies(data []byte) []byte {
+	out := append([]byte(nil), data...)
+	inBody := false
+	for start := 0; start < len(out); {
+		end := start
+		for end < len(out) && out[end] != '\n' {
+			end++
+		}
+		line := string(out[start:end])
+		switch {
+		case strings.Contains(line, "-----BEGIN"):
+			inBody = true // the header line itself is preserved
+		case strings.Contains(line, "-----END"):
+			inBody = false
+		case inBody:
+			for i := start; i < end; i++ {
+				if out[i] != '\r' {
+					out[i] = ' '
+				}
+			}
+		}
+		start = end + 1
+	}
+	return out
 }
 
 // pemBodyRunMin is the shortest base64 run counted as key body. It sits above every word in the PEM armour
@@ -1282,6 +1323,7 @@ func baseDefaultRules() []rule {
 			},
 			skipValue:          wordlikePathToken,
 			maskNotebookOutput: true,
+			maskPEMBodies:      true,
 		},
 		{
 			id: "generic-secret", category: "Generic", title: "Hardcoded secret", severity: shared.SeverityMedium,

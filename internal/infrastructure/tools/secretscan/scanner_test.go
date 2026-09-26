@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -750,4 +751,59 @@ func TestGenericSecretSkipsReplaceMeTemplates(t *testing.T) {
 			t.Errorf("%s: a replace-me template is not a credential, got %q", name, f.match)
 		}
 	}
+}
+
+// A PEM key block is ONE credential and the private-key rule already reports it at its header. Every base64
+// body line also satisfied the keyword-free entropy rule, so a 49-line SSH key inside an ArgoCD repository
+// manifest produced 49 entropy findings beside the one private-key finding, and the same block in git history
+// doubled that to 100 rows for one rotation. gitleaks reports it once.
+func TestPrivateKeyBodyDoesNotAlsoFireTheEntropyRule(t *testing.T) {
+	body := make([]string, 0, 30)
+	for i := 0; i < 30; i++ {
+		body = append(body, highEntropyLine(i))
+	}
+	manifest := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: repo\nstringData:\n  sshPrivateKey: |\n" +
+		"    -----BEGIN OPENSSH " + "PRIVATE KEY-----\n    " + strings.Join(body, "\n    ") +
+		"\n    -----END OPENSSH PRIVATE KEY-----\n"
+
+	rs := scanDir(t, map[string]string{"repo.yaml": manifest})
+	entropy := 0
+	privateKeys := 0
+	for _, r := range rs {
+		switch r.rule {
+		case "generic-high-entropy":
+			entropy++
+		case "private-key":
+			privateKeys++
+		}
+	}
+	if privateKeys != 1 {
+		t.Errorf("the key block must be reported once by private-key, got %d", privateKeys)
+	}
+	if entropy != 0 {
+		t.Errorf("the key body must not also fire the entropy rule %d times: %+v", entropy, rs)
+	}
+}
+
+// Masking the body must not blind the entropy rule OUTSIDE a key block, or a real token next to one is lost.
+func TestEntropyRuleStillFiresOutsideAPEMBlock(t *testing.T) {
+	manifest := "-----BEGIN " + "PRIVATE KEY-----\n" + highEntropyLine(1) + "\n-----END PRIVATE KEY-----\n" +
+		"loose_token: " + highEntropyLine(7) + "\n"
+	rs := scanDir(t, map[string]string{"mixed.txt": manifest})
+	found := false
+	for _, r := range rs {
+		if r.rule == "generic-high-entropy" || r.rule == "generic-secret" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a high-entropy value after the END marker must still be flagged, got %+v", rs)
+	}
+}
+
+// highEntropyLine returns a 44-character base64 line derived from a digest, so no literal token appears in
+// this source file and every line differs.
+func highEntropyLine(i int) string {
+	h := sha256.Sum256([]byte("synapse-pem-body-fixture-" + strconv.Itoa(i)))
+	return base64.RawStdEncoding.EncodeToString(h[:32])
 }
