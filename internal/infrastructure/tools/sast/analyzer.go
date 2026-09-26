@@ -578,13 +578,31 @@ type scanStatus struct {
 func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []string, project projectContext, seen map[string]bool, limit int) ([]ports.SASTRawFinding, scanStatus, error) {
 	var hits []ports.SASTRawFinding
 	var status scanStatus
+	// The per-file budget is per CLASS. Sharing one counter let a file's style findings consume the whole
+	// share before a security rule matched further down: one file on a real repository reached the cap at
+	// exactly 50 findings, every one of them maintainability, so a weakness below that point would have been
+	// dropped for want of budget spent on formatting. The tree-wide caps are unchanged, so the report does
+	// not grow; only the order in which a single file may spend its share does.
+	securityHits, qualityHits := 0, 0
+	// add reports whether scanning this file should CONTINUE. A full quality bucket drops the finding and
+	// keeps going, because the security rules below it must still get their chance; only a full security
+	// bucket ends the file.
 	add := func(h ports.SASTRawFinding) bool {
 		key := findingIdentity(h)
 		if seen[key] {
 			return true
 		}
-		if len(hits) >= limit {
-			return false
+		if !isSecurityFinding(h) {
+			if qualityHits >= limit {
+				status.findingsTruncated = true
+				return true
+			}
+			qualityHits++
+		} else {
+			if securityHits >= limit {
+				return false
+			}
+			securityHits++
 		}
 		seen[key] = true
 		hits = append(hits, h)
