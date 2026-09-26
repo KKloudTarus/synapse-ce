@@ -78,6 +78,7 @@ nav:
       - Reachability benchmark: reachability-benchmark-runbook.md
       - Reachability soundness: reachability-soundness.md
       - SCA accuracy benchmark: sca-accuracy-benchmark.md
+      - Source-repository benchmark: source-repository-benchmark.md
       - Public SCA diagnostic inputs: sca-public-inputs.md
       - Trusted benchmark provisioning: trusted-benchmark-provisioning.md
       - SAST post-triage benchmark: sast-post-triage-benchmark.md
