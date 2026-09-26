@@ -1087,10 +1087,17 @@ func wordlikePathToken(secret string) bool {
 var resourcePathExtensions = []string{
 	".xml", ".sql", ".yaml", ".yml", ".json", ".properties", ".java", ".kt", ".ts", ".js", ".go", ".py",
 	".html", ".csv", ".md", ".txt", ".png", ".jpg", ".svg",
+	// Media and font assets. A CDN asset URL carries a high-entropy path segment by design: an avatar at
+	// pbs.twimg.com/profile_images/<18 digits>/<8 mixed-case chars>_400x400.jpeg cleared the entropy floor
+	// six times in one repository, where gitleaks reported nothing.
+	".jpeg", ".gif", ".webp", ".avif", ".ico", ".bmp", ".mp4", ".webm", ".woff", ".woff2", ".ttf", ".eot",
 }
 
 // resourcePathIndicators mark the line as declaring where something lives.
-var resourcePathIndicators = []string{"classpath:", "file=", "file:", "path=", "resource=", "src=", "href=", "include"}
+// A URL is a location by definition, so "://" is the indicator for the asset case. Both halves are still
+// required: the line must name a location AND carry a known non-credential extension, so a credential in a
+// query string is untouched.
+var resourcePathIndicators = []string{"classpath:", "file=", "file:", "path=", "resource=", "src=", "href=", "include", "://"}
 
 // lineDeclaresResourcePath reports whether the line is a resource declaration whose high-entropy token is a
 // FILE NAME, not a credential. Liquibase and Flyway generate migration names long and varied enough to clear

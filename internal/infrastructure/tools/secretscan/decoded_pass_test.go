@@ -76,3 +76,33 @@ func scanOneFile(t *testing.T, name, content string) []string {
 	}
 	return ids
 }
+
+// A CDN asset URL carries a high-entropy path segment by design. An avatar URL in a documentation page
+// cleared the keyword-free entropy floor six times in one repository, where gitleaks reported nothing.
+func TestHighEntropyIgnoresAssetURL(t *testing.T) {
+	lines := []string{
+		`      'https://pbs.twimg.com/profile_images/557940120184041473/bFyXy8Pu_400x400.jpeg',`,
+		`      'https://cdn.example.com/assets/9f8Ab2Cd7eF1gH3iJ4kL5mN6oP7qR8sT/logo.webp',`,
+		`  <img src="https://static.example.com/uSer_AvatarS/1691627325794725888/voQFcYjY.png" />`,
+	}
+	for _, line := range lines {
+		for _, id := range scanOneFile(t, "Community.vue", line) {
+			if id == "generic-high-entropy" {
+				t.Errorf("an asset URL is a location, not a credential: %q", line)
+			}
+		}
+	}
+}
+
+// A credential in a URL query string is untouched: that line names a location but carries no asset
+// extension, so the resource-path guard does not apply to it.
+func TestHighEntropyStillReadsCredentialInQueryString(t *testing.T) {
+	line := `webhook = "https://hooks.example.com/services/` + base64.RawURLEncoding.EncodeToString([]byte("synapse-entropy-query-fixture-value")) + `"`
+	hits := scanOneFile(t, "config.yaml", line)
+	for _, id := range hits {
+		if id != "(none)" {
+			return
+		}
+	}
+	t.Errorf("a high-entropy value on a URL line with no asset extension must still be reported; rules that fired: %v", hits)
+}
