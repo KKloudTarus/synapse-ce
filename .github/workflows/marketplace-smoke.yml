@@ -1,0 +1,42 @@
+name: Marketplace action smoke
+
+# Proves the published Marketplace listing's own snippet works end to end: it consumes
+# KKloudTarus/synapse-ce@v0.2.0 from the release, which downloads the checksum-verified binary and gates on
+# real findings. Runs on this branch only; it is a one-shot verification, not part of CI.
+on:
+  push:
+    branches:
+      - test/marketplace-action
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: scan this repository with the released action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Exactly the snippet the Marketplace listing hands a new user, pinned to the released tag.
+      - name: Synapse SCA scan
+        uses: KKloudTarus/synapse-ce@v0.2.0
+        with:
+          path: deploy
+          fail-on: critical
+          sarif: "true"
+
+      - name: Show the SARIF the action produced
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s synapse.sarif
+          python3 - <<'PY'
+          import json
+          d = json.load(open("synapse.sarif"))
+          run = d["runs"][0]
+          print("sarif version:", d.get("version"))
+          print("tool:", run["tool"]["driver"]["name"], run["tool"]["driver"].get("version", "-"))
+          print("rules:", len(run["tool"]["driver"].get("rules", [])))
+          print("results:", len(run.get("results", [])))
+          PY
