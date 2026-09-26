@@ -4,7 +4,7 @@ This matrix is generated from the shipped first-party rule catalog. The drift te
 
 OWASP coverage is required for security-quality rules. An empty OWASP list on a non-security rule means not applicable. Direct CWE mappings follow OWASP Top 10:2021's published mapped-CWE lists where available; CWEs outside those lists use explicit Synapse-reviewed Top 10 classifications and are not presented as OWASP-published CWE crosswalks.
 
-Catalogued rules: **3344**. Security-quality rules with an OWASP mapping: **1195/1195**.
+Catalogued rules: **3345**. Security-quality rules with an OWASP mapping: **1196/1196**.
 
 ## Sonar-equivalent type mapping
 
@@ -39,7 +39,7 @@ Catalogued rules: **3344**. Security-quality rules with an OWASP mapping: **1195
 | Kotlin | 22 | 8 | 17 | 83 | 130 |
 | Kubernetes | 5 | 24 | 6 | 1 | 36 |
 | PHP | 32 | 22 | 44 | 84 | 182 |
-| Python | 122 | 35 | 53 | 106 | 316 |
+| Python | 122 | 35 | 54 | 106 | 317 |
 | Ruby | 9 | 14 | 10 | 8 | 41 |
 | Rust | 68 | 17 | 26 | 53 | 164 |
 | Scala | 18 | 1 | 3 | 19 | 41 |

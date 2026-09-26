@@ -2650,6 +2650,7 @@ python-use-list-literal
 python-useless-object-inheritance
 python-version-info-py2-block
 python-xml-parse-xxe
+python-xmlrpc-client
 python-xrange
 python-yaml-unsafe-load
 python-yaml-unsafe-loader
