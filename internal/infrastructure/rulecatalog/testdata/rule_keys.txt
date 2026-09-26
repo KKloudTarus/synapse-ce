@@ -2035,6 +2035,7 @@ kubeconfig-token
 kubernetes-allow-priv-escalation
 kubernetes-automount-sa-token
 kubernetes-caps-not-dropped
+kubernetes-configmap-credential
 kubernetes-dangerous-capability
 kubernetes-default-namespace
 kubernetes-default-service-account

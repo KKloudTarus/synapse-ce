@@ -700,3 +700,39 @@ spec:
 		t.Error("expected kubernetes-secret-env-var to fire on envFrom.secretRef")
 	}
 }
+
+// A ConfigMap is unencrypted in etcd and readable by every workload that can read ConfigMaps in the
+// namespace, so a credential there is worse off than in a Secret. Trivy reports 23 of these on the estate
+// where this engine reported none, because the rule only looked at Secret.
+func TestKubernetesConfigMapCredential(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app
+  namespace: prod
+data:
+  LOG_LEVEL: info
+  DB_PASSWORD: s3cr3t-value-here
+`
+	if _, ok := ruleIDs(scan(t, map[string]string{"cm.yaml": manifest}))["kubernetes-configmap-credential"]; !ok {
+		t.Error("expected a credential in a ConfigMap to be flagged")
+	}
+}
+
+// A credential-named key whose value points at where the credential lives is configuration, not the
+// credential. Flagging those would put a finding on every correctly written ConfigMap.
+func TestKubernetesConfigMapReferenceIsNotACredential(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app
+  namespace: prod
+data:
+  DB_PASSWORD_FILE: /etc/creds/password
+  API_TOKEN: ${TOKEN_FROM_VAULT}
+  CLIENT_SECRET: ""
+`
+	if f, bad := ruleIDs(scan(t, map[string]string{"cm.yaml": manifest}))["kubernetes-configmap-credential"]; bad {
+		t.Errorf("a path, a template reference and an empty value are not credentials: %+v", f)
+	}
+}

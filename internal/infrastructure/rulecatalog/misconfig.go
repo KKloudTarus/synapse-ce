@@ -932,6 +932,15 @@ func k8sRules() []rule.Rule {
 			RemediationEffort:   15,
 		},
 		{
+			Key: "kubernetes-configmap-credential", Name: "Credential stored in a ConfigMap", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"kubernetes", "secrets"}, CWE: []string{"CWE-312"}, OWASP: []string{"A02:2021"}, Detection: rule.DetectionAST,
+			Description:         "A ConfigMap key names a credential and carries a literal value.",
+			Rationale:           "A ConfigMap is stored unencrypted in etcd and is readable by every workload that can read ConfigMaps in its namespace, so a credential there is worse off than the same credential in a Secret, not better. It also lands in source control with the manifest.\n\nSource: https://kubernetes.io/docs/concepts/configuration/configmap/",
+			Remediation:         "Move the value to a Secret backed by a managed secret source, and reference it as a mounted file.",
+			CompliantExample:    "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app\n  namespace: prod\ndata:\n  LOG_LEVEL: info\n  DB_PASSWORD_FILE: /etc/creds/password\n",
+			NoncompliantExample: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app\ndata:\n  DB_PASSWORD: s3cr3t-value-here\n",
+			RemediationEffort:   30,
+		},
+		{
 			Key: "kubernetes-no-cpu-request", Name: "No CPU request", Language: "Kubernetes", Type: rule.TypeBug, Qualities: []rule.Quality{rule.QualityReliability}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "resources"}, CWE: []string{}, OWASP: []string{}, Detection: rule.DetectionAST,
 			Description:         "The container spec does not define a CPU request.",
 			Rationale:           "The scheduler places a pod using its requests, not its limits. A container with no CPU request can be scheduled onto a node that has no CPU left for it, and is the first to be throttled when the node saturates.\n\nSource: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",

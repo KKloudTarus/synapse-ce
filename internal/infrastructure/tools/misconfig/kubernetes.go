@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -322,6 +323,15 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 		add("kubernetes-secret-in-manifest", "Secret value stored in manifest",
 			"The Secret embeds data directly in a manifest, which can expose credentials through source control, reviews, and build artifacts. Reference a managed secret source or inject the value at deployment time.", shared.SeverityMedium, "data")
 	}
+	// A ConfigMap is not encrypted at rest and is readable by anything that can read ConfigMaps in the
+	// namespace, so a credential there is worse off than the same credential in a Secret, not better.
+	if doc.Kind == "ConfigMap" {
+		if key, ok := configMapCredentialKey(doc); ok {
+			add("kubernetes-configmap-credential", "Credential stored in a ConfigMap",
+				"ConfigMap key "+clip(key)+" names a credential and carries a literal value. A ConfigMap is stored unencrypted in etcd and is readable by every workload that can read ConfigMaps in the namespace. Move the value to a Secret backed by a managed secret source.",
+				shared.SeverityMedium, "data")
+		}
+	}
 	if doc.Kind == "Ingress" {
 		if len(doc.Spec.TLS) == 0 {
 			add("kubernetes-ingress-no-tls", "Ingress has no TLS configuration",
@@ -541,6 +551,30 @@ func rbacHasEscalationVerb(rules []k8sRBACRule) bool {
 		}
 	}
 	return false
+}
+
+// configMapCredentialKey returns the first ConfigMap key that names a credential and carries a literal
+// value. A value that is empty, or that only references something else (a $VAR, a ${...} template, a
+// path), is configuration telling the platform where to find the credential, not the credential.
+func configMapCredentialKey(doc k8sDoc) (string, bool) {
+	for _, entries := range []map[string]string{doc.Data, doc.StringData} {
+		keys := make([]string, 0, len(entries))
+		for key := range entries {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys) // one manifest must always report the same key
+		for _, key := range keys {
+			if !secretKeyRe.MatchString(key) {
+				continue
+			}
+			value := strings.TrimSpace(entries[key])
+			if value == "" || strings.Contains(value, "$") || strings.HasPrefix(value, "/") {
+				continue
+			}
+			return key, true
+		}
+	}
+	return "", false
 }
 
 // secretEnvSource reports the Secret whose material the container receives through its environment, either
