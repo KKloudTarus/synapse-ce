@@ -244,3 +244,146 @@ func TestMavenFollowsParentByRelativePath(t *testing.T) {
 		t.Errorf("the reactor parent must be followed on disk for its managed versions, got %v", names)
 	}
 }
+
+// A BOM pins its own modules with ${project.version}, and its managed entries are inherited by every project
+// that imports it. Interpolating such an entry with the INHERITING project's properties substituted that
+// project's own version: on a live service a dependency came out at the scanned project's 0.0.1-SNAPSHOT
+// instead of 3.2.5. The declaring POM's properties are what a managed entry must be read with.
+func TestMavenManagedVersionUsesTheDeclaringPomProperties(t *testing.T) {
+	repo := t.TempDir()
+	writePOM(t, repo, "com.vendor", "vendor-bom", "3.2.5", `<project>
+  <groupId>com.vendor</groupId><artifactId>vendor-bom</artifactId><version>3.2.5</version>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>com.vendor</groupId><artifactId>vendor-core</artifactId><version>${project.version}</version></dependency>
+  </dependencies></dependencyManagement></project>`)
+	writePOM(t, repo, "com.vendor", "vendor-core", "3.2.5", `<project>
+  <groupId>com.vendor</groupId><artifactId>vendor-core</artifactId><version>3.2.5</version></project>`)
+
+	names, _ := parseMaven(t, repo, t.TempDir(), `<project>
+  <groupId>io.example</groupId><artifactId>service</artifactId><version>0.0.1-SNAPSHOT</version>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>com.vendor</groupId><artifactId>vendor-bom</artifactId><version>3.2.5</version><type>pom</type><scope>import</scope></dependency>
+  </dependencies></dependencyManagement>
+  <dependencies><dependency><groupId>com.vendor</groupId><artifactId>vendor-core</artifactId></dependency></dependencies></project>`)
+	if !contains(names, "com.vendor:vendor-core@3.2.5") {
+		t.Errorf("the BOM's ${project.version} must resolve to the BOM's version, got %v", names)
+	}
+	for _, n := range names {
+		if strings.Contains(n, "0.0.1-SNAPSHOT") {
+			t.Errorf("the scanned project's own version must not leak into a dependency: %v", names)
+		}
+	}
+}
+
+// The ROOT project's managed version must beat a transitive declaration, which is the whole point of a Spring
+// Boot BOM. When the managed entry failed to interpolate it was discarded and the transitive version won, so a
+// project resolved jackson 2.12.3 where its own BOM pins 2.13.3: an inventory naming versions the build never
+// uses, which then matches the wrong advisories.
+func TestMavenRootManagedVersionBeatsTransitiveDeclaration(t *testing.T) {
+	repo := t.TempDir()
+	writePOM(t, repo, "com.vendor", "platform-bom", "1.0", `<project>
+  <groupId>com.vendor</groupId><artifactId>platform-bom</artifactId><version>1.0</version>
+  <properties><jackson.version>2.13.3</jackson.version></properties>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>com.fasterxml</groupId><artifactId>jackson-core</artifactId><version>${jackson.version}</version></dependency>
+  </dependencies></dependencyManagement></project>`)
+	writePOM(t, repo, "com.vendor", "lib", "1.0", `<project>
+  <groupId>com.vendor</groupId><artifactId>lib</artifactId><version>1.0</version>
+  <dependencies><dependency><groupId>com.fasterxml</groupId><artifactId>jackson-core</artifactId><version>2.12.3</version></dependency></dependencies></project>`)
+	for _, v := range []string{"2.12.3", "2.13.3"} {
+		writePOM(t, repo, "com.fasterxml", "jackson-core", v, `<project>
+  <groupId>com.fasterxml</groupId><artifactId>jackson-core</artifactId><version>`+v+`</version></project>`)
+	}
+
+	names, _ := parseMaven(t, repo, t.TempDir(), `<project>
+  <groupId>io.example</groupId><artifactId>service</artifactId><version>0.1</version>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>com.vendor</groupId><artifactId>platform-bom</artifactId><version>1.0</version><type>pom</type><scope>import</scope></dependency>
+  </dependencies></dependencyManagement>
+  <dependencies><dependency><groupId>com.vendor</groupId><artifactId>lib</artifactId><version>1.0</version></dependency></dependencies></project>`)
+	if !contains(names, "com.fasterxml:jackson-core@2.13.3") {
+		t.Errorf("the root's managed version must win over the transitive declaration, got %v", names)
+	}
+	if contains(names, "com.fasterxml:jackson-core@2.12.3") {
+		t.Errorf("the transitive version must not survive alongside the managed one, got %v", names)
+	}
+}
+
+// A BOM's properties must not leak into the importing project's namespace, or a project's own ${…} silently
+// resolves to a vendor's value.
+func TestMavenImportedBOMPropertiesDoNotLeak(t *testing.T) {
+	repo := t.TempDir()
+	writePOM(t, repo, "com.vendor", "bom", "1.0", `<project>
+  <groupId>com.vendor</groupId><artifactId>bom</artifactId><version>1.0</version>
+  <properties><shared.version>9.9.9</shared.version></properties>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>g</groupId><artifactId>managed</artifactId><version>${shared.version}</version></dependency>
+  </dependencies></dependencyManagement></project>`)
+	writePOM(t, repo, "g", "managed", "9.9.9", `<project><groupId>g</groupId><artifactId>managed</artifactId><version>9.9.9</version></project>`)
+	writePOM(t, repo, "g", "own", "1.2.3", `<project><groupId>g</groupId><artifactId>own</artifactId><version>1.2.3</version></project>`)
+
+	names, _ := parseMaven(t, repo, t.TempDir(), `<project>
+  <groupId>io.example</groupId><artifactId>service</artifactId><version>0.1</version>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>com.vendor</groupId><artifactId>bom</artifactId><version>1.0</version><type>pom</type><scope>import</scope></dependency>
+  </dependencies></dependencyManagement>
+  <dependencies>
+    <dependency><groupId>g</groupId><artifactId>managed</artifactId></dependency>
+    <dependency><groupId>g</groupId><artifactId>own</artifactId><version>${shared.version}</version></dependency>
+  </dependencies></project>`)
+	if !contains(names, "g:managed@9.9.9") {
+		t.Errorf("the BOM's managed entry must still resolve, got %v", names)
+	}
+	for _, n := range names {
+		if n == "g:own@9.9.9" {
+			t.Errorf("the importing project's ${shared.version} must not pick up the BOM's value, got %v", names)
+		}
+	}
+}
+
+// The scope a consumer sees depends on the scope of the dependency that PULLED a transitive artifact in, not
+// only on how that artifact declares itself. A compile-scope child of a TEST dependency is test scope in the
+// consumer. Losing that counted another project's test fixtures as production risk: on one live service 29
+// artifacts reached only through test dependencies were scoped production.
+func TestMavenTransitiveScopeIsInheritedFromTheRequiringDependency(t *testing.T) {
+	repo := t.TempDir()
+	writePOM(t, repo, "g", "testkit", "1.0", `<project><groupId>g</groupId><artifactId>testkit</artifactId><version>1.0</version>
+  <dependencies><dependency><groupId>g</groupId><artifactId>testkit-core</artifactId><version>1.0</version></dependency></dependencies></project>`)
+	writePOM(t, repo, "g", "testkit-core", "1.0", `<project><groupId>g</groupId><artifactId>testkit-core</artifactId><version>1.0</version>
+  <dependencies><dependency><groupId>g</groupId><artifactId>testkit-deep</artifactId><version>1.0</version></dependency></dependencies></project>`)
+	writePOM(t, repo, "g", "testkit-deep", "1.0", `<project><groupId>g</groupId><artifactId>testkit-deep</artifactId><version>1.0</version></project>`)
+	writePOM(t, repo, "g", "runtime-lib", "1.0", `<project><groupId>g</groupId><artifactId>runtime-lib</artifactId><version>1.0</version>
+  <dependencies><dependency><groupId>g</groupId><artifactId>runtime-child</artifactId><version>1.0</version></dependency></dependencies></project>`)
+	writePOM(t, repo, "g", "runtime-child", "1.0", `<project><groupId>g</groupId><artifactId>runtime-child</artifactId><version>1.0</version></project>`)
+
+	t.Setenv("MAVEN_REPO_LOCAL", repo)
+	dir := t.TempDir()
+	pom := `<project><groupId>io.example</groupId><artifactId>service</artifactId><version>0.1</version>
+  <dependencies>
+    <dependency><groupId>g</groupId><artifactId>testkit</artifactId><version>1.0</version><scope>test</scope></dependency>
+    <dependency><groupId>g</groupId><artifactId>runtime-lib</artifactId><version>1.0</version></dependency>
+  </dependencies></project>`
+	path := filepath.Join(dir, "pom.xml")
+	if err := os.WriteFile(path, []byte(pom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	comps, _, err := (Maven{}).Parse(context.Background(), ParseInput{Dir: dir, Path: path, Content: []byte(pom)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopeOf := map[string]string{}
+	for _, c := range comps {
+		scopeOf[c.Name] = c.Scope
+	}
+	for _, name := range []string{"g:testkit", "g:testkit-core", "g:testkit-deep"} {
+		if scopeOf[name] != "test" {
+			t.Errorf("%s is reachable only through a test dependency, so it must be test scope, got %q", name, scopeOf[name])
+		}
+	}
+	// A compile-scope branch is unaffected: it must stay production, or the fix would hide real risk.
+	for _, name := range []string{"g:runtime-lib", "g:runtime-child"} {
+		if scopeOf[name] == "test" {
+			t.Errorf("%s is a compile-scope dependency and must not be demoted to test", name)
+		}
+	}
+}

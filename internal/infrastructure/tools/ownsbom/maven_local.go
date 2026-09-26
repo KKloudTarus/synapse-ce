@@ -108,12 +108,26 @@ type mavenPOMXML struct {
 	} `xml:"dependencies"`
 }
 
+// managedDep is one <dependencyManagement> entry together with the properties of the POM that DECLARED it.
+//
+// Carrying the declaring POM's properties is what makes a managed version correct. A BOM pins its own modules
+// with <version>${project.version}</version>, and its entries are inherited by every project that imports it.
+// Interpolating such an entry with the INHERITING project's properties substituted that project's own version
+// instead: on a live service it reported feign-reactor-cloud at the scanned project's 0.0.1-SNAPSHOT rather
+// than 3.2.5. Worse, when the interpolation produced no resolvable version the managed entry was discarded and
+// a transitive declaration won, so a Spring Boot project resolved jackson 2.12.3 where its own BOM pins
+// 2.13.3 -- an inventory that names versions the build never uses.
+type managedDep struct {
+	dep   mavenDepXML
+	props map[string]string
+}
+
 // effectivePOM is one POM after its parent chain and imported BOMs have been merged in.
 type effectivePOM struct {
 	coord   mavenCoord
 	props   map[string]string
-	managed map[string]mavenDepXML // "group:artifact" -> the managed entry
-	deps    []mavenDepXML          // own plus inherited <dependencies>, in declaration order
+	managed map[string]managedDep // "group:artifact" -> the managed entry and its declaring properties
+	deps    []mavenDepXML         // own plus inherited <dependencies>, in declaration order
 }
 
 // mavenLocalRepo reads effective POMs out of a local Maven repository. It memoises by coordinate, because a
@@ -274,10 +288,10 @@ func (r *mavenLocalRepo) build(raw *mavenPOMXML, self mavenCoord, depth int, dir
 	props["pom.version"] = coord.version
 	props["version"] = coord.version
 
-	managed := map[string]mavenDepXML{}
+	managed := map[string]managedDep{}
 	if parent != nil {
 		for k, v := range parent.managed {
-			managed[k] = v
+			managed[k] = v // keeps the properties of whichever POM declared it
 		}
 	}
 	// An imported BOM contributes its managed set; an entry declared HERE wins over an imported one, which
@@ -302,12 +316,6 @@ func (r *mavenLocalRepo) build(raw *mavenPOMXML, self mavenCoord, depth int, dir
 		for k, v := range bom.managed {
 			managed[k] = v
 		}
-		// A BOM's own properties carry the versions its managed entries refer to.
-		for k, v := range bom.props {
-			if _, ours := props[k]; !ours {
-				props[k] = v
-			}
-		}
 	}
 	for _, d := range raw.DependencyManagement.Dependencies.Dependency {
 		if isBOMImport(d) {
@@ -318,7 +326,7 @@ func (r *mavenLocalRepo) build(raw *mavenPOMXML, self mavenCoord, depth int, dir
 		if group == "" || artifact == "" {
 			continue
 		}
-		managed[group+":"+artifact] = d
+		managed[group+":"+artifact] = managedDep{dep: d, props: props}
 	}
 
 	// <dependencies> are inherited, so the parent's come first and the child's are appended.
@@ -431,7 +439,7 @@ func resolveMavenTree(repo *mavenLocalRepo, root *effectivePOM, location string,
 	var edges []sbom.Dependency
 
 	queue := make([]mavenTreeNode, 0, len(root.deps))
-	enqueue := func(owner *effectivePOM, deps []mavenDepXML, depth int, inherited map[string]struct{}, parentPURL string, transitive bool) {
+	enqueue := func(owner *effectivePOM, deps []mavenDepXML, depth int, inherited map[string]struct{}, parentPURL, parentScope string, transitive bool) {
 		for _, d := range deps {
 			group := interpolate(strings.TrimSpace(d.GroupID), owner.props)
 			artifact := interpolate(strings.TrimSpace(d.ArtifactID), owner.props)
@@ -455,21 +463,21 @@ func resolveMavenTree(repo *mavenLocalRepo, root *effectivePOM, location string,
 			// The ROOT project's managed set wins over a transitive declaration, and the owner's own managed
 			// set supplies a version for a dependency that declares none.
 			version := interpolate(strings.TrimSpace(d.Version), owner.props)
-			if managed, ok := root.managed[key]; ok && transitive {
-				if v := interpolate(strings.TrimSpace(managed.Version), root.props); sbom.IsResolvedVersion(v) {
+			if entry, ok := root.managed[key]; ok && transitive {
+				if v := interpolate(strings.TrimSpace(entry.dep.Version), entry.props); sbom.IsResolvedVersion(v) {
 					version = v
 				}
 				if scope == "" {
-					scope = strings.ToLower(strings.TrimSpace(managed.Scope))
+					scope = strings.ToLower(strings.TrimSpace(entry.dep.Scope))
 				}
 			}
 			if !sbom.IsResolvedVersion(version) {
-				if managed, ok := owner.managed[key]; ok {
-					if v := interpolate(strings.TrimSpace(managed.Version), owner.props); sbom.IsResolvedVersion(v) {
+				if entry, ok := owner.managed[key]; ok {
+					if v := interpolate(strings.TrimSpace(entry.dep.Version), entry.props); sbom.IsResolvedVersion(v) {
 						version = v
 					}
 					if scope == "" {
-						scope = strings.ToLower(strings.TrimSpace(managed.Scope))
+						scope = strings.ToLower(strings.TrimSpace(entry.dep.Scope))
 					}
 				}
 			}
@@ -478,6 +486,9 @@ func resolveMavenTree(repo *mavenLocalRepo, root *effectivePOM, location string,
 			}
 			if transitive && !scopeIsTransitive(scope) {
 				continue
+			}
+			if transitive {
+				scope = inheritedScope(parentScope, scope)
 			}
 			next := make(map[string]struct{}, len(inherited)+len(d.Exclusions.Exclusion))
 			for k := range inherited {
@@ -500,7 +511,7 @@ func resolveMavenTree(repo *mavenLocalRepo, root *effectivePOM, location string,
 		}
 	}
 
-	enqueue(root, root.deps, 1, map[string]struct{}{}, "", false)
+	enqueue(root, root.deps, 1, map[string]struct{}{}, "", "", false)
 	for head := 0; head < len(queue); head++ {
 		node := queue[head]
 		if len(seen) >= maxTreeNodes {
@@ -534,7 +545,7 @@ func resolveMavenTree(repo *mavenLocalRepo, root *effectivePOM, location string,
 		if child == nil {
 			continue // its .pom is not in the local repository: the subtree is unknown, not empty
 		}
-		enqueue(child, child.deps, node.depth+1, node.exclusions, purl, true)
+		enqueue(child, child.deps, node.depth+1, node.exclusions, purl, node.scope, true)
 	}
 	return set.components(), edges
 }
@@ -549,6 +560,25 @@ func addMavenEdge(edges *[]sbom.Dependency, seen map[string]bool, from, to strin
 	}
 	seen[key] = true
 	*edges = append(*edges, sbom.Dependency{Ref: from, DependsOn: []string{to}})
+}
+
+// inheritedScope applies Maven's scope table to a transitive dependency: the scope a consumer sees depends on
+// the scope of the dependency that PULLED IT IN, not only on how the child declares itself. A compile-scope
+// child of a TEST dependency is test scope in the consumer, and the same holds for provided and runtime.
+//
+// Losing this counted another project's test fixtures as production risk: on one live service 29 artifacts
+// reached only through archunit, blockhound and docker-java test dependencies were scoped production, which
+// inflates exactly the number an operator triages first.
+func inheritedScope(parentScope, childScope string) string {
+	switch parentScope {
+	case "test":
+		return "test"
+	case "provided", "system":
+		return "provided"
+	case "runtime":
+		return "runtime"
+	}
+	return childScope
 }
 
 // scopeIsTransitive reports whether a dependency in this scope is inherited by a consumer. Maven's table:
