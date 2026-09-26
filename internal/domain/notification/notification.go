@@ -34,13 +34,14 @@ const (
 	EventFleetAgentOffline   EventType = "fleet.agent.offline"
 	EventIncidentCreated     EventType = "incident.created"
 	EventOwnershipChanged    EventType = "finding.ownership_changed"
+	EventDestinationChanged  EventType = "notification.destination_changed"
 	EventTest                EventType = "notification.test"
 )
 
 func (v EventType) Valid() bool {
 	switch v {
 	case EventVulnerabilityAction, EventScanCompleted, EventQualityGateFailed,
-		EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged, EventTest:
+		EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged, EventDestinationChanged, EventTest:
 		return true
 	}
 	return false
@@ -118,7 +119,7 @@ func (r *Rule) Normalize() error {
 		r.LeadTime = 24 * time.Hour
 	}
 	r.LeadTimeSecs = int64(r.LeadTime / time.Second)
-	if r.TenantID.IsZero() || r.ID.IsZero() || r.Name == "" || !r.EventType.Valid() || r.EventType == EventTest || len(r.ChannelIDs) == 0 || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
+	if r.TenantID.IsZero() || r.ID.IsZero() || r.Name == "" || !r.EventType.Valid() || r.EventType == EventTest || r.EventType == EventDestinationChanged || len(r.ChannelIDs) == 0 || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: invalid notification rule", shared.ErrValidation)
 	}
 	if r.MinSeverity != "" && shared.SeverityRank(r.MinSeverity) == 0 {

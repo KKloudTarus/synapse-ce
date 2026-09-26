@@ -15,6 +15,8 @@ export { type SLAPoliciesView, type SLAPolicy, type SLAConfig, type SLAWeights, 
 export { type OffensivePolicy, type OffensiveTechnique, type OffensiveLegalReview } from './offensivepolicy'
 export { type AlertTestResult, type AlertTestOutcome, AlertNotEnabledError } from './alerting'
 export { type NotificationChannel, type NotificationChannelInput, type NotificationChannelType, type NotificationRule, type NotificationRuleInput, type NotificationEventType, type NotificationDelivery, type NotificationDeliveryState, type NotificationAttempt } from './notifications'
+export { type UserContact } from './user-contacts'
+export { type InboxItem, type InboxPreference } from './inbox'
 export { type EngagementCredential } from './engagements'
 export { type AutoVerifyResult } from './dashboard'
 export { type DetectionProvenanceCurrent, type DetectionProvenanceTransition } from './incidents'
@@ -51,6 +53,8 @@ import { offensivePolicyApi } from './offensivepolicy'
 import { alertingApi } from './alerting'
 import { notificationsApi } from './notifications'
 import { ownershipApi } from './ownership'
+import { userContactsApi } from './user-contacts'
+import { inboxApi } from './inbox'
 import { privacyApi } from './privacy'
 import { writeupApi } from './writeup'
 import { cspmApi } from './cspm'
@@ -71,6 +75,8 @@ export const downloadReportDoc = evidenceApi.downloadReportDoc
 // Unified api object — same shape as before
 export const api = {
   ...ownershipApi,
+  ...userContactsApi,
+  ...inboxApi,
   ...authApi,
   ...teamApi,
   ...auditApi,

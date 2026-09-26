@@ -6,6 +6,34 @@ Synapse can route tenant events to signed HTTP webhooks, Slack incoming webhooks
 and email recipients. Delivery runs in `synapse-worker`; API requests and scans do
 not wait for a remote service.
 
+## Personal email contacts
+
+When notifications and SMTP are enabled, every authenticated human user can manage
+their own email destinations at **My profile** (`/profile`). `GET` and `POST
+/api/v1/me/contacts` list/add contacts; `POST
+/api/v1/me/contacts/{id}/verification` queues a verification message; `POST
+/api/v1/me/contacts/{id}/verify` consumes the eight-digit code; `DELETE
+/api/v1/me/contacts/{id}` removes a manually managed contact. These endpoints
+derive tenant and user from authentication. The admin user roster and user pickers
+do not expose contact addresses or verification metadata.
+
+Verification is a security message addressed only to the requesting user, outside
+tenant notification rules and future personal mute preferences. It requires the
+existing SMTP relay and a stable vault key on both API and worker. The API returns
+`503` when SMTP is unavailable; it never claims that a contact was verified or an
+email sent. The code expires in 10 minutes; only five attempts are allowed.
+Resends are at least 60 seconds apart, with at most five requests per hour per
+user. A replacement challenge, deletion, disable, or email change invalidates
+pending delivery. The challenge code is encrypted at rest, and the durable job
+contains only its challenge ID. A worker retry can produce a duplicate mail if
+the SMTP relay accepted the first one before its acknowledgment was recorded.
+
+A verified `email` and `email_verified: true` claim from the signed OIDC ID token
+creates an identity-provider-managed contact for the account already resolved by
+issuer and subject. Missing, false, null, and string `"true"` do not confer
+verification. A later unverified claim revokes the prior provider-managed contact;
+changed email increments its version. Email is never used to merge accounts.
+
 ## Enable the framework
 
 Both `synapse-api` and `synapse-worker` need the same PostgreSQL database and the
@@ -46,6 +74,31 @@ of these events:
 - `fleet.agent.offline`
 - `incident.created`
 - `finding.ownership_changed` (requires explicit `team_ids` or `all_teams` scope)
+
+Engagement and team scope use searchable pickers over the existing engagement
+list and ownership team pages. Each choice keeps its stable ID beside the
+display name, including when two records share a name. A saved ID that the
+directory no longer returns stays on the rule, with a warning, until an
+administrator removes it. Removing it is the only way the rule becomes broader.
+Archived teams can remain selected and are marked archived. Personal recipient
+roles are not offered here: the event catalog that decides which roles an event
+supports is still open (#1339), and a rule must not grow a recipient filter
+ahead of that contract.
+
+The engagement list endpoint returns the tenant's engagements in one response,
+and the picker requests that list once, then shows 25 matches at a time. Team
+search walks the existing cursor pages and does not download a user directory.
+The picker does not include email addresses or contact verification state.
+
+## Personal inbox
+
+When notifications are enabled, each human user has an inbox at `/inbox` and a bell in the application header. `GET /api/v1/me/inbox` and `GET /api/v1/me/inbox/unread` are scoped to the signed-in user. Machine roles are denied. The bell polls at most every 30 seconds and pauses while the tab is hidden. A deployment without the inbox returns 404 and the bell stops asking.
+
+Inbox rows are written in the same database transaction as the notification event. In-app delivery does not create a channel delivery or a job. Replaying an event after retention does not recreate a deleted row. Mark-all-read uses the server time of that request, so a message that arrives while the request is running stays unread.
+
+Personal recipients come from structured IDs already on the event: the canonical finding assignee and active ownership team members. A legacy assignee label, an email address, or a display name is never resolved into a recipient. Mentioned users, approvers, and engagement leads stay unsupported until a producer records a verified identity. `notification.destination_changed` is mandatory in-app for enabled tenant admins. It is not a routing rule and cannot be muted. One notice is stored per channel revision: repeating that save is a no-op, and changing only the secret or the URL path is not a host change. Changing back to an earlier host writes a new notice. The payload contains the actor, the action, the channel class, and the scheme plus host. It does not contain a URL path, query, port secret, or credential.
+
+`PUT /api/v1/me/notification-preferences` stores `inherit`, `enabled`, or `disabled` for the signed-in user. Mandatory in-app wins over an explicit mute, and an explicit mute wins over the default for every other choice. Personal email is sent only to the verified contact version captured when the event was projected. A later email change does not retarget a message that is still queued. Slack direct messages and Teams personal delivery are shown as unavailable.
 
 Vulnerability and incident rules can set an inclusive severity floor. SLA rules
 set a lead time (24 hours by default). Events created before the framework first

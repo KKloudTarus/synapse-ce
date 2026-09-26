@@ -18,7 +18,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-type NotificationRepository struct{ pool *pgxpool.Pool }
+type NotificationRepository struct {
+	pool               *pgxpool.Pool
+	destinationNotices bool
+}
 
 func NewNotificationRepository(pool *pgxpool.Pool) *NotificationRepository {
 	return &NotificationRepository{pool: pool}
@@ -41,8 +44,10 @@ func (r *NotificationRepository) CreateChannel(ctx context.Context, c notificati
 		if _, err := tx.Exec(ctx, `INSERT INTO notification_channels(tenant_id,id,name,channel_type,enabled,destination,recipients,revision,secret_version,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, c.TenantID, c.ID, c.Name, c.Type, c.Enabled, c.Destination, recipients, c.Revision, c.SecretVersion, c.CreatedAt, c.UpdatedAt); err != nil {
 			return fmt.Errorf("insert notification channel: %w", err)
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO notification_channel_versions(tenant_id,channel_id,version,sealed_config,created_at) VALUES($1,$2,$3,$4,$5)`, c.TenantID, c.ID, c.SecretVersion, sealed, c.CreatedAt)
-		return err
+		if _, err := tx.Exec(ctx, `INSERT INTO notification_channel_versions(tenant_id,channel_id,version,sealed_config,created_at) VALUES($1,$2,$3,$4,$5)`, c.TenantID, c.ID, c.SecretVersion, sealed, c.CreatedAt); err != nil {
+			return err
+		}
+		return r.maybeDestinationNotice(ctx, tx, c, "created")
 	})
 	return c, err
 }
@@ -53,7 +58,8 @@ func (r *NotificationRepository) UpdateChannel(ctx context.Context, c notificati
 	}
 	err := WithTenant(ctx, r.pool, c.TenantID.String(), func(tx pgx.Tx) error {
 		var currentVersion int
-		if err := tx.QueryRow(ctx, `SELECT secret_version FROM notification_channels WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL AND revision=$3 FOR UPDATE`, c.TenantID, c.ID, c.Revision-1).Scan(&currentVersion); err != nil {
+		var previousDestination string
+		if err := tx.QueryRow(ctx, `SELECT secret_version, destination FROM notification_channels WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL AND revision=$3 FOR UPDATE`, c.TenantID, c.ID, c.Revision-1).Scan(&currentVersion, &previousDestination); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("notification channel revision is stale: %w", shared.ErrConflict)
 			}
@@ -75,7 +81,10 @@ func (r *NotificationRepository) UpdateChannel(ctx context.Context, c notificati
 		if err == nil && !c.Enabled {
 			_, err = tx.Exec(ctx, `UPDATE notification_deliveries d SET state='cancelled',last_error='channel_disabled',next_attempt_at=NULL,updated_at=$3 WHERE tenant_id=$1 AND channel_id=$2 AND state IN ('pending','retrying') AND NOT EXISTS(SELECT 1 FROM notification_delivery_attempts a WHERE a.tenant_id=d.tenant_id AND a.delivery_id=d.id AND a.outcome='started')`, c.TenantID, c.ID, c.UpdatedAt)
 		}
-		return err
+		if err != nil || !replace || notification.SameEndpoint(previousDestination, c.Destination) {
+			return err
+		}
+		return r.maybeDestinationNotice(ctx, tx, c, "host_changed")
 	})
 	return c, err
 }
@@ -341,16 +350,28 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
 		var ids []shared.ID
 		for rows.Next() {
 			var id shared.ID
 			if err := rows.Scan(&id); err != nil {
+				rows.Close()
 				return nil, err
 			}
 			ids = append(ids, id)
 		}
-		return ids, rows.Err()
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+		// The source row already exists, but retention may have removed the inbox
+		// projection. Re-apply it so the tombstone, not the event conflict, decides
+		// whether the row comes back.
+		e.ID = existing
+		if err := r.projectPersonal(ctx, tx, e); err != nil {
+			return nil, err
+		}
+		return ids, nil
 	}
 
 	type target struct {
@@ -447,8 +468,13 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 	}
 	matched, _ := json.Marshal(allRules)
 	revisionJSON, _ := json.Marshal(revisions)
-	_, err = tx.Exec(ctx, `UPDATE notification_events SET matched_rules=$3,rule_revisions=$4 WHERE tenant_id=$1 AND id=$2`, e.TenantID, e.ID, matched, revisionJSON)
-	return ids, err
+	if _, err = tx.Exec(ctx, `UPDATE notification_events SET matched_rules=$3,rule_revisions=$4 WHERE tenant_id=$1 AND id=$2`, e.TenantID, e.ID, matched, revisionJSON); err != nil {
+		return nil, err
+	}
+	if err = r.projectPersonal(ctx, tx, e); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 func (r *NotificationRepository) GetDelivery(ctx context.Context, tenant, id shared.ID) (notification.Delivery, error) {

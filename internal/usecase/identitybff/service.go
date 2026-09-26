@@ -40,6 +40,19 @@ type Service struct {
 	clock      ports.Clock
 	ids        ports.IDGenerator
 	cfg        Config
+	contacts   interface {
+		ImportOIDCEmail(context.Context, shared.ID, shared.ID, string, string) error
+		RevokeOIDCEmail(context.Context, shared.ID, shared.ID, string) error
+	}
+}
+
+// SetVerifiedEmailImporter enables import only after the callback has resolved
+// the account by issuer and subject. Email never participates in account lookup.
+func (s *Service) SetVerifiedEmailImporter(importer interface {
+	ImportOIDCEmail(context.Context, shared.ID, shared.ID, string, string) error
+	RevokeOIDCEmail(context.Context, shared.ID, shared.ID, string) error
+}) {
+	s.contacts = importer
 }
 
 func NewService(provider ports.OIDCProvider, identities *identityuc.Service, store ports.IdentityStore, users ports.UserRepository, clock ports.Clock, ids ports.IDGenerator, cfg Config) (*Service, error) {
@@ -85,6 +98,17 @@ func (s *Service) Complete(ctx context.Context, state, code, nonce string) (Sess
 	u, err := s.resolveUser(tenantCtx, verified)
 	if err != nil {
 		return Session{}, err
+	}
+	if s.contacts != nil {
+		var syncErr error
+		if verified.EmailVerified {
+			syncErr = s.contacts.ImportOIDCEmail(tenantCtx, s.cfg.TenantID, u.ID, verified.Issuer, verified.Email)
+		} else {
+			syncErr = s.contacts.RevokeOIDCEmail(tenantCtx, s.cfg.TenantID, u.ID, verified.Issuer)
+		}
+		if syncErr != nil {
+			return Session{}, fmt.Errorf("synchronize verified OIDC contact: %w", syncErr)
+		}
 	}
 	created, err := s.identities.CreateSession(ctx, s.cfg.TenantID, u.ID, nil, s.cfg.SessionTTL)
 	if err != nil {

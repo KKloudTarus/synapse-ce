@@ -7,6 +7,7 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../EngagementDetail/compon
 import type { OwnershipAction, OwnershipBulkResult, OwnershipCapability, OwnershipFilter, OwnershipFinding } from '../../lib/api/ownership'
 import type { CurrentUser } from '../../lib/types'
 import { OwnershipPanel } from './OwnershipPanel'
+import { UserPicker } from './UserPicker'
 import { canTriage, Choice, findingHref, OwnershipBoundary, ownershipError, TeamChoice, useOwnershipRequestKey, useOwnershipTeams } from './shared'
 
 export function OwnershipInbox() {
@@ -103,7 +104,7 @@ function Inbox({ capability, user }: { capability: OwnershipCapability; user: Cu
     </Card>
     {canTriage(user) && chosen.length > 0 && <Card title={`Update ${chosen.length} selected findings`}><div className="space-y-3">
       <Field label="Bulk action"><Choice value={action} onChange={(event) => { setAction(event.target.value as OwnershipAction); setOutcomes([]) }} disabled={busy}><option value="claim">Claim for myself</option><option value="assign">Assign team / person</option><option value="transfer">Transfer team</option><option value="clear">Clear and keep manual protection</option><option value="release">Release to automatic routing</option></Choice></Field>
-      {(action === 'assign' || action === 'transfer') && <div className="grid gap-3 sm:grid-cols-2"><Field label="Destination team"><TeamChoice teams={teams.teams} value={team} onChange={setTeam} label="Bulk destination team" disabled={busy} /></Field><Field label="Assignee user ID"><Input value={assignee} onChange={(event) => setAssignee(event.target.value)} disabled={busy || clear && action === 'transfer'} /></Field></div>}
+      {(action === 'assign' || action === 'transfer') && <div className="grid gap-3 sm:grid-cols-2"><Field label="Destination team"><TeamChoice teams={teams.teams} value={team} onChange={id=>{setTeam(id);setAssignee('')}} label="Bulk destination team" disabled={busy} /></Field><UserPicker team={team} value={assignee} onChange={setAssignee} disabled={busy || clear && action === 'transfer'} /></div>}
       {action === 'transfer' && <label className="flex gap-2 text-sm"><input type="checkbox" checked={clear} onChange={(event) => { setClear(event.target.checked); if (event.target.checked) setAssignee('') }} disabled={busy} />Clear the current assignee during transfer</label>}
       <p className="text-xs text-secondary">Each finding is updated independently. Conflicts stay selected for review; successful updates are kept.</p>
       <Button loading={busy} onClick={() => void applyBulk()} disabled={page.loading || action === 'transfer' && !team || action === 'release' && (capability.mode !== 'enforce' || !capability.routing_available)}>Apply to selected findings</Button>

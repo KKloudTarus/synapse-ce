@@ -5,6 +5,7 @@ const TABS = [
   { label: 'Audit', to: '/settings', end: true },
   { label: 'Team', to: '/settings/team' },
   { label: 'Finding ownership', to: '/settings/ownership' },
+  { label: 'Assignee review', to: '/settings/assignee-review' },
   { label: 'Integrations', to: '/settings/integrations' },
   { label: 'Connectors', to: '/settings/connectors' },
   { label: 'SLA policy', to: '/settings/sla' },

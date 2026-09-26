@@ -195,7 +195,7 @@ func (r *OwnershipRepository) ApplyAssignment(ctx context.Context, m ports.Owner
 			after.Revision++
 		}
 		if effectiveChanged || m.LegacyEndpoint {
-			if err := ownershipCAS(tx.Exec(ctx, `UPDATE findings SET assignee=$4,version=version+1,updated_at=$5 WHERE tenant_id=$1 AND engagement_id=$2 AND id=$3 AND version=$6`, tenant, m.EngagementID, m.FindingID, after.LegacyAssignee, m.At, m.ExpectedFindingVersion)); err != nil {
+			if err := ownershipCAS(tx.Exec(ctx, `UPDATE findings SET assignee=$4,assignee_user_id=$7,version=version+1,updated_at=$5 WHERE tenant_id=$1 AND engagement_id=$2 AND id=$3 AND version=$6`, tenant, m.EngagementID, m.FindingID, after.LegacyAssignee, m.At, m.ExpectedFindingVersion, nullableID(after.AssigneeID))); err != nil {
 				return err
 			}
 		}

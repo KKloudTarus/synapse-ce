@@ -21,6 +21,7 @@ import {
 } from '../../components/ui'
 import { useToast } from '../../components/synapse/Toast'
 import { useFetch } from '../../hooks'
+import { RuleTargetPicker } from './RuleTargetPicker'
 
 const EVENTS: { value: NotificationEventType; label: string }[] = [
   { value: 'vulnerability_action.created', label: 'Vulnerability risk action' },
@@ -492,6 +493,20 @@ function ChannelList({
   )
 }
 
+function teamCursor(cursor?: string): { offset: number; apiCursor?: string } {
+  if (!cursor) return { offset: 0 }
+  try {
+    if (cursor.startsWith('api:')) return { offset: 0, apiCursor: cursor.slice(4) }
+    if (cursor.startsWith('local:')) {
+      const parsed = JSON.parse(cursor.slice(6)) as { offset?: number; apiCursor?: string }
+      return { offset: Number(parsed.offset) || 0, apiCursor: parsed.apiCursor || undefined }
+    }
+  } catch {
+    return { offset: 0 }
+  }
+  return { offset: 0, apiCursor: cursor }
+}
+
 function RuleCreate({
   initial,
   channels,
@@ -510,11 +525,49 @@ function RuleCreate({
   const [selected, setSelected] = useState<string[]>(
     initial?.channel_ids ?? [channels[0]?.id].filter(Boolean),
   )
-  const [engagements, setEngagements] = useState(
-    initial?.engagement_ids?.join(', ') ?? '',
-  )
-  const [teams, setTeams] = useState(initial?.team_ids?.join(', ') ?? '')
+  const [engagements, setEngagements] = useState<string[]>(initial?.engagement_ids ?? [])
+  const [teams, setTeams] = useState<string[]>(initial?.team_ids ?? [])
   const [allTeams, setAllTeams] = useState(initial?.all_teams ?? false)
+  const engagementCache = useRef<Promise<Array<{ id: string; name: string; client: string }>> | null>(null)
+  const searchEngagements = useCallback(async (query: string, cursor: string | undefined, signal: AbortSignal) => {
+    if (!engagementCache.current) {
+      engagementCache.current = api.listEngagements().catch((err: unknown) => {
+        engagementCache.current = null
+        throw err
+      })
+    }
+    const all = await engagementCache.current
+    if (signal.aborted) throw new DOMException('The search was cancelled.', 'AbortError')
+    const needle = query.trim().toLowerCase()
+    const matches = all.filter((item) => {
+      const haystack = `${item.name} ${item.id} ${item.client}`.toLowerCase()
+      return needle === '' || haystack.includes(needle)
+    })
+    const start = cursor ? Number(cursor) || 0 : 0
+    const page = matches.slice(start, start + 25)
+    const next = start + 25 < matches.length ? String(start + 25) : undefined
+    return { items: page.map((item) => ({ id: item.id, label: item.name || item.id })), next }
+  }, [])
+  const searchTeams = useCallback(async (query: string, cursor: string | undefined, signal: AbortSignal) => {
+    const parsed = teamCursor(cursor)
+    const page = await api.ownershipTeams(parsed.apiCursor, signal)
+    if (signal.aborted) throw new DOMException('The search was cancelled.', 'AbortError')
+    const needle = query.trim().toLowerCase()
+    const matches = (page.items ?? [])
+      .filter((team) => {
+        const haystack = `${team.name} ${team.slug} ${team.id}`.toLowerCase()
+        return needle === '' || haystack.includes(needle)
+      })
+      .map((team) => ({ id: team.id, label: team.name || team.slug || team.id, archived: team.archived }))
+    const slice = matches.slice(parsed.offset, parsed.offset + 25)
+    const nextOffset = parsed.offset + 25
+    const next = nextOffset < matches.length
+      ? `local:${JSON.stringify({ offset: nextOffset, apiCursor: parsed.apiCursor ?? '' })}`
+      : page.next
+        ? `api:${page.next}`
+        : undefined
+    return { items: slice, next }
+  }, [])
   const [actions, setActions] = useState(
     initial?.action_types?.join(', ') ?? '',
   )
@@ -531,20 +584,16 @@ function RuleCreate({
     setBusy(true)
     setError(null)
     try {
-      const teamIDs = teams.split(',').map((id) => id.trim()).filter(Boolean)
-      if (event === 'finding.ownership_changed' && !allTeams && !teamIDs.length) {
-        throw new Error('Enter at least one team ID or select all teams.')
+      if (event === 'finding.ownership_changed' && !allTeams && teams.length === 0) {
+        throw new Error('Choose at least one team or select all teams.')
       }
       const input = {
         name: name.trim(),
         enabled: initial?.enabled ?? true,
         event_type: event,
         channel_ids: selected,
-        engagement_ids: engagements
-          .split(',')
-          .map((x) => x.trim())
-          .filter(Boolean),
-        team_ids: event === 'finding.ownership_changed' && !allTeams ? teamIDs : undefined,
+        engagement_ids: engagements,
+        team_ids: event === 'finding.ownership_changed' && !allTeams ? teams : undefined,
         all_teams: event === 'finding.ownership_changed' ? allTeams : undefined,
         action_types:
           event === 'vulnerability_action.created'
@@ -619,17 +668,14 @@ function RuleCreate({
             </label>
           ))}
         </fieldset>
-        <Field
-          label="Engagement IDs (optional)"
-          htmlFor="notification-engagements"
-          hint="Comma-separated; leave blank for all engagements."
-        >
-          <Input
-            id="notification-engagements"
-            value={engagements}
-            onChange={(e) => setEngagements(e.target.value)}
-          />
-        </Field>
+        <RuleTargetPicker
+          label="Engagements (optional)"
+          hint="Leave unselected to match every engagement. A saved engagement that is missing from this directory stays on the rule until you remove it."
+          selected={engagements}
+          onChange={setEngagements}
+          disabled={!canAdmin}
+          search={searchEngagements}
+        />
         {event === 'vulnerability_action.created' && (
           <Field
             label="Action types (optional)"
@@ -654,18 +700,14 @@ function RuleCreate({
               />
               All teams in this tenant
             </label>
-            <Field
+            <RuleTargetPicker
               label="Team IDs"
-              htmlFor="notification-teams"
-              hint="Comma-separated. Notify when any listed team gains or loses ownership, or its finding's assignee changes."
-            >
-              <Input
-                id="notification-teams"
-                value={teams}
-                disabled={allTeams}
-                onChange={(e) => setTeams(e.target.value)}
-              />
-            </Field>
+              hint="Notify when any listed team gains or loses ownership, or its finding's assignee changes. Archived teams stay selected until you remove them."
+              selected={teams}
+              onChange={setTeams}
+              disabled={!canAdmin || allTeams}
+              search={searchTeams}
+            />
           </fieldset>
         )}
         {(event === 'vulnerability_action.created' ||
@@ -773,6 +815,9 @@ function RuleList({
                 {EVENTS.find((e) => e.value === r.event_type)?.label} →{' '}
                 {r.channel_ids.map(channelName).join(', ')}
               </p>
+              {r.engagement_ids && r.engagement_ids.length > 0 && (
+                <p className="text-sm text-tertiary">Engagements: {r.engagement_ids.join(', ')}</p>
+              )}
               {r.event_type === 'finding.ownership_changed' && (
                 <p className="text-sm text-tertiary">
                   {r.all_teams ? 'All teams in this tenant' : `Teams: ${r.team_ids?.join(', ') ?? ''}`}

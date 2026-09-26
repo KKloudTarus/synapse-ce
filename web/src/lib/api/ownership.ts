@@ -1,6 +1,7 @@
 import { req } from './client'
 
 export interface OwnershipPage<T> { items: T[]; next?: string }
+export interface UserChoice { id: string; name: string; role: string }
 export interface OwnershipCapability { enabled: boolean; mode: 'off' | 'observe' | 'enforce'; routing_available: boolean; reason?: string }
 export interface OwnershipTeam { id: string; slug: string; name: string; archived: boolean; revision: number; created_at: string; updated_at: string }
 export interface OwnershipMember { team_id: string; user_id: string; created_at: string }
@@ -43,6 +44,7 @@ const mutate = (method: string, body: unknown, key?: string): RequestInit => ({ 
 const findingPath = (eng: string, fid: string) => `/engagements/${id(eng)}/findings/${id(fid)}/ownership`
 
 export const ownershipApi = {
+  userChoices: (team: string, q: string, cursor?: string, signal?: AbortSignal): Promise<OwnershipPage<UserChoice>> => req(`/users/picker${query({ team_id: team, q, cursor, limit: 25 })}`, { signal }),
   ownershipCapability: (signal?: AbortSignal): Promise<OwnershipCapability> => req('/ownership/capabilities', { signal }),
   ownershipTeams: (cursor?: string, signal?: AbortSignal): Promise<OwnershipPage<OwnershipTeam>> => req(`/ownership/teams${query({ cursor, limit: 200 })}`, { signal }),
   ownershipTeam: (team: string): Promise<OwnershipTeam> => req(`/ownership/teams/${id(team)}`),

@@ -174,6 +174,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 	identitybff "github.com/KKloudTarus/synapse-ce/internal/usecase/identitybff"
 	identityuc "github.com/KKloudTarus/synapse-ce/internal/usecase/identityuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/inbox"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
@@ -212,6 +213,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/taintscan"
 	threatmodeluc "github.com/KKloudTarus/synapse-ce/internal/usecase/threatmodeluc"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 	vexuc "github.com/KKloudTarus/synapse-ce/internal/usecase/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityactionuc"
@@ -1458,6 +1460,11 @@ func main() {
 	} else {
 		router.SetOwnership(nil, "off", "disabled")
 	}
+	var userContactService *usercontacts.Service
+	if databasePool != nil {
+		router.SetAssigneeReviewReader(postgres.NewAssigneeReviewReader(databasePool))
+		router.SetUserPickerReader(postgres.NewUserPickerReader(databasePool))
+	}
 	if cfg.NotificationEnabled {
 		if databasePool == nil {
 			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires PostgreSQL")
@@ -1471,13 +1478,28 @@ func main() {
 			Host: cfg.NotificationSMTPHost, Port: cfg.NotificationSMTPPort, From: cfg.NotificationSMTPFrom,
 			Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS,
 		}, 10*time.Second)
-		notificationService, notificationErr := notificationuc.NewService(postgres.NewNotificationRepository(databasePool), vaultCipher, notificationSender, auditLog, clock, ids)
+		notificationRepository := postgres.NewNotificationRepository(databasePool)
+		notificationRepository.EnableDestinationNotices()
+		notificationService, notificationErr := notificationuc.NewService(notificationRepository, vaultCipher, notificationSender, auditLog, clock, ids)
 		if notificationErr != nil {
 			log.Error("notification service init failed", "err", notificationErr)
 			os.Exit(1)
 		}
 		notificationService.SetTransactionRunner(postgres.NewTenantTransactionRunner(databasePool))
 		router.SetNotifications(notificationService)
+		userContactService, notificationErr = usercontacts.NewService(postgres.NewUserContactStore(databasePool), userRepo, vaultCipher, notificationSender, ids, clock, usercontacts.DeriveVerifierKey(cfg.VaultMasterKey), cfg.NotificationSMTPHost != "" && cfg.NotificationSMTPFrom != "")
+		if notificationErr != nil {
+			log.Error("user contact service init failed", "err", notificationErr)
+			os.Exit(1)
+		}
+		router.SetUserContacts(userContactService)
+		inboxService, inboxErr := inbox.NewService(postgres.NewInboxStore(databasePool), clock)
+		if inboxErr != nil {
+			log.Error("personal inbox init failed", "err", inboxErr)
+			os.Exit(1)
+		}
+		inboxService.SetMailer(notificationSender)
+		router.SetInbox(inboxService)
 		log.Info("tenant notification management ENABLED")
 	}
 	router.SetIntegrations(integrationService)
@@ -1675,6 +1697,9 @@ func main() {
 		if oidcErr != nil {
 			log.Error("OIDC BFF initialization failed", "err", oidcErr)
 			os.Exit(1)
+		}
+		if userContactService != nil {
+			oidcService.SetVerifiedEmailImporter(userContactService)
 		}
 		httpOIDCService, oidcErr := httpapi.NewOIDCService(
 			func(ctx context.Context) (httpapi.OIDCAuthorization, error) {

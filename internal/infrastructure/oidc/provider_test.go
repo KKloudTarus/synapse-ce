@@ -56,3 +56,19 @@ func TestGroupRoleMappingRejectsMemberAlias(t *testing.T) {
 		t.Fatal("member alias must not be configured for OIDC")
 	}
 }
+
+func TestVerifiedEmailClaimRequiresBooleanTrue(t *testing.T) {
+	for _, claim := range []json.RawMessage{nil, []byte(`null`), []byte(`false`), []byte(`"true"`), []byte(`1`)} {
+		email, verified, err := verifiedEmailClaim("alice@example.com", claim)
+		if err != nil || verified || email != "" {
+			t.Fatalf("claim %s imported %q/%t: %v", claim, email, verified, err)
+		}
+	}
+	email, verified, err := verifiedEmailClaim("Alice@EXAMPLE.COM", []byte(`true`))
+	if err != nil || !verified || email != "Alice@example.com" {
+		t.Fatalf("verified claim = %q/%t: %v", email, verified, err)
+	}
+	if _, _, err := verifiedEmailClaim("bad\r\nBcc: x@example.com", []byte(`true`)); err == nil {
+		t.Fatal("accepted unsafe verified email")
+	}
+}

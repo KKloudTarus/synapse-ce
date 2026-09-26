@@ -32,6 +32,7 @@ import (
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
+	inboxuc "github.com/KKloudTarus/synapse-ce/internal/usecase/inbox"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	ownershipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ownership"
@@ -41,6 +42,7 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 	vexuc "github.com/KKloudTarus/synapse-ce/internal/usecase/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityactionuc"
@@ -74,6 +76,9 @@ type Router struct {
 	audit                    *audituc.Service
 	vex                      *vexuc.Service
 	users                    *usersuc.Service
+	userContacts             *usercontacts.Service
+	assigneeReview           ports.AssigneeReviewReader
+	userPicker               ports.UserPickerReader
 	credentials              *credentialsuc.Service
 	integrations             *integrationuc.Service
 	dastVerifier             runtimeVerifierService
@@ -155,6 +160,7 @@ type Router struct {
 	incidentResponses        incidentResponseCoordinator // optional; nil ⇒ incident-scoped governed response route is not registered
 	responseObservers        responseObserverAdmin       // optional; nil ⇒ response-observer assignment route is not registered
 	notifications            *notificationuc.Service     // optional; nil ⇒ tenant notification management routes are not registered
+	inbox                    *inboxuc.Service
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -502,6 +508,14 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/notifications/deliveries", rt.authz(userdom.PermAdminister, rt.listNotificationDeliveries))
 		mux.HandleFunc("GET /api/v1/notifications/deliveries/{nid}", rt.authz(userdom.PermAdminister, rt.getNotificationDelivery))
 		mux.HandleFunc("GET /api/v1/notifications/deliveries/{nid}/attempts", rt.authz(userdom.PermAdminister, rt.listNotificationAttempts))
+	}
+	if rt.inbox != nil {
+		mux.HandleFunc("GET /api/v1/me/inbox", rt.authz(userdom.PermView, rt.listMyInbox))
+		mux.HandleFunc("GET /api/v1/me/inbox/unread", rt.authz(userdom.PermView, rt.countMyInbox))
+		mux.HandleFunc("POST /api/v1/me/inbox/read", rt.authz(userdom.PermView, rt.readAllMyInbox))
+		mux.HandleFunc("POST /api/v1/me/inbox/{id}/read", rt.authz(userdom.PermView, rt.readMyInbox))
+		mux.HandleFunc("GET /api/v1/me/notification-preferences", rt.authz(userdom.PermView, rt.listMyNotificationPreferences))
+		mux.HandleFunc("PUT /api/v1/me/notification-preferences", rt.authz(userdom.PermView, rt.saveMyNotificationPreference))
 	}
 	if rt.businessAssets != nil {
 		if rt.eng != nil && rt.findings != nil {
@@ -884,6 +898,19 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/capabilities", rt.authz(userdom.PermView, rt.listCapabilities))
 	}
 	mux.HandleFunc("GET /api/v1/me", rt.currentUser)
+	if rt.assigneeReview != nil {
+		mux.HandleFunc("GET /api/v1/findings/assignee-review", rt.authz(userdom.PermAdminister, rt.listAssigneeReview))
+	}
+	if rt.userPicker != nil {
+		mux.HandleFunc("GET /api/v1/users/picker", rt.authz(userdom.PermTriage, rt.listUserChoices))
+	}
+	if rt.userContacts != nil {
+		mux.HandleFunc("GET /api/v1/me/contacts", rt.authz(userdom.PermView, rt.listMyContacts))
+		mux.HandleFunc("POST /api/v1/me/contacts", rt.authz(userdom.PermView, rt.addMyContact))
+		mux.HandleFunc("DELETE /api/v1/me/contacts/{id}", rt.authz(userdom.PermView, rt.deleteMyContact))
+		mux.HandleFunc("POST /api/v1/me/contacts/{id}/verification", rt.authz(userdom.PermView, rt.requestMyContactVerification))
+		mux.HandleFunc("POST /api/v1/me/contacts/{id}/verify", rt.authz(userdom.PermView, rt.verifyMyContact))
+	}
 	// User management is administer-only and confined to the caller's own tenant. Deleting a user is
 	// deliberately absent: an identity owns its audit, evidence, and finding attribution, so access is
 	// revoked by disabling the account or rotating its key, never by removing the row.

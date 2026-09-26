@@ -4,6 +4,7 @@ import { Button, Input, Select, cn } from '../../../components/ui'
 import { useFetch } from '../../../hooks'
 import { ApiError, api } from '../../../lib/api'
 import type { Finding, FindingComment, Retest, RetestOutcome } from '../../../lib/types'
+import { UserPicker } from '../../Ownership/UserPicker'
 
 export function AssigneeControl({
   finding,
@@ -16,20 +17,21 @@ export function AssigneeControl({
   onUpdated: (f: Finding) => void
   onReload: () => void
 }) {
-  const [value, setValue] = useState(finding.assignee)
+  const [selectedID, setSelectedID] = useState(finding.assigneeUserId ?? '')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<'' | 'saved' | 'failed' | 'conflict'>('')
 
   useEffect(() => {
-    setValue(finding.assignee)
-  }, [finding.assignee, finding.version])
+    setSelectedID(finding.assigneeUserId ?? '')
+  }, [finding.assigneeUserId, finding.version])
 
-  async function save() {
-    if (value.trim() === finding.assignee) return
+  async function save(id: string) {
+    if (id === (finding.assigneeUserId ?? '')) return
+    setSelectedID(id)
     setBusy(true)
     setNote('')
     try {
-      onUpdated(await api.setFindingAssignee(engagementId, finding.id, value.trim(), finding.version))
+      onUpdated(await api.setFindingAssignee(engagementId, finding.id, id, finding.version))
       setNote('saved')
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
@@ -38,26 +40,17 @@ export function AssigneeControl({
       } else {
         setNote('failed')
       }
+      setSelectedID(finding.assigneeUserId ?? '')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="space-y-2">
       <div className="flex items-center gap-1.5 text-xs font-semibold text-secondary">
         <User01 className="size-3.5 text-fg-tertiary" />
-        <span>Assignee:</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <Input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onBlur={save}
-          placeholder="unassigned"
-          aria-label={`Assignee for ${finding.title}`}
-          className="h-8 max-w-[12rem] text-xs font-medium"
-        />
+        <span>Assignee</span>
         {busy && <Loading01 className="size-3.5 animate-spin text-tertiary" />}
         {note === 'saved' && <span className="text-xs font-bold text-success-primary">saved</span>}
         {note === 'failed' && <span className="text-xs font-bold text-error-primary">failed</span>}
@@ -67,6 +60,9 @@ export function AssigneeControl({
           </span>
         )}
       </div>
+      <UserPicker team="" allowAll value={selectedID} onChange={(id)=>void save(id)} disabled={busy} />
+      {finding.assignee && <p className="text-xs text-secondary">Stored assignee label: {finding.assignee}</p>}
+      {finding.assignee && !finding.assigneeUserId && <p className="text-xs text-warning-primary">Legacy assignee label has no user binding. Choose a user above to enable personal routing.</p>}
     </div>
   )
 }

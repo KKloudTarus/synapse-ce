@@ -13,6 +13,7 @@ import {
   Key01,
   LogOut01,
   Plus,
+  User01,
   Monitor01,
   Server01,
   Signal01,
@@ -51,6 +52,7 @@ type NavItem = {
 
 const DASHBOARD: NavItem = { icon: BarChartSquare02, label: 'Dashboard', to: '/dashboard', end: true }
 const SETTINGS: NavItem = { icon: Settings01, label: 'Settings', to: '/settings' }
+const PROFILE: NavItem = { icon: User01, label: 'My profile', to: '/profile' }
 
 const NAV_GROUPS: Array<{
   label: string
@@ -353,7 +355,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       </nav>
 
       <div className="shrink-0 border-t border-secondary p-3">
-        <div className="space-y-0.5">{renderItems([SETTINGS])}</div>
+        <div className="space-y-0.5">{renderItems([PROFILE, SETTINGS])}</div>
         {auth && (
         <button
           type="button"

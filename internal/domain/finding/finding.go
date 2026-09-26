@@ -183,7 +183,10 @@ type Finding struct {
 	// Workflow: the human assignee, and an optimistic-concurrency version that
 	// Kanban/status/assignee edits check to prevent lost updates.
 	Assignee string
-	Version  int
+	// AssigneeUserID is the canonical same-tenant user reference for personal
+	// routing. A legacy free-text label may have no resolvable user.
+	AssigneeUserID shared.ID `json:"assignee_user_id,omitempty"`
+	Version        int
 
 	// Risk priority (CISA KEV -> EPSS x CVSS), copied from the source vuln so
 	// findings can be ordered by real risk. KEV findings rank above all.

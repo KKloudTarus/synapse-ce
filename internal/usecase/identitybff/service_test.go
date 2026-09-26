@@ -32,7 +32,10 @@ func (bffProtector) Open(_ context.Context, ciphertext string, _ []byte) ([]byte
 	return []byte(ciphertext), nil
 }
 
-type bffProvider struct{ expectedNonce string }
+type bffProvider struct {
+	expectedNonce string
+	identity      ports.OIDCIdentity
+}
 
 func (p *bffProvider) GenerateVerifier() string { return "test-pkce-verifier-value-0123456789" }
 func (p *bffProvider) AuthorizationURL(state, nonce, _ string) (string, error) {
@@ -43,6 +46,9 @@ func (p *bffProvider) ExchangeAndVerify(_ context.Context, _, _, nonce string) (
 	if nonce != p.expectedNonce {
 		return ports.OIDCIdentity{}, fmt.Errorf("nonce mismatch")
 	}
+	if p.identity.Subject != "" {
+		return p.identity, nil
+	}
 	return ports.OIDCIdentity{Issuer: "https://issuer.example", Subject: "subject", Role: user.RoleAdmin}, nil
 }
 
@@ -50,6 +56,7 @@ type bffStore struct {
 	transaction  identity.AuthorizationTransaction
 	identity     identity.ExternalIdentity
 	tamperTenant bool
+	sessions     int
 }
 
 func (s *bffStore) CreateExternalIdentity(_ context.Context, external identity.ExternalIdentity) error {
@@ -77,7 +84,10 @@ func (s *bffStore) ConsumeAuthorizationTransaction(_ context.Context, _ shared.I
 	}
 	return transaction, nil
 }
-func (s *bffStore) CreateSession(context.Context, identity.Session) error { return nil }
+func (s *bffStore) CreateSession(context.Context, identity.Session) error {
+	s.sessions++
+	return nil
+}
 func (s *bffStore) RotateSession(context.Context, shared.ID, identity.Session, time.Time) error {
 	return nil
 }
@@ -280,5 +290,75 @@ func TestCompleteRefusesToTouchTheBootstrapOperator(t *testing.T) {
 	}
 	if len(users.upserts) != 0 {
 		t.Errorf("the bootstrap principal was written: %+v", users.upserts)
+	}
+}
+
+type recordedContacts struct {
+	user    shared.ID
+	issuer  string
+	email   string
+	imports int
+	revokes int
+	fail    error
+}
+
+func (r *recordedContacts) ImportOIDCEmail(_ context.Context, _, user shared.ID, issuer, email string) error {
+	r.imports++
+	r.user, r.issuer, r.email = user, issuer, email
+	return r.fail
+}
+func (r *recordedContacts) RevokeOIDCEmail(_ context.Context, _, user shared.ID, issuer string) error {
+	r.revokes++
+	r.user, r.issuer = user, issuer
+	return r.fail
+}
+
+func TestCompleteImportsVerifiedEmailForTheResolvedSubject(t *testing.T) {
+	store := &bffStore{}
+	service, provider, _ := newBFFTestServiceWithUsers(t, store, true)
+	contacts := &recordedContacts{}
+	service.SetVerifiedEmailImporter(contacts)
+	provider.identity = ports.OIDCIdentity{Issuer: "https://issuer.example", Subject: "subject", Role: user.RoleAdmin, Email: "Ada@Example.com", EmailVerified: true}
+	for range 2 {
+		start, err := service.Begin(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if contacts.imports != 2 || contacts.revokes != 0 || contacts.user != "user-1" || contacts.issuer != "https://issuer.example" || contacts.email != "Ada@Example.com" {
+		t.Fatalf("import tracked the wrong account: %+v", contacts)
+	}
+	if store.sessions != 2 {
+		t.Fatalf("sessions = %d", store.sessions)
+	}
+}
+
+func TestCompleteRevokesUnverifiedOIDCEmailWithoutCreatingASessionOnFailure(t *testing.T) {
+	store := &bffStore{}
+	service, provider, _ := newBFFTestServiceWithUsers(t, store, true)
+	contacts := &recordedContacts{}
+	service.SetVerifiedEmailImporter(contacts)
+	provider.identity = ports.OIDCIdentity{Issuer: "https://issuer.example", Subject: "subject", Role: user.RoleAdmin, Email: "ada@example.com", EmailVerified: false}
+	start, err := service.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); err != nil {
+		t.Fatal(err)
+	}
+	if contacts.imports != 0 || contacts.revokes != 1 || contacts.user != "user-1" || contacts.issuer != "https://issuer.example" {
+		t.Fatalf("unverified claim imported a contact: %+v", contacts)
+	}
+	contacts.fail = errors.New("contact store unavailable")
+	provider.identity.EmailVerified = true
+	start, err = service.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); err == nil || store.sessions != 1 {
+		t.Fatalf("failed import created a session: %v sessions=%d", err, store.sessions)
 	}
 }
