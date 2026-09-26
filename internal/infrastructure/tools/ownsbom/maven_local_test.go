@@ -387,3 +387,57 @@ func TestMavenTransitiveScopeIsInheritedFromTheRequiringDependency(t *testing.T)
 		}
 	}
 }
+
+// Among several imported BOMs the FIRST declaration decides an artifact, which is Maven's rule. Letting a
+// later import overwrite an earlier one resolved spring-retry to the version an older transitively imported
+// Boot BOM pins rather than the one the project's own BOM pins.
+func TestMavenFirstImportedBOMWins(t *testing.T) {
+	repo := t.TempDir()
+	writePOM(t, repo, "com.vendor", "bom-new", "2.0", `<project>
+  <groupId>com.vendor</groupId><artifactId>bom-new</artifactId><version>2.0</version>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>g</groupId><artifactId>shared</artifactId><version>1.3.3</version></dependency>
+  </dependencies></dependencyManagement></project>`)
+	writePOM(t, repo, "com.vendor", "bom-old", "1.0", `<project>
+  <groupId>com.vendor</groupId><artifactId>bom-old</artifactId><version>1.0</version>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>g</groupId><artifactId>shared</artifactId><version>1.3.1</version></dependency>
+  </dependencies></dependencyManagement></project>`)
+	for _, v := range []string{"1.3.1", "1.3.3"} {
+		writePOM(t, repo, "g", "shared", v, `<project><groupId>g</groupId><artifactId>shared</artifactId><version>`+v+`</version></project>`)
+	}
+	names, _ := parseMaven(t, repo, t.TempDir(), `<project>
+  <groupId>io.example</groupId><artifactId>service</artifactId><version>0.1</version>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>com.vendor</groupId><artifactId>bom-new</artifactId><version>2.0</version><type>pom</type><scope>import</scope></dependency>
+    <dependency><groupId>com.vendor</groupId><artifactId>bom-old</artifactId><version>1.0</version><type>pom</type><scope>import</scope></dependency>
+  </dependencies></dependencyManagement>
+  <dependencies><dependency><groupId>g</groupId><artifactId>shared</artifactId></dependency></dependencies></project>`)
+	if !contains(names, "g:shared@1.3.3") {
+		t.Errorf("the first imported BOM must decide the version, got %v", names)
+	}
+}
+
+// A POM's OWN explicit entry still beats every import, which is the escape hatch a project uses to pin a
+// version its BOMs disagree about.
+func TestMavenOwnManagedEntryBeatsAnImport(t *testing.T) {
+	repo := t.TempDir()
+	writePOM(t, repo, "com.vendor", "bom", "1.0", `<project>
+  <groupId>com.vendor</groupId><artifactId>bom</artifactId><version>1.0</version>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>g</groupId><artifactId>shared</artifactId><version>1.0.0</version></dependency>
+  </dependencies></dependencyManagement></project>`)
+	for _, v := range []string{"1.0.0", "2.0.0"} {
+		writePOM(t, repo, "g", "shared", v, `<project><groupId>g</groupId><artifactId>shared</artifactId><version>`+v+`</version></project>`)
+	}
+	names, _ := parseMaven(t, repo, t.TempDir(), `<project>
+  <groupId>io.example</groupId><artifactId>service</artifactId><version>0.1</version>
+  <dependencyManagement><dependencies>
+    <dependency><groupId>com.vendor</groupId><artifactId>bom</artifactId><version>1.0</version><type>pom</type><scope>import</scope></dependency>
+    <dependency><groupId>g</groupId><artifactId>shared</artifactId><version>2.0.0</version></dependency>
+  </dependencies></dependencyManagement>
+  <dependencies><dependency><groupId>g</groupId><artifactId>shared</artifactId></dependency></dependencies></project>`)
+	if !contains(names, "g:shared@2.0.0") {
+		t.Errorf("the project's own managed entry must beat an imported one, got %v", names)
+	}
+}

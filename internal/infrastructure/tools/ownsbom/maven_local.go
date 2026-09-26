@@ -288,14 +288,18 @@ func (r *mavenLocalRepo) build(raw *mavenPOMXML, self mavenCoord, depth int, dir
 	props["pom.version"] = coord.version
 	props["version"] = coord.version
 
+	// dependencyManagement precedence, in the order Maven's model builder applies it and the order that
+	// decides a real Spring Cloud project's versions:
+	//
+	//   1. an entry the POM declares itself wins over everything;
+	//   2. an entry INHERITED FROM THE PARENT wins over an imported BOM, because the parent's management is
+	//      merged into the model before imports are resolved and an import only fills what is unmanaged;
+	//   3. among the imports the FIRST declaration wins.
+	//
+	// Getting (2) backwards resolved spring-retry to 1.3.1 on a JHipster service: jhipster-dependencies takes
+	// Spring Boot 2.7.3 from its parent, which pins 1.3.3, while the spring-cloud BOM it imports carries an
+	// older Boot that pins 1.3.1. Letting the import win named a version the build never uses.
 	managed := map[string]managedDep{}
-	if parent != nil {
-		for k, v := range parent.managed {
-			managed[k] = v // keeps the properties of whichever POM declared it
-		}
-	}
-	// An imported BOM contributes its managed set; an entry declared HERE wins over an imported one, which
-	// is why the imports are folded in before the POM's own explicit entries.
 	imports := 0
 	for _, d := range raw.DependencyManagement.Dependencies.Dependency {
 		if !isBOMImport(d) {
@@ -314,7 +318,15 @@ func (r *mavenLocalRepo) build(raw *mavenPOMXML, self mavenCoord, depth int, dir
 			continue
 		}
 		for k, v := range bom.managed {
+			if _, earlier := managed[k]; earlier {
+				continue // an earlier import in this POM already decided this artifact
+			}
 			managed[k] = v
+		}
+	}
+	if parent != nil {
+		for k, v := range parent.managed {
+			managed[k] = v // an inherited entry overrides an imported one
 		}
 	}
 	for _, d := range raw.DependencyManagement.Dependencies.Dependency {
