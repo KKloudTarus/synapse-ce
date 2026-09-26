@@ -252,7 +252,11 @@ func kustomizeOriginIndex(root, dir string) k8sOrigin {
 	if yaml.Unmarshal(data, &kd) != nil {
 		return nil
 	}
-	index := map[string]string{}
+	type origin struct {
+		path string
+		line int
+	}
+	index := map[string]origin{}
 	for _, ref := range kustomizeRefs(kd) {
 		abs := ref
 		if !filepath.IsAbs(abs) {
@@ -272,13 +276,23 @@ func kustomizeOriginIndex(root, dir string) k8sOrigin {
 		relSlash := filepath.ToSlash(rel)
 		dec := yaml.NewDecoder(bytes.NewReader(body))
 		for {
-			var doc k8sDoc
-			if decErr := dec.Decode(&doc); decErr != nil {
+			// Decoded as a NODE, so the document's position in its own file is known. The position the rules
+			// computed belongs to the render stream, which this file does not share.
+			var node yaml.Node
+			if decErr := dec.Decode(&node); decErr != nil {
 				break
+			}
+			var doc k8sDoc
+			if node.Decode(&doc) != nil {
+				continue
 			}
 			if key := k8sDocKey(doc); key != "" {
 				if _, taken := index[key]; !taken {
-					index[key] = relSlash // first declaration wins; a duplicate key is ambiguous, not better
+					line := firstKeyLine(&node, "kind")
+					if line == 0 {
+						line = 1
+					}
+					index[key] = origin{path: relSlash, line: line} // first declaration wins; a duplicate key is ambiguous, not better
 				}
 			}
 		}
@@ -286,7 +300,10 @@ func kustomizeOriginIndex(root, dir string) k8sOrigin {
 	if len(index) == 0 {
 		return nil
 	}
-	return func(doc k8sDoc) string { return index[k8sDocKey(doc)] }
+	return func(doc k8sDoc) (string, int) {
+		o := index[k8sDocKey(doc)]
+		return o.path, o.line
+	}
 }
 
 // k8sDocKey identifies a manifest document the way Kubernetes does, by kind plus namespaced name. An

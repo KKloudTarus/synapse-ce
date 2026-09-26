@@ -32,14 +32,19 @@ func TestKustomizeOriginIndexResolvesRenderedDocuments(t *testing.T) {
 
 	api := k8sDoc{Kind: "Deployment"}
 	api.Metadata.Name, api.Metadata.Namespace = "api", "prod"
-	if got := origin(api); got != "deploy/k8s/api.yaml" {
+	got, line := origin(api)
+	if got != "deploy/k8s/api.yaml" {
 		t.Errorf("api Deployment resolved to %q, want deploy/k8s/api.yaml", got)
+	}
+	// The line is the one that file declares the document on, never a position in the render stream.
+	if line <= 0 {
+		t.Errorf("a remapped document must carry a line of its own file, got %d", line)
 	}
 
 	// An omitted namespace keys as "default", matching how the scanner reads a manifest.
 	worker := k8sDoc{Kind: "Deployment"}
 	worker.Metadata.Name = "worker"
-	if got := origin(worker); got != "deploy/k8s/worker.yaml" {
+	if got, _ := origin(worker); got != "deploy/k8s/worker.yaml" {
 		t.Errorf("worker Deployment resolved to %q, want deploy/k8s/worker.yaml", got)
 	}
 
@@ -48,7 +53,7 @@ func TestKustomizeOriginIndexResolvesRenderedDocuments(t *testing.T) {
 	// being handed a wrong file.
 	generated := k8sDoc{Kind: "ConfigMap"}
 	generated.Metadata.Name = "generated-settings"
-	if got := origin(generated); got != "" {
+	if got, _ := origin(generated); got != "" {
 		t.Errorf("a document no file declares resolved to %q, want the empty string", got)
 	}
 }

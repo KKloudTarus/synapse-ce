@@ -98,11 +98,22 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 // templates' findings at one file. `helm template` already states the answer, printing
 // `# Source: <chart>/templates/<file>.yaml` above each document, so this reads it back.
 //
-// A path is only used when it exists on disk, so a Source line this does not understand leaves the finding on
-// the aggregator path rather than moving it to a path that opens nothing.
+// A path is only used when a reader can open it, so a Source line this does not understand leaves the finding
+// on the aggregator path rather than moving it to a path that opens nothing. A subchart vendored as a package
+// resolves to the PACKAGE, because nothing inside a tarball has a path of its own; that still names the
+// subchart to change, which the umbrella chart's Chart.yaml does not.
+//
+// The line is resolved inside the named file too. A position in the render stream is a line the source
+// template usually does not have (a 718-line template reported at line 16628), so the document's own `kind:`
+// is located in the template when it appears exactly once there, and line 1 stands otherwise.
 func helmOriginIndex(chartDir, relDir string, rendered []byte) k8sOrigin {
-	index := map[string]string{}
+	type origin struct {
+		path string
+		line int
+	}
+	index := map[string]origin{}
 	aliases := helmDependencyAliases(chartDir)
+	kindLines := map[string]map[string]int{} // source path -> kind -> unique line (0 when ambiguous)
 	for _, chunk := range bytes.Split(rendered, []byte("\n---")) {
 		source := helmSourceComment(chunk)
 		if source == "" {
@@ -114,28 +125,96 @@ func helmOriginIndex(chartDir, relDir string, rendered []byte) k8sOrigin {
 		if len(parts) != 2 || parts[1] == "" {
 			continue
 		}
-		within := helmResolveAlias(parts[1], aliases)
-		if _, err := os.Stat(filepath.Join(chartDir, filepath.FromSlash(within))); err != nil {
+		within, packaged := helmSourceOnDisk(chartDir, helmResolveAlias(parts[1], aliases))
+		if within == "" {
 			continue
 		}
 		rel := filepath.ToSlash(filepath.Join(relDir, within))
+		if !packaged {
+			if _, seen := kindLines[within]; !seen {
+				kindLines[within] = helmTemplateKindLines(filepath.Join(chartDir, filepath.FromSlash(within)))
+			}
+		}
 		dec := yaml.NewDecoder(bytes.NewReader(chunk))
 		for {
 			var doc k8sDoc
 			if err := dec.Decode(&doc); err != nil {
 				break
 			}
-			if key := k8sDocKey(doc); key != "" {
-				if _, taken := index[key]; !taken {
-					index[key] = rel // first declaration wins; a duplicate key is ambiguous, not better
-				}
+			key := k8sDocKey(doc)
+			if key == "" {
+				continue
 			}
+			if _, taken := index[key]; taken {
+				continue // first declaration wins; a duplicate key is ambiguous, not better
+			}
+			line := 0
+			if !packaged {
+				line = kindLines[within][doc.Kind]
+			}
+			index[key] = origin{path: rel, line: line}
 		}
 	}
 	if len(index) == 0 {
 		return nil
 	}
-	return func(doc k8sDoc) string { return index[k8sDocKey(doc)] }
+	return func(doc k8sDoc) (string, int) {
+		o := index[k8sDocKey(doc)]
+		return o.path, o.line
+	}
+}
+
+// helmSourceOnDisk turns a chart-relative Source path into one a reader can open. It returns the path and
+// whether it is a PACKAGED subchart, whose templates have no path of their own.
+func helmSourceOnDisk(chartDir, within string) (string, bool) {
+	if _, err := os.Stat(filepath.Join(chartDir, filepath.FromSlash(within))); err == nil {
+		return within, false
+	}
+	// A dependency vendored as `charts/<name>-<version>.tgz` renders as `charts/<name>/templates/...`, so the
+	// directory the Source names does not exist. The package does, and it is what a reader opens.
+	if !strings.HasPrefix(within, "charts/") {
+		return "", false
+	}
+	name, _, found := strings.Cut(strings.TrimPrefix(within, "charts/"), "/")
+	if !found || name == "" || strings.ContainsAny(name, `/\*?[`) {
+		return "", false
+	}
+	matches, err := filepath.Glob(filepath.Join(chartDir, "charts", name+"-*.tgz"))
+	if err != nil || len(matches) != 1 {
+		return "", false // zero is nothing to name; more than one is a guess
+	}
+	return "charts/" + filepath.Base(matches[0]), true
+}
+
+// helmTemplateKindLines locates each Kubernetes kind a template declares, keeping only the kinds it declares
+// exactly once. A template that emits two ClusterRoles cannot say which one a finding belongs to, so it
+// reports none and the finding lands on line 1 of the right file.
+func helmTemplateKindLines(path string) map[string]int {
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 || int64(len(data)) > maxFileBytes {
+		return nil
+	}
+	out := map[string]int{}
+	seen := map[string]int{}
+	for i, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(stripYAMLComment(strings.TrimRight(raw, "\r")))
+		rest, ok := strings.CutPrefix(line, "kind:")
+		if !ok {
+			continue
+		}
+		kind := strings.Trim(strings.TrimSpace(rest), `"'`)
+		// A templated kind names nothing until it is rendered.
+		if kind == "" || strings.ContainsAny(kind, "{}$") {
+			continue
+		}
+		seen[kind]++
+		if seen[kind] == 1 {
+			out[kind] = i + 1
+		} else {
+			out[kind] = 0
+		}
+	}
+	return out
 }
 
 // helmDependencyAliases maps a subchart's alias to the directory name it was vendored under. A dependency

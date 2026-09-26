@@ -260,11 +260,15 @@ type k8sScanResult struct {
 // a document that decodes but does not fit our shape (or has no kind) is skipped and later documents are
 // still scanned; a YAML *stream* syntax error halts parsing of the rest of THIS file (prior results are
 // kept), because yaml.v3 cannot reliably resume mid-stream. Either way the overall scan never fails.
-// k8sOrigin resolves a rendered document back to the file that declared it. A kustomize or Helm render
-// merges many manifests into one stream, so without this every finding from the render carries the
-// aggregator's path, which is the one path a reader cannot open to fix anything. nil means the caller
-// scanned a single file and rel is already right.
-type k8sOrigin func(doc k8sDoc) string
+// k8sOrigin resolves a rendered document back to the file that declared it, and to a line INSIDE that file.
+// A kustomize or Helm render merges many manifests into one stream, so without this every finding from the
+// render carries the aggregator's path, which is the one path a reader cannot open to fix anything. The line
+// matters just as much: a position in the render stream is a line the source file usually does not have, so
+// a remapped document must be given a line of its own rather than keep the stream's. An empty path means the
+// document was not remapped; a zero line with a path means the file is right and the position is not
+// resolvable, which the caller reads as line 1. nil means the caller scanned a single file and rel is already
+// right.
+type k8sOrigin func(doc k8sDoc) (string, int)
 
 func scanKubernetes(rel string, data []byte) k8sScanResult {
 	return scanKubernetesFrom(rel, data, nil)
@@ -292,19 +296,32 @@ func scanKubernetesFrom(rel string, data []byte, origin k8sOrigin) k8sScanResult
 			continue // not a manifest we recognise; try the next document
 		}
 		docRel := rel
+		// docLine > 0 marks a REMAPPED document: the position every rule computed belongs to the render
+		// stream, not to the file the finding now names, so it is replaced by one the named file has.
+		docLine := 0
 		if origin != nil {
-			if from := origin(doc); from != "" {
+			if from, line := origin(doc); from != "" {
 				docRel = from
+				docLine = line
+				if docLine <= 0 {
+					docLine = 1
+				}
 			}
 		}
-		out.findings = append(out.findings, checkK8sDoc(docRel, doc, &node)...)
+		found := checkK8sDoc(docRel, doc, &node)
+		if docLine > 0 {
+			for i := range found {
+				found[i].Line = docLine
+			}
+		}
+		out.findings = append(out.findings, found...)
 		namespace := k8sNamespace(doc.Metadata.Namespace)
 		if isWorkloadKind(doc.Kind) {
 			resource := clip(doc.Kind)
 			if doc.Metadata.Name != "" {
 				resource += "/" + clip(doc.Metadata.Name)
 			}
-			out.workloads = append(out.workloads, k8sWorkloadFact{namespace: namespace, file: docRel, line: firstKeyLine(&node, "kind"), resource: resource})
+			out.workloads = append(out.workloads, k8sWorkloadFact{namespace: namespace, file: docRel, line: k8sLine(docLine, &node, "kind"), resource: resource})
 		}
 		if doc.Kind == "NetworkPolicy" {
 			out.policyNamespaces[namespace] = struct{}{}
@@ -320,7 +337,7 @@ func scanKubernetesFrom(rel string, data []byte, origin k8sOrigin) k8sScanResult
 				roleKey:  roleFactKey(doc.RoleRef.Kind, namespace, doc.RoleRef.Name),
 				subjects: subjectKinds(doc.Subjects),
 				file:     docRel,
-				line:     firstKeyLine(&node, "roleRef"),
+				line:     k8sLine(docLine, &node, "roleRef"),
 				resource: resourceName(doc),
 				roleName: clip(doc.RoleRef.Kind) + "/" + clip(doc.RoleRef.Name),
 			})
@@ -992,6 +1009,15 @@ func k8sContainerFinding(rel string, node *yaml.Node, resource, rule, title stri
 	return ports.MisconfigRawFinding{
 		File: rel, Line: line, RuleID: rule, Title: title, Severity: sev, Resource: resource, Description: desc,
 	}
+}
+
+// k8sLine picks the line a fact belongs on: the remapped document's own line when the document came out of a
+// render, otherwise the position inside the scanned file.
+func k8sLine(docLine int, node *yaml.Node, key string) int {
+	if docLine > 0 {
+		return docLine
+	}
+	return firstKeyLine(node, key)
 }
 
 // firstKeyLine returns the 1-indexed line of the first mapping key whose name equals key, searched
