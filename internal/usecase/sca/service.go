@@ -3885,7 +3885,8 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			// 64 MiB budget, most of the tree is in this state, so the count and the budget are both named.
 			if report.UnscannedFiles > 0 {
 				result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
-					"static analysis did not scan %d file(s): the retained-source budget of %d MiB was already full, so no rule ran over them",
+					"static analysis did not scan %d file(s): the retained-source budget of %d MiB was already full, so no rule ran over them. "+
+						"Raise SYNAPSE_SAST_SOURCE_BUDGET_BYTES to cover the tree (it trades memory for coverage)",
 					report.UnscannedFiles, report.SourceBudget>>20))
 			}
 		} else {
