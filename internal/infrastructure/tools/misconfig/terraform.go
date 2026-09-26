@@ -23,9 +23,23 @@ var (
 	tfPublicRDS    = regexp.MustCompile(`(?i)\bpublicly_accessible\s*=\s*true\b`)
 	tfPabDisabled  = regexp.MustCompile(`(?i)\b(block_public_acls|block_public_policy|ignore_public_acls|restrict_public_buckets)\s*=\s*false\b`)
 	tfOpenCIDR     = regexp.MustCompile(`"0\.0\.0\.0/0"|"::/0"`)
-	tfSubBlockOpen = regexp.MustCompile(`^(ingress|egress)\b`)
-	tfIAMWildcard  = regexp.MustCompile(`(?i)("Action"\s*:\s*"\*"|actions\s*=\s*\[\s*"\*"\s*\])`)
-	tfSecretAttr   = regexp.MustCompile(`(?i)\b(password|secret|secret_key|access_key|private_key|api_key|token)\s*=\s*"([^"]+)"`)
+	// tfCIDRAttrAssign matches an assignment to an attribute a provider actually reads to decide which
+	// source or destination ranges a network rule ALLOWS. The open literal only means "open to the
+	// internet" when it is the value of one of these; mentioning 0.0.0.0/0 anywhere else is usually the
+	// opposite of a finding, e.g. `condition = !contains(var.allowed_cidrs, "0.0.0.0/0")` in a variable
+	// validation, or an error_message naming the range it refuses.
+	//
+	// Anchoring at the start of the trimmed line is what keeps `destination_cidr_block = "0.0.0.0/0"` out:
+	// that is an ordinary default route on aws_route, not an open firewall rule.
+	tfCIDRAttrAssign = regexp.MustCompile(`(?i)^(cidr_blocks|cidr_block|ipv6_cidr_blocks|ipv6_cidr_block|cidr_ipv4|cidr_ipv6|source_ranges|destination_ranges|source_address_prefixes|source_address_prefix|destination_address_prefixes|destination_address_prefix|remote_ip_prefix)\s*=`)
+	// tfDirectionAttr is a direction declared as an ATTRIBUTE rather than by a sub-block name.
+	// aws_security_group_rule and the for_each map entries built for it say type = "egress", and Azure's
+	// network security rule says direction = "Outbound". Without reading it, an allow-all egress rule
+	// written that way was reported as an open INGRESS rule, at high severity instead of medium.
+	tfDirectionAttr = regexp.MustCompile(`(?i)^(?:type|direction)\s*=\s*"(egress|ingress|outbound|inbound)"`)
+	tfSubBlockOpen  = regexp.MustCompile(`^(ingress|egress)\b`)
+	tfIAMWildcard   = regexp.MustCompile(`(?i)("Action"\s*:\s*"\*"|actions\s*=\s*\[\s*"\*"\s*\])`)
+	tfSecretAttr    = regexp.MustCompile(`(?i)\b(password|secret|secret_key|access_key|private_key|api_key|token)\s*=\s*"([^"]+)"`)
 
 	// authz — public access / over-broad grants (some case-sensitive to separate IAM "Principal" from
 	// the lower-case `principal` attribute on aws_lambda_permission).
@@ -89,6 +103,16 @@ func scanTerraformResolved(rel string, data []byte, resolved map[string]string) 
 	// right direction; subOpenDepth is the brace depth at which it opened, used to clear it on close.
 	subBlock := ""
 	subOpenDepth := 0
+	// openCIDRAttr carries the CIDR attribute whose value list is still open across lines, so a literal on
+	// a continuation line is still attributed to the attribute that assigns it:
+	//
+	//	cidr_blocks = [
+	//	  "0.0.0.0/0",
+	//	]
+	openCIDRAttr := ""
+	// braceStack holds the line index where each currently-open brace block started, so the innermost
+	// block a line sits in can be walked when a rule needs the block's own attributes.
+	var braceStack []int
 
 	for i, raw := range lines {
 		line := stripHCLComment(raw)
@@ -113,7 +137,30 @@ func scanTerraformResolved(rel string, data []byte, resolved map[string]string) 
 			stack[len(stack)-1].body.WriteString(trimmed)
 			stack[len(stack)-1].body.WriteByte('\n')
 		}
-		out = append(out, tfLineRules(rel, i+1, trimmed, curType, subBlock)...)
+		cidrMatch := tfCIDRAttrAssign.FindStringSubmatch(trimmed)
+		cidrAttr := openCIDRAttr
+		if cidrMatch != nil {
+			cidrAttr = strings.ToLower(cidrMatch[1])
+		}
+		// The enclosing block's direction attribute is only read when an open CIDR is actually on the line,
+		// so the block walk costs nothing on the overwhelming majority of lines.
+		blockDir := ""
+		if cidrAttr != "" && tfOpenCIDR.MatchString(trimmed) && len(braceStack) > 0 {
+			blockDir = tfBlockDirection(lines, braceStack[len(braceStack)-1])
+		}
+		out = append(out, tfLineRules(rel, i+1, trimmed, curType, subBlock, cidrAttr, blockDir)...)
+		for n := strings.Count(line, "{"); n > 0; n-- {
+			braceStack = append(braceStack, i)
+		}
+		for n := strings.Count(line, "}"); n > 0 && len(braceStack) > 0; n-- {
+			braceStack = braceStack[:len(braceStack)-1]
+		}
+		switch {
+		case cidrMatch != nil && strings.Count(trimmed, "[") > strings.Count(trimmed, "]"):
+			openCIDRAttr = cidrAttr // the list continues on the following lines
+		case cidrMatch != nil, openCIDRAttr != "" && strings.Contains(trimmed, "]"):
+			openCIDRAttr = ""
+		}
 
 		depth += strings.Count(line, "{") - strings.Count(line, "}")
 		if depth < 0 {
@@ -348,7 +395,32 @@ func tfBlockRules(rel, resType string, line int, body string) []ports.MisconfigR
 
 // tfLineRules applies the per-line attribute checks, scoping by the enclosing resource type (and, for an
 // open CIDR, the ingress/egress sub-block) where it matters.
-func tfLineRules(rel string, line int, text, resType, subBlock string) []ports.MisconfigRawFinding {
+// tfBlockDirection returns the direction the block opened on line start declares, or "" when it declares
+// none. It walks only that block: the scan stops at the brace that closes it, so a neighbouring rule's
+// direction can never be read by mistake.
+func tfBlockDirection(lines []string, start int) string {
+	depth := 0
+	for i := start; i < len(lines); i++ {
+		line := stripHCLComment(lines[i])
+		if i > start {
+			if m := tfDirectionAttr.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
+				switch strings.ToLower(m[1]) {
+				case "egress", "outbound":
+					return "egress"
+				case "ingress", "inbound":
+					return "ingress"
+				}
+			}
+		}
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
+		if i > start && depth <= 0 {
+			return "" // the block closed without declaring a direction
+		}
+	}
+	return ""
+}
+
+func tfLineRules(rel string, line int, text, resType, subBlock, cidrAttr, blockDir string) []ports.MisconfigRawFinding {
 	var out []ports.MisconfigRawFinding
 	add := func(rule, title string, sev shared.Severity, desc string) {
 		res := "Terraform"
@@ -377,8 +449,18 @@ func tfLineRules(rel string, line int, text, resType, subBlock string) []ports.M
 		add("terraform-public-access-block-disabled", "Public-access block disabled", shared.SeverityMedium,
 			"An S3 public-access-block guard is set to false, weakening the account/bucket protection against accidental public exposure. Keep all four block settings true.")
 	}
-	if tfOpenCIDR.MatchString(text) && (strings.Contains(lower, "security_group") || strings.Contains(lower, "firewall") || strings.Contains(lower, "ingress") || resType == "") {
-		if subBlock == "egress" {
+	// cidrAttr is the gate: the literal has to be the value assigned to an allowing range attribute.
+	// The attribute name is stronger evidence than the resource type ever was, so it replaces the old
+	// security_group/firewall/ingress type check, which also missed Azure's azurerm_network_security_rule.
+	if cidrAttr != "" && tfOpenCIDR.MatchString(text) {
+		// Direction comes from the sub-block, the block's own type/direction attribute, the resource type,
+		// or the CIDR attribute itself: GCP's destination_ranges and Azure's destination_address_prefix are
+		// egress by name. An explicit attribute wins over the resource type, because that is the shape
+		// aws_security_group_rule uses and the type name says nothing about direction there.
+		if blockDir == "ingress" {
+			add("terraform-open-cidr", "Network rule open to the whole internet", shared.SeverityHigh,
+				"A security-group / firewall rule allows 0.0.0.0/0 (or ::/0), exposing the port to the entire internet. Restrict the CIDR to the specific ranges that need access.")
+		} else if blockDir == "egress" || subBlock == "egress" || strings.Contains(lower, "egress") || strings.HasPrefix(cidrAttr, "destination") {
 			add("terraform-open-egress", "Security group egress open to the whole internet", shared.SeverityMedium,
 				"An egress rule allows 0.0.0.0/0 (or ::/0), letting the workload reach any host on the internet and easing data exfiltration if it is compromised. Restrict egress to the destinations it actually needs.")
 		} else {

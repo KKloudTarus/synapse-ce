@@ -1,0 +1,110 @@
+name: Scan Output Contract
+
+# The CLI's output contract is what a pipeline actually consumes, and it broke in ways every unit test
+# passed through: `--sarif` owned stdout, so redirecting it to a file left a failed build saying only
+# "12 finding(s) at or above high" with no way to see which twelve; the report header called itself a
+# dogfood run; the tool line printed a Go map. This job runs the real binary on a real repository (this
+# one) on a GitHub runner and asserts the contract a consumer relies on.
+#
+# The SARIF upload to the Security tab is deliberately NOT here: it needs a third-party action and
+# security-events write, which is a repository policy decision rather than a scanner one.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "cmd/synapse-cli/**"
+      - "internal/usecase/export/**"
+      - "internal/composition/exportcompose/**"
+      - "internal/infrastructure/rulecatalog/**"
+      - "action.yml"
+      - ".github/workflows/scan-output-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: CLI and SARIF output contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build synapse-cli
+        run: go build -o ./bin/synapse-cli ./cmd/synapse-cli
+
+      - name: --help prints the usage and exits 0
+        run: |
+          set -euo pipefail
+          ./bin/synapse-cli scan --help > help.txt
+          grep -q -- '--sarif-out FILE' help.txt
+
+      - name: Scan this repository with --sarif-out
+        run: |
+          # Not `-e` on the scan: a non-zero exit is the gate result, and the floor is deliberately high
+          # so this job asserts the OUTPUT contract rather than the finding count.
+          set -uo pipefail
+          rc=0
+          ./bin/synapse-cli scan . --sarif-out synapse.sarif --fail-on critical > report.txt 2> report.err || rc=$?
+          echo "scan exit=${rc}"
+          cat report.txt
+
+      - name: The human report survives a SARIF run
+        run: |
+          set -euo pipefail
+          grep -q 'findings (promoted):' report.txt
+          grep -q 'sarif: synapse.sarif' report.txt
+          # Internal vocabulary and Go's own map syntax must not reach a consumer's log.
+          if grep -q 'dogfood' report.txt; then echo '::error::the report calls itself a dogfood run'; exit 1; fi
+          if grep -qE 'map\[' report.txt; then echo '::error::the report prints a raw Go map'; exit 1; fi
+
+      - name: Every SARIF rule carries a link, a description and a fix
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, sys
+
+          with open("synapse.sarif") as fh:
+              log = json.load(fh)
+          rules = log["runs"][0]["tool"]["driver"]["rules"]
+          if not rules:
+              sys.exit("the SARIF declares no rules, so this job proves nothing")
+
+          incomplete = [
+              r["id"] for r in rules
+              if not r.get("helpUri") or not r.get("help") or not r.get("fullDescription")
+          ]
+          if incomplete:
+              sys.exit(f"{len(incomplete)} rule(s) carry no link, description or fix: {incomplete[:5]}")
+
+          # A security rule is placed in the security view by security-severity; a quality or reliability
+          # rule must carry none, or a long-function warning arrives as a vulnerability.
+          for r in rules:
+              props = r.get("properties") or {}
+              tags = props.get("tags") or []
+              if {"maintainability", "reliability"} & set(tags):
+                  if "security-severity" in props:
+                      sys.exit(f"{r['id']} is a code-quality rule carrying security-severity")
+              elif "security" in tags and "security-severity" not in props:
+                  sys.exit(f"{r['id']} is a security rule carrying no security-severity")
+
+          print(f"{len(rules)} rules, all carrying a link, a description and a fix")
+          PY
+
+      - name: Upload the SARIF as an artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: scan-output-contract
+          path: |
+            synapse.sarif
+            report.txt
+            report.err
+          retention-days: 7
