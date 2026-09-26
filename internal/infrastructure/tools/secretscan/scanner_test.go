@@ -658,3 +658,96 @@ func TestSkipsPrivateKeyHeaderWithoutBody(t *testing.T) {
 		}
 	}
 }
+
+// A credential in an UNQUOTED YAML scalar is the shape a Spring, Rails or Helm deployment actually uses.
+// Requiring quotes meant the gating rule never fired on it: gitleaks found 25 distinct credentials this way
+// on one live repository that this scanner could not see.
+func TestGenericSecretUnquotedValues(t *testing.T) {
+	v := highEnt
+	for name, body := range map[string]string{
+		"application.yml":       "spring:\n  datasource:\n    password: " + v + "\n",
+		"application-dev.yml":   "oauth:\n  client-secret: " + v + "\n",
+		"config.yml":            "aws:\n  secret-key: " + v + "\n",
+		"app.properties":        "ORDER_DB_PASSWORD=" + v + "\n",
+		"values.yaml":           "api:\n  token: " + v + "  # inline comment after the value\n",
+		"secret_key_in_env.env": "SECRET=" + v + "\n",
+	} {
+		rs := scanDir(t, map[string]string{name: body})
+		if hasRule(rs, "generic-secret") == nil {
+			t.Errorf("%s: an unquoted credential must be flagged, got %+v", name, rs)
+		}
+	}
+}
+
+// A quoted value keeps working exactly as before, including the notebook-escaped form.
+func TestGenericSecretQuotedStillWorks(t *testing.T) {
+	for name, body := range map[string]string{
+		"a.json":  "{\"api_key\": \"" + highEnt + "\"}\n",
+		"b.go":    "password := \"" + highEnt + "\"\n",
+		"c.ipynb": "{\"cells\":[{\"cell_type\":\"code\",\"source\":[\"api_key = \\\"" + highEnt + "\\\"\\n\"]}]}\n",
+	} {
+		if hasRule(scanDir(t, map[string]string{name: body}), "generic-secret") == nil {
+			t.Errorf("%s: a quoted credential must still be flagged", name)
+		}
+	}
+}
+
+// Making the quotes optional exposed two shapes that are NOT credentials, and both must stay quiet or the
+// gating rule becomes noise on every config file and every source file.
+func TestGenericSecretUnquotedNonCredentials(t *testing.T) {
+	for name, body := range map[string]string{
+		// A path saying where the credential lives.
+		"compose.yml": "environment:\n  PASSWORD_FILE: /run/secrets/db_password\n",
+		// An identifier or constant standing in for the credential.
+		"Config.java": "String password = DEFAULT_DATABASE_PASSWORD;\n",
+		"conf.py":     "api_key = defaultClientSecretName\n",
+		// A Spring placeholder resolved at runtime.
+		"app.yml": "spring:\n  datasource:\n    password: ${DB_PASSWORD}\n",
+	} {
+		if f := hasRule(scanDir(t, map[string]string{name: body}), "generic-secret"); f != nil {
+			t.Errorf("%s: must not be flagged as a secret, got match %q", name, f.match)
+		}
+	}
+}
+
+// A value behind a frontend build tool's public prefix is inlined into the browser bundle, so it is
+// published to every visitor by construction. Found on live code as a Datadog RUM client token, which is
+// itself prefixed "pub" because it ships in page source.
+func TestGenericSecretSkipsClientBundleVariables(t *testing.T) {
+	v := highEnt
+	for _, line := range []string{
+		"REACT_APP_DATADOG_CLIENT_TOKEN=pub" + v + "\n",
+		"NEXT_PUBLIC_API_TOKEN=" + v + "\n",
+		"VITE_ANALYTICS_KEY=" + v + "\n",
+		"EXPO_PUBLIC_SENTRY_TOKEN=" + v + "\n",
+	} {
+		if f := hasRule(scanDir(t, map[string]string{".env": line}), "generic-secret"); f != nil {
+			t.Errorf("a client-bundle variable is public by construction: %q fired on %q", f.match, line)
+		}
+	}
+	// A private variable on the same file is still flagged, so the guard is about the prefix, not the file.
+	if hasRule(scanDir(t, map[string]string{".env": "API_TOKEN=" + v + "\n"}), "generic-secret") == nil {
+		t.Error("a non-public variable must still be flagged")
+	}
+	// A real provider credential behind a public prefix has already shipped: never gated.
+	if hasRule(scanDir(t, map[string]string{".env": "NEXT_PUBLIC_AWS=" + awsID + "\n"}), "aws-access-key-id") == nil {
+		t.Error("a provider-prefix credential must be flagged even behind a public variable prefix")
+	}
+	// The prefix must start a token; it must not match as a substring of another name.
+	if hasRule(scanDir(t, map[string]string{".env": "MY_VITE_SECRET=" + v + "\n"}), "generic-secret") == nil {
+		t.Error("the public prefix must not match mid-identifier")
+	}
+}
+
+// A value that tells the reader to replace it is a template. Both spellings were found on live code and
+// neither was covered by the existing "changeme" entry.
+func TestGenericSecretSkipsReplaceMeTemplates(t *testing.T) {
+	for name, body := range map[string]string{
+		"secrets.yaml": "ORCHESTRATOR_STATE_SECRET: \"REPLACE_ME_WITH_A_REAL_SECRET_32+\"\n",
+		"Dockerfile":   "ARG NEXTAUTH_SECRET=app-secret-change-in-production-2026\n",
+	} {
+		if f := hasRule(scanDir(t, map[string]string{name: body}), "generic-secret"); f != nil {
+			t.Errorf("%s: a replace-me template is not a credential, got %q", name, f.match)
+		}
+	}
+}

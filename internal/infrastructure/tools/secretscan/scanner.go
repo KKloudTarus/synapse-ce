@@ -95,6 +95,11 @@ func New() *Scanner {
 			`(?i)example`, `(?i)placeholder`, `(?i)changeme`, `(?i)redacted`, `(?i)dummy`,
 			`(?i)your[_-]?(secret|token|key|password)`, `(?i)^x{6,}$`, `(?i)^0+$`,
 			`(?i)sample`, `^\$\{`, `(?i)^<[a-z_]+>$`,
+			// A value that tells the reader to replace it is a template, not a credential. Found on live
+			// code as REPLACE_ME_… and as …-change-in-production-<year>; "changeme" above does not cover
+			// either spelling.
+			`(?i)replace[_-]?(me|this|with)`, `(?i)change[_-]?(this|in[_-]?produc)`,
+			`(?i)^(insert|todo|fixme)`,
 		}),
 		skipDirs: set(".git", "node_modules", "vendor", "dist", "build", "target", ".idea",
 			".gradle", ".venv", "venv", "__pycache__", ".terraform", "bin"),
@@ -887,6 +892,67 @@ var highEntropyDeferKeywords = []string{
 // This suppresses on the VALUE, so it cannot hide a credential that merely sits on a line near a path, and
 // it leaves the keyword-anchored generic-secret rule untouched: a real token assigned to an api_key is
 // still gated there whatever its shape.
+// clientPublicBundlePrefixes are the environment-variable prefixes a frontend build tool INLINES into the
+// browser bundle. A value behind one of them is published to every visitor by construction, so it is a
+// public configuration value and not a leaked credential. Datadog's RUM client token, which is prefixed
+// "pub" precisely because it ships in page source, arrives on live code as REACT_APP_DATADOG_CLIENT_TOKEN.
+var clientPublicBundlePrefixes = []string{
+	"REACT_APP_", "NEXT_PUBLIC_", "NUXT_PUBLIC_", "VITE_", "VUE_APP_",
+	"EXPO_PUBLIC_", "GATSBY_", "PUBLIC_", "STORYBOOK_",
+}
+
+// clientPublicVariableLine reports whether the line assigns to one of those variables. It gates only the
+// GENERIC keyword rule: for a generic high-entropy value there is no way to tell a public token from a
+// private one, and the variable name settles it. A distinctive-prefix provider rule (an AWS key, a GitHub
+// token) is deliberately NOT gated, because a real provider credential behind a public prefix is a leak
+// that has already shipped.
+func clientPublicVariableLine(line string) bool {
+	for _, prefix := range clientPublicBundlePrefixes {
+		at := strings.Index(line, prefix)
+		if at < 0 {
+			continue
+		}
+		// The prefix must start a token, so a substring inside some other identifier does not count.
+		if at > 0 {
+			c := line[at-1]
+			if c == '_' || c == '-' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// assignedValueNotCredential reports whether the value assigned to a credential-named key is something
+// other than the credential. Two shapes account for it in practice, and both became reachable when the
+// value's quotes stopped being required:
+//
+//   - A PATH saying where the credential lives (`password_file: /run/secrets/db_password`). wordlikePathToken
+//     already recognises that shape, and it is used here for exactly the same reason.
+//   - An IDENTIFIER or constant reference standing in for the credential (`password = DB_PASSWORD_DEFAULT`,
+//     `secret: defaultClientSecret`). A real credential of 16 characters or more essentially always carries
+//     a digit; a name written for a human does not, and in source code an unquoted assignment holds a name
+//     far more often than a literal. A value with any character no identifier can carry, so anything with
+//     /, +, = or -, is exempt from the identifier test and judged on entropy alone.
+func assignedValueNotCredential(secret string) bool {
+	if wordlikePathToken(secret) {
+		return true
+	}
+	hasDigit := false
+	for i := 0; i < len(secret); i++ {
+		c := secret[i]
+		switch {
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_':
+		default:
+			return false // not an identifier at all: judge it on entropy
+		}
+	}
+	return !hasDigit
+}
+
 func wordlikePathToken(secret string) bool {
 	if !strings.Contains(secret, "/") {
 		return false
@@ -1218,10 +1284,29 @@ func baseDefaultRules() []rule {
 			// data team leaves a key, so this was a hole in the GATING rule, not a cosmetic one. The
 			// optional backslash admits one more character in a position that previously allowed only a
 			// quote, so it costs no precision.
-			re:     regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_]{0,32}["']?\s*\]?\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*\]?\s*[:=]\s*\\?["']([A-Za-z0-9/+=_\-]{16,})\\?["']`),
-			group:  1,
-			minEnt: 3.5,
-			allow:  compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
+			//
+			// The value's QUOTES ARE OPTIONAL. Requiring them meant the rule never fired on the one place
+			// credentials actually sit in a Spring, Rails or Helm deployment: an unquoted YAML scalar, and
+			// the same in .env and .properties. On one live repository gitleaks found 25 distinct
+			// credentials this way that this rule could not see, under keys as plain as `password:`,
+			// `client-secret:` and `secret-key:`. In exchange the match must now end at a real value
+			// boundary (a quote, whitespace, end of input, or a delimiter), so a value the character class
+			// truncates mid-token no longer counts; a quoted value behaves exactly as before.
+			//
+			// The keyword suffix also admits a HYPHEN, so `secret-key:` and `access-token:` reach the
+			// rule. The value guards are unchanged: 16 characters, entropy 3.5, the allow-list, and the
+			// identifier/path skip below.
+			//
+			// The separator admits a SECOND character, which makes `password := "…"` match. Go's short
+			// variable declaration is how a Go program assigns a literal, and the single-character
+			// separator had never matched it. `==` matches too, and a comparison against a literal
+			// credential is a hardcoded credential just the same.
+			re:        regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?\s*\]?\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*\]?\s*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
+			group:     1,
+			minEnt:    3.5,
+			allow:     compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
+			skipValue: assignedValueNotCredential,
+			lineSkip:  clientPublicVariableLine,
 		},
 		// ── additional distinctive-prefix provider tokens (near-zero false positive: the unique prefix is the signal) ──
 		{
