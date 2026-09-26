@@ -1506,7 +1506,7 @@ func baseDefaultRules() []rule {
 			// variable declaration is how a Go program assigns a literal, and the single-character
 			// separator had never matched it. `==` matches too, and a comparison against a literal
 			// credential is a hardcoded credential just the same.
-			re:        regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?\s*\]?\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*\]?\s*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
+			re:        regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?[ \t]*\]?\$?[ \t]*(?:as[ \t]+[A-Za-z_][A-Za-z0-9_.]*)?[ \t]*["']?[ \t]*\]?[ \t]*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
 			group:     1,
 			minEnt:    3.5,
 			allow:     compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
@@ -1527,7 +1527,7 @@ func baseDefaultRules() []rule {
 			// in live code, and the two never see the same text: generic-secret reads the masked file.
 			id: "commented-credential", category: "Generic", title: "Credential left in a comment", severity: shared.SeverityMedium,
 			keywords:        []string{"secret", "token", "passwd", "password", "api_key", "apikey", "apiKey", "access_key", "SECRET", "TOKEN", "API_KEY"},
-			re:              regexp.MustCompile(`(?im)^[ \t]*(?:#|//|--|;)+[ \t]*["']?[A-Za-z0-9_.\-]{0,32}(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?\s*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
+			re:              regexp.MustCompile(`(?im)^[ \t]*(?:#|//|--|;)+[ \t]*["']?[A-Za-z0-9_.\-]{0,32}(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?[ \t]*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
 			group:           1,
 			minEnt:          3.5,
 			allow:           compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),

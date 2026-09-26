@@ -216,3 +216,41 @@ func TestValueOnTheFollowingLineStillCounts(t *testing.T) {
 		})
 	}
 }
+
+// A credential keyword and the separator that assigns it are always on one line. Letting whitespace cross a
+// newline there made a keyword bind to the NEXT line's attribute: `:tokens="tokens"` on one line and
+// `:available-permissions="availablePermissions"` on the next captured `available-permissions=` as the
+// secret, on a Vue component with no credential in it at all.
+func TestKeywordDoesNotBindToTheNextLinesAttribute(t *testing.T) {
+	content := "        <ApiTokenManager\n" +
+		"          :tokens=\"tokens\"\n" +
+		"          :available-permissions=\"availablePermissions\"\n" +
+		"          :default-permissions=\"defaultPermissions\" />\n"
+	for _, id := range scanOneFile(t, "Index.vue", content) {
+		if id != "(none)" {
+			t.Errorf("a prop binding is not a credential; rule %s fired", id)
+		}
+	}
+}
+
+// The keyword still reaches its value across the shapes that really occur on one line: a quoted YAML key,
+// a bracketed config key, and Go's short variable declaration.
+func TestKeywordStillReachesItsValueOnOneLine(t *testing.T) {
+	cases := map[string]string{
+		"yaml":            `  client-secret: "AbCdEf0123456789GhIjKl"`,
+		"bracketed":       `app.config['SECRET_KEY_HMAC'] = "AbCdEf0123456789GhIjKl"`,
+		"go short assign": `apiKey := "AbCdEf0123456789GhIjKl"`,
+		"quoted key":      `"access_token" : "AbCdEf0123456789GhIjKl"`,
+	}
+	for name, line := range cases {
+		t.Run(name, func(t *testing.T) {
+			hits := scanOneFile(t, "config.yaml", line)
+			for _, id := range hits {
+				if id != "(none)" {
+					return
+				}
+			}
+			t.Errorf("the credential must still be found; rules that fired: %v", hits)
+		})
+	}
+}
