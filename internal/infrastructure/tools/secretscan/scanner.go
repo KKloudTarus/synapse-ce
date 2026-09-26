@@ -1043,6 +1043,9 @@ func assignedValueNotCredential(secret string) bool {
 	if wordlikePathToken(secret) {
 		return true
 	}
+	if identifierAssignment(secret) {
+		return true
+	}
 	hasDigit := false
 	for i := 0; i < len(secret); i++ {
 		c := secret[i]
@@ -1055,6 +1058,24 @@ func assignedValueNotCredential(secret string) bool {
 		}
 	}
 	return !hasDigit
+}
+
+// nextAssignmentRe matches an identifier immediately followed by "=": the shape of another assignment, not
+// of a value.
+var nextAssignmentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}=`)
+
+// identifierAssignment reports whether the captured value is itself an assignment. The whitespace between a
+// key and its value may cross a newline, which is how a JSON formatter breaks a long line, so a key with an
+// EMPTY value reaches past its own line and takes the next one:
+//
+//	CAPTCHA_H_SECRET=
+//	CAPTCHA_H_TIMEOUT=5
+//
+// captured CAPTCHA_H_TIMEOUT=5 as the secret and reported it a line below the key. Three of those sat in one
+// env template on a real repository. A base64 value carries "=" only as trailing padding, never after an
+// identifier, so this cannot reject a real credential.
+func identifierAssignment(secret string) bool {
+	return nextAssignmentRe.MatchString(secret)
 }
 
 // connectionStringPlaceholder reports whether a connection string's password component is a substitution

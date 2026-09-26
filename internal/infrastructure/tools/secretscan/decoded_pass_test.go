@@ -184,3 +184,35 @@ func TestConnectionStringStillReadsRealPassword(t *testing.T) {
 	}
 	t.Errorf("a literal password in a connection string must be reported; rules that fired: %v", hits)
 }
+
+// The whitespace between a key and its value may cross a newline, which is how a JSON formatter breaks a
+// long line. A key with an EMPTY value then reached past its own line and took the next one as its secret,
+// reporting it a line below the key. Three of those sat in one env template on a real repository.
+func TestEmptyValueDoesNotCaptureTheNextLine(t *testing.T) {
+	content := "CAPTCHA_H_SITEKEY=\nCAPTCHA_H_SECRET=\nCAPTCHA_H_TIMEOUT=5\nCAPTCHA_H_FAIL_OPEN=false\n"
+	for _, id := range scanOneFile(t, ".env.captcha", content) {
+		if id != "(none)" {
+			t.Errorf("an empty value is not a credential; rule %s fired", id)
+		}
+	}
+}
+
+// A credential really assigned on the line is still reported, and so is one a formatter moved to the next
+// line, because only an identifier-shaped value is refused.
+func TestValueOnTheFollowingLineStillCounts(t *testing.T) {
+	cases := map[string]string{
+		"same line": `  "api_key": "AbCdEf0123456789GhIjKl"`,
+		"next line": "  \"api_key\":\n    \"AbCdEf0123456789GhIjKl\"",
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			hits := scanOneFile(t, "config.json", content)
+			for _, id := range hits {
+				if id != "(none)" {
+					return
+				}
+			}
+			t.Errorf("a real credential must still be reported; rules that fired: %v", hits)
+		})
+	}
+}
