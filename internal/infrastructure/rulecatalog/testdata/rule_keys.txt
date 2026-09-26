@@ -2043,12 +2043,15 @@ kubernetes-host-network
 kubernetes-host-path
 kubernetes-host-pid
 kubernetes-host-port
+kubernetes-image-no-digest
 kubernetes-image-no-tag
 kubernetes-ingress-no-tls
 kubernetes-ingress-tls-no-secret
 kubernetes-namespace-no-network-policy
 kubernetes-no-cpu-limit
+kubernetes-no-cpu-request
 kubernetes-no-memory-limit
+kubernetes-no-memory-request
 kubernetes-no-priv-escalation-disabled
 kubernetes-no-read-only-root-fs
 kubernetes-no-run-as-group
@@ -2060,6 +2063,7 @@ kubernetes-rbac-cluster-admin-binding
 kubernetes-rbac-escalation-verbs
 kubernetes-rbac-wildcard-permissions
 kubernetes-run-as-root
+kubernetes-secret-env-var
 kubernetes-secret-in-env
 kubernetes-secret-in-manifest
 launchdarkly-api-token

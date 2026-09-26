@@ -170,8 +170,11 @@ spec:
       type: RuntimeDefault
   containers:
     - name: app
-      image: myapp:1.0
+      image: myapp:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
       resources:
+        requests:
+          cpu: "250m"
+          memory: "128Mi"
         limits:
           cpu: "500m"
           memory: "256Mi"
@@ -559,4 +562,141 @@ func keys(m map[string]ports.MisconfigRawFinding) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// A Service, a Secret or an Ingress left in the default namespace is the same scoping defect as a workload
+// there. The rule used to fire on workload kinds only, which under-reported a repository's real exposure by
+// roughly half: checkov found 23 of these where this engine found 10.
+func TestKubernetesDefaultNamespaceCoversNonWorkloadKinds(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Service
+metadata:
+  name: api
+spec:
+  ports:
+    - port: 80
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: creds
+stringData:
+  note: placeholder
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+spec:
+  rules: []
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+`
+	var kinds []string
+	for _, f := range scan(t, map[string]string{"manifests.yaml": manifest}) {
+		if f.RuleID == "kubernetes-default-namespace" {
+			kinds = append(kinds, f.Resource)
+		}
+	}
+	if len(kinds) != 3 {
+		t.Errorf("expected the Service, Secret and Ingress to be flagged, got %v", kinds)
+	}
+	// Namespace itself is cluster-scoped, so it must never be flagged for lacking a namespace.
+	for _, k := range kinds {
+		if strings.HasPrefix(k, "Namespace/") {
+			t.Errorf("a cluster-scoped kind must not be flagged: %s", k)
+		}
+	}
+}
+
+// A resource in an explicit namespace is clean, including the non-workload kinds the rule now covers.
+func TestKubernetesDefaultNamespaceQuietWhenNamespaced(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: prod
+spec:
+  ports:
+    - port: 80
+`
+	for _, f := range scan(t, map[string]string{"svc.yaml": manifest}) {
+		if f.RuleID == "kubernetes-default-namespace" {
+			t.Errorf("a namespaced Service must not be flagged: %+v", f)
+		}
+	}
+}
+
+// Resource REQUESTS are what the scheduler reserves, a digest is what makes an image immutable, and a
+// Secret in the environment is readable through /proc. Each is a defect the limit / tag / literal-secret
+// rules do not cover, and checkov reports all three where this engine reported none.
+func TestKubernetesRequestsDigestAndSecretEnv(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: prod
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: myapp:1.0
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-credentials
+                  key: password
+`
+	got := map[string]bool{}
+	for _, f := range scan(t, map[string]string{"deploy.yaml": manifest}) {
+		got[f.RuleID] = true
+	}
+	for _, id := range []string{"kubernetes-no-cpu-request", "kubernetes-no-memory-request",
+		"kubernetes-image-no-digest", "kubernetes-secret-env-var"} {
+		if !got[id] {
+			t.Errorf("expected %s to fire", id)
+		}
+	}
+	// Limits ARE set here, so the limit rules must stay quiet: requests and limits are separate defects.
+	for _, id := range []string{"kubernetes-no-cpu-limit", "kubernetes-no-memory-limit"} {
+		if got[id] {
+			t.Errorf("%s must not fire when the limit is set", id)
+		}
+	}
+}
+
+// envFrom.secretRef injects every key of a Secret at once, so it is the same defect as a single
+// secretKeyRef and must be detected too.
+func TestKubernetesSecretEnvFromRef(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: myapp:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+      envFrom:
+        - secretRef:
+            name: app-credentials
+`
+	found := false
+	for _, f := range scan(t, map[string]string{"pod.yaml": manifest}) {
+		if f.RuleID == "kubernetes-secret-env-var" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected kubernetes-secret-env-var to fire on envFrom.secretRef")
+	}
 }

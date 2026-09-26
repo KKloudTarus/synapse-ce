@@ -102,18 +102,36 @@ type k8sContainer struct {
 	Image           string     `yaml:"image"`
 	SecurityContext *ctnSecCtx `yaml:"securityContext"`
 	Resources       *struct {
-		Limits map[string]any `yaml:"limits"`
+		Limits   map[string]any `yaml:"limits"`
+		Requests map[string]any `yaml:"requests"`
 	} `yaml:"resources"`
 	Ports []struct {
 		HostPort int `yaml:"hostPort"`
 	} `yaml:"ports"`
-	Env []k8sEnvVar `yaml:"env"`
+	Env     []k8sEnvVar  `yaml:"env"`
+	EnvFrom []k8sEnvFrom `yaml:"envFrom"`
 }
 
 type k8sEnvVar struct {
-	Name      string `yaml:"name"`
-	Value     string `yaml:"value"`
-	ValueFrom any    `yaml:"valueFrom"`
+	Name      string        `yaml:"name"`
+	Value     string        `yaml:"value"`
+	ValueFrom *k8sValueFrom `yaml:"valueFrom"`
+}
+
+// k8sValueFrom is the env valueFrom source. Only secretKeyRef is modelled: it is the one source that puts
+// secret material into the process environment.
+type k8sValueFrom struct {
+	SecretKeyRef *struct {
+		Name string `yaml:"name"`
+		Key  string `yaml:"key"`
+	} `yaml:"secretKeyRef"`
+}
+
+// k8sEnvFrom is one envFrom entry. secretRef injects EVERY key of a Secret as an environment variable.
+type k8sEnvFrom struct {
+	SecretRef *struct {
+		Name string `yaml:"name"`
+	} `yaml:"secretRef"`
 }
 
 type ctnSecCtx struct {
@@ -270,9 +288,9 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 		})
 	}
 
-	if isWorkloadKind(doc.Kind) && (doc.Metadata.Namespace == "" || doc.Metadata.Namespace == "default") {
-		add("kubernetes-default-namespace", "Workload in the default namespace",
-			"The workload has no namespace or uses \"default\", so it shares a namespace with unrelated workloads and weakens RBAC/network-policy scoping. Deploy it to a dedicated namespace.",
+	if isNamespacedKind(doc.Kind) && (doc.Metadata.Namespace == "" || doc.Metadata.Namespace == "default") {
+		add("kubernetes-default-namespace", "Resource in the default namespace",
+			"The resource has no namespace or uses \"default\", so it shares a namespace with unrelated resources and weakens RBAC and network-policy scoping. Deploy it to a dedicated namespace.",
 			shared.SeverityLow, "metadata")
 	}
 	if isWorkloadKind(doc.Kind) && usesDefaultServiceAccount(spec) {
@@ -419,10 +437,12 @@ func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctn
 			"No seccompProfile is set (RuntimeDefault or Localhost) on the container or the pod, so syscalls are unrestricted. Set seccompProfile.type: RuntimeDefault.",
 			"seccompProfile", shared.SeverityLow)
 	}
-	cpu, mem := false, false
+	cpu, mem, cpuReq, memReq := false, false, false, false
 	if c.Resources != nil {
 		_, cpu = c.Resources.Limits["cpu"]
 		_, mem = c.Resources.Limits["memory"]
+		_, cpuReq = c.Resources.Requests["cpu"]
+		_, memReq = c.Resources.Requests["memory"]
 	}
 	if !cpu {
 		h("kubernetes-no-cpu-limit", "No CPU limit",
@@ -432,6 +452,18 @@ func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctn
 	if !mem {
 		h("kubernetes-no-memory-limit", "No memory limit",
 			"The container sets no resources.limits.memory, so a memory leak or hostile workload can OOM the node (noisy-neighbor / DoS). Set a memory limit.",
+			"resources", shared.SeverityLow)
+	}
+	// A request, not a limit, is what the scheduler reserves. Without one the pod lands on a node that has
+	// no room for it and the kubelet evicts it first under pressure, so the two are separate defects.
+	if !cpuReq {
+		h("kubernetes-no-cpu-request", "No CPU request",
+			"The container sets no resources.requests.cpu, so the scheduler reserves no CPU for it and places it on any node. Set a CPU request that reflects what the workload needs.",
+			"resources", shared.SeverityLow)
+	}
+	if !memReq {
+		h("kubernetes-no-memory-request", "No memory request",
+			"The container sets no resources.requests.memory, so the scheduler reserves no memory for it and the kubelet evicts it first under node memory pressure. Set a memory request.",
 			"resources", shared.SeverityLow)
 	}
 	if !runAsUserSet(sc, pod) {
@@ -448,6 +480,18 @@ func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctn
 		h("kubernetes-image-no-tag", "Container image not version-pinned",
 			"The container image uses no tag or :latest, so the deployed version is not reproducible and can silently change. Pin an explicit tag, ideally by digest.",
 			"image", shared.SeverityLow)
+	}
+	// A tag is mutable: whoever can push to the registry can replace what a pinned tag resolves to. Only a
+	// digest names an immutable image, so this is a separate defect from an unpinned tag.
+	if c.Image != "" && !strings.Contains(c.Image, "@sha256:") {
+		h("kubernetes-image-no-digest", "Container image not pinned by digest",
+			"The container image is referenced by tag rather than by digest, and a tag can be repointed at different content in the registry. Pin the image as name:tag@sha256:<digest>.",
+			"image", shared.SeverityLow)
+	}
+	if name, ok := secretEnvSource(c); ok {
+		h("kubernetes-secret-env-var", "Secret exposed as an environment variable",
+			"Secret "+clip(name)+" is injected into the process environment, where it is readable through /proc, a crash dump, a child process and most debug tooling. Mount the Secret as a file and read it from disk instead.",
+			"env", shared.SeverityLow)
 	}
 	for _, p := range c.Ports {
 		if p.HostPort != 0 {
@@ -499,6 +543,22 @@ func rbacHasEscalationVerb(rules []k8sRBACRule) bool {
 	return false
 }
 
+// secretEnvSource reports the Secret whose material the container receives through its environment, either
+// one key via env.valueFrom.secretKeyRef or every key at once via envFrom.secretRef.
+func secretEnvSource(c k8sContainer) (string, bool) {
+	for _, entry := range c.Env {
+		if entry.ValueFrom != nil && entry.ValueFrom.SecretKeyRef != nil {
+			return entry.ValueFrom.SecretKeyRef.Name, true
+		}
+	}
+	for _, entry := range c.EnvFrom {
+		if entry.SecretRef != nil {
+			return entry.SecretRef.Name, true
+		}
+	}
+	return "", false
+}
+
 func hasLiteralSecretEnv(env []k8sEnvVar) bool {
 	for _, entry := range env {
 		if secretKeyRe.MatchString(entry.Name) && strings.TrimSpace(entry.Value) != "" && entry.ValueFrom == nil {
@@ -513,6 +573,28 @@ func hasLiteralSecretEnv(env []k8sEnvVar) bool {
 func isWorkloadKind(kind string) bool {
 	switch kind {
 	case "Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "ReplicationController":
+		return true
+	}
+	return false
+}
+
+// isNamespacedKind reports whether a kind is namespace-scoped, so leaving it in "default" is a real scoping
+// defect. A Service, a Secret or an Ingress in the default namespace is the same weakness as a workload
+// there, which is why this is wider than isWorkloadKind.
+//
+// The set is an explicit ALLOW-LIST of core kinds rather than "everything that is not cluster-scoped". Any
+// YAML document with a kind field decodes here, including a Kustomization, a CRD instance and unrelated
+// config that happens to use the word, and claiming a namespace defect on those would be a finding nobody
+// can act on.
+func isNamespacedKind(kind string) bool {
+	if isWorkloadKind(kind) {
+		return true
+	}
+	switch kind {
+	case "Service", "Ingress", "Secret", "ConfigMap", "ServiceAccount",
+		"Role", "RoleBinding", "PersistentVolumeClaim", "NetworkPolicy",
+		"HorizontalPodAutoscaler", "PodDisruptionBudget", "ResourceQuota", "LimitRange",
+		"Endpoints", "EndpointSlice", "PodTemplate":
 		return true
 	}
 	return false
