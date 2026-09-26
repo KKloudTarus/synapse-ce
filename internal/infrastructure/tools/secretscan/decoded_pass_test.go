@@ -254,3 +254,41 @@ func TestKeywordStillReachesItsValueOnOneLine(t *testing.T) {
 		})
 	}
 }
+
+// The other documented URI shape names the parts with the words themselves. In driver docstrings and
+// translation catalogues that line was 65 of one repository's secret findings.
+func TestConnectionStringIgnoresPlaceholderWords(t *testing.T) {
+	lines := []string{
+		`            - postgres://user:password@host/db`,
+		`        "mysql://user:password@host:port/dbname[?key=value&key=value...]"`,
+		`  uri = "postgresql://username:changeme@your-postgres-host/dbname"`,
+	}
+	for _, line := range lines {
+		for _, id := range scanOneFile(t, "base.py", line) {
+			if id == "db-connection-string" {
+				t.Errorf("a URI grammar example is not a credential: %q", line)
+			}
+		}
+	}
+}
+
+// Only BOTH components being generic makes it an example. A real account name beside a weak password is a
+// credential, and reporting it is the point.
+func TestConnectionStringStillReadsRealAccount(t *testing.T) {
+	lines := []string{
+		`DATABASE_URL=postgresql://superset_admin:password@db.internal/superset`,
+		`uri: mysql://user:h4rdc0dedPassw0rd@db.internal/app`,
+	}
+	for _, line := range lines {
+		hits := scanOneFile(t, "settings.py", line)
+		found := false
+		for _, id := range hits {
+			if id == "db-connection-string" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("a real account or password must be reported: %q gave %v", line, hits)
+		}
+	}
+}

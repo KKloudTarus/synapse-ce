@@ -1089,7 +1089,29 @@ func connectionStringPlaceholder(value string) bool {
 	if colon < 0 {
 		return false
 	}
-	return templatePlaceholder(value[colon+1 : at])
+	password := value[colon+1 : at]
+	if templatePlaceholder(password) {
+		return true
+	}
+	// The other documented shape names the parts with the words themselves: `postgres://user:password@host/db`
+	// in a docstring is the URI grammar, not a credential. 65 of one repository's findings were that line in
+	// driver docs and translation catalogues. BOTH components must be generic, so `admin:password` stays
+	// reported: a real account name beside a weak password is a credential, and a weak one at that.
+	scheme := strings.Index(value, "://")
+	if scheme < 0 {
+		return false
+	}
+	user := value[scheme+3 : colon]
+	return placeholderWords[strings.ToLower(user)] && placeholderWords[strings.ToLower(password)]
+}
+
+// placeholderWords are the self-describing names documentation uses in place of a value.
+var placeholderWords = map[string]bool{
+	"user": true, "username": true, "user_name": true, "youruser": true, "your_user": true,
+	"myuser": true, "dbuser": true, "db_user": true, "login": true, "account": true,
+	"password": true, "passwd": true, "pwd": true, "pass": true, "secret": true,
+	"yourpassword": true, "your_password": true, "mypassword": true, "my_password": true,
+	"dbpassword": true, "db_password": true, "changeme": true, "changethis": true,
 }
 
 // templatePlaceholder recognises the substitution shapes documentation and configuration use to stand in for
