@@ -17,6 +17,8 @@ vi.mock('../../lib/api', async (original) => ({
     createNotificationRule: vi.fn(),
     updateNotificationRule: vi.fn(),
     testNotificationChannel: vi.fn(),
+    listEngagements: vi.fn(),
+    ownershipTeams: vi.fn(),
   },
 }))
 const channel = {
@@ -42,6 +44,13 @@ describe('notification settings', () => {
     vi.mocked(api.listNotificationChannels).mockResolvedValue([channel])
     vi.mocked(api.listNotificationRules).mockResolvedValue([])
     vi.mocked(api.notificationDeliveryPage).mockResolvedValue({ items: [] })
+    vi.mocked(api.listEngagements).mockResolvedValue([])
+    vi.mocked(api.ownershipTeams).mockResolvedValue({
+      items: [
+        { id: 'pay', slug: 'pay', name: 'Payments', archived: false, revision: 1, created_at: '', updated_at: '' },
+        { id: 'ops', slug: 'ops', name: 'Operations', archived: false, revision: 1, created_at: '', updated_at: '' },
+      ],
+    })
   })
   it('creates a signed webhook with write-only fields', async () => {
     vi.mocked(api.createNotificationChannel).mockResolvedValue(channel)
@@ -145,11 +154,10 @@ describe('notification settings', () => {
     })
     expect(screen.getByLabelText('All teams in this tenant')).not.toBeChecked()
     fireEvent.click(screen.getByRole('button', { name: 'Add rule' }))
-    expect(await screen.findByText('Enter at least one team ID or select all teams.')).toBeInTheDocument()
+    expect(await screen.findByText('Choose at least one team or select all teams.')).toBeInTheDocument()
     expect(api.createNotificationRule).not.toHaveBeenCalled()
-    fireEvent.change(screen.getByLabelText(/^Team IDs/), {
-      target: { value: 'pay, ops' },
-    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Payments (pay)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Operations (ops)' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add rule' }))
     await waitFor(() => expect(api.createNotificationRule).toHaveBeenCalledWith(
       expect.objectContaining({ event_type: 'finding.ownership_changed', team_ids: ['pay', 'ops'], all_teams: false }),
@@ -162,9 +170,9 @@ describe('notification settings', () => {
     fireEvent.change(screen.getAllByLabelText('Name')[1], {
       target: { value: 'Tenant ownership alerts' },
     })
-    fireEvent.change(screen.getByLabelText(/^Team IDs/), { target: { value: 'pay' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Payments (pay)' }))
     fireEvent.click(screen.getByLabelText('All teams in this tenant'))
-    expect(screen.getByLabelText(/^Team IDs/)).toBeDisabled()
+    expect(screen.getByRole('searchbox', { name: 'Team IDs' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Add rule' }))
     await waitFor(() => expect(api.createNotificationRule).toHaveBeenCalledWith(
       expect.objectContaining({ event_type: 'finding.ownership_changed', all_teams: true, team_ids: undefined }),
@@ -180,7 +188,8 @@ describe('notification settings', () => {
     render(<Alerting />)
     expect(await screen.findByText('Teams: pay, ops')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Edit rule' }))
-    expect(screen.getByLabelText(/^Team IDs/)).toHaveValue('pay, ops')
+    expect(await screen.findByRole('button', { name: 'Remove Payments (pay)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove Operations (ops)' })).toBeInTheDocument()
     expect(screen.getByLabelText('All teams in this tenant')).not.toBeChecked()
     fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
     await waitFor(() => expect(api.updateNotificationRule).toHaveBeenCalledWith('rule',

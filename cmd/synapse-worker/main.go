@@ -79,6 +79,7 @@ import (
 	exploitationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/exploitation"
 	lineageuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findinglineage"
 	incidentuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/incidentuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/inbox"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
@@ -90,6 +91,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitycorrelation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityevaluation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitymaintenance"
@@ -663,6 +665,19 @@ func main() {
 			os.Exit(1)
 		}
 		handlers[notificationuc.JobKind] = notificationJobHandler{svc: notificationService}
+		contactService, contactErr := usercontacts.NewService(postgres.NewUserContactStore(pool), postgres.NewUserRepository(pool), vaultCipher, sender, ids, clock, usercontacts.DeriveVerifierKey(cfg.VaultMasterKey), cfg.NotificationSMTPHost != "" && cfg.NotificationSMTPFrom != "")
+		if contactErr != nil {
+			log.Error("user contact worker init failed", "err", contactErr)
+			os.Exit(1)
+		}
+		handlers[usercontacts.JobKind] = contactVerificationJobHandler{svc: contactService}
+		personalInbox, inboxErr := inbox.NewService(postgres.NewInboxStore(pool), clock)
+		if inboxErr != nil {
+			log.Error("personal inbox worker init failed", "err", inboxErr)
+			os.Exit(1)
+		}
+		personalInbox.SetMailer(sender)
+		handlers[inbox.JobKind] = personalMailJobHandler{svc: personalInbox}
 		notificationSource := postgres.NewNotificationSource(pool, postgres.NewNotificationRepository(pool), cfg.FleetAgentStaleAfter, cfg.AlertWebhookURL == "")
 		notificationSource.SetVulnerabilityEnabled(cfg.VulnerabilityNotificationsEnabled && !cfg.VulnerabilityDryRunEnabled)
 		maintenanceTasks = append(maintenanceTasks, func(taskCtx context.Context) {
@@ -1275,6 +1290,22 @@ func mustVaultCipher(cfg config.Config, log *slog.Logger) *vault.Cipher {
 type scaJobHandler struct{ svc *scauc.Service }
 
 type notificationJobHandler struct{ svc *notificationuc.Service }
+
+type personalMailJobHandler struct{ svc *inbox.Service }
+
+func (h personalMailJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return h.svc.HandleJob(ctx, job)
+}
+
+type contactVerificationJobHandler struct{ svc *usercontacts.Service }
+
+func (h contactVerificationJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
+	return h.svc.HandleJob(ctx, job)
+}
+
+func (h contactVerificationJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, _ error) error {
+	return h.svc.OnDeadLetter(ctx, job)
+}
 
 func (h notificationJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
 	return h.svc.HandleJob(ctx, job)

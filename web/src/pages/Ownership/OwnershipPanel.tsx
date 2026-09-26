@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useOptionalAuth } from '../../auth/AuthContext'
-import { Button, Card, ErrorState, Field, Input, Pill, Spinner } from '../../components/ui'
+import { Button, Card, ErrorState, Field, Pill, Spinner } from '../../components/ui'
 import { useFetch } from '../../hooks'
 import { api } from '../../lib/api'
 import type { OwnershipAction, OwnershipCapability, OwnershipDecision, OwnershipTeam } from '../../lib/api/ownership'
 import type { CurrentUser } from '../../lib/types'
 import { canTriage, Choice, ownershipError, ResolutionEvidence, TeamChoice, useOwnershipRequestKey, useOwnershipTeams } from './shared'
+import { UserPicker } from './UserPicker'
 
 export function OwnershipPanel({ engagement, finding, capability, user, teams, readOnly = false, onChanged }: { engagement: string; finding: string; capability: OwnershipCapability; user: CurrentUser; teams: OwnershipTeam[]; readOnly?: boolean; onChanged?: () => void }) {
   const current = useFetch((signal) => api.findingOwnership(engagement, finding, signal), { deps: [engagement, finding] })
@@ -51,8 +52,8 @@ export function OwnershipPanel({ engagement, finding, capability, user, teams, r
             <option value="claim">Claim for myself</option><option value="assign">Assign team / person</option><option value="transfer">Transfer team</option><option value="clear">Clear assignment and protect</option><option value="release">Release to automatic routing</option>
           </Choice></Field>
           {(action === 'assign' || action === 'transfer') && <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Destination team"><TeamChoice teams={teams} value={team} onChange={setTeam} disabled={busy} label="Destination team" /></Field>
-            <Field label="Assignee user ID" hint={action === 'transfer' ? 'Leave empty to preserve an eligible assignee, or explicitly clear below.' : 'Optional. The person must be an active member of the selected team.'}><Input value={assignee} disabled={busy || clearAssignee && action === 'transfer'} onChange={(event) => setAssignee(event.target.value)} /></Field>
+            <Field label="Destination team"><TeamChoice teams={teams} value={team} onChange={id=>{setTeam(id);setAssignee('')}} disabled={busy} label="Destination team" /></Field>
+            <UserPicker team={team} value={assignee} onChange={setAssignee} disabled={busy || clearAssignee && action === 'transfer'} />
           </div>}
           {action === 'transfer' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={clearAssignee} disabled={busy} onChange={(event) => { setClearAssignee(event.target.checked); if (event.target.checked) setAssignee('') }} />Clear the current assignee during transfer</label>}
           {action === 'claim' && <p className="text-xs text-secondary">You must be an active member of the owning team.</p>}

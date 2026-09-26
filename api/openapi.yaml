@@ -27,6 +27,8 @@ security:
 tags:
   - name: users
     description: Operator identities, roles, and API-key lifecycle
+  - name: personal-contacts
+    description: Self-service verified email destinations scoped to the authenticated human user
   - name: platform
     description: Deployment-wide configuration a client needs before it renders navigation
   - name: health
@@ -2787,6 +2789,143 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '502': {description: No sink acknowledged the alert, content: {application/json: {schema: {$ref: '#/components/schemas/AlertTestResult'}}}}
+
+  /api/v1/me/contacts:
+    get:
+      tags: [personal-contacts]
+      operationId: listMyContacts
+      summary: List only the authenticated user's private contacts
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/UserContact'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [personal-contacts]
+      operationId: addMyEmailContact
+      summary: Add an unverified email destination
+      description: The server derives tenant and user from the principal; caller-supplied identity fields are ignored. Maximum 20 contacts per user.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [kind, value], properties: {kind: {type: string, enum: [email]}, value: {type: string, format: email, maxLength: 320}}}}}}
+      responses:
+        '201': {description: Created but not yet verified, content: {application/json: {schema: {$ref: '#/components/schemas/UserContact'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '409': {description: Duplicate address or contact limit reached}
+
+  /api/v1/me/contacts/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    delete:
+      tags: [personal-contacts]
+      operationId: deleteMyContact
+      summary: Remove a self-managed contact and invalidate its pending challenge
+      responses:
+        '204': {description: Removed}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/me/contacts/{id}/verification:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [personal-contacts]
+      operationId: requestMyContactVerification
+      summary: Queue a security verification email
+      description: Code expires after 10 minutes. Resend requires 60 seconds; at most five requests per user per hour. No code appears in this response or job payload. SMTP must be configured.
+      responses:
+        '202': {description: Durably queued, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [queued]}}}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Already verified, stale, or rate limited}
+        '503': {description: SMTP is unavailable}
+
+  /api/v1/me/contacts/{id}/verify:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [personal-contacts]
+      operationId: verifyMyContact
+      summary: Consume a single-use eight-digit code
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [code], properties: {code: {type: string, pattern: '^[0-9]{8}$'}}}}}}
+      responses:
+        '200': {description: Verified contact, content: {application/json: {schema: {$ref: '#/components/schemas/UserContact'}}}}
+        '403': {description: Incorrect code}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Expired or exhausted challenge}
+
+  /api/v1/me/inbox:
+    get:
+      tags: [personal-inbox]
+      operationId: listMyInbox
+      summary: List the signed-in user's inbox
+      parameters:
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: unread, in: query, schema: {type: boolean}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 25}}
+      responses:
+        '200': {description: Inbox page, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/InboxItem'}}, next: {type: string}}}}}}
+        '400': {description: Caller-supplied user or tenant identity, or a tampered cursor}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/me/inbox/unread:
+    get:
+      tags: [personal-inbox]
+      operationId: countMyUnreadInbox
+      summary: Count unread inbox rows, capped at 100
+      responses:
+        '200': {description: Capped count, content: {application/json: {schema: {type: object, properties: {unread: {type: integer, maximum: 100}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/me/inbox/read:
+    post:
+      tags: [personal-inbox]
+      operationId: markAllMyInboxRead
+      summary: Mark inbox rows read up to the server time of this request
+      responses:
+        '204': {description: Updated}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/me/inbox/{id}/read:
+    post:
+      tags: [personal-inbox]
+      operationId: markMyInboxRead
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '204': {description: Updated or already read}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/me/notification-preferences:
+    get:
+      tags: [personal-inbox]
+      operationId: listMyNotificationPreferences
+      responses:
+        '200': {description: Effective choices, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/InboxPreference'}}}}}}}
+    put:
+      tags: [personal-inbox]
+      operationId: saveMyNotificationPreference
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [event_type, channel, state, revision], properties: {event_type: {type: string}, channel: {type: string, enum: [in_app, email]}, state: {type: string, enum: [inherit, enabled, disabled]}, revision: {type: integer, minimum: 0}}}}}}
+      responses:
+        '200': {description: Saved choice, content: {application/json: {schema: {$ref: '#/components/schemas/InboxPreference'}}}}
+        '400': {description: Unsupported channel, mandatory mute, or caller-supplied identity}
+        '409': {description: Stale revision}
+
+  /api/v1/users/picker:
+    get:
+      tags: [users]
+      operationId: searchEligibleUsers
+      summary: Search active same-tenant users for an ownership assignee
+      description: Requires the triage permission. Results contain only stable ID, display name and role; no contact data. Team filter uses active membership.
+      parameters:
+        - {name: team_id, in: query, schema: {type: string}}
+        - {name: q, in: query, schema: {type: string, maxLength: 100}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 25}}
+      responses:
+        '200': {description: Bounded choices, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/UserChoice'}}, next: {type: string}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/findings/assignee-review:
+    get:
+      tags: [findings]
+      operationId: listUnresolvedAssigneeBackfill
+      summary: Review ambiguous or unmatched legacy assignee labels
+      description: Admin-only. Rows already resolved to a canonical user ID are omitted. Both cursor fields are required together.
+      parameters:
+        - {name: cursor_engagement_id, in: query, schema: {type: string}}
+        - {name: cursor_finding_id, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Bounded review page, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/AssigneeReviewItem'}}, next: {type: object, nullable: true, properties: {engagement_id: {type: string}, finding_id: {type: string}}}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
 
   /api/v1/notifications/channels:
     get:
@@ -8166,6 +8305,36 @@ components:
             than its own switch, so a client can explain an enabled switch that is still disabled.
           items: {type: string}
 
+    UserChoice:
+      type: object
+      required: [id, name, role]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        role: {type: string}
+
+    AssigneeReviewItem:
+      type: object
+      required: [engagement_id, finding_id, legacy_assignee, reason]
+      properties:
+        engagement_id: {type: string}
+        finding_id: {type: string}
+        legacy_assignee: {type: string}
+        reason: {type: string, enum: [ambiguous, unmatched, legacy_label]}
+
+    UserContact:
+      type: object
+      required: [id, kind, source, value, version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [email]}
+        source: {type: string, enum: [manual, oidc]}
+        value: {type: string, format: email}
+        verified_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+
     User:
       type: object
       required: [id, name, role, disabled, createdAt]
@@ -9914,6 +10083,7 @@ components:
               StartLine: {type: integer}
               EndLine: {type: integer}
           Assignee: {type: string}
+          assignee_user_id: {type: string, description: Canonical same-tenant user ID for personal routing; omitted for unresolved legacy labels.}
           Version: {type: integer}
           Sources: {type: array, items: {type: string}}
           Confidence: {type: string}
@@ -11938,6 +12108,30 @@ components:
         sealed_at: {type: string, format: date-time}
         lane_count: {type: integer}
         complete_coverage: {type: boolean}
+
+    InboxItem:
+      type: object
+      required: [id, event_id, event_type, title, summary, link_path, created_at]
+      properties:
+        id: {type: string}
+        event_id: {type: string}
+        event_type: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        link_path: {type: string, description: Relative application path. Clients must not redirect to an absolute URL.}
+        created_at: {type: string, format: date-time}
+        read_at: {type: string, format: date-time, nullable: true}
+    InboxPreference:
+      type: object
+      required: [event_type, channel, state, revision, mandatory, available]
+      properties:
+        event_type: {type: string}
+        channel: {type: string}
+        state: {type: string, enum: [inherit, enabled, disabled]}
+        revision: {type: integer}
+        mandatory: {type: boolean}
+        available: {type: boolean}
+        reason: {type: string}
 
     NotificationEventType:
       type: string

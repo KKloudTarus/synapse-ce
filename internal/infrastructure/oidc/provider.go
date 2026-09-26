@@ -58,7 +58,7 @@ func New(ctx context.Context, cfg Config) (*Provider, error) {
 		verifier: provider.Verifier(&coreoidc.Config{ClientID: cfg.ClientID}),
 		oauth: oauth2.Config{
 			ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, RedirectURL: cfg.RedirectURL,
-			Endpoint: provider.Endpoint(), Scopes: []string{coreoidc.ScopeOpenID, "profile", "groups"},
+			Endpoint: provider.Endpoint(), Scopes: []string{coreoidc.ScopeOpenID, "profile", "groups", "email"},
 		},
 		roles: roles,
 	}, nil
@@ -97,9 +97,11 @@ func (p *Provider) ExchangeAndVerify(ctx context.Context, code, verifier, nonce 
 		return ports.OIDCIdentity{}, fmt.Errorf("verify OIDC ID token: %w", err)
 	}
 	var claims struct {
-		Nonce  string          `json:"nonce"`
-		AtHash string          `json:"at_hash"`
-		Groups json.RawMessage `json:"groups"`
+		Nonce         string          `json:"nonce"`
+		AtHash        string          `json:"at_hash"`
+		Groups        json.RawMessage `json:"groups"`
+		Email         string          `json:"email"`
+		EmailVerified json.RawMessage `json:"email_verified"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		return ports.OIDCIdentity{}, fmt.Errorf("decode OIDC ID token claims: %w", err)
@@ -119,7 +121,24 @@ func (p *Provider) ExchangeAndVerify(ctx context.Context, code, verifier, nonce 
 	if idToken.Issuer != p.issuer || strings.TrimSpace(idToken.Subject) == "" {
 		return ports.OIDCIdentity{}, fmt.Errorf("OIDC issuer or subject is invalid")
 	}
-	return ports.OIDCIdentity{Issuer: idToken.Issuer, Subject: idToken.Subject, Role: role}, nil
+	email, verifiedEmail, err := verifiedEmailClaim(claims.Email, claims.EmailVerified)
+	if err != nil {
+		return ports.OIDCIdentity{}, err
+	}
+	return ports.OIDCIdentity{Issuer: idToken.Issuer, Subject: idToken.Subject, Role: role, Email: email, EmailVerified: verifiedEmail}, nil
+}
+
+// Only the JSON boolean true from the verified ID token grants email authority.
+// String "true", false, null, and missing claims cannot mark a contact verified.
+func verifiedEmailClaim(email string, claim json.RawMessage) (string, bool, error) {
+	if string(claim) != "true" {
+		return "", false, nil
+	}
+	address, err := user.NormalizeContactEmail(email)
+	if err != nil {
+		return "", false, fmt.Errorf("OIDC verified email is invalid: %w", err)
+	}
+	return address, true, nil
 }
 
 func (p *Provider) roleForGroups(raw json.RawMessage) (user.Role, error) {

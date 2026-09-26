@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"io"
 	"net"
@@ -86,6 +87,71 @@ func TestSMTPControlledRelay(t *testing.T) {
 				t.Fatalf("%+v", result)
 			}
 		})
+	}
+}
+
+func TestContactVerificationUsesExistingSMTPTransport(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	mail := make(chan string, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+		_, _ = fmt.Fprint(conn, "220 test relay\r\n")
+		reader := bufio.NewReader(conn)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			switch {
+			case strings.HasPrefix(line, "EHLO"):
+				_, _ = fmt.Fprint(conn, "250 test relay\r\n")
+			case strings.HasPrefix(line, "MAIL"), strings.HasPrefix(line, "RCPT"):
+				_, _ = fmt.Fprint(conn, "250 accepted\r\n")
+			case strings.HasPrefix(line, "DATA"):
+				_, _ = fmt.Fprint(conn, "354 data\r\n")
+				var body strings.Builder
+				for {
+					line, err = reader.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if line == ".\r\n" {
+						break
+					}
+					body.WriteString(line)
+				}
+				mail <- body.String()
+				_, _ = fmt.Fprint(conn, "250 accepted\r\n")
+				return
+			default:
+				return
+			}
+		}
+	}()
+	host, port, _ := net.SplitHostPort(listener.Addr().String())
+	number, _ := strconv.Atoi(port)
+	sender := New(SMTPConfig{Host: host, Port: number, From: "synapse@example.com"}, time.Second)
+	result := sender.SendContactVerification(context.Background(), "alice@example.com", "01234567", shared.ID("challenge-1"))
+	if result.StatusCode != 250 || result.ErrorCode != "" {
+		t.Fatalf("SMTP result: %+v", result)
+	}
+	body := <-mail
+	for _, expected := range []string{"To: alice@example.com", "Message-ID: <challenge-1@synapse.local>", "01234567", "Verify your Synapse email address"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("SMTP message missing %q", expected)
+		}
+	}
+	if result := sender.SendContactVerification(context.Background(), "alice@example.com\r\nBcc: attacker@example.com", "01234567", shared.ID("challenge-2")); result.ErrorCode != "smtp_recipient_invalid" {
+		t.Fatalf("unsafe recipient accepted: %+v", result)
 	}
 }
 

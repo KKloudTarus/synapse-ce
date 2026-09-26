@@ -99,6 +99,9 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			return err
 		}
 		count += n
+		if err := retainPersonalInbox(ctx, tx, tenant, now); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, `INSERT INTO notification_source_state(tenant_id,source_kind,source_id,fingerprint,active,observed_at) VALUES($1,'framework','activation','v1',true,$2) ON CONFLICT DO NOTHING`, tenant, now)
 		if err != nil {
 			return err

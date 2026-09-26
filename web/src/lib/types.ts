@@ -774,6 +774,7 @@ export interface Finding {
   impact: string
   priority: number
   assignee: string
+  assigneeUserId?: string // null/omitted when a legacy label is ambiguous or unmatched
   version: number // optimistic-concurrency token
   kind: FindingKind // external is a reader-only origin; native writers never persist it
   evidenceScore: number // 0-100; exploitation findings need >= 75 to be reportable

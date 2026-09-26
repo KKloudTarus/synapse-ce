@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -127,6 +128,22 @@ func (s *Sender) do(req *http.Request) ports.NotificationSendResult {
 }
 
 func (s *Sender) sendEmail(ctx context.Context, w ports.NotificationWork, _ ports.NotificationChannelConfig) ports.NotificationSendResult {
+	title, summary := eventText(w)
+	return s.sendSMTP(ctx, w.Delivery.Recipient, title, summary, w.Delivery.ID)
+}
+
+// SendContactVerification shares the SMTP transport and retry classification with
+// notification delivery, but the code is never put into a persisted event, rule,
+// delivery attempt, or job payload.
+func (s *Sender) SendContactVerification(ctx context.Context, recipient, code string, challengeID shared.ID) ports.NotificationSendResult {
+	return s.sendSMTP(ctx, recipient, "Verify your Synapse email address", "Your verification code is "+code+". It expires in 10 minutes. If you did not request this, ignore this email.", challengeID)
+}
+
+func (s *Sender) SendPersonalNotice(ctx context.Context, recipient, title, summary string, messageID shared.ID) ports.NotificationSendResult {
+	return s.sendSMTP(ctx, recipient, title, summary, messageID)
+}
+
+func (s *Sender) sendSMTP(ctx context.Context, destination, title, summary string, messageID shared.ID) ports.NotificationSendResult {
 	if strings.TrimSpace(s.smtp.Host) == "" || strings.TrimSpace(s.smtp.From) == "" {
 		return ports.NotificationSendResult{ErrorCode: "smtp_not_configured"}
 	}
@@ -134,13 +151,12 @@ func (s *Sender) sendEmail(ctx context.Context, w ports.NotificationWork, _ port
 	if err != nil || strings.ContainsAny(from.Address, "\r\n") {
 		return ports.NotificationSendResult{ErrorCode: "smtp_sender_invalid"}
 	}
-	recipient, err := mail.ParseAddress(w.Delivery.Recipient)
-	if err != nil || recipient.Address != w.Delivery.Recipient || strings.ContainsAny(w.Delivery.Recipient, "\r\n") {
+	recipient, err := mail.ParseAddress(destination)
+	if err != nil || recipient.Address != destination || strings.ContainsAny(destination, "\r\n") {
 		return ports.NotificationSendResult{ErrorCode: "smtp_recipient_invalid"}
 	}
-	title, summary := eventText(w)
-	messageID := "<" + w.Delivery.ID.String() + "@synapse.local>"
-	body := "From: " + from.Address + "\r\nTo: " + w.Delivery.Recipient + "\r\nSubject: " + safeHeader(title) + "\r\nMessage-ID: " + messageID + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + limit(summary, 64<<10) + "\r\n"
+	mailID := "<" + messageID.String() + "@synapse.local>"
+	body := "From: " + from.Address + "\r\nTo: " + destination + "\r\nSubject: " + safeHeader(title) + "\r\nMessage-ID: " + mailID + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + limit(summary, 64<<10) + "\r\n"
 	address := net.JoinHostPort(s.smtp.Host, strconv.Itoa(s.smtp.Port))
 	dialer := net.Dialer{Timeout: s.timeout}
 	conn, err := dialer.DialContext(ctx, "tcp", address)
@@ -174,7 +190,7 @@ func (s *Sender) sendEmail(ctx context.Context, w ports.NotificationWork, _ port
 	if err = client.Mail(from.Address); err != nil {
 		return smtpResult(err)
 	}
-	if err = client.Rcpt(w.Delivery.Recipient); err != nil {
+	if err = client.Rcpt(destination); err != nil {
 		return smtpResult(err)
 	}
 	writer, err := client.Data()

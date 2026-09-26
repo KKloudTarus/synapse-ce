@@ -74,7 +74,7 @@ func (s *Service) createChannel(ctx context.Context, actor string, in ChannelInp
 		return domain.Channel{}, err
 	}
 	c := domain.Channel{TenantID: tenant, ID: id, Name: strings.TrimSpace(in.Name), Type: in.Type, Enabled: in.Enabled, Destination: destination, Recipients: recipients, Revision: 1, SecretVersion: 1, CreatedAt: now, UpdatedAt: now}
-	created, err := s.repo.CreateChannel(ctx, c, sealed)
+	created, err := s.repo.CreateChannel(domain.WithActor(ctx, actor), c, sealed)
 	if err != nil {
 		return domain.Channel{}, fmt.Errorf("create notification channel: %w", err)
 	}
@@ -134,7 +134,7 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 	if updated.Name == "" {
 		return domain.Channel{}, fmt.Errorf("%w: notification channel name is required", shared.ErrValidation)
 	}
-	updated, err = s.repo.UpdateChannel(ctx, updated, sealed, replace)
+	updated, err = s.repo.UpdateChannel(domain.WithActor(ctx, actor), updated, sealed, replace)
 	if err != nil {
 		return domain.Channel{}, err
 	}

@@ -11,6 +11,10 @@ type OIDCIdentity struct {
 	Issuer  string
 	Subject string
 	Role    user.Role
+	// Email is advisory unless EmailVerified is true in the signed ID token.
+	// Neither value is an account lookup key.
+	Email         string
+	EmailVerified bool
 	// Name is an optional bounded display string. It is never an identity key: only
 	// (Issuer, Subject) identifies the subject.
 	Name string
