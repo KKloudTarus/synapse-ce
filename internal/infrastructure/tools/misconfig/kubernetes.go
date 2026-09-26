@@ -110,8 +110,9 @@ type k8sContainer struct {
 	Ports []struct {
 		HostPort int `yaml:"hostPort"`
 	} `yaml:"ports"`
-	Env     []k8sEnvVar  `yaml:"env"`
-	EnvFrom []k8sEnvFrom `yaml:"envFrom"`
+	Env             []k8sEnvVar  `yaml:"env"`
+	EnvFrom         []k8sEnvFrom `yaml:"envFrom"`
+	ImagePullPolicy string       `yaml:"imagePullPolicy"`
 }
 
 type k8sEnvVar struct {
@@ -508,6 +509,15 @@ func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctn
 		h("kubernetes-image-no-digest", "Container image not pinned by digest",
 			"The container image is referenced by tag rather than by digest, and a tag can be repointed at different content in the registry. Pin the image as name:tag@sha256:<digest>.",
 			"image", shared.SeverityLow)
+	}
+	// A mutable tag plus a cached image means nobody can say what is running: the kubelet keeps whatever it
+	// pulled first, and the tag has since moved. Pinning by digest makes IfNotPresent correct, which is why
+	// this is conditional rather than the unconditional "always pull" check other scanners ship.
+	if c.Image != "" && !strings.Contains(c.Image, "@sha256:") &&
+		!strings.EqualFold(strings.TrimSpace(c.ImagePullPolicy), "Always") {
+		h("kubernetes-image-pull-policy-cached", "Mutable image tag served from cache",
+			"The image is referenced by tag, not by digest, and imagePullPolicy is not Always, so a node keeps the layer it pulled first even after the tag moves and the running image cannot be identified. Pin the image by digest, or set imagePullPolicy: Always.",
+			"imagePullPolicy", shared.SeverityLow)
 	}
 	if name, ok := secretEnvSource(c); ok {
 		h("kubernetes-secret-env-var", "Secret exposed as an environment variable",

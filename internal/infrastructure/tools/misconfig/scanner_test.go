@@ -804,3 +804,55 @@ func TestHelmRenderSuccessReportsNoFailure(t *testing.T) {
 		t.Error("the rendered chart's Deployment must still produce findings")
 	}
 }
+
+// A mutable tag plus a cached image means nobody can say what is running: the kubelet keeps whatever it pulled
+// first and the tag has since moved. Pinning by digest makes IfNotPresent correct, so the rule is conditional
+// rather than the unconditional "always pull" check other scanners ship.
+func TestKubernetesImagePullPolicyOnlyWhenTagIsMutable(t *testing.T) {
+	cached := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: app:1.0
+      imagePullPolicy: IfNotPresent
+`
+	if _, ok := ruleIDs(scan(t, map[string]string{"a.yaml": cached}))["kubernetes-image-pull-policy-cached"]; !ok {
+		t.Error("a tag-referenced image with a caching pull policy must be flagged")
+	}
+
+	// Digest-pinned: IfNotPresent is the correct setting and must not be flagged.
+	pinned := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: app:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+      imagePullPolicy: IfNotPresent
+`
+	if f, bad := ruleIDs(scan(t, map[string]string{"b.yaml": pinned}))["kubernetes-image-pull-policy-cached"]; bad {
+		t.Errorf("a digest-pinned image makes IfNotPresent correct: %+v", f)
+	}
+
+	// imagePullPolicy: Always is fine even on a mutable tag.
+	always := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: app:1.0
+      imagePullPolicy: Always
+`
+	if _, bad := ruleIDs(scan(t, map[string]string{"c.yaml": always}))["kubernetes-image-pull-policy-cached"]; bad {
+		t.Error("imagePullPolicy: Always must not be flagged")
+	}
+}

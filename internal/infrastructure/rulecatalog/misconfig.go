@@ -959,6 +959,15 @@ func k8sRules() []rule.Rule {
 			RemediationEffort:   15,
 		},
 		{
+			Key: "kubernetes-image-pull-policy-cached", Name: "Mutable image tag served from cache", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "supply-chain"}, CWE: []string{"CWE-494"}, OWASP: []string{"A08:2021"}, Detection: rule.DetectionAST,
+			Description:         "The image is referenced by tag rather than digest and `imagePullPolicy` is not `Always`.",
+			Rationale:           "A tag is mutable and a cached layer is not re-checked, so a node keeps whatever it pulled first even after the tag has moved. The result is a cluster where two nodes can run different code behind the same manifest and nobody can say which. A digest-pinned image makes `IfNotPresent` correct, which is why this applies only to the unpinned case.\n\nSource: https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy",
+			Remediation:         "Pin the image by digest, or set `imagePullPolicy: Always`.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test:1.0\n    imagePullPolicy: IfNotPresent\n",
+			RemediationEffort:   5,
+		},
+		{
 			Key: "kubernetes-image-no-digest", Name: "Container image not pinned by digest", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "supply-chain"}, CWE: []string{"CWE-494"}, OWASP: []string{"A08:2021"}, Detection: rule.DetectionAST,
 			Description:         "The container image is referenced by tag rather than by an immutable digest.",
 			Rationale:           "A tag is a mutable pointer. Anyone who can push to the registry can repoint a pinned tag at different content, so the cluster runs an image nobody reviewed and the manifest still reads as pinned. Only a digest names exact content.\n\nSource: https://kubernetes.io/docs/concepts/containers/images/",

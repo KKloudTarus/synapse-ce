@@ -2046,6 +2046,7 @@ kubernetes-host-pid
 kubernetes-host-port
 kubernetes-image-no-digest
 kubernetes-image-no-tag
+kubernetes-image-pull-policy-cached
 kubernetes-ingress-no-tls
 kubernetes-ingress-tls-no-secret
 kubernetes-namespace-no-network-policy
