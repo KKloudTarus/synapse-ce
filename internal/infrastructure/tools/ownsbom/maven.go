@@ -17,7 +17,12 @@ import (
 // unresolved version. <scope>test</scope> maps to background test scope. Uses stdlib encoding/xml – and
 // because the schema only binds <project><dependencies>, the <dependencyManagement> BOM (version
 // constraints, not real deps) is naturally excluded. No third-party library, vendor-neutral.
-type Maven struct{}
+type Maven struct {
+	// Fetcher resolves a POM the local Maven repository does not hold. Nil means local-only resolution, which
+	// is what an --offline scan uses; a CI runner has no local repository at all, so this is what closes the
+	// difference between the full tree and the handful of literal versions a pom.xml states outright.
+	Fetcher POMFetcher
+}
 
 // Ecosystem identifies this parser's package ecosystem.
 func (Maven) Ecosystem() string { return "maven" }
@@ -34,7 +39,7 @@ func (Maven) Markers() []string { return []string{"pom.xml"} }
 //
 // When there is no local repository, or it resolves no more than the direct-literal parse does, the literal
 // parse below stands. It is the floor, never replaced by something smaller.
-func (Maven) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
+func (m Maven) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	var pom struct {
 		Dependencies struct {
 			Dependency []struct {
@@ -72,7 +77,7 @@ func (Maven) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.D
 		})
 	}
 	literal := set.components()
-	if comps, edges, ok := resolveMavenFromLocalRepository(in, len(literal)); ok {
+	if comps, edges, ok := resolveMavenFromLocalRepository(ctx, in, len(literal), m.Fetcher); ok {
 		return comps, edges, nil
 	}
 	return literal, nil, nil

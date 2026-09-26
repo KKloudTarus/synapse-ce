@@ -60,9 +60,15 @@ type EcosystemParser interface {
 type Registry struct {
 	byMarker map[string]EcosystemParser // lower-cased manifest basename -> parser
 	ecos     []string                   // distinct ecosystems present, sorted
+	// mavenFetcher is kept so the registry can report what POM fetching could not do. It is the same instance
+	// the Maven parser holds, so its per-scan state is the state being reported.
+	mavenFetcher POMFetcher
 }
 
-var _ ports.SBOMGenerator = (*Registry)(nil)
+var (
+	_ ports.SBOMGenerator       = (*Registry)(nil)
+	_ ports.SBOMWarningReporter = (*Registry)(nil)
+)
 
 // New builds a registry from the given parsers. Two parsers claiming the same marker is a configuration
 // error (ambiguous dispatch), not a silent last-wins. Markers are matched case-insensitively (a Gemfile
@@ -95,7 +101,38 @@ func New(parsers ...EcosystemParser) (*Registry, error) {
 // Swift, Dart, Elixir, R (renv), Julia, and Conan. The parsers claim distinct markers, so New does not
 // error here in practice.
 func DefaultRegistry() (*Registry, error) {
-	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, Bun{}, PyPI{}, Poetry{}, Pipfile{}, UV{}, Cargo{}, Maven{}, Gradle{}, BuildGradle{}, Gem{}, Composer{}, NuGet{}, NuGetAssets{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
+	return DefaultRegistryWith(RegistryOptions{})
+}
+
+// RegistryOptions carries the capabilities a caller chooses to grant the owned parsers. Every field is off by
+// default, so DefaultRegistry stays the inert, offline-safe producer and a caller opts in explicitly.
+type RegistryOptions struct {
+	// MavenPOMFetcher lets the Maven parser resolve a POM the local repository does not hold. Without it a
+	// machine that has never run Maven, which is what a CI runner is, resolves almost none of a Spring
+	// project's tree. It makes outbound https requests, so it belongs to an online scan only and an --offline
+	// scan must leave it nil.
+	MavenPOMFetcher POMFetcher
+}
+
+// SBOMWarnings reports what the producer could not resolve, so a truncated dependency tree is never mistaken
+// for a small one. Today that is the Maven POM fetcher's account of hosts it could not use.
+func (r *Registry) SBOMWarnings() []string {
+	if r == nil || r.mavenFetcher == nil {
+		return nil
+	}
+	return r.mavenFetcher.Warnings()
+}
+
+// DefaultRegistryWith assembles the owned parsers with the granted capabilities.
+func DefaultRegistryWith(opts RegistryOptions) (*Registry, error) {
+	reg, err := New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, Bun{}, PyPI{}, Poetry{}, Pipfile{}, UV{}, Cargo{},
+		Maven{Fetcher: opts.MavenPOMFetcher}, Gradle{}, BuildGradle{}, Gem{}, Composer{}, NuGet{},
+		NuGetAssets{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
+	if err != nil {
+		return nil, err
+	}
+	reg.mavenFetcher = opts.MavenPOMFetcher
+	return reg, nil
 }
 
 // MarkerEcosystems returns each registry marker mapped to the ecosystem parser that claims it.

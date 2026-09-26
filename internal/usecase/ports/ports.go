@@ -1625,6 +1625,14 @@ type SBOMGenerator interface {
 	Generate(ctx context.Context, targetRef string) (*sbom.SBOM, error)
 }
 
+// SBOMWarningReporter is the optional reporting form of an SBOM producer: it says what the producer could NOT
+// resolve. A dependency tree that a rate limit or a missing repository truncated looks exactly like a small
+// project unless the producer can say so, which is the difference between a clean result and an unknown one.
+type SBOMWarningReporter interface {
+	SBOMGenerator
+	SBOMWarnings() []string
+}
+
 // SBOMCache is an optional content-addressed cache of GENERATED (pre-enrichment) SBOMs. The key is derived
 // from the workspace CONTENT plus the producer VERSION, so an unchanged source re-scanned with the same
 // producer reuses the SBOM (skipping the expensive cataloging step), while a producer version bump

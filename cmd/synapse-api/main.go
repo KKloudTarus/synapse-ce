@@ -3386,7 +3386,11 @@ func main() {
 		if primaryKind == scacompose.SBOMProducerOwned {
 			secondary, secondaryName = syftGen, "syft"
 		} else {
-			reg, rerr := ownsbom.DefaultRegistry()
+			crossOpts := ownsbom.RegistryOptions{}
+			if !cfg.Offline {
+				crossOpts.MavenPOMFetcher = ownsbom.NewHTTPPOMFetcher(ownsbom.DefaultPOMCacheDir())
+			}
+			reg, rerr := ownsbom.DefaultRegistryWith(crossOpts)
 			if rerr != nil {
 				log.Error("build ownsbom cross-check producer", "err", rerr)
 				os.Exit(1)

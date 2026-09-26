@@ -1479,7 +1479,14 @@ func selectSBOMGenerator(cfg config.Config) (ports.SBOMGenerator, error) {
 	if kind == scacompose.SBOMProducerSyft {
 		return syft.New(cfg.SyftBin), nil
 	}
-	reg, rerr := ownsbom.DefaultRegistry()
+	// A CI runner has neither ~/.m2 nor mvn, so without POM fetching a Spring project's transitive tree
+	// resolves to almost nothing. --offline leaves the fetcher nil, which the flag already promises for every
+	// registry resolver.
+	opts := ownsbom.RegistryOptions{}
+	if !cfg.Offline {
+		opts.MavenPOMFetcher = ownsbom.NewHTTPPOMFetcher(ownsbom.DefaultPOMCacheDir())
+	}
+	reg, rerr := ownsbom.DefaultRegistryWith(opts)
 	if rerr != nil {
 		return nil, fmt.Errorf("build ownsbom SBOM producer: %w", rerr)
 	}

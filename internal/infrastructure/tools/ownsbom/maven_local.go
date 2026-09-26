@@ -1,6 +1,7 @@
 package ownsbom
 
 import (
+	"context"
 	"encoding/xml"
 	"os"
 	"path/filepath"
@@ -106,6 +107,12 @@ type mavenPOMXML struct {
 	Dependencies struct {
 		Dependency []mavenDepXML `xml:"dependency"`
 	} `xml:"dependencies"`
+	Repositories struct {
+		Repository []struct {
+			ID  string `xml:"id"`
+			URL string `xml:"url"`
+		} `xml:"repository"`
+	} `xml:"repositories"`
 }
 
 // managedDep is one <dependencyManagement> entry together with the properties of the POM that DECLARED it.
@@ -136,6 +143,14 @@ type mavenLocalRepo struct {
 	root  string
 	cache map[mavenCoord]*effectivePOM
 	reads int
+	// fetcher resolves a POM the local repository does not have. It is nil for a local-only resolution, which
+	// is what an --offline scan and every unit test use.
+	fetcher POMFetcher
+	// repositories are the SCANNED PROJECT's declared repositories, used in order before Maven Central. A
+	// repository declared by a third-party dependency is deliberately not used.
+	repositories []string
+	ctx          context.Context
+	fetches      int
 }
 
 // localMavenRepoRoot locates the local repository without running anything. The MAVEN_REPO_LOCAL override
@@ -226,7 +241,13 @@ func (r *mavenLocalRepo) effective(c mavenCoord, depth int) *effectivePOM {
 	r.reads++
 	data, err := readBounded(r.pomPath(c), maxPomBytes)
 	if err != nil {
-		return nil
+		// Nothing on disk. On a machine that has never run Maven, which is what a CI runner is, that is every
+		// POM, so fetching is the difference between the full tree and almost nothing.
+		fetched, ok := r.fetch(c)
+		if !ok {
+			return nil
+		}
+		data = fetched
 	}
 	var raw mavenPOMXML
 	if err := xml.Unmarshal(data, &raw); err != nil {
@@ -235,6 +256,26 @@ func (r *mavenLocalRepo) effective(c mavenCoord, depth int) *effectivePOM {
 	eff := r.build(&raw, c, depth, "")
 	r.cache[c] = eff
 	return eff
+}
+
+// fetch retrieves a POM the local repository does not hold. It is bounded by the fetcher's own request budget
+// and returns false for anything it could not get, which costs that subtree and never the scan.
+func (r *mavenLocalRepo) fetch(c mavenCoord) ([]byte, bool) {
+	if r.fetcher == nil {
+		return nil, false
+	}
+	ctx := r.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false
+	}
+	data, ok := r.fetcher.FetchPOM(ctx, c.group, c.artifact, c.version, r.repositories)
+	if ok {
+		r.fetches++
+	}
+	return data, ok
 }
 
 // build merges a parsed POM with its parent chain and its imported BOMs. dir is the on-disk directory of a
@@ -632,16 +673,40 @@ func mavenScope(scope, base string) string {
 // resolveMavenFromLocalRepository builds the full tree for a project pom.xml. It returns ok=false when there
 // is no local repository, when the POM does not parse, or when the tree came out no larger than the
 // direct-literal parse, so the caller keeps its existing result rather than trading it for a smaller one.
-func resolveMavenFromLocalRepository(in ParseInput, direct int) ([]sbom.Component, []sbom.Dependency, bool) {
+// projectRepositories returns the https repository URLs the SCANNED PROJECT declares, in declaration order.
+// They are tried before Maven Central, which is what lets an internal artifact be fetched from the repository
+// that actually holds it rather than demanded of a public mirror that has never heard of it. A repository
+// declared by a third-party dependency is deliberately not collected.
+func projectRepositories(raw *mavenPOMXML) []string {
+	out := make([]string, 0, len(raw.Repositories.Repository))
+	for _, entry := range raw.Repositories.Repository {
+		url := strings.TrimSpace(entry.URL)
+		if url == "" || strings.Contains(url, "${") {
+			continue // an unresolved property would build a wrong host
+		}
+		out = append(out, url)
+	}
+	return out
+}
+
+func resolveMavenFromLocalRepository(ctx context.Context, in ParseInput, direct int, fetcher POMFetcher) ([]sbom.Component, []sbom.Dependency, bool) {
 	root := localMavenRepoRoot()
-	if root == "" {
+	// With no local repository AND no fetcher there is nothing to resolve from. With a fetcher there is: a CI
+	// runner has no ~/.m2, and that is exactly the case this path exists for.
+	if root == "" && fetcher == nil {
 		return nil, nil, false
 	}
 	var raw mavenPOMXML
 	if err := xml.Unmarshal(in.Content, &raw); err != nil {
 		return nil, nil, false
 	}
-	repo := &mavenLocalRepo{root: root, cache: map[mavenCoord]*effectivePOM{}}
+	repo := &mavenLocalRepo{
+		root:         root,
+		cache:        map[mavenCoord]*effectivePOM{},
+		fetcher:      fetcher,
+		repositories: projectRepositories(&raw),
+		ctx:          ctx,
+	}
 	self := mavenCoord{
 		group:    strings.TrimSpace(raw.GroupID),
 		artifact: strings.TrimSpace(raw.ArtifactID),

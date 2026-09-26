@@ -3255,6 +3255,13 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		doc.Audit.CreatedAt = now
 		doc.Audit.UpdatedAt = now
 	}
+	// An SBOM producer that could not reach a package repository returns a SMALLER tree, not an error, and a
+	// small tree is indistinguishable from a small project. Read what it could not resolve so a rate limit or
+	// an unreachable repository is stated rather than inferred.
+	var producerWarnings []string
+	if reporter, ok := s.sbomGen.(ports.SBOMWarningReporter); ok {
+		producerWarnings = reporter.SBOMWarnings()
+	}
 	if sbomGenErr == nil {
 		trace.succeed(step, "SBOM generated", map[string]int{"components": countComponents(doc), "dependencies": len(doc.Dependencies), "cache_hit": boolToInt(cacheHit)})
 	}
@@ -3816,7 +3823,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		LicenseCoverageBreakdown: licenseCoverageBreakdown,
 		Manifest:                 manifest,
 		RiskMatches:              riskMatches,
-		SourceWarnings:           sourceWarnings,
+		SourceWarnings:           append(append([]string(nil), producerWarnings...), sourceWarnings...),
 		Image:                    ws.Image,
 		DebugEvents:              trace.snapshot(),
 		LineCoverage:             opts.LineCoverage,

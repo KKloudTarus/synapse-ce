@@ -172,7 +172,13 @@ func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.Adv
 	}
 	switch producerKind {
 	case SBOMProducerOwned:
-		reg, rerr := ownsbom.DefaultRegistry()
+		// POM fetching closes the Maven tree on a machine that has never run Maven, which is what a CI runner
+		// is. Under --offline it stays nil, matching what the flag promises for every registry resolver.
+		ownOpts := ownsbom.RegistryOptions{}
+		if !cfg.Offline {
+			ownOpts.MavenPOMFetcher = ownsbom.NewHTTPPOMFetcher(ownsbom.DefaultPOMCacheDir())
+		}
+		reg, rerr := ownsbom.DefaultRegistryWith(ownOpts)
 		if rerr != nil {
 			return Execution{}, fmt.Errorf("build ownsbom SBOM producer: %w", rerr)
 		}
