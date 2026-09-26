@@ -19,6 +19,7 @@ var explicitInventory = []string{
 	"gitlab-ci-curl-pipe-shell", "gitlab-ci-debug-trace-enabled", "gitlab-ci-image-no-digest", "gitlab-ci-include-project-unpinned", "gitlab-ci-include-remote", "gitlab-ci-registry-password-on-command-line", "gitlab-ci-script-injection",
 	"gha-no-explicit-permissions", "gha-permissions-write-all", "gha-pull-request-target", "gha-script-injection", "gha-unpinned-action",
 	"kubernetes-added-capability", "kubernetes-allow-priv-escalation", "kubernetes-automount-sa-token", "kubernetes-caps-not-dropped", "kubernetes-configmap-credential", "kubernetes-dangerous-capability", "kubernetes-default-namespace", "kubernetes-default-service-account", "kubernetes-host-ipc", "kubernetes-host-network", "kubernetes-host-path", "kubernetes-host-pid", "kubernetes-host-port", "kubernetes-image-no-tag", "kubernetes-ingress-annotation-snippet", "kubernetes-ingress-no-tls", "kubernetes-ingress-tls-no-secret", "kubernetes-image-no-digest", "kubernetes-image-pull-policy-cached", "kubernetes-namespace-no-network-policy", "kubernetes-low-run-as-user", "kubernetes-no-cpu-limit", "kubernetes-no-cpu-request", "kubernetes-no-memory-limit", "kubernetes-no-liveness-probe", "kubernetes-no-memory-request", "kubernetes-no-readiness-probe", "kubernetes-no-priv-escalation-disabled", "kubernetes-no-read-only-root-fs", "kubernetes-no-run-as-group", "kubernetes-no-run-as-non-root", "kubernetes-no-run-as-user", "kubernetes-no-seccomp", "kubernetes-privileged", "kubernetes-rbac-cluster-admin-binding", "kubernetes-rbac-escalation-verbs", "kubernetes-rbac-read-all-secrets", "kubernetes-rbac-webhook-control", "kubernetes-rbac-wildcard-permissions", "kubernetes-run-as-root", "kubernetes-secret-env-var", "kubernetes-secret-in-env", "kubernetes-secret-in-manifest",
+	"nginx-alias-path-traversal", "nginx-autoindex-enabled", "nginx-h2c-smuggling", "nginx-header-redefinition", "nginx-proxy-pass-host-header", "nginx-proxy-ssl-verify-off", "nginx-redirect-host-header", "nginx-redirect-without-scheme", "nginx-unbounded-request-body", "nginx-weak-cipher-suite", "nginx-weak-tls-version",
 	"openapi-apikey-over-cleartext", "openapi-no-global-security", "openapi-operation-security-empty", "openapi-request-array-unbounded", "openapi-response-collection-unbounded",
 	"spring-actuator-exposure-wildcard", "spring-actuator-health-details-always", "spring-actuator-sensitive-endpoint-exposed", "spring-actuator-shutdown-enabled", "spring-h2-console-enabled",
 	"terraform-api-gateway-no-auth", "terraform-apigw-no-logging", "terraform-asg-no-health-check", "terraform-azure-nsg-open", "terraform-azure-public-network-access", "terraform-azure-storage-min-tls", "terraform-azure-storage-no-https", "terraform-azure-storage-public-container", "terraform-cloudfront-allow-http", "terraform-cloudfront-no-default-root", "terraform-cloudtrail-no-log-validation", "terraform-cloudtrail-not-multi-region", "terraform-cloudwatch-no-retention", "terraform-cloudwatch-unencrypted", "terraform-db-publicly-accessible", "terraform-default-resource-managed", "terraform-dynamodb-no-pitr", "terraform-dynamodb-unencrypted", "terraform-ebs-unencrypted", "terraform-ecr-mutable-tags", "terraform-ecr-no-cmk", "terraform-ecr-no-scan", "terraform-efs-unencrypted", "terraform-eks-no-logging", "terraform-eks-public-endpoint", "terraform-elasticache-unencrypted", "terraform-encryption-disabled", "terraform-gcp-compute-public-ip", "terraform-gcp-public-iam-member", "terraform-iam-admin-policy", "terraform-iam-wildcard", "terraform-iam-wildcard-resource", "terraform-imdsv2-not-required", "terraform-instance-public-ip", "terraform-kinesis-unencrypted", "terraform-kms-no-rotation", "terraform-lambda-no-dlq", "terraform-lambda-public", "terraform-lb-no-access-logs", "terraform-lifecycle-ignore-all", "terraform-local-exec-provisioner", "terraform-module-no-version", "terraform-module-unpinned-git", "terraform-open-cidr", "terraform-open-egress", "terraform-plaintext-secret", "terraform-public-access-block-disabled", "terraform-public-bucket-acl", "terraform-rds-deletion-protection-disabled", "terraform-rds-iam-auth-disabled", "terraform-rds-no-backup", "terraform-rds-no-encryption", "terraform-rds-no-multi-az", "terraform-redshift-unencrypted", "terraform-remote-exec-provisioner", "terraform-s3-no-logging", "terraform-s3-no-versioning", "terraform-sg-no-description", "terraform-sns-unencrypted", "terraform-sqs-no-dlq", "terraform-sqs-unencrypted", "terraform-wildcard-principal",
@@ -48,6 +49,7 @@ func TestCatalogParity(t *testing.T) {
 		"GitHub Actions":         domainrule.DetectionPattern,
 		"GitLab CI":              domainrule.DetectionPattern,
 		"Kubernetes":             domainrule.DetectionAST,
+		"Nginx":                  domainrule.DetectionAST,
 		"OpenAPI":                domainrule.DetectionAST,
 		"Spring Boot":            domainrule.DetectionAST,
 		"Terraform":              domainrule.DetectionPattern,
@@ -70,6 +72,7 @@ func TestCatalogParity(t *testing.T) {
 		"GitHub Actions":         true,
 		"GitLab CI":              true,
 		"Kubernetes":             true,
+		"Nginx":                  true,
 		"OpenAPI":                true,
 		"Spring Boot":            true,
 		"Terraform":              true,
@@ -130,6 +133,8 @@ func TestCatalogParity(t *testing.T) {
 			filename = ".gitlab-ci.yml"
 		} else if strings.HasPrefix(id, "kubernetes-") {
 			filename = "pod.yaml"
+		} else if strings.HasPrefix(id, "nginx-") {
+			filename = "nginx.conf"
 		} else if strings.HasPrefix(id, "openapi-") {
 			filename = "openapi.yaml"
 		} else if strings.HasPrefix(id, "spring-") {

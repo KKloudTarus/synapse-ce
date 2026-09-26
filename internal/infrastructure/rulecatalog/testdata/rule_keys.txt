@@ -2096,6 +2096,17 @@ mongodb-atlas-api-private-key
 netlify-access-token
 netrc-password
 new-relic-key
+nginx-alias-path-traversal
+nginx-autoindex-enabled
+nginx-h2c-smuggling
+nginx-header-redefinition
+nginx-proxy-pass-host-header
+nginx-proxy-ssl-verify-off
+nginx-redirect-host-header
+nginx-redirect-without-scheme
+nginx-unbounded-request-body
+nginx-weak-cipher-suite
+nginx-weak-tls-version
 node-body-parser-deprecated
 node-buffer-allocunsafe
 node-child-shell-true

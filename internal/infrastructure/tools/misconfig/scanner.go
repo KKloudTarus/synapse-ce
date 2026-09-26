@@ -90,6 +90,7 @@ const (
 	cfgSpringConfig
 	cfgOpenAPI
 	cfgGitLabCI
+	cfgNginx
 )
 
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
@@ -206,7 +207,7 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 		}
 		kind := classifyName(d.Name())
 		isTFVars := isTFVarsName(d.Name())
-		if kind == cfgNone && !isTFVars && !maybeYAML(d.Name()) && !maybeCFN(d.Name()) && !isSpringConfigName(d.Name()) {
+		if kind == cfgNone && !isTFVars && !maybeYAML(d.Name()) && !maybeCFN(d.Name()) && !isSpringConfigName(d.Name()) && !isNginxConfName(path) {
 			return nil
 		}
 		if count >= maxFiles {
@@ -237,6 +238,8 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 				kind = cfgGithubActions
 			case isSpringConfigName(d.Name()) && looksSpringConfig(data):
 				kind = cfgSpringConfig
+			case isNginxConfName(path) && looksNginx(data):
+				kind = cfgNginx
 			case looksOpenAPI(data):
 				kind = cfgOpenAPI
 			case looksCompose(data):
@@ -281,6 +284,8 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 			out = append(out, scanOpenAPI(rel, data)...)
 		case cfgGitLabCI:
 			out = append(out, scanGitLabCI(rel, data)...)
+		case cfgNginx:
+			out = append(out, scanNginx(rel, data)...)
 		}
 		return nil
 	})

@@ -14,6 +14,7 @@ func misconfigRules() []rule.Rule {
 	rules = append(rules, ghaRules()...)
 	rules = append(rules, gitlabCIRules()...)
 	rules = append(rules, k8sRules()...)
+	rules = append(rules, nginxRules()...)
 	rules = append(rules, openAPIRules()...)
 	rules = append(rules, springRules()...)
 	rules = append(rules, tfRules()...)
