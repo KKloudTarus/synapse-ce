@@ -2929,6 +2929,11 @@ snyk-api-token
 sonarqube-token
 sourcegraph-access-token
 splunk-hec-token
+spring-actuator-exposure-wildcard
+spring-actuator-health-details-always
+spring-actuator-sensitive-endpoint-exposed
+spring-actuator-shutdown-enabled
+spring-h2-console-enabled
 sqlalchemy-raw-sql-dynamic
 square-token
 ssrf-fetch-user-url

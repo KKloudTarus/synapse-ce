@@ -4,7 +4,7 @@ This matrix is generated from the shipped first-party rule catalog. The drift te
 
 OWASP coverage is required for security-quality rules. An empty OWASP list on a non-security rule means not applicable. Direct CWE mappings follow OWASP Top 10:2021's published mapped-CWE lists where available; CWEs outside those lists use explicit Synapse-reviewed Top 10 classifications and are not presented as OWASP-published CWE crosswalks.
 
-Catalogued rules: **3337**. Security-quality rules with an OWASP mapping: **1188/1188**.
+Catalogued rules: **3342**. Security-quality rules with an OWASP mapping: **1193/1193**.
 
 ## Sonar-equivalent type mapping
 
@@ -44,6 +44,7 @@ Catalogued rules: **3337**. Security-quality rules with an OWASP mapping: **1188
 | Rust | 68 | 17 | 26 | 53 | 164 |
 | Scala | 18 | 1 | 3 | 19 | 41 |
 | Secrets | 0 | 124 | 0 | 0 | 124 |
+| Spring Boot | 0 | 5 | 0 | 0 | 5 |
 | Swift | 39 | 7 | 19 | 55 | 120 |
 | Terraform | 10 | 21 | 24 | 9 | 64 |
 | Text | 0 | 1 | 1 | 6 | 8 |

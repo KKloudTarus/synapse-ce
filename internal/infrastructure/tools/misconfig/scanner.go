@@ -86,6 +86,7 @@ const (
 	cfgCompose
 	cfgGithubActions
 	cfgBicep
+	cfgSpringConfig
 )
 
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
@@ -192,7 +193,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		}
 		kind := classifyName(d.Name())
 		isTFVars := isTFVarsName(d.Name())
-		if kind == cfgNone && !isTFVars && !maybeYAML(d.Name()) && !maybeCFN(d.Name()) {
+		if kind == cfgNone && !isTFVars && !maybeYAML(d.Name()) && !maybeCFN(d.Name()) && !isSpringConfigName(d.Name()) {
 			return nil
 		}
 		if count >= maxFiles {
@@ -220,6 +221,8 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			switch {
 			case isGitHubActionsPath(rel):
 				kind = cfgGithubActions
+			case isSpringConfigName(d.Name()) && looksSpringConfig(data):
+				kind = cfgSpringConfig
 			case looksCompose(data):
 				kind = cfgCompose
 			case looksKubernetes(data):
@@ -256,6 +259,8 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			out = append(out, scanCompose(rel, data)...)
 		case cfgGithubActions:
 			out = append(out, scanGitHubActions(rel, data)...)
+		case cfgSpringConfig:
+			out = append(out, scanSpringConfig(rel, data)...)
 		}
 		return nil
 	})

@@ -13,6 +13,7 @@ func misconfigRules() []rule.Rule {
 	rules = append(rules, dockerfileRules()...)
 	rules = append(rules, ghaRules()...)
 	rules = append(rules, k8sRules()...)
+	rules = append(rules, springRules()...)
 	rules = append(rules, tfRules()...)
 	return rules
 }
@@ -1699,6 +1700,56 @@ func tfRules() []rule.Rule {
 			Remediation:         "Pin the source to a tag or commit with ?ref=.",
 			CompliantExample:    "module \"vpc\" {\n  source = \"git::https://github.com/org/repo.git?ref=v1.2.0\"\n}",
 			NoncompliantExample: "module \"vpc\" {\n  source = \"git::https://github.com/org/repo.git\"\n}",
+			RemediationEffort:   5,
+		},
+	}
+}
+
+func springRules() []rule.Rule {
+	return []rule.Rule{
+		{
+			Key: "spring-actuator-exposure-wildcard", Name: "Actuator exposes every endpoint", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"spring", "actuator", "exposure"}, CWE: []string{"CWE-200"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description:         "`management.endpoints.web.exposure.include` is `\"*\"`, publishing every Actuator endpoint over HTTP.",
+			Rationale:           "The wildcard publishes endpoints the service never needs, including `heapdump`, which returns a full image of process memory, and `env`, which returns the resolved configuration. A single unauthenticated request to either yields every credential the application holds.\n\nSource: https://docs.spring.io/spring-boot/reference/actuator/endpoints.html",
+			Remediation:         "List only the endpoints the service needs, typically `health` and `info`.",
+			CompliantExample:    "management:\n  endpoints:\n    web:\n      exposure:\n        include: health,info\n",
+			NoncompliantExample: "management:\n  endpoints:\n    web:\n      exposure:\n        include: \"*\"\n",
+			RemediationEffort:   15,
+		},
+		{
+			Key: "spring-actuator-sensitive-endpoint-exposed", Name: "Actuator publishes a sensitive endpoint", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"spring", "actuator", "exposure"}, CWE: []string{"CWE-200"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description:         "The Actuator exposure allow-list names an endpoint that discloses internal state or mutates the running application.",
+			Rationale:           "`env` and `configprops` return the resolved configuration, `threaddump` returns every stack, `logfile` streams the application log, and `loggers`, `caches` and `shutdown` accept writes. Each widens what an attacker learns or changes from one HTTP request. Publishing `health`, `info`, `metrics` and `prometheus` is the ordinary reason Actuator is enabled and is not flagged.\n\nSource: https://docs.spring.io/spring-boot/reference/actuator/endpoints.html",
+			Remediation:         "Remove the endpoint from `management.endpoints.web.exposure.include`, or move Actuator to a management port that is not routable from outside the cluster and require authentication on it.",
+			CompliantExample:    "management:\n  endpoints:\n    web:\n      exposure:\n        include: health,info,metrics\n",
+			NoncompliantExample: "management:\n  endpoints:\n    web:\n      exposure:\n        include: health,env,configprops,threaddump\n",
+			RemediationEffort:   15,
+		},
+		{
+			Key: "spring-actuator-shutdown-enabled", Name: "Actuator shutdown endpoint enabled", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"spring", "actuator", "availability"}, CWE: []string{"CWE-284"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description:         "`management.endpoint.shutdown.enabled` is true, so an HTTP POST stops the application.",
+			Rationale:           "The shutdown endpoint is the only Actuator endpoint disabled by default, because reaching it ends the process. Enabling it turns one reachable request into a denial of service that needs no vulnerability.\n\nSource: https://docs.spring.io/spring-boot/reference/actuator/endpoints.html",
+			Remediation:         "Leave `management.endpoint.shutdown.enabled` at its default of false and stop the process through the platform.",
+			CompliantExample:    "management:\n  endpoint:\n    shutdown:\n      enabled: false\n",
+			NoncompliantExample: "management:\n  endpoint:\n    shutdown:\n      enabled: true\n",
+			RemediationEffort:   5,
+		},
+		{
+			Key: "spring-h2-console-enabled", Name: "H2 web console enabled", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"spring", "database", "console"}, CWE: []string{"CWE-284"}, OWASP: []string{"A05:2021"}, Detection: rule.DetectionAST,
+			Description:         "`spring.h2.console.enabled` is true, serving a browser SQL shell against the application datasource.",
+			Rationale:           "The console executes arbitrary SQL as the application's database user, and H2 has repeatedly turned that into remote code execution (CVE-2021-42392, CVE-2022-23221). It exists for local development and has no place in a profile that ships.\n\nSource: https://www.h2database.com/html/features.html#console_application",
+			Remediation:         "Set `spring.h2.console.enabled` to false, and keep it out of every profile other than a developer's own.",
+			CompliantExample:    "spring:\n  h2:\n    console:\n      enabled: false\n",
+			NoncompliantExample: "spring:\n  h2:\n    console:\n      enabled: true\n",
+			RemediationEffort:   5,
+		},
+		{
+			Key: "spring-actuator-health-details-always", Name: "Health endpoint always shows details", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityLow, Tags: []string{"spring", "actuator", "exposure"}, CWE: []string{"CWE-200"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description:         "`management.endpoint.health.show-details` is `always`, so every caller sees each health component's detail.",
+			Rationale:           "Component detail names the infrastructure behind the service: database hostnames and schema, broker addresses, disk paths and free space. That is reconnaissance handed to an unauthenticated caller, and `when_authorized` gives an operator the same view without it.\n\nSource: https://docs.spring.io/spring-boot/reference/actuator/endpoints.html#actuator.endpoints.health",
+			Remediation:         "Use `show-details: when_authorized` and restrict it with `management.endpoint.health.roles`.",
+			CompliantExample:    "management:\n  endpoint:\n    health:\n      show-details: when_authorized\n      roles: 'ROLE_ADMIN'\n",
+			NoncompliantExample: "management:\n  endpoint:\n    health:\n      show-details: always\n",
 			RemediationEffort:   5,
 		},
 	}
