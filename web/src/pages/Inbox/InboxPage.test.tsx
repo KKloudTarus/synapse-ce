@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
@@ -58,5 +58,30 @@ describe('InboxPage', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'finding.ownership_changed email' }), { target: { value: 'disabled' } })
     expect(await screen.findByDisplayValue('Disabled')).toBeInTheDocument()
     expect(api.saveInboxPreference).toHaveBeenCalledWith(expect.objectContaining({ channel: 'email', state: 'disabled', revision: 2 }))
+  })
+
+  it('keeps the newest page when an older request finishes last', async () => {
+    let resolveOlder: (value: { items: typeof item[] }) => void = () => {}
+    vi.mocked(api.inboxPage)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOlder = resolve }))
+      .mockResolvedValueOnce({ items: [{ ...item, id: 'fresh', title: 'Fresh notice' }] })
+    vi.mocked(api.inboxPreferences).mockResolvedValue({ items: [] })
+    render(<MemoryRouter><InboxPage /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Unread only' }))
+    expect(await screen.findByText('Fresh notice')).toBeInTheDocument()
+    await act(async () => { resolveOlder({ items: [item] }) })
+    expect(screen.getByText('Fresh notice')).toBeInTheDocument()
+    expect(screen.queryByText('Finding ownership changed')).not.toBeInTheDocument()
+  })
+
+  it('shows an error when mark all fails and keeps the loaded list', async () => {
+    vi.mocked(api.inboxPage).mockResolvedValue({ items: [item] })
+    vi.mocked(api.inboxPreferences).mockResolvedValue({ items: [] })
+    vi.mocked(api.markInboxAllRead).mockRejectedValue(new Error('conflict'))
+    render(<MemoryRouter><InboxPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark all read' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('conflict')
+    expect(screen.getByText('Finding ownership changed')).toBeInTheDocument()
+    expect(api.inboxPage).toHaveBeenCalledTimes(1)
   })
 })

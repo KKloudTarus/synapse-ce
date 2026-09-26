@@ -55,6 +55,21 @@ func TestMarkAllUsesRequestCutoff(t *testing.T) {
 	}
 }
 
+func TestCursorBindsUnreadFilter(t *testing.T) {
+	at := time.Date(2026, 9, 26, 0, 0, 0, 0, time.UTC)
+	svc, err := NewService(&fakeInbox{items: []ports.InboxItem{{ID: "n", CreatedAt: at}}}, fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := svc.List(context.Background(), "tenant", "user", "", true, 1)
+	if err != nil || page.Next == "" {
+		t.Fatalf("cursor %q: %v", page.Next, err)
+	}
+	if _, err := svc.List(context.Background(), "tenant", "user", page.Next, false, 1); err == nil {
+		t.Fatal("unread cursor was accepted for the full inbox")
+	}
+}
+
 func TestCursorRejectsTampering(t *testing.T) {
 	svc, err := NewService(&fakeInbox{}, fixedClock{})
 	if err != nil {

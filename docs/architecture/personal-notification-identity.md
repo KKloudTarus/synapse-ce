@@ -19,6 +19,21 @@ stale personal destination. Typed ownership writes set both fields inside the
 existing revision-guarded assignment transaction. No email, fuzzy-name, or
 case-insensitive inference is performed.
 
+`ResolvePersonalRecipients` runs in the same transaction as the notification
+event. It returns stable user IDs and the roles that selected them. A person
+who is both the assignee and a team member gets both roles and one inbox row.
+The result never includes a contact address. Mention, approver, and
+engagement-lead roles stay unsupported until a producer records a verified
+identity.
+
+A destination notice is identified by the channel, the action, the normalized
+host, and the channel revision. Repeating that revision is one notice. A later
+host change, including a return to a host that was used before, is a new
+notice. Secret rotation and path-only edits are not host changes.
+
+Disabling a user consumes open contact-verification challenges in that update.
+Send time checks the same disabled flag again before any queued mail leaves.
+
 Self-managed contacts and OIDC-imported contacts are separate records. An OIDC
 address is imported only after issuer/subject resolves an existing or newly
 provisioned user and only if the signed `email_verified` claim is the JSON

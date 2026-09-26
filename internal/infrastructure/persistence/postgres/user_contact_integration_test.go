@@ -211,3 +211,50 @@ func TestUserContactResendAndOIDCVersionFences(t *testing.T) {
 		t.Fatalf("unverified IdP claim retained verified contact: %+v", contacts[0])
 	}
 }
+
+func TestDisableUserConsumesOpenContactChallenges(t *testing.T) {
+	pool, db := ownershipTestDatabase(t, 180, nil)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('contact-disable','Disable','consultant','contact-disable','default')`); err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := vault.NewCipher([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := &contactTestClock{now: time.Now().UTC()}
+	mailer := &contactTestMailer{}
+	svc, err := usercontacts.NewService(NewUserContactStore(pool), NewUserRepository(pool), cipher, mailer, idgen.RandomID{}, clock, usercontacts.DeriveVerifierKey("test-only-master"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid := shared.ID("contact-disable")
+	contact, err := svc.AddEmail(ctx, shared.DefaultTenant, uid, "disable@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RequestVerification(ctx, shared.DefaultTenant, uid, contact.ID); err != nil {
+		t.Fatal(err)
+	}
+	var job ports.QueuedJob
+	if err := WithTenant(ctx, pool, shared.DefaultTenant.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id,tenant_id,kind,payload FROM jobs WHERE kind=$1`, usercontacts.JobKind).Scan(&job.ID, &job.TenantID, &job.Kind, &job.Payload)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WithTenant(ctx, pool, shared.DefaultTenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE users SET disabled=true WHERE id=$1`, uid)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var consumed bool
+	if err := WithTenant(ctx, pool, shared.DefaultTenant.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT consumed_at IS NOT NULL FROM user_contact_challenges WHERE tenant_id='default' AND user_id=$1`, uid).Scan(&consumed)
+	}); err != nil || !consumed {
+		t.Fatalf("open challenge survived disable: consumed=%t %v", consumed, err)
+	}
+	if err := svc.HandleJob(ctx, job); err != nil || mailer.code != "" {
+		t.Fatalf("disabled user was mailed %q: %v", mailer.code, err)
+	}
+}

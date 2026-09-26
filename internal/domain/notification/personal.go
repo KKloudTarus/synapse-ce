@@ -252,6 +252,49 @@ func compactIDs(ids ...shared.ID) []shared.ID {
 	return uniqueIDs(ids)
 }
 
+// ResolvedRecipient is one person selected for an event. Roles explain why.
+// Contact addresses are not part of this result.
+type ResolvedRecipient struct {
+	UserID shared.ID
+	Roles  []string
+}
+
+// MergePersonalRecipients dedupes one person who matches more than one role.
+// The first matching role wins the order; later roles are recorded on that person.
+func MergePersonalRecipients(assignees, members, admins []shared.ID) []ResolvedRecipient {
+	roles := map[shared.ID][]string{}
+	var order []shared.ID
+	add := func(id shared.ID, role string) {
+		if id.IsZero() {
+			return
+		}
+		current, seen := roles[id]
+		if !seen {
+			order = append(order, id)
+		}
+		for _, existing := range current {
+			if existing == role {
+				return
+			}
+		}
+		roles[id] = append(current, role)
+	}
+	for _, id := range assignees {
+		add(id, RoleAssignee)
+	}
+	for _, id := range members {
+		add(id, RoleTeamMember)
+	}
+	for _, id := range admins {
+		add(id, RoleTenantAdmin)
+	}
+	out := make([]ResolvedRecipient, 0, len(order))
+	for _, id := range order {
+		out = append(out, ResolvedRecipient{UserID: id, Roles: roles[id]})
+	}
+	return out
+}
+
 func ConfigurableEvents() []EventType {
 	return []EventType{EventVulnerabilityAction, EventScanCompleted, EventQualityGateFailed, EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged}
 }

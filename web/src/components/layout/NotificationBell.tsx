@@ -16,7 +16,19 @@ export function NotificationBell() {
       if (stopped || document.visibilityState === 'hidden') return
       const current = ++generation.current
       const controller = new AbortController()
-      void api.inboxUnread(controller.signal).then((page) => {
+      let pending: Promise<{ unread: number }> | undefined
+      try {
+        pending = api.inboxUnread(controller.signal)
+      } catch {
+        pending = undefined
+      }
+      if (!pending || typeof pending.then !== 'function') {
+        stopped = true
+        window.clearInterval(timer)
+        setUnavailable(true)
+        return controller
+      }
+      void pending.then((page) => {
         if (current === generation.current) setUnread(Math.max(0, page.unread))
       }).catch((error: unknown) => {
         if (controller.signal.aborted || current !== generation.current) return

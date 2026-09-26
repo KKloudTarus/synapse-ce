@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -145,7 +146,13 @@ func (s *UserContactStore) RequestVerification(ctx context.Context, c ports.User
 		if _, err := tx.Exec(ctx, `INSERT INTO user_contact_challenges(tenant_id,id,user_id,contact_id,contact_version,code_digest,sealed_code,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, c.TenantID, c.ID, c.UserID, c.ContactID, c.ContactVersion, c.Digest, c.SealedCode, c.ExpiresAt, c.CreatedAt); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO jobs(id,tenant_id,kind,payload,status,available_at) VALUES($1,$2,$3,$4,'queued',now())`, jobID, c.TenantID, "user_contact_verification", []byte(`{"challenge_id":"`+c.ID.String()+`"}`)); err != nil {
+		payload, err := json.Marshal(struct {
+			ChallengeID shared.ID `json:"challenge_id"`
+		}{ChallengeID: c.ID})
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO jobs(id,tenant_id,kind,payload,status,available_at) VALUES($1,$2,$3,$4,'queued',now())`, jobID, c.TenantID, "user_contact_verification", payload); err != nil {
 			return err
 		}
 		return appendTenantAudit(ctx, tx, c.TenantID.String(), ports.AuditEntry{Actor: c.UserID.String(), Action: "user_contact.verification_requested", Target: c.ContactID.String(), At: c.CreatedAt})

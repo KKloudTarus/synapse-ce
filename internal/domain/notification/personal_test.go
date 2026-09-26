@@ -51,6 +51,20 @@ func TestSubjectUsesStructuredIDsOnly(t *testing.T) {
 	}
 }
 
+func TestMergePersonalRecipientsDedupesOverlap(t *testing.T) {
+	got := MergePersonalRecipients(
+		[]shared.ID{"ada", "ada", ""},
+		[]shared.ID{"ada", "bob"},
+		[]shared.ID{"cara"},
+	)
+	if len(got) != 3 || got[0].UserID != "ada" || len(got[0].Roles) != 2 || got[0].Roles[0] != RoleAssignee || got[0].Roles[1] != RoleTeamMember {
+		t.Fatalf("overlap: %+v", got)
+	}
+	if got[1].UserID != "bob" || got[1].Roles[0] != RoleTeamMember || got[2].UserID != "cara" || got[2].Roles[0] != RoleTenantAdmin {
+		t.Fatalf("order: %+v", got)
+	}
+}
+
 func TestDestinationNoticeMasksHost(t *testing.T) {
 	event, err := NewDestinationEvent("tenant", "channel", ChannelWebhook, "https://User:secret@hooks.example:8443/path?token=abc", "created", "ada", time.Unix(10, 0).UTC())
 	if err != nil {

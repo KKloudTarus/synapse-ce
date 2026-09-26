@@ -350,16 +350,28 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
 		var ids []shared.ID
 		for rows.Next() {
 			var id shared.ID
 			if err := rows.Scan(&id); err != nil {
+				rows.Close()
 				return nil, err
 			}
 			ids = append(ids, id)
 		}
-		return ids, rows.Err()
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+		// The source row already exists, but retention may have removed the inbox
+		// projection. Re-apply it so the tombstone, not the event conflict, decides
+		// whether the row comes back.
+		e.ID = existing
+		if err := r.projectPersonal(ctx, tx, e); err != nil {
+			return nil, err
+		}
+		return ids, nil
 	}
 
 	type target struct {

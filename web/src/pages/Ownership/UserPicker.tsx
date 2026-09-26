@@ -17,7 +17,16 @@ export function UserPicker({team,value,onChange,disabled=false,allowAll=false}:{
     setLoading(true);setError('');setItems([]);setNext(undefined)
     if(!team&&!allowAll){setLoading(false);return ()=>controller.abort()}
     const timer=setTimeout(()=>{
-      void api.userChoices(team,query,undefined,controller.signal).then(page=>{
+      let pending: ReturnType<typeof api.userChoices> | undefined
+      try { pending = api.userChoices(team,query,undefined,controller.signal) } catch (err) {
+        if(current===generation.current && !controller.signal.aborted){setError(err instanceof Error?err.message:'Could not search users');setLoading(false)}
+        return
+      }
+      if(!pending || typeof pending.then!=='function'){
+        if(current===generation.current){setError('User search is unavailable');setLoading(false)}
+        return
+      }
+      void pending.then(page=>{
         if(current!==generation.current)return
         setItems(page.items);setNext(page.next)
       }).catch(err=>{

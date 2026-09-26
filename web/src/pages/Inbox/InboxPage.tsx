@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type InboxItem, type InboxPreference } from '../../lib/api'
 
@@ -13,33 +13,47 @@ export function InboxPage() {
   const [preferences, setPreferences] = useState<InboxPreference[]>([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const generation = useRef(0)
 
   const load = useCallback(async (cursor?: string, unread = unreadOnly) => {
+    const current = ++generation.current
     setLoading(true)
     setError('')
     try {
       const [page, prefs] = await Promise.all([api.inboxPage(cursor, unread), cursor ? Promise.resolve(null) : api.inboxPreferences()])
-      setItems((current) => cursor ? [...(current ?? []), ...(page.items ?? [])] : (page.items ?? []))
+      if (current !== generation.current) return
+      setItems((existing) => cursor ? [...(existing ?? []), ...(page.items ?? [])] : (page.items ?? []))
       setNext(page.next)
       if (prefs) setPreferences(prefs.items ?? [])
     } catch (err) {
+      if (current !== generation.current) return
       if (!cursor) setItems([])
       setError(err instanceof Error ? err.message : 'Could not load notifications')
     } finally {
-      setLoading(false)
+      if (current === generation.current) setLoading(false)
     }
   }, [unreadOnly])
 
   useEffect(() => { void load(undefined, unreadOnly) }, [load, unreadOnly])
 
   async function readOne(item: InboxItem) {
-    await api.markInboxRead(item.id)
-    setItems((current) => current?.map((row) => row.id === item.id ? { ...row, read_at: row.read_at ?? new Date().toISOString() } : row) ?? [])
+    setError('')
+    try {
+      await api.markInboxRead(item.id)
+      setItems((current) => current?.map((row) => row.id === item.id ? { ...row, read_at: row.read_at ?? new Date().toISOString() } : row) ?? [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not mark the notification read')
+    }
   }
 
   async function readAll() {
-    await api.markInboxAllRead()
-    await load()
+    setError('')
+    try {
+      await api.markInboxAllRead()
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not mark notifications read')
+    }
   }
 
   async function save(item: InboxPreference, state: InboxPreference['state']) {

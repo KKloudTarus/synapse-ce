@@ -35,7 +35,7 @@ func (s *Service) List(ctx context.Context, tenant, user shared.ID, cursor strin
 	if limit < 1 || limit > 50 {
 		limit = 25
 	}
-	before, beforeID, err := decodeCursor(cursor)
+	before, beforeID, err := decodeCursor(cursor, unreadOnly)
 	if err != nil {
 		return ports.InboxPage{}, err
 	}
@@ -46,7 +46,7 @@ func (s *Service) List(ctx context.Context, tenant, user shared.ID, cursor strin
 	page := ports.InboxPage{Items: items}
 	if len(items) == limit {
 		last := items[len(items)-1]
-		page.Next = encodeCursor(last.CreatedAt, last.ID)
+		page.Next = encodeCursor(unreadOnly, last.CreatedAt, last.ID)
 	}
 	return page, nil
 }
@@ -125,11 +125,15 @@ func (e *mailError) Terminal() bool            { return e.terminal }
 func (e *mailError) RetryAfter() time.Duration { return 0 }
 func (e *mailError) MaxAttempts() int          { return 8 }
 
-func encodeCursor(at time.Time, id shared.ID) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(at.UTC().Format(time.RFC3339Nano) + "|" + id.String()))
+func encodeCursor(unread bool, at time.Time, id shared.ID) string {
+	flag := "0"
+	if unread {
+		flag = "1"
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(flag + "|" + at.UTC().Format(time.RFC3339Nano) + "|" + id.String()))
 }
 
-func decodeCursor(raw string) (time.Time, shared.ID, error) {
+func decodeCursor(raw string, unread bool) (time.Time, shared.ID, error) {
 	if raw == "" {
 		return time.Time{}, "", nil
 	}
@@ -137,10 +141,14 @@ func decodeCursor(raw string) (time.Time, shared.ID, error) {
 	if err != nil {
 		return time.Time{}, "", fmt.Errorf("%w: invalid inbox cursor", shared.ErrValidation)
 	}
-	stamp, id, ok := strings.Cut(string(decoded), "|")
+	flag, rest, ok := strings.Cut(string(decoded), "|")
+	stamp, id, okID := strings.Cut(rest, "|")
 	at, err := time.Parse(time.RFC3339Nano, stamp)
-	if !ok || err != nil || id == "" || strings.ContainsAny(id, "\r\n") {
+	if !ok || !okID || (flag != "0" && flag != "1") || err != nil || id == "" || strings.ContainsAny(id, "\r\n") {
 		return time.Time{}, "", fmt.Errorf("%w: invalid inbox cursor", shared.ErrValidation)
+	}
+	if (flag == "1") != unread {
+		return time.Time{}, "", fmt.Errorf("%w: inbox cursor does not match the unread filter", shared.ErrValidation)
 	}
 	return at, shared.ID(id), nil
 }
