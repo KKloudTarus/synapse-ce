@@ -153,3 +153,34 @@ func TestHighEntropyStillReadsShuffledAlphabet(t *testing.T) {
 	}
 	t.Errorf("a generated token must still be reported; rules that fired: %v", hits)
 }
+
+// A database's own documentation gives the connection-URI shape with the parts named, so every such line
+// matched: on one repository that was 234 of 267 secret findings, almost all in docs.
+func TestConnectionStringIgnoresDocumentedPlaceholders(t *testing.T) {
+	lines := []string{
+		"| PostgreSQL | `postgresql://<UserName>:<DBPassword>@<Database Host>/<Database Name>` |",
+		"| MySQL | `mysql://<UserName>:<DBPassword>@<Database Host>/<Database Name>` |",
+		"DATABASE_URL=postgresql://{username}:{password}@{host}/{database}",
+		"uri: mongodb://admin:${MONGO_PASSWORD}@mongo:27017/app",
+		"redis://default:%(redis_password)s@cache:6379/0",
+	}
+	for _, line := range lines {
+		for _, id := range scanOneFile(t, "configuring.mdx", line) {
+			if id == "db-connection-string" {
+				t.Errorf("a documented URI template is not a credential: %q", line)
+			}
+		}
+	}
+}
+
+// A connection string carrying a real password is still reported.
+func TestConnectionStringStillReadsRealPassword(t *testing.T) {
+	line := `psql "postgresql://superset:h4rdc0dedPassw0rd@127.0.0.1:15432/superset"`
+	hits := scanOneFile(t, "bashlib.sh", line)
+	for _, id := range hits {
+		if id == "db-connection-string" {
+			return
+		}
+	}
+	t.Errorf("a literal password in a connection string must be reported; rules that fired: %v", hits)
+}

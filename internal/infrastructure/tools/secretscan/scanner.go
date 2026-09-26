@@ -1057,6 +1057,40 @@ func assignedValueNotCredential(secret string) bool {
 	return !hasDigit
 }
 
+// connectionStringPlaceholder reports whether a connection string's password component is a substitution
+// placeholder rather than a credential.
+func connectionStringPlaceholder(value string) bool {
+	at := strings.LastIndex(value, "@")
+	if at < 0 {
+		return false
+	}
+	colon := strings.LastIndex(value[:at], ":")
+	if colon < 0 {
+		return false
+	}
+	return templatePlaceholder(value[colon+1 : at])
+}
+
+// templatePlaceholder recognises the substitution shapes documentation and configuration use to stand in for
+// a value: <NAME>, {name}, {{name}}, ${NAME}, %(name)s and $NAME.
+func templatePlaceholder(value string) bool {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return true
+	}
+	switch {
+	case strings.HasPrefix(v, "<") && strings.HasSuffix(v, ">"):
+		return true
+	case strings.HasPrefix(v, "{") && strings.HasSuffix(v, "}"):
+		return true
+	case strings.HasPrefix(v, "${"), strings.HasPrefix(v, "%("), strings.HasPrefix(v, "%{"):
+		return true
+	case strings.HasPrefix(v, "$"):
+		return true
+	}
+	return false
+}
+
 // codecAlphabets are the ordered character tables every base64/base32/base36 implementation carries. They
 // have maximal character variety, so they clear any entropy floor by construction, and one of them appears
 // in a vendored polyfill in most JavaScript repositories.
@@ -1365,6 +1399,11 @@ func baseDefaultRules() []rule {
 			id: "db-connection-string", category: "Database", title: "Database connection string with credentials", severity: shared.SeverityHigh,
 			keywords: []string{"://"},
 			re:       regexp.MustCompile(`\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp|mssql)://[^:@\s/"']+:[^@\s/"']{3,}@[^\s"']+`),
+			// A database's own documentation gives the URI shape with the parts named, so every such line
+			// matched: `postgresql://<UserName>:<DBPassword>@<Database Host>/<Database Name>` was 234 of one
+			// repository's 267 secret findings, almost all of them in docs. A password component that is a
+			// substitution placeholder is a documented shape, not a credential.
+			skipValue: connectionStringPlaceholder,
 		},
 		{
 			id: "putty-private-key", category: "PrivateKey", title: "PuTTY private key", severity: shared.SeverityCritical,
