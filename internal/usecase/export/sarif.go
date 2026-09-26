@@ -153,17 +153,44 @@ type SARIFOptions struct {
 	RuleMeta func(ruleID string) (SARIFRuleMeta, bool)
 }
 
+// spdxLicenseList is the license reference that resolves for every id. A per-license page exists but its
+// URL is case-sensitive and the rule id is lower-cased, so linking one would sometimes 404.
+const spdxLicenseList = "https://spdx.org/licenses/"
+
+// advisoryHelpURI returns the database page for an advisory id, or "" when the id is not an advisory. Only
+// CVE ids had a link, so a GHSA, Go, PyPI or Rust advisory arrived with nowhere to read about it.
+func advisoryHelpURI(ruleID string) string {
+	switch {
+	case strings.HasPrefix(ruleID, "CVE-"):
+		return "https://nvd.nist.gov/vuln/detail/" + ruleID
+	case strings.HasPrefix(ruleID, "GHSA-"):
+		return "https://github.com/advisories/" + ruleID
+	case strings.HasPrefix(ruleID, "GO-"):
+		return "https://pkg.go.dev/vuln/" + ruleID
+	case strings.HasPrefix(ruleID, "PYSEC-"), strings.HasPrefix(ruleID, "RUSTSEC-"),
+		strings.HasPrefix(ruleID, "OSV-"), strings.HasPrefix(ruleID, "GMS-"),
+		strings.HasPrefix(ruleID, "MAL-"):
+		return "https://osv.dev/vulnerability/" + ruleID
+	}
+	return ""
+}
+
 // advisoryHelp names the concrete remediation for a dependency advisory: the release to upgrade to. A
 // catalog rule states its fix in the catalog; an advisory states it as a fixed version on the finding.
 func advisoryHelp(f finding.Finding, p parsedKey, opts SARIFOptions) string {
-	if p.component == "" || opts.Fix == nil {
+	if p.component == "" {
 		return ""
 	}
-	fix := strings.TrimSpace(opts.Fix(f))
-	if fix == "" {
+	if opts.Fix == nil {
 		return ""
 	}
-	return "Upgrade " + p.component + " to " + fix + " or later."
+	if fix := strings.TrimSpace(opts.Fix(f)); fix != "" {
+		return "Upgrade " + p.component + " to " + fix + " or later."
+	}
+	// No fixed release exists, which is itself the thing a reader has to act on: waiting for one is not a
+	// plan. Saying so beats leaving the alert with no remediation at all.
+	return "No fixed release is available for " + p.component +
+		". Remove or replace the dependency, or record an accepted risk with an expiry."
 }
 
 // applyRuleMeta fills a rule's descriptive fields from the catalog. A help URI already derived from the
@@ -345,8 +372,20 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 				DefaultConfiguration: &SARIFConfig{Level: level},
 				Properties:           ruleClassProperties(f.Kind, f.Severity),
 			}
-			if strings.HasPrefix(ruleID, "CVE-") {
-				rule.HelpURI = "https://nvd.nist.gov/vuln/detail/" + ruleID
+			if p.kind == "license" {
+				// A denied license is a compliance obligation, not a vulnerability. Left in the security
+				// class it arrives in a code-scanning security view beside the advisories.
+				rule.Properties = map[string]any{
+					"problem.severity": problemSeverity(f.Severity),
+					"tags":             []string{"license"},
+				}
+				rule.HelpURI = spdxLicenseList
+				rule.Help = &SARIFMultiformatText{
+					Text: "Replace the dependency with one under an allowed license, or record an approved exception for this one.",
+				}
+			}
+			if uri := advisoryHelpURI(ruleID); uri != "" {
+				rule.HelpURI = uri
 			}
 			if opts.RuleMeta != nil {
 				if meta, ok := opts.RuleMeta(ruleID); ok {

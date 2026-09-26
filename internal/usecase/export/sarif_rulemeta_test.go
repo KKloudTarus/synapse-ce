@@ -225,3 +225,62 @@ func TestSARIFCatalogMetadataWinsOverFindingDescription(t *testing.T) {
 		}
 	}
 }
+
+// Only CVE ids had a link, so a GHSA, Go, PyPI or Rust advisory arrived with nowhere to read about it.
+func TestAdvisoryHelpURICoversEveryIDFamily(t *testing.T) {
+	cases := map[string]string{
+		"CVE-2020-7471":       "https://nvd.nist.gov/vuln/detail/CVE-2020-7471",
+		"GHSA-crmm-hgp2-wgrp": "https://github.com/advisories/GHSA-crmm-hgp2-wgrp",
+		"GO-2026-5932":        "https://pkg.go.dev/vuln/GO-2026-5932",
+		"PYSEC-2021-76":       "https://osv.dev/vulnerability/PYSEC-2021-76",
+		"RUSTSEC-2021-0079":   "https://osv.dev/vulnerability/RUSTSEC-2021-0079",
+		"weak-crypto-md5":     "", // a catalog rule takes its link from the catalog
+	}
+	for id, want := range cases {
+		if got := advisoryHelpURI(id); got != want {
+			t.Errorf("advisoryHelpURI(%q) = %q, want %q", id, got, want)
+		}
+	}
+}
+
+// An advisory with no fixed release still needs a remediation: waiting for one is not a plan.
+func TestAdvisoryWithNoFixStatesWhatToDo(t *testing.T) {
+	f := finding.Finding{
+		ID: "v2", Title: "GO-2026-5932 in golang.org/x/crypto@v0.57.0", Severity: shared.SeverityMedium,
+		Status: finding.StatusOpen, DedupKey: "vuln:GO-2026-5932:golang.org/x/crypto:v0.57.0",
+		Description: "the openpgp package is unmaintained\nNo fix available.",
+	}
+	log := buildSARIF([]finding.Finding{f}, "v9", SARIFOptions{Fix: func(finding.Finding) string { return "" }})
+	rule := log.Runs[0].Tool.Driver.Rules[0]
+	if rule.HelpURI != "https://pkg.go.dev/vuln/GO-2026-5932" {
+		t.Errorf("helpUri = %q, want the Go vulnerability page", rule.HelpURI)
+	}
+	if rule.Help == nil || !strings.Contains(rule.Help.Text, "No fixed release is available") {
+		t.Errorf("help = %+v, want the no-fix remediation", rule.Help)
+	}
+}
+
+// A denied license is a compliance obligation, not a vulnerability: left in the security class it arrives
+// in a code-scanning security view beside the advisories.
+func TestLicenseRuleIsNotASecurityRule(t *testing.T) {
+	f := finding.Finding{
+		ID: "l1", Title: "Denied license: cc-by-sa-4.0", Severity: shared.SeverityMedium,
+		Status: finding.StatusOpen, DedupKey: "license:cc-by-sa-4.0",
+		Description: "Policy-denied license used by: github.com/opencontainers/go-digest",
+	}
+	log := buildSARIF([]finding.Finding{f}, "v9", SARIFOptions{})
+	rule := log.Runs[0].Tool.Driver.Rules[0]
+	if _, ok := rule.Properties["security-severity"]; ok {
+		t.Errorf("a license rule must not carry security-severity: %v", rule.Properties)
+	}
+	tags, _ := rule.Properties["tags"].([]string)
+	if !contains(tags, "license") {
+		t.Errorf("tags = %v, want license", tags)
+	}
+	if contains(tags, "security") {
+		t.Errorf("tags = %v, must not claim security", tags)
+	}
+	if rule.HelpURI == "" || rule.Help == nil {
+		t.Errorf("a license rule needs a reference and a remediation: %+v", rule)
+	}
+}
