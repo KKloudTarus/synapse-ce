@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -40,10 +41,36 @@ type SARIFDriver struct {
 }
 
 type SARIFRule struct {
-	ID                   string       `json:"id"`
-	ShortDescription     SARIFText    `json:"shortDescription"`
-	HelpURI              string       `json:"helpUri,omitempty"`
-	DefaultConfiguration *SARIFConfig `json:"defaultConfiguration,omitempty"`
+	ID               string     `json:"id"`
+	Name             string     `json:"name,omitempty"`
+	ShortDescription SARIFText  `json:"shortDescription"`
+	FullDescription  *SARIFText `json:"fullDescription,omitempty"`
+	// Help is what a code-scanning UI shows when a reader opens the alert, so the remediation goes here
+	// rather than only in the message.
+	Help                 *SARIFMultiformatText `json:"help,omitempty"`
+	HelpURI              string                `json:"helpUri,omitempty"`
+	DefaultConfiguration *SARIFConfig          `json:"defaultConfiguration,omitempty"`
+	Properties           map[string]any        `json:"properties,omitempty"`
+}
+
+// SARIFMultiformatText is SARIF's multiformatMessageString. GitHub renders the markdown variant.
+type SARIFMultiformatText struct {
+	Text     string `json:"text"`
+	Markdown string `json:"markdown,omitempty"`
+}
+
+// SARIFRuleMeta is the published catalog metadata for one rule. It fills in the fields that tell a
+// reader what the rule checks, why it matters, and how to fix it, which a bare id and title do not.
+type SARIFRuleMeta struct {
+	Name        string   // catalog name, when it is more precise than the finding title
+	Description string   // what the rule checks -> fullDescription
+	Rationale   string   // why it matters -> help
+	Remediation string   // how to fix it -> help
+	HelpURI     string   // a page that resolves today -> helpUri
+	Tags        []string // language / category tags -> properties.tags
+	CWE         []string
+	OWASP       []string
+	Precision   string // "high" | "medium" | "low", when the catalog states it
 }
 
 type SARIFConfig struct {
@@ -120,6 +147,128 @@ type SARIFOptions struct {
 	// server-owned authorization re-check. SARIF renders it as an external accepted suppression while
 	// retaining the result. Advisory or review-required opinions must return false.
 	AIGateExemption func(finding.Finding) (ports.AIGateExemption, bool)
+	// RuleMeta returns the catalog entry for a rule id. Without it a result carries only an id, a title
+	// and a level, which is what made the output hard to act on: no rule link, no rationale, no fix.
+	// Returning false leaves the rule with just the fields derived from the finding.
+	RuleMeta func(ruleID string) (SARIFRuleMeta, bool)
+}
+
+// applyRuleMeta fills a rule's descriptive fields from the catalog. A help URI already derived from the
+// finding (an advisory's own NVD page) wins, because it is specific to that advisory.
+func applyRuleMeta(rule *SARIFRule, meta SARIFRuleMeta) {
+	if name := strings.TrimSpace(meta.Name); name != "" {
+		rule.Name = name
+	}
+	if desc := strings.TrimSpace(meta.Description); desc != "" {
+		rule.FullDescription = &SARIFText{Text: desc}
+	}
+	if rule.HelpURI == "" {
+		rule.HelpURI = strings.TrimSpace(meta.HelpURI)
+	}
+	// help pairs why it matters with how to fix it, which is what a reader needs when they open the alert.
+	var text, markdown strings.Builder
+	if why := strings.TrimSpace(meta.Rationale); why != "" {
+		text.WriteString(why)
+		markdown.WriteString(why)
+	}
+	if fix := strings.TrimSpace(meta.Remediation); fix != "" {
+		if text.Len() > 0 {
+			text.WriteString("\n\n")
+			markdown.WriteString("\n\n")
+		}
+		text.WriteString("Remediation: " + fix)
+		markdown.WriteString("**Remediation:** " + fix)
+	}
+	if text.Len() > 0 {
+		rule.Help = &SARIFMultiformatText{Text: text.String(), Markdown: markdown.String()}
+	}
+	props := map[string]any{}
+	// external/cwe/cwe-89 and external/owasp/... are the tag shapes a code-scanning UI groups by.
+	tags := make([]string, 0, len(meta.Tags)+len(meta.CWE)+len(meta.OWASP))
+	for _, tag := range meta.Tags {
+		if t := strings.TrimSpace(tag); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	for _, id := range meta.CWE {
+		if t := strings.TrimSpace(id); t != "" {
+			tags = append(tags, "external/cwe/"+strings.ToLower(t))
+		}
+	}
+	for _, id := range meta.OWASP {
+		if t := strings.TrimSpace(id); t != "" {
+			tags = append(tags, "external/owasp/"+t)
+		}
+	}
+	if p := strings.TrimSpace(meta.Precision); p != "" {
+		props["precision"] = p
+	}
+	if rule.Properties == nil {
+		rule.Properties = map[string]any{}
+	}
+	// The class tags set before this call say whether the rule is a security rule; the catalog's tags add
+	// the language and category, so they are appended rather than replacing them.
+	if existing, ok := rule.Properties["tags"].([]string); ok {
+		tags = append(existing, tags...)
+	}
+	if len(tags) > 0 {
+		rule.Properties["tags"] = tags
+	}
+	for k, v := range props {
+		rule.Properties[k] = v
+	}
+	if len(rule.Properties) == 0 {
+		rule.Properties = nil
+	}
+}
+
+// ruleClassProperties tells a code-scanning UI whether a rule is a security rule and how serious it is.
+// GitHub places an alert in the security view when the rule carries security-severity and uses
+// problem.severity for everything else, so a maintainability rule that carries no security-severity stops
+// arriving as a vulnerability. That separation is what keeps a few hundred style findings from burying the
+// handful of real advisories in one undifferentiated list.
+func ruleClassProperties(kind finding.Kind, severity shared.Severity) map[string]any {
+	props := map[string]any{"problem.severity": problemSeverity(severity)}
+	switch kind {
+	case finding.KindQuality:
+		props["tags"] = []string{"maintainability"}
+	case finding.KindReliability:
+		props["tags"] = []string{"reliability"}
+	default:
+		props["tags"] = []string{"security"}
+		props["security-severity"] = securitySeverity(severity)
+	}
+	return props
+}
+
+// problemSeverity is SARIF's non-security seriousness axis.
+func problemSeverity(sev shared.Severity) string {
+	switch sev {
+	case shared.SeverityCritical, shared.SeverityHigh:
+		return "error"
+	case shared.SeverityLow, shared.SeverityInfo:
+		return "recommendation"
+	default: // medium / unknown
+		return "warning"
+	}
+}
+
+// securitySeverity is the CVSS-shaped number GitHub reads to bucket a security alert: >= 9.0 critical,
+// >= 7.0 high, >= 4.0 medium, > 0 low. The exact value is not a CVSS score for the finding, it is the
+// bucket the finding's own severity already states.
+func securitySeverity(sev shared.Severity) string {
+	switch sev {
+	case shared.SeverityCritical:
+		return "9.0"
+	case shared.SeverityHigh:
+		return "7.0"
+	case shared.SeverityMedium:
+		return "5.0"
+	case shared.SeverityLow:
+		return "2.0"
+	default: // info / unknown: known to be a finding, not claimed to be a vulnerability
+		return "0.0"
+	}
 }
 
 func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *SARIFLog {
@@ -181,9 +330,15 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 				ID:                   ruleID,
 				ShortDescription:     SARIFText{Text: ruleTitle(f.Title)},
 				DefaultConfiguration: &SARIFConfig{Level: level},
+				Properties:           ruleClassProperties(f.Kind, f.Severity),
 			}
 			if strings.HasPrefix(ruleID, "CVE-") {
 				rule.HelpURI = "https://nvd.nist.gov/vuln/detail/" + ruleID
+			}
+			if opts.RuleMeta != nil {
+				if meta, ok := opts.RuleMeta(ruleID); ok {
+					applyRuleMeta(&rule, meta)
+				}
 			}
 			rules = append(rules, rule)
 		}
