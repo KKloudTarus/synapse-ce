@@ -3306,15 +3306,9 @@ func main() {
 	// the finding. Unsupported formats, indirect calls, malformed metadata, and every unresolved path provide no
 	// coverage, never not_reachable.
 	// Its proof actors stay out of the deterministic set, so it can raise urgency but can never suppress.
-	if cfg.GoBinaryReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACH_GOBIN", "go-binary reachability") {
-		goBinAnalyzer := gobinreach.NewEntryCallAnalyzer()
-		coord, cerr := reachproof.NewCoordinatorForLanguage(goBinAnalyzer, judgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageGoBinary)
-		if cerr != nil {
-			log.Error("go-binary reachability coordinator init failed", "err", cerr)
-			os.Exit(1)
-		}
-		scaService.SetGoBinaryReachability(coord.WithRaiseOnly())
-		log.Info("Go-binary affected-symbol reachability ENABLED (raise-only, PCLNTAB calls from main.main)")
+	if err := configureAPIGoBinaryReachability(cfg, scaService, judgmentSvc, auditLog, clock, log); err != nil {
+		log.Error("go-binary reachability coordinator init failed", "err", err)
+		os.Exit(1)
 	}
 
 	// Build-aware .NET (NuGet) reachability. Unlike the source-only import scanners above, it does NOT guess
@@ -3698,6 +3692,30 @@ func main() {
 		log.Error("server error", "err", err)
 		os.Exit(1)
 	}
+}
+
+func configureAPIGoBinaryReachability(cfg config.Config, scaService *scauc.Service, judgmentSvc *analysisuc.Service, auditLog ports.AuditLogger, clock ports.Clock, log *slog.Logger) error {
+	if !cfg.GoBinaryReachabilityEnabled || !requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACH_GOBIN", "go-binary reachability") {
+		return nil
+	}
+	if err := installGoBinaryReachability(scaService, judgmentSvc, auditLog, clock); err != nil {
+		return err
+	}
+	log.Info("Go-binary affected-symbol reachability ENABLED (raise-only, PCLNTAB calls from main.main)")
+	return nil
+}
+
+// installGoBinaryReachability wires the API scan pipeline to the raise-only Go-binary proof coordinator.
+func installGoBinaryReachability(scaService *scauc.Service, judgmentSvc *analysisuc.Service, auditLog ports.AuditLogger, clock ports.Clock) error {
+	if scaService == nil {
+		return fmt.Errorf("%w: Go-binary reachability requires an SCA service", shared.ErrValidation)
+	}
+	coord, err := reachproof.NewCoordinatorForLanguage(gobinreach.NewEntryCallAnalyzer(), judgmentSvc, auditLog, clock, judgment.Tier2, reachproof.LanguageGoBinary)
+	if err != nil {
+		return err
+	}
+	scaService.SetGoBinaryReachability(coord.WithRaiseOnly())
+	return nil
 }
 
 // scaJobHandler binds the SCA service to the worker's Handler + DeadLetterer interfaces:
