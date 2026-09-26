@@ -1215,3 +1215,55 @@ func TestAnalyzeSourceReportsNothingUnscannedWhenItFits(t *testing.T) {
 		t.Errorf("UnscannedFiles = %d, want 0 for a tree that fits", report.UnscannedFiles)
 	}
 }
+
+// The retained-source budget is configurable, because the default bounds memory on an untrusted tree but does
+// bind on a monorepo, where the unretained part is scanned by no rule at all.
+func TestWithSourceBudgetRaisesCoverage(t *testing.T) {
+	root := t.TempDir()
+	body := "import hashlib\n" + strings.Repeat("x = 1  # padding\n", 200) + "h = hashlib.md5(data)\n"
+	for _, name := range []string{"a.py", "b.py", "c.py", "d.py"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tight := New().WithSourceBudget(int64(len(body)) + 16)
+	tightReport, err := tight.AnalyzeSourceReport(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tightReport.UnscannedFiles == 0 {
+		t.Fatal("a tight budget must leave files unscanned, or the test proves nothing")
+	}
+
+	roomy := New().WithSourceBudget(int64(len(body)) * 8)
+	roomyReport, err := roomy.AnalyzeSourceReport(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roomyReport.UnscannedFiles != 0 {
+		t.Errorf("a budget that fits the tree must leave nothing unscanned, got %d", roomyReport.UnscannedFiles)
+	}
+	if len(roomyReport.Findings) <= len(tightReport.Findings) {
+		t.Errorf("raising the budget must find more: %d then %d", len(tightReport.Findings), len(roomyReport.Findings))
+	}
+}
+
+// A zero or negative budget keeps the default, because a budget of nothing would silently scan nothing.
+func TestWithSourceBudgetIgnoresNonPositive(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.py"), []byte("import hashlib\nh = hashlib.md5(d)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, budget := range []int64{0, -1} {
+		report, err := New().WithSourceBudget(budget).AnalyzeSourceReport(context.Background(), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(report.Findings) == 0 {
+			t.Errorf("budget %d must fall back to the default and still scan, got no findings", budget)
+		}
+		if report.SourceBudget != maxRetainedSourceBytes {
+			t.Errorf("budget %d must report the default, got %d", budget, report.SourceBudget)
+		}
+	}
+}

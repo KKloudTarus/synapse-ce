@@ -159,6 +159,11 @@ type Config struct {
 	ProjectSourceMaxFileBytes     int64
 	ProjectSourceMaxFiles         int
 	ProjectSourceMaxBytes         int64
+	// SASTSourceBudgetBytes is the source the pattern SAST analyzer retains for cross-file context. The
+	// default bounds memory on an untrusted tree and never binds on an ordinary repository; it DOES bind on a
+	// monorepo, where the unretained part of the tree is scanned by no rule at all. 0 keeps the built-in
+	// default.
+	SASTSourceBudgetBytes int64
 	// ProjectGitComparisonDepth bounds history fetched to resolve an immutable
 	// Code comparison base; comparison degrades gracefully when insufficient.
 	ProjectGitComparisonDepth int
@@ -879,6 +884,7 @@ func Load() Config {
 		ProjectSourceMaxFileBytes:     getint64("SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", 2<<20),
 		ProjectSourceMaxFiles:         getint("SYNAPSE_PROJECT_SOURCE_MAX_FILES", 10_000),
 		ProjectSourceMaxBytes:         getint64("SYNAPSE_PROJECT_SOURCE_MAX_BYTES", 500<<20),
+		SASTSourceBudgetBytes:         getint64("SYNAPSE_SAST_SOURCE_BUDGET_BYTES", 0),
 		ProjectGitComparisonDepth:     getint("SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH", 256),
 		BlobEndpoint:                  getenv("SYNAPSE_BLOB_ENDPOINT", ""),
 		BlobAccessKey:                 getenv("SYNAPSE_BLOB_ACCESS_KEY", ""),

@@ -271,6 +271,8 @@ func isGeneratedSource(lines []string) bool {
 type Analyzer struct {
 	rules []rule
 	byID  map[string]*rule
+	// sourceBudget is the bytes of source retained for cross-file context analysis. Zero means the default.
+	sourceBudget int64
 }
 
 type sourceFile struct {
@@ -284,9 +286,23 @@ type sourceFile struct {
 // New returns an analyzer with the built-in tier-1 rule set.
 func New() *Analyzer {
 	rules := canonicalBuiltinRules(builtinRules())
-	a := &Analyzer{rules: rules, byID: make(map[string]*rule, len(rules))}
+	a := &Analyzer{rules: rules, byID: make(map[string]*rule, len(rules)), sourceBudget: maxRetainedSourceBytes}
 	for i := range a.rules {
 		a.byID[a.rules[i].id] = &a.rules[i]
+	}
+	return a
+}
+
+// WithSourceBudget raises or lowers the bytes of source the analyzer retains for cross-file context.
+//
+// The default bounds memory on an untrusted tree, and on an ordinary repository it never binds. It DOES bind
+// on a monorepo: the three largest repositories in one estate hold 112, 120 and 164 MiB of source against the
+// 64 MiB default, so most of each was never scanned and every rule reported nothing there. An operator who
+// accepts the memory cost can raise it and scan the whole tree; a value of zero or less keeps the default,
+// because a budget of nothing would silently scan nothing.
+func (a *Analyzer) WithSourceBudget(bytes int64) *Analyzer {
+	if bytes > 0 {
+		a.sourceBudget = bytes
 	}
 	return a
 }
@@ -303,7 +319,7 @@ func (a *Analyzer) Name() string { return "synapse-pattern-sast" }
 // cancellation and never aborts the whole scan on a single unreadable file. Callers that need to
 // know whether a safety cap cut the scan short use AnalyzeSourceReport.
 func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SASTRawFinding, error) {
-	report, err := a.analyzeSource(ctx, root, maxSourceFiles, maxRetainedSourceBytes)
+	report, err := a.analyzeSource(ctx, root, maxSourceFiles, a.budget())
 	return report.Findings, err
 }
 
@@ -311,7 +327,15 @@ func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SAST
 // safety cap (per-file finding budget, whole-tree finding budget, retained-source budget, or an
 // oversized line) stopped the scan, so Findings is a lower bound and must not back a clean result.
 func (a *Analyzer) AnalyzeSourceReport(ctx context.Context, root string) (ports.SASTSourceReport, error) {
-	return a.analyzeSource(ctx, root, maxSourceFiles, maxRetainedSourceBytes)
+	return a.analyzeSource(ctx, root, maxSourceFiles, a.budget())
+}
+
+// budget is the retained-source budget, falling back to the default for a zero-valued Analyzer.
+func (a *Analyzer) budget() int64 {
+	if a.sourceBudget > 0 {
+		return a.sourceBudget
+	}
+	return maxRetainedSourceBytes
 }
 
 func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int, maxBytes int64) (ports.SASTSourceReport, error) {

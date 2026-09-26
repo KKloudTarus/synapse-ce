@@ -616,6 +616,20 @@ func runQualityTo(w io.Writer, args []string) error {
 // runRating computes the deterministic A-E health grades (security / reliability / maintainability) and
 // the technical-debt estimate for a local source tree, from the code-quality findings + first-party SAST
 // + the code-size inventory. Read-only, no DB.
+// sastAnalyzer builds the pattern SAST analyzer, honouring SYNAPSE_SAST_SOURCE_BUDGET_BYTES. The default
+// retained-source budget never binds on an ordinary repository but does on a monorepo, where the unretained
+// part of the tree is scanned by no rule; the scan says how many files that was, and this is the knob that
+// closes it for an operator willing to pay the memory.
+func sastAnalyzer() *sast.Analyzer {
+	a := sast.New()
+	if raw := strings.TrimSpace(os.Getenv("SYNAPSE_SAST_SOURCE_BUDGET_BYTES")); raw != "" {
+		if bytes, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			a = a.WithSourceBudget(bytes)
+		}
+	}
+	return a
+}
+
 func runRating(args []string) error {
 	dir := args[0]
 	if strings.HasPrefix(dir, "-") {
@@ -659,7 +673,7 @@ func runRating(args []string) error {
 	}
 	// First-party security signal for the security grade (SCA dep vulns fold in when rating runs over a
 	// full scan's findings; this standalone command uses the SAST analyzer).
-	sastRaws, err := sast.New().AnalyzeSource(ctx, dir)
+	sastRaws, err := sastAnalyzer().AnalyzeSource(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("sast: %w", err)
 	}
@@ -767,7 +781,7 @@ func runGate(args []string) error {
 		return fmt.Errorf("code quality: %w", err)
 	}
 	findings := qualityReport.Findings
-	sastRaws, err := sast.New().AnalyzeSource(ctx, dir)
+	sastRaws, err := sastAnalyzer().AnalyzeSource(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("sast: %w", err)
 	}
@@ -1676,7 +1690,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		sca.SetJVMReachability(jvmreach.New())
 	}
 	if cfg.SASTEnabled && !image {
-		sca.SetSASTAnalyzer(sast.New()) // deterministic pattern-SAST (CI-friendly)
+		sca.SetSASTAnalyzer(sastAnalyzer()) // deterministic pattern-SAST (CI-friendly)
 	} else if cfg.SASTEnabled && image {
 		// Source SAST over an assembled image rootfs is low-value (compiled artifacts, vendored trees)
 		// and scans the whole filesystem, which times out on large images. Scan SAST at the SOURCE repo.
