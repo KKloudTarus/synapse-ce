@@ -53,3 +53,23 @@ func TestExecuteCLIReportsLifecycleFailure(t *testing.T) {
 		t.Fatalf("CLI code = %d, stderr = %q", code, stderr.String())
 	}
 }
+
+func TestExecuteCurrentScorecardFailsOnRatchetDecision(t *testing.T) {
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	code := executeCurrentScorecard(context.Background(), stdout, stderr, func(context.Context) (cycle.CurrentGoBinaryScorecardResult, error) {
+		return cycle.CurrentGoBinaryScorecardResult{Path: "scorecard.json", Scorecard: cycle.CurrentGoBinaryScorecard{Decision: "fail"}}, nil
+	})
+	if code != 1 || !bytes.Contains(stdout.Bytes(), []byte("scorecard.json")) || !bytes.Contains(stderr.Bytes(), []byte("ratchet failed")) {
+		t.Fatalf("failed scorecard code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestExecuteCurrentScorecardReportsPassingPath(t *testing.T) {
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	code := executeCurrentScorecard(context.Background(), stdout, stderr, func(context.Context) (cycle.CurrentGoBinaryScorecardResult, error) {
+		return cycle.CurrentGoBinaryScorecardResult{Path: "scorecard.json", Scorecard: cycle.CurrentGoBinaryScorecard{Decision: "pass"}}, nil
+	})
+	if code != 0 || stdout.String() != "scorecard.json\n" || stderr.Len() != 0 {
+		t.Fatalf("passing scorecard code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
