@@ -596,13 +596,18 @@ func (store *IntegrationStore) CancelIntegrationOperation(ctx context.Context, i
 	return operation, err
 }
 
-func (store *IntegrationStore) ListDueIntegrations(ctx context.Context, now time.Time, limit int) (items []integration.Integration, err error) {
+func (store *IntegrationStore) ListDueIntegrations(ctx context.Context, now time.Time, limit int, providers []integration.Provider) (items []integration.Integration, err error) {
+	providerNames := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		providerNames = append(providerNames, string(provider))
+	}
 	err = WithContextTenant(ctx, store.pool, func(tx pgx.Tx) error {
 		rows, queryErr := tx.Query(ctx, integrationSelect+` WHERE enabled=TRUE AND archived=FALSE
+			AND provider = ANY($3::text[])
 			AND NOT EXISTS(SELECT 1 FROM integration_operations active WHERE active.integration_id=integrations.id AND active.state IN ('queued','running'))
 			AND COALESCE((SELECT max(done.updated_at) FROM integration_operations done WHERE done.integration_id=integrations.id AND done.operation_type='poll' AND done.state IN ('succeeded','partial','failed','cancelled')), '-infinity'::timestamptz)
 				<= $1::timestamptz - make_interval(secs=>poll_interval_seconds)
-			ORDER BY updated_at,id COLLATE "C" LIMIT $2`, now.UTC(), limit)
+			ORDER BY updated_at,id COLLATE "C" LIMIT $2`, now.UTC(), limit, providerNames)
 		if queryErr != nil {
 			return fmt.Errorf("list due integrations: %w", queryErr)
 		}

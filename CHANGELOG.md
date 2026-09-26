@@ -7,6 +7,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Fixed
+
+- Scheduled integration polling now selects only registered providers with the `read_runs` capability before applying the per-tick dispatch limit, so write-only providers cannot starve Jenkins polling. Both memory and PostgreSQL stores enforce the provider filter.
+
 ## [0.2.1] - 2026-09-26
 
 ### Fixed

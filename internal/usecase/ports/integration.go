@@ -32,7 +32,7 @@ type IntegrationStore interface {
 	FinishIntegrationOperation(ctx context.Context, id shared.ID, state integration.OperationState, checkpoint string, counts integration.OperationCounts, errors []string, pipelines []integration.Pipeline, finishedAt time.Time) (integration.Operation, error)
 	FinishIntegrationPoll(ctx context.Context, id shared.ID, state integration.OperationState, checkpoint string, counts integration.OperationCounts, errors []string, runs []integration.ExternalRun, finishedAt time.Time) (integration.Operation, error)
 	CancelIntegrationOperation(ctx context.Context, id shared.ID, finishedAt time.Time, audit AuditEntry) (integration.Operation, error)
-	ListDueIntegrations(ctx context.Context, now time.Time, limit int) ([]integration.Integration, error)
+	ListDueIntegrations(ctx context.Context, now time.Time, limit int, providers []integration.Provider) ([]integration.Integration, error)
 
 	ListIntegrationExternalRuns(ctx context.Context, integrationID shared.ID, limit int) ([]integration.ExternalRun, error)
 }
