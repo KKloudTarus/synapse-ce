@@ -179,11 +179,19 @@ spec:
         limits:
           cpu: "500m"
           memory: "256Mi"
+      livenessProbe:
+        httpGet:
+          path: /healthz
+          port: 8080
+      readinessProbe:
+        httpGet:
+          path: /readyz
+          port: 8080
       securityContext:
         privileged: false
         runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 3000
+        runAsUser: 10001
+        runAsGroup: 30001
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
         capabilities:
@@ -884,5 +892,91 @@ func TestHelmLibraryChartIsNotACoverageGap(t *testing.T) {
 	}
 	if report.UnrenderedCharts != 0 {
 		t.Errorf("a library chart is not installable by design and must not count as a gap: %v", report.ChartRenderReasons)
+	}
+}
+
+// A workload with no liveness probe is never restarted when it wedges, and with no readiness probe its Service
+// routes traffic before it can serve. Checkov reports 224 of these across the estate where this engine had no
+// rule at all.
+func TestKubernetesProbesAndLowUID(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: prod
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: myapp:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+          securityContext:
+            runAsUser: 1000
+`
+	got := ruleIDs(scan(t, map[string]string{"deploy.yaml": manifest}))
+	for _, id := range []string{"kubernetes-no-liveness-probe", "kubernetes-no-readiness-probe", "kubernetes-low-run-as-user"} {
+		if _, ok := got[id]; !ok {
+			t.Errorf("expected %s to fire, got %v", id, keys(got))
+		}
+	}
+	// runAsUser IS set, so the absent-runAsUser rule must stay quiet: the two describe different defects.
+	if _, bad := got["kubernetes-no-run-as-user"]; bad {
+		t.Error("an explicit runAsUser must not also trigger the missing-runAsUser rule")
+	}
+}
+
+// Declared probes and a high UID are the correct configuration and must be quiet, or every hardened workload
+// collects three findings it cannot act on.
+func TestKubernetesProbesAndHighUIDAreQuiet(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: prod
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: myapp:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          readinessProbe:
+            exec:
+              command: ["/bin/ready"]
+          securityContext:
+            runAsUser: 10001
+`
+	got := ruleIDs(scan(t, map[string]string{"deploy.yaml": manifest}))
+	for _, id := range []string{"kubernetes-no-liveness-probe", "kubernetes-no-readiness-probe", "kubernetes-low-run-as-user"} {
+		if _, bad := got[id]; bad {
+			t.Errorf("%s must not fire on a correctly configured container", id)
+		}
+	}
+}
+
+// runAsUser: 0 is explicit root, which kubernetes-run-as-root already reports at a higher severity. The low-UID
+// rule must not pile a second finding onto the same line.
+func TestKubernetesLowUIDDoesNotDoubleReportRoot(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: app:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+      securityContext:
+        runAsUser: 0
+`
+	got := ruleIDs(scan(t, map[string]string{"pod.yaml": manifest}))
+	if _, bad := got["kubernetes-low-run-as-user"]; bad {
+		t.Error("explicit root is reported by kubernetes-run-as-root; the low-UID rule must not double-report it")
+	}
+	if _, ok := got["kubernetes-run-as-root"]; !ok {
+		t.Error("explicit root must still be reported")
 	}
 }

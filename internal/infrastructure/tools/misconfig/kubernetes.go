@@ -110,9 +110,11 @@ type k8sContainer struct {
 	Ports []struct {
 		HostPort int `yaml:"hostPort"`
 	} `yaml:"ports"`
-	Env             []k8sEnvVar  `yaml:"env"`
-	EnvFrom         []k8sEnvFrom `yaml:"envFrom"`
-	ImagePullPolicy string       `yaml:"imagePullPolicy"`
+	LivenessProbe   map[string]any `yaml:"livenessProbe"`
+	ReadinessProbe  map[string]any `yaml:"readinessProbe"`
+	Env             []k8sEnvVar    `yaml:"env"`
+	EnvFrom         []k8sEnvFrom   `yaml:"envFrom"`
+	ImagePullPolicy string         `yaml:"imagePullPolicy"`
 }
 
 type k8sEnvVar struct {
@@ -488,6 +490,27 @@ func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctn
 			"The container sets no resources.requests.memory, so the scheduler reserves no memory for it and the kubelet evicts it first under node memory pressure. Set a memory request.",
 			"resources", shared.SeverityLow)
 	}
+	// A UID under 10000 collides with a real account on many host images, so a container escape lands on an
+	// existing identity with whatever the host grants it. This is the SET-but-low case; the absent case is the
+	// rule below.
+	if uid, ok := effectiveRunAsUser(sc, pod); ok && uid > 0 && uid < minHostSafeUID {
+		h("kubernetes-low-run-as-user", "Container UID collides with host accounts",
+			fmt.Sprintf("securityContext.runAsUser is %d, below %d, so it can coincide with an account that exists on the host image and inherit whatever that account is granted. Use a high, application-specific UID.", uid, minHostSafeUID),
+			"runAsUser", shared.SeverityLow)
+	}
+	// A workload with no liveness probe is never restarted when it wedges: the process is up, serves nothing,
+	// and the platform has no way to tell. With no readiness probe the Service sends traffic to a pod that has
+	// not finished starting, so every deployment drops requests.
+	if len(c.LivenessProbe) == 0 {
+		h("kubernetes-no-liveness-probe", "No liveness probe",
+			"The container declares no livenessProbe, so a process that is running but wedged is never restarted and the platform cannot tell it apart from a healthy one. Declare a livenessProbe that fails when the container cannot do its work.",
+			"livenessProbe", shared.SeverityLow)
+	}
+	if len(c.ReadinessProbe) == 0 {
+		h("kubernetes-no-readiness-probe", "No readiness probe",
+			"The container declares no readinessProbe, so its Service routes traffic to it before it has finished starting and every rollout drops requests. Declare a readinessProbe that passes once the container can serve.",
+			"readinessProbe", shared.SeverityLow)
+	}
 	if !runAsUserSet(sc, pod) {
 		h("kubernetes-no-run-as-user", "No explicit runAsUser",
 			"Neither the container nor the pod sets an explicit securityContext.runAsUser, so the UID is left to the image. Pin a non-zero runAsUser for a predictable, non-root identity.",
@@ -653,6 +676,22 @@ func isNamespacedKind(kind string) bool {
 		return true
 	}
 	return false
+}
+
+// minHostSafeUID is the floor above which a container UID cannot collide with a conventional host account.
+// Distribution images allocate system and first human accounts well below it.
+const minHostSafeUID = 10000
+
+// effectiveRunAsUser resolves the UID the container runs as, from its own securityContext or, by
+// inheritance, the pod's. ok is false when neither sets one.
+func effectiveRunAsUser(sc *ctnSecCtx, pod *podSecCtx) (int, bool) {
+	if sc != nil && sc.RunAsUser != nil {
+		return *sc.RunAsUser, true
+	}
+	if pod != nil && pod.RunAsUser != nil {
+		return *pod.RunAsUser, true
+	}
+	return 0, false
 }
 
 // runAsUserSet reports whether an explicit runAsUser is set on the container or, by inheritance, the pod.

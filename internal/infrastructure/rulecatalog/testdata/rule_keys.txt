@@ -2049,13 +2049,16 @@ kubernetes-image-no-tag
 kubernetes-image-pull-policy-cached
 kubernetes-ingress-no-tls
 kubernetes-ingress-tls-no-secret
+kubernetes-low-run-as-user
 kubernetes-namespace-no-network-policy
 kubernetes-no-cpu-limit
 kubernetes-no-cpu-request
+kubernetes-no-liveness-probe
 kubernetes-no-memory-limit
 kubernetes-no-memory-request
 kubernetes-no-priv-escalation-disabled
 kubernetes-no-read-only-root-fs
+kubernetes-no-readiness-probe
 kubernetes-no-run-as-group
 kubernetes-no-run-as-non-root
 kubernetes-no-run-as-user
