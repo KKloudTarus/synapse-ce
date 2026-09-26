@@ -79,6 +79,10 @@ type rule struct {
 	// masking it reports a clean file. A prefix cannot be produced by prose, so admitting comments for
 	// these rules costs no precision.
 	scanComments bool
+	// configFilesOnly narrows scanComments to CONFIGURATION files. A commented-out setting in a values.yaml
+	// or a .env is the value that was applied until someone commented it out; a commented-out assignment in
+	// source code is dead code or a documented example, which is why comments stay masked there.
+	configFilesOnly bool
 }
 
 // Scanner implements ports.SecretScanner with an owned ruleset.
@@ -483,7 +487,7 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 		r := &s.rules[i]
 		// maskComments preserves byte offsets, so a match offset and a line count index either string.
 		subject := text
-		if r.scanComments {
+		if r.scanComments && (!r.configFilesOnly || isConfigFileName(rel)) {
 			subject = original
 		}
 		if r.maskNotebookOutput {
@@ -978,6 +982,40 @@ func clientPublicVariableLine(line string) bool {
 	return false
 }
 
+// secretNamingKeys are keys whose value NAMES a credential store rather than holding a credential. In a Helm
+// values file `existingSecret: app-db-credentials` points at a Kubernetes Secret, so the value is a resource
+// name that is meant to be in the repository.
+var secretNamingKeys = []string{
+	"existingsecret", "existingsecretname", "secretname", "secret_name", "secret-name",
+	"secretref", "secret_ref", "secretkeyref", "existingclaim", "secretprovider", "secretproviderclass",
+}
+
+// namesACredentialStore reports whether the line's key points at a credential store instead of holding a
+// credential, which is the one shape a commented-out configuration line shares with a real leak.
+func namesACredentialStore(line string) bool {
+	key, _, found := strings.Cut(line, ":")
+	if !found {
+		key, _, found = strings.Cut(line, "=")
+		if !found {
+			return false
+		}
+	}
+	normalised := strings.ToLower(strings.Trim(strings.TrimSpace(key), "#/-[] \t\"'"))
+	for _, name := range secretNamingKeys {
+		if strings.HasSuffix(normalised, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// commentedCredentialLineSkip drops the two line shapes a commented-out setting shares with something that is
+// not a credential: a value inlined into a browser bundle by construction, and a key that names a credential
+// store rather than holding a credential.
+func commentedCredentialLineSkip(line string) bool {
+	return clientPublicVariableLine(line) || namesACredentialStore(line)
+}
+
 // assignedValueNotCredential reports whether the value assigned to a credential-named key is something
 // other than the credential. Two shapes account for it in practice, and both became reachable when the
 // value's quotes stopped being required:
@@ -1362,6 +1400,29 @@ func baseDefaultRules() []rule {
 			allow:     compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
 			skipValue: assignedValueNotCredential,
 			lineSkip:  clientPublicVariableLine,
+		},
+		{
+			// A credential in a COMMENT is still a credential in the repository: it is in the history, it is
+			// readable by everyone with access, and a commented-out config line is usually the value that was
+			// live yesterday. Comments are blanked before the rules run so that prose and examples do not
+			// surface as live findings, which left this class unreported: gitleaks found seven of them on one
+			// live estate where this scanner found none.
+			//
+			// The distinction the rule keeps is structural rather than textual. It matches only a credential
+			// ASSIGNMENT whose line BEGINS with a comment marker, which is what a commented-out setting looks
+			// like, and it leaves prose that merely mentions a credential alone. The value guards are the ones
+			// generic-secret uses, so the bar for what counts as a credential is the same in a comment as it is
+			// in live code, and the two never see the same text: generic-secret reads the masked file.
+			id: "commented-credential", category: "Generic", title: "Credential left in a comment", severity: shared.SeverityMedium,
+			keywords:        []string{"secret", "token", "passwd", "password", "api_key", "apikey", "apiKey", "access_key", "SECRET", "TOKEN", "API_KEY"},
+			re:              regexp.MustCompile(`(?im)^[ \t]*(?:#|//|--|;)+[ \t]*["']?[A-Za-z0-9_.\-]{0,32}(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?\s*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
+			group:           1,
+			minEnt:          3.5,
+			allow:           compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
+			skipValue:       assignedValueNotCredential,
+			lineSkip:        commentedCredentialLineSkip,
+			scanComments:    true,
+			configFilesOnly: true,
 		},
 		// ── additional distinctive-prefix provider tokens (near-zero false positive: the unique prefix is the signal) ──
 		{

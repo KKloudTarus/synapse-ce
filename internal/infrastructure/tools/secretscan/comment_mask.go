@@ -151,3 +151,25 @@ func maskBlockComments(data []byte) []byte {
 	}
 	return out
 }
+
+// configFileExts are file types that hold CONFIGURATION rather than code. A commented-out credential
+// assignment in one of these is the setting that was applied until someone commented it out; the same shape in
+// source code is dead code or a documented example, so the two are treated differently.
+var configFileExts = map[string]bool{
+	".yaml": true, ".yml": true, ".env": true, ".properties": true, ".ini": true, ".cfg": true,
+	".conf": true, ".toml": true, ".tf": true, ".tfvars": true, ".tpl": true,
+}
+
+// configFileBases are extension-less or fully-named configuration files.
+var configFileBases = map[string]bool{
+	".env": true, ".gitlab-ci.yml": true, "values.yaml": true, "values.yml": true,
+}
+
+// isConfigFileName reports whether a path names a configuration file.
+func isConfigFileName(rel string) bool {
+	base := strings.ToLower(filepath.Base(rel))
+	if configFileBases[base] || strings.HasPrefix(base, ".env") {
+		return true
+	}
+	return configFileExts[strings.ToLower(filepath.Ext(rel))]
+}

@@ -26,8 +26,12 @@ func defaultRules() []rule {
 //
 // Deliberately excluded: jwt (a structural eyJ shape, and a documented example token is the most common
 // thing in a comment), every keyword-anchored generic rule, and the entropy rules.
+// commented-credential is the one keyword-anchored rule admitted, and only in CONFIGURATION files: a
+// commented-out `password:` in a values.yaml is the setting that was live until someone commented it out,
+// while the same shape in source code is dead code or a documented example and stays masked.
 var commentScannedRuleIDs = map[string]bool{
-	"aws-access-key-id": true, "aws-secret-access-key": true,
+	"commented-credential": true,
+	"aws-access-key-id":    true, "aws-secret-access-key": true,
 	"github-token": true, "github-fine-grained-pat": true, "gitlab-pat": true,
 	"slack-token": true, "slack-webhook-url": true,
 	"google-api-key": true, "gcp-service-account-key": true,

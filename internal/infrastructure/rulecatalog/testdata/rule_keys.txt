@@ -258,6 +258,7 @@ cloudformation-sqs-no-dlq
 cloudformation-sqs-no-encryption
 cloudformation-wildcard-principal
 cloudinary-url
+commented-credential
 compose-dangerous-capability
 compose-docker-socket-mount
 compose-host-ipc
