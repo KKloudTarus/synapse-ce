@@ -176,6 +176,7 @@ as intact.
 | `SYNAPSE_SYMBOL_OVERLAY_DIR` | (none) | Directory of curated advisory-id -> affected-symbol JSON files; the owned matcher merges these onto findings so non-Go / NVD-CSAF-only advisories can drive symbol reachability. Best-effort. |
 | `SYNAPSE_JARHASH_ONLINE_ENABLED` | `false` | Recover the coordinate of a shaded or metadata-less JAR by its SHA-1. |
 | `SYNAPSE_OSV_URL`, `SYNAPSE_OSV_BULK_URL`, `SYNAPSE_DEPSDEV_URL`, `SYNAPSE_KEV_URL`, `SYNAPSE_EPSS_URL` | (public) | Feed overrides for tests or mirrors. |
+| `SYNAPSE_ALPINE_SECDB_URL` | `https://secdb.alpinelinux.org` | Base URL `sync-advisories --remote-secdb` ingests Alpine's apk advisories from. Point it at an internal mirror of the same layout for an air-gapped estate. |
 
 ### Owned-only scanner default and rollback
 

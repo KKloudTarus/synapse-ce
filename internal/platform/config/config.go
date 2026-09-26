@@ -77,6 +77,10 @@ type Config struct {
 	// DBAutoMigrate controls embedded migrations for long-running services. A dedicated
 	// synapse-migrate job may own migrations while services rely on readiness instead.
 	DBAutoMigrate bool
+	// AlpineSecdbURL is the base URL of the apk secdb mirror `sync-advisories --remote-secdb` ingests. It is
+	// configurable so an air-gapped estate can point it at an internal mirror of the same layout.
+	AlpineSecdbURL string
+
 	// SyftBin is the Syft executable used for SBOM generation (shell-out).
 	SyftBin string
 	// SBOMProducer selects the SBOM-generation producer: "ownsbom" (default – the detection-independent
@@ -852,6 +856,7 @@ func Load() Config {
 		DBMigrationDSN:                   getenv("SYNAPSE_DB_MIGRATION_DSN", ""),
 		DBHaltWriterDSN:                  getenv("SYNAPSE_DB_HALT_WRITER_DSN", ""),
 		DBAutoMigrate:                    getbool("SYNAPSE_DB_AUTO_MIGRATE", true),
+		AlpineSecdbURL:                   getenv("SYNAPSE_ALPINE_SECDB_URL", ""),
 		SyftBin:                          getenv("SYNAPSE_SYFT_BIN", "syft"),
 		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "ownsbom"),
 		GrypeBin:                         getenv("SYNAPSE_GRYPE_BIN", "grype"),

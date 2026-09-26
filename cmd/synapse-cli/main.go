@@ -1120,6 +1120,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
+	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-secdb   # fetch + ingest Alpine's own secdb, which covers current apk branches far better than the OSV mirror (small; requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --csaf <dir> # ingest a local CSAF 2.0 advisory dump (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli build-cvss-db <out.jsonl[.gz]> <nvd-*.json[.gz]...>  # build an OFFLINE CVSS DB from NVD JSON feeds; use it via SYNAPSE_NVD_CVSS_DB to backfill CVSS with no network/rate-limit")
 	os.Exit(2)
@@ -1265,7 +1266,7 @@ func runScan() {
 // over the dump directory streams every parseable advisory into the store via the narrow AdvisoryWriter.
 func syncAdvisories(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: synapse-cli sync-advisories <dir>|--remote|--remote-distros|--csaf <dir> (requires SYNAPSE_DB_DSN)")
+		return fmt.Errorf("usage: synapse-cli sync-advisories <dir>|--remote|--remote-distros|--remote-secdb|--csaf <dir> (requires SYNAPSE_DB_DSN)")
 	}
 	if args[0] == "--oval" {
 		if len(args) < 2 {
@@ -1315,6 +1316,12 @@ func syncAdvisories(args []string) error {
 		}
 		feed = ownadvisory.NewSecdbDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "apk secdb dir "+args[1], "osv", "cli-secdb-bulk", "CLI apk secdb bulk ingest"
+	case args[0] == "--remote-secdb":
+		// Alpine's own secdb, which is materially richer than the OSV mirror of it for the branches people
+		// run: OSV carried 128 advisories for Alpine:v3.19 and a scan of alpine:3.19 matched 4 CVEs where
+		// Trivy matched 10. The documents are tens of kilobytes each, so this is a fast sync.
+		feed = ownadvisory.NewRemoteSecdbFeed(cfg.AlpineSecdbURL, nil)
+		src, bulkAdapter, sourceKey, sourceName = "Alpine secdb", "osv", "cli-secdb-bulk", "CLI apk secdb bulk ingest"
 	default:
 		feed = ownadvisory.NewDirFeed(args[0])
 		src, bulkAdapter, sourceKey, sourceName = args[0], "osv", "cli-osv-bulk", "CLI OSV bulk ingest"
