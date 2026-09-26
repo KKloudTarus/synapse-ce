@@ -16,6 +16,7 @@ var explicitInventory = []string{
 	"cloudformation-api-no-auth", "cloudformation-apigw-no-logging", "cloudformation-cloudfront-no-default-root", "cloudformation-cloudfront-no-logging", "cloudformation-cloudtrail-no-log-validation", "cloudformation-cloudtrail-not-multi-region", "cloudformation-dynamodb-unencrypted", "cloudformation-ebs-unencrypted", "cloudformation-ec2-imdsv2", "cloudformation-ecr-no-scan", "cloudformation-efs-unencrypted", "cloudformation-eks-public-endpoint", "cloudformation-iam-wildcard", "cloudformation-kms-no-rotation", "cloudformation-lambda-no-dlq", "cloudformation-lambda-public", "cloudformation-log-retention-missing", "cloudformation-open-security-group", "cloudformation-plaintext-secret", "cloudformation-public-bucket-acl", "cloudformation-rds-no-backup", "cloudformation-rds-no-deletion-protection", "cloudformation-rds-public", "cloudformation-rds-unencrypted", "cloudformation-redshift-unencrypted", "cloudformation-s3-no-encryption", "cloudformation-s3-no-logging", "cloudformation-s3-no-public-access-block", "cloudformation-s3-no-versioning", "cloudformation-sg-open-egress", "cloudformation-sns-no-encryption", "cloudformation-sqs-no-dlq", "cloudformation-sqs-no-encryption", "cloudformation-wildcard-principal",
 	"compose-dangerous-capability", "compose-docker-socket-mount", "compose-host-ipc", "compose-host-network", "compose-host-pid", "compose-image-unpinned", "compose-privileged", "compose-secret-in-env", "compose-unconfined-security-opt", "compose-userns-host",
 	"dockerfile-add-instead-of-copy", "dockerfile-add-remote-url", "dockerfile-apt-no-clean", "dockerfile-apt-no-norecommends", "dockerfile-apt-upgrade", "dockerfile-expose-ssh", "dockerfile-image-no-tag", "dockerfile-insecure-download", "dockerfile-maintainer-deprecated", "dockerfile-multiple-cmd", "dockerfile-no-healthcheck", "dockerfile-run-as-root", "dockerfile-run-pipe-shell", "dockerfile-run-sudo", "dockerfile-secret-in-arg", "dockerfile-secret-in-env", "dockerfile-workdir-relative", "dockerfile-multiple-entrypoint", "dockerfile-shell-form-entrypoint", "dockerfile-from-platform-pinned", "dockerfile-copy-to-root", "dockerfile-private-key-copy", "dockerfile-world-writable", "dockerfile-setuid-chmod", "dockerfile-secret-in-run", "dockerfile-apt-no-yes", "dockerfile-apk-no-cache", "dockerfile-yum-no-clean", "dockerfile-pip-no-cache-dir", "dockerfile-cd-in-run", "dockerfile-plaintext-download", "dockerfile-apt-cli", "dockerfile-yum-no-yes", "dockerfile-apt-version-pin", "dockerfile-apk-version-pin",
+	"gitlab-ci-curl-pipe-shell", "gitlab-ci-debug-trace-enabled", "gitlab-ci-image-no-digest", "gitlab-ci-include-project-unpinned", "gitlab-ci-include-remote", "gitlab-ci-registry-password-on-command-line", "gitlab-ci-script-injection",
 	"gha-no-explicit-permissions", "gha-permissions-write-all", "gha-pull-request-target", "gha-script-injection", "gha-unpinned-action",
 	"kubernetes-added-capability", "kubernetes-allow-priv-escalation", "kubernetes-automount-sa-token", "kubernetes-caps-not-dropped", "kubernetes-configmap-credential", "kubernetes-dangerous-capability", "kubernetes-default-namespace", "kubernetes-default-service-account", "kubernetes-host-ipc", "kubernetes-host-network", "kubernetes-host-path", "kubernetes-host-pid", "kubernetes-host-port", "kubernetes-image-no-tag", "kubernetes-ingress-annotation-snippet", "kubernetes-ingress-no-tls", "kubernetes-ingress-tls-no-secret", "kubernetes-image-no-digest", "kubernetes-image-pull-policy-cached", "kubernetes-namespace-no-network-policy", "kubernetes-low-run-as-user", "kubernetes-no-cpu-limit", "kubernetes-no-cpu-request", "kubernetes-no-memory-limit", "kubernetes-no-liveness-probe", "kubernetes-no-memory-request", "kubernetes-no-readiness-probe", "kubernetes-no-priv-escalation-disabled", "kubernetes-no-read-only-root-fs", "kubernetes-no-run-as-group", "kubernetes-no-run-as-non-root", "kubernetes-no-run-as-user", "kubernetes-no-seccomp", "kubernetes-privileged", "kubernetes-rbac-cluster-admin-binding", "kubernetes-rbac-escalation-verbs", "kubernetes-rbac-read-all-secrets", "kubernetes-rbac-webhook-control", "kubernetes-rbac-wildcard-permissions", "kubernetes-run-as-root", "kubernetes-secret-env-var", "kubernetes-secret-in-env", "kubernetes-secret-in-manifest",
 	"openapi-apikey-over-cleartext", "openapi-no-global-security", "openapi-operation-security-empty", "openapi-request-array-unbounded", "openapi-response-collection-unbounded",
@@ -45,6 +46,7 @@ func TestCatalogParity(t *testing.T) {
 		"Docker Compose":         domainrule.DetectionPattern,
 		"Dockerfile":             domainrule.DetectionPattern,
 		"GitHub Actions":         domainrule.DetectionPattern,
+		"GitLab CI":              domainrule.DetectionPattern,
 		"Kubernetes":             domainrule.DetectionAST,
 		"OpenAPI":                domainrule.DetectionAST,
 		"Spring Boot":            domainrule.DetectionAST,
@@ -66,6 +68,7 @@ func TestCatalogParity(t *testing.T) {
 		"Docker Compose":         true,
 		"Dockerfile":             true,
 		"GitHub Actions":         true,
+		"GitLab CI":              true,
 		"Kubernetes":             true,
 		"OpenAPI":                true,
 		"Spring Boot":            true,
@@ -123,6 +126,8 @@ func TestCatalogParity(t *testing.T) {
 			filename = "Dockerfile"
 		} else if strings.HasPrefix(id, "gha-") {
 			filename = ".github/workflows/workflow.yaml"
+		} else if strings.HasPrefix(id, "gitlab-ci-") {
+			filename = ".gitlab-ci.yml"
 		} else if strings.HasPrefix(id, "kubernetes-") {
 			filename = "pod.yaml"
 		} else if strings.HasPrefix(id, "openapi-") {

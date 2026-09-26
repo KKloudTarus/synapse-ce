@@ -926,6 +926,13 @@ gha-unpinned-action
 github-client-secret
 github-fine-grained-pat
 github-token
+gitlab-ci-curl-pipe-shell
+gitlab-ci-debug-trace-enabled
+gitlab-ci-image-no-digest
+gitlab-ci-include-project-unpinned
+gitlab-ci-include-remote
+gitlab-ci-registry-password-on-command-line
+gitlab-ci-script-injection
 gitlab-deploy-token
 gitlab-pat
 gitlab-pipeline-trigger-token

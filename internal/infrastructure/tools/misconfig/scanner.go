@@ -89,6 +89,7 @@ const (
 	cfgBicep
 	cfgSpringConfig
 	cfgOpenAPI
+	cfgGitLabCI
 )
 
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
@@ -278,6 +279,8 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 			out = append(out, scanSpringConfig(rel, data)...)
 		case cfgOpenAPI:
 			out = append(out, scanOpenAPI(rel, data)...)
+		case cfgGitLabCI:
+			out = append(out, scanGitLabCI(rel, data)...)
 		}
 		return nil
 	})
@@ -326,6 +329,11 @@ func classifyName(name string) configKind {
 	}
 	if isComposeName(name) {
 		return cfgCompose
+	}
+	// A pipeline file is recognised by name: a template repository's `<name>.gitlab-ci.yml` is included
+	// verbatim into other projects' pipelines, so it is the same surface as the root file.
+	if isGitLabCIName(name) {
+		return cfgGitLabCI
 	}
 	return cfgNone
 }
