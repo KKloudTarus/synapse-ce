@@ -670,15 +670,56 @@ func lineOf(text string, at int) string {
 	return text[start : at+end]
 }
 
+// pemBodyRunMin is the shortest base64 run counted as key body. It sits above every word in the PEM armour
+// ("BEGIN", "PRIVATE", "OPENSSH") so a bare header contributes nothing.
+const pemBodyRunMin = 20
+
+// pemBodyMinBytes is how much base64 body must sit on a PEM header's line before the header is read as an
+// embedded key block rather than a quoted constant. The smallest real key body, an EC P-256 key in PKCS#8,
+// is about 240 base64 characters, and a rule example or a delimiter constant carries none.
+const pemBodyMinBytes = 128
+
 // pemHeaderQuotedInline reports whether the PEM header on this line is a quoted one-line constant rather
-// than the first line of a key block: the header is not at the start of the line, or the same line also
-// carries the END marker or an escaped newline.
+// than the first line of a key block. Three marks say one-line string: the header does not start the line,
+// the END marker sits beside it, or the line carries an escaped newline. Each of those is a rule example, a
+// delimiter to strip, or a test name.
+//
+// A key EMBEDDED in a source-code string literal carries all three marks and is still a real key. A GCP
+// service-account JSON pasted into a Java constant reads as
+// `"  \"private_key\": \"-----BEGIN PRIVATE KEY-----\\nMIIEv…\\n-----END PRIVATE KEY-----\\n"`, and standing
+// it down lost a critical finding on live code. So the stand-down now requires the line to carry no key
+// body. Base64 is counted across the whole line rather than as one run, because the escaped newlines break
+// a single key into many short runs.
 func pemHeaderQuotedInline(line string) bool {
+	if pemBodyBase64Bytes(line) >= pemBodyMinBytes {
+		return false
+	}
 	trimmed := strings.TrimLeft(line, " \t\"'`")
 	if !strings.HasPrefix(trimmed, "-----BEGIN") {
 		return true
 	}
 	return strings.Contains(line, "-----END") || strings.Contains(line, `\n`)
+}
+
+// pemBodyBase64Bytes sums the base64 runs on the line that are long enough to be key body.
+func pemBodyBase64Bytes(line string) int {
+	total, run := 0, 0
+	flush := func() {
+		if run >= pemBodyRunMin {
+			total += run
+		}
+		run = 0
+	}
+	for i := 0; i < len(line); i++ {
+		switch c := line[i]; {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '+', c == '/', c == '=':
+			run++
+		default:
+			flush()
+		}
+	}
+	flush()
+	return total
 }
 
 // maskVBComments preserves byte offsets and newlines while blanking apostrophe and statement Rem comments.

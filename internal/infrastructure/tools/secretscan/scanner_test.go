@@ -622,3 +622,39 @@ func TestGenericHighEntropyDefersToKeywordRules(t *testing.T) {
 		}
 	}
 }
+
+// A private key EMBEDDED in a source-code string literal is a real key. The stand-down for a one-line PEM
+// constant used to drop it: the header does not start the line, the END marker sits beside it, and the
+// newlines are escaped, which are exactly the three marks a rule example carries. Found on live Java code,
+// where a GCP service-account JSON had been pasted into a constant and later deleted.
+func TestDetectsPrivateKeyEmbeddedInStringLiteral(t *testing.T) {
+	body := strings.Repeat("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj", 6)
+	var b strings.Builder
+	b.WriteString("  \"private_key\": \"-----BEGIN ")
+	b.WriteString("PRIVATE KEY-----")
+	for i := 0; i < 6; i++ {
+		b.WriteString(`\n`)
+		b.WriteString(body[i*64 : (i+1)*64])
+	}
+	b.WriteString(`\n-----END PRIVATE KEY-----\n"`)
+
+	rs := scanDir(t, map[string]string{"GoogleCloudConfig.java": "String creds = \"{\" +\n" + b.String() + " +\n\"}\";\n"})
+	if hasRule(rs, "private-key") == nil {
+		t.Errorf("an embedded private key block must be flagged, got %+v", rs)
+	}
+}
+
+// The stand-down still holds for a header with no key body beside it: a rule example, a delimiter constant,
+// a test name. Without this the embedded-key change would turn every such line into a critical finding.
+func TestSkipsPrivateKeyHeaderWithoutBody(t *testing.T) {
+	for name, line := range map[string]string{
+		"rules.go":  "var pemHeader = \"-----BEGIN " + "PRIVATE KEY-----\"\n",
+		"strip.go":  "s = strings.TrimPrefix(s, \"-----BEGIN " + "PRIVATE KEY-----\\n\")\n",
+		"names.txt": "case \"-----BEGIN " + "PRIVATE KEY----- to -----END PRIVATE KEY-----\":\n",
+	} {
+		rs := scanDir(t, map[string]string{name: line})
+		if r := hasRule(rs, "private-key"); r != nil {
+			t.Errorf("%s: a bodyless PEM header must not be flagged: %+v", name, r)
+		}
+	}
+}
