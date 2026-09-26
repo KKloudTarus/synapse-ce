@@ -1057,6 +1057,32 @@ func assignedValueNotCredential(secret string) bool {
 	return !hasDigit
 }
 
+// codecAlphabets are the ordered character tables every base64/base32/base36 implementation carries. They
+// have maximal character variety, so they clear any entropy floor by construction, and one of them appears
+// in a vendored polyfill in most JavaScript repositories.
+var codecAlphabets = []string{
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=",
+	"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+	"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567=",
+	"0123456789abcdefghijklmnopqrstuvwxyz",
+}
+
+// codecAlphabetToken reports whether the candidate is a run of one of those tables. A credential that is a
+// contiguous slice of an ordered alphabet is not a credential anyone generated.
+func codecAlphabetToken(value string) bool {
+	if len(value) < 24 {
+		return false // too short to be a table; leave it to the entropy floor
+	}
+	for _, alphabet := range codecAlphabets {
+		if strings.Contains(alphabet, value) {
+			return true
+		}
+	}
+	return false
+}
+
 func wordlikePathToken(secret string) bool {
 	if !strings.Contains(secret, "/") {
 		return false
@@ -1097,7 +1123,14 @@ var resourcePathExtensions = []string{
 // A URL is a location by definition, so "://" is the indicator for the asset case. Both halves are still
 // required: the line must name a location AND carry a known non-credential extension, so a credential in a
 // query string is untouched.
-var resourcePathIndicators = []string{"classpath:", "file=", "file:", "path=", "resource=", "src=", "href=", "include", "://"}
+var resourcePathIndicators = []string{
+	"classpath:", "file=", "file:", "path=", "resource=", "src=", "href=", "include", "://",
+	// CSS and SCSS name a location with `src:` and `url(` rather than an attribute. A webfont is served
+	// under a content hash, so `src: url(/fonts/UcC73FwrK3iLTeHuS_fvQtMwCp50KnMa25L7W0Q5n-wU.woff2)` is a
+	// 44-character high-entropy token by design: two font stylesheets produced 20 of one repository's 26
+	// secret findings, where gitleaks reported one.
+	"src:", "url(", "srcset=",
+}
 
 // lineDeclaresResourcePath reports whether the line is a resource declaration whose high-entropy token is a
 // FILE NAME, not a credential. Liquibase and Flyway generate migration names long and varied enough to clear
@@ -1378,7 +1411,7 @@ func baseDefaultRules() []rule {
 			lineSkip: func(line string) bool {
 				return hasAnyKeyword(line, highEntropyDeferKeywords) || lineDeclaresResourcePath(line)
 			},
-			skipValue:          wordlikePathToken,
+			skipValue:          func(v string) bool { return wordlikePathToken(v) || codecAlphabetToken(v) },
 			maskNotebookOutput: true,
 			maskPEMBodies:      true,
 		},

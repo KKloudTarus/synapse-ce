@@ -106,3 +106,50 @@ func TestHighEntropyStillReadsCredentialInQueryString(t *testing.T) {
 	}
 	t.Errorf("a high-entropy value on a URL line with no asset extension must still be reported; rules that fired: %v", hits)
 }
+
+// A webfont is served under a content hash, so a font stylesheet carries a high-entropy token on every
+// @font-face block by design. Two stylesheets produced 20 of one repository's 26 secret findings, where
+// gitleaks reported one. CSS names a location with `src:` and `url(` rather than an attribute.
+func TestHighEntropyIgnoresWebfontSource(t *testing.T) {
+	lines := []string{
+		`  src: url(/fonts/UcC73FwrK3iLTeHuS_fvQtMwCp50KnMa25L7W0Q5n-wU.woff2) format('woff2');`,
+		`  src: url("../fonts/9tK5xB3rQ7wZmH2vL8pN4sT6uY1cE0fG5jD3kR7aW9b.ttf");`,
+	}
+	for _, line := range lines {
+		for _, id := range scanOneFile(t, "inter.scss", line) {
+			if id == "generic-high-entropy" {
+				t.Errorf("a webfont source is a location, not a credential: %q", line)
+			}
+		}
+	}
+}
+
+// A codec alphabet has maximal character variety, so it clears any entropy floor by construction, and one
+// appears in a vendored polyfill in most JavaScript repositories.
+func TestHighEntropyIgnoresCodecAlphabet(t *testing.T) {
+	lines := []string{
+		`      var byteToCharMap = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='`,
+		`const B64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"`,
+		`  private static final String BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";`,
+	}
+	for _, line := range lines {
+		for _, id := range scanOneFile(t, "codec.js", line) {
+			if id == "generic-high-entropy" {
+				t.Errorf("a codec alphabet is a constant table, not a credential: %q", line)
+			}
+		}
+	}
+}
+
+// A shuffled alphabet of the same characters is NOT a table: that is exactly the shape of a generated
+// secret, so it must still be reported.
+func TestHighEntropyStillReadsShuffledAlphabet(t *testing.T) {
+	line := `token = "qWzR7tYuI9oPaS4dFgHjKlZ2xCvBnM1e3rTyU6iO0pAs"`
+	hits := scanOneFile(t, "config.yaml", line)
+	for _, id := range hits {
+		if id != "(none)" {
+			return
+		}
+	}
+	t.Errorf("a generated token must still be reported; rules that fired: %v", hits)
+}
