@@ -54,7 +54,11 @@ END $$;
 -- A rolling deployment may keep writing the legacy string. Changing it clears
 -- an old canonical binding, or binds an exact enabled same-tenant user ID.
 -- +goose StatementBegin
-CREATE FUNCTION synapse_bridge_finding_assignee() RETURNS trigger LANGUAGE plpgsql AS $$
+-- Callers with write access to findings need not have direct read access to
+-- users. Keep the lookup under the migration owner's privileges; FORCE RLS
+-- still applies the caller's transaction tenant setting.
+CREATE FUNCTION synapse_bridge_finding_assignee() RETURNS trigger LANGUAGE plpgsql
+ SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
  IF TG_OP='INSERT' OR NEW.assignee IS DISTINCT FROM OLD.assignee THEN
   NEW.assignee_user_id := (
@@ -72,7 +76,8 @@ CREATE TRIGGER findings_assignee_identity_bridge BEFORE INSERT OR UPDATE OF assi
 -- Keep the bounded admin review queue accurate after old binaries change a
 -- label or a triager resolves it to a canonical user.
 -- +goose StatementBegin
-CREATE FUNCTION synapse_track_assignee_review() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION synapse_track_assignee_review() RETURNS trigger LANGUAGE plpgsql
+ SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
  IF TG_OP='INSERT' AND NEW.assignee='' THEN RETURN NULL; END IF;
  IF NEW.assignee<>'' AND NEW.assignee_user_id IS NULL THEN
