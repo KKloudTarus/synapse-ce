@@ -7,6 +7,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-26
+
 ### Added
 
 - **Hosted Go-binary reachability regression evidence for API and worker.** The benchmark exercises both production configuration gates against version-bound Linux binaries, records each observed outcome and binary digest, and rejects reports with a mismatched source, inventory, fixture, oracle, or Go toolchain identity. The `synapse-reachability-cycle current-go-binary-scorecard` command exits nonzero on a failed ratchet.
