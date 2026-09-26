@@ -443,7 +443,7 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 		}
 		contextLines := lines
 		if phpExts[ext] {
-			contextLines, _ = phpContextLines(ext, lines, phpLineViews(ext, lines))
+			contextLines, _ = phpContextLines(ext, lines, phpLineViews(ext, rel, lines))
 		}
 		appendFile(sourceFile{Path: path, Rel: rel, Lines: lines, ContextLines: contextLines, Ext: ext}, sourceLinesBytes(lines))
 		return nil
@@ -598,15 +598,18 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 	isJS := jsExts[ext]
 	isGo := goExts[ext]
 	// Browser context is a whole-file property, so it is decided once before the line loop.
-	browserFile := isJS && browserContextFile(lines)
+	browserFile := isJS && (clientComponentExts[ext] || browserContextFile(lines)) || browserScriptHost(ext, lines)
 	// So is "does this file handle requests at all": a file reader in a CLI is not a request sink,
 	// whatever the variable is called.
 	requestFile := requestContextFile(lines)
 	isPHP := phpExts[ext]
+	// A translation catalogue is text for humans keyed by identifier, so a credential-shaped rule has
+	// nothing to find there. Decided once per file rather than per line.
+	localization := isLocalizationCatalogue(rel)
 	var phpViews []phpLineView
 	phpTextLines, phpCodeLines := lines, lines
 	if isPHP {
-		phpViews = phpLineViews(ext, lines)
+		phpViews = phpLineViews(ext, rel, lines)
 		phpTextLines, phpCodeLines = phpContextLines(ext, lines, phpViews)
 	}
 	for i, text := range lines {
@@ -649,6 +652,9 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			r := &a.rules[ri]
 			if !r.appliesTo(ext) {
 				continue // language-gated rule on a non-matching file type
+			}
+			if localization && credentialShapedRuleIDs[r.id] {
+				continue // a translation catalogue's values are UI text, never credentials
 			}
 			if r.id == "generic-sql-dynamic-execute" && pyExts[ext] && a.matchesRule("sqlalchemy-raw-sql-dynamic", ext, text) {
 				continue // specialized SQLAlchemy rule owns this Python sink
@@ -729,6 +735,9 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 				matchAt, matched := phpRuleMatchIndex(r, text, code)
 				if !r.appliesTo(ext) || !matched || r.id == "php:closing-tag" && !phpClosingTagEligible(ext) || phpRuleOwnsGeneric(r.id, a, ext, text, code) {
 					continue
+				}
+				if localization && credentialShapedRuleIDs[r.id] {
+					continue // a translation catalogue's values are UI text, never credentials
 				}
 				line := start + 1 + strings.Count(text[:matchAt], "\n")
 				h := ports.SASTRawFinding{
