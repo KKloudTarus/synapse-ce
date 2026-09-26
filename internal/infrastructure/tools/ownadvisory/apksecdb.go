@@ -79,29 +79,44 @@ func ParseSecdb(content []byte) ([]advisory.Advisory, error) {
 				continue // "0" is the "triaged not affected" marker, never an actionable fixed boundary
 			}
 			cves, ghsas := splitAdvisoryIDs(ids)
-			universal := append(cves, ghsas...) // a CVE is preferred as the primary id, so list CVEs first
-			if len(universal) == 0 {
-				continue // no universal id: a language-only (GO/RUSTSEC) entry, a safe coverage gap for an OS feed
-			}
-			primary := universal[0]
-			acc := byID[primary]
-			if acc == nil {
-				acc = &secfixAcc{aliases: map[string]struct{}{}, fixed: map[string]map[string]struct{}{}}
-				byID[primary] = acc
-				order = append(order, primary)
-			}
-			for _, id := range universal {
-				if id != primary {
-					acc.aliases[id] = struct{}{}
+			// A secfixes entry lists every advisory ONE package version fixes, and two CVEs there are two
+			// vulnerabilities that happen to share a fix, not one vulnerability with a second name. Folding
+			// them into a single advisory with the other as an alias claims a single identity for two, which
+			// the advisory writer refuses: it rejected 13,597 of 16,707 Alpine advisories as an alias
+			// conflict, so most of Alpine's feed never reached the store and a scan of alpine:3.19 matched 4
+			// CVEs where Trivy matched 10. Each CVE therefore becomes its own advisory over the same fixed
+			// version. A GHSA stays an alias, because a GHSA and a CVE for one flaw ARE one identity in two
+			// namespaces.
+			primaries := cves
+			var aliases []string
+			if len(primaries) == 0 {
+				if len(ghsas) == 0 {
+					continue // no universal id: a language-only (GO/RUSTSEC) entry, a safe coverage gap here
 				}
+				primaries, aliases = ghsas[:1], ghsas[1:]
+			} else {
+				aliases = ghsas
 			}
-			set := acc.fixed[name]
-			if set == nil {
-				set = map[string]struct{}{}
-				acc.fixed[name] = set
-				acc.order = append(acc.order, name)
+			for _, primary := range primaries {
+				acc := byID[primary]
+				if acc == nil {
+					acc = &secfixAcc{aliases: map[string]struct{}{}, fixed: map[string]map[string]struct{}{}}
+					byID[primary] = acc
+					order = append(order, primary)
+				}
+				for _, id := range aliases {
+					if id != primary {
+						acc.aliases[id] = struct{}{}
+					}
+				}
+				set := acc.fixed[name]
+				if set == nil {
+					set = map[string]struct{}{}
+					acc.fixed[name] = set
+					acc.order = append(acc.order, name)
+				}
+				set[fixedVer] = struct{}{}
 			}
-			set[fixedVer] = struct{}{}
 		}
 	}
 	out := make([]advisory.Advisory, 0, len(order))

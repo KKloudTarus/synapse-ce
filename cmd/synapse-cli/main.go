@@ -616,6 +616,20 @@ func runQualityTo(w io.Writer, args []string) error {
 // runRating computes the deterministic A-E health grades (security / reliability / maintainability) and
 // the technical-debt estimate for a local source tree, from the code-quality findings + first-party SAST
 // + the code-size inventory. Read-only, no DB.
+// sastAnalyzer builds the pattern SAST analyzer, honouring SYNAPSE_SAST_SOURCE_BUDGET_BYTES. The default
+// retained-source budget never binds on an ordinary repository but does on a monorepo, where the unretained
+// part of the tree is scanned by no rule; the scan says how many files that was, and this is the knob that
+// closes it for an operator willing to pay the memory.
+func sastAnalyzer() *sast.Analyzer {
+	a := sast.New()
+	if raw := strings.TrimSpace(os.Getenv("SYNAPSE_SAST_SOURCE_BUDGET_BYTES")); raw != "" {
+		if bytes, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			a = a.WithSourceBudget(bytes)
+		}
+	}
+	return a
+}
+
 func runRating(args []string) error {
 	dir := args[0]
 	if strings.HasPrefix(dir, "-") {
@@ -659,7 +673,7 @@ func runRating(args []string) error {
 	}
 	// First-party security signal for the security grade (SCA dep vulns fold in when rating runs over a
 	// full scan's findings; this standalone command uses the SAST analyzer).
-	sastRaws, err := sast.New().AnalyzeSource(ctx, dir)
+	sastRaws, err := sastAnalyzer().AnalyzeSource(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("sast: %w", err)
 	}
@@ -767,7 +781,7 @@ func runGate(args []string) error {
 		return fmt.Errorf("code quality: %w", err)
 	}
 	findings := qualityReport.Findings
-	sastRaws, err := sast.New().AnalyzeSource(ctx, dir)
+	sastRaws, err := sastAnalyzer().AnalyzeSource(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("sast: %w", err)
 	}
@@ -1106,6 +1120,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories <dir>        # ingest a local OSV dump into the owned advisory store (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote     # fetch + ingest app ecosystems from the OSV bulk bucket (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-distros # fetch + ingest OS-package advisories (Debian/Alpine) from OSV (large; requires SYNAPSE_DB_DSN)")
+	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --remote-secdb   # fetch + ingest Alpine's own secdb, which covers current apk branches far better than the OSV mirror (small; requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli sync-advisories --csaf <dir> # ingest a local CSAF 2.0 advisory dump (requires SYNAPSE_DB_DSN)")
 	fmt.Fprintln(os.Stderr, "  synapse-cli build-cvss-db <out.jsonl[.gz]> <nvd-*.json[.gz]...>  # build an OFFLINE CVSS DB from NVD JSON feeds; use it via SYNAPSE_NVD_CVSS_DB to backfill CVSS with no network/rate-limit")
 	os.Exit(2)
@@ -1251,7 +1266,7 @@ func runScan() {
 // over the dump directory streams every parseable advisory into the store via the narrow AdvisoryWriter.
 func syncAdvisories(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: synapse-cli sync-advisories <dir>|--remote|--remote-distros|--csaf <dir> (requires SYNAPSE_DB_DSN)")
+		return fmt.Errorf("usage: synapse-cli sync-advisories <dir>|--remote|--remote-distros|--remote-secdb|--csaf <dir> (requires SYNAPSE_DB_DSN)")
 	}
 	if args[0] == "--oval" {
 		if len(args) < 2 {
@@ -1301,6 +1316,12 @@ func syncAdvisories(args []string) error {
 		}
 		feed = ownadvisory.NewSecdbDirFeed(args[1])
 		src, bulkAdapter, sourceKey, sourceName = "apk secdb dir "+args[1], "osv", "cli-secdb-bulk", "CLI apk secdb bulk ingest"
+	case args[0] == "--remote-secdb":
+		// Alpine's own secdb, which is materially richer than the OSV mirror of it for the branches people
+		// run: OSV carried 128 advisories for Alpine:v3.19 and a scan of alpine:3.19 matched 4 CVEs where
+		// Trivy matched 10. The documents are tens of kilobytes each, so this is a fast sync.
+		feed = ownadvisory.NewRemoteSecdbFeed(cfg.AlpineSecdbURL, nil)
+		src, bulkAdapter, sourceKey, sourceName = "Alpine secdb", "osv", "cli-secdb-bulk", "CLI apk secdb bulk ingest"
 	default:
 		feed = ownadvisory.NewDirFeed(args[0])
 		src, bulkAdapter, sourceKey, sourceName = args[0], "osv", "cli-osv-bulk", "CLI OSV bulk ingest"
@@ -1465,7 +1486,14 @@ func selectSBOMGenerator(cfg config.Config) (ports.SBOMGenerator, error) {
 	if kind == scacompose.SBOMProducerSyft {
 		return syft.New(cfg.SyftBin), nil
 	}
-	reg, rerr := ownsbom.DefaultRegistry()
+	// A CI runner has neither ~/.m2 nor mvn, so without POM fetching a Spring project's transitive tree
+	// resolves to almost nothing. --offline leaves the fetcher nil, which the flag already promises for every
+	// registry resolver.
+	opts := ownsbom.RegistryOptions{}
+	if !cfg.Offline {
+		opts.MavenPOMFetcher = ownsbom.NewHTTPPOMFetcher(ownsbom.DefaultPOMCacheDir())
+	}
+	reg, rerr := ownsbom.DefaultRegistryWith(opts)
 	if rerr != nil {
 		return nil, fmt.Errorf("build ownsbom SBOM producer: %w", rerr)
 	}
@@ -1676,7 +1704,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		sca.SetJVMReachability(jvmreach.New())
 	}
 	if cfg.SASTEnabled && !image {
-		sca.SetSASTAnalyzer(sast.New()) // deterministic pattern-SAST (CI-friendly)
+		sca.SetSASTAnalyzer(sastAnalyzer()) // deterministic pattern-SAST (CI-friendly)
 	} else if cfg.SASTEnabled && image {
 		// Source SAST over an assembled image rootfs is low-value (compiled artifacts, vendored trees)
 		// and scans the whole filesystem, which times out on large images. Scan SAST at the SOURCE repo.

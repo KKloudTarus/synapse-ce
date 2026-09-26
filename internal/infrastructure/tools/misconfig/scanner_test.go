@@ -3,6 +3,7 @@ package misconfig
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -170,16 +171,27 @@ spec:
       type: RuntimeDefault
   containers:
     - name: app
-      image: myapp:1.0
+      image: myapp:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
       resources:
+        requests:
+          cpu: "250m"
+          memory: "128Mi"
         limits:
           cpu: "500m"
           memory: "256Mi"
+      livenessProbe:
+        httpGet:
+          path: /healthz
+          port: 8080
+      readinessProbe:
+        httpGet:
+          path: /readyz
+          port: 8080
       securityContext:
         privileged: false
         runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 3000
+        runAsUser: 10001
+        runAsGroup: 30001
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
         capabilities:
@@ -426,10 +438,17 @@ spec:
 }
 
 func TestNonKubernetesYAMLSkipped(t *testing.T) {
-	// A CI/compose YAML with no apiVersion+kind must not be parsed as a manifest.
+	// A CI/compose YAML with no apiVersion+kind must not be parsed as a manifest. The file IS a GitHub Actions
+	// workflow, so the Actions rules legitimately apply to it; what must not happen is a Kubernetes rule firing.
 	ci := "jobs:\n  build:\n    steps:\n      - run: make\n"
-	if got := scan(t, map[string]string{".github/workflows/ci.yml": ci}); len(got) != 0 {
-		t.Errorf("non-Kubernetes YAML must be skipped, got %+v", got)
+	for _, f := range scan(t, map[string]string{".github/workflows/ci.yml": ci}) {
+		if strings.HasPrefix(f.RuleID, "kubernetes-") {
+			t.Errorf("non-Kubernetes YAML must not be parsed as a manifest, got %+v", f)
+		}
+	}
+	// A CI YAML outside .github/workflows/ is neither a manifest nor a workflow: nothing at all.
+	if got := scan(t, map[string]string{"ci/pipeline.yml": ci}); len(got) != 0 {
+		t.Errorf("a non-workflow, non-manifest YAML must yield no findings, got %+v", got)
 	}
 }
 
@@ -559,4 +578,412 @@ func keys(m map[string]ports.MisconfigRawFinding) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// A Service, a Secret or an Ingress left in the default namespace is the same scoping defect as a workload
+// there. The rule used to fire on workload kinds only, which under-reported a repository's real exposure by
+// roughly half: checkov found 23 of these where this engine found 10.
+func TestKubernetesDefaultNamespaceCoversNonWorkloadKinds(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Service
+metadata:
+  name: api
+spec:
+  ports:
+    - port: 80
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: creds
+stringData:
+  note: placeholder
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: web
+spec:
+  rules: []
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prod
+`
+	var kinds []string
+	for _, f := range scan(t, map[string]string{"manifests.yaml": manifest}) {
+		if f.RuleID == "kubernetes-default-namespace" {
+			kinds = append(kinds, f.Resource)
+		}
+	}
+	if len(kinds) != 3 {
+		t.Errorf("expected the Service, Secret and Ingress to be flagged, got %v", kinds)
+	}
+	// Namespace itself is cluster-scoped, so it must never be flagged for lacking a namespace.
+	for _, k := range kinds {
+		if strings.HasPrefix(k, "Namespace/") {
+			t.Errorf("a cluster-scoped kind must not be flagged: %s", k)
+		}
+	}
+}
+
+// A resource in an explicit namespace is clean, including the non-workload kinds the rule now covers.
+func TestKubernetesDefaultNamespaceQuietWhenNamespaced(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: prod
+spec:
+  ports:
+    - port: 80
+`
+	for _, f := range scan(t, map[string]string{"svc.yaml": manifest}) {
+		if f.RuleID == "kubernetes-default-namespace" {
+			t.Errorf("a namespaced Service must not be flagged: %+v", f)
+		}
+	}
+}
+
+// Resource REQUESTS are what the scheduler reserves, a digest is what makes an image immutable, and a
+// Secret in the environment is readable through /proc. Each is a defect the limit / tag / literal-secret
+// rules do not cover, and checkov reports all three where this engine reported none.
+func TestKubernetesRequestsDigestAndSecretEnv(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: prod
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: myapp:1.0
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-credentials
+                  key: password
+`
+	got := map[string]bool{}
+	for _, f := range scan(t, map[string]string{"deploy.yaml": manifest}) {
+		got[f.RuleID] = true
+	}
+	for _, id := range []string{"kubernetes-no-cpu-request", "kubernetes-no-memory-request",
+		"kubernetes-image-no-digest", "kubernetes-secret-env-var"} {
+		if !got[id] {
+			t.Errorf("expected %s to fire", id)
+		}
+	}
+	// Limits ARE set here, so the limit rules must stay quiet: requests and limits are separate defects.
+	for _, id := range []string{"kubernetes-no-cpu-limit", "kubernetes-no-memory-limit"} {
+		if got[id] {
+			t.Errorf("%s must not fire when the limit is set", id)
+		}
+	}
+}
+
+// envFrom.secretRef injects every key of a Secret at once, so it is the same defect as a single
+// secretKeyRef and must be detected too.
+func TestKubernetesSecretEnvFromRef(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: myapp:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+      envFrom:
+        - secretRef:
+            name: app-credentials
+`
+	found := false
+	for _, f := range scan(t, map[string]string{"pod.yaml": manifest}) {
+		if f.RuleID == "kubernetes-secret-env-var" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected kubernetes-secret-env-var to fire on envFrom.secretRef")
+	}
+}
+
+// A ConfigMap is unencrypted in etcd and readable by every workload that can read ConfigMaps in the
+// namespace, so a credential there is worse off than in a Secret. Trivy reports 23 of these on the estate
+// where this engine reported none, because the rule only looked at Secret.
+func TestKubernetesConfigMapCredential(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app
+  namespace: prod
+data:
+  LOG_LEVEL: info
+  DB_PASSWORD: s3cr3t-value-here
+`
+	if _, ok := ruleIDs(scan(t, map[string]string{"cm.yaml": manifest}))["kubernetes-configmap-credential"]; !ok {
+		t.Error("expected a credential in a ConfigMap to be flagged")
+	}
+}
+
+// A credential-named key whose value points at where the credential lives is configuration, not the
+// credential. Flagging those would put a finding on every correctly written ConfigMap.
+func TestKubernetesConfigMapReferenceIsNotACredential(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app
+  namespace: prod
+data:
+  DB_PASSWORD_FILE: /etc/creds/password
+  API_TOKEN: ${TOKEN_FROM_VAULT}
+  CLIENT_SECRET: ""
+`
+	if f, bad := ruleIDs(scan(t, map[string]string{"cm.yaml": manifest}))["kubernetes-configmap-credential"]; bad {
+		t.Errorf("a path, a template reference and an empty value are not credentials: %+v", f)
+	}
+}
+
+// A Helm chart that refuses to render contributes no findings, and the caller must be able to tell that apart
+// from a chart with nothing wrong. On one live repository 112 of 126 charts refused to render and the report
+// said nothing, so every one of those applications read as clean.
+func TestHelmRenderFailureIsReported(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	root := t.TempDir()
+	// A chart that declares a dependency it does not vendor: helm template refuses, which is the single most
+	// common failure on a real umbrella chart.
+	chart := filepath.Join(root, "app")
+	if err := os.MkdirAll(filepath.Join(chart, "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"Chart.yaml":            "apiVersion: v2\nname: app\nversion: 0.1.0\ndependencies:\n  - name: webapp\n    version: 1.0.0\n    repository: https://example.invalid/charts\n",
+		"values.yaml":           "replicaCount: 1\n",
+		"templates/deploy.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: app\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: app:1\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(chart, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := New().WithHelmDirect().ScanConfigsReport(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ScanConfigsReport: %v", err)
+	}
+	if report.UnrenderedCharts != 1 {
+		t.Fatalf("an unrenderable chart must be counted, got %d", report.UnrenderedCharts)
+	}
+	if len(report.ChartRenderReasons) == 0 || !strings.Contains(report.ChartRenderReasons[0], "dependency") {
+		t.Errorf("the reason must name the missing dependency so a reader can fix it, got %v", report.ChartRenderReasons)
+	}
+}
+
+// A chart that renders is not reported as unrenderable, or the warning becomes noise on every repository.
+func TestHelmRenderSuccessReportsNoFailure(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	root := t.TempDir()
+	chart := filepath.Join(root, "app")
+	if err := os.MkdirAll(filepath.Join(chart, "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"Chart.yaml":            "apiVersion: v2\nname: app\nversion: 0.1.0\n",
+		"values.yaml":           "image: app:1\n",
+		"templates/deploy.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: app\n  namespace: prod\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: {{ .Values.image }}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(chart, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := New().WithHelmDirect().ScanConfigsReport(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ScanConfigsReport: %v", err)
+	}
+	if report.UnrenderedCharts != 0 {
+		t.Errorf("a chart that renders must not be counted as unrenderable: %v", report.ChartRenderReasons)
+	}
+	if len(report.Findings) == 0 {
+		t.Error("the rendered chart's Deployment must still produce findings")
+	}
+}
+
+// A mutable tag plus a cached image means nobody can say what is running: the kubelet keeps whatever it pulled
+// first and the tag has since moved. Pinning by digest makes IfNotPresent correct, so the rule is conditional
+// rather than the unconditional "always pull" check other scanners ship.
+func TestKubernetesImagePullPolicyOnlyWhenTagIsMutable(t *testing.T) {
+	cached := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: app:1.0
+      imagePullPolicy: IfNotPresent
+`
+	if _, ok := ruleIDs(scan(t, map[string]string{"a.yaml": cached}))["kubernetes-image-pull-policy-cached"]; !ok {
+		t.Error("a tag-referenced image with a caching pull policy must be flagged")
+	}
+
+	// Digest-pinned: IfNotPresent is the correct setting and must not be flagged.
+	pinned := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: app:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+      imagePullPolicy: IfNotPresent
+`
+	if f, bad := ruleIDs(scan(t, map[string]string{"b.yaml": pinned}))["kubernetes-image-pull-policy-cached"]; bad {
+		t.Errorf("a digest-pinned image makes IfNotPresent correct: %+v", f)
+	}
+
+	// imagePullPolicy: Always is fine even on a mutable tag.
+	always := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: app:1.0
+      imagePullPolicy: Always
+`
+	if _, bad := ruleIDs(scan(t, map[string]string{"c.yaml": always}))["kubernetes-image-pull-policy-cached"]; bad {
+		t.Error("imagePullPolicy: Always must not be flagged")
+	}
+}
+
+// A Helm LIBRARY chart ships template helpers for other charts and declares no resources of its own, so
+// `helm template` refusing it is correct. Counting it as a chart the scan could not cover reported a coverage
+// gap that does not exist: it accounted for 2 of the warnings on a live chart repository.
+func TestHelmLibraryChartIsNotACoverageGap(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	root := t.TempDir()
+	chart := filepath.Join(root, "common")
+	if err := os.MkdirAll(filepath.Join(chart, "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"Chart.yaml":             "apiVersion: v2\nname: common\nversion: 1.0.0\ntype: library\n",
+		"values.yaml":            "{}\n",
+		"templates/_helpers.tpl": "{{- define \"common.name\" -}}app{{- end -}}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(chart, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := New().WithHelmDirect().ScanConfigsReport(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ScanConfigsReport: %v", err)
+	}
+	if report.UnrenderedCharts != 0 {
+		t.Errorf("a library chart is not installable by design and must not count as a gap: %v", report.ChartRenderReasons)
+	}
+}
+
+// A workload with no liveness probe is never restarted when it wedges, and with no readiness probe its Service
+// routes traffic before it can serve. Checkov reports 224 of these across the estate where this engine had no
+// rule at all.
+func TestKubernetesProbesAndLowUID(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: prod
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: myapp:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+          securityContext:
+            runAsUser: 1000
+`
+	got := ruleIDs(scan(t, map[string]string{"deploy.yaml": manifest}))
+	for _, id := range []string{"kubernetes-no-liveness-probe", "kubernetes-no-readiness-probe", "kubernetes-low-run-as-user"} {
+		if _, ok := got[id]; !ok {
+			t.Errorf("expected %s to fire, got %v", id, keys(got))
+		}
+	}
+	// runAsUser IS set, so the absent-runAsUser rule must stay quiet: the two describe different defects.
+	if _, bad := got["kubernetes-no-run-as-user"]; bad {
+		t.Error("an explicit runAsUser must not also trigger the missing-runAsUser rule")
+	}
+}
+
+// Declared probes and a high UID are the correct configuration and must be quiet, or every hardened workload
+// collects three findings it cannot act on.
+func TestKubernetesProbesAndHighUIDAreQuiet(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: prod
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: myapp:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          readinessProbe:
+            exec:
+              command: ["/bin/ready"]
+          securityContext:
+            runAsUser: 10001
+`
+	got := ruleIDs(scan(t, map[string]string{"deploy.yaml": manifest}))
+	for _, id := range []string{"kubernetes-no-liveness-probe", "kubernetes-no-readiness-probe", "kubernetes-low-run-as-user"} {
+		if _, bad := got[id]; bad {
+			t.Errorf("%s must not fire on a correctly configured container", id)
+		}
+	}
+}
+
+// runAsUser: 0 is explicit root, which kubernetes-run-as-root already reports at a higher severity. The low-UID
+// rule must not pile a second finding onto the same line.
+func TestKubernetesLowUIDDoesNotDoubleReportRoot(t *testing.T) {
+	manifest := `apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+  namespace: prod
+spec:
+  containers:
+    - name: app
+      image: app:1.0@sha256:5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03
+      securityContext:
+        runAsUser: 0
+`
+	got := ruleIDs(scan(t, map[string]string{"pod.yaml": manifest}))
+	if _, bad := got["kubernetes-low-run-as-user"]; bad {
+		t.Error("explicit root is reported by kubernetes-run-as-root; the low-UID rule must not double-report it")
+	}
+	if _, ok := got["kubernetes-run-as-root"]; !ok {
+		t.Error("explicit root must still be reported")
+	}
 }

@@ -41,6 +41,7 @@ type Scanner struct {
 }
 
 var _ ports.MisconfigScanner = (*Scanner)(nil)
+var _ ports.MisconfigReporter = (*Scanner)(nil)
 
 // New returns a scanner with the default configuration. Helm rendering is OFF by default (no runner, not
 // trusted-local): `helm template` executes an untrusted chart, so a caller must opt in with WithHelmRunner
@@ -86,11 +87,23 @@ const (
 	cfgCompose
 	cfgGithubActions
 	cfgBicep
+	cfgSpringConfig
+	cfgOpenAPI
+	cfgGitLabCI
+	cfgNginx
 )
 
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
 // Best-effort: an unreadable or unparsable file is skipped.
 func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.MisconfigRawFinding, error) {
+	report, err := s.ScanConfigsReport(ctx, root)
+	return report.Findings, err
+}
+
+// ScanConfigsReport is the reporting form: the same findings plus what the scan could NOT evaluate. A Helm
+// chart that refuses to render contributes no findings, and without this the caller cannot tell that apart
+// from a chart with nothing wrong.
+func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.MisconfigScanReport, error) {
 	var out []ports.MisconfigRawFinding
 	var kubernetes k8sScanResult
 	// Kustomize (opt-in, like Helm): render each ROOT kustomization and scan the output. A manifest is
@@ -152,8 +165,9 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		data []byte
 	}
 	var tfFiles []tfFile
-	count := 0  // config files actually scanned
-	walked := 0 // total tree entries visited
+	count := 0         // config files actually scanned
+	walked := 0        // total tree entries visited
+	truncated := false // set when a cap stopped the walk, so the caller never reads a bounded scan as complete
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -163,6 +177,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		}
 		walked++
 		if walked > maxEntries {
+			truncated = true
 			return filepath.SkipAll // a pathologically large tree: stop walking regardless of file type
 		}
 		if d.IsDir() {
@@ -192,10 +207,11 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		}
 		kind := classifyName(d.Name())
 		isTFVars := isTFVarsName(d.Name())
-		if kind == cfgNone && !isTFVars && !maybeYAML(d.Name()) && !maybeCFN(d.Name()) {
+		if kind == cfgNone && !isTFVars && !maybeYAML(d.Name()) && !maybeCFN(d.Name()) && !isSpringConfigName(d.Name()) && !isNginxConfName(path) {
 			return nil
 		}
 		if count >= maxFiles {
+			truncated = true
 			return filepath.SkipAll
 		}
 		count++
@@ -220,6 +236,12 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			switch {
 			case isGitHubActionsPath(rel):
 				kind = cfgGithubActions
+			case isSpringConfigName(d.Name()) && looksSpringConfig(data):
+				kind = cfgSpringConfig
+			case isNginxConfName(path) && looksNginx(data):
+				kind = cfgNginx
+			case looksOpenAPI(data):
+				kind = cfgOpenAPI
 			case looksCompose(data):
 				kind = cfgCompose
 			case looksKubernetes(data):
@@ -256,11 +278,19 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 			out = append(out, scanCompose(rel, data)...)
 		case cfgGithubActions:
 			out = append(out, scanGitHubActions(rel, data)...)
+		case cfgSpringConfig:
+			out = append(out, scanSpringConfig(rel, data)...)
+		case cfgOpenAPI:
+			out = append(out, scanOpenAPI(rel, data)...)
+		case cfgGitLabCI:
+			out = append(out, scanGitLabCI(rel, data)...)
+		case cfgNginx:
+			out = append(out, scanNginx(rel, data)...)
 		}
 		return nil
 	})
 	if walkErr != nil {
-		return out, fmt.Errorf("misconfig scan: %w", walkErr) // e.g. context cancellation
+		return ports.MisconfigScanReport{Findings: out}, fmt.Errorf("misconfig scan: %w", walkErr) // e.g. context cancellation
 	}
 	// Second Terraform pass: resolve each directory's variable/local map (unambiguous literals only) and
 	// scan each deferred .tf file with its own directory's map.
@@ -273,7 +303,13 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 	}
 	out = append(out, kubernetes.findings...)
 	out = append(out, networkPolicyFindings(kubernetes)...)
-	return out, nil
+	out = append(out, secretReaderFindings(kubernetes)...)
+	return ports.MisconfigScanReport{
+		Findings:           out,
+		UnrenderedCharts:   kubernetes.chartRenderFailures,
+		ChartRenderReasons: kubernetes.chartRenderReasons,
+		Truncated:          truncated,
+	}, nil
 }
 
 // isTFVarsName recognises an HCL Terraform variable-values file (terraform.tfvars, *.auto.tfvars, or any
@@ -298,6 +334,11 @@ func classifyName(name string) configKind {
 	}
 	if isComposeName(name) {
 		return cfgCompose
+	}
+	// A pipeline file is recognised by name: a template repository's `<name>.gitlab-ci.yml` is included
+	// verbatim into other projects' pipelines, so it is the same surface as the root file.
+	if isGitLabCIName(name) {
+		return cfgGitLabCI
 	}
 	return cfgNone
 }

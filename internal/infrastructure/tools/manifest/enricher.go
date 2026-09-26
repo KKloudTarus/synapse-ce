@@ -125,6 +125,7 @@ type lockChecksumParser interface {
 var checksumLockParsers = map[string]lockChecksumParser{
 	"package-lock.json": ownsbom.NPM{},
 	"pnpm-lock.yaml":    ownsbom.Pnpm{},
+	"bun.lock":          ownsbom.Bun{},
 	"yarn.lock":         ownsbom.Yarn{},
 	"cargo.lock":        ownsbom.Cargo{},
 	"pipfile.lock":      ownsbom.Pipfile{},

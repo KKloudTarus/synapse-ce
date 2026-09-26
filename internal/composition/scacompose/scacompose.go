@@ -172,7 +172,13 @@ func BuildExecution(cfg config.Config, log *slog.Logger, advisoryStore ports.Adv
 	}
 	switch producerKind {
 	case SBOMProducerOwned:
-		reg, rerr := ownsbom.DefaultRegistry()
+		// POM fetching closes the Maven tree on a machine that has never run Maven, which is what a CI runner
+		// is. Under --offline it stays nil, matching what the flag promises for every registry resolver.
+		ownOpts := ownsbom.RegistryOptions{}
+		if !cfg.Offline {
+			ownOpts.MavenPOMFetcher = ownsbom.NewHTTPPOMFetcher(ownsbom.DefaultPOMCacheDir())
+		}
+		reg, rerr := ownsbom.DefaultRegistryWith(ownOpts)
 		if rerr != nil {
 			return Execution{}, fmt.Errorf("build ownsbom SBOM producer: %w", rerr)
 		}
@@ -443,7 +449,10 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 		log.Info("coarse JVM class-reachability ENABLED (deprioritizes findings on unreferenced deps)")
 	}
 	if cfg.SASTEnabled {
-		svc.SetSASTAnalyzer(sast.New()) // deterministic pattern-SAST in the scan pipeline
+		// SYNAPSE_SAST_SOURCE_BUDGET_BYTES raises the source retained for cross-file context. The default
+		// never binds on an ordinary repository; on a monorepo the unretained part of the tree is scanned by
+		// no rule, and the scan reports how many files that was.
+		svc.SetSASTAnalyzer(sast.New().WithSourceBudget(cfg.SASTSourceBudgetBytes))
 		log.Info("pattern-SAST ENABLED (weak crypto / hardcoded secrets / insecure config)")
 	}
 	if cfg.SecretScanEnabled {

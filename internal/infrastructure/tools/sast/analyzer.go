@@ -22,13 +22,22 @@ import (
 )
 
 const (
-	maxFileBytes           = 1 << 20 // skip files larger than 1 MiB (generated/data, not hand-written source)
-	maxNotebookBytes       = 16 << 20
-	maxSourceFiles         = 100_000  // cap retained source units; each notebook code cell is one unit
-	maxRetainedSourceBytes = 64 << 20 // cap source held for cross-file context analysis
-	maxLineBytes           = 4096     // skip minified/blob lines
-	maxFindings            = 500      // cap unique hits so a hostile/huge tree can't flood the report
-	maxFindingsPerFile     = 50       // per-file share of the budget so one huge file can't consume it all
+	maxFileBytes     = 1 << 20 // skip files larger than 1 MiB (generated/data, not hand-written source)
+	maxNotebookBytes = 16 << 20
+	maxSourceFiles   = 100_000 // cap retained source units; each notebook code cell is one unit
+	maxLineBytes     = 4096    // skip minified/blob lines
+	// maxFindings caps unique hits so a hostile or huge tree cannot flood the report.
+	//
+	// It stays at 500 deliberately, and the measurement is worth recording because the obvious change is a
+	// trap. Raising the retained-source budget on a 26,672-file monorepo cut the unscanned count to 4,942 for
+	// 21 extra seconds (296s to 317s), and the finding count stayed at exactly 500: this cap, not the budget,
+	// is what binds there. Raising it to 10,000 took the same scan past 1,800 seconds before it was abandoned,
+	// because the cap is also what stops the rules running once the report is full, so lifting it makes every
+	// remaining file match every rule. Past the default ten-minute stage budget the stage is cut and reports a
+	// lower bound anyway, which is worse than an honest 500 with the truncation stated. A higher cap needs the
+	// matcher to get cheaper first, not a bigger number.
+	maxFindings        = 500
+	maxFindingsPerFile = 50 // per-file share of the budget so one huge file can't consume it all
 
 	// Minified/bundled-content probe. A generated bundle is not hand-written source: every hit in it
 	// is noise, and a single 200 KB line burns the whole finding budget.
@@ -271,6 +280,8 @@ func isGeneratedSource(lines []string) bool {
 type Analyzer struct {
 	rules []rule
 	byID  map[string]*rule
+	// sourceBudget is the bytes of source retained for cross-file context analysis. Zero means the default.
+	sourceBudget int64
 }
 
 type sourceFile struct {
@@ -284,9 +295,21 @@ type sourceFile struct {
 // New returns an analyzer with the built-in tier-1 rule set.
 func New() *Analyzer {
 	rules := canonicalBuiltinRules(builtinRules())
-	a := &Analyzer{rules: rules, byID: make(map[string]*rule, len(rules))}
+	a := &Analyzer{rules: rules, byID: make(map[string]*rule, len(rules)), sourceBudget: defaultSourceBudget()}
 	for i := range a.rules {
 		a.byID[a.rules[i].id] = &a.rules[i]
+	}
+	return a
+}
+
+// WithSourceBudget raises or lowers the bytes of source the analyzer retains for cross-file context.
+//
+// The default is derived from the memory this process may use (see budget.go), so it is one eighth of the
+// cgroup limit or the host total, floored at the historical 64 MiB and capped at 512 MiB. A value of zero or
+// less keeps that default, because a budget of nothing would silently scan nothing.
+func (a *Analyzer) WithSourceBudget(bytes int64) *Analyzer {
+	if bytes > 0 {
+		a.sourceBudget = bytes
 	}
 	return a
 }
@@ -303,7 +326,7 @@ func (a *Analyzer) Name() string { return "synapse-pattern-sast" }
 // cancellation and never aborts the whole scan on a single unreadable file. Callers that need to
 // know whether a safety cap cut the scan short use AnalyzeSourceReport.
 func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SASTRawFinding, error) {
-	report, err := a.analyzeSource(ctx, root, maxSourceFiles, maxRetainedSourceBytes)
+	report, err := a.analyzeSource(ctx, root, maxSourceFiles, a.budget())
 	return report.Findings, err
 }
 
@@ -311,7 +334,15 @@ func (a *Analyzer) AnalyzeSource(ctx context.Context, root string) ([]ports.SAST
 // safety cap (per-file finding budget, whole-tree finding budget, retained-source budget, or an
 // oversized line) stopped the scan, so Findings is a lower bound and must not back a clean result.
 func (a *Analyzer) AnalyzeSourceReport(ctx context.Context, root string) (ports.SASTSourceReport, error) {
-	return a.analyzeSource(ctx, root, maxSourceFiles, maxRetainedSourceBytes)
+	return a.analyzeSource(ctx, root, maxSourceFiles, a.budget())
+}
+
+// budget is the retained-source budget, falling back to the derived default for a zero-valued Analyzer.
+func (a *Analyzer) budget() int64 {
+	if a.sourceBudget > 0 {
+		return a.sourceBudget
+	}
+	return defaultSourceBudget()
 }
 
 func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int, maxBytes int64) (ports.SASTSourceReport, error) {
@@ -325,9 +356,18 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	// is reported rather than folded into Truncated: excluding a bundle is a scope decision, and a
 	// flag that is true for every real repository tells the caller nothing.
 	skippedFiles := 0
+	// unscannedFiles counts files the walk reached but could NOT retain, because the source budget was
+	// already full. They differ from skippedFiles, which are files deliberately excluded as vendored,
+	// minified or generated.
+	unscannedFiles := 0
 	appendFile := func(file sourceFile, bytes int64) bool {
 		if len(files) >= maxFiles || bytes > maxBytes-retainedBytes {
-			truncated = true // the tree outgrew the retained-source budget: results are a lower bound
+			// The tree outgrew the retained-source budget. Saying only "lower bound" leaves the reader
+			// unable to judge how much was missed: a 2.1 GB monorepo holds 163 MiB of source against a
+			// 64 MiB budget, so roughly 60% of it went unscanned and every rule reported nothing there.
+			// Counting the dropped files turns that into a number the reader can act on.
+			truncated = true
+			unscannedFiles++
 			return false
 		}
 		files = append(files, file)
@@ -416,33 +456,70 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	if err != nil {
 		return ports.SASTSourceReport{}, err
 	}
-	out := make([]ports.SASTRawFinding, 0, maxFindings)
+	// The report budget is spent on SECURITY findings before code-quality ones. Walk order alone used to
+	// decide, and on a real 971-file Spring service that meant 417 low-severity code smells consumed the
+	// budget and a CWE-327 weak-hash call in a later directory was never reported. The scan said so (the
+	// caller gets Truncated and a lower-bound warning), but an honest lower bound that drops the security
+	// finding and keeps "print used instead of a logger" is still spending the budget on the wrong thing.
+	//
+	// Both buckets are filled across the WHOLE tree, so no file is left unscanned for want of budget; only
+	// the quality bucket is trimmed at the end, and only once security has taken what it needs.
+	// Pre-allocated to the old cap rather than the new one: almost every repository stays far below it, and
+	// reserving 10,000 slots per scan would cost more than the growth it saves.
+	security := make([]ports.SASTRawFinding, 0, maxFindings)
+	quality := make([]ports.SASTRawFinding, 0, maxFindings)
 	seen := make(map[string]bool, maxFindings)
+	droppedQuality := false
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return ports.SASTSourceReport{}, err
 		}
 		// The per-file cap is applied BEFORE the tree-wide one so a single generated or vendored file
 		// that matches thousands of times cannot spend the whole report budget on itself.
-		limit := min(maxFindingsPerFile, maxFindings-len(out))
+		limit := min(maxFindingsPerFile, maxFindings-len(security))
+		if limit <= 0 {
+			// Security alone has filled the report. Anything further would be dropped, so stop rather
+			// than pay to scan it, and say the result is a lower bound.
+			truncated = true
+			break
+		}
 		hits, status, scanErr := a.scanLines(ctx, file.Rel, file.Ext, file.Lines, project, seen, limit)
-		out = append(out, hits...)
 		if scanErr != nil {
 			return ports.SASTSourceReport{}, scanErr
 		}
-		truncated = truncated || status.findingsTruncated || status.lineLimitReached || status.statementLimitReached
-		if len(out) >= maxFindings {
-			// Only truncated when a file was actually left unscanned. Landing exactly on the
-			// budget with the last file complete is a complete scan, and reporting it as a lower
-			// bound would make every caller distrust a result that is in fact exhaustive.
-			truncated = truncated || file.Rel != files[len(files)-1].Rel
-			break
+		for _, hit := range hits {
+			if isSecurityFinding(hit) {
+				security = append(security, hit)
+				continue
+			}
+			if len(quality) < maxFindings {
+				quality = append(quality, hit)
+			} else {
+				droppedQuality = true
+			}
 		}
+		truncated = truncated || status.findingsTruncated || status.lineLimitReached || status.statementLimitReached
 	}
 	if err := ctx.Err(); err != nil {
 		return ports.SASTSourceReport{}, err
 	}
-	return ports.SASTSourceReport{Findings: dedupeFindings(out), Truncated: truncated, SkippedFiles: skippedFiles}, nil
+	out := security
+	if room := maxFindings - len(out); room > 0 {
+		if room < len(quality) {
+			droppedQuality = true
+			quality = quality[:room]
+		}
+		out = append(out, quality...)
+	} else if len(quality) > 0 {
+		droppedQuality = true
+	}
+	return ports.SASTSourceReport{
+		Findings:       dedupeFindings(out),
+		Truncated:      truncated || droppedQuality,
+		SkippedFiles:   skippedFiles,
+		UnscannedFiles: unscannedFiles,
+		SourceBudget:   maxBytes,
+	}, nil
 }
 
 func sourceLinesBytes(lines []string) int64 {
@@ -617,6 +694,9 @@ func (a *Analyzer) scanLines(ctx context.Context, rel, ext string, lines []strin
 			}
 			if matched && isPHP && phpRuleOwnsGeneric(r.id, a, ext, phpText, matchText) {
 				continue
+			}
+			if matched && r.blockFn != nil && !r.blockFn(forwardBlock(lines, i)) {
+				continue // the bounded block the match opens answers the question the line could not
 			}
 			if matched {
 				h := ports.SASTRawFinding{
@@ -914,4 +994,53 @@ func dedupeFindings(in []ports.SASTRawFinding) []ports.SASTRawFinding {
 		out = append(out, h)
 	}
 	return out
+}
+
+// isSecurityFinding reports whether a raw hit is a security weakness rather than a maintainability or
+// reliability smell, so the report budget can be spent on security first. RuleType carries the rule's own
+// classification and an empty value means a security vulnerability, which is the documented default in
+// ports.SASTRawFinding. A security_hotspot counts: it is a control worth a human look, not a style note.
+func isSecurityFinding(f ports.SASTRawFinding) bool {
+	switch f.RuleType {
+	case "", "vulnerability", "security_hotspot":
+		return true
+	}
+	return f.RuleQuality == "security"
+}
+
+// forwardBlockLines caps how far a blockFn rule reads past its match. A struct or options literal that
+// runs longer than this is not the shape these rules are written for, and an unbounded read would let one
+// pathological file dominate the scan.
+const forwardBlockLines = 24
+
+// forwardBlock returns the brace-balanced text a match at index at opens, bounded by forwardBlockLines. It
+// stops as soon as the braces opened on the first line are closed, so an adjacent literal further down the
+// file cannot answer for this one. When the braces never balance within the cap the whole window is
+// returned, which keeps the rule fail-open (it reports) rather than silently clearing a real finding.
+func forwardBlock(lines []string, at int) string {
+	if at < 0 || at >= len(lines) {
+		return ""
+	}
+	var b strings.Builder
+	depth := 0
+	started := false
+	for i := at; i < len(lines) && i < at+forwardBlockLines; i++ {
+		b.WriteString(lines[i])
+		b.WriteByte('\n')
+		for _, c := range lines[i] {
+			switch c {
+			case '{', '(':
+				depth++
+				started = true
+			case '}', ')':
+				if depth > 0 {
+					depth--
+				}
+			}
+		}
+		if started && depth == 0 {
+			break
+		}
+	}
+	return b.String()
 }

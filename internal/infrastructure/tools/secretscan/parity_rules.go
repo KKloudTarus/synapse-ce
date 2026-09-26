@@ -12,7 +12,48 @@ import (
 // redaction, keyword-prefilter, entropy, allow-list, and decode-pass behavior.
 func defaultRules() []rule {
 	base := baseDefaultRules()
-	return append(base, parityExpansionRules()...)
+	return applyCommentScanning(append(base, parityExpansionRules()...))
+}
+
+// commentScannedRuleIDs are the rules whose unique provider prefix or armour header IS the signal, so they
+// read the file with its comments intact. Every other rule sees comments blanked, because a generic or
+// keyword-anchored pattern fires constantly on documentation and example values.
+//
+// The reason these are different: a real credential commented out is still committed, still in the history,
+// and usually still live. Found on a real service, where an AWS access key id sat on a commented-out YAML
+// line and the scan reported the file clean while a competitor reported the key. Prose cannot produce an
+// AKIA, a ghp_, or a PEM header, so admitting comments here costs no precision.
+//
+// Deliberately excluded: jwt (a structural eyJ shape, and a documented example token is the most common
+// thing in a comment), every keyword-anchored generic rule, and the entropy rules.
+// commented-credential is the one keyword-anchored rule admitted, and only in CONFIGURATION files: a
+// commented-out `password:` in a values.yaml is the setting that was live until someone commented it out,
+// while the same shape in source code is dead code or a documented example and stays masked.
+var commentScannedRuleIDs = map[string]bool{
+	"commented-credential": true,
+	"aws-access-key-id":    true, "aws-secret-access-key": true,
+	"github-token": true, "github-fine-grained-pat": true, "gitlab-pat": true,
+	"slack-token": true, "slack-webhook-url": true,
+	"google-api-key": true, "gcp-service-account-key": true,
+	"private-key": true, "putty-private-key": true, "age-secret-key": true,
+	"azure-storage-key": true, "npm-token": true, "pypi-token": true, "rubygems-token": true,
+	"stripe-secret-key": true, "dockerhub-pat": true, "stripe-restricted-key": true,
+	"twilio-api-key": true, "sendgrid-api-key": true, "mailgun-api-key": true, "mailchimp-api-key": true,
+	"openai-api-key": true, "anthropic-api-key": true, "digitalocean-token": true,
+	"shopify-token": true, "square-token": true, "telegram-bot-token": true,
+	"doppler-token": true, "planetscale-token": true, "vault-token": true,
+	"terraform-cloud-token": true, "huggingface-token": true, "grafana-token": true,
+}
+
+// applyCommentScanning marks the provider rules that read comments. It is applied once over the assembled
+// ruleset rather than written on each literal, so the decision is one reviewable list.
+func applyCommentScanning(rules []rule) []rule {
+	for i := range rules {
+		if commentScannedRuleIDs[rules[i].id] {
+			rules[i].scanComments = true
+		}
+	}
+	return rules
 }
 
 func parityExpansionRuleIDs() []string {

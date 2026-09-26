@@ -151,6 +151,27 @@ func baseSecretRules() []rule.Rule {
 			RemediationEffort:   15,
 			Detection:           rule.DetectionPattern,
 		},
+		{
+			Key:             "commented-credential",
+			Name:            "Credential left in a comment",
+			Language:        "Secrets",
+			Type:            rule.TypeVulnerability,
+			Qualities:       []rule.Quality{rule.QualitySecurity},
+			DefaultSeverity: shared.SeverityMedium,
+			Tags:            []string{"credentials"},
+			CWE:             []string{"CWE-798"},
+			OWASP:           []string{"A07:2021"},
+			Description:     "Detects a credential assignment on a line that is commented out.",
+			Rationale: "Commenting a setting out does not remove its value from the repository: it stays in the working tree and in every " +
+				"commit that carried it, readable by everyone with access, and a commented-out credential is usually the one that was live " +
+				"until recently. Comments are blanked before the other rules run so that prose and examples do not surface as live findings, " +
+				"which is why this class needs a rule of its own.\n\nSource: https://cwe.mitre.org/data/definitions/798.html",
+			Remediation:         "Delete the line and rotate the credential, because removing it now does not remove it from the history.",
+			CompliantExample:    "# dbPassword is read from DB_PASSWORD in the environment",
+			NoncompliantExample: "# dbPassword = \"V3ryC0mpl3xP@ssw0rd9876\"",
+			RemediationEffort:   15,
+			Detection:           rule.DetectionPattern,
+		},
 		secretRule("generic-high-entropy", "High-entropy string", shared.SeverityMedium, "CWE-798", "generic", "Detects a standalone high-entropy string that looks like a credential even with no adjacent keyword.",
 			"A high-entropy token committed to source is frequently an API key, access token, or password; the keyword-free detector catches bare values the keyword-anchored rule misses. Hits are quarantined for verification rather than gating.", "https://cwe.mitre.org/data/definitions/798.html",
 			"apiToken := os.Getenv(\"API_TOKEN\")", "x := \"<REDACTED_HIGH_ENTROPY_TOKEN>\""),

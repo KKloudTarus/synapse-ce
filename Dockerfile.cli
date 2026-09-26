@@ -1,24 +1,42 @@
 # syntax=docker/dockerfile:1
 #
-# Release image for synapse-cli. Built by goreleaser (.goreleaser.yaml `dockers`) from the prebuilt,
-# cross-compiled binary in the build context, so there is NO Go build here. Ships syft (required for any
-# scan) and grype (offline vulnerability DB) so a user can scan with zero host install:
+# Release image for synapse-cli:
 #
 #   docker run --rm -v "$PWD:/scan:ro" ghcr.io/kkloudtarus/synapse-cli scan /scan --fail-on high
 #
-# This targets the pure-Go SCA/SAST/secret/misconfig path. Sandboxed execution and JVM-from-source
-# resolution need a Linux host with bubblewrap and a JDK/Maven/Gradle, which a plain distroless image
-# does not provide (matching deploy/Dockerfile's `api` target).
-FROM anchore/syft:v1.45.1 AS syft
+# It builds the binary here rather than consuming a prebuilt one, so a multi-platform build needs no
+# per-platform artifact plumbing: every command is pure Go with CGO_ENABLED=0, so one native builder
+# cross-compiles both architectures and neither is emulated.
+#
+# SBOM generation is the OWNED engine (pure Go, in-process), so no third-party SBOM scanner is installed.
+# Grype ships as an OPT-IN vulnerability source and nothing selects it by default: without a synced advisory
+# store it is the only way this image can match OS-package CVEs, and a scan that has neither says so rather
+# than reporting a clean image. Turn it on with SYNAPSE_DETECTION_SOURCES=owned,grype.
+#
+# This targets the pure-Go SCA/SAST/secret/misconfig path. Sandboxed execution and JVM-from-source resolution
+# need a Linux host with bubblewrap and a JDK/Maven/Gradle, which a distroless image does not provide (that is
+# deploy/Dockerfile's `full` target).
+
+FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine AS build
+ARG TARGETOS
+ARG TARGETARCH
+# VERSION is the release tag, embedded so `synapse-cli version` and every report's tool_versions match the
+# image tag. It defaults to "dev" so a local build of this file is honest about not being a release.
+ARG VERSION=dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build -trimpath \
+    -ldflags "-s -w -X github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version=${VERSION}" \
+    -o /out/synapse-cli ./cmd/synapse-cli
+
 FROM anchore/grype:v0.115.0 AS grype
 
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=syft /syft /usr/local/bin/syft
 COPY --from=grype /grype /usr/local/bin/grype
-# The cross-compiled synapse-cli for this image's platform, supplied by goreleaser at the context root.
-COPY synapse-cli /usr/local/bin/synapse-cli
-ENV SYNAPSE_SYFT_BIN=/usr/local/bin/syft \
-    SYNAPSE_GRYPE_BIN=/usr/local/bin/grype
+COPY --from=build /out/synapse-cli /usr/local/bin/synapse-cli
+ENV SYNAPSE_GRYPE_BIN=/usr/local/bin/grype
 USER nonroot:nonroot
 WORKDIR /scan
 ENTRYPOINT ["/usr/local/bin/synapse-cli"]

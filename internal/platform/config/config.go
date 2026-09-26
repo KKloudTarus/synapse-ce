@@ -77,6 +77,10 @@ type Config struct {
 	// DBAutoMigrate controls embedded migrations for long-running services. A dedicated
 	// synapse-migrate job may own migrations while services rely on readiness instead.
 	DBAutoMigrate bool
+	// AlpineSecdbURL is the base URL of the apk secdb mirror `sync-advisories --remote-secdb` ingests. It is
+	// configurable so an air-gapped estate can point it at an internal mirror of the same layout.
+	AlpineSecdbURL string
+
 	// SyftBin is the Syft executable used for SBOM generation (shell-out).
 	SyftBin string
 	// SBOMProducer selects the SBOM-generation producer: "ownsbom" (default – the detection-independent
@@ -159,6 +163,11 @@ type Config struct {
 	ProjectSourceMaxFileBytes     int64
 	ProjectSourceMaxFiles         int
 	ProjectSourceMaxBytes         int64
+	// SASTSourceBudgetBytes is the source the pattern SAST analyzer retains for cross-file context. The
+	// default bounds memory on an untrusted tree and never binds on an ordinary repository; it DOES bind on a
+	// monorepo, where the unretained part of the tree is scanned by no rule at all. 0 keeps the built-in
+	// default.
+	SASTSourceBudgetBytes int64
 	// ProjectGitComparisonDepth bounds history fetched to resolve an immutable
 	// Code comparison base; comparison degrades gracefully when insufficient.
 	ProjectGitComparisonDepth int
@@ -847,6 +856,7 @@ func Load() Config {
 		DBMigrationDSN:                   getenv("SYNAPSE_DB_MIGRATION_DSN", ""),
 		DBHaltWriterDSN:                  getenv("SYNAPSE_DB_HALT_WRITER_DSN", ""),
 		DBAutoMigrate:                    getbool("SYNAPSE_DB_AUTO_MIGRATE", true),
+		AlpineSecdbURL:                   getenv("SYNAPSE_ALPINE_SECDB_URL", ""),
 		SyftBin:                          getenv("SYNAPSE_SYFT_BIN", "syft"),
 		SBOMProducer:                     getenv("SYNAPSE_SBOM_PRODUCER", "ownsbom"),
 		GrypeBin:                         getenv("SYNAPSE_GRYPE_BIN", "grype"),
@@ -879,6 +889,7 @@ func Load() Config {
 		ProjectSourceMaxFileBytes:     getint64("SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES", 2<<20),
 		ProjectSourceMaxFiles:         getint("SYNAPSE_PROJECT_SOURCE_MAX_FILES", 10_000),
 		ProjectSourceMaxBytes:         getint64("SYNAPSE_PROJECT_SOURCE_MAX_BYTES", 500<<20),
+		SASTSourceBudgetBytes:         getint64("SYNAPSE_SAST_SOURCE_BUDGET_BYTES", 0),
 		ProjectGitComparisonDepth:     getint("SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH", 256),
 		BlobEndpoint:                  getenv("SYNAPSE_BLOB_ENDPOINT", ""),
 		BlobAccessKey:                 getenv("SYNAPSE_BLOB_ACCESS_KEY", ""),

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -621,4 +622,188 @@ func TestGenericHighEntropyDefersToKeywordRules(t *testing.T) {
 			t.Errorf("a benign hash context (%q) must not fire generic-high-entropy: %+v", ctx, r)
 		}
 	}
+}
+
+// A private key EMBEDDED in a source-code string literal is a real key. The stand-down for a one-line PEM
+// constant used to drop it: the header does not start the line, the END marker sits beside it, and the
+// newlines are escaped, which are exactly the three marks a rule example carries. Found on live Java code,
+// where a GCP service-account JSON had been pasted into a constant and later deleted.
+func TestDetectsPrivateKeyEmbeddedInStringLiteral(t *testing.T) {
+	body := strings.Repeat("MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj", 6)
+	var b strings.Builder
+	b.WriteString("  \"private_key\": \"-----BEGIN ")
+	b.WriteString("PRIVATE KEY-----")
+	for i := 0; i < 6; i++ {
+		b.WriteString(`\n`)
+		b.WriteString(body[i*64 : (i+1)*64])
+	}
+	b.WriteString(`\n-----END PRIVATE KEY-----\n"`)
+
+	rs := scanDir(t, map[string]string{"GoogleCloudConfig.java": "String creds = \"{\" +\n" + b.String() + " +\n\"}\";\n"})
+	if hasRule(rs, "private-key") == nil {
+		t.Errorf("an embedded private key block must be flagged, got %+v", rs)
+	}
+}
+
+// The stand-down still holds for a header with no key body beside it: a rule example, a delimiter constant,
+// a test name. Without this the embedded-key change would turn every such line into a critical finding.
+func TestSkipsPrivateKeyHeaderWithoutBody(t *testing.T) {
+	for name, line := range map[string]string{
+		"rules.go":  "var pemHeader = \"-----BEGIN " + "PRIVATE KEY-----\"\n",
+		"strip.go":  "s = strings.TrimPrefix(s, \"-----BEGIN " + "PRIVATE KEY-----\\n\")\n",
+		"names.txt": "case \"-----BEGIN " + "PRIVATE KEY----- to -----END PRIVATE KEY-----\":\n",
+	} {
+		rs := scanDir(t, map[string]string{name: line})
+		if r := hasRule(rs, "private-key"); r != nil {
+			t.Errorf("%s: a bodyless PEM header must not be flagged: %+v", name, r)
+		}
+	}
+}
+
+// A credential in an UNQUOTED YAML scalar is the shape a Spring, Rails or Helm deployment actually uses.
+// Requiring quotes meant the gating rule never fired on it: gitleaks found 25 distinct credentials this way
+// on one live repository that this scanner could not see.
+func TestGenericSecretUnquotedValues(t *testing.T) {
+	v := highEnt
+	for name, body := range map[string]string{
+		"application.yml":       "spring:\n  datasource:\n    password: " + v + "\n",
+		"application-dev.yml":   "oauth:\n  client-secret: " + v + "\n",
+		"config.yml":            "aws:\n  secret-key: " + v + "\n",
+		"app.properties":        "ORDER_DB_PASSWORD=" + v + "\n",
+		"values.yaml":           "api:\n  token: " + v + "  # inline comment after the value\n",
+		"secret_key_in_env.env": "SECRET=" + v + "\n",
+	} {
+		rs := scanDir(t, map[string]string{name: body})
+		if hasRule(rs, "generic-secret") == nil {
+			t.Errorf("%s: an unquoted credential must be flagged, got %+v", name, rs)
+		}
+	}
+}
+
+// A quoted value keeps working exactly as before, including the notebook-escaped form.
+func TestGenericSecretQuotedStillWorks(t *testing.T) {
+	for name, body := range map[string]string{
+		"a.json":  "{\"api_key\": \"" + highEnt + "\"}\n",
+		"b.go":    "password := \"" + highEnt + "\"\n",
+		"c.ipynb": "{\"cells\":[{\"cell_type\":\"code\",\"source\":[\"api_key = \\\"" + highEnt + "\\\"\\n\"]}]}\n",
+	} {
+		if hasRule(scanDir(t, map[string]string{name: body}), "generic-secret") == nil {
+			t.Errorf("%s: a quoted credential must still be flagged", name)
+		}
+	}
+}
+
+// Making the quotes optional exposed two shapes that are NOT credentials, and both must stay quiet or the
+// gating rule becomes noise on every config file and every source file.
+func TestGenericSecretUnquotedNonCredentials(t *testing.T) {
+	for name, body := range map[string]string{
+		// A path saying where the credential lives.
+		"compose.yml": "environment:\n  PASSWORD_FILE: /run/secrets/db_password\n",
+		// An identifier or constant standing in for the credential.
+		"Config.java": "String password = DEFAULT_DATABASE_PASSWORD;\n",
+		"conf.py":     "api_key = defaultClientSecretName\n",
+		// A Spring placeholder resolved at runtime.
+		"app.yml": "spring:\n  datasource:\n    password: ${DB_PASSWORD}\n",
+	} {
+		if f := hasRule(scanDir(t, map[string]string{name: body}), "generic-secret"); f != nil {
+			t.Errorf("%s: must not be flagged as a secret, got match %q", name, f.match)
+		}
+	}
+}
+
+// A value behind a frontend build tool's public prefix is inlined into the browser bundle, so it is
+// published to every visitor by construction. Found on live code as a Datadog RUM client token, which is
+// itself prefixed "pub" because it ships in page source.
+func TestGenericSecretSkipsClientBundleVariables(t *testing.T) {
+	v := highEnt
+	for _, line := range []string{
+		"REACT_APP_DATADOG_CLIENT_TOKEN=pub" + v + "\n",
+		"NEXT_PUBLIC_API_TOKEN=" + v + "\n",
+		"VITE_ANALYTICS_KEY=" + v + "\n",
+		"EXPO_PUBLIC_SENTRY_TOKEN=" + v + "\n",
+	} {
+		if f := hasRule(scanDir(t, map[string]string{".env": line}), "generic-secret"); f != nil {
+			t.Errorf("a client-bundle variable is public by construction: %q fired on %q", f.match, line)
+		}
+	}
+	// A private variable on the same file is still flagged, so the guard is about the prefix, not the file.
+	if hasRule(scanDir(t, map[string]string{".env": "API_TOKEN=" + v + "\n"}), "generic-secret") == nil {
+		t.Error("a non-public variable must still be flagged")
+	}
+	// A real provider credential behind a public prefix has already shipped: never gated.
+	if hasRule(scanDir(t, map[string]string{".env": "NEXT_PUBLIC_AWS=" + awsID + "\n"}), "aws-access-key-id") == nil {
+		t.Error("a provider-prefix credential must be flagged even behind a public variable prefix")
+	}
+	// The prefix must start a token; it must not match as a substring of another name.
+	if hasRule(scanDir(t, map[string]string{".env": "MY_VITE_SECRET=" + v + "\n"}), "generic-secret") == nil {
+		t.Error("the public prefix must not match mid-identifier")
+	}
+}
+
+// A value that tells the reader to replace it is a template. Both spellings were found on live code and
+// neither was covered by the existing "changeme" entry.
+func TestGenericSecretSkipsReplaceMeTemplates(t *testing.T) {
+	for name, body := range map[string]string{
+		"secrets.yaml": "ORCHESTRATOR_STATE_SECRET: \"REPLACE_ME_WITH_A_REAL_SECRET_32+\"\n",
+		"Dockerfile":   "ARG NEXTAUTH_SECRET=app-secret-change-in-production-2026\n",
+	} {
+		if f := hasRule(scanDir(t, map[string]string{name: body}), "generic-secret"); f != nil {
+			t.Errorf("%s: a replace-me template is not a credential, got %q", name, f.match)
+		}
+	}
+}
+
+// A PEM key block is ONE credential and the private-key rule already reports it at its header. Every base64
+// body line also satisfied the keyword-free entropy rule, so a 49-line SSH key inside an ArgoCD repository
+// manifest produced 49 entropy findings beside the one private-key finding, and the same block in git history
+// doubled that to 100 rows for one rotation. gitleaks reports it once.
+func TestPrivateKeyBodyDoesNotAlsoFireTheEntropyRule(t *testing.T) {
+	body := make([]string, 0, 30)
+	for i := 0; i < 30; i++ {
+		body = append(body, highEntropyLine(i))
+	}
+	manifest := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: repo\nstringData:\n  sshPrivateKey: |\n" +
+		"    -----BEGIN OPENSSH " + "PRIVATE KEY-----\n    " + strings.Join(body, "\n    ") +
+		"\n    -----END OPENSSH PRIVATE KEY-----\n"
+
+	rs := scanDir(t, map[string]string{"repo.yaml": manifest})
+	entropy := 0
+	privateKeys := 0
+	for _, r := range rs {
+		switch r.rule {
+		case "generic-high-entropy":
+			entropy++
+		case "private-key":
+			privateKeys++
+		}
+	}
+	if privateKeys != 1 {
+		t.Errorf("the key block must be reported once by private-key, got %d", privateKeys)
+	}
+	if entropy != 0 {
+		t.Errorf("the key body must not also fire the entropy rule %d times: %+v", entropy, rs)
+	}
+}
+
+// Masking the body must not blind the entropy rule OUTSIDE a key block, or a real token next to one is lost.
+func TestEntropyRuleStillFiresOutsideAPEMBlock(t *testing.T) {
+	manifest := "-----BEGIN " + "PRIVATE KEY-----\n" + highEntropyLine(1) + "\n-----END PRIVATE KEY-----\n" +
+		"loose_token: " + highEntropyLine(7) + "\n"
+	rs := scanDir(t, map[string]string{"mixed.txt": manifest})
+	found := false
+	for _, r := range rs {
+		if r.rule == "generic-high-entropy" || r.rule == "generic-secret" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a high-entropy value after the END marker must still be flagged, got %+v", rs)
+	}
+}
+
+// highEntropyLine returns a 44-character base64 line derived from a digest, so no literal token appears in
+// this source file and every line differs.
+func highEntropyLine(i int) string {
+	h := sha256.Sum256([]byte("synapse-pem-body-fixture-" + strconv.Itoa(i)))
+	return base64.RawStdEncoding.EncodeToString(h[:32])
 }

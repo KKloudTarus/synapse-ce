@@ -176,6 +176,7 @@ as intact.
 | `SYNAPSE_SYMBOL_OVERLAY_DIR` | (none) | Directory of curated advisory-id -> affected-symbol JSON files; the owned matcher merges these onto findings so non-Go / NVD-CSAF-only advisories can drive symbol reachability. Best-effort. |
 | `SYNAPSE_JARHASH_ONLINE_ENABLED` | `false` | Recover the coordinate of a shaded or metadata-less JAR by its SHA-1. |
 | `SYNAPSE_OSV_URL`, `SYNAPSE_OSV_BULK_URL`, `SYNAPSE_DEPSDEV_URL`, `SYNAPSE_KEV_URL`, `SYNAPSE_EPSS_URL` | (public) | Feed overrides for tests or mirrors. |
+| `SYNAPSE_ALPINE_SECDB_URL` | `https://secdb.alpinelinux.org` | Base URL `sync-advisories --remote-secdb` ingests Alpine's apk advisories from. Point it at an internal mirror of the same layout for an air-gapped estate. |
 
 ### Owned-only scanner default and rollback
 
@@ -260,6 +261,9 @@ Most of these ship ON by default (safe, best-effort). See [Features](features.md
 | `SYNAPSE_PROJECT_SOURCE_MAX_FILE_BYTES` | `2097152` | Maximum captured source file size. Bigger files are retained as unavailable metadata. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_FILES` | `10000` | Maximum source files captured for one analysis. |
 | `SYNAPSE_PROJECT_SOURCE_MAX_BYTES` | `524288000` | Total source-artifact capture budget per analysis. |
+| `SYNAPSE_MAVEN_POM_CACHE` | OS cache dir | Where fetched Maven POMs are kept so a second scan of the same project needs no network. The layout is a standard Maven repository layout, so an existing mirror can be pointed at directly. An unwritable directory disables caching without disabling fetching. |
+| `SYNAPSE_MAVEN_ALLOW_PRIVATE_REPOS` | `false` | Allow a `<repositories>` entry that resolves to a private address (RFC 1918) to be fetched from. Off by default because a `pom.xml` is untrusted input and a scanner must not be steered into the network it runs inside; turn it on to resolve your own project against your own internal repository. Loopback and link-local (cloud instance metadata) are refused even when this is on. |
+| `SYNAPSE_SAST_SOURCE_BUDGET_BYTES` | `0` (built-in 64 MiB) | Source bytes the pattern SAST analyzer retains for cross-file context analysis. The default bounds memory on an untrusted tree and never binds on an ordinary repository, but it does bind on a monorepo: a tree holding 164 MiB of source against a 64 MiB budget leaves most of itself unretained, and no rule runs over the part that was not held. The scan reports the number of files in that state, so raising this is a memory-for-coverage trade an operator makes deliberately. `0` keeps the built-in default. |
 | `SYNAPSE_PROJECT_GIT_COMPARISON_DEPTH` | `256` | Maximum Git history depth acquired for persisted comparisons and behavioral-hotspot evidence. Behavioral hotspots evaluate at most `depth - 1` first-parent commits (capped at 2048), never fetch during analysis, and report shallow/incomplete history explicitly; a missing/too-old comparison base leaves source readable but comparison/unified/split capabilities unavailable. |
 
 Historical Code reads are analysis-scoped and private-cacheable. Source and diff APIs never fetch the current repository or read mutable local paths. Git comparison requires configured, validated head/base/default-branch refs; local and archive scans intentionally expose source-only capability. Generated files are hidden by default from the Code inventory but remain retained and explicitly addressable. Binary/non-UTF-8/limited artifacts expose an unavailable reason instead of content.

@@ -25,12 +25,19 @@ var _ ports.AdvisoryFeed = (*SecdbDirFeed)(nil)
 // resolved to at least one fixed package. It returns the total skipped and a fatal error.
 func (f *SecdbDirFeed) Each(ctx context.Context, fn func(a advisory.Advisory) error) (int, error) {
 	inert := 0
+	// Aggregated by id across files for the same reason the remote feed does it: a directory of secdb files is
+	// one file per branch, and an advisory affecting several branches must reach the store as ONE record
+	// carrying every branch's fixed version rather than as several records that replace each other.
+	agg := newSecdbAggregator()
 	fileSkipped, err := walkAdvisoryFiles(ctx, f.dir, hasJSONSuffix, maxOVALFileBytes, ParseSecdb, func(adv advisory.Advisory) error {
 		if len(adv.Affected) == 0 {
 			inert++
 			return nil
 		}
-		return fn(adv)
+		return agg.add(adv)
 	})
-	return fileSkipped + inert, err
+	if err != nil {
+		return fileSkipped + inert, err
+	}
+	return fileSkipped + inert, agg.each(fn)
 }

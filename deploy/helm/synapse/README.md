@@ -107,3 +107,24 @@ helm template synapse deploy/helm/synapse -f deploy/helm/synapse/tests/productio
 NetworkPolicy starts with namespace-wide default deny, allows ingress only from the configured ingress-controller namespace, permits DNS plus TLS/PostgreSQL egress, and grants HTTP/S recon egress only to the worker. Configure an FQDN-aware CNI or egress gateway with managed PostgreSQL/S3 and authorized-target allowlists before production use.
 
 The disposable EKS rehearsal proved the chart's HA, migration, TLS, private-service, and fail-closed startup paths. Its standard managed-node runtime denied the nested unprivileged namespaces required by bubblewrap, so positive sandbox execution remains a deployment prerequisite: validate the target AMI/runtime and run a sandboxed worker job before relying on the chart for production workloads.
+
+## Scan settings and extra environment
+
+A scan's own limits are set under `scan`, and each key is omitted from the pod when it is empty, so the binary
+keeps its own default rather than being handed a blank value:
+
+| Value | What it does |
+| --- | --- |
+| `scan.sastSourceBudgetBytes` | Bytes of source the static analyser retains for cross-file context. Unset derives it from the container memory limit (one eighth, floored at 64Mi, capped at 512Mi), which is right on almost every repository. Set it for a monorepo whose source exceeds that and whose pod has the memory to hold it; the scan reports how many files the budget could not cover either way. |
+| `scan.mavenPomCache` | Directory for the Maven POM cache. Point it at a volume and a re-scan of the same project needs no network. |
+| `scan.mavenAllowPrivateRepos` | Allows a `pom.xml` to name a repository on a private address. Off by default, because a `pom.xml` is untrusted input. Loopback and cloud instance metadata stay refused either way. |
+
+`extraEnv` appends environment variables to every Synapse component, after the ones this chart models:
+
+```yaml
+extraEnv:
+  - name: SYNAPSE_DETECTION_SOURCES
+    value: owned,grype
+```
+
+It exists so a setting this chart does not model yet is still reachable, rather than waiting on a chart release.

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -59,9 +60,15 @@ type EcosystemParser interface {
 type Registry struct {
 	byMarker map[string]EcosystemParser // lower-cased manifest basename -> parser
 	ecos     []string                   // distinct ecosystems present, sorted
+	// mavenFetcher is kept so the registry can report what POM fetching could not do. It is the same instance
+	// the Maven parser holds, so its per-scan state is the state being reported.
+	mavenFetcher POMFetcher
 }
 
-var _ ports.SBOMGenerator = (*Registry)(nil)
+var (
+	_ ports.SBOMGenerator       = (*Registry)(nil)
+	_ ports.SBOMWarningReporter = (*Registry)(nil)
+)
 
 // New builds a registry from the given parsers. Two parsers claiming the same marker is a configuration
 // error (ambiguous dispatch), not a silent last-wins. Markers are matched case-insensitively (a Gemfile
@@ -94,7 +101,38 @@ func New(parsers ...EcosystemParser) (*Registry, error) {
 // Swift, Dart, Elixir, R (renv), Julia, and Conan. The parsers claim distinct markers, so New does not
 // error here in practice.
 func DefaultRegistry() (*Registry, error) {
-	return New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, PyPI{}, Poetry{}, Pipfile{}, UV{}, Cargo{}, Maven{}, Gradle{}, BuildGradle{}, Gem{}, Composer{}, NuGet{}, NuGetAssets{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
+	return DefaultRegistryWith(RegistryOptions{})
+}
+
+// RegistryOptions carries the capabilities a caller chooses to grant the owned parsers. Every field is off by
+// default, so DefaultRegistry stays the inert, offline-safe producer and a caller opts in explicitly.
+type RegistryOptions struct {
+	// MavenPOMFetcher lets the Maven parser resolve a POM the local repository does not hold. Without it a
+	// machine that has never run Maven, which is what a CI runner is, resolves almost none of a Spring
+	// project's tree. It makes outbound https requests, so it belongs to an online scan only and an --offline
+	// scan must leave it nil.
+	MavenPOMFetcher POMFetcher
+}
+
+// SBOMWarnings reports what the producer could not resolve, so a truncated dependency tree is never mistaken
+// for a small one. Today that is the Maven POM fetcher's account of hosts it could not use.
+func (r *Registry) SBOMWarnings() []string {
+	if r == nil || r.mavenFetcher == nil {
+		return nil
+	}
+	return r.mavenFetcher.Warnings()
+}
+
+// DefaultRegistryWith assembles the owned parsers with the granted capabilities.
+func DefaultRegistryWith(opts RegistryOptions) (*Registry, error) {
+	reg, err := New(GoMod{}, NPM{}, Yarn{}, Pnpm{}, Bun{}, PyPI{}, Poetry{}, Pipfile{}, UV{}, Cargo{},
+		Maven{Fetcher: opts.MavenPOMFetcher}, Gradle{}, BuildGradle{}, Gem{}, Composer{}, NuGet{},
+		NuGetAssets{}, Swift{}, Dart{}, Elixir{}, Conda{}, Renv{}, Julia{}, Conan{})
+	if err != nil {
+		return nil, err
+	}
+	reg.mavenFetcher = opts.MavenPOMFetcher
+	return reg, nil
 }
 
 // MarkerEcosystems returns each registry marker mapped to the ecosystem parser that claims it.
@@ -165,7 +203,7 @@ func (r *Registry) Generate(ctx context.Context, targetRef string) (*sbom.SBOM, 
 		if rerr != nil {
 			return fmt.Errorf("read %s: %w", path, rerr)
 		}
-		pcomps, pdeps, perr := parser.Parse(ctx, ParseInput{Dir: filepath.Dir(path), Path: path, Content: content})
+		pcomps, pdeps, perr := parser.Parse(ctx, ParseInput{Dir: filepath.Dir(path), Path: path, Content: decodeManifestText(content)})
 		if perr != nil {
 			return fmt.Errorf("parse %s: %w", path, perr)
 		}
@@ -222,5 +260,42 @@ func readManifestFile(path string) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	return content, true
+	return decodeManifestText(content), true
+}
+
+// decodeManifestText normalises a manifest to UTF-8 before any parser sees it. A requirements.txt written
+// on Windows through a PowerShell redirect is UTF-16LE with a byte-order mark, and every parser here reads
+// bytes: the pinned versions are all there and none of them match, so the file yields nothing and the
+// repository reports an empty inventory. Found on a real service whose requirements.txt holds 122 pinned
+// Python dependencies, all of them invisible.
+//
+// Only a byte-order mark converts. A BOM is an explicit declaration by the writer, so acting on it cannot
+// misread a file; guessing an encoding from content could, and a manifest is exactly the wrong place to
+// guess. A UTF-8 BOM is stripped for the same reason: it would otherwise sit on the first key and break the
+// first entry alone, which is worse than failing outright because it looks like a parse that worked.
+func decodeManifestText(content []byte) []byte {
+	switch {
+	case len(content) >= 3 && content[0] == 0xEF && content[1] == 0xBB && content[2] == 0xBF:
+		return content[3:]
+	case len(content) >= 2 && content[0] == 0xFF && content[1] == 0xFE:
+		return utf16ToUTF8(content[2:], true)
+	case len(content) >= 2 && content[0] == 0xFE && content[1] == 0xFF:
+		return utf16ToUTF8(content[2:], false)
+	}
+	return content
+}
+
+// utf16ToUTF8 decodes UTF-16 code units, honouring surrogate pairs. An unpaired surrogate or a trailing odd
+// byte becomes U+FFFD rather than aborting: a manifest with one bad rune should still yield its other
+// entries, which is the same posture the parsers take toward a line they cannot read.
+func utf16ToUTF8(b []byte, little bool) []byte {
+	units := make([]uint16, 0, len(b)/2)
+	for i := 0; i+1 < len(b); i += 2 {
+		if little {
+			units = append(units, uint16(b[i])|uint16(b[i+1])<<8)
+		} else {
+			units = append(units, uint16(b[i])<<8|uint16(b[i+1]))
+		}
+	}
+	return []byte(string(utf16.Decode(units)))
 }

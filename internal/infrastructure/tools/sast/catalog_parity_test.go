@@ -141,13 +141,18 @@ func TestCatalogParity(t *testing.T) {
 			}
 		}
 
-		// The compliant example must not match the regex (or must be skipped).
+		// The compliant example must not match the regex (or must be skipped, or must be cleared by the
+		// rule's block predicate, which is part of the detector's decision for a multi-line literal).
 		if catRule.CompliantExample != "" {
 			lines := strings.Split(catRule.CompliantExample, "\n")
-			for _, line := range lines {
-				if tc.re.MatchString(line) && !tc.skip(line) {
-					t.Errorf("Rule %s: Compliant example incorrectly triggers the detector", tc.id)
+			for i, line := range lines {
+				if !tc.re.MatchString(line) || tc.skip(line) {
+					continue
 				}
+				if tc.blockFn != nil && !tc.blockFn(forwardBlock(lines, i)) {
+					continue
+				}
+				t.Errorf("Rule %s: Compliant example incorrectly triggers the detector", tc.id)
 			}
 		}
 	}

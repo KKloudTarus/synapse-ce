@@ -20,7 +20,9 @@ func (c *captureRunner) Run(_ context.Context, spec ports.ToolSpec) (ports.ToolR
 // A sandboxed resolver reaches a registry, so its spec carries an egress policy, and the sandbox
 // refuses a policy without an authoritative execution identity. The resolver had none, so it failed
 // for that reason on every scan with the sandbox enabled, and a project with a manifest but no
-// lockfile resolved to nothing while the scan called it "no recognized dependency manifests".
+// lockfile resolved to nothing while the scan reported no recognized dependency manifest. That
+// completeness message has since been widened to name the other way zero components happens, a manifest
+// present whose entries pin no version, so it no longer asserts the manifest is absent.
 func TestResolvePassesTheEgressExecutionIdentityFromContext(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"x","version":"1.0.0"}`), 0o600); err != nil {

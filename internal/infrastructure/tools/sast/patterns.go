@@ -16,6 +16,9 @@ import (
 // rtype/rquality classify the finding. They are optional: the zero value means a security vulnerability
 // (Vulnerability + Security), which is what the security-focused tier-1 rules are. Correctness/style
 // rules set them explicitly (e.g. Bug+Reliability, CodeSmell+Maintainability).
+// sensitiveLogFieldRe names the fields whose value must not reach a log sink.
+var sensitiveLogFieldRe = regexp.MustCompile(`(?i)(password|passwd|token|secret|credential|api[_-]?key|authorization|bearer|private[_-]?key|resetUrl|reset_url)`)
+
 type rule struct {
 	id       string
 	cwe      string
@@ -27,6 +30,11 @@ type rule struct {
 	exts     map[string]bool
 	rtype    domainrule.Type
 	rquality domainrule.Quality
+	// blockFn, when set, decides whether a line match survives by reading the bounded brace-balanced
+	// block the match opens. It exists for the ABSENCE of a field in a multi-line literal, which a
+	// line pattern cannot see: http.Cookie{...} spread over eight lines is dangerous because Secure
+	// is missing, and no single line says so. nil for every other rule, so the hot path is unchanged.
+	blockFn func(block string) bool
 }
 
 // ruleType returns the finding type, defaulting to a security vulnerability.
@@ -714,8 +722,45 @@ func builtinRules() []rule {
 		{
 			id: "sensitive-data-logging", cwe: "CWE-532", severity: shared.SeverityMedium, title: "Sensitive data written to logs",
 			desc:   "Logging passwords, tokens, secrets, or reset URLs can leak credentials through log pipelines. Redact or omit sensitive fields.",
-			re:     regexp.MustCompile(`(?i)\b(logger|console)\.(info|log|warn|error|debug)\s*\([^)]*(password|token|secret|resetUrl)`),
+			// The receiver and method lists were too narrow to match the standard library of the two
+			// languages this fires most on. Python writes logger.warning / logger.exception /
+			// logging.error, and an earlier method alternation stopped at "warn", so "warning(" failed:
+			// "warn" matched and the following "ing(" could not. Go and Java write log.Printf and
+			// slog.Info. Found on a real service where logger.warning("... token=%s", token) went
+			// unreported while a competitor flagged it.
+			//
+			// "log" carries a word boundary, so catalog.info and backlog.debug do not match.
+			//
+			// The sensitive-field test moved from the line to the bounded block, because the same
+			// service writes several of its log calls with the open paren on one line and the sensitive
+			// argument on the next, which no line pattern can see. For a single-line call the block IS
+			// that line, since its parens balance there, so the one-line behaviour is unchanged.
+			re: regexp.MustCompile(`(?i)\b(logger|logging|log|console|slog|logrus|zap|sugar)\.` +
+				`(info|infof|log|logf|warn|warnf|warning|error|errorf|errf|debug|debugf|exception|critical|fatal|fatalf|trace|print|printf|println)` +
+				`\s*\(`),
 			skipFn: commentOnlyLine,
+			blockFn: func(block string) bool {
+				return sensitiveLogFieldRe.MatchString(block)
+			},
+		},
+		{
+			id: "cookie-missing-secure-flag", cwe: "CWE-614", severity: shared.SeverityMedium,
+			title: "Cookie set without the Secure flag",
+			desc: "A cookie literal sets no Secure field, so the browser will send it over plaintext HTTP as well as HTTPS.",
+			// The existing insecure-cookie-flags rule below catches a flag written as false. This one
+			// catches the far more common shape, the field being absent from a multi-line literal, which
+			// needs the block rather than the line. Found on a real service where four auth-token cookies
+			// were set with Path, Expires and HttpOnly but no Secure.
+			re:     regexp.MustCompile(`(?i)(http\.Cookie\{|new\s+Cookie\(|res\.cookie\s*\(|SetCookie\s*\()`),
+			skipFn: commentOnlyLine,
+			blockFn: func(block string) bool {
+				lower := strings.ToLower(block)
+				// Report only when Secure is absent entirely. A Secure written as false is the other
+				// rule's finding, so leaving it here would double-report one cookie.
+				return !strings.Contains(lower, "secure")
+			},
+			rtype:    domainrule.TypeVulnerability,
+			rquality: domainrule.QualitySecurity,
 		},
 		{
 			id: "insecure-cookie-flags", cwe: "CWE-614", severity: shared.SeverityMedium, title: "Session cookie uses insecure flags",
@@ -848,4 +893,24 @@ func builtinRules() []rule {
 		},
 	}
 	return append(core, langPackRules()...)
+}
+
+// loopbackListenerRe matches an address literal that is only reachable from the host itself.
+var loopbackListenerRe = regexp.MustCompile(`["'` + "`" + `](?:127\.0\.0\.1|localhost|\[::1\])?:`)
+
+// skipLoopbackListener stands the plaintext-listener hotspot down for a loopback bind, and for a comment.
+// A debug or health listener on 127.0.0.1 is not reachable from off the host, so it needs no TLS and
+// reporting it would be the noise that makes a hotspot rule worth ignoring. An address built from a
+// variable is NOT skipped: it cannot be read here, and the hotspot exists to prompt that one look.
+func skipLoopbackListener(line string) bool {
+	if commentOnlyLine(line) {
+		return true
+	}
+	lower := strings.ToLower(line)
+	for _, host := range []string{`"127.0.0.1:`, `"localhost:`, "`127.0.0.1:", "`localhost:", `"[::1]:`} {
+		if strings.Contains(lower, host) {
+			return true
+		}
+	}
+	return false
 }

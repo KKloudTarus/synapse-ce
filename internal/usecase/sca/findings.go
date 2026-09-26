@@ -273,7 +273,7 @@ func nonProductionSecretPath(p string) bool {
 // stored in the finding, the evidence seal, or the report.
 func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, now time.Time, minSeverity shared.Severity, includeTest bool) []finding.Finding {
 	min := shared.SeverityRank(minSeverity)
-	out := make([]finding.Finding, 0, len(raws))
+	kept := make([]ports.SecretRawFinding, 0, len(raws))
 	for _, sr := range raws {
 		if sr.Severity != shared.SeverityUnknown && shared.SeverityRank(sr.Severity) < min {
 			continue
@@ -283,10 +283,18 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 		if !includeTest && nonProductionSecretPath(sr.File) {
 			continue
 		}
-		// Dedup on rule+file+line so a re-scan updates in place (1:1). A git-history hit keys distinctly from a
-		// working-tree hit at the same path:line (a "history" marker, plus its introducing commit when
-		// resolved) so a committed-then-removed secret is its own finding rather than colliding with a
-		// working-tree one, and two history hits without attribution still separate from the worktree.
+		kept = append(kept, sr)
+	}
+	spreadByIndex, skip := groupHistorySightings(kept)
+
+	out := make([]finding.Finding, 0, len(kept))
+	for i, sr := range kept {
+		if skip[i] {
+			continue
+		}
+		// Dedup on rule+file+line so a re-scan updates in place (1:1). A git-history hit adds a "history"
+		// marker, plus its introducing commit when resolved, so a committed-then-removed secret is its own
+		// finding rather than colliding with a working-tree one at the same path:line.
 		dedup := "secret:" + sr.RuleID + ":" + sr.File + ":" + strconv.Itoa(sr.Line)
 		if sr.FromHistory {
 			dedup += ":history"
@@ -299,7 +307,7 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 			ID:           findingID(engagementID, dedup),
 			EngagementID: engagementID,
 			Title:        fmt.Sprintf("%s (%s:%d)", sr.Title, sr.File, sr.Line),
-			Description:  secretDescription(sr),
+			Description:  secretDescription(sr) + secretSpreadSentence(spreadByIndex[i]),
 			Severity:     sr.Severity,
 			Sources:      []string{"synapse-secret-scan"},
 			Confidence:   secretFindingConfidence(sr),
@@ -317,6 +325,122 @@ func buildSecretFindings(engagementID shared.ID, raws []ports.SecretRawFinding, 
 		})
 	}
 	return out
+}
+
+// secretHistorySpread describes how widely one leaked credential appears in the repository history.
+type secretSpread struct {
+	occurrences int
+	files       int
+	commits     int
+	firstSeen   string
+}
+
+// groupHistorySightings collapses every git-history sighting of the SAME credential into one representative.
+//
+// A history hit is a LEAKED CREDENTIAL, not a line to edit: the blob carrying it is already immutable, and
+// the remediation is one rotation however many commits hold it. Keying each sighting separately turned 50
+// leaked credentials in one live repository into 581 rows, the same per-commit inflation gitleaks produces
+// (163 rows for 33 credentials), and it is not what an operator acts on. A working-tree hit is left alone,
+// because there each location is a line to change.
+//
+// The representative is the EARLIEST sighting, ordered by FirstSeen then commit, file and line, so it is
+// canonical rather than a product of scan order: adding new commits cannot move it, and the dedup key
+// therefore stays stable across scans. The credential's fingerprint groups the sightings and is deliberately
+// NOT part of the dedup key, because a dedup key ships in exports and a digest of a WEAK credential is a
+// crackable hash of it.
+//
+// It returns the spread keyed by the representative's index in kept, and the set of indices to skip.
+func groupHistorySightings(kept []ports.SecretRawFinding) (map[int]secretSpread, map[int]bool) {
+	members := make(map[string][]int)
+	var order []string
+	for i, sr := range kept {
+		if !sr.FromHistory || sr.Fingerprint == "" {
+			continue
+		}
+		key := sr.RuleID + "\x00" + sr.Fingerprint
+		if _, seen := members[key]; !seen {
+			order = append(order, key)
+		}
+		members[key] = append(members[key], i)
+	}
+	spreads := make(map[int]secretSpread, len(order))
+	skip := make(map[int]bool)
+	for _, key := range order {
+		idx := members[key]
+		if len(idx) == 1 {
+			continue // one sighting: nothing to collapse and no spread worth stating
+		}
+		best := idx[0]
+		files := make(map[string]struct{}, len(idx))
+		commits := make(map[string]struct{}, len(idx))
+		earliest := ""
+		for _, i := range idx {
+			sr := kept[i]
+			files[sr.File] = struct{}{}
+			if sr.Commit != "" {
+				commits[sr.Commit] = struct{}{}
+			}
+			if sr.FirstSeen != "" && (earliest == "" || sr.FirstSeen < earliest) {
+				earliest = sr.FirstSeen
+			}
+			if earlierSighting(sr, kept[best]) {
+				best = i
+			}
+		}
+		for _, i := range idx {
+			if i != best {
+				skip[i] = true
+			}
+		}
+		spreads[best] = secretSpread{occurrences: len(idx), files: len(files), commits: len(commits), firstSeen: earliest}
+	}
+	return spreads, skip
+}
+
+// earlierSighting orders two sightings of one credential so the representative is canonical. A sighting with
+// a resolved date wins over one without, because an unattributed hit cannot be placed in time.
+func earlierSighting(a, b ports.SecretRawFinding) bool {
+	if (a.FirstSeen == "") != (b.FirstSeen == "") {
+		return a.FirstSeen != ""
+	}
+	if a.FirstSeen != b.FirstSeen {
+		return a.FirstSeen < b.FirstSeen
+	}
+	if a.Commit != b.Commit {
+		return a.Commit < b.Commit
+	}
+	if a.File != b.File {
+		return a.File < b.File
+	}
+	return a.Line < b.Line
+}
+
+// secretSpreadSentence states how widely one leaked credential appears, so an operator sees the one rotation
+// to perform and how much of the history still exposes the value.
+func secretSpreadSentence(s secretSpread) string {
+	if s.occurrences <= 1 {
+		return ""
+	}
+	out := fmt.Sprintf(" This credential appears %s in the repository history", pluralCount(s.occurrences, "time"))
+	if s.files > 1 {
+		out += fmt.Sprintf(", across %s", pluralCount(s.files, "file"))
+	}
+	if s.commits > 1 {
+		out += fmt.Sprintf(", in %s", pluralCount(s.commits, "commit"))
+	}
+	out += "."
+	if s.firstSeen != "" {
+		out += " Earliest sighting: " + s.firstSeen + "."
+	}
+	out += " Rewriting history does not rotate it; rotate the credential once and the whole spread is closed."
+	return out
+}
+
+func pluralCount(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // lowSignalSecretRules are the entropy/context-based secret rules whose matches carry more false

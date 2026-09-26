@@ -240,7 +240,7 @@ var rpmMatchableIDs = map[string]bool{"rhel": true, "redhat": true, "rocky": tru
 // stanza with millions of distinct junk keys cannot grow the per-stanza map (keeps memory O(1) per stanza).
 var (
 	dpkgFieldKeys = map[string]bool{"Package": true, "Status": true, "Version": true, "Architecture": true, "Source": true}
-	apkFieldKeys  = map[string]bool{"P": true, "V": true, "A": true}
+	apkFieldKeys  = map[string]bool{"P": true, "V": true, "A": true, "o": true}
 )
 
 // dpkgExtract pulls (name, version, arch, upstream) from a dpkg stanza; only "install ok installed" is
@@ -341,10 +341,17 @@ func validDebianVersion(s string) bool {
 	return true
 }
 
-// apkExtract pulls (name, version, arch) from an apk stanza (single-letter keys). No upstream: the apk
-// secdb matcher is keyed on the package name the apk DB carries.
+// apkExtract pulls (name, version, arch, upstream) from an apk stanza (single-letter keys). The "o" field is
+// the ORIGIN, the source package this binary was built from, and Alpine's secdb is keyed by it: one openssl
+// advisory covers the libcrypto3 and libssl3 binaries built from it, and neither matches by its own name.
+// Reading it is what the deb path already does with "Source:".
+//
+// Measured on nginx:1.25-alpine, where every missed advisory sat on a binary whose name differs from its
+// origin: libcrypto3 and libssl3 (openssl), libcurl (curl), libexpat (expat), xz-libs (xz). Without the origin
+// the scan matched 26 of the 51 CVEs Trivy reports, and openssl is the most advisory-heavy package in any
+// Alpine image.
 func apkExtract(f map[string]string) (name, version, arch, upstream string, ok bool) {
-	return f["P"], f["V"], f["A"], "", true
+	return f["P"], f["V"], f["A"], f["o"], true
 }
 
 // parseOSDB streams a Debian/apk control DB (stanzas separated by a blank line, "Key: Value" lines) into
@@ -431,8 +438,9 @@ func osComponent(typ, namespace, name, version, arch, tag, upstream string) (sbo
 	if tag != "" {
 		q = append(q, "distro="+purlEncode(tag))
 	}
-	// upstream=<source>[@<source-version>]: the SOURCE package a Debian/Ubuntu advisory is keyed by, so a
-	// binary whose source name differs matches its source-keyed advisory (the matcher reads this qualifier).
+	// upstream=<source>[@<source-version>]: the SOURCE package a Debian, Ubuntu or Alpine advisory is keyed
+	// by, so a binary whose source name differs matches its source-keyed advisory (the matcher reads this
+	// qualifier).
 	// The whole value is percent-encoded, so a hostile Source field cannot inject a qualifier (@ -> %40).
 	if up := cleanField(upstream); up != "" {
 		q = append(q, "upstream="+purlEncode(up))

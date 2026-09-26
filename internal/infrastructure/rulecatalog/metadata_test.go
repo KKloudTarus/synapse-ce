@@ -249,6 +249,10 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"Text":                   true,
 		"Swift":                  true,
 		"VB.NET":                 true,
+		"Spring Boot":            true,
+		"OpenAPI":                true,
+		"GitLab CI":              true,
+		"Nginx":                  true,
 	}
 
 	for _, r := range rules {

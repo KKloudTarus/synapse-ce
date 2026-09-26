@@ -582,7 +582,7 @@ func TestAnalyzerRespectsAggregateLimits(t *testing.T) {
 	writeFile(t, root, "a.go", "import \"crypto/md5\"\n")
 	writeFile(t, root, "b.go", "import \"crypto/sha1\"\n")
 
-	report, err := New().analyzeSource(context.Background(), root, 1, maxRetainedSourceBytes)
+	report, err := New().analyzeSource(context.Background(), root, 1, minSourceBudget)
 	if err != nil || len(report.Findings) != 1 || !report.Truncated {
 		t.Fatalf("file-limited scan = %+v, err=%v", report, err)
 	}
@@ -1167,4 +1167,103 @@ func TestReportSeparatesExclusionsFromTruncation(t *testing.T) {
 			t.Error("Truncated = true for a scan that ended exactly on the budget with every file read")
 		}
 	})
+}
+
+// A file the walk reaches but cannot retain, because the source budget is already full, is a different thing
+// from one it deliberately skipped as vendored: no rule runs over it, so a clean-looking report is wrong. The
+// count is what makes the truncation actionable. On a 2.1 GB monorepo holding 163 MiB of source against the
+// 64 MiB budget, most of the tree is in this state and the report used to say only "lower bound".
+func TestAnalyzeSourceCountsFilesTheBudgetCouldNotHold(t *testing.T) {
+	root := t.TempDir()
+	// Each file is comfortably larger than the tiny budget below, so only the first can be retained.
+	body := "import hashlib\n" + strings.Repeat("x = 1  # padding\n", 200) + "h = hashlib.md5(data)\n"
+	for _, name := range []string{"a.py", "b.py", "c.py", "d.py"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := New().analyzeSource(context.Background(), root, 100, int64(len(body))+16)
+	if err != nil {
+		t.Fatalf("analyzeSource: %v", err)
+	}
+	if report.UnscannedFiles != 3 {
+		t.Errorf("UnscannedFiles = %d, want the 3 files the budget could not hold", report.UnscannedFiles)
+	}
+	if !report.Truncated {
+		t.Error("a report that left files unscanned must be marked truncated")
+	}
+	if report.SourceBudget == 0 {
+		t.Error("the budget the count was measured against must be reported")
+	}
+	// The one file that WAS retained must still have been analysed, or the test proves nothing.
+	if len(report.Findings) == 0 {
+		t.Error("the retained file must still produce findings")
+	}
+}
+
+// A tree that fits the budget reports nothing unscanned, so the warning never appears on an ordinary project.
+func TestAnalyzeSourceReportsNothingUnscannedWhenItFits(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.py"), []byte("import hashlib\nh = hashlib.md5(data)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err := New().analyzeSource(context.Background(), root, 100, 1<<20)
+	if err != nil {
+		t.Fatalf("analyzeSource: %v", err)
+	}
+	if report.UnscannedFiles != 0 {
+		t.Errorf("UnscannedFiles = %d, want 0 for a tree that fits", report.UnscannedFiles)
+	}
+}
+
+// The retained-source budget is configurable, because the default bounds memory on an untrusted tree but does
+// bind on a monorepo, where the unretained part is scanned by no rule at all.
+func TestWithSourceBudgetRaisesCoverage(t *testing.T) {
+	root := t.TempDir()
+	body := "import hashlib\n" + strings.Repeat("x = 1  # padding\n", 200) + "h = hashlib.md5(data)\n"
+	for _, name := range []string{"a.py", "b.py", "c.py", "d.py"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tight := New().WithSourceBudget(int64(len(body)) + 16)
+	tightReport, err := tight.AnalyzeSourceReport(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tightReport.UnscannedFiles == 0 {
+		t.Fatal("a tight budget must leave files unscanned, or the test proves nothing")
+	}
+
+	roomy := New().WithSourceBudget(int64(len(body)) * 8)
+	roomyReport, err := roomy.AnalyzeSourceReport(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roomyReport.UnscannedFiles != 0 {
+		t.Errorf("a budget that fits the tree must leave nothing unscanned, got %d", roomyReport.UnscannedFiles)
+	}
+	if len(roomyReport.Findings) <= len(tightReport.Findings) {
+		t.Errorf("raising the budget must find more: %d then %d", len(tightReport.Findings), len(roomyReport.Findings))
+	}
+}
+
+// A zero or negative budget keeps the default, because a budget of nothing would silently scan nothing.
+func TestWithSourceBudgetIgnoresNonPositive(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.py"), []byte("import hashlib\nh = hashlib.md5(d)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, budget := range []int64{0, -1} {
+		report, err := New().WithSourceBudget(budget).AnalyzeSourceReport(context.Background(), root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(report.Findings) == 0 {
+			t.Errorf("budget %d must fall back to the default and still scan, got no findings", budget)
+		}
+		if report.SourceBudget != defaultSourceBudget() {
+			t.Errorf("budget %d must report the default, got %d", budget, report.SourceBudget)
+		}
+	}
 }

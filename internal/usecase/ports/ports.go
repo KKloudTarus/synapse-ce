@@ -1625,6 +1625,14 @@ type SBOMGenerator interface {
 	Generate(ctx context.Context, targetRef string) (*sbom.SBOM, error)
 }
 
+// SBOMWarningReporter is the optional reporting form of an SBOM producer: it says what the producer could NOT
+// resolve. A dependency tree that a rate limit or a missing repository truncated looks exactly like a small
+// project unless the producer can say so, which is the difference between a clean result and an unknown one.
+type SBOMWarningReporter interface {
+	SBOMGenerator
+	SBOMWarnings() []string
+}
+
 // SBOMCache is an optional content-addressed cache of GENERATED (pre-enrichment) SBOMs. The key is derived
 // from the workspace CONTENT plus the producer VERSION, so an unchanged source re-scanned with the same
 // producer reuses the SBOM (skipping the expensive cataloging step), while a producer version bump
@@ -2223,6 +2231,12 @@ type SASTSourceReport struct {
 	Findings     []SASTRawFinding
 	Truncated    bool
 	SkippedFiles int
+	// UnscannedFiles counts files the walk reached but could not retain, because the source budget was
+	// already full. A large monorepo can hold several times the budget in source, and every rule reports
+	// nothing for the part that was never held, so the count is what makes "lower bound" actionable.
+	UnscannedFiles int
+	// SourceBudget is the retained-source budget in bytes that UnscannedFiles was measured against.
+	SourceBudget int64
 }
 
 // SASTSourceReporter is the optional completeness capability of a SASTAnalyzer. It exists so the
@@ -2259,6 +2273,10 @@ type SecretRawFinding struct {
 	Commit    string
 	Author    string
 	FirstSeen string
+	// Fingerprint is a stable, non-reversible identity for the matched credential: the hex SHA-256 of the
+	// raw value. It exists so that two sightings of the SAME credential can be recognised as one leak
+	// without the value itself ever leaving the detector. Empty when the detector computed none.
+	Fingerprint string
 }
 
 // SecretScanReport is the bounded output of a deterministic secret scan. Truncated means the scan was incomplete due to a child-file failure or safety cap, so Findings is a lower bound.
@@ -2331,6 +2349,31 @@ type VEXLoader interface {
 type MisconfigScanner interface {
 	Name() string
 	ScanConfigs(ctx context.Context, root string) ([]MisconfigRawFinding, error)
+}
+
+// MisconfigScanReport is the bounded output of an IaC scan. UnrenderedCharts counts the Helm charts whose
+// `helm template` refused to run, which is the difference between "this chart has no misconfiguration" and
+// "this chart was never evaluated". On one live repository 112 of 126 charts refused to render (a dependency
+// declared but not vendored, a Chart.yaml with no name), and the scan said nothing about it, so an operator
+// read an absent finding as a clean chart.
+type MisconfigScanReport struct {
+	Findings         []MisconfigRawFinding
+	UnrenderedCharts int
+	// Truncated reports that the walk stopped before covering the tree, because it reached its file or entry
+	// cap. The findings are then a lower bound, and saying so is the difference between a bounded scan and a
+	// scan that quietly claims to have looked everywhere.
+	Truncated bool
+	// ChartRenderReasons holds up to a few distinct failure reasons, so the warning tells the reader what to
+	// fix (run `helm dependency build`, give the chart a name) rather than only that something failed.
+	ChartRenderReasons []string
+}
+
+// MisconfigReporter is the reporting form of MisconfigScanner: it returns the same findings plus what the
+// scan could NOT evaluate. A scanner that does not implement it is treated as "completeness unknown", which
+// is why ScanConfigs remains the interface the service requires.
+type MisconfigReporter interface {
+	MisconfigScanner
+	ScanConfigsReport(ctx context.Context, root string) (MisconfigScanReport, error)
 }
 
 // RiskResult is the output of risk enrichment: vulns annotated with KEV + EPSS,

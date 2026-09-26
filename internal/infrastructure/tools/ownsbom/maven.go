@@ -17,7 +17,12 @@ import (
 // unresolved version. <scope>test</scope> maps to background test scope. Uses stdlib encoding/xml – and
 // because the schema only binds <project><dependencies>, the <dependencyManagement> BOM (version
 // constraints, not real deps) is naturally excluded. No third-party library, vendor-neutral.
-type Maven struct{}
+type Maven struct {
+	// Fetcher resolves a POM the local Maven repository does not hold. Nil means local-only resolution, which
+	// is what an --offline scan uses; a CI runner has no local repository at all, so this is what closes the
+	// difference between the full tree and the handful of literal versions a pom.xml states outright.
+	Fetcher POMFetcher
+}
 
 // Ecosystem identifies this parser's package ecosystem.
 func (Maven) Ecosystem() string { return "maven" }
@@ -25,8 +30,16 @@ func (Maven) Ecosystem() string { return "maven" }
 // Markers are the manifest basenames Maven claims.
 func (Maven) Markers() []string { return []string{"pom.xml"} }
 
-// Parse extracts the direct dependencies (with literal versions) from a pom.xml as maven components.
-func (Maven) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
+// Parse extracts a pom.xml's dependencies as maven components.
+//
+// It first tries the full tree from the LOCAL MAVEN REPOSITORY (see maven_local.go): the parent chain,
+// imported BOMs, properties and the transitive walk resolved by reading .pom files already on disk, with no
+// toolchain and no network. That is what a real Java service needs, because a Spring Boot pom.xml declares
+// starters with no version and names none of the transitive tree.
+//
+// When there is no local repository, or it resolves no more than the direct-literal parse does, the literal
+// parse below stands. It is the floor, never replaced by something smaller.
+func (m Maven) Parse(ctx context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	var pom struct {
 		Dependencies struct {
 			Dependency []struct {
@@ -63,5 +76,9 @@ func (Maven) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.D
 			Scope:    scope,
 		})
 	}
-	return set.components(), nil, nil
+	literal := set.components()
+	if comps, edges, ok := resolveMavenFromLocalRepository(ctx, in, len(literal), m.Fetcher); ok {
+		return comps, edges, nil
+	}
+	return literal, nil, nil
 }

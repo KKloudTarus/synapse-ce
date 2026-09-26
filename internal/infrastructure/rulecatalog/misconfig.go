@@ -12,7 +12,11 @@ func misconfigRules() []rule.Rule {
 	rules = append(rules, composeRules()...)
 	rules = append(rules, dockerfileRules()...)
 	rules = append(rules, ghaRules()...)
+	rules = append(rules, gitlabCIRules()...)
 	rules = append(rules, k8sRules()...)
+	rules = append(rules, nginxRules()...)
+	rules = append(rules, openAPIRules()...)
+	rules = append(rules, springRules()...)
 	rules = append(rules, tfRules()...)
 	return rules
 }
@@ -773,6 +777,15 @@ func dockerfileRules() []rule.Rule {
 func ghaRules() []rule.Rule {
 	return []rule.Rule{
 		{
+			Key: "gha-no-explicit-permissions", Name: "Workflow sets no top-level permissions", Language: "GitHub Actions", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"actions", "permissions"}, CWE: []string{"CWE-732"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionPattern,
+			Description:         "The workflow declares no top-level `permissions`, so the GITHUB_TOKEN takes the repository default.",
+			Rationale:           "On many repositories the default token grants write access to contents, so every job in the workflow can push commits, move tags and alter releases. A compromised third-party action inherits that, and nothing in the workflow file says the privilege was ever granted. A top-level `permissions` block is the only place that sets the floor: a job-level block narrows one job and leaves the rest on the default.\n\nSource: https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication",
+			Remediation:         "Declare `permissions: contents: read` at the top level and grant a write scope only to the job that needs it.",
+			CompliantExample:    "name: ci\non: [push]\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846 # v3\n",
+			NoncompliantExample: "name: ci\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846 # v3\n",
+			RemediationEffort:   15,
+		},
+		{
 			Key: "gha-permissions-write-all", Name: "Workflow grants write-all permissions", Language: "GitHub Actions", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"actions", "permissions"}, CWE: []string{"CWE-732"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionPattern,
 			Description:         "The workflow sets permissions to 'write-all'.",
 			Rationale:           "Granting write-all permissions gives the workflow token full access to modify the repository, releases, and packages. If an action is compromised, the attacker can hijack the repository.\n\nSource: https://docs.github.com/en/actions/security-guides/automatic-token-authentication#modifying-the-permissions-for-the-github_token",
@@ -859,7 +872,55 @@ func k8sRules() []rule.Rule {
 			RemediationEffort:   30,
 		},
 		{
-			Key: "kubernetes-default-namespace", Name: "Workload in the default namespace", Language: "Kubernetes", Type: rule.TypeCodeSmell, Qualities: []rule.Quality{rule.QualityMaintainability}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "namespace"}, CWE: []string{}, OWASP: []string{}, Detection: rule.DetectionAST,
+			Key: "kubernetes-added-capability", Name: "Linux capability added beyond the runtime default", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"kubernetes", "capabilities"}, CWE: []string{"CWE-250"}, OWASP: []string{"A04:2021"}, Detection: rule.DetectionAST,
+			Description: "`securityContext.capabilities.add` grants a kernel privilege the container runtime hands no container by default.",
+			Rationale: "The runtime already grants every container a fixed set (CHOWN, NET_BIND_SERVICE, SETUID and eleven others), so adding one of those back " +
+				"after a `drop: [\"ALL\"]` is the hardening pattern an upstream chart is written with and grants nothing. Anything outside that set is a real " +
+				"privilege this workload holds and its neighbours do not, widening what a compromise of it reaches on the node. CIS Kubernetes Benchmark 5.2.8." +
+				"\n\nSource: https://kubernetes.io/docs/concepts/security/pod-security-standards/",
+			Remediation:         "Remove the capability, or state in the manifest which syscall requires it.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n    securityContext:\n      capabilities:\n        drop: [\"ALL\"]\n        add: [\"NET_BIND_SERVICE\"]\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test\n    securityContext:\n      capabilities:\n        add: [\"SYS_TIME\"]\n",
+			RemediationEffort:   30,
+		},
+		{
+			Key: "kubernetes-rbac-webhook-control", Name: "ClusterRole can rewrite admission webhooks", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"kubernetes", "rbac"}, CWE: []string{"CWE-269"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description: "A ClusterRole grants `create`, `update` or `patch` on mutating or validating webhook configurations.",
+			Rationale: "An admission webhook decides what the API server accepts and can rewrite every object submitted to it, so write access to one is write access " +
+				"to every future object in the cluster: a sidecar injected into any pod, or the policy that would have blocked it switched off. A rule that only " +
+				"reads webhook configurations is how a controller watches them and is not this." +
+				"\n\nSource: https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/",
+			Remediation:         "Remove the write verb, or narrow the rule with `resourceNames` to the configurations this controller owns.",
+			CompliantExample:    "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: webhook-watcher\nrules:\n  - apiGroups: [\"admissionregistration.k8s.io\"]\n    resources: [\"validatingwebhookconfigurations\"]\n    verbs: [\"get\", \"list\", \"watch\"]\n",
+			NoncompliantExample: "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: webhook-admin\nrules:\n  - apiGroups: [\"admissionregistration.k8s.io\"]\n    resources: [\"mutatingwebhookconfigurations\"]\n    verbs: [\"create\", \"update\", \"patch\"]\n",
+			RemediationEffort:   60,
+		},
+		{
+			Key: "kubernetes-rbac-read-all-secrets", Name: "Binding lets a workload identity read every Secret", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"kubernetes", "rbac"}, CWE: []string{"CWE-522"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description: "A binding grants a ServiceAccount or Node a role that reads Secrets with no `resourceNames`.",
+			Rationale: "`resourceNames` is what turns \"every Secret\" into \"these Secrets\", so a read rule without it collects database passwords, TLS keys and " +
+				"other services' tokens. A ServiceAccount token sits in a pod, so one application flaw is enough to use the permission, where a human subject " +
+				"authenticates first. The role alone is not the defect: it becomes one when something is bound to it, which is why the binding is reported." +
+				"\n\nSource: https://kubernetes.io/docs/concepts/configuration/secret/",
+			Remediation:         "List the Secrets the workload needs in `resourceNames`, or bind a Role scoped to its own namespace.",
+			CompliantExample:    "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: reader\nrules:\n  - apiGroups: [\"\"]\n    resources: [\"secrets\"]\n    resourceNames: [\"app-db\"]\n    verbs: [\"get\"]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  name: reader\nroleRef:\n  kind: ClusterRole\n  name: reader\nsubjects:\n  - kind: ServiceAccount\n    name: app\n    namespace: dev\n",
+			NoncompliantExample: "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: reader\nrules:\n  - apiGroups: [\"\"]\n    resources: [\"secrets\"]\n    verbs: [\"get\", \"list\"]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  name: reader\nroleRef:\n  kind: ClusterRole\n  name: reader\nsubjects:\n  - kind: ServiceAccount\n    name: app\n    namespace: dev\n",
+			RemediationEffort:   60,
+		},
+		{
+			Key: "kubernetes-ingress-annotation-snippet", Name: "Ingress injects raw NGINX configuration", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"kubernetes", "ingress"}, CWE: []string{"CWE-94"}, OWASP: []string{"A03:2021"}, Detection: rule.DetectionAST,
+			Description: "An Ingress annotation supplies a raw NGINX configuration snippet.",
+			Rationale: "A snippet is nginx configuration the Ingress author writes, and the controller renders it into its shared config and runs it with the " +
+				"controller's own identity. That is CVE-2021-25742: whoever can create an Ingress in any namespace reads the controller's service-account token " +
+				"and every TLS secret the cluster holds, with no namespace boundary in the way." +
+				"\n\nSource: https://nvd.nist.gov/vuln/detail/CVE-2021-25742",
+			Remediation:         "Remove the snippet annotation, and set `allow-snippet-annotations=false` on the controller so no manifest can reintroduce one.",
+			CompliantExample:    "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: app\n  namespace: dev\n  annotations:\n    nginx.ingress.kubernetes.io/rewrite-target: /\nspec:\n  tls:\n    - hosts: [\"app.example.com\"]\n      secretName: app-tls\n  rules:\n    - host: app.example.com\n",
+			NoncompliantExample: "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: app\n  annotations:\n    nginx.ingress.kubernetes.io/configuration-snippet: |\n      more_set_headers \"X-Test: 1\";\nspec:\n  rules:\n    - host: app.example.com\n",
+			RemediationEffort:   30,
+		},
+		{
+			Key: "kubernetes-default-namespace", Name: "Resource in the default namespace", Language: "Kubernetes", Type: rule.TypeCodeSmell, Qualities: []rule.Quality{rule.QualityMaintainability}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "namespace"}, CWE: []string{}, OWASP: []string{}, Detection: rule.DetectionAST,
 			Description:         "The resource defines its namespace as 'default' or omits it entirely.",
 			Rationale:           "Deploying to the default namespace makes managing RBAC, network policies, and resource quotas difficult. Applications should be isolated into dedicated namespaces.\n\nSource: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/",
 			Remediation:         "Explicitly declare a meaningful `namespace` in the resource metadata.",
@@ -929,6 +990,87 @@ func k8sRules() []rule.Rule {
 			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  securityContext:\n    runAsNonRoot: true\n    runAsUser: 1000\n    runAsGroup: 1000\n    seccompProfile:\n      type: RuntimeDefault\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n    resources:\n      limits:\n        cpu: 100m\n        memory: 128Mi\n    securityContext:\n      allowPrivilegeEscalation: false\n      readOnlyRootFilesystem: true\n      capabilities:\n        drop: [\"ALL\"]\n",
 			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test\n",
 			RemediationEffort:   15,
+		},
+		{
+			Key: "kubernetes-configmap-credential", Name: "Credential stored in a ConfigMap", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"kubernetes", "secrets"}, CWE: []string{"CWE-312"}, OWASP: []string{"A02:2021"}, Detection: rule.DetectionAST,
+			Description:         "A ConfigMap key names a credential and carries a literal value.",
+			Rationale:           "A ConfigMap is stored unencrypted in etcd and is readable by every workload that can read ConfigMaps in its namespace, so a credential there is worse off than the same credential in a Secret, not better. It also lands in source control with the manifest.\n\nSource: https://kubernetes.io/docs/concepts/configuration/configmap/",
+			Remediation:         "Move the value to a Secret backed by a managed secret source, and reference it as a mounted file.",
+			CompliantExample:    "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app\n  namespace: prod\ndata:\n  LOG_LEVEL: info\n  DB_PASSWORD_FILE: /etc/creds/password\n",
+			NoncompliantExample: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app\ndata:\n  DB_PASSWORD: s3cr3t-value-here\n",
+			RemediationEffort:   30,
+		},
+		{
+			Key: "kubernetes-no-liveness-probe", Name: "No liveness probe", Language: "Kubernetes", Type: rule.TypeBug, Qualities: []rule.Quality{rule.QualityReliability}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "availability"}, CWE: []string{}, OWASP: []string{}, Detection: rule.DetectionAST,
+			Description:         "The container declares no `livenessProbe`.",
+			Rationale:           "Without a liveness probe a process that is running but wedged is never restarted: it holds its port, answers nothing, and the platform cannot tell it apart from a healthy replica. The outage lasts until a human notices.\n\nSource: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/",
+			Remediation:         "Declare a `livenessProbe` that fails when the container can no longer do its work.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n    livenessProbe:\n      httpGet:\n        path: /healthz\n        port: 8080\n    readinessProbe:\n      httpGet:\n        path: /readyz\n        port: 8080\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test\n",
+			RemediationEffort:   30,
+		},
+		{
+			Key: "kubernetes-no-readiness-probe", Name: "No readiness probe", Language: "Kubernetes", Type: rule.TypeBug, Qualities: []rule.Quality{rule.QualityReliability}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "availability"}, CWE: []string{}, OWASP: []string{}, Detection: rule.DetectionAST,
+			Description:         "The container declares no `readinessProbe`.",
+			Rationale:           "Without a readiness probe the Service adds the pod to its endpoints as soon as the container starts, so traffic arrives before the application can serve it and every rollout drops requests.\n\nSource: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/",
+			Remediation:         "Declare a `readinessProbe` that passes only once the container can serve traffic.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n    livenessProbe:\n      httpGet:\n        path: /healthz\n        port: 8080\n    readinessProbe:\n      httpGet:\n        path: /readyz\n        port: 8080\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test\n",
+			RemediationEffort:   30,
+		},
+		{
+			Key: "kubernetes-low-run-as-user", Name: "Container UID collides with host accounts", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "identity"}, CWE: []string{"CWE-250"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description:         "`securityContext.runAsUser` is set below 10000.",
+			Rationale:           "Distribution images allocate system and first human accounts well below 10000, so a low container UID can coincide with a real account on the node. A container escape then lands on an existing identity and inherits whatever the host grants it, and a shared hostPath volume is written as that user.\n\nSource: https://kubernetes.io/docs/concepts/security/pod-security-standards/",
+			Remediation:         "Use a high, application-specific UID such as 10001.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n    securityContext:\n      runAsUser: 10001\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test\n    securityContext:\n      runAsUser: 1000\n",
+			RemediationEffort:   15,
+		},
+		{
+			Key: "kubernetes-no-cpu-request", Name: "No CPU request", Language: "Kubernetes", Type: rule.TypeBug, Qualities: []rule.Quality{rule.QualityReliability}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "resources"}, CWE: []string{}, OWASP: []string{}, Detection: rule.DetectionAST,
+			Description:         "The container spec does not define a CPU request.",
+			Rationale:           "The scheduler places a pod using its requests, not its limits. A container with no CPU request can be scheduled onto a node that has no CPU left for it, and is the first to be throttled when the node saturates.\n\nSource: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
+			Remediation:         "Set `resources.requests.cpu` to what the workload needs at rest.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n    resources:\n      requests:\n        cpu: 100m\n        memory: 128Mi\n      limits:\n        cpu: 200m\n        memory: 256Mi\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test\n",
+			RemediationEffort:   15,
+		},
+		{
+			Key: "kubernetes-no-memory-request", Name: "No memory request", Language: "Kubernetes", Type: rule.TypeBug, Qualities: []rule.Quality{rule.QualityReliability}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "resources"}, CWE: []string{}, OWASP: []string{}, Detection: rule.DetectionAST,
+			Description:         "The container spec does not define a memory request.",
+			Rationale:           "A pod with no memory request has the lowest quality-of-service class, so the kubelet evicts it first when the node comes under memory pressure, even when the pod is behaving correctly.\n\nSource: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/",
+			Remediation:         "Set `resources.requests.memory` to the workload's steady-state footprint.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n    resources:\n      requests:\n        cpu: 100m\n        memory: 128Mi\n      limits:\n        cpu: 200m\n        memory: 256Mi\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test\n",
+			RemediationEffort:   15,
+		},
+		{
+			Key: "kubernetes-image-pull-policy-cached", Name: "Mutable image tag served from cache", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "supply-chain"}, CWE: []string{"CWE-494"}, OWASP: []string{"A08:2021"}, Detection: rule.DetectionAST,
+			Description:         "The image is referenced by tag rather than digest and `imagePullPolicy` is not `Always`.",
+			Rationale:           "A tag is mutable and a cached layer is not re-checked, so a node keeps whatever it pulled first even after the tag has moved. The result is a cluster where two nodes can run different code behind the same manifest and nobody can say which. A digest-pinned image makes `IfNotPresent` correct, which is why this applies only to the unpinned case.\n\nSource: https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy",
+			Remediation:         "Pin the image by digest, or set `imagePullPolicy: Always`.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test:1.0\n    imagePullPolicy: IfNotPresent\n",
+			RemediationEffort:   5,
+		},
+		{
+			Key: "kubernetes-image-no-digest", Name: "Container image not pinned by digest", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "supply-chain"}, CWE: []string{"CWE-494"}, OWASP: []string{"A08:2021"}, Detection: rule.DetectionAST,
+			Description:         "The container image is referenced by tag rather than by an immutable digest.",
+			Rationale:           "A tag is a mutable pointer. Anyone who can push to the registry can repoint a pinned tag at different content, so the cluster runs an image nobody reviewed and the manifest still reads as pinned. Only a digest names exact content.\n\nSource: https://kubernetes.io/docs/concepts/containers/images/",
+			Remediation:         "Reference the image as `name:tag@sha256:<digest>`.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test:1.0\n",
+			RemediationEffort:   15,
+		},
+		{
+			Key: "kubernetes-secret-env-var", Name: "Secret exposed as an environment variable", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "secrets"}, CWE: []string{"CWE-214"}, OWASP: []string{"A05:2021"}, Detection: rule.DetectionAST,
+			Description:         "A Secret is injected into the container environment through `env.valueFrom.secretKeyRef` or `envFrom.secretRef`.",
+			Rationale:           "An environment variable is readable through /proc/<pid>/environ, is inherited by every child process, and is captured by crash dumps, `docker inspect` and most debug tooling. A Secret mounted as a file is readable only by the process that opens it, and can be rotated without restarting the pod.\n\nSource: https://kubernetes.io/docs/concepts/configuration/secret/",
+			Remediation:         "Mount the Secret as a volume and read the credential from the file path.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n    volumeMounts:\n    - name: creds\n      mountPath: /etc/creds\n      readOnly: true\n  volumes:\n  - name: creds\n    secret:\n      secretName: app-credentials\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test\n    env:\n    - name: DB_PASSWORD\n      valueFrom:\n        secretKeyRef:\n          name: app-credentials\n          key: password\n",
+			RemediationEffort:   30,
 		},
 		{
 			Key: "kubernetes-no-memory-limit", Name: "No memory limit", Language: "Kubernetes", Type: rule.TypeBug, Qualities: []rule.Quality{rule.QualityReliability}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "resources"}, CWE: []string{}, OWASP: []string{}, Detection: rule.DetectionAST,
@@ -1663,6 +1805,56 @@ func tfRules() []rule.Rule {
 			Remediation:         "Pin the source to a tag or commit with ?ref=.",
 			CompliantExample:    "module \"vpc\" {\n  source = \"git::https://github.com/org/repo.git?ref=v1.2.0\"\n}",
 			NoncompliantExample: "module \"vpc\" {\n  source = \"git::https://github.com/org/repo.git\"\n}",
+			RemediationEffort:   5,
+		},
+	}
+}
+
+func springRules() []rule.Rule {
+	return []rule.Rule{
+		{
+			Key: "spring-actuator-exposure-wildcard", Name: "Actuator exposes every endpoint", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"spring", "actuator", "exposure"}, CWE: []string{"CWE-200"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description:         "`management.endpoints.web.exposure.include` is `\"*\"`, publishing every Actuator endpoint over HTTP.",
+			Rationale:           "The wildcard publishes endpoints the service never needs, including `heapdump`, which returns a full image of process memory, and `env`, which returns the resolved configuration. A single unauthenticated request to either yields every credential the application holds.\n\nSource: https://docs.spring.io/spring-boot/reference/actuator/endpoints.html",
+			Remediation:         "List only the endpoints the service needs, typically `health` and `info`.",
+			CompliantExample:    "management:\n  endpoints:\n    web:\n      exposure:\n        include: health,info\n",
+			NoncompliantExample: "management:\n  endpoints:\n    web:\n      exposure:\n        include: \"*\"\n",
+			RemediationEffort:   15,
+		},
+		{
+			Key: "spring-actuator-sensitive-endpoint-exposed", Name: "Actuator publishes a sensitive endpoint", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"spring", "actuator", "exposure"}, CWE: []string{"CWE-200"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description:         "The Actuator exposure allow-list names an endpoint that discloses internal state or mutates the running application.",
+			Rationale:           "`env` and `configprops` return the resolved configuration, `threaddump` returns every stack, `logfile` streams the application log, and `loggers`, `caches` and `shutdown` accept writes. Each widens what an attacker learns or changes from one HTTP request. Publishing `health`, `info`, `metrics` and `prometheus` is the ordinary reason Actuator is enabled and is not flagged.\n\nSource: https://docs.spring.io/spring-boot/reference/actuator/endpoints.html",
+			Remediation:         "Remove the endpoint from `management.endpoints.web.exposure.include`, or move Actuator to a management port that is not routable from outside the cluster and require authentication on it.",
+			CompliantExample:    "management:\n  endpoints:\n    web:\n      exposure:\n        include: health,info,metrics\n",
+			NoncompliantExample: "management:\n  endpoints:\n    web:\n      exposure:\n        include: health,env,configprops,threaddump\n",
+			RemediationEffort:   15,
+		},
+		{
+			Key: "spring-actuator-shutdown-enabled", Name: "Actuator shutdown endpoint enabled", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"spring", "actuator", "availability"}, CWE: []string{"CWE-284"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description:         "`management.endpoint.shutdown.enabled` is true, so an HTTP POST stops the application.",
+			Rationale:           "The shutdown endpoint is the only Actuator endpoint disabled by default, because reaching it ends the process. Enabling it turns one reachable request into a denial of service that needs no vulnerability.\n\nSource: https://docs.spring.io/spring-boot/reference/actuator/endpoints.html",
+			Remediation:         "Leave `management.endpoint.shutdown.enabled` at its default of false and stop the process through the platform.",
+			CompliantExample:    "management:\n  endpoint:\n    shutdown:\n      enabled: false\n",
+			NoncompliantExample: "management:\n  endpoint:\n    shutdown:\n      enabled: true\n",
+			RemediationEffort:   5,
+		},
+		{
+			Key: "spring-h2-console-enabled", Name: "H2 web console enabled", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"spring", "database", "console"}, CWE: []string{"CWE-284"}, OWASP: []string{"A05:2021"}, Detection: rule.DetectionAST,
+			Description:         "`spring.h2.console.enabled` is true, serving a browser SQL shell against the application datasource.",
+			Rationale:           "The console executes arbitrary SQL as the application's database user, and H2 has repeatedly turned that into remote code execution (CVE-2021-42392, CVE-2022-23221). It exists for local development and has no place in a profile that ships.\n\nSource: https://www.h2database.com/html/features.html#console_application",
+			Remediation:         "Set `spring.h2.console.enabled` to false, and keep it out of every profile other than a developer's own.",
+			CompliantExample:    "spring:\n  h2:\n    console:\n      enabled: false\n",
+			NoncompliantExample: "spring:\n  h2:\n    console:\n      enabled: true\n",
+			RemediationEffort:   5,
+		},
+		{
+			Key: "spring-actuator-health-details-always", Name: "Health endpoint always shows details", Language: "Spring Boot", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityLow, Tags: []string{"spring", "actuator", "exposure"}, CWE: []string{"CWE-200"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description:         "`management.endpoint.health.show-details` is `always`, so every caller sees each health component's detail.",
+			Rationale:           "Component detail names the infrastructure behind the service: database hostnames and schema, broker addresses, disk paths and free space. That is reconnaissance handed to an unauthenticated caller, and `when_authorized` gives an operator the same view without it.\n\nSource: https://docs.spring.io/spring-boot/reference/actuator/endpoints.html#actuator.endpoints.health",
+			Remediation:         "Use `show-details: when_authorized` and restrict it with `management.endpoint.health.roles`.",
+			CompliantExample:    "management:\n  endpoint:\n    health:\n      show-details: when_authorized\n      roles: 'ROLE_ADMIN'\n",
+			NoncompliantExample: "management:\n  endpoint:\n    health:\n      show-details: always\n",
 			RemediationEffort:   5,
 		},
 	}

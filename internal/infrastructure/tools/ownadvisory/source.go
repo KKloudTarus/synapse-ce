@@ -208,9 +208,14 @@ func (s *Source) Scan(ctx context.Context, doc *sbom.SBOM) ([]vulnerability.RawF
 			// source stays "<src>", and the advisory ranges are in source-version space, so using the binary
 			// version could cross a nonzero introduced/fixed boundary the source does not (a false result).
 			// Fall back to the binary version only for a name-only upstream (Syft omits the version when they
-			// are equal). The emit map dedups a binary+source double hit. Only deb: an rpm's upstream is a
-			// source-RPM filename needing NEVRA parsing, and the owned RedHat CSAF feed is binary-keyed.
-			if purlType(c.PURL) == "deb" {
+			// are equal). The emit map dedups a binary+source double hit.
+			//
+			// apk is the same shape: Alpine's secdb is keyed by the ORIGIN package (one openssl advisory
+			// covers libcrypto3 and libssl3), the apk DB records it in the "o" field, and the origin carries no
+			// separate version because every subpackage of an origin ships the origin's version. Not rpm: its
+			// upstream is a source-RPM filename needing NEVRA parsing, and the owned RedHat CSAF feed is
+			// binary-keyed.
+			if t := purlType(c.PURL); t == "deb" || t == "apk" {
 				name := canonicalName(eco, c.Name)
 				// Decode the qualifier BEFORE splitting: PURL encodes the name/version "@" separator as %40
 				// (and an epoch ":" as %3A), so "openssl%401.1.1k" decodes to "openssl@1.1.1k" first.

@@ -55,7 +55,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install synapse-cli, syft and grype
+    - name: Install synapse-cli and grype
       shell: bash
       # No GITHUB_TOKEN is exposed here on purpose: the release lookup hits a PUBLIC endpoint, and
       # keeping the token out of this step means the `curl | sh` tool installers below cannot exfiltrate
@@ -65,8 +65,7 @@ runs:
       run: |
         set -euo pipefail
 
-        # Pinned scanner tool versions (kept in step with the release container image).
-        SYFT_VERSION="v1.45.1"
+        # Pinned tool version, kept in step with the release container image.
         GRYPE_VERSION="v0.115.0"
         REPO="KKloudTarus/synapse-ce"
         BIN_DIR="${RUNNER_TEMP}/synapse-bin"
@@ -130,14 +129,16 @@ runs:
         fi
         chmod +x "${BIN_DIR}/synapse-cli" 2>/dev/null || true
 
-        # syft (required) + grype (offline DB) via anchore's installers, PINNED to the tool version tag
-        # (not the moving main branch) so the installer script itself is fixed. The installers
-        # checksum-verify the tool binaries they fetch.
-        curl -fsSL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" | sh -s -- -b "${BIN_DIR}" "${SYFT_VERSION}"
+        # SBOM generation is the OWNED engine (pure Go, in-process), so syft is not installed: it was a
+        # `curl | sh` in every consumer's CI for a tool nothing on the default path calls.
+        #
+        # grype stays as an OPT-IN vulnerability source and nothing selects it by default. Without a synced
+        # advisory store it is the only way a scan can match OS-package CVEs, and a scan that has neither says
+        # so rather than reporting a clean result. The installer is pinned to the tool version tag (not the
+        # moving main branch) so the script itself is fixed, and it checksum-verifies the binary it fetches.
         curl -fsSL "https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh" | sh -s -- -b "${BIN_DIR}" "${GRYPE_VERSION}"
 
         echo "${BIN_DIR}" >> "${GITHUB_PATH}"
-        echo "SYNAPSE_SYFT_BIN=${BIN_DIR}/syft" >> "${GITHUB_ENV}"
         echo "SYNAPSE_GRYPE_BIN=${BIN_DIR}/grype" >> "${GITHUB_ENV}"
 
     - name: Run scan

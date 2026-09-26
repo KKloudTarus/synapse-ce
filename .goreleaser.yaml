@@ -4,7 +4,9 @@
 #   git tag v0.1.0 && git push origin v0.1.0
 # The tag triggers .github/workflows/release.yml, which runs `goreleaser release --clean`:
 # cross-compiled binaries for every target, a checksums file, per-platform archives, a GitHub
-# Release, and a multi-arch synapse-cli container image on GHCR.
+# Release. The multi-arch synapse-cli container image is built and pushed by the `image` job in
+# .github/workflows/release.yml, which builds Dockerfile.cli directly: one place owns the image, and it is
+# the place whose build can be run and verified locally.
 #
 # Every command is pure Go and builds with CGO_ENABLED=0 (the sqlite driver is pure Go), so all five
 # cross-compile from a single Linux runner. `synapse-ast` (the tree-sitter sidecar) is intentionally
@@ -141,24 +143,6 @@ checksum:
 # Multi-arch synapse-cli container image on GHCR, built with buildx from the prebuilt binaries (no
 # in-image Go build). The synapse-api image follows the same pattern and can be added when needed; the
 # compose stack already builds an API image from deploy/Dockerfile.
-dockers_v2:
-  - id: synapse-cli
-    images:
-      - ghcr.io/kkloudtarus/synapse-cli
-    tags:
-      - "{{ .Tag }}"
-      - latest
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    dockerfile: Dockerfile.cli
-    labels:
-      org.opencontainers.image.title: synapse-cli
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.revision: "{{ .FullCommit }}"
-      org.opencontainers.image.source: https://github.com/KKloudTarus/synapse-ce
-      org.opencontainers.image.licenses: Apache-2.0
-
 release:
   github:
     owner: KKloudTarus

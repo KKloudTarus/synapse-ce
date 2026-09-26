@@ -9,10 +9,12 @@
 package secretscan
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -59,6 +61,28 @@ type rule struct {
 	// lineSkip, when set, drops a match based on the whole line it sits on. It is how a rule tells a
 	// delimiter quoted inside other code from the thing it delimits.
 	lineSkip func(line string) bool
+	// maskNotebookOutput makes this rule read a notebook with its cell OUTPUTS blanked.
+	maskNotebookOutput bool
+	// maskPEMBodies makes this rule read the file with the BODY of every PEM block blanked. A key block is
+	// ONE credential, and the private-key rule already reports it at its header; without this, each of the
+	// 49 base64 body lines of an SSH key in an ArgoCD manifest became its own finding, so one key was
+	// reported 50 times where gitleaks reports it once.
+	maskPEMBodies bool
+	// skipValue drops a match on the matched VALUE rather than on its line, for a shape a regex cannot
+	// express. It exists for the keyword-free entropy rule, whose character class includes "/" and so
+	// reads a URL or asset path as base64.
+	skipValue func(secret string) bool
+	// scanComments makes this rule read the file WITH its comments intact. Comments are blanked for
+	// every other rule, because a generic or keyword-anchored pattern fires constantly on documentation
+	// and example values. A provider rule whose unique prefix IS the signal has the opposite problem: a
+	// real AKIA or ghp_ token committed inside a comment is a leaked credential that is still live, and
+	// masking it reports a clean file. A prefix cannot be produced by prose, so admitting comments for
+	// these rules costs no precision.
+	scanComments bool
+	// configFilesOnly narrows scanComments to CONFIGURATION files. A commented-out setting in a values.yaml
+	// or a .env is the value that was applied until someone commented it out; a commented-out assignment in
+	// source code is dead code or a documented example, which is why comments stay masked there.
+	configFilesOnly bool
 }
 
 // Scanner implements ports.SecretScanner with an owned ruleset.
@@ -80,6 +104,11 @@ func New() *Scanner {
 			`(?i)example`, `(?i)placeholder`, `(?i)changeme`, `(?i)redacted`, `(?i)dummy`,
 			`(?i)your[_-]?(secret|token|key|password)`, `(?i)^x{6,}$`, `(?i)^0+$`,
 			`(?i)sample`, `^\$\{`, `(?i)^<[a-z_]+>$`,
+			// A value that tells the reader to replace it is a template, not a credential. Found on live
+			// code as REPLACE_ME_… and as …-change-in-production-<year>; "changeme" above does not cover
+			// either spelling.
+			`(?i)replace[_-]?(me|this|with)`, `(?i)change[_-]?(this|in[_-]?produc)`,
+			`(?i)^(insert|todo|fixme)`,
 		}),
 		skipDirs: set(".git", "node_modules", "vendor", "dist", "build", "target", ".idea",
 			".gradle", ".venv", "venv", "__pycache__", ".terraform", "bin"),
@@ -452,13 +481,28 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 	original := string(data)
 	data = maskComments(rel, data)
 	text := string(data)
+	var masked []byte // notebook-output-masked view, built once on first demand
 	awsCandidates := make([]awsCandidate, 0, 3)
 	for i := range s.rules {
 		r := &s.rules[i]
-		if !hasAnyKeyword(text, r.keywords) {
+		// maskComments preserves byte offsets, so a match offset and a line count index either string.
+		subject := text
+		if r.scanComments && (!r.configFilesOnly || isConfigFileName(rel)) {
+			subject = original
+		}
+		if r.maskNotebookOutput {
+			if masked == nil {
+				masked = maskNotebookOutputs(rel, []byte(subject))
+			}
+			subject = string(masked)
+		}
+		if r.maskPEMBodies {
+			subject = string(maskPEMBlockBodies([]byte(subject)))
+		}
+		if !hasAnyKeyword(subject, r.keywords) {
 			continue
 		}
-		for _, m := range r.re.FindAllStringSubmatchIndex(text, -1) {
+		for _, m := range r.re.FindAllStringSubmatchIndex(subject, -1) {
 			if len(*out) >= limit {
 				return true
 			}
@@ -466,11 +510,14 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			if r.group > 0 && len(m) > 2*r.group+1 && m[2*r.group] >= 0 {
 				start, end = m[2*r.group], m[2*r.group+1]
 			}
-			secret := text[start:end]
+			secret := subject[start:end]
 			if s.allowed(secret, r.allow) {
 				continue
 			}
-			if r.lineSkip != nil && r.lineSkip(lineOf(text, start)) {
+			if r.skipValue != nil && r.skipValue(secret) {
+				continue
+			}
+			if r.lineSkip != nil && r.lineSkip(lineOf(subject, start)) {
 				continue
 			}
 			if inlineAllow(lineOf(original, start)) {
@@ -479,7 +526,7 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 			if r.minEnt > 0 && shannon(secret) < r.minEnt {
 				continue
 			}
-			line := 1 + strings.Count(text[:start], "\n")
+			line := 1 + strings.Count(subject[:start], "\n")
 			key := r.id + ":" + rel + ":" + strconv.Itoa(line)
 			if seen[key] {
 				continue
@@ -496,14 +543,15 @@ func (s *Scanner) scanContent(rel string, data []byte, seen map[string]bool, out
 				verified = verdict(vf, r.id, secret)
 			}
 			*out = append(*out, ports.SecretRawFinding{
-				File:     rel,
-				Line:     line,
-				RuleID:   r.id,
-				Category: r.category,
-				Title:    r.title,
-				Severity: r.severity,
-				Match:    redactMatch(secret),
-				Verified: verified,
+				File:        rel,
+				Line:        line,
+				RuleID:      r.id,
+				Category:    r.category,
+				Title:       r.title,
+				Severity:    r.severity,
+				Match:       redactMatch(secret),
+				Verified:    verified,
+				Fingerprint: secretFingerprint(secret),
 			})
 		}
 	}
@@ -640,15 +688,89 @@ func lineOf(text string, at int) string {
 	return text[start : at+end]
 }
 
+// maskPEMBlockBodies blanks the base64 BODY of every PEM block while preserving byte offsets and newlines,
+// so a match offset and a line count still index the same positions. The BEGIN and END armour lines are kept:
+// the private-key rule matches the header and must still see it.
+//
+// A key block is ONE credential. Without this every base64 line of it also satisfied the keyword-free entropy
+// rule, so a 49-line SSH key inside an ArgoCD repository manifest produced 49 entropy findings beside the one
+// private-key finding, and the same block in git history doubled that to 100. The remediation is one rotation.
+func maskPEMBlockBodies(data []byte) []byte {
+	out := append([]byte(nil), data...)
+	inBody := false
+	for start := 0; start < len(out); {
+		end := start
+		for end < len(out) && out[end] != '\n' {
+			end++
+		}
+		line := string(out[start:end])
+		switch {
+		case strings.Contains(line, "-----BEGIN"):
+			inBody = true // the header line itself is preserved
+		case strings.Contains(line, "-----END"):
+			inBody = false
+		case inBody:
+			for i := start; i < end; i++ {
+				if out[i] != '\r' {
+					out[i] = ' '
+				}
+			}
+		}
+		start = end + 1
+	}
+	return out
+}
+
+// pemBodyRunMin is the shortest base64 run counted as key body. It sits above every word in the PEM armour
+// ("BEGIN", "PRIVATE", "OPENSSH") so a bare header contributes nothing.
+const pemBodyRunMin = 20
+
+// pemBodyMinBytes is how much base64 body must sit on a PEM header's line before the header is read as an
+// embedded key block rather than a quoted constant. The smallest real key body, an EC P-256 key in PKCS#8,
+// is about 240 base64 characters, and a rule example or a delimiter constant carries none.
+const pemBodyMinBytes = 128
+
 // pemHeaderQuotedInline reports whether the PEM header on this line is a quoted one-line constant rather
-// than the first line of a key block: the header is not at the start of the line, or the same line also
-// carries the END marker or an escaped newline.
+// than the first line of a key block. Three marks say one-line string: the header does not start the line,
+// the END marker sits beside it, or the line carries an escaped newline. Each of those is a rule example, a
+// delimiter to strip, or a test name.
+//
+// A key EMBEDDED in a source-code string literal carries all three marks and is still a real key. A GCP
+// service-account JSON pasted into a Java constant reads as
+// `"  \"private_key\": \"-----BEGIN PRIVATE KEY-----\\nMIIEv…\\n-----END PRIVATE KEY-----\\n"`, and standing
+// it down lost a critical finding on live code. So the stand-down now requires the line to carry no key
+// body. Base64 is counted across the whole line rather than as one run, because the escaped newlines break
+// a single key into many short runs.
 func pemHeaderQuotedInline(line string) bool {
+	if pemBodyBase64Bytes(line) >= pemBodyMinBytes {
+		return false
+	}
 	trimmed := strings.TrimLeft(line, " \t\"'`")
 	if !strings.HasPrefix(trimmed, "-----BEGIN") {
 		return true
 	}
 	return strings.Contains(line, "-----END") || strings.Contains(line, `\n`)
+}
+
+// pemBodyBase64Bytes sums the base64 runs on the line that are long enough to be key body.
+func pemBodyBase64Bytes(line string) int {
+	total, run := 0, 0
+	flush := func() {
+		if run >= pemBodyRunMin {
+			total += run
+		}
+		run = 0
+	}
+	for i := 0; i < len(line); i++ {
+		switch c := line[i]; {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '+', c == '/', c == '=':
+			run++
+		default:
+			flush()
+		}
+	}
+	flush()
+	return total
 }
 
 // maskVBComments preserves byte offsets and newlines while blanking apostrophe and statement Rem comments.
@@ -717,6 +839,18 @@ func (s *Scanner) allowed(secret string, ruleAllow []*regexp.Regexp) bool {
 		}
 	}
 	return false
+}
+
+// secretFingerprint is a stable, non-reversible identity for a matched credential. It exists so the same
+// credential seen in many git blobs is recognised as ONE leak: the remediation is one rotation, however many
+// commits carry it. SHA-256 is used because the value must never be recoverable from the finding, and the
+// digest is domain-separated so a fingerprint cannot be confused with any other digest in the system.
+func secretFingerprint(s string) string {
+	if s == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("synapse-secret-fingerprint:" + s))
+	return hex.EncodeToString(sum[:])
 }
 
 // redactMatch masks a secret to a short, non-usable preview. A private-key block is replaced wholesale.
@@ -799,6 +933,180 @@ func set(items ...string) map[string]bool {
 var highEntropyDeferKeywords = []string{
 	"secret", "token", "passwd", "password", "api_key", "apikey", "access_key",
 	"integrity", "digest", "checksum", "sha256", "sha384", "sha512", "sha1", "md5", "fingerprint", "etag",
+}
+
+// wordlikePathToken reports whether a slash-bearing candidate is a PATH rather than base64. The
+// keyword-free entropy rule's character class includes "/", so a URL or asset path of the right length
+// clears the 4.5 bits/char floor and is reported as a credential. Found across a real estate: one notebook
+// cell's output held 2.2 MB of a printed catalogue dump, and 1,999 of the 2,844 keyword-free entropy
+// findings in the whole estate came from that single file, all of them CDN asset paths, one repeated 853
+// times.
+//
+// The discriminator is base64's own signature: encoding random bytes produces mixed case throughout, so
+// any run of 8 or more characters holds both an upper and a lower case letter. A path's segments are words
+// and numbers, which do not. A candidate whose every slash-delimited segment lacks that mixed-case run is
+// a path. Segments shorter than 8 are ignored, since a short one carries no evidence either way.
+//
+// This suppresses on the VALUE, so it cannot hide a credential that merely sits on a line near a path, and
+// it leaves the keyword-anchored generic-secret rule untouched: a real token assigned to an api_key is
+// still gated there whatever its shape.
+// clientPublicBundlePrefixes are the environment-variable prefixes a frontend build tool INLINES into the
+// browser bundle. A value behind one of them is published to every visitor by construction, so it is a
+// public configuration value and not a leaked credential. Datadog's RUM client token, which is prefixed
+// "pub" precisely because it ships in page source, arrives on live code as REACT_APP_DATADOG_CLIENT_TOKEN.
+var clientPublicBundlePrefixes = []string{
+	"REACT_APP_", "NEXT_PUBLIC_", "NUXT_PUBLIC_", "VITE_", "VUE_APP_",
+	"EXPO_PUBLIC_", "GATSBY_", "PUBLIC_", "STORYBOOK_",
+}
+
+// clientPublicVariableLine reports whether the line assigns to one of those variables. It gates only the
+// GENERIC keyword rule: for a generic high-entropy value there is no way to tell a public token from a
+// private one, and the variable name settles it. A distinctive-prefix provider rule (an AWS key, a GitHub
+// token) is deliberately NOT gated, because a real provider credential behind a public prefix is a leak
+// that has already shipped.
+func clientPublicVariableLine(line string) bool {
+	for _, prefix := range clientPublicBundlePrefixes {
+		at := strings.Index(line, prefix)
+		if at < 0 {
+			continue
+		}
+		// The prefix must start a token, so a substring inside some other identifier does not count.
+		if at > 0 {
+			c := line[at-1]
+			if c == '_' || c == '-' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// secretNamingKeys are keys whose value NAMES a credential store rather than holding a credential. In a Helm
+// values file `existingSecret: app-db-credentials` points at a Kubernetes Secret, so the value is a resource
+// name that is meant to be in the repository.
+var secretNamingKeys = []string{
+	"existingsecret", "existingsecretname", "secretname", "secret_name", "secret-name",
+	"secretref", "secret_ref", "secretkeyref", "existingclaim", "secretprovider", "secretproviderclass",
+}
+
+// namesACredentialStore reports whether the line's key points at a credential store instead of holding a
+// credential, which is the one shape a commented-out configuration line shares with a real leak.
+func namesACredentialStore(line string) bool {
+	key, _, found := strings.Cut(line, ":")
+	if !found {
+		key, _, found = strings.Cut(line, "=")
+		if !found {
+			return false
+		}
+	}
+	normalised := strings.ToLower(strings.Trim(strings.TrimSpace(key), "#/-[] \t\"'"))
+	for _, name := range secretNamingKeys {
+		if strings.HasSuffix(normalised, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// commentedCredentialLineSkip drops the two line shapes a commented-out setting shares with something that is
+// not a credential: a value inlined into a browser bundle by construction, and a key that names a credential
+// store rather than holding a credential.
+func commentedCredentialLineSkip(line string) bool {
+	return clientPublicVariableLine(line) || namesACredentialStore(line)
+}
+
+// assignedValueNotCredential reports whether the value assigned to a credential-named key is something
+// other than the credential. Two shapes account for it in practice, and both became reachable when the
+// value's quotes stopped being required:
+//
+//   - A PATH saying where the credential lives (`password_file: /run/secrets/db_password`). wordlikePathToken
+//     already recognises that shape, and it is used here for exactly the same reason.
+//   - An IDENTIFIER or constant reference standing in for the credential (`password = DB_PASSWORD_DEFAULT`,
+//     `secret: defaultClientSecret`). A real credential of 16 characters or more essentially always carries
+//     a digit; a name written for a human does not, and in source code an unquoted assignment holds a name
+//     far more often than a literal. A value with any character no identifier can carry, so anything with
+//     /, +, = or -, is exempt from the identifier test and judged on entropy alone.
+func assignedValueNotCredential(secret string) bool {
+	if wordlikePathToken(secret) {
+		return true
+	}
+	hasDigit := false
+	for i := 0; i < len(secret); i++ {
+		c := secret[i]
+		switch {
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_':
+		default:
+			return false // not an identifier at all: judge it on entropy
+		}
+	}
+	return !hasDigit
+}
+
+func wordlikePathToken(secret string) bool {
+	if !strings.Contains(secret, "/") {
+		return false
+	}
+	for _, seg := range strings.Split(secret, "/") {
+		if len(seg) < 8 {
+			continue
+		}
+		var hasUpper, hasLower bool
+		for _, c := range seg {
+			switch {
+			case c >= 'A' && c <= 'Z':
+				hasUpper = true
+			case c >= 'a' && c <= 'z':
+				hasLower = true
+			}
+		}
+		if hasUpper && hasLower {
+			return false
+		}
+	}
+	return true
+}
+
+// resourcePathExtensions are the file extensions whose presence marks a quoted value as a RESOURCE PATH
+// rather than a credential. Kept to source, config and migration artefacts: a credential is never stored as
+// the name of a .java or .xml file, while a long generated migration name is exactly that shape.
+var resourcePathExtensions = []string{
+	".xml", ".sql", ".yaml", ".yml", ".json", ".properties", ".java", ".kt", ".ts", ".js", ".go", ".py",
+	".html", ".csv", ".md", ".txt", ".png", ".jpg", ".svg",
+}
+
+// resourcePathIndicators mark the line as declaring where something lives.
+var resourcePathIndicators = []string{"classpath:", "file=", "file:", "path=", "resource=", "src=", "href=", "include"}
+
+// lineDeclaresResourcePath reports whether the line is a resource declaration whose high-entropy token is a
+// FILE NAME, not a credential. Liquibase and Flyway generate migration names long and varied enough to clear
+// a 4.5 bits/char entropy floor on the base64 alphabet, so a JHipster changelog produces one keyword-free
+// entropy hit per include line and nothing in the old skip list stood them down.
+//
+// Both halves are required, which is what keeps this from swallowing a real secret: the line must name a
+// location AND carry a known non-credential extension. A credential assigned on a line that merely contains
+// the word "file" still fires, and a credential keyword on the line defers to the gating generic-secret rule
+// before this is consulted.
+func lineDeclaresResourcePath(line string) bool {
+	lower := strings.ToLower(line)
+	hasIndicator := false
+	for _, indicator := range resourcePathIndicators {
+		if strings.Contains(lower, indicator) {
+			hasIndicator = true
+			break
+		}
+	}
+	if !hasIndicator {
+		return false
+	}
+	for _, ext := range resourcePathExtensions {
+		if strings.Contains(lower, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 // defaultRules is the owned starter ruleset. Prefix-anchored rules (AWS/GitHub/GitLab/Slack/Google/private
@@ -1048,7 +1356,12 @@ func baseDefaultRules() []rule {
 			// keyword-anchored generic-secret rule (which is PROMOTED/gating) rather than quarantining here,
 			// so a keyword-context secret is never demoted to gate-exempt. Also skip benign high-entropy
 			// contexts (SRI/integrity, digests, checksums) that are public hashes, not credentials.
-			lineSkip: func(line string) bool { return hasAnyKeyword(line, highEntropyDeferKeywords) },
+			lineSkip: func(line string) bool {
+				return hasAnyKeyword(line, highEntropyDeferKeywords) || lineDeclaresResourcePath(line)
+			},
+			skipValue:          wordlikePathToken,
+			maskNotebookOutput: true,
+			maskPEMBodies:      true,
 		},
 		{
 			id: "generic-secret", category: "Generic", title: "Hardcoded secret", severity: shared.SeverityMedium,
@@ -1058,10 +1371,58 @@ func baseDefaultRules() []rule {
 			// config key (`app.config['SECRET_KEY_HMAC_2'] = "\u2026"`). The keyword may now carry
 			// an identifier suffix and be wrapped in brackets and quotes. The value guards
 			// (16 characters, entropy 3.5, allow-list) are untouched, so precision is unchanged.
-			re:     regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_]{0,32}["']?\s*\]?\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*\]?\s*[:=]\s*["']([A-Za-z0-9/+=_\-]{16,})["']`),
-			group:  1,
-			minEnt: 3.5,
-			allow:  compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
+			// The value's quote may be BACKSLASH-ESCAPED. A Jupyter notebook stores each cell's source as
+			// JSON-encoded strings, so a credential written in a code cell reads as api_key = \"…\" on
+			// disk, and requiring a bare quote missed every one of them. Notebooks are exactly where a
+			// data team leaves a key, so this was a hole in the GATING rule, not a cosmetic one. The
+			// optional backslash admits one more character in a position that previously allowed only a
+			// quote, so it costs no precision.
+			//
+			// The value's QUOTES ARE OPTIONAL. Requiring them meant the rule never fired on the one place
+			// credentials actually sit in a Spring, Rails or Helm deployment: an unquoted YAML scalar, and
+			// the same in .env and .properties. On one live repository gitleaks found 25 distinct
+			// credentials this way that this rule could not see, under keys as plain as `password:`,
+			// `client-secret:` and `secret-key:`. In exchange the match must now end at a real value
+			// boundary (a quote, whitespace, end of input, or a delimiter), so a value the character class
+			// truncates mid-token no longer counts; a quoted value behaves exactly as before.
+			//
+			// The keyword suffix also admits a HYPHEN, so `secret-key:` and `access-token:` reach the
+			// rule. The value guards are unchanged: 16 characters, entropy 3.5, the allow-list, and the
+			// identifier/path skip below.
+			//
+			// The separator admits a SECOND character, which makes `password := "…"` match. Go's short
+			// variable declaration is how a Go program assigns a literal, and the single-character
+			// separator had never matched it. `==` matches too, and a comparison against a literal
+			// credential is a hardcoded credential just the same.
+			re:        regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?\s*\]?\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*\]?\s*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
+			group:     1,
+			minEnt:    3.5,
+			allow:     compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
+			skipValue: assignedValueNotCredential,
+			lineSkip:  clientPublicVariableLine,
+		},
+		{
+			// A credential in a COMMENT is still a credential in the repository: it is in the history, it is
+			// readable by everyone with access, and a commented-out config line is usually the value that was
+			// live yesterday. Comments are blanked before the rules run so that prose and examples do not
+			// surface as live findings, which left this class unreported: gitleaks found seven of them on one
+			// live estate where this scanner found none.
+			//
+			// The distinction the rule keeps is structural rather than textual. It matches only a credential
+			// ASSIGNMENT whose line BEGINS with a comment marker, which is what a commented-out setting looks
+			// like, and it leaves prose that merely mentions a credential alone. The value guards are the ones
+			// generic-secret uses, so the bar for what counts as a credential is the same in a comment as it is
+			// in live code, and the two never see the same text: generic-secret reads the masked file.
+			id: "commented-credential", category: "Generic", title: "Credential left in a comment", severity: shared.SeverityMedium,
+			keywords:        []string{"secret", "token", "passwd", "password", "api_key", "apikey", "apiKey", "access_key", "SECRET", "TOKEN", "API_KEY"},
+			re:              regexp.MustCompile(`(?im)^[ \t]*(?:#|//|--|;)+[ \t]*["']?[A-Za-z0-9_.\-]{0,32}(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?\s*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
+			group:           1,
+			minEnt:          3.5,
+			allow:           compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
+			skipValue:       assignedValueNotCredential,
+			lineSkip:        commentedCredentialLineSkip,
+			scanComments:    true,
+			configFilesOnly: true,
 		},
 		// ── additional distinctive-prefix provider tokens (near-zero false positive: the unique prefix is the signal) ──
 		{
@@ -1247,5 +1608,58 @@ func baseDefaultRules() []rule {
 			// The webhook id (17-20 digits) plus its token (60-110 url-safe base64 chars); ptb./canary. hosts too.
 			re: regexp.MustCompile(`https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/[0-9]{17,20}/[A-Za-z0-9_-]{60,110}`),
 		},
+	}
+}
+
+// maskNotebookOutputs blanks the OUTPUT spans of a Jupyter notebook while preserving byte offsets and
+// newlines, the same contract maskComments keeps, so a match offset and a line count still index the file.
+//
+// Why outputs are different from source: a cell's output is what running the code printed, not what anyone
+// wrote. Profiling a real estate, one notebook's cell output held 2.2 MB of a printed catalogue dump and
+// produced 1,999 of the 2,844 keyword-free entropy findings across all 72 repositories, every one of them
+// an asset path or a crawler key. Chasing those token shapes is the wrong cut; the right one is that
+// program output is not authored content.
+//
+// It is applied ONLY to the keyword-free entropy rule. A provider token printed into an output is still a
+// leaked credential, and the prefix-anchored rules keep reading the whole file, so an AKIA or a ghp_ in a
+// cell output is still reported. What stands down is the rule that cannot tell a catalogue dump from a key.
+func maskNotebookOutputs(rel string, data []byte) []byte {
+	if !strings.HasSuffix(strings.ToLower(rel), ".ipynb") {
+		return data
+	}
+	out := append([]byte(nil), data...)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	depth := 0
+	pendingOutputs := false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return out // a malformed notebook keeps whatever was masked so far, never fails the scan
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			switch t {
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+			}
+		case string:
+			if depth > 0 && t == "outputs" && !pendingOutputs {
+				start := dec.InputOffset()
+				var skip json.RawMessage
+				if err := dec.Decode(&skip); err != nil {
+					return out
+				}
+				end := dec.InputOffset()
+				if start >= 0 && end <= int64(len(out)) && start < end {
+					for i := start; i < end; i++ {
+						if out[i] != '\n' && out[i] != '\r' {
+							out[i] = ' '
+						}
+					}
+				}
+			}
+		}
 	}
 }

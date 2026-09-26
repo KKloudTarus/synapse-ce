@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -17,6 +19,47 @@ import (
 // effectively removes the container boundary.
 var dangerousCaps = set("ALL", "SYS_ADMIN", "NET_ADMIN", "NET_RAW", "SYS_PTRACE",
 	"SYS_MODULE", "SYS_BOOT", "DAC_READ_SEARCH", "SYS_RAWIO")
+
+// runtimeDefaultCaps is the capability set containerd and Docker grant every container without being asked.
+// Adding one of these back after a `drop: [ALL]` is the hardening pattern an upstream chart is written with,
+// not a privilege the workload gains, so re-listing one grants nothing and is not a finding.
+//
+// Source: https://github.com/containerd/containerd/blob/main/oci/spec.go (defaultUnixCaps)
+var runtimeDefaultCaps = set("AUDIT_WRITE", "CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL",
+	"MKNOD", "NET_BIND_SERVICE", "NET_RAW", "SETFCAP", "SETGID", "SETPCAP", "SETUID", "SYS_CHROOT")
+
+// addedCapabilityBeyondDefault returns the first added capability that grants something the runtime does not
+// already hand every container, and that kubernetes-dangerous-capability does not already report. The two
+// rules never fire on the same capability, so a SYS_ADMIN container is one finding and not two.
+func addedCapabilityBeyondDefault(added []string) (string, bool) {
+	for _, capName := range added {
+		name := strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(capName)), "CAP_")))
+		if name == "" || dangerousCaps[name] || runtimeDefaultCaps[name] {
+			continue
+		}
+		return capName, true
+	}
+	return "", false
+}
+
+// ingressSnippetAnnotation returns the first Ingress annotation whose key names an NGINX configuration
+// snippet. A snippet is raw nginx configuration the Ingress author supplies, and the controller renders it
+// into the shared config with the controller's own privileges, which is CVE-2021-25742: an author who can
+// create an Ingress in any namespace can read the controller's service-account token and every TLS secret
+// the cluster holds.
+func ingressSnippetAnnotation(doc k8sDoc) (string, bool) {
+	keys := make([]string, 0, len(doc.Metadata.Annotations))
+	for key := range doc.Metadata.Annotations {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if strings.Contains(strings.ToLower(key), "snippet") {
+			return key, true
+		}
+	}
+	return "", false
+}
 
 // maxNestDepth bounds YAML flow-collection nesting before we decode. yaml.v3 has no recursion-depth
 // limit, so a deeply-nested untrusted document (e.g. millions of '[') can overflow the parser's stack –
@@ -32,13 +75,15 @@ const maxLocatorDepth = 1000
 type k8sDoc struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
-		Name      string `yaml:"name"`
-		Namespace string `yaml:"namespace"`
+		Name        string            `yaml:"name"`
+		Namespace   string            `yaml:"namespace"`
+		Annotations map[string]string `yaml:"annotations"`
 	} `yaml:"metadata"`
 	Spec                         k8sSpec           `yaml:"spec"`
 	AutomountServiceAccountToken *bool             `yaml:"automountServiceAccountToken"`
 	Rules                        []k8sRBACRule     `yaml:"rules"`
 	RoleRef                      k8sRoleRef        `yaml:"roleRef"`
+	Subjects                     []k8sSubject      `yaml:"subjects"`
 	Data                         map[string]string `yaml:"data"`
 	StringData                   map[string]string `yaml:"stringData"`
 }
@@ -66,8 +111,16 @@ type k8sSpec struct {
 type k8sRBACRule struct {
 	APIGroups       []string `yaml:"apiGroups"`
 	Resources       []string `yaml:"resources"`
+	ResourceNames   []string `yaml:"resourceNames"`
 	Verbs           []string `yaml:"verbs"`
 	NonResourceURLs []string `yaml:"nonResourceURLs"`
+}
+
+// k8sSubject is one identity a binding grants its role to.
+type k8sSubject struct {
+	Kind      string `yaml:"kind"`
+	Name      string `yaml:"name"`
+	Namespace string `yaml:"namespace"`
 }
 
 type k8sRoleRef struct {
@@ -102,18 +155,39 @@ type k8sContainer struct {
 	Image           string     `yaml:"image"`
 	SecurityContext *ctnSecCtx `yaml:"securityContext"`
 	Resources       *struct {
-		Limits map[string]any `yaml:"limits"`
+		Limits   map[string]any `yaml:"limits"`
+		Requests map[string]any `yaml:"requests"`
 	} `yaml:"resources"`
 	Ports []struct {
 		HostPort int `yaml:"hostPort"`
 	} `yaml:"ports"`
-	Env []k8sEnvVar `yaml:"env"`
+	LivenessProbe   map[string]any `yaml:"livenessProbe"`
+	ReadinessProbe  map[string]any `yaml:"readinessProbe"`
+	Env             []k8sEnvVar    `yaml:"env"`
+	EnvFrom         []k8sEnvFrom   `yaml:"envFrom"`
+	ImagePullPolicy string         `yaml:"imagePullPolicy"`
 }
 
 type k8sEnvVar struct {
-	Name      string `yaml:"name"`
-	Value     string `yaml:"value"`
-	ValueFrom any    `yaml:"valueFrom"`
+	Name      string        `yaml:"name"`
+	Value     string        `yaml:"value"`
+	ValueFrom *k8sValueFrom `yaml:"valueFrom"`
+}
+
+// k8sValueFrom is the env valueFrom source. Only secretKeyRef is modelled: it is the one source that puts
+// secret material into the process environment.
+type k8sValueFrom struct {
+	SecretKeyRef *struct {
+		Name string `yaml:"name"`
+		Key  string `yaml:"key"`
+	} `yaml:"secretKeyRef"`
+}
+
+// k8sEnvFrom is one envFrom entry. secretRef injects EVERY key of a Secret as an environment variable.
+type k8sEnvFrom struct {
+	SecretRef *struct {
+		Name string `yaml:"name"`
+	} `yaml:"secretRef"`
 }
 
 type ctnSecCtx struct {
@@ -151,18 +225,57 @@ type k8sWorkloadFact struct {
 	resource  string
 }
 
+// k8sRoleFact records a Role or ClusterRole that grants unrestricted read access to Secrets. Whether that is
+// a defect depends on who it is bound to, which lives in a different document, so the decision waits for the
+// whole tree.
+type k8sRoleFact struct {
+	key      string // "ClusterRole/name" or "Role/namespace/name": the identity a binding's roleRef names
+	resource string
+}
+
+// k8sBindingFact records a binding and the role it names, so a binding can be judged against the role's
+// rules once both have been read.
+type k8sBindingFact struct {
+	roleKey  string
+	subjects []string // the subject kinds the binding grants to
+	file     string
+	line     int
+	resource string
+	roleName string
+}
+
 type k8sScanResult struct {
 	findings         []ports.MisconfigRawFinding
 	workloads        []k8sWorkloadFact
 	policyNamespaces map[string]struct{}
+	secretReaders    map[string]k8sRoleFact
+	bindings         []k8sBindingFact
+	// chartRenderFailures counts Helm charts that refused to render, and chartRenderReasons carries the
+	// distinct reasons. A chart that will not render is not a chart with no findings.
+	chartRenderFailures int
+	chartRenderReasons  []string
 }
 
 // scanKubernetes decodes every YAML document in data and returns findings plus namespace facts. Best-effort:
 // a document that decodes but does not fit our shape (or has no kind) is skipped and later documents are
 // still scanned; a YAML *stream* syntax error halts parsing of the rest of THIS file (prior results are
 // kept), because yaml.v3 cannot reliably resume mid-stream. Either way the overall scan never fails.
+// k8sOrigin resolves a rendered document back to the file that declared it, and to a line INSIDE that file.
+// A kustomize or Helm render merges many manifests into one stream, so without this every finding from the
+// render carries the aggregator's path, which is the one path a reader cannot open to fix anything. The line
+// matters just as much: a position in the render stream is a line the source file usually does not have, so
+// a remapped document must be given a line of its own rather than keep the stream's. An empty path means the
+// document was not remapped; a zero line with a path means the file is right and the position is not
+// resolvable, which the caller reads as line 1. nil means the caller scanned a single file and rel is already
+// right.
+type k8sOrigin func(doc k8sDoc) (string, int)
+
 func scanKubernetes(rel string, data []byte) k8sScanResult {
-	out := k8sScanResult{policyNamespaces: make(map[string]struct{})}
+	return scanKubernetesFrom(rel, data, nil)
+}
+
+func scanKubernetesFrom(rel string, data []byte, origin k8sOrigin) k8sScanResult {
+	out := k8sScanResult{policyNamespaces: make(map[string]struct{}), secretReaders: make(map[string]k8sRoleFact)}
 	// Refuse pathologically deep documents BEFORE decoding: yaml.v3 recurses per nesting level with no
 	// depth cap, so a crafted deep document would overflow the goroutine stack (an unrecoverable fatal),
 	// not merely return an error. This keeps a malformed file a per-file skip, per the port contract.
@@ -182,20 +295,85 @@ func scanKubernetes(rel string, data []byte) k8sScanResult {
 		if err := node.Decode(&doc); err != nil || doc.Kind == "" {
 			continue // not a manifest we recognise; try the next document
 		}
-		out.findings = append(out.findings, checkK8sDoc(rel, doc, &node)...)
+		docRel := rel
+		// docLine > 0 marks a REMAPPED document: the position every rule computed belongs to the render
+		// stream, not to the file the finding now names, so it is replaced by one the named file has.
+		docLine := 0
+		if origin != nil {
+			if from, line := origin(doc); from != "" {
+				docRel = from
+				docLine = line
+				if docLine <= 0 {
+					docLine = 1
+				}
+			}
+		}
+		found := checkK8sDoc(docRel, doc, &node)
+		if docLine > 0 {
+			for i := range found {
+				found[i].Line = docLine
+			}
+		}
+		out.findings = append(out.findings, found...)
 		namespace := k8sNamespace(doc.Metadata.Namespace)
 		if isWorkloadKind(doc.Kind) {
 			resource := clip(doc.Kind)
 			if doc.Metadata.Name != "" {
 				resource += "/" + clip(doc.Metadata.Name)
 			}
-			out.workloads = append(out.workloads, k8sWorkloadFact{namespace: namespace, file: rel, line: firstKeyLine(&node, "kind"), resource: resource})
+			out.workloads = append(out.workloads, k8sWorkloadFact{namespace: namespace, file: docRel, line: k8sLine(docLine, &node, "kind"), resource: resource})
 		}
 		if doc.Kind == "NetworkPolicy" {
 			out.policyNamespaces[namespace] = struct{}{}
 		}
+		if isRBACRoleKind(doc.Kind) && rbacReadsEverySecret(doc.Rules) {
+			out.secretReaders[roleFactKey(doc.Kind, namespace, doc.Metadata.Name)] = k8sRoleFact{
+				key:      roleFactKey(doc.Kind, namespace, doc.Metadata.Name),
+				resource: clip(doc.Kind) + "/" + clip(doc.Metadata.Name),
+			}
+		}
+		if isRBACBindingKind(doc.Kind) {
+			out.bindings = append(out.bindings, k8sBindingFact{
+				roleKey:  roleFactKey(doc.RoleRef.Kind, namespace, doc.RoleRef.Name),
+				subjects: subjectKinds(doc.Subjects),
+				file:     docRel,
+				line:     k8sLine(docLine, &node, "roleRef"),
+				resource: resourceName(doc),
+				roleName: clip(doc.RoleRef.Kind) + "/" + clip(doc.RoleRef.Name),
+			})
+		}
 	}
 	return out
+}
+
+// roleFactKey identifies a role the way a binding's roleRef does. A ClusterRole is cluster-scoped, so its
+// name alone identifies it; a Role only exists inside its namespace.
+func roleFactKey(kind, namespace, name string) string {
+	if kind == "ClusterRole" {
+		return "ClusterRole/" + name
+	}
+	return "Role/" + namespace + "/" + name
+}
+
+// subjectKinds returns the kinds a binding grants to, which is what decides whether a workload identity gets
+// the permission or a human administrator does.
+func subjectKinds(subjects []k8sSubject) []string {
+	out := make([]string, 0, len(subjects))
+	for _, subject := range subjects {
+		kind := strings.TrimSpace(subject.Kind)
+		if kind != "" && !slices.Contains(out, kind) {
+			out = append(out, kind)
+		}
+	}
+	return out
+}
+
+func resourceName(doc k8sDoc) string {
+	res := clip(doc.Kind)
+	if doc.Metadata.Name != "" {
+		res += "/" + clip(doc.Metadata.Name)
+	}
+	return res
 }
 
 func k8sNamespace(namespace string) string {
@@ -208,12 +386,57 @@ func k8sNamespace(namespace string) string {
 func mergeK8sScanResult(dst *k8sScanResult, src k8sScanResult) {
 	dst.findings = append(dst.findings, src.findings...)
 	dst.workloads = append(dst.workloads, src.workloads...)
+	dst.chartRenderFailures += src.chartRenderFailures
+	for _, reason := range src.chartRenderReasons {
+		if !slices.Contains(dst.chartRenderReasons, reason) {
+			dst.chartRenderReasons = append(dst.chartRenderReasons, reason)
+		}
+	}
 	if dst.policyNamespaces == nil {
 		dst.policyNamespaces = make(map[string]struct{})
 	}
 	for namespace := range src.policyNamespaces {
 		dst.policyNamespaces[namespace] = struct{}{}
 	}
+	if dst.secretReaders == nil {
+		dst.secretReaders = make(map[string]k8sRoleFact)
+	}
+	for key, fact := range src.secretReaders {
+		dst.secretReaders[key] = fact
+	}
+	dst.bindings = append(dst.bindings, src.bindings...)
+}
+
+// secretReaderFindings judges each binding against the roles the whole tree declared. A Role granting read
+// access to every Secret is only a defect once something is bound to it, and it matters most when that
+// something is a workload identity: a ServiceAccount token sits in a pod, so any container escape or
+// application flaw reads every Secret in scope, where a human subject at least authenticates first.
+func secretReaderFindings(result k8sScanResult) []ports.MisconfigRawFinding {
+	var out []ports.MisconfigRawFinding
+	seen := make(map[string]struct{})
+	for _, binding := range result.bindings {
+		role, ok := result.secretReaders[binding.roleKey]
+		if !ok {
+			continue
+		}
+		if !slices.ContainsFunc(binding.subjects, func(kind string) bool {
+			return kind == "ServiceAccount" || kind == "Node"
+		}) {
+			continue
+		}
+		key := binding.file + "|" + binding.resource
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, ports.MisconfigRawFinding{
+			File: binding.file, Line: binding.line, RuleID: "kubernetes-rbac-read-all-secrets",
+			Title:    "Binding lets a workload identity read every Secret",
+			Severity: shared.SeverityHigh, Resource: binding.resource,
+			Description: "The binding grants " + role.resource + " to a ServiceAccount or Node, and that role reads Secrets with no resourceNames, so the holder reads every Secret in scope: database passwords, TLS keys and other services' tokens. The token sits in a pod, so one application flaw is enough to collect them. List the Secrets the workload needs in resourceNames, or bind a Role scoped to its own namespace.",
+		})
+	}
+	return out
 }
 
 func networkPolicyFindings(result k8sScanResult) []ports.MisconfigRawFinding {
@@ -254,9 +477,9 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 		})
 	}
 
-	if isWorkloadKind(doc.Kind) && (doc.Metadata.Namespace == "" || doc.Metadata.Namespace == "default") {
-		add("kubernetes-default-namespace", "Workload in the default namespace",
-			"The workload has no namespace or uses \"default\", so it shares a namespace with unrelated workloads and weakens RBAC/network-policy scoping. Deploy it to a dedicated namespace.",
+	if isNamespacedKind(doc.Kind) && (doc.Metadata.Namespace == "" || doc.Metadata.Namespace == "default") {
+		add("kubernetes-default-namespace", "Resource in the default namespace",
+			"The resource has no namespace or uses \"default\", so it shares a namespace with unrelated resources and weakens RBAC and network-policy scoping. Deploy it to a dedicated namespace.",
 			shared.SeverityLow, "metadata")
 	}
 	if isWorkloadKind(doc.Kind) && usesDefaultServiceAccount(spec) {
@@ -279,6 +502,14 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 			add("kubernetes-rbac-escalation-verbs", "RBAC rule grants escalation permissions",
 				"The RBAC rule grants bind, escalate, or impersonate, which can be used to obtain broader privileges. Remove these verbs unless an administrator explicitly requires them.", shared.SeverityHigh, "verbs")
 		}
+		// An admission webhook configuration decides what the API server accepts, so write access to one is
+		// write access to every future object in the cluster. It is cluster-scoped, so only a ClusterRole can
+		// grant it.
+		if doc.Kind == "ClusterRole" && rbacGrantsWebhookControl(doc.Rules) {
+			add("kubernetes-rbac-webhook-control", "ClusterRole can rewrite admission webhooks",
+				"The ClusterRole grants create, update or patch on mutating or validating webhook configurations. An admission webhook decides what the API server accepts and can rewrite every object submitted to it, so whoever holds this can inject a sidecar into any future pod, or disable the policy that would have blocked it. Remove the verb, or scope the rule to the named configurations this controller owns with resourceNames.",
+				shared.SeverityHigh, "rules")
+		}
 	}
 	if isRBACBindingKind(doc.Kind) && doc.RoleRef.Kind == "ClusterRole" && doc.RoleRef.Name == "cluster-admin" {
 		add("kubernetes-rbac-cluster-admin-binding", "Binding grants cluster-admin",
@@ -288,7 +519,21 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 		add("kubernetes-secret-in-manifest", "Secret value stored in manifest",
 			"The Secret embeds data directly in a manifest, which can expose credentials through source control, reviews, and build artifacts. Reference a managed secret source or inject the value at deployment time.", shared.SeverityMedium, "data")
 	}
+	// A ConfigMap is not encrypted at rest and is readable by anything that can read ConfigMaps in the
+	// namespace, so a credential there is worse off than the same credential in a Secret, not better.
+	if doc.Kind == "ConfigMap" {
+		if key, ok := configMapCredentialKey(doc); ok {
+			add("kubernetes-configmap-credential", "Credential stored in a ConfigMap",
+				"ConfigMap key "+clip(key)+" names a credential and carries a literal value. A ConfigMap is stored unencrypted in etcd and is readable by every workload that can read ConfigMaps in the namespace. Move the value to a Secret backed by a managed secret source.",
+				shared.SeverityMedium, "data")
+		}
+	}
 	if doc.Kind == "Ingress" {
+		if key, ok := ingressSnippetAnnotation(doc); ok {
+			add("kubernetes-ingress-annotation-snippet", "Ingress injects raw NGINX configuration",
+				"Annotation "+clip(key)+" supplies raw NGINX configuration that the ingress controller renders into its shared config and executes with the controller's own identity. That is CVE-2021-25742: whoever can create an Ingress in any namespace can read the controller's service-account token and every TLS secret the cluster holds. Remove the snippet, and set allow-snippet-annotations=false on the controller so no manifest can reintroduce one.",
+				shared.SeverityHigh, "annotations")
+		}
 		if len(doc.Spec.TLS) == 0 {
 			add("kubernetes-ingress-no-tls", "Ingress has no TLS configuration",
 				"The Ingress declares routes without a TLS entry, so clients may connect without transport encryption. Configure TLS for every hostname that serves sensitive traffic.", shared.SeverityLow, "spec")
@@ -364,6 +609,11 @@ func checkK8sDoc(rel string, doc k8sDoc, node *yaml.Node) []ports.MisconfigRawFi
 					break
 				}
 			}
+			if extra, ok := addedCapabilityBeyondDefault(sc.Capabilities.Add); ok {
+				out = append(out, k8sContainerFinding(rel, node, cres, "kubernetes-added-capability",
+					"Linux capability added beyond the runtime default", shared.SeverityMedium, "capabilities",
+					fmt.Sprintf("securityContext.capabilities.add includes %q, a kernel privilege the container runtime grants no container by default, so this workload can do something to the node that its neighbours cannot. Remove it, or state in the manifest which syscall needs it.", clip(extra)), docLine))
+			}
 		}
 	}
 	return out
@@ -403,10 +653,12 @@ func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctn
 			"No seccompProfile is set (RuntimeDefault or Localhost) on the container or the pod, so syscalls are unrestricted. Set seccompProfile.type: RuntimeDefault.",
 			"seccompProfile", shared.SeverityLow)
 	}
-	cpu, mem := false, false
+	cpu, mem, cpuReq, memReq := false, false, false, false
 	if c.Resources != nil {
 		_, cpu = c.Resources.Limits["cpu"]
 		_, mem = c.Resources.Limits["memory"]
+		_, cpuReq = c.Resources.Requests["cpu"]
+		_, memReq = c.Resources.Requests["memory"]
 	}
 	if !cpu {
 		h("kubernetes-no-cpu-limit", "No CPU limit",
@@ -417,6 +669,39 @@ func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctn
 		h("kubernetes-no-memory-limit", "No memory limit",
 			"The container sets no resources.limits.memory, so a memory leak or hostile workload can OOM the node (noisy-neighbor / DoS). Set a memory limit.",
 			"resources", shared.SeverityLow)
+	}
+	// A request, not a limit, is what the scheduler reserves. Without one the pod lands on a node that has
+	// no room for it and the kubelet evicts it first under pressure, so the two are separate defects.
+	if !cpuReq {
+		h("kubernetes-no-cpu-request", "No CPU request",
+			"The container sets no resources.requests.cpu, so the scheduler reserves no CPU for it and places it on any node. Set a CPU request that reflects what the workload needs.",
+			"resources", shared.SeverityLow)
+	}
+	if !memReq {
+		h("kubernetes-no-memory-request", "No memory request",
+			"The container sets no resources.requests.memory, so the scheduler reserves no memory for it and the kubelet evicts it first under node memory pressure. Set a memory request.",
+			"resources", shared.SeverityLow)
+	}
+	// A UID under 10000 collides with a real account on many host images, so a container escape lands on an
+	// existing identity with whatever the host grants it. This is the SET-but-low case; the absent case is the
+	// rule below.
+	if uid, ok := effectiveRunAsUser(sc, pod); ok && uid > 0 && uid < minHostSafeUID {
+		h("kubernetes-low-run-as-user", "Container UID collides with host accounts",
+			fmt.Sprintf("securityContext.runAsUser is %d, below %d, so it can coincide with an account that exists on the host image and inherit whatever that account is granted. Use a high, application-specific UID.", uid, minHostSafeUID),
+			"runAsUser", shared.SeverityLow)
+	}
+	// A workload with no liveness probe is never restarted when it wedges: the process is up, serves nothing,
+	// and the platform has no way to tell. With no readiness probe the Service sends traffic to a pod that has
+	// not finished starting, so every deployment drops requests.
+	if len(c.LivenessProbe) == 0 {
+		h("kubernetes-no-liveness-probe", "No liveness probe",
+			"The container declares no livenessProbe, so a process that is running but wedged is never restarted and the platform cannot tell it apart from a healthy one. Declare a livenessProbe that fails when the container cannot do its work.",
+			"livenessProbe", shared.SeverityLow)
+	}
+	if len(c.ReadinessProbe) == 0 {
+		h("kubernetes-no-readiness-probe", "No readiness probe",
+			"The container declares no readinessProbe, so its Service routes traffic to it before it has finished starting and every rollout drops requests. Declare a readinessProbe that passes once the container can serve.",
+			"readinessProbe", shared.SeverityLow)
 	}
 	if !runAsUserSet(sc, pod) {
 		h("kubernetes-no-run-as-user", "No explicit runAsUser",
@@ -432,6 +717,27 @@ func k8sHardening(rel string, node *yaml.Node, cres string, docLine int, sc *ctn
 		h("kubernetes-image-no-tag", "Container image not version-pinned",
 			"The container image uses no tag or :latest, so the deployed version is not reproducible and can silently change. Pin an explicit tag, ideally by digest.",
 			"image", shared.SeverityLow)
+	}
+	// A tag is mutable: whoever can push to the registry can replace what a pinned tag resolves to. Only a
+	// digest names an immutable image, so this is a separate defect from an unpinned tag.
+	if c.Image != "" && !strings.Contains(c.Image, "@sha256:") {
+		h("kubernetes-image-no-digest", "Container image not pinned by digest",
+			"The container image is referenced by tag rather than by digest, and a tag can be repointed at different content in the registry. Pin the image as name:tag@sha256:<digest>.",
+			"image", shared.SeverityLow)
+	}
+	// A mutable tag plus a cached image means nobody can say what is running: the kubelet keeps whatever it
+	// pulled first, and the tag has since moved. Pinning by digest makes IfNotPresent correct, which is why
+	// this is conditional rather than the unconditional "always pull" check other scanners ship.
+	if c.Image != "" && !strings.Contains(c.Image, "@sha256:") &&
+		!strings.EqualFold(strings.TrimSpace(c.ImagePullPolicy), "Always") {
+		h("kubernetes-image-pull-policy-cached", "Mutable image tag served from cache",
+			"The image is referenced by tag, not by digest, and imagePullPolicy is not Always, so a node keeps the layer it pulled first even after the tag moves and the running image cannot be identified. Pin the image by digest, or set imagePullPolicy: Always.",
+			"imagePullPolicy", shared.SeverityLow)
+	}
+	if name, ok := secretEnvSource(c); ok {
+		h("kubernetes-secret-env-var", "Secret exposed as an environment variable",
+			"Secret "+clip(name)+" is injected into the process environment, where it is readable through /proc, a crash dump, a child process and most debug tooling. Mount the Secret as a file and read it from disk instead.",
+			"env", shared.SeverityLow)
 	}
 	for _, p := range c.Ports {
 		if p.HostPort != 0 {
@@ -471,6 +777,57 @@ func rbacHasWildcard(rules []k8sRBACRule) bool {
 	return false
 }
 
+// rbacGrantsWebhookControl reports whether a rule can create, update or patch an admission webhook
+// configuration. The apiGroup, the resource and the verb all have to line up, because a rule that only reads
+// webhook configurations is how a controller watches them and is not a defect.
+//
+// The apiGroup has to be NAMED. A rule wildcarding every group grants this too, but it grants everything
+// else with it and kubernetes-rbac-wildcard-permissions already reports that role; restating one consequence
+// of it here would put two findings on one line for one decision.
+func rbacGrantsWebhookControl(rules []k8sRBACRule) bool {
+	writeVerbs := set("create", "update", "patch", "*")
+	webhookResources := set("mutatingwebhookconfigurations", "validatingwebhookconfigurations", "*")
+	for _, rule := range rules {
+		if !rbacMatches(rule.APIGroups, set("admissionregistration.k8s.io")) {
+			continue
+		}
+		if rbacMatches(rule.Resources, webhookResources) && rbacMatches(rule.Verbs, writeVerbs) {
+			return true
+		}
+	}
+	return false
+}
+
+// rbacReadsEverySecret reports whether a rule grants a read verb on Secrets without narrowing to named ones.
+// resourceNames is what turns "every Secret" into "these Secrets", so a rule that has it is scoped.
+func rbacReadsEverySecret(rules []k8sRBACRule) bool {
+	readVerbs := set("get", "list", "watch", "*")
+	for _, rule := range rules {
+		if len(rule.ResourceNames) > 0 {
+			continue
+		}
+		// Secrets live in the core API group, which a manifest writes as "" or omits entirely.
+		if len(rule.APIGroups) > 0 && !rbacMatches(rule.APIGroups, set("", "*")) {
+			continue
+		}
+		if rbacMatches(rule.Resources, set("secrets", "*")) && rbacMatches(rule.Verbs, readVerbs) {
+			return true
+		}
+	}
+	return false
+}
+
+// rbacMatches reports whether any value in an RBAC list is one the caller is looking for, compared the way
+// the API server compares them: case-insensitively, with surrounding space ignored.
+func rbacMatches(values []string, want map[string]bool) bool {
+	for _, value := range values {
+		if want[strings.ToLower(strings.TrimSpace(value))] {
+			return true
+		}
+	}
+	return false
+}
+
 func rbacHasEscalationVerb(rules []k8sRBACRule) bool {
 	for _, rule := range rules {
 		for _, verb := range rule.Verbs {
@@ -481,6 +838,46 @@ func rbacHasEscalationVerb(rules []k8sRBACRule) bool {
 		}
 	}
 	return false
+}
+
+// configMapCredentialKey returns the first ConfigMap key that names a credential and carries a literal
+// value. A value that is empty, or that only references something else (a $VAR, a ${...} template, a
+// path), is configuration telling the platform where to find the credential, not the credential.
+func configMapCredentialKey(doc k8sDoc) (string, bool) {
+	for _, entries := range []map[string]string{doc.Data, doc.StringData} {
+		keys := make([]string, 0, len(entries))
+		for key := range entries {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys) // one manifest must always report the same key
+		for _, key := range keys {
+			if !secretKeyRe.MatchString(key) {
+				continue
+			}
+			value := strings.TrimSpace(entries[key])
+			if value == "" || strings.Contains(value, "$") || strings.HasPrefix(value, "/") {
+				continue
+			}
+			return key, true
+		}
+	}
+	return "", false
+}
+
+// secretEnvSource reports the Secret whose material the container receives through its environment, either
+// one key via env.valueFrom.secretKeyRef or every key at once via envFrom.secretRef.
+func secretEnvSource(c k8sContainer) (string, bool) {
+	for _, entry := range c.Env {
+		if entry.ValueFrom != nil && entry.ValueFrom.SecretKeyRef != nil {
+			return entry.ValueFrom.SecretKeyRef.Name, true
+		}
+	}
+	for _, entry := range c.EnvFrom {
+		if entry.SecretRef != nil {
+			return entry.SecretRef.Name, true
+		}
+	}
+	return "", false
 }
 
 func hasLiteralSecretEnv(env []k8sEnvVar) bool {
@@ -500,6 +897,44 @@ func isWorkloadKind(kind string) bool {
 		return true
 	}
 	return false
+}
+
+// isNamespacedKind reports whether a kind is namespace-scoped, so leaving it in "default" is a real scoping
+// defect. A Service, a Secret or an Ingress in the default namespace is the same weakness as a workload
+// there, which is why this is wider than isWorkloadKind.
+//
+// The set is an explicit ALLOW-LIST of core kinds rather than "everything that is not cluster-scoped". Any
+// YAML document with a kind field decodes here, including a Kustomization, a CRD instance and unrelated
+// config that happens to use the word, and claiming a namespace defect on those would be a finding nobody
+// can act on.
+func isNamespacedKind(kind string) bool {
+	if isWorkloadKind(kind) {
+		return true
+	}
+	switch kind {
+	case "Service", "Ingress", "Secret", "ConfigMap", "ServiceAccount",
+		"Role", "RoleBinding", "PersistentVolumeClaim", "NetworkPolicy",
+		"HorizontalPodAutoscaler", "PodDisruptionBudget", "ResourceQuota", "LimitRange",
+		"Endpoints", "EndpointSlice", "PodTemplate":
+		return true
+	}
+	return false
+}
+
+// minHostSafeUID is the floor above which a container UID cannot collide with a conventional host account.
+// Distribution images allocate system and first human accounts well below it.
+const minHostSafeUID = 10000
+
+// effectiveRunAsUser resolves the UID the container runs as, from its own securityContext or, by
+// inheritance, the pod's. ok is false when neither sets one.
+func effectiveRunAsUser(sc *ctnSecCtx, pod *podSecCtx) (int, bool) {
+	if sc != nil && sc.RunAsUser != nil {
+		return *sc.RunAsUser, true
+	}
+	if pod != nil && pod.RunAsUser != nil {
+		return *pod.RunAsUser, true
+	}
+	return 0, false
 }
 
 // runAsUserSet reports whether an explicit runAsUser is set on the container or, by inheritance, the pod.
@@ -574,6 +1009,15 @@ func k8sContainerFinding(rel string, node *yaml.Node, resource, rule, title stri
 	return ports.MisconfigRawFinding{
 		File: rel, Line: line, RuleID: rule, Title: title, Severity: sev, Resource: resource, Description: desc,
 	}
+}
+
+// k8sLine picks the line a fact belongs on: the remapped document's own line when the document came out of a
+// render, otherwise the position inside the scanned file.
+func k8sLine(docLine int, node *yaml.Node, key string) int {
+	if docLine > 0 {
+		return docLine
+	}
+	return firstKeyLine(node, key)
 }
 
 // firstKeyLine returns the 1-indexed line of the first mapping key whose name equals key, searched
