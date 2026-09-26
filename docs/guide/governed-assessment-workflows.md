@@ -186,13 +186,15 @@ GET /api/v1/engagements/{id}/report.html
 GET /api/v1/engagements/{id}/report.docx
 GET /api/v1/engagements/{id}/export/sarif
 GET /api/v1/engagements/{id}/export/openvex
+GET /api/v1/engagements/{id}/export/csaf
 GET /api/v1/engagements/{id}/export/cyclonedx
 GET /api/v1/engagements/{id}/export/spdx
 ```
 
 Reports are deterministic functions of stored data. Evidence-chain verification failures block report
-generation. Exports cover SARIF, OpenVEX, CycloneDX, and SPDX; CSAF is an advisory **ingest** format, not
-an export.
+generation. Exports cover SARIF, OpenVEX, CSAF 2.0 VEX, CycloneDX, and SPDX. CSAF advisory
+feeds are also supported for ingest; the CSAF export is VEX-specific, not a general-purpose
+advisory publisher.
 
 ## Offensive work
 

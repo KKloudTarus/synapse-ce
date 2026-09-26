@@ -216,10 +216,13 @@ credential vault with placeholder substitution.
 
 Reports are templated from stored data and are deterministic. Compliance mapping from CWE to
 OWASP, PCI, and ISO controls comes from a curated, source-cited table, with no model in the
-path. Synapse exports CycloneDX and SPDX with PURL, SARIF, and OpenVEX, ingests CSAF and OVAL advisory
-feeds, and uses KEV plus EPSS for prioritization. CSAF is an ingest format only; there is no CSAF export.
-The SBOM both imports and exports: CycloneDX 1.6 and SPDX 2.3 and 3.0 are available from the
-engagement, from the API export routes, and from the export button in the dashboard.
+path. Synapse exports CycloneDX and SPDX with PURL, SARIF, OpenVEX, and CSAF 2.0 VEX;
+it also ingests CSAF and OVAL advisory feeds and uses KEV plus EPSS for prioritization. The CSAF
+VEX export (`GET /api/v1/engagements/{id}/export/csaf`) describes the same publishable findings
+as OpenVEX; it is not a general-purpose CSAF advisory publisher.
+Import a client-supplied CycloneDX SBOM as the engagement inventory. Export the retained SBOM
+as CycloneDX 1.6 or SPDX 2.3 / 3.0 through the engagement API or dashboard export button.
+SPDX is export-only; it is not an accepted SBOM import format.
 
 ## Bounded AI analysis (optional)
 
