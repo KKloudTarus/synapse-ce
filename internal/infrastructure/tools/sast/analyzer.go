@@ -22,13 +22,22 @@ import (
 )
 
 const (
-	maxFileBytes           = 1 << 20 // skip files larger than 1 MiB (generated/data, not hand-written source)
-	maxNotebookBytes       = 16 << 20
-	maxSourceFiles         = 100_000  // cap retained source units; each notebook code cell is one unit
-	maxRetainedSourceBytes = 64 << 20 // cap source held for cross-file context analysis
-	maxLineBytes           = 4096     // skip minified/blob lines
-	maxFindings            = 500      // cap unique hits so a hostile/huge tree can't flood the report
-	maxFindingsPerFile     = 50       // per-file share of the budget so one huge file can't consume it all
+	maxFileBytes     = 1 << 20 // skip files larger than 1 MiB (generated/data, not hand-written source)
+	maxNotebookBytes = 16 << 20
+	maxSourceFiles   = 100_000 // cap retained source units; each notebook code cell is one unit
+	maxLineBytes     = 4096    // skip minified/blob lines
+	// maxFindings caps unique hits so a hostile or huge tree cannot flood the report.
+	//
+	// It stays at 500 deliberately, and the measurement is worth recording because the obvious change is a
+	// trap. Raising the retained-source budget on a 26,672-file monorepo cut the unscanned count to 4,942 for
+	// 21 extra seconds (296s to 317s), and the finding count stayed at exactly 500: this cap, not the budget,
+	// is what binds there. Raising it to 10,000 took the same scan past 1,800 seconds before it was abandoned,
+	// because the cap is also what stops the rules running once the report is full, so lifting it makes every
+	// remaining file match every rule. Past the default ten-minute stage budget the stage is cut and reports a
+	// lower bound anyway, which is worse than an honest 500 with the truncation stated. A higher cap needs the
+	// matcher to get cheaper first, not a bigger number.
+	maxFindings        = 500
+	maxFindingsPerFile = 50 // per-file share of the budget so one huge file can't consume it all
 
 	// Minified/bundled-content probe. A generated bundle is not hand-written source: every hit in it
 	// is noise, and a single 200 KB line burns the whole finding budget.
@@ -286,7 +295,7 @@ type sourceFile struct {
 // New returns an analyzer with the built-in tier-1 rule set.
 func New() *Analyzer {
 	rules := canonicalBuiltinRules(builtinRules())
-	a := &Analyzer{rules: rules, byID: make(map[string]*rule, len(rules)), sourceBudget: maxRetainedSourceBytes}
+	a := &Analyzer{rules: rules, byID: make(map[string]*rule, len(rules)), sourceBudget: defaultSourceBudget()}
 	for i := range a.rules {
 		a.byID[a.rules[i].id] = &a.rules[i]
 	}
@@ -295,11 +304,9 @@ func New() *Analyzer {
 
 // WithSourceBudget raises or lowers the bytes of source the analyzer retains for cross-file context.
 //
-// The default bounds memory on an untrusted tree, and on an ordinary repository it never binds. It DOES bind
-// on a monorepo: the three largest repositories in one estate hold 112, 120 and 164 MiB of source against the
-// 64 MiB default, so most of each was never scanned and every rule reported nothing there. An operator who
-// accepts the memory cost can raise it and scan the whole tree; a value of zero or less keeps the default,
-// because a budget of nothing would silently scan nothing.
+// The default is derived from the memory this process may use (see budget.go), so it is one eighth of the
+// cgroup limit or the host total, floored at the historical 64 MiB and capped at 512 MiB. A value of zero or
+// less keeps that default, because a budget of nothing would silently scan nothing.
 func (a *Analyzer) WithSourceBudget(bytes int64) *Analyzer {
 	if bytes > 0 {
 		a.sourceBudget = bytes
@@ -330,12 +337,12 @@ func (a *Analyzer) AnalyzeSourceReport(ctx context.Context, root string) (ports.
 	return a.analyzeSource(ctx, root, maxSourceFiles, a.budget())
 }
 
-// budget is the retained-source budget, falling back to the default for a zero-valued Analyzer.
+// budget is the retained-source budget, falling back to the derived default for a zero-valued Analyzer.
 func (a *Analyzer) budget() int64 {
 	if a.sourceBudget > 0 {
 		return a.sourceBudget
 	}
-	return maxRetainedSourceBytes
+	return defaultSourceBudget()
 }
 
 func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int, maxBytes int64) (ports.SASTSourceReport, error) {
@@ -457,6 +464,8 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	//
 	// Both buckets are filled across the WHOLE tree, so no file is left unscanned for want of budget; only
 	// the quality bucket is trimmed at the end, and only once security has taken what it needs.
+	// Pre-allocated to the old cap rather than the new one: almost every repository stays far below it, and
+	// reserving 10,000 slots per scan would cost more than the growth it saves.
 	security := make([]ports.SASTRawFinding, 0, maxFindings)
 	quality := make([]ports.SASTRawFinding, 0, maxFindings)
 	seen := make(map[string]bool, maxFindings)

@@ -582,7 +582,7 @@ func TestAnalyzerRespectsAggregateLimits(t *testing.T) {
 	writeFile(t, root, "a.go", "import \"crypto/md5\"\n")
 	writeFile(t, root, "b.go", "import \"crypto/sha1\"\n")
 
-	report, err := New().analyzeSource(context.Background(), root, 1, maxRetainedSourceBytes)
+	report, err := New().analyzeSource(context.Background(), root, 1, minSourceBudget)
 	if err != nil || len(report.Findings) != 1 || !report.Truncated {
 		t.Fatalf("file-limited scan = %+v, err=%v", report, err)
 	}
@@ -1262,7 +1262,7 @@ func TestWithSourceBudgetIgnoresNonPositive(t *testing.T) {
 		if len(report.Findings) == 0 {
 			t.Errorf("budget %d must fall back to the default and still scan, got no findings", budget)
 		}
-		if report.SourceBudget != maxRetainedSourceBytes {
+		if report.SourceBudget != defaultSourceBudget() {
 			t.Errorf("budget %d must report the default, got %d", budget, report.SourceBudget)
 		}
 	}
