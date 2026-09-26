@@ -439,8 +439,9 @@ live and offline sources.
 
 ## GitHub Action
 
-The reusable action installs the released `synapse-cli` (plus syft and grype) and runs the gate, so a
-whole scan step is three lines:
+The reusable action installs the released `synapse-cli` and runs the gate, so a whole scan step is three
+lines. `v1` is the action's INTERFACE version and moves with every release; pin a release tag such as
+`@v0.2.1` instead when you want the action itself frozen.
 
 ```yaml
 - uses: KKloudTarus/synapse-ce@v1

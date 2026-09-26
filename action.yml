@@ -74,8 +74,13 @@ runs:
         # Resolve the release tag (accept "latest" or an explicit vX.Y.Z). Public repo → no auth needed.
         tag="${SYNAPSE_VERSION}"
         if [ "${tag}" = "latest" ] || [ -z "${tag}" ]; then
-          tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-            | grep -m1 '"tag_name"' | cut -d '"' -f4)"
+          # Written to a file before parsing. Piping into `grep -m1` closes the read end as soon as the first
+          # match is found, so curl can take EPIPE and exit 23 while the response is still being written; with
+          # pipefail that failed the whole step, and it did on a GitHub runner with the default version input.
+          # Whether it happens depends on the response size and timing, which is why it passed locally.
+          curl -fsSL -o "${BIN_DIR}/latest.json" "https://api.github.com/repos/${REPO}/releases/latest"
+          tag="$(grep -m1 '"tag_name"' "${BIN_DIR}/latest.json" | cut -d '"' -f4)"
+          rm -f "${BIN_DIR}/latest.json"
         fi
         # Only a strict vX.Y.Z[-suffix] tag is allowed, so a crafted `version` input cannot walk the
         # download path to an arbitrary artifact. The case guard rejects any stray character over the
