@@ -25,7 +25,15 @@ func (Maven) Ecosystem() string { return "maven" }
 // Markers are the manifest basenames Maven claims.
 func (Maven) Markers() []string { return []string{"pom.xml"} }
 
-// Parse extracts the direct dependencies (with literal versions) from a pom.xml as maven components.
+// Parse extracts a pom.xml's dependencies as maven components.
+//
+// It first tries the full tree from the LOCAL MAVEN REPOSITORY (see maven_local.go): the parent chain,
+// imported BOMs, properties and the transitive walk resolved by reading .pom files already on disk, with no
+// toolchain and no network. That is what a real Java service needs, because a Spring Boot pom.xml declares
+// starters with no version and names none of the transitive tree.
+//
+// When there is no local repository, or it resolves no more than the direct-literal parse does, the literal
+// parse below stands. It is the floor, never replaced by something smaller.
 func (Maven) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.Dependency, error) {
 	var pom struct {
 		Dependencies struct {
@@ -63,5 +71,9 @@ func (Maven) Parse(_ context.Context, in ParseInput) ([]sbom.Component, []sbom.D
 			Scope:    scope,
 		})
 	}
-	return set.components(), nil, nil
+	literal := set.components()
+	if comps, edges, ok := resolveMavenFromLocalRepository(in, len(literal)); ok {
+		return comps, edges, nil
+	}
+	return literal, nil, nil
 }

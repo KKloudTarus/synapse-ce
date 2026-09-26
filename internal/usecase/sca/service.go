@@ -3776,6 +3776,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		unresolvedEco = removeEcosystem(unresolvedEco, "gradle")
 		lockfiles = append(append([]string{}, lockfiles...), "gradle-dependency-tree")
 	}
+	// The owned pom.xml parser resolves the full tree out of the LOCAL Maven repository whenever one is
+	// present, needing no toolchain and no network, and it emits dependency EDGES only in that case: a
+	// direct-literal parse yields components and no edges. So an SBOM that carries maven edges already holds
+	// the transitive tree, and leaving maven in the unresolved set would tell an operator to run
+	// `mvn package` for a tree the scan is already reporting on.
+	if sbomHasEcosystemEdges(doc, "pkg:maven/") {
+		unresolvedEco = removeEcosystem(unresolvedEco, "maven")
+		lockfiles = append(append([]string{}, lockfiles...), "maven-local-repository")
+	}
 	// The same marker for the resolvers that pin a lockfile-less manifest. Resolution IS a
 	// resolving source: it runs the ecosystem's own lock tool and the versions it returns are
 	// as pinned as a committed lockfile's. Without this a scan that resolved every component
@@ -4945,6 +4954,21 @@ func purlDistroTag(purl string) string {
 // so a zero count there reads as a gap in the scan.
 //
 // A caller CANCELLATION still propagates, because nobody is waiting for a partial answer then.
+// sbomHasEcosystemEdges reports whether the SBOM carries a dependency EDGE whose requiring component is in
+// the given ecosystem. An edge is the evidence that a transitive tree was resolved: a manifest parse that
+// only reads declared dependencies produces components with no edges between them.
+func sbomHasEcosystemEdges(doc *sbom.SBOM, purlPrefix string) bool {
+	if doc == nil {
+		return false
+	}
+	for _, edge := range doc.Dependencies {
+		if strings.HasPrefix(edge.Ref, purlPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func budgetExpired(err error) bool {
 	return err != nil && errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled)
 }
