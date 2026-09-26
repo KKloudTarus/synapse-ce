@@ -87,7 +87,129 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 	if len(rendered) > maxRenderedBytes {
 		rendered = rendered[:maxRenderedBytes]
 	}
-	return scanKubernetes(filepath.ToSlash(filepath.Join(relDir, "Chart.yaml")), rendered)
+	return scanKubernetesFrom(filepath.ToSlash(filepath.Join(relDir, "Chart.yaml")), rendered,
+		helmOriginIndex(chartDir, relDir, rendered))
+}
+
+// helmOriginIndex maps each rendered document back to the template that produced it.
+//
+// Without it every finding from a chart carries the chart's Chart.yaml and a line number into the rendered
+// stream, which is the one path a reader cannot open to fix anything: a chart with 40 templates reports 40
+// templates' findings at one file. `helm template` already states the answer, printing
+// `# Source: <chart>/templates/<file>.yaml` above each document, so this reads it back.
+//
+// A path is only used when it exists on disk, so a Source line this does not understand leaves the finding on
+// the aggregator path rather than moving it to a path that opens nothing.
+func helmOriginIndex(chartDir, relDir string, rendered []byte) k8sOrigin {
+	index := map[string]string{}
+	aliases := helmDependencyAliases(chartDir)
+	for _, chunk := range bytes.Split(rendered, []byte("\n---")) {
+		source := helmSourceComment(chunk)
+		if source == "" {
+			continue
+		}
+		// The first segment of a Source path is the chart NAME from Chart.yaml, which need not match the
+		// directory it was read from, so it is replaced by the directory rather than trusted.
+		parts := strings.SplitN(source, "/", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			continue
+		}
+		within := helmResolveAlias(parts[1], aliases)
+		if _, err := os.Stat(filepath.Join(chartDir, filepath.FromSlash(within))); err != nil {
+			continue
+		}
+		rel := filepath.ToSlash(filepath.Join(relDir, within))
+		dec := yaml.NewDecoder(bytes.NewReader(chunk))
+		for {
+			var doc k8sDoc
+			if err := dec.Decode(&doc); err != nil {
+				break
+			}
+			if key := k8sDocKey(doc); key != "" {
+				if _, taken := index[key]; !taken {
+					index[key] = rel // first declaration wins; a duplicate key is ambiguous, not better
+				}
+			}
+		}
+	}
+	if len(index) == 0 {
+		return nil
+	}
+	return func(doc k8sDoc) string { return index[k8sDocKey(doc)] }
+}
+
+// helmDependencyAliases maps a subchart's alias to the directory name it was vendored under. A dependency
+// declared with an `alias` renders under the alias, so the Source path names a `charts/<alias>` directory that
+// does not exist: datadog vendors datadog-operator and renders it as `charts/operator`.
+func helmDependencyAliases(chartDir string) map[string]string {
+	out := map[string]string{}
+	// apiVersion v2 declares dependencies in Chart.yaml; v1 declares them in requirements.yaml.
+	for _, name := range []string{"Chart.yaml", "requirements.yaml", "requirements.yml"} {
+		data, err := os.ReadFile(filepath.Join(chartDir, name))
+		if err != nil || len(data) == 0 || int64(len(data)) > maxChartMetadataBytes {
+			continue
+		}
+		var meta struct {
+			Dependencies []struct {
+				Name  string `yaml:"name"`
+				Alias string `yaml:"alias"`
+			} `yaml:"dependencies"`
+		}
+		if yaml.Unmarshal(data, &meta) != nil {
+			continue
+		}
+		for _, dep := range meta.Dependencies {
+			alias := strings.TrimSpace(dep.Alias)
+			depName := strings.TrimSpace(dep.Name)
+			if alias == "" || depName == "" || strings.ContainsAny(alias+depName, "/\\") {
+				continue
+			}
+			if _, taken := out[alias]; !taken {
+				out[alias] = depName
+			}
+		}
+	}
+	return out
+}
+
+// helmResolveAlias rewrites a `charts/<alias>/...` prefix to the directory the subchart was vendored under.
+func helmResolveAlias(path string, aliases map[string]string) string {
+	if len(aliases) == 0 || !strings.HasPrefix(path, "charts/") {
+		return path
+	}
+	rest := strings.TrimPrefix(path, "charts/")
+	segment, tail, found := strings.Cut(rest, "/")
+	if !found {
+		return path
+	}
+	name, ok := aliases[segment]
+	if !ok {
+		return path
+	}
+	return "charts/" + name + "/" + tail
+}
+
+// helmSourceComment returns the template path one rendered document names, or "" when it names none.
+func helmSourceComment(chunk []byte) string {
+	const marker = "# Source:"
+	for _, line := range strings.Split(string(chunk), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, marker) {
+			// Only the leading comment block can carry it; a document's body cannot. A bare document
+			// separator is part of that block, since the stream's first document begins with one.
+			if trimmed != "" && trimmed != "---" && trimmed != "..." && !strings.HasPrefix(trimmed, "#") {
+				return ""
+			}
+			continue
+		}
+		path := strings.TrimSpace(strings.TrimPrefix(trimmed, marker))
+		// A rendered path is chart-relative. Refuse anything that could climb out of the chart directory.
+		if path == "" || strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
+			return ""
+		}
+		return filepath.ToSlash(path)
+	}
+	return ""
 }
 
 // isHelmLibraryChart reports whether the chart declares `type: library`. Such a chart is not installable by
