@@ -12007,6 +12007,10 @@ components:
           properties:
             id: {type: string}
             revision: {type: integer}
+            disabled_reason:
+              type: string
+              enum: [engagement_filter_unsupported]
+              description: Set when the system disabled the rule. engagement_filter_unsupported means the event type carries no engagement, so the stored engagement scope could never match. Any save clears it.
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
 
