@@ -177,8 +177,15 @@ runs:
         fi
         rc=0
         if [ "${SYNAPSE_SARIF}" = "true" ]; then
-          # --sarif writes the SARIF report to stdout; capture it to the requested file.
-          synapse-cli "${args[@]}" --sarif > "${SYNAPSE_SARIF_OUT}" || rc=$?
+          # --sarif-out puts the SARIF in a file and leaves stdout for the human report, so the job log
+          # still shows what was found. --sarif alone takes stdout, so redirecting it to a file left the
+          # log with nothing but the gate's exit code. Probed because `version:` may pin an older binary
+          # than this action file.
+          if synapse-cli scan --help 2>&1 | grep -q -- '--sarif-out'; then
+            synapse-cli "${args[@]}" --sarif-out "${SYNAPSE_SARIF_OUT}" || rc=$?
+          else
+            synapse-cli "${args[@]}" --sarif > "${SYNAPSE_SARIF_OUT}" || rc=$?
+          fi
           echo "sarif-file=${SYNAPSE_SARIF_OUT}" >> "${GITHUB_OUTPUT}"
         else
           synapse-cli "${args[@]}" || rc=$?
