@@ -248,27 +248,77 @@
     "fleet": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "assetsEnabled", "hostIngestEnabled", "telemetryIngestEnabled", "detectionIngestEnabled", "keyRegistrationEnabled", "clientCertHeader", "clientCertHost", "enrollmentHost", "staleAfter", "correlation"],
+      "required": [
+        "enabled",
+        "assetsEnabled",
+        "hostIngestEnabled",
+        "telemetryIngestEnabled",
+        "detectionIngestEnabled",
+        "keyRegistrationEnabled",
+        "clientCertHeader",
+        "clientCertHost",
+        "enrollmentHost",
+        "staleAfter",
+        "correlation"
+      ],
       "properties": {
-        "enabled": {"type": "boolean"},
-        "assetsEnabled": {"type": "boolean"},
-        "hostIngestEnabled": {"type": "boolean"},
-        "telemetryIngestEnabled": {"type": "boolean"},
-        "detectionIngestEnabled": {"type": "boolean"},
-        "keyRegistrationEnabled": {"type": "boolean"},
-        "clientCertHeader": {"type": "string"},
-        "clientCertHost": {"type": "string"},
-        "enrollmentHost": {"type": "string"},
-        "staleAfter": {"type": "string", "pattern": "^([1-9][0-9]{0,2}ms|[1-9][0-9]?s|[1-9][0-9]?m|[1-9]h|1[0-9]h|2[0-4]h)$"},
+        "enabled": {
+          "type": "boolean"
+        },
+        "assetsEnabled": {
+          "type": "boolean"
+        },
+        "hostIngestEnabled": {
+          "type": "boolean"
+        },
+        "telemetryIngestEnabled": {
+          "type": "boolean"
+        },
+        "detectionIngestEnabled": {
+          "type": "boolean"
+        },
+        "keyRegistrationEnabled": {
+          "type": "boolean"
+        },
+        "clientCertHeader": {
+          "type": "string"
+        },
+        "clientCertHost": {
+          "type": "string"
+        },
+        "enrollmentHost": {
+          "type": "string"
+        },
+        "staleAfter": {
+          "type": "string",
+          "pattern": "^([1-9][0-9]{0,2}ms|[1-9][0-9]?s|[1-9][0-9]?m|[1-9]h|1[0-9]h|2[0-4]h)$"
+        },
         "correlation": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["enabled", "window", "allowedLateness", "maxPerIncident"],
+          "required": [
+            "enabled",
+            "window",
+            "allowedLateness",
+            "maxPerIncident"
+          ],
           "properties": {
-            "enabled": {"type": "boolean"},
-            "window": {"type": "string", "pattern": "^([1-9][0-9]{0,2}ms|[1-9][0-9]?s|[1-9][0-9]?m|[1-9]h|1[0-9]h|2[0-4]h)$"},
-            "allowedLateness": {"type": "string", "pattern": "^(0(ms|s|m|h)|[1-9][0-9]{0,2}ms|[1-9][0-9]?s|[1-9][0-9]?m|1h)$"},
-            "maxPerIncident": {"type": "integer", "minimum": 1, "maximum": 1000}
+            "enabled": {
+              "type": "boolean"
+            },
+            "window": {
+              "type": "string",
+              "pattern": "^([1-9][0-9]{0,2}ms|[1-9][0-9]?s|[1-9][0-9]?m|[1-9]h|1[0-9]h|2[0-4]h)$"
+            },
+            "allowedLateness": {
+              "type": "string",
+              "pattern": "^(0(ms|s|m|h)|[1-9][0-9]{0,2}ms|[1-9][0-9]?s|[1-9][0-9]?m|1h)$"
+            },
+            "maxPerIncident": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
           }
         }
       }
@@ -276,40 +326,122 @@
     "responseExecution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "commandTTL", "pollInterval"],
+      "required": [
+        "enabled",
+        "commandTTL",
+        "pollInterval"
+      ],
       "properties": {
-        "enabled": {"type": "boolean"},
-        "commandTTL": {"type": "string", "pattern": "^([1-9][0-9]{0,2}ms|[1-9][0-9]?s|[1-5][0-9]{2}s|600s|[1-9]m|10m)$"},
-        "pollInterval": {"type": "string", "pattern": "^([1-9][0-9]{0,2}ms|1s)$"}
+        "enabled": {
+          "type": "boolean"
+        },
+        "commandTTL": {
+          "type": "string",
+          "pattern": "^([1-9][0-9]{0,2}ms|[1-9][0-9]?s|[1-5][0-9]{2}s|600s|[1-9]m|10m)$"
+        },
+        "pollInterval": {
+          "type": "string",
+          "pattern": "^([1-9][0-9]{0,2}ms|1s)$"
+        }
       }
     },
     "vulnerabilityIntelligence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["providerSyncEnabled", "syncSchedulerInterval", "syncStaleAfter", "syncDispatchLimit", "occurrenceWritesEnabled", "findingProjectionEnabled", "actionsEnabled", "notificationsEnabled", "dryRunEnabled", "tenantAllowlist", "maintenance"],
+      "required": [
+        "providerSyncEnabled",
+        "syncSchedulerInterval",
+        "syncStaleAfter",
+        "syncDispatchLimit",
+        "occurrenceWritesEnabled",
+        "findingProjectionEnabled",
+        "actionsEnabled",
+        "notificationsEnabled",
+        "dryRunEnabled",
+        "tenantAllowlist",
+        "maintenance"
+      ],
       "properties": {
-        "providerSyncEnabled": {"type": "boolean"},
-        "syncSchedulerInterval": {"type": "string", "pattern": "^(0|[1-9][0-9]*(ms|s|m|h))$"},
-        "syncStaleAfter": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$"},
-        "syncDispatchLimit": {"type": "integer", "minimum": 1, "maximum": 1000},
-        "occurrenceWritesEnabled": {"type": "boolean"},
-        "findingProjectionEnabled": {"type": "boolean"},
-        "actionsEnabled": {"type": "boolean"},
-        "notificationsEnabled": {"type": "boolean"},
-        "dryRunEnabled": {"type": "boolean"},
-        "tenantAllowlist": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "providerSyncEnabled": {
+          "type": "boolean"
+        },
+        "syncSchedulerInterval": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*(ms|s|m|h))$"
+        },
+        "syncStaleAfter": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+        },
+        "syncDispatchLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "occurrenceWritesEnabled": {
+          "type": "boolean"
+        },
+        "findingProjectionEnabled": {
+          "type": "boolean"
+        },
+        "actionsEnabled": {
+          "type": "boolean"
+        },
+        "notificationsEnabled": {
+          "type": "boolean"
+        },
+        "dryRunEnabled": {
+          "type": "boolean"
+        },
+        "tenantAllowlist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
         "maintenance": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["interval", "deleteEnabled", "rawPayloadRetention", "syncRunRetention", "resolvedOccurrenceRetention", "unreferencedAdvisoryRetention", "batchSize"],
+          "required": [
+            "interval",
+            "deleteEnabled",
+            "rawPayloadRetention",
+            "syncRunRetention",
+            "resolvedOccurrenceRetention",
+            "unreferencedAdvisoryRetention",
+            "batchSize"
+          ],
           "properties": {
-            "interval": {"type": "string", "pattern": "^(0|[1-9][0-9]*(ms|s|m|h))$"},
-            "deleteEnabled": {"type": "boolean"},
-            "rawPayloadRetention": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$"},
-            "syncRunRetention": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$"},
-            "resolvedOccurrenceRetention": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$"},
-            "unreferencedAdvisoryRetention": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m|h)$"},
-            "batchSize": {"type": "integer", "minimum": 1, "maximum": 1000}
+            "interval": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*(ms|s|m|h))$"
+            },
+            "deleteEnabled": {
+              "type": "boolean"
+            },
+            "rawPayloadRetention": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+            },
+            "syncRunRetention": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+            },
+            "resolvedOccurrenceRetention": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+            },
+            "unreferencedAdvisoryRetention": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(ms|s|m|h)$"
+            },
+            "batchSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
           }
         }
       }
@@ -784,6 +916,38 @@
         },
         "resources": {
           "$ref": "#/definitions/resources"
+        }
+      }
+    },
+    "scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sastSourceBudgetBytes": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "mavenPomCache": {
+          "type": "string"
+        },
+        "mavenAllowPrivateRepos": {
+          "type": "boolean"
+        }
+      }
+    },
+    "extraEnv": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
         }
       }
     }

@@ -291,3 +291,20 @@ topologySpreadConstraints:
     # Rewritten by each workload template to its own component labels. Keeping a selector here
     # would accidentally couple the API, worker, and web scheduling domains.
     labelSelector: {}
+
+# Scan-time settings, applied to every component that runs a scan. Each is omitted from the pod when unset, so
+# the binary keeps its own default.
+scan:
+  # Bytes of source the static analyser retains for cross-file context. Unset derives it from the container
+  # memory limit (one eighth, floored at 64Mi and capped at 512Mi), which is right on almost every repository.
+  # Set it explicitly for a monorepo whose source exceeds that and whose pod has the memory to hold it.
+  sastSourceBudgetBytes: ""
+  # Directory for the Maven POM cache. A persistent path makes a re-scan of the same project need no network.
+  mavenPomCache: ""
+  # Allow a pom.xml to name a repository on a private address. Off by default: a pom.xml is untrusted input,
+  # and loopback and cloud instance metadata stay refused either way.
+  mavenAllowPrivateRepos: false
+
+# Extra environment variables for every Synapse component, appended after the ones this chart models. It is the
+# escape hatch for a setting the chart does not model yet.
+extraEnv: []

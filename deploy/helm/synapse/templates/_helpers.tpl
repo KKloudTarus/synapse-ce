@@ -268,4 +268,25 @@ broker DaemonSet enabled and an execution node selector.
 - name: SYNAPSE_OIDC_CLIENT_SECRET
   valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.oidc.clientSecret.name is required when oidc.enabled" .Values.existingSecrets.oidc.clientSecret.name }}, key: {{ required "existingSecrets.oidc.clientSecret.key is required when oidc.enabled" .Values.existingSecrets.oidc.clientSecret.key }}}}
 {{- end }}
+{{- /* Scan-time settings. Every one of these only exists on the component that runs a scan, and each is
+     omitted entirely when unset so the binary keeps its own default rather than being handed an empty value. */}}
+{{- with .Values.scan }}
+{{- if .sastSourceBudgetBytes }}
+- name: SYNAPSE_SAST_SOURCE_BUDGET_BYTES
+  value: {{ .sastSourceBudgetBytes | quote }}
+{{- end }}
+{{- if .mavenPomCache }}
+- name: SYNAPSE_MAVEN_POM_CACHE
+  value: {{ .mavenPomCache | quote }}
+{{- end }}
+{{- if .mavenAllowPrivateRepos }}
+- name: SYNAPSE_MAVEN_ALLOW_PRIVATE_REPOS
+  value: "true"
+{{- end }}
+{{- end }}
+{{- /* extraEnv is the escape hatch. Without it every new SYNAPSE_* setting is unreachable through this chart
+     until someone adds a template line, which is how a chart drifts permanently behind the code. */}}
+{{- with .Values.extraEnv }}
+{{- toYaml . | nindent 0 }}
+{{- end }}
 {{- end }}
