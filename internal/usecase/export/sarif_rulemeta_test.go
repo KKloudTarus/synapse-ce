@@ -177,3 +177,51 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// An advisory is not in the rule catalog, so without a fallback it carried only an id, a title and an NVD
+// link. The finding's own description is the advisory summary and the resolver knows the release that fixes
+// it, so an advisory alert gets the same two fields a catalog rule gets.
+func TestSARIFAdvisoryCarriesDescriptionAndFix(t *testing.T) {
+	findings := firstPartyFindings()
+	for i := range findings {
+		if findings[i].DedupKey == "vuln:CVE-2020-7471:django:2.2.0" {
+			findings[i].Description = "django allows SQL injection via StringAgg delimiter\nFixed in: 2.2.10"
+		}
+	}
+	fix := func(f finding.Finding) string {
+		if f.DedupKey == "vuln:CVE-2020-7471:django:2.2.0" {
+			return "2.2.10"
+		}
+		return ""
+	}
+	log := buildSARIF(findings, "v9", SARIFOptions{Manifest: demoManifests, Fix: fix})
+	for _, r := range log.Runs[0].Tool.Driver.Rules {
+		if r.ID != "CVE-2020-7471" {
+			continue
+		}
+		if r.FullDescription == nil || !strings.Contains(r.FullDescription.Text, "SQL injection") {
+			t.Errorf("fullDescription = %+v, want the advisory summary", r.FullDescription)
+		}
+		if r.Help == nil || !strings.Contains(r.Help.Text, "django to 2.2.10") {
+			t.Errorf("help = %+v, want the upgrade target", r.Help)
+		}
+		return
+	}
+	t.Fatal("the advisory rule is missing from the SARIF")
+}
+
+// A catalog rule's own description and fix must win over the finding's description.
+func TestSARIFCatalogMetadataWinsOverFindingDescription(t *testing.T) {
+	meta := func(string) (SARIFRuleMeta, bool) {
+		return SARIFRuleMeta{Description: "catalog description", Remediation: "catalog remediation"}, true
+	}
+	log := buildSARIF(firstPartyFindings(), "v9", SARIFOptions{RuleMeta: meta})
+	for _, r := range log.Runs[0].Tool.Driver.Rules {
+		if r.ID != "weak-crypto-md5" {
+			continue
+		}
+		if r.FullDescription == nil || r.FullDescription.Text != "catalog description" {
+			t.Errorf("fullDescription = %+v, want the catalog text", r.FullDescription)
+		}
+	}
+}

@@ -153,6 +153,19 @@ type SARIFOptions struct {
 	RuleMeta func(ruleID string) (SARIFRuleMeta, bool)
 }
 
+// advisoryHelp names the concrete remediation for a dependency advisory: the release to upgrade to. A
+// catalog rule states its fix in the catalog; an advisory states it as a fixed version on the finding.
+func advisoryHelp(f finding.Finding, p parsedKey, opts SARIFOptions) string {
+	if p.component == "" || opts.Fix == nil {
+		return ""
+	}
+	fix := strings.TrimSpace(opts.Fix(f))
+	if fix == "" {
+		return ""
+	}
+	return "Upgrade " + p.component + " to " + fix + " or later."
+}
+
 // applyRuleMeta fills a rule's descriptive fields from the catalog. A help URI already derived from the
 // finding (an advisory's own NVD page) wins, because it is specific to that advisory.
 func applyRuleMeta(rule *SARIFRule, meta SARIFRuleMeta) {
@@ -338,6 +351,19 @@ func buildSARIF(findings []finding.Finding, version string, opts SARIFOptions) *
 			if opts.RuleMeta != nil {
 				if meta, ok := opts.RuleMeta(ruleID); ok {
 					applyRuleMeta(&rule, meta)
+				}
+			}
+			// An advisory is not in the rule catalog, so it would otherwise carry only an id, a title and
+			// an NVD link. The finding's own description is the advisory summary and already names the
+			// release that fixes it, so it fills the same two fields a catalog rule gets.
+			if rule.FullDescription == nil {
+				if desc := strings.TrimSpace(f.Description); desc != "" {
+					rule.FullDescription = &SARIFText{Text: desc}
+				}
+			}
+			if rule.Help == nil {
+				if help := advisoryHelp(f, p, opts); help != "" {
+					rule.Help = &SARIFMultiformatText{Text: help}
 				}
 			}
 			rules = append(rules, rule)
