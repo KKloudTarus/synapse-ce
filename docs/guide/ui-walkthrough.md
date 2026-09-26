@@ -636,10 +636,18 @@ What offensive tooling is permitted and under what authorization.
 
 Where notifications go, which events trigger them, and what was delivered.
 
-1. `Add channel`, then set **Type**, **Name**, **Webhook URL**, **HMAC secret**.
+1. `Add channel`, choose **Type** (signed webhook, Slack incoming webhook, or email), and set
+   **Name**. A signed webhook needs a **Webhook URL** and **HMAC secret**; Slack needs its incoming
+   webhook URL; email needs **Recipients**.
 2. Add rules mapping events to channels.
-3. `Send test alert` proves the path end to end before you rely on it.
-4. Review deliveries with the channel / event / state filters; open one to see each attempt.
+3. Click `Test` on a channel row. This queues a test delivery for that channel; the returned
+   delivery ID and `pending` state do **not** mean the receiver acknowledged it.
+4. Review delivery history using the channel / event / state filters. Open the delivery to
+   inspect its attempts and confirm whether it was delivered.
+
+The separate `Send test alert` button under **Legacy incident webhook** tests only the
+compatibility webhook configured with `SYNAPSE_ALERT_WEBHOOK_*`; it does not test tenant-managed
+channels.
 
 === "Desktop"
 
