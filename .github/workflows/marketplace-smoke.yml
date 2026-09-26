@@ -1,8 +1,8 @@
 name: Marketplace action smoke
 
-# Proves the published Marketplace listing's own snippet works end to end: it consumes
-# KKloudTarus/synapse-ce@v0.2.0 from the release, which downloads the checksum-verified binary and gates on
-# real findings. Runs on this branch only; it is a one-shot verification, not part of CI.
+# Proves the published Marketplace listing's own snippet works end to end, by both references a user can copy:
+# the release tag the listing shows, and the major tag the README and docs show. Each downloads the
+# checksum-verified binary, gates on real findings and writes SARIF. Runs on this branch only.
 on:
   push:
     branches:
@@ -18,25 +18,37 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # Exactly the snippet the Marketplace listing hands a new user, pinned to the released tag.
-      - name: Synapse SCA scan
-        uses: KKloudTarus/synapse-ce@v0.2.0
+      # Exactly the snippet the Marketplace listing hands a new user, pinned to the released tag, and left on
+      # the default version input: resolving "latest" is the path that failed with curl exit 23 on v0.2.0.
+      - name: Synapse SCA scan (release tag)
+        uses: KKloudTarus/synapse-ce@v0.2.1
         with:
           path: deploy
           fail-on: critical
           sarif: "true"
+
+      # The reference the README and docs tell people to write. It resolved to nothing until the release
+      # workflow started maintaining the major tag.
+      - name: Synapse SCA scan (documented major tag)
+        uses: KKloudTarus/synapse-ce@v1
+        with:
+          path: api
+          fail-on: critical
+          sarif: "true"
+          sarif-output: synapse-v1.sarif
 
       - name: Show the SARIF the action produced
         if: always()
         run: |
           set -euo pipefail
           test -s synapse.sarif
+          test -s synapse-v1.sarif
           python3 - <<'PY'
           import json
-          d = json.load(open("synapse.sarif"))
-          run = d["runs"][0]
-          print("sarif version:", d.get("version"))
-          print("tool:", run["tool"]["driver"]["name"], run["tool"]["driver"].get("version", "-"))
-          print("rules:", len(run["tool"]["driver"].get("rules", [])))
-          print("results:", len(run.get("results", [])))
+          for name in ("synapse.sarif", "synapse-v1.sarif"):
+              d = json.load(open(name))
+              run = d["runs"][0]
+              driver = run["tool"]["driver"]
+              print(f"{name}: sarif {d.get('version')} tool {driver['name']} {driver.get('version', '-')} "
+                    f"rules {len(driver.get('rules', []))} results {len(run.get('results', []))}")
           PY
