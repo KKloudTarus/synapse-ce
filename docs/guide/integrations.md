@@ -59,7 +59,7 @@ SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT=10
 SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH=100
 ```
 
-The worker refuses to start when the integration scheduler is enabled without leader election. Dispatch also stops at the configured aggregate queue depth.
+The worker refuses to start when the integration scheduler is enabled without leader election. Dispatch also stops at the configured aggregate queue depth. The scheduler considers only registered providers advertising `read_runs` before sorting and limiting due integrations; write-only providers cannot consume dispatch slots or starve Jenkins polls. Other provider capabilities, including manual tests and discovery, remain independently gated by their descriptors.
 
 When metrics are enabled on the worker, `synapse_integration_operations_total` exposes only `provider`, `operation`, and `outcome` labels. Tenant IDs, endpoints, pipeline names, job names, revisions, and credentials are never metric labels.
 

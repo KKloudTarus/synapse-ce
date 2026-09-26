@@ -98,3 +98,74 @@ func TestSchedulerIsLeaderGatedBackpressureAwareAndDispatchBounded(t *testing.T)
 		t.Fatalf("queue depth=%d err=%v", depth, err)
 	}
 }
+
+func TestSchedulerReadRunsProviderIsNotStarvedByWriteOnlyProvider(t *testing.T) {
+	ctx := context.Background()
+	tenantID := shared.ID("tenant-poll")
+	tenantCtx := shared.WithTenant(ctx, tenantID)
+	clock := &integrationTestClock{now: time.Date(2026, 9, 26, 8, 0, 0, 0, time.UTC)}
+	ids := idgen.RandomID{}
+	queue := memory.NewJobQueue(ids, clock.Now)
+	cipher, err := vault.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := memory.NewIntegrationStore(queue, cipher, clock, &integrationTestAudit{})
+	registry := integration.NewRegistry()
+	for _, descriptor := range []integration.ProviderDescriptor{
+		{Provider: "jenkins", Name: "Jenkins", Capabilities: []integration.Capability{integration.CapabilityReadRuns}},
+		{Provider: "jira", Name: "Jira", Capabilities: []integration.Capability{integration.CapabilityTestConnection}},
+	} {
+		registered := descriptor
+		if err := registry.Register(registered, func(integration.Integration, integration.CredentialBundle) (integration.Adapter, error) {
+			return schedulerAdapter{descriptor: registered}, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service, err := NewService(store, registry, memory.NewProjectRepository(), memory.MissingIntegrationAnalysisMatcher{}, ids, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jira := integration.Integration{
+		ID: "jira-older", TenantID: tenantID, Provider: "jira", Name: "Jira",
+		Endpoint: "https://jira.example.com", Config: []byte(`{}`), PollInterval: time.Minute,
+		Enabled: true, Version: 1, CreatedAt: clock.Now().Add(-2 * time.Hour), UpdatedAt: clock.Now().Add(-2 * time.Hour),
+	}
+	jenkins := integration.Integration{
+		ID: "jenkins-newer", TenantID: tenantID, Provider: "jenkins", Name: "Jenkins",
+		Endpoint: "https://jenkins.example.com", Config: []byte(`{}`), PollInterval: time.Minute,
+		Enabled: true, Version: 1, CreatedAt: clock.Now().Add(-time.Hour), UpdatedAt: clock.Now().Add(-time.Hour),
+	}
+	for _, item := range []integration.Integration{jira, jenkins} {
+		if err := store.CreateIntegration(tenantCtx, item, ports.AuditEntry{
+			Actor: "test", Action: "integration.created", Target: item.ID.String(), At: clock.Now(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Without an eligibility filter the older write-only provider wins LIMIT 1.
+	unfiltered, err := store.ListDueIntegrations(tenantCtx, clock.Now(), 1, []integration.Provider{"jira", "jenkins"})
+	if err != nil || len(unfiltered) != 1 || unfiltered[0].ID != jira.ID {
+		t.Fatalf("unfiltered first due=%+v err=%v", unfiltered, err)
+	}
+	scheduler, err := NewScheduler(store, schedulerTenants{tenantID}, queue, service, clock, AlwaysLeader{},
+		SchedulerConfig{Interval: time.Minute, DispatchLimit: 1, MaxQueueDepth: 2}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dispatched, err := scheduler.Tick(ctx); err != nil || dispatched != 1 {
+		t.Fatalf("scheduler dispatched=%d err=%v, want Jenkins poll", dispatched, err)
+	}
+	polls, err := store.ListIntegrationOperations(tenantCtx, jenkins.ID, 10)
+	if err != nil || len(polls) != 1 || polls[0].Type != integration.OperationPoll || polls[0].State != integration.OperationQueued {
+		t.Fatalf("Jenkins operations=%+v err=%v", polls, err)
+	}
+	writeOnlyOperations, err := store.ListIntegrationOperations(tenantCtx, jira.ID, 10)
+	if err != nil || len(writeOnlyOperations) != 0 {
+		t.Fatalf("write-only provider was polled: operations=%+v err=%v", writeOnlyOperations, err)
+	}
+	if dispatched, err := scheduler.Tick(ctx); err != nil || dispatched != 0 {
+		t.Fatalf("second tick dispatched=%d err=%v, want no duplicate or write-only polls", dispatched, err)
+	}
+}
