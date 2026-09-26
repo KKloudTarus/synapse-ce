@@ -2275,3 +2275,53 @@ func TestMergeDependenciesUnionsEdges(t *testing.T) {
 		t.Fatalf("nil extra must be a no-op")
 	}
 }
+
+// budgetExpiredSecretScanner fails the way the scan's own SYNAPSE_SCAN_TIMEOUT makes a late stage fail.
+type budgetExpiredSecretScanner struct{}
+
+func (budgetExpiredSecretScanner) Name() string { return "budget-expired-secret-scanner" }
+func (budgetExpiredSecretScanner) ScanFiles(context.Context, string) (ports.SecretScanReport, error) {
+	return ports.SecretScanReport{}, fmt.Errorf("secret scan: %w", context.DeadlineExceeded)
+}
+
+// A stage that runs out of the scan's time budget must not discard the scan. Before this, a 1.7 GB
+// repository whose secret scan ran past the ten-minute default returned an error and nothing else, throwing
+// away the SBOM, the vulnerabilities and the findings that were already computed.
+func TestScanBudgetExpiryKeepsTheCompletedWorkAndWarns(t *testing.T) {
+	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: t.TempDir()}, &fakeAudit{}, &fakeDetector{})
+	svc.SetSecretScanner(budgetExpiredSecretScanner{})
+	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err != nil {
+		t.Fatalf("a stage running out of budget must not fail the scan: %v", err)
+	}
+	found := false
+	for _, w := range result.SourceWarnings {
+		if strings.Contains(w, "secret scan did not finish within the scan time budget") {
+			found = true
+			if !strings.Contains(w, "gap in the scan") {
+				t.Errorf("the warning must name the absence as a gap in the scan: %q", w)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the skipped stage must be recorded as a source warning, got %v", result.SourceWarnings)
+	}
+}
+
+// cancelledSecretScanner reports the shape a CALLER cancellation produces.
+type cancelledSecretScanner struct{}
+
+func (cancelledSecretScanner) Name() string { return "cancelled-secret-scanner" }
+func (cancelledSecretScanner) ScanFiles(context.Context, string) (ports.SecretScanReport, error) {
+	return ports.SecretScanReport{}, fmt.Errorf("secret scan: %w", context.Canceled)
+}
+
+// A caller CANCELLATION still fails the scan: nobody is waiting for a partial answer, and silently returning
+// one would report a truncated scan as a scan.
+func TestScanCallerCancellationStillFails(t *testing.T) {
+	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: t.TempDir()}, &fakeAudit{}, &fakeDetector{})
+	svc.SetSecretScanner(cancelledSecretScanner{})
+	if _, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}); err == nil {
+		t.Fatal("a cancelled scan must return an error, not a partial result")
+	}
+}

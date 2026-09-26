@@ -3857,7 +3857,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		// the plain form remains the fallback rather than an error.
 		if reporter, ok := s.sastAnalyzer.(ports.SASTSourceReporter); ok {
 			report, rerr := reporter.AnalyzeSourceReport(ctx, ws.Dir)
-			if rerr != nil {
+			switch {
+			case budgetExpired(rerr):
+				result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("static analysis"))
+			case rerr != nil:
 				return nil, fmt.Errorf("analyze source (sast): %w", rerr)
 			}
 			sastRaws = report.Findings
@@ -3869,7 +3872,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			}
 		} else {
 			sastRaws, err = s.sastAnalyzer.AnalyzeSource(ctx, ws.Dir)
-			if err != nil {
+			switch {
+			case budgetExpired(err):
+				result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("static analysis"))
+			case err != nil:
 				return nil, fmt.Errorf("analyze source (sast): %w", err)
 			}
 		}
@@ -3882,7 +3888,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		// verifying extension. Otherwise the scan stays deterministic and offline. The raw secret is
 		// confined to the scanner; only the verdict rides back on each finding.
 		secretReport, serr := s.scanSecrets(ctx, ws.Dir)
-		if serr != nil {
+		switch {
+		case budgetExpired(serr):
+			result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("secret scan"))
+		case serr != nil:
 			return nil, fmt.Errorf("scan secrets: %w", serr)
 		}
 		if secretReport.Truncated {
@@ -3924,7 +3933,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	}
 	if opts.scansVulnerabilities() && s.misconfig != nil {
 		misRaws, merr := s.misconfig.ScanConfigs(ctx, ws.Dir)
-		if merr != nil {
+		switch {
+		case budgetExpired(merr):
+			result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("infrastructure-as-code scan"))
+		case merr != nil:
 			return nil, fmt.Errorf("scan misconfig: %w", merr)
 		}
 		result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, misRaws, now, s.minSeverity)...)
@@ -3956,7 +3968,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		} else {
 			report, qerr = s.codeQuality.BuildReport(ctx, ws.Dir)
 		}
-		if qerr != nil {
+		switch {
+		case budgetExpired(qerr):
+			result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("code-quality analysis"))
+		case qerr != nil:
 			return nil, fmt.Errorf("analyze code quality: %w", qerr)
 		}
 		result.CodeQuality = &report
@@ -4918,6 +4933,27 @@ func purlDistroTag(purl string) string {
 }
 
 // removeEcosystem returns unresolvedEco without the named ecosystem (case-insensitive), preserving order.
+// budgetExpired reports whether a stage failed because the SCAN'S OWN TIME BUDGET ran out rather than
+// because the stage is broken. SYNAPSE_SCAN_TIMEOUT wraps the whole scan, so on a very large repository a
+// late stage can hit it after every earlier stage has already produced its findings.
+//
+// Such a failure must NOT discard the scan. It used to: a 1.7 GB repository whose secret scan ran past the
+// ten-minute default returned an error and nothing else, throwing away the SBOM, the vulnerabilities, the
+// SAST findings and the IaC findings that were already computed and sitting in result. Trivy behaves the
+// same way on a throttled dependency request, which is why a single 429 loses an entire Java scan; there is
+// no version of that behaviour worth keeping. The stage's absence is recorded as a source warning instead,
+// so a zero count there reads as a gap in the scan.
+//
+// A caller CANCELLATION still propagates, because nobody is waiting for a partial answer then.
+func budgetExpired(err error) bool {
+	return err != nil && errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled)
+}
+
+// stageBudgetWarning is the source warning recorded when a stage is cut short by the scan budget.
+func stageBudgetWarning(stage string) string {
+	return stage + " did not finish within the scan time budget (SYNAPSE_SCAN_TIMEOUT); its findings are ABSENT, so a zero count there is a gap in the scan rather than a clean result"
+}
+
 func removeEcosystem(unresolvedEco []string, name string) []string {
 	out := make([]string, 0, len(unresolvedEco))
 	for _, e := range unresolvedEco {
