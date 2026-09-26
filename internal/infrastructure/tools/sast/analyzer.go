@@ -325,9 +325,18 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	// is reported rather than folded into Truncated: excluding a bundle is a scope decision, and a
 	// flag that is true for every real repository tells the caller nothing.
 	skippedFiles := 0
+	// unscannedFiles counts files the walk reached but could NOT retain, because the source budget was
+	// already full. They differ from skippedFiles, which are files deliberately excluded as vendored,
+	// minified or generated.
+	unscannedFiles := 0
 	appendFile := func(file sourceFile, bytes int64) bool {
 		if len(files) >= maxFiles || bytes > maxBytes-retainedBytes {
-			truncated = true // the tree outgrew the retained-source budget: results are a lower bound
+			// The tree outgrew the retained-source budget. Saying only "lower bound" leaves the reader
+			// unable to judge how much was missed: a 2.1 GB monorepo holds 163 MiB of source against a
+			// 64 MiB budget, so roughly 60% of it went unscanned and every rule reported nothing there.
+			// Counting the dropped files turns that into a number the reader can act on.
+			truncated = true
+			unscannedFiles++
 			return false
 		}
 		files = append(files, file)
@@ -471,7 +480,13 @@ func (a *Analyzer) analyzeSource(ctx context.Context, root string, maxFiles int,
 	} else if len(quality) > 0 {
 		droppedQuality = true
 	}
-	return ports.SASTSourceReport{Findings: dedupeFindings(out), Truncated: truncated || droppedQuality, SkippedFiles: skippedFiles}, nil
+	return ports.SASTSourceReport{
+		Findings:       dedupeFindings(out),
+		Truncated:      truncated || droppedQuality,
+		SkippedFiles:   skippedFiles,
+		UnscannedFiles: unscannedFiles,
+		SourceBudget:   maxBytes,
+	}, nil
 }
 
 func sourceLinesBytes(lines []string) int64 {
@@ -959,7 +974,6 @@ func isSecurityFinding(f ports.SASTRawFinding) bool {
 	}
 	return f.RuleQuality == "security"
 }
-
 
 // forwardBlockLines caps how far a blockFn rule reads past its match. A struct or options literal that
 // runs longer than this is not the shape these rules are written for, and an unbounded read would let one

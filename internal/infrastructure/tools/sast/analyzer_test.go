@@ -1168,3 +1168,50 @@ func TestReportSeparatesExclusionsFromTruncation(t *testing.T) {
 		}
 	})
 }
+
+// A file the walk reaches but cannot retain, because the source budget is already full, is a different thing
+// from one it deliberately skipped as vendored: no rule runs over it, so a clean-looking report is wrong. The
+// count is what makes the truncation actionable. On a 2.1 GB monorepo holding 163 MiB of source against the
+// 64 MiB budget, most of the tree is in this state and the report used to say only "lower bound".
+func TestAnalyzeSourceCountsFilesTheBudgetCouldNotHold(t *testing.T) {
+	root := t.TempDir()
+	// Each file is comfortably larger than the tiny budget below, so only the first can be retained.
+	body := "import hashlib\n" + strings.Repeat("x = 1  # padding\n", 200) + "h = hashlib.md5(data)\n"
+	for _, name := range []string{"a.py", "b.py", "c.py", "d.py"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := New().analyzeSource(context.Background(), root, 100, int64(len(body))+16)
+	if err != nil {
+		t.Fatalf("analyzeSource: %v", err)
+	}
+	if report.UnscannedFiles != 3 {
+		t.Errorf("UnscannedFiles = %d, want the 3 files the budget could not hold", report.UnscannedFiles)
+	}
+	if !report.Truncated {
+		t.Error("a report that left files unscanned must be marked truncated")
+	}
+	if report.SourceBudget == 0 {
+		t.Error("the budget the count was measured against must be reported")
+	}
+	// The one file that WAS retained must still have been analysed, or the test proves nothing.
+	if len(report.Findings) == 0 {
+		t.Error("the retained file must still produce findings")
+	}
+}
+
+// A tree that fits the budget reports nothing unscanned, so the warning never appears on an ordinary project.
+func TestAnalyzeSourceReportsNothingUnscannedWhenItFits(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.py"), []byte("import hashlib\nh = hashlib.md5(data)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err := New().analyzeSource(context.Background(), root, 100, 1<<20)
+	if err != nil {
+		t.Fatalf("analyzeSource: %v", err)
+	}
+	if report.UnscannedFiles != 0 {
+		t.Errorf("UnscannedFiles = %d, want 0 for a tree that fits", report.UnscannedFiles)
+	}
+}

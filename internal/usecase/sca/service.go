@@ -3879,6 +3879,15 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			if report.SkippedFiles > 0 {
 				result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf("static analysis skipped %d vendored, minified or generated file(s)", report.SkippedFiles))
 			}
+			// A file the walk reached but could not hold is a different thing from one it deliberately
+			// skipped, and it is the one that makes a clean-looking report wrong: every rule reports nothing
+			// for source that was never retained. On a 2.1 GB monorepo holding 163 MiB of source against the
+			// 64 MiB budget, most of the tree is in this state, so the count and the budget are both named.
+			if report.UnscannedFiles > 0 {
+				result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
+					"static analysis did not scan %d file(s): the retained-source budget of %d MiB was already full, so no rule ran over them",
+					report.UnscannedFiles, report.SourceBudget>>20))
+			}
 		} else {
 			sastRaws, err = s.sastAnalyzer.AnalyzeSource(ctx, ws.Dir)
 			switch {

@@ -2223,6 +2223,12 @@ type SASTSourceReport struct {
 	Findings     []SASTRawFinding
 	Truncated    bool
 	SkippedFiles int
+	// UnscannedFiles counts files the walk reached but could not retain, because the source budget was
+	// already full. A large monorepo can hold several times the budget in source, and every rule reports
+	// nothing for the part that was never held, so the count is what makes "lower bound" actionable.
+	UnscannedFiles int
+	// SourceBudget is the retained-source budget in bytes that UnscannedFiles was measured against.
+	SourceBudget int64
 }
 
 // SASTSourceReporter is the optional completeness capability of a SASTAnalyzer. It exists so the
