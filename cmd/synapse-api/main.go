@@ -3281,12 +3281,9 @@ func main() {
 	// the finding. Unsupported formats, indirect calls, malformed metadata, and every unresolved path provide no
 	// coverage, never not_reachable.
 	// Its proof actors stay out of the deterministic set, so it can raise urgency but can never suppress.
-	if cfg.GoBinaryReachabilityEnabled && requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACH_GOBIN", "go-binary reachability") {
-		if cerr := installGoBinaryReachability(scaService, judgmentSvc, auditLog, clock); cerr != nil {
-			log.Error("go-binary reachability coordinator init failed", "err", cerr)
-			os.Exit(1)
-		}
-		log.Info("Go-binary affected-symbol reachability ENABLED (raise-only, PCLNTAB calls from main.main)")
+	if err := configureAPIGoBinaryReachability(cfg, scaService, judgmentSvc, auditLog, clock, log); err != nil {
+		log.Error("go-binary reachability coordinator init failed", "err", err)
+		os.Exit(1)
 	}
 
 	// Build-aware .NET (NuGet) reachability. Unlike the source-only import scanners above, it does NOT guess
@@ -3672,9 +3669,18 @@ func main() {
 	}
 }
 
-// installGoBinaryReachability wires the API scan pipeline to the raise-only Go-binary
-// proof coordinator. Keeping this composition step named makes the production root
-// directly executable by the binding benchmark.
+func configureAPIGoBinaryReachability(cfg config.Config, scaService *scauc.Service, judgmentSvc *analysisuc.Service, auditLog ports.AuditLogger, clock ports.Clock, log *slog.Logger) error {
+	if !cfg.GoBinaryReachabilityEnabled || !requireJudgmentsOrSkip(log, judgmentSvc != nil, "SYNAPSE_REACH_GOBIN", "go-binary reachability") {
+		return nil
+	}
+	if err := installGoBinaryReachability(scaService, judgmentSvc, auditLog, clock); err != nil {
+		return err
+	}
+	log.Info("Go-binary affected-symbol reachability ENABLED (raise-only, PCLNTAB calls from main.main)")
+	return nil
+}
+
+// installGoBinaryReachability wires the API scan pipeline to the raise-only Go-binary proof coordinator.
 func installGoBinaryReachability(scaService *scauc.Service, judgmentSvc *analysisuc.Service, auditLog ports.AuditLogger, clock ports.Clock) error {
 	if scaService == nil {
 		return fmt.Errorf("%w: Go-binary reachability requires an SCA service", shared.ErrValidation)

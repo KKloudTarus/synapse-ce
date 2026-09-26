@@ -6,6 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,30 +25,47 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	reachbench "github.com/KKloudTarus/synapse-ce/internal/infrastructure/reachbench"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/benchmark"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	measurement "github.com/KKloudTarus/synapse-ce/internal/usecase/reachbench"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
 
 const target = "current-go-binary-benchmark"
 
+// AssertMainCalls keeps the benchmarked gate connected to the actual root.
+func AssertMainCalls(t *testing.T, gate string) {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "main" {
+			continue
+		}
+		found := false
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			name, ok := call.Fun.(*ast.Ident)
+			if ok && name.Name == gate {
+				found = true
+			}
+			return true
+		})
+		if found {
+			return
+		}
+	}
+	t.Fatalf("production main does not call the benchmarked %s gate", gate)
+}
+
 // Installer is the binding-specific composition function from one production root.
-type Installer func(*scauc.Service, *analysisuc.Service, ports.AuditLogger, ports.Clock) error
-
-type report struct {
-	BindingID string       `json:"binding_id"`
-	Cases     []reportCase `json:"cases"`
-}
-
-type reportCase struct {
-	ID               string `json:"id"`
-	ExpectedOutcome  string `json:"expected_outcome"`
-	ActualOutcome    string `json:"actual_outcome"`
-	ExpectedCoverage string `json:"expected_coverage"`
-	ActualCoverage   string `json:"actual_coverage"`
-	JudgmentCount    int    `json:"judgment_count"`
-	FindingRetained  bool   `json:"finding_retained"`
-	GateExempted     bool   `json:"gate_exempted"`
-}
+type Installer func(*scauc.Service, *analysisuc.Service, ports.AuditLogger, ports.Clock, bool, bool) error
 
 // Run measures one installed production binding. Every fixture passes through
 // the real SCA scan path; unsupported inputs retain their source finding and
@@ -66,27 +86,44 @@ func Run(t *testing.T, bindingID string, install Installer) {
 	}
 	ctx := context.Background()
 	root := t.TempDir()
-	result := report{BindingID: bindingID}
-	for _, fixture := range reachbench.CurrentGoBinaryFixtures() {
+	result, err := reachbench.NewCurrentGoBinaryBindingReport(ctx, bindingID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtures, err := reachbench.CurrentGoBinaryFixtures()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var regressions []string
+	for _, fixture := range fixtures {
 		fixtureRoot, err := reachbench.MaterializeCurrentGoBinaryFixture(ctx, root, fixture.ID)
 		if err != nil {
 			t.Fatalf("materialize %s: %v", fixture.ID, err)
 		}
-		outcome, coverage, count, retained, exempted := execute(t, ctx, fixtureRoot, fixture.Subject, string(fixture.ExpectedOutcome), install)
-		if outcome != string(fixture.ExpectedOutcome) || coverage != string(fixture.ExpectedCoverage) || !retained || exempted {
-			t.Fatalf("%s: outcome=%s coverage=%s retained=%v gate_exempted=%v, want outcome=%s coverage=%s retained=true gate_exempted=false", fixture.ID, outcome, coverage, retained, exempted, fixture.ExpectedOutcome, fixture.ExpectedCoverage)
+		binary, err := os.ReadFile(filepath.Join(fixtureRoot, "reachbench-binary"))
+		if err != nil {
+			t.Fatalf("read %s built binary: %v", fixture.ID, err)
 		}
-		result.Cases = append(result.Cases, reportCase{
-			ID: fixture.ID, ExpectedOutcome: string(fixture.ExpectedOutcome), ActualOutcome: outcome,
-			ExpectedCoverage: string(fixture.ExpectedCoverage), ActualCoverage: coverage,
+		outcome, coverage, count, retained, exempted := execute(t, ctx, fixtureRoot, fixture, install)
+		result.Cases = append(result.Cases, reachbench.CurrentCaseScore{
+			ID: fixture.ID, ExpectedOutcome: fixture.ExpectedOutcome, ActualOutcome: outcome,
+			ExpectedCoverage: fixture.ExpectedCoverage, ActualCoverage: coverage,
 			JudgmentCount: count, FindingRetained: retained, GateExempted: exempted,
+			GoBinaryEnabled: fixture.Enabled, JudgmentsEnabled: fixture.JudgmentsEnabled, BinaryDigest: benchmark.SHA256Digest(binary),
 		})
+		if outcome != fixture.ExpectedOutcome || coverage != fixture.ExpectedCoverage || !retained || exempted || count != map[measurement.Outcome]int{measurement.OutcomeReachable: 1}[fixture.ExpectedOutcome] {
+			regressions = append(regressions, fmt.Sprintf("%s: measured outcome=%s coverage=%s judgments=%d retained=%t exempted=%t; want outcome=%s coverage=%s", fixture.ID, outcome, coverage, count, retained, exempted, fixture.ExpectedOutcome, fixture.ExpectedCoverage))
+		}
 	}
 	writeReport(t, bindingID, result)
+	for _, regression := range regressions {
+		t.Error(regression)
+	}
 }
 
-func execute(t *testing.T, ctx context.Context, root, subject, expectedOutcome string, install Installer) (outcome, coverage string, judgmentCount int, findingRetained, gateExempted bool) {
+func execute(t *testing.T, ctx context.Context, root string, fixture reachbench.CurrentGoBinaryFixture, install Installer) (outcome measurement.Outcome, coverage measurement.CoverageStatus, judgmentCount int, findingRetained, gateExempted bool) {
 	t.Helper()
+	subject := fixture.Subject
 	clock := benchmarkClock{now: time.Unix(1_700_000_000, 0).UTC()}
 	audit := &benchmarkAudit{}
 	store := memory.NewJudgmentStore()
@@ -94,9 +131,9 @@ func execute(t *testing.T, ctx context.Context, root, subject, expectedOutcome s
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := fixtureVulnerability(subject)
+	raw := fixtureVulnerability(fixture)
 	svc := newSCA(t, root, raw, clock, audit)
-	if err := install(svc, judgmentSvc, audit, clock); err != nil {
+	if err := install(svc, judgmentSvc, audit, clock, fixture.Enabled, fixture.JudgmentsEnabled); err != nil {
 		t.Fatalf("install Go-binary binding: %v", err)
 	}
 	scan, err := svc.ScanWithOptions(ctx, "benchmark", "current-go-binary-engagement", ports.AcquireRequest{Kind: "local", Value: target}, scauc.ScanOptions{Mode: scauc.ScanModeVulnerabilities})
@@ -132,30 +169,19 @@ func execute(t *testing.T, ctx context.Context, root, subject, expectedOutcome s
 			t.Fatalf("Go-binary binding minted a non-reachable claim: %+v", item)
 		}
 	}
-	wantCount := 0
-	if expectedOutcome == "reachable" {
-		wantCount = 1
-	}
-	if len(judgments) != wantCount {
-		t.Fatalf("judgments for %s = %d, want %d", subject, len(judgments), wantCount)
-	}
 	// This is measured case coverage, not a negative-proof claim: a persisted
 	// reachable judgment is complete positive coverage; all other cases remain
 	// unavailable and never imply suppression or absence.
-	if wantCount == 0 {
-		return "no_analysis", "unavailable", 0, findingRetained, gateExempted
+	if len(judgments) == 0 {
+		return measurement.OutcomeNoAnalysis, measurement.CoverageUnavailable, 0, findingRetained, gateExempted
 	}
-	return "reachable", "complete", 1, findingRetained, gateExempted
+	return measurement.OutcomeReachable, measurement.CoverageComplete, len(judgments), findingRetained, gateExempted
 }
 
-func fixtureVulnerability(subject string) vulnerability.RawFinding {
-	componentVersion := "v0.59.0"
-	if strings.HasSuffix(subject, "@v0.58.0") {
-		componentVersion = "v0.58.0"
-	}
+func fixtureVulnerability(fixture reachbench.CurrentGoBinaryFixture) vulnerability.RawFinding {
 	return vulnerability.RawFinding{
-		Source: "current-go-binary-benchmark", AdvisoryID: "CVE-2026-0001", Component: "golang.org/x/net", Version: componentVersion,
-		Ecosystem: "Go", PackagePURL: subject, AffectedSymbols: []string{"golang.org/x/net/idna.ToASCII"}, Severity: shared.SeverityHigh,
+		Source: "current-go-binary-benchmark", AdvisoryID: "CVE-2026-0001", Component: "golang.org/x/net", Version: fixture.Version,
+		Ecosystem: "Go", PackagePURL: fixture.Subject, AffectedSymbols: []string{"golang.org/x/net/idna.ToASCII"}, Severity: shared.SeverityHigh,
 	}
 }
 
@@ -173,7 +199,7 @@ func newSCA(t *testing.T, root string, raw vulnerability.RawFinding, clock ports
 	)
 }
 
-func writeReport(t *testing.T, bindingID string, result report) {
+func writeReport(t *testing.T, bindingID string, result reachbench.CurrentGoBinaryBindingReport) {
 	t.Helper()
 	dir := strings.TrimSpace(os.Getenv("SYNAPSE_GOBIN_BINDING_REPORT_DIR"))
 	if dir == "" {

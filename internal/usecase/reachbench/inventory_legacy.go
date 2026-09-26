@@ -40,6 +40,10 @@ func CurrentProductionInventory() (ProductionInventory, error) {
 			binding := &cohort.Bindings[bindingIndex]
 			if binding.ID == "worker" {
 				binding.State, binding.Reason = BindingEnabled, ""
+				binding.Configuration = ArtifactReference{
+					ID:     "sca/reachability/go-binary/configuration/worker-enabled-v1",
+					Digest: benchmark.SHA256Digest([]byte("synapse-worker:go-binary-reachability=true;judgments=true;raise-only;current-contract-v1")),
+				}
 			}
 		}
 	}

@@ -47,6 +47,13 @@ func RunCurrentGoBinaryScorecardFromEnvironment(ctx context.Context) (CurrentGoB
 	}
 	dependencies := DefaultDependencies()
 	runner := &Runner{dependencies: dependencies}
+	clean, err := currentGoBinarySourceClean(ctx, runner)
+	if err != nil {
+		return CurrentGoBinaryScorecardResult{}, err
+	}
+	if !clean {
+		return CurrentGoBinaryScorecardResult{}, errors.New("current Go-binary scorecard requires a clean source checkout")
+	}
 	harness, err := runner.deriveHarness(ctx)
 	if err != nil {
 		return CurrentGoBinaryScorecardResult{}, fmt.Errorf("derive current Go-binary scorecard source: %w", err)

@@ -45,15 +45,16 @@ var envLiteral = regexp.MustCompile(`"(SYNAPSE_[A-Z0-9_]+)"`)
 var classifiedEnv = map[string]string{
 	// Test- and CI-only switches. They exist to make tests hermetic or to opt into slow suites, and
 	// setting them in production would not change product behavior.
-	"SYNAPSE_TEST_DB_DSN":          "test-only: Postgres DSN for integration tests",
-	"SYNAPSE_TEST_DUR":             "test-only: bounded duration for time-sensitive tests",
-	"SYNAPSE_LIVE_AI":              "test-only: opts into live-provider AI tests",
-	"SYNAPSE_LIVE_LLM_TEST":        "test-only: opts into live LLM wire tests",
-	"SYNAPSE_K8S_INTEGRATION":      "test-only: opts into the kind-based Kubernetes suite",
-	"SYNAPSE_EVAL_OUT":             "tooling-only: output path for the offline AI-triage evaluation harness",
-	"SYNAPSE_EVAL_SBOM":            "tooling-only: SBOM input for the offline evaluation harness",
-	"SYNAPSE_BENCH_RELEASE_DIGEST": "tooling-only: exact source revision injected into performance measurements by CI",
-	"SYNAPSE_PROBE_SECRET":         "conformance-only: redaction marker injected into the sandbox probe by synapse-sandbox-check",
+	"SYNAPSE_TEST_DB_DSN":              "test-only: Postgres DSN for integration tests",
+	"SYNAPSE_TEST_DUR":                 "test-only: bounded duration for time-sensitive tests",
+	"SYNAPSE_LIVE_AI":                  "test-only: opts into live-provider AI tests",
+	"SYNAPSE_LIVE_LLM_TEST":            "test-only: opts into live LLM wire tests",
+	"SYNAPSE_K8S_INTEGRATION":          "test-only: opts into the kind-based Kubernetes suite",
+	"SYNAPSE_EVAL_OUT":                 "tooling-only: output path for the offline AI-triage evaluation harness",
+	"SYNAPSE_EVAL_SBOM":                "tooling-only: SBOM input for the offline evaluation harness",
+	"SYNAPSE_BENCH_RELEASE_DIGEST":     "tooling-only: exact source revision injected into performance measurements by CI",
+	"SYNAPSE_GOBIN_BINDING_REPORT_DIR": "tooling-only: local API and worker Go-binary benchmark reports",
+	"SYNAPSE_PROBE_SECRET":             "conformance-only: redaction marker injected into the sandbox probe by synapse-sandbox-check",
 
 	// Internal IPC. The parent process creates these inherited file descriptors when it spawns a
 	// sandboxed helper. An operator-supplied value would be meaningless or actively harmful, so they are

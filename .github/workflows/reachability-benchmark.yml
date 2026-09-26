@@ -108,13 +108,17 @@ jobs:
           scorecard="$RUNNER_TEMP/synapse-reachability/current-go-binary/github-${{ github.run_id }}/attempt-${{ github.run_attempt }}/scorecard.json"
           test -s "$scorecard"
           jq -e '
-            .schema_version == "synapse-reachability-current-go-binary-scorecard-v1" and
+            .schema_version == "synapse-reachability-current-go-binary-scorecard-v2" and
             .source.commit == "${{ needs.route.outputs.source_sha }}" and
+            (.source.tree | test("^[0-9a-f]{40}$")) and
             .inventory_id == "synapse-ce-current-go-binary-inventory-v1" and
             (.inventory_digest | test("^sha256:[0-9a-f]{64}$")) and
-            .oracle_cases == 5 and .required_cells == 10 and .observed_cells == 10 and .decision == "pass" and
+            (.fixture_digest | test("^sha256:[0-9a-f]{64}$")) and
+            (.oracle_digest | test("^sha256:[0-9a-f]{64}$")) and
+            (.toolchain | test("^go[0-9]+\\.[0-9]+")) and
+            .oracle_cases == 7 and .required_cells == 14 and .observed_cells == 14 and .decision == "pass" and
             ([.bindings[].binding_id] | sort) == ["api", "worker"] and
-            all(.bindings[]; .ratchet_passed == true and .false_suppressions == 0 and .dropped_findings == 0 and .positive_cells == 2 and .correct_positives == 2 and .no_analysis_cells == 3 and .correct_no_analysis == 3 and .reachable_precision == 1 and .reachable_recall == 1 and .coverage_rate == 0.4 and .no_analysis_rate == 0.6 and (.cases | length) == 5 and all(.cases[]; .finding_retained == true and .gate_exempted == false))
+            all(.bindings[]; .ratchet_passed == true and .false_suppressions == 0 and .dropped_findings == 0 and .positive_cells == 2 and .correct_positives == 2 and .no_analysis_cells == 5 and .correct_no_analysis == 5 and .reachable_precision == 1 and .reachable_recall == 1 and .coverage_rate == (2/7) and .no_analysis_rate == (5/7) and (.cases | length) == 7 and all(.cases[]; .finding_retained == true and .gate_exempted == false and (.binary_digest | test("^sha256:[0-9a-f]{64}$"))))
           ' "$scorecard" > /dev/null
       - name: Require complete per-language candidate scorecard
         shell: bash

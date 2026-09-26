@@ -18,8 +18,11 @@ in [SCA accuracy benchmark](sca-accuracy-benchmark.md).
 Go-binary regression result from the API and worker binding reports. It requires
 Linux/amd64 and `SYNAPSE_GOBIN_BINDING_REPORT_DIR` pointing to a directory with
 `api.json` and `worker.json` from the binding tests. It writes a sanitized scorecard
-under the process temp directory; a missing or malformed report exits nonzero. The
-hosted workflow then checks the scorecard ratchet and uploads it as an artifact.
+under the process temp directory; missing, mismatched, or stale report identities
+and a failed ratchet exit nonzero. The fixture uses the root `go.mod` and `go.sum`
+pins, so prepare dependencies with `go mod download` before an offline local run.
+The hosted workflow uploads the scorecard as an artifact when generated and fails
+the gate unless it passes.
 
 ## Assessment lifecycle administration
 

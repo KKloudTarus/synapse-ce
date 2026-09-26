@@ -31,6 +31,10 @@ func executeCurrentScorecard(ctx context.Context, stdout, stderr io.Writer, run 
 		return 1
 	}
 	_, _ = fmt.Fprintln(stdout, result.Path)
+	if result.Scorecard.Decision != "pass" {
+		_, _ = fmt.Fprintln(stderr, "synapse-reachability-cycle current-go-binary-scorecard: ratchet failed")
+		return 1
+	}
 	return 0
 }
 
