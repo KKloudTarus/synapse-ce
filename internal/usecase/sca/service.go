@@ -3951,6 +3951,10 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			var misReport ports.MisconfigScanReport
 			misReport, merr = reporter.ScanConfigsReport(ctx, ws.Dir)
 			misRaws = misReport.Findings
+			if misReport.Truncated {
+				result.SourceWarnings = append(result.SourceWarnings,
+					"infrastructure-as-code scan hit its file cap, so it did not cover the whole tree and its findings are a lower bound")
+			}
 			if misReport.UnrenderedCharts > 0 {
 				warning := fmt.Sprintf("%d Helm chart(s) could not be rendered, so their manifests were NOT evaluated",
 					misReport.UnrenderedCharts)

@@ -2345,6 +2345,10 @@ type MisconfigScanner interface {
 type MisconfigScanReport struct {
 	Findings         []MisconfigRawFinding
 	UnrenderedCharts int
+	// Truncated reports that the walk stopped before covering the tree, because it reached its file or entry
+	// cap. The findings are then a lower bound, and saying so is the difference between a bounded scan and a
+	// scan that quietly claims to have looked everywhere.
+	Truncated bool
 	// ChartRenderReasons holds up to a few distinct failure reasons, so the warning tells the reader what to
 	// fix (run `helm dependency build`, give the chart a name) rather than only that something failed.
 	ChartRenderReasons []string

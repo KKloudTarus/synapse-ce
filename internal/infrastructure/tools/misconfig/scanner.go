@@ -162,8 +162,9 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 		data []byte
 	}
 	var tfFiles []tfFile
-	count := 0  // config files actually scanned
-	walked := 0 // total tree entries visited
+	count := 0         // config files actually scanned
+	walked := 0        // total tree entries visited
+	truncated := false // set when a cap stopped the walk, so the caller never reads a bounded scan as complete
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -173,6 +174,7 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 		}
 		walked++
 		if walked > maxEntries {
+			truncated = true
 			return filepath.SkipAll // a pathologically large tree: stop walking regardless of file type
 		}
 		if d.IsDir() {
@@ -206,6 +208,7 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 			return nil
 		}
 		if count >= maxFiles {
+			truncated = true
 			return filepath.SkipAll
 		}
 		count++
@@ -291,6 +294,7 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 		Findings:           out,
 		UnrenderedCharts:   kubernetes.chartRenderFailures,
 		ChartRenderReasons: kubernetes.chartRenderReasons,
+		Truncated:          truncated,
 	}, nil
 }
 
