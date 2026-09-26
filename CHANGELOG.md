@@ -7,6 +7,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Fixed
+
+- CI imports now transition to succeeded only after their analysis and audit are accepted. Rejected imports cannot enqueue false `scan.completed` notifications, and pending scan notifications recheck the job status before delivery. Overlapping CI imports no longer occupy the single running server-scan slot.
+
 ## [0.2.1] - 2026-09-26
 
 ### Fixed

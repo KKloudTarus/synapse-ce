@@ -580,6 +580,22 @@ func (r *NotificationRepository) LoadWork(ctx context.Context, tenant, did share
 
 func (r *NotificationRepository) DeliveryStillRelevant(ctx context.Context, work ports.NotificationWork) (bool, error) {
 	switch work.Event.Type {
+	case notification.EventScanCompleted:
+		// An event can remain queued after a job changes status. Check the
+		// authoritative job before sending, not just the captured event.
+		if work.Event.SourceKind != "scan_job" {
+			return true, nil
+		}
+		var relevant bool
+		err := WithTenant(ctx, r.pool, work.Event.TenantID.String(), func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT EXISTS(
+				SELECT 1 FROM scan_jobs j
+				JOIN engagements e ON e.id=j.engagement_id
+				WHERE e.tenant_id=$1 AND j.id=$2 AND j.status='succeeded'
+					AND j.finished_at IS NOT NULL
+			)`, work.Event.TenantID, work.Event.SourceID).Scan(&relevant)
+		})
+		return relevant, err
 	case notification.EventSLAApproaching:
 		var data struct {
 			AssessmentID string    `json:"assessment_id"`
