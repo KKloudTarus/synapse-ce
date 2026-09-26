@@ -2337,6 +2337,27 @@ type MisconfigScanner interface {
 	ScanConfigs(ctx context.Context, root string) ([]MisconfigRawFinding, error)
 }
 
+// MisconfigScanReport is the bounded output of an IaC scan. UnrenderedCharts counts the Helm charts whose
+// `helm template` refused to run, which is the difference between "this chart has no misconfiguration" and
+// "this chart was never evaluated". On one live repository 112 of 126 charts refused to render (a dependency
+// declared but not vendored, a Chart.yaml with no name), and the scan said nothing about it, so an operator
+// read an absent finding as a clean chart.
+type MisconfigScanReport struct {
+	Findings         []MisconfigRawFinding
+	UnrenderedCharts int
+	// ChartRenderReasons holds up to a few distinct failure reasons, so the warning tells the reader what to
+	// fix (run `helm dependency build`, give the chart a name) rather than only that something failed.
+	ChartRenderReasons []string
+}
+
+// MisconfigReporter is the reporting form of MisconfigScanner: it returns the same findings plus what the
+// scan could NOT evaluate. A scanner that does not implement it is treated as "completeness unknown", which
+// is why ScanConfigs remains the interface the service requires.
+type MisconfigReporter interface {
+	MisconfigScanner
+	ScanConfigsReport(ctx context.Context, root string) (MisconfigScanReport, error)
+}
+
 // RiskResult is the output of risk enrichment: vulns annotated with KEV + EPSS,
 // plus the data-source versions (for reproducibility provenance).
 type RiskResult struct {

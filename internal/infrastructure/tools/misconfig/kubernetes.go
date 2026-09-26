@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -174,6 +175,10 @@ type k8sScanResult struct {
 	findings         []ports.MisconfigRawFinding
 	workloads        []k8sWorkloadFact
 	policyNamespaces map[string]struct{}
+	// chartRenderFailures counts Helm charts that refused to render, and chartRenderReasons carries the
+	// distinct reasons. A chart that will not render is not a chart with no findings.
+	chartRenderFailures int
+	chartRenderReasons  []string
 }
 
 // scanKubernetes decodes every YAML document in data and returns findings plus namespace facts. Best-effort:
@@ -243,6 +248,12 @@ func k8sNamespace(namespace string) string {
 func mergeK8sScanResult(dst *k8sScanResult, src k8sScanResult) {
 	dst.findings = append(dst.findings, src.findings...)
 	dst.workloads = append(dst.workloads, src.workloads...)
+	dst.chartRenderFailures += src.chartRenderFailures
+	for _, reason := range src.chartRenderReasons {
+		if !slices.Contains(dst.chartRenderReasons, reason) {
+			dst.chartRenderReasons = append(dst.chartRenderReasons, reason)
+		}
+	}
 	if dst.policyNamespaces == nil {
 		dst.policyNamespaces = make(map[string]struct{})
 	}

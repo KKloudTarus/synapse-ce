@@ -3941,7 +3941,27 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 	if opts.scansVulnerabilities() && s.misconfig != nil {
-		misRaws, merr := s.misconfig.ScanConfigs(ctx, ws.Dir)
+		// Prefer the reporting form, so a Helm chart the scan could not RENDER reaches the caller. A chart
+		// that refuses to render contributes no findings, and on one live repository 112 of 126 charts refused
+		// (a declared dependency not vendored, a Chart.yaml with no name) while the report said nothing, so
+		// every one of those applications read as clean.
+		var misRaws []ports.MisconfigRawFinding
+		var merr error
+		if reporter, ok := s.misconfig.(ports.MisconfigReporter); ok {
+			var misReport ports.MisconfigScanReport
+			misReport, merr = reporter.ScanConfigsReport(ctx, ws.Dir)
+			misRaws = misReport.Findings
+			if misReport.UnrenderedCharts > 0 {
+				warning := fmt.Sprintf("%d Helm chart(s) could not be rendered, so their manifests were NOT evaluated",
+					misReport.UnrenderedCharts)
+				if len(misReport.ChartRenderReasons) > 0 {
+					warning += ": " + strings.Join(misReport.ChartRenderReasons, "; ")
+				}
+				result.SourceWarnings = append(result.SourceWarnings, warning)
+			}
+		} else {
+			misRaws, merr = s.misconfig.ScanConfigs(ctx, ws.Dir)
+		}
 		switch {
 		case budgetExpired(merr):
 			result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("infrastructure-as-code scan"))

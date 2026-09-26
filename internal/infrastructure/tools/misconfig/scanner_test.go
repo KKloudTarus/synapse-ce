@@ -3,6 +3,7 @@ package misconfig
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -734,5 +735,72 @@ data:
 `
 	if f, bad := ruleIDs(scan(t, map[string]string{"cm.yaml": manifest}))["kubernetes-configmap-credential"]; bad {
 		t.Errorf("a path, a template reference and an empty value are not credentials: %+v", f)
+	}
+}
+
+// A Helm chart that refuses to render contributes no findings, and the caller must be able to tell that apart
+// from a chart with nothing wrong. On one live repository 112 of 126 charts refused to render and the report
+// said nothing, so every one of those applications read as clean.
+func TestHelmRenderFailureIsReported(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	root := t.TempDir()
+	// A chart that declares a dependency it does not vendor: helm template refuses, which is the single most
+	// common failure on a real umbrella chart.
+	chart := filepath.Join(root, "app")
+	if err := os.MkdirAll(filepath.Join(chart, "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"Chart.yaml":            "apiVersion: v2\nname: app\nversion: 0.1.0\ndependencies:\n  - name: webapp\n    version: 1.0.0\n    repository: https://example.invalid/charts\n",
+		"values.yaml":           "replicaCount: 1\n",
+		"templates/deploy.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: app\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: app:1\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(chart, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := New().WithHelmDirect().ScanConfigsReport(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ScanConfigsReport: %v", err)
+	}
+	if report.UnrenderedCharts != 1 {
+		t.Fatalf("an unrenderable chart must be counted, got %d", report.UnrenderedCharts)
+	}
+	if len(report.ChartRenderReasons) == 0 || !strings.Contains(report.ChartRenderReasons[0], "dependency") {
+		t.Errorf("the reason must name the missing dependency so a reader can fix it, got %v", report.ChartRenderReasons)
+	}
+}
+
+// A chart that renders is not reported as unrenderable, or the warning becomes noise on every repository.
+func TestHelmRenderSuccessReportsNoFailure(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	root := t.TempDir()
+	chart := filepath.Join(root, "app")
+	if err := os.MkdirAll(filepath.Join(chart, "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"Chart.yaml":            "apiVersion: v2\nname: app\nversion: 0.1.0\n",
+		"values.yaml":           "image: app:1\n",
+		"templates/deploy.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: app\n  namespace: prod\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: {{ .Values.image }}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(chart, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := New().WithHelmDirect().ScanConfigsReport(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ScanConfigsReport: %v", err)
+	}
+	if report.UnrenderedCharts != 0 {
+		t.Errorf("a chart that renders must not be counted as unrenderable: %v", report.ChartRenderReasons)
+	}
+	if len(report.Findings) == 0 {
+		t.Error("the rendered chart's Deployment must still produce findings")
 	}
 }

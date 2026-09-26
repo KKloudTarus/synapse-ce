@@ -41,6 +41,7 @@ type Scanner struct {
 }
 
 var _ ports.MisconfigScanner = (*Scanner)(nil)
+var _ ports.MisconfigReporter = (*Scanner)(nil)
 
 // New returns a scanner with the default configuration. Helm rendering is OFF by default (no runner, not
 // trusted-local): `helm template` executes an untrusted chart, so a caller must opt in with WithHelmRunner
@@ -92,6 +93,14 @@ const (
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
 // Best-effort: an unreadable or unparsable file is skipped.
 func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.MisconfigRawFinding, error) {
+	report, err := s.ScanConfigsReport(ctx, root)
+	return report.Findings, err
+}
+
+// ScanConfigsReport is the reporting form: the same findings plus what the scan could NOT evaluate. A Helm
+// chart that refuses to render contributes no findings, and without this the caller cannot tell that apart
+// from a chart with nothing wrong.
+func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.MisconfigScanReport, error) {
 	var out []ports.MisconfigRawFinding
 	var kubernetes k8sScanResult
 	// Kustomize (opt-in, like Helm): render each ROOT kustomization and scan the output. A manifest is
@@ -265,7 +274,7 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 		return nil
 	})
 	if walkErr != nil {
-		return out, fmt.Errorf("misconfig scan: %w", walkErr) // e.g. context cancellation
+		return ports.MisconfigScanReport{Findings: out}, fmt.Errorf("misconfig scan: %w", walkErr) // e.g. context cancellation
 	}
 	// Second Terraform pass: resolve each directory's variable/local map (unambiguous literals only) and
 	// scan each deferred .tf file with its own directory's map.
@@ -278,7 +287,11 @@ func (s *Scanner) ScanConfigs(ctx context.Context, root string) ([]ports.Misconf
 	}
 	out = append(out, kubernetes.findings...)
 	out = append(out, networkPolicyFindings(kubernetes)...)
-	return out, nil
+	return ports.MisconfigScanReport{
+		Findings:           out,
+		UnrenderedCharts:   kubernetes.chartRenderFailures,
+		ChartRenderReasons: kubernetes.chartRenderReasons,
+	}, nil
 }
 
 // isTFVarsName recognises an HCL Terraform variable-values file (terraform.tfvars, *.auto.tfvars, or any
