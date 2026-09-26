@@ -918,6 +918,7 @@ generic-high-entropy
 generic-secret
 generic-sql-dynamic-execute
 generic-ssrf-request-url
+gha-no-explicit-permissions
 gha-permissions-write-all
 gha-pull-request-target
 gha-script-injection

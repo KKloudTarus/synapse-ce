@@ -438,10 +438,17 @@ spec:
 }
 
 func TestNonKubernetesYAMLSkipped(t *testing.T) {
-	// A CI/compose YAML with no apiVersion+kind must not be parsed as a manifest.
+	// A CI/compose YAML with no apiVersion+kind must not be parsed as a manifest. The file IS a GitHub Actions
+	// workflow, so the Actions rules legitimately apply to it; what must not happen is a Kubernetes rule firing.
 	ci := "jobs:\n  build:\n    steps:\n      - run: make\n"
-	if got := scan(t, map[string]string{".github/workflows/ci.yml": ci}); len(got) != 0 {
-		t.Errorf("non-Kubernetes YAML must be skipped, got %+v", got)
+	for _, f := range scan(t, map[string]string{".github/workflows/ci.yml": ci}) {
+		if strings.HasPrefix(f.RuleID, "kubernetes-") {
+			t.Errorf("non-Kubernetes YAML must not be parsed as a manifest, got %+v", f)
+		}
+	}
+	// A CI YAML outside .github/workflows/ is neither a manifest nor a workflow: nothing at all.
+	if got := scan(t, map[string]string{"ci/pipeline.yml": ci}); len(got) != 0 {
+		t.Errorf("a non-workflow, non-manifest YAML must yield no findings, got %+v", got)
 	}
 }
 

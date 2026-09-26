@@ -774,6 +774,15 @@ func dockerfileRules() []rule.Rule {
 func ghaRules() []rule.Rule {
 	return []rule.Rule{
 		{
+			Key: "gha-no-explicit-permissions", Name: "Workflow sets no top-level permissions", Language: "GitHub Actions", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"actions", "permissions"}, CWE: []string{"CWE-732"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionPattern,
+			Description:         "The workflow declares no top-level `permissions`, so the GITHUB_TOKEN takes the repository default.",
+			Rationale:           "On many repositories the default token grants write access to contents, so every job in the workflow can push commits, move tags and alter releases. A compromised third-party action inherits that, and nothing in the workflow file says the privilege was ever granted. A top-level `permissions` block is the only place that sets the floor: a job-level block narrows one job and leaves the rest on the default.\n\nSource: https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication",
+			Remediation:         "Declare `permissions: contents: read` at the top level and grant a write scope only to the job that needs it.",
+			CompliantExample:    "name: ci\non: [push]\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846 # v3\n",
+			NoncompliantExample: "name: ci\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846 # v3\n",
+			RemediationEffort:   15,
+		},
+		{
 			Key: "gha-permissions-write-all", Name: "Workflow grants write-all permissions", Language: "GitHub Actions", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"actions", "permissions"}, CWE: []string{"CWE-732"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionPattern,
 			Description:         "The workflow sets permissions to 'write-all'.",
 			Rationale:           "Granting write-all permissions gives the workflow token full access to modify the repository, releases, and packages. If an action is compromised, the attacker can hijack the repository.\n\nSource: https://docs.github.com/en/actions/security-guides/automatic-token-authentication#modifying-the-permissions-for-the-github_token",

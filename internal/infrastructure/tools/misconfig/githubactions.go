@@ -27,6 +27,13 @@ var (
 	// list item. `\b` keeps it from matching the safe `pull_request` trigger.
 	reGHPRTarget = regexp.MustCompile(`(?i)^\s*(pull_request_target\s*:|on\s*:.*\bpull_request_target\b|-\s*["']?pull_request_target["']?\s*$)`)
 	reGHWriteAll = regexp.MustCompile(`(?i)^\s*permissions\s*:\s*write-all\s*$`)
+	// A TOP-LEVEL permissions key, meaning one at indentation zero. A job-level permissions block narrows one
+	// job, which leaves every other job on the repository default, so only the top-level key settles the
+	// workflow's floor.
+	reGHTopPermissions = regexp.MustCompile(`(?i)^permissions\s*:`)
+	// The workflow's own top-level keys, used to place the missing-permissions finding on a line a reader can
+	// open rather than at line 1 of a file that may start with comments.
+	reGHTopJobs = regexp.MustCompile(`(?i)^jobs\s*:`)
 	// A `run:` (shell) or `script:` (actions/github-script) key opens an injection-tracked block.
 	reGHRunKey = regexp.MustCompile(`(?i)^\s*(?:-\s*)?(?:run|script)\s*:`)
 	// An attacker-controllable expression: an untrusted github.event.* field (ending in a risky suffix)
@@ -77,7 +84,9 @@ func scanGitHubActions(rel string, data []byte) []ports.MisconfigRawFinding {
 	var out []ports.MisconfigRawFinding
 	lines := strings.Split(string(data), "\n")
 
-	runCol := -1 // key column of the enclosing run:/script: block; >-1 means we are inside its script
+	runCol := -1            // key column of the enclosing run:/script: block; >-1 means we are inside its script
+	topPermissions := false // a top-level permissions key was seen
+	jobsLine := 0           // line of the top-level jobs key, where a missing-permissions finding is placed
 
 	for i, raw := range lines {
 		line := strings.TrimRight(raw, "\r")
@@ -106,6 +115,17 @@ func scanGitHubActions(rel string, data []byte) []ports.MisconfigRawFinding {
 				Severity: shared.SeverityHigh, Resource: "workflow trigger",
 				Description: "pull_request_target runs with the base repository's secrets and a read/write token while able to check out untrusted PR code. If it checks out and builds/executes the PR head, a fork can exfiltrate secrets or tamper with the repo. Prefer pull_request; if pull_request_target is required, never check out or execute untrusted head code and keep permissions minimal.",
 			})
+		case !inRun && reGHTopPermissions.MatchString(code):
+			topPermissions = true
+			if reGHWriteAll.MatchString(code) {
+				out = append(out, ports.MisconfigRawFinding{
+					File: rel, Line: ln, RuleID: "gha-permissions-write-all", Title: "Workflow grants write-all permissions",
+					Severity: shared.SeverityMedium, Resource: "workflow permissions",
+					Description: "permissions: write-all grants the GITHUB_TOKEN write access to every scope, far beyond what most jobs need. Set least-privilege permissions (default read-only at the top level, granting specific write scopes only to the jobs that need them).",
+				})
+			}
+		case !inRun && reGHTopJobs.MatchString(code):
+			jobsLine = ln
 		case !inRun && reGHWriteAll.MatchString(code):
 			out = append(out, ports.MisconfigRawFinding{
 				File: rel, Line: ln, RuleID: "gha-permissions-write-all", Title: "Workflow grants write-all permissions",
@@ -133,6 +153,16 @@ func scanGitHubActions(rel string, data []byte) []ports.MisconfigRawFinding {
 				})
 			}
 		}
+	}
+	// No TOP-LEVEL permissions key means the GITHUB_TOKEN takes the repository default, which on many
+	// repositories is write access to contents. The workflow then hands a compromised action enough
+	// privilege to push commits, and nothing in the file says so.
+	if !topPermissions && jobsLine > 0 {
+		out = append(out, ports.MisconfigRawFinding{
+			File: rel, Line: jobsLine, RuleID: "gha-no-explicit-permissions", Title: "Workflow sets no top-level permissions",
+			Severity: shared.SeverityMedium, Resource: "workflow permissions",
+			Description: "The workflow declares no top-level permissions, so the GITHUB_TOKEN takes the repository default, which is write access to contents on many repositories. A compromised action in any job could then push commits or alter releases. Declare permissions: contents: read at the top level and grant a write scope only to the job that needs it.",
+		})
 	}
 	return out
 }

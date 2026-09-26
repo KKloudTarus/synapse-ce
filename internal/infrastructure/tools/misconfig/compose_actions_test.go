@@ -193,3 +193,81 @@ func TestGitHubActionsRulesGatedToWorkflowPath(t *testing.T) {
 		}
 	}
 }
+
+// With no top-level permissions the GITHUB_TOKEN takes the repository default, which on many repositories is
+// write access to contents, so every job can push commits and a compromised action inherits that. Checkov
+// reports this where the engine only looked for the literal write-all.
+func TestGitHubActionsMissingTopLevelPermissions(t *testing.T) {
+	workflow := `name: ci
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
+`
+	got := ruleIDs(scan(t, map[string]string{".github/workflows/ci.yml": workflow}))
+	if _, ok := got["gha-no-explicit-permissions"]; !ok {
+		t.Errorf("a workflow with no top-level permissions must be flagged, got %v", keys(got))
+	}
+}
+
+// A top-level permissions block settles the floor, so the rule must be quiet.
+func TestGitHubActionsTopLevelPermissionsSatisfiesTheRule(t *testing.T) {
+	workflow := `name: ci
+on: [push]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
+`
+	if _, bad := ruleIDs(scan(t, map[string]string{".github/workflows/ci.yml": workflow}))["gha-no-explicit-permissions"]; bad {
+		t.Error("a declared top-level permissions block must satisfy the rule")
+	}
+}
+
+// A JOB-level permissions block narrows one job and leaves every other job on the repository default, so it
+// must NOT satisfy the top-level requirement.
+func TestGitHubActionsJobLevelPermissionsIsNotEnough(t *testing.T) {
+	workflow := `name: ci
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@a12a3943b4bdde767164f792f33f40b04645d846
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make release
+`
+	if _, ok := ruleIDs(scan(t, map[string]string{".github/workflows/ci.yml": workflow}))["gha-no-explicit-permissions"]; !ok {
+		t.Error("a job-level permissions block leaves other jobs on the default and must not satisfy the rule")
+	}
+}
+
+// write-all is still reported as its own, more specific finding, and it also counts as a declared top-level
+// block so the two never stack on one workflow.
+func TestGitHubActionsWriteAllStillReportedAlone(t *testing.T) {
+	workflow := `name: ci
+on: [push]
+permissions: write-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make
+`
+	got := ruleIDs(scan(t, map[string]string{".github/workflows/ci.yml": workflow}))
+	if _, ok := got["gha-permissions-write-all"]; !ok {
+		t.Error("write-all must still be reported")
+	}
+	if _, bad := got["gha-no-explicit-permissions"]; bad {
+		t.Error("write-all IS a declared top-level block; the two findings must not stack")
+	}
+}
