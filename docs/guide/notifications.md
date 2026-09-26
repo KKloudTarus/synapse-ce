@@ -47,8 +47,24 @@ of these events:
 - `incident.created`
 - `finding.ownership_changed` (requires explicit `team_ids` or `all_teams` scope)
 
-Vulnerability and incident rules can set an inclusive severity floor. SLA rules
-set a lead time (24 hours by default). Events created before the framework first
+Each event type accepts only the rule filters its producer can satisfy, and a rule
+with any other filter is rejected when it is saved:
+
+| Event | Filters |
+| --- | --- |
+| `vulnerability_action.created` | severity floor, action types, engagements |
+| `scan.completed` | engagements |
+| `quality_gate.failed` | none |
+| `sla.approaching_deadline` | engagements, lead time (24 hours by default) |
+| `fleet.agent.offline` | none |
+| `incident.created` | severity floor, engagements |
+| `finding.ownership_changed` | engagements, teams (required) |
+
+The severity floor is inclusive. Quality gate and fleet events carry no engagement,
+so an engagement scope on them could never match. Rules of that shape saved before
+this check were disabled on upgrade with `disabled_reason: engagement_filter_unsupported`;
+their engagement list is kept so you can see what was intended. Remove the engagement
+scope and save the rule to enable it again. Events created before the framework first
 activates for a tenant are not replayed automatically.
 
 Only tenant administrators (`PermAdminister`) can read or change these settings,

@@ -37,13 +37,10 @@ const (
 	EventTest                EventType = "notification.test"
 )
 
+// Valid reports whether the event type is declared in the catalog.
 func (v EventType) Valid() bool {
-	switch v {
-	case EventVulnerabilityAction, EventScanCompleted, EventQualityGateFailed,
-		EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged, EventTest:
-		return true
-	}
-	return false
+	_, ok := catalog[v]
+	return ok
 }
 
 type DeliveryState string
@@ -101,42 +98,49 @@ type Rule struct {
 	ChannelIDs    []shared.ID     `json:"channel_ids"`
 	LeadTime      time.Duration   `json:"-"`
 	LeadTimeSecs  int64           `json:"lead_time_seconds,omitempty"`
-	Revision      int             `json:"revision"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	// DisabledReason explains a rule the system disabled; any save by an administrator clears it.
+	DisabledReason string    `json:"disabled_reason,omitempty"`
+	Revision       int       `json:"revision"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
+
+// DisabledEngagementFilterUnsupported marks rules that migration 0181 disabled because their event
+// type carries no engagement, so their engagement filter could never match.
+const DisabledEngagementFilterUnsupported = "engagement_filter_unsupported"
 
 func (r *Rule) Normalize() error {
 	r.Name = strings.TrimSpace(r.Name)
+	spec, known := catalog[r.EventType]
 	if r.LeadTimeSecs < 0 || r.LeadTimeSecs > 2592000 {
 		return fmt.Errorf("%w: invalid lead time", shared.ErrValidation)
 	}
 	if r.LeadTime == 0 && r.LeadTimeSecs > 0 {
 		r.LeadTime = time.Duration(r.LeadTimeSecs) * time.Second
 	}
-	if r.EventType == EventSLAApproaching && r.LeadTime == 0 {
+	if spec.HasLeadTime && r.LeadTime == 0 {
 		r.LeadTime = 24 * time.Hour
 	}
 	r.LeadTimeSecs = int64(r.LeadTime / time.Second)
-	if r.TenantID.IsZero() || r.ID.IsZero() || r.Name == "" || !r.EventType.Valid() || r.EventType == EventTest || len(r.ChannelIDs) == 0 || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
+	if r.TenantID.IsZero() || r.ID.IsZero() || r.Name == "" || !known || spec.OperatorOnly || len(r.ChannelIDs) == 0 || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: invalid notification rule", shared.ErrValidation)
 	}
 	if r.MinSeverity != "" && shared.SeverityRank(r.MinSeverity) == 0 {
 		return fmt.Errorf("%w: invalid notification minimum severity", shared.ErrValidation)
 	}
-	if r.MinSeverity != "" && r.EventType != EventVulnerabilityAction && r.EventType != EventIncidentCreated {
-		return fmt.Errorf("%w: minimum severity only applies to vulnerability and incident events", shared.ErrValidation)
+	if r.MinSeverity != "" && !spec.Allows(FilterMinSeverity) {
+		return unsupportedFilter(r.EventType, "minimum severity")
 	}
-	if len(r.ActionTypes) > 0 && r.EventType != EventVulnerabilityAction {
-		return fmt.Errorf("%w: action types only apply to vulnerability action events", shared.ErrValidation)
+	if len(r.ActionTypes) > 0 && !spec.Allows(FilterActionTypes) {
+		return unsupportedFilter(r.EventType, "action types")
 	}
 	for _, action := range r.ActionTypes {
 		if !validActionType(strings.TrimSpace(action)) {
 			return fmt.Errorf("%w: invalid vulnerability action type", shared.ErrValidation)
 		}
 	}
-	if r.EventType != EventSLAApproaching && r.LeadTime != 0 {
-		return fmt.Errorf("%w: lead time only applies to SLA events", shared.ErrValidation)
+	if r.LeadTime != 0 && !spec.Allows(FilterLeadTime) {
+		return unsupportedFilter(r.EventType, "lead time")
 	}
 	if r.LeadTime < 0 || r.LeadTime > 30*24*time.Hour {
 		return fmt.Errorf("%w: notification lead time must be between zero and 30 days", shared.ErrValidation)
@@ -144,13 +148,20 @@ func (r *Rule) Normalize() error {
 	r.ActionTypes = uniqueStrings(r.ActionTypes)
 	r.ChannelIDs = uniqueIDs(r.ChannelIDs)
 	r.EngagementIDs = uniqueIDs(r.EngagementIDs)
-	if err := r.normalizeTeamScope(); err != nil {
+	if len(r.EngagementIDs) > 0 && !spec.Allows(FilterEngagements) {
+		return unsupportedFilter(r.EventType, "engagement scope")
+	}
+	if err := r.normalizeTeamScope(spec); err != nil {
 		return err
 	}
 	if len(r.ChannelIDs) == 0 || len(r.ChannelIDs) > 50 || len(r.EngagementIDs) > 200 || len(r.Name) > 200 {
 		return fmt.Errorf("%w: invalid rule bounds", shared.ErrValidation)
 	}
 	return nil
+}
+
+func unsupportedFilter(t EventType, filter string) error {
+	return fmt.Errorf("%w: %s is not a filter for %s events", shared.ErrValidation, filter, t)
 }
 
 type Event struct {
@@ -178,7 +189,8 @@ func (e Event) Validate() error {
 }
 
 func (r Rule) Matches(e Event) bool {
-	if !r.Enabled || r.TenantID != e.TenantID || r.EventType != e.Type {
+	spec, known := catalog[e.Type]
+	if !known || spec.OperatorOnly || !r.Enabled || r.TenantID != e.TenantID || r.EventType != e.Type {
 		return false
 	}
 	if r.MinSeverity != "" && (e.Severity == "" || shared.SeverityRank(e.Severity) < shared.SeverityRank(r.MinSeverity)) {
@@ -187,7 +199,7 @@ func (r Rule) Matches(e Event) bool {
 	if len(r.EngagementIDs) > 0 && !containsID(r.EngagementIDs, e.EngagementID) {
 		return false
 	}
-	if e.Type == EventOwnershipChanged && !r.matchesOwnership(e) {
+	if spec.Allows(FilterTeams) && !r.matchesTeams(e) {
 		return false
 	}
 	if len(r.ActionTypes) > 0 {
@@ -198,7 +210,7 @@ func (r Rule) Matches(e Event) bool {
 			return false
 		}
 	}
-	if e.Type == EventSLAApproaching {
+	if spec.HasLeadTime {
 		var data struct {
 			LeadTimeSeconds int64 `json:"lead_time_seconds"`
 		}

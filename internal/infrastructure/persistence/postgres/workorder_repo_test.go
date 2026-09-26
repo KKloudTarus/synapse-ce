@@ -209,12 +209,19 @@ func TestMigration0059(t *testing.T) {
 // rolls the shared integration schema back while other packages are using it.
 func isolatedMigration0059DSN(t *testing.T, sharedDSN string) string {
 	t.Helper()
+	return isolatedMigrationDSN(t, sharedDSN, "0059")
+}
+
+// isolatedMigrationDSN creates a disposable database for a migration test that walks the schema
+// down and back up, and drops it when the test ends.
+func isolatedMigrationDSN(t *testing.T, sharedDSN, label string) string {
+	t.Helper()
 
 	u, err := url.Parse(sharedDSN)
 	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
 		t.Fatalf("parse PostgreSQL test DSN for isolated migration test: %v", err)
 	}
-	name := fmt.Sprintf("synapse_migration_0059_%d", time.Now().UnixNano())
+	name := fmt.Sprintf("synapse_migration_%s_%d", label, time.Now().UnixNano())
 	isolated := *u
 	isolated.Path = "/" + name
 	isolated.RawPath = ""
