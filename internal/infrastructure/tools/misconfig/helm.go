@@ -3,18 +3,22 @@ package misconfig
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 const (
-	helmRenderTimeout  = 45 * time.Second // bound a single `helm template` render
-	maxRenderedBytes   = 16 << 20         // cap the rendered manifest stream fed to the K8s rules
-	maxHelmStderrBytes = 8 << 10          // enough for helm's one-line refusal, bounded like every other read
+	helmRenderTimeout     = 45 * time.Second // bound a single `helm template` render
+	maxRenderedBytes      = 16 << 20         // cap the rendered manifest stream fed to the K8s rules
+	maxHelmStderrBytes    = 8 << 10          // enough for helm's one-line refusal, bounded like every other read
+	maxChartMetadataBytes = 1 << 20          // a Chart.yaml is tiny; cap the read defensively
 )
 
 // scanHelmChart renders a Helm chart and runs the Kubernetes rules over the output – the raw templates
@@ -33,6 +37,12 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 	// it, so every one of those apps read as clean.
 	failed := func(reason string) k8sScanResult {
 		return k8sScanResult{chartRenderFailures: 1, chartRenderReasons: []string{reason}}
+	}
+	// A LIBRARY chart ships template helpers for other charts and declares no resources of its own, so
+	// `helm template` refusing it is correct and there is nothing to evaluate. Counting it as a chart the scan
+	// could not cover reported a coverage gap that does not exist.
+	if isHelmLibraryChart(chartDir) {
+		return k8sScanResult{}
 	}
 	args := []string{"template", "synapse-scan", chartDir, "--skip-tests"}
 	var rendered []byte
@@ -78,6 +88,23 @@ func scanHelmChart(ctx context.Context, runner ports.ToolRunner, direct bool, he
 		rendered = rendered[:maxRenderedBytes]
 	}
 	return scanKubernetes(filepath.ToSlash(filepath.Join(relDir, "Chart.yaml")), rendered)
+}
+
+// isHelmLibraryChart reports whether the chart declares `type: library`. Such a chart is not installable by
+// design, so its render refusal is expected rather than a gap in coverage. An unreadable or unparsable
+// Chart.yaml is treated as an ordinary chart, so a real gap is never hidden by a failed read.
+func isHelmLibraryChart(chartDir string) bool {
+	data, err := os.ReadFile(filepath.Join(chartDir, "Chart.yaml"))
+	if err != nil || len(data) > maxChartMetadataBytes {
+		return false
+	}
+	var meta struct {
+		Type string `yaml:"type"`
+	}
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(meta.Type), "library")
 }
 
 // helmFailureReason reduces helm's stderr to the short, actionable sentence a reader can act on. Helm states

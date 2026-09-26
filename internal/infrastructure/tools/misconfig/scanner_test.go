@@ -856,3 +856,33 @@ spec:
 		t.Error("imagePullPolicy: Always must not be flagged")
 	}
 }
+
+// A Helm LIBRARY chart ships template helpers for other charts and declares no resources of its own, so
+// `helm template` refusing it is correct. Counting it as a chart the scan could not cover reported a coverage
+// gap that does not exist: it accounted for 2 of the warnings on a live chart repository.
+func TestHelmLibraryChartIsNotACoverageGap(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
+	}
+	root := t.TempDir()
+	chart := filepath.Join(root, "common")
+	if err := os.MkdirAll(filepath.Join(chart, "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"Chart.yaml":             "apiVersion: v2\nname: common\nversion: 1.0.0\ntype: library\n",
+		"values.yaml":            "{}\n",
+		"templates/_helpers.tpl": "{{- define \"common.name\" -}}app{{- end -}}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(chart, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := New().WithHelmDirect().ScanConfigsReport(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ScanConfigsReport: %v", err)
+	}
+	if report.UnrenderedCharts != 0 {
+		t.Errorf("a library chart is not installable by design and must not count as a gap: %v", report.ChartRenderReasons)
+	}
+}
