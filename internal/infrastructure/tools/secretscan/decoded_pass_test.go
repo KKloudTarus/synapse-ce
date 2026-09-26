@@ -58,6 +58,23 @@ func certificatePEM() string {
 	return out.String()
 }
 
+// serviceAccountKeyJSON builds a GCP service-account key file: the type marker plus PEM key material, which
+// is what the rule requires. The PEM armour is assembled from parts and the body is a plain label, following
+// the convention in this package of never writing a real-looking secret as a literal.
+func serviceAccountKeyJSON() string {
+	armour := func(kind string) string { return "-----" + kind + " PRIVATE KEY" + "-----" }
+	body := armour("BEGIN") + `\n` + "MIIsyntheticFixtureBodyNotARealKey" + `\n` + armour("END")
+	return `{"type": "service_account", "project_id": "p", "private_key_id": "k", "private_key": "` + body + `\n"}`
+}
+
+// syntheticSecret derives a credential-shaped value from a label. The repository's convention is to hash
+// rather than write such values as literals, so no real-looking secret appears in this source and a
+// repository secret scanner has nothing to report on the test that proves the scanner works.
+func syntheticSecret(label string) string {
+	digest := sha256.Sum256([]byte("synapse-secretscan-fixture-" + label))
+	return base64.RawURLEncoding.EncodeToString(digest[:16])
+}
+
 // scanOneFile runs the scanner over one file and returns the rule ids that fired.
 func scanOneFile(t *testing.T, name, content string) []string {
 	t.Helper()
@@ -144,7 +161,7 @@ func TestHighEntropyIgnoresCodecAlphabet(t *testing.T) {
 // A shuffled alphabet of the same characters is NOT a table: that is exactly the shape of a generated
 // secret, so it must still be reported.
 func TestHighEntropyStillReadsShuffledAlphabet(t *testing.T) {
-	line := `token = "qWzR7tYuI9oPaS4dFgHjKlZ2xCvBnM1e3rTyU6iO0pAs"`
+	line := `token = "` + syntheticSecret("shuffled") + `"`
 	hits := scanOneFile(t, "config.yaml", line)
 	for _, id := range hits {
 		if id != "(none)" {
@@ -200,9 +217,10 @@ func TestEmptyValueDoesNotCaptureTheNextLine(t *testing.T) {
 // A credential really assigned on the line is still reported, and so is one a formatter moved to the next
 // line, because only an identifier-shaped value is refused.
 func TestValueOnTheFollowingLineStillCounts(t *testing.T) {
+	value := syntheticSecret("following-line")
 	cases := map[string]string{
-		"same line": `  "api_key": "AbCdEf0123456789GhIjKl"`,
-		"next line": "  \"api_key\":\n    \"AbCdEf0123456789GhIjKl\"",
+		"same line": `  "api_key": "` + value + `"`,
+		"next line": "  \"api_key\":\n    \"" + value + "\"",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -236,11 +254,12 @@ func TestKeywordDoesNotBindToTheNextLinesAttribute(t *testing.T) {
 // The keyword still reaches its value across the shapes that really occur on one line: a quoted YAML key,
 // a bracketed config key, and Go's short variable declaration.
 func TestKeywordStillReachesItsValueOnOneLine(t *testing.T) {
+	value := syntheticSecret("one-line")
 	cases := map[string]string{
-		"yaml":            `  client-secret: "AbCdEf0123456789GhIjKl"`,
-		"bracketed":       `app.config['SECRET_KEY_HMAC'] = "AbCdEf0123456789GhIjKl"`,
-		"go short assign": `apiKey := "AbCdEf0123456789GhIjKl"`,
-		"quoted key":      `"access_token" : "AbCdEf0123456789GhIjKl"`,
+		"yaml":            `  client-secret: "` + value + `"`,
+		"bracketed":       `app.config['SECRET_KEY_HMAC'] = "` + value + `"`,
+		"go short assign": `apiKey := "` + value + `"`,
+		"quoted key":      `"access_token" : "` + value + `"`,
 	}
 	for name, line := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -304,7 +323,7 @@ func TestGCPKeyNeedsKeyMaterial(t *testing.T) {
 		}
 	}
 
-	real := `{"type": "service_account", "project_id": "p", "private_key_id": "k", "private_key": "-----BEGIN PRIVATE KEY-----\nMIIsyntheticFixtureBodyNotARealKey\n-----END PRIVATE KEY-----\n"}`
+	real := serviceAccountKeyJSON()
 	found := false
 	hits := scanOneFile(t, "key.json", real)
 	for _, id := range hits {
