@@ -295,6 +295,7 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 	}
 	out = append(out, kubernetes.findings...)
 	out = append(out, networkPolicyFindings(kubernetes)...)
+	out = append(out, secretReaderFindings(kubernetes)...)
 	return ports.MisconfigScanReport{
 		Findings:           out,
 		UnrenderedCharts:   kubernetes.chartRenderFailures,

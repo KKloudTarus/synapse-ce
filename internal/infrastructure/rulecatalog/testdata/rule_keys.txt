@@ -2033,6 +2033,7 @@ kotlin-wildcard-import
 kotlin-wildcard-role
 kotlin-xpath-concat
 kubeconfig-token
+kubernetes-added-capability
 kubernetes-allow-priv-escalation
 kubernetes-automount-sa-token
 kubernetes-caps-not-dropped
@@ -2048,6 +2049,7 @@ kubernetes-host-port
 kubernetes-image-no-digest
 kubernetes-image-no-tag
 kubernetes-image-pull-policy-cached
+kubernetes-ingress-annotation-snippet
 kubernetes-ingress-no-tls
 kubernetes-ingress-tls-no-secret
 kubernetes-low-run-as-user
@@ -2067,6 +2069,8 @@ kubernetes-no-seccomp
 kubernetes-privileged
 kubernetes-rbac-cluster-admin-binding
 kubernetes-rbac-escalation-verbs
+kubernetes-rbac-read-all-secrets
+kubernetes-rbac-webhook-control
 kubernetes-rbac-wildcard-permissions
 kubernetes-run-as-root
 kubernetes-secret-env-var

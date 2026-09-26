@@ -870,6 +870,54 @@ func k8sRules() []rule.Rule {
 			RemediationEffort:   30,
 		},
 		{
+			Key: "kubernetes-added-capability", Name: "Linux capability added beyond the runtime default", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityMedium, Tags: []string{"kubernetes", "capabilities"}, CWE: []string{"CWE-250"}, OWASP: []string{"A04:2021"}, Detection: rule.DetectionAST,
+			Description: "`securityContext.capabilities.add` grants a kernel privilege the container runtime hands no container by default.",
+			Rationale: "The runtime already grants every container a fixed set (CHOWN, NET_BIND_SERVICE, SETUID and eleven others), so adding one of those back " +
+				"after a `drop: [\"ALL\"]` is the hardening pattern an upstream chart is written with and grants nothing. Anything outside that set is a real " +
+				"privilege this workload holds and its neighbours do not, widening what a compromise of it reaches on the node. CIS Kubernetes Benchmark 5.2.8." +
+				"\n\nSource: https://kubernetes.io/docs/concepts/security/pod-security-standards/",
+			Remediation:         "Remove the capability, or state in the manifest which syscall requires it.",
+			CompliantExample:    "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n  namespace: dev\nspec:\n  containers:\n  - name: test\n    image: test:1.0@sha256:abc\n    securityContext:\n      capabilities:\n        drop: [\"ALL\"]\n        add: [\"NET_BIND_SERVICE\"]\n",
+			NoncompliantExample: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\nspec:\n  containers:\n  - name: test\n    image: test\n    securityContext:\n      capabilities:\n        add: [\"SYS_TIME\"]\n",
+			RemediationEffort:   30,
+		},
+		{
+			Key: "kubernetes-rbac-webhook-control", Name: "ClusterRole can rewrite admission webhooks", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"kubernetes", "rbac"}, CWE: []string{"CWE-269"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description: "A ClusterRole grants `create`, `update` or `patch` on mutating or validating webhook configurations.",
+			Rationale: "An admission webhook decides what the API server accepts and can rewrite every object submitted to it, so write access to one is write access " +
+				"to every future object in the cluster: a sidecar injected into any pod, or the policy that would have blocked it switched off. A rule that only " +
+				"reads webhook configurations is how a controller watches them and is not this." +
+				"\n\nSource: https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/",
+			Remediation:         "Remove the write verb, or narrow the rule with `resourceNames` to the configurations this controller owns.",
+			CompliantExample:    "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: webhook-watcher\nrules:\n  - apiGroups: [\"admissionregistration.k8s.io\"]\n    resources: [\"validatingwebhookconfigurations\"]\n    verbs: [\"get\", \"list\", \"watch\"]\n",
+			NoncompliantExample: "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: webhook-admin\nrules:\n  - apiGroups: [\"admissionregistration.k8s.io\"]\n    resources: [\"mutatingwebhookconfigurations\"]\n    verbs: [\"create\", \"update\", \"patch\"]\n",
+			RemediationEffort:   60,
+		},
+		{
+			Key: "kubernetes-rbac-read-all-secrets", Name: "Binding lets a workload identity read every Secret", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"kubernetes", "rbac"}, CWE: []string{"CWE-522"}, OWASP: []string{"A01:2021"}, Detection: rule.DetectionAST,
+			Description: "A binding grants a ServiceAccount or Node a role that reads Secrets with no `resourceNames`.",
+			Rationale: "`resourceNames` is what turns \"every Secret\" into \"these Secrets\", so a read rule without it collects database passwords, TLS keys and " +
+				"other services' tokens. A ServiceAccount token sits in a pod, so one application flaw is enough to use the permission, where a human subject " +
+				"authenticates first. The role alone is not the defect: it becomes one when something is bound to it, which is why the binding is reported." +
+				"\n\nSource: https://kubernetes.io/docs/concepts/configuration/secret/",
+			Remediation:         "List the Secrets the workload needs in `resourceNames`, or bind a Role scoped to its own namespace.",
+			CompliantExample:    "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: reader\nrules:\n  - apiGroups: [\"\"]\n    resources: [\"secrets\"]\n    resourceNames: [\"app-db\"]\n    verbs: [\"get\"]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  name: reader\nroleRef:\n  kind: ClusterRole\n  name: reader\nsubjects:\n  - kind: ServiceAccount\n    name: app\n    namespace: dev\n",
+			NoncompliantExample: "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: reader\nrules:\n  - apiGroups: [\"\"]\n    resources: [\"secrets\"]\n    verbs: [\"get\", \"list\"]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  name: reader\nroleRef:\n  kind: ClusterRole\n  name: reader\nsubjects:\n  - kind: ServiceAccount\n    name: app\n    namespace: dev\n",
+			RemediationEffort:   60,
+		},
+		{
+			Key: "kubernetes-ingress-annotation-snippet", Name: "Ingress injects raw NGINX configuration", Language: "Kubernetes", Type: rule.TypeVulnerability, Qualities: []rule.Quality{rule.QualitySecurity}, DefaultSeverity: shared.SeverityHigh, Tags: []string{"kubernetes", "ingress"}, CWE: []string{"CWE-94"}, OWASP: []string{"A03:2021"}, Detection: rule.DetectionAST,
+			Description: "An Ingress annotation supplies a raw NGINX configuration snippet.",
+			Rationale: "A snippet is nginx configuration the Ingress author writes, and the controller renders it into its shared config and runs it with the " +
+				"controller's own identity. That is CVE-2021-25742: whoever can create an Ingress in any namespace reads the controller's service-account token " +
+				"and every TLS secret the cluster holds, with no namespace boundary in the way." +
+				"\n\nSource: https://nvd.nist.gov/vuln/detail/CVE-2021-25742",
+			Remediation:         "Remove the snippet annotation, and set `allow-snippet-annotations=false` on the controller so no manifest can reintroduce one.",
+			CompliantExample:    "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: app\n  namespace: dev\n  annotations:\n    nginx.ingress.kubernetes.io/rewrite-target: /\nspec:\n  tls:\n    - hosts: [\"app.example.com\"]\n      secretName: app-tls\n  rules:\n    - host: app.example.com\n",
+			NoncompliantExample: "apiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: app\n  annotations:\n    nginx.ingress.kubernetes.io/configuration-snippet: |\n      more_set_headers \"X-Test: 1\";\nspec:\n  rules:\n    - host: app.example.com\n",
+			RemediationEffort:   30,
+		},
+		{
 			Key: "kubernetes-default-namespace", Name: "Resource in the default namespace", Language: "Kubernetes", Type: rule.TypeCodeSmell, Qualities: []rule.Quality{rule.QualityMaintainability}, DefaultSeverity: shared.SeverityLow, Tags: []string{"kubernetes", "namespace"}, CWE: []string{}, OWASP: []string{}, Detection: rule.DetectionAST,
 			Description:         "The resource defines its namespace as 'default' or omits it entirely.",
 			Rationale:           "Deploying to the default namespace makes managing RBAC, network policies, and resource quotas difficult. Applications should be isolated into dedicated namespaces.\n\nSource: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/",
