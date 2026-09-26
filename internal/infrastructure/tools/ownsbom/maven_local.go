@@ -287,6 +287,19 @@ func (r *mavenLocalRepo) build(raw *mavenPOMXML, self mavenCoord, depth int, dir
 	props["pom.artifactId"] = coord.artifact
 	props["pom.version"] = coord.version
 	props["version"] = coord.version
+	// ${project.parent.version} is how a multi-module release pins its own siblings, and it is not the same
+	// as ${project.version} when a module carries its own version. swagger-core declares swagger-models and
+	// swagger-annotations this way, so without these two artifacts went unresolved on 8 of 10 live services.
+	if parentCoord.artifact != "" {
+		parentVersion := interpolate(parentCoord.version, props)
+		parentGroup := firstNonEmpty(parentCoord.group, coord.group)
+		props["project.parent.groupId"] = parentGroup
+		props["project.parent.artifactId"] = parentCoord.artifact
+		props["project.parent.version"] = parentVersion
+		props["pom.parent.groupId"] = parentGroup
+		props["pom.parent.artifactId"] = parentCoord.artifact
+		props["pom.parent.version"] = parentVersion
+	}
 
 	// dependencyManagement precedence, in the order Maven's model builder applies it and the order that
 	// decides a real Spring Cloud project's versions:

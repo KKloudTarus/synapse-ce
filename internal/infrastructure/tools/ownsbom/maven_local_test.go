@@ -441,3 +441,54 @@ func TestMavenOwnManagedEntryBeatsAnImport(t *testing.T) {
 		t.Errorf("the project's own managed entry must beat an imported one, got %v", names)
 	}
 }
+
+// ${project.parent.version} is how a multi-module release pins its own siblings, and it differs from
+// ${project.version} when a module carries its own version. swagger-core declares swagger-models and
+// swagger-annotations that way, so without it those two artifacts went unresolved on 8 of 10 live services.
+func TestMavenResolvesProjectParentVersionProperty(t *testing.T) {
+	repo := t.TempDir()
+	writePOM(t, repo, "io.swagger.core.v3", "swagger-project", "2.1.7", `<project>
+  <groupId>io.swagger.core.v3</groupId><artifactId>swagger-project</artifactId><version>2.1.7</version></project>`)
+	writePOM(t, repo, "io.swagger.core.v3", "swagger-core", "2.1.7", `<project>
+  <parent><groupId>io.swagger.core.v3</groupId><artifactId>swagger-project</artifactId><version>2.1.7</version></parent>
+  <artifactId>swagger-core</artifactId>
+  <dependencies>
+    <dependency><groupId>io.swagger.core.v3</groupId><artifactId>swagger-models</artifactId><version>${project.parent.version}</version></dependency>
+    <dependency><groupId>io.swagger.core.v3</groupId><artifactId>swagger-annotations</artifactId><version>${project.parent.version}</version></dependency>
+  </dependencies></project>`)
+	for _, a := range []string{"swagger-models", "swagger-annotations"} {
+		writePOM(t, repo, "io.swagger.core.v3", a, "2.1.7", `<project>
+  <groupId>io.swagger.core.v3</groupId><artifactId>`+a+`</artifactId><version>2.1.7</version></project>`)
+	}
+	names, _ := parseMaven(t, repo, t.TempDir(), `<project>
+  <groupId>io.example</groupId><artifactId>service</artifactId><version>0.1</version>
+  <dependencies><dependency><groupId>io.swagger.core.v3</groupId><artifactId>swagger-core</artifactId><version>2.1.7</version></dependency></dependencies></project>`)
+	for _, want := range []string{"io.swagger.core.v3:swagger-models@2.1.7", "io.swagger.core.v3:swagger-annotations@2.1.7"} {
+		if !contains(names, want) {
+			t.Errorf("expected %s, got %v", want, names)
+		}
+	}
+}
+
+// A module with its OWN version must not have ${project.parent.version} collapse onto it, or a sibling pinned
+// to the parent release resolves to the module's version instead.
+func TestMavenParentVersionDiffersFromProjectVersion(t *testing.T) {
+	repo := t.TempDir()
+	writePOM(t, repo, "g", "reactor", "5.0.0", `<project><groupId>g</groupId><artifactId>reactor</artifactId><version>5.0.0</version></project>`)
+	writePOM(t, repo, "g", "module", "1.2.3", `<project>
+  <parent><groupId>g</groupId><artifactId>reactor</artifactId><version>5.0.0</version></parent>
+  <artifactId>module</artifactId><version>1.2.3</version>
+  <dependencies><dependency><groupId>g</groupId><artifactId>sibling</artifactId><version>${project.parent.version}</version></dependency></dependencies></project>`)
+	for _, v := range []string{"1.2.3", "5.0.0"} {
+		writePOM(t, repo, "g", "sibling", v, `<project><groupId>g</groupId><artifactId>sibling</artifactId><version>`+v+`</version></project>`)
+	}
+	names, _ := parseMaven(t, repo, t.TempDir(), `<project>
+  <groupId>io.example</groupId><artifactId>service</artifactId><version>0.1</version>
+  <dependencies><dependency><groupId>g</groupId><artifactId>module</artifactId><version>1.2.3</version></dependency></dependencies></project>`)
+	if !contains(names, "g:sibling@5.0.0") {
+		t.Errorf("${project.parent.version} must be the parent's version, got %v", names)
+	}
+	if contains(names, "g:sibling@1.2.3") {
+		t.Errorf("the module's own version must not be substituted, got %v", names)
+	}
+}
