@@ -174,7 +174,7 @@ tar -xzf synapse.tar.gz synapse-cli
 ./synapse-cli scan ./path/to/project --fail-on high
 ```
 
-Or scan with zero install using the container image (bundles `synapse-cli`, plus syft and grype for the opt-in cross-check):
+Or scan with zero install using the container image (bundles `synapse-cli`, plus grype for the opt-in OS-package cross-check):
 
 Container images are not published by the current release workflow. Use a release archive or build
 `deploy/Dockerfile` locally when a containerized CLI is required.

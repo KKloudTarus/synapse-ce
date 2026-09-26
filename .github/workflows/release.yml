@@ -53,6 +53,33 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  action-major-tag:
+    name: action major tag
+    runs-on: ubuntu-latest
+    # The README, docs/guide/cli.md and the Marketplace listing all tell people to write
+    # `uses: KKloudTarus/synapse-ce@v1`, and that tag never existed, so every copied snippet failed with
+    # "Unable to resolve action". An Action's major tag is its INTERFACE version and is independent of the
+    # product version, which is why it stays v1 while the product is 0.x. It moves here on every release so it
+    # cannot rot again; change ACTION_MAJOR in one place if the action's inputs ever break compatibility.
+    permissions:
+      contents: write
+    env:
+      ACTION_MAJOR: v1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Move the action major tag to this release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$ACTION_MAJOR" "${{ github.sha }}"
+          git push --force origin "refs/tags/$ACTION_MAJOR"
+
   image:
     name: synapse-cli image
     runs-on: ubuntu-latest

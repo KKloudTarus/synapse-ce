@@ -7,6 +7,14 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-26
+
+### Fixed
+
+- **The reusable GitHub Action failed on its own default.** `version: latest` resolved the release tag by piping the GitHub API response into `grep -m1`, which closes the read end at the first match, so curl could take EPIPE and exit 23 while the response was still being written; with `pipefail` that failed the whole step. Whether it happened depended on the response size and timing, so it passed locally and failed on a GitHub runner: running the Marketplace listing's own snippet in a real workflow was what found it. The response is written to a file before it is parsed, which removes the pipe. Verified by running the published action end to end.
+- **The action's documented reference pointed at a tag that never existed.** `README.md` and `docs/guide/cli.md` both told people to write `uses: KKloudTarus/synapse-ce@v1`, and no `v1` tag was ever pushed, so every copied snippet failed with "Unable to resolve action". The release workflow now moves that major tag to each release, so it cannot rot again, and the docs say what it means: `v1` is the action's interface version and is independent of the product version, which is why it stays `v1` while the product is 0.x.
+- The README no longer says the container image bundles syft, which it has not since the image stopped shipping it.
+
 ## [0.2.0] - 2026-09-26
 
 ### Added
