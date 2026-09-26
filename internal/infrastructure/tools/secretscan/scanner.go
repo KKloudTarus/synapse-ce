@@ -598,10 +598,22 @@ func (s *Scanner) scanDecoded(rel, text, original string, seen map[string]bool, 
 		if inlineAllow(lineOf(original, start)) {
 			return false // an inline allow on the encoded token's line suppresses it
 		}
-		decodedText := string(decoded)
+		// A PEM block's body is masked before the detectors run, so one key carried inside an encoded
+		// value stays one credential rather than one finding per base64 body line. The armour lines stay,
+		// so the private-key rule still sees its header.
+		decodedText := string(maskPEMBlockBodies(decoded))
 		line := 1 + strings.Count(text[:start], "\n")
 		for i := range s.rules {
 			r := &s.rules[i]
+			// A KEYWORD-FREE rule must not run here. Decoded bytes are high-entropy by construction, so the
+			// entropy rule fired on anything base64 carried: an EKS cluster's base64 CA certificate decodes
+			// to a PEM whose DER body is a perfect high-entropy token, and that was 19 findings on one
+			// Terraform module repository, one per rendered fixture, for a value that is public by
+			// definition. It also contradicted this pass's own contract, which is that a hit requires a real
+			// detector with its distinctive keyword to fire on the decoded bytes.
+			if len(r.keywords) == 0 {
+				continue
+			}
 			if !hasAnyKeyword(decodedText, r.keywords) {
 				continue
 			}
