@@ -250,6 +250,7 @@ func TestMetadata_ApprovedLanguage(t *testing.T) {
 		"Swift":                  true,
 		"VB.NET":                 true,
 		"Spring Boot":            true,
+		"OpenAPI":                true,
 	}
 
 	for _, r := range rules {

@@ -88,6 +88,7 @@ const (
 	cfgGithubActions
 	cfgBicep
 	cfgSpringConfig
+	cfgOpenAPI
 )
 
 // ScanConfigs walks root, classifies each regular file, and returns located misconfig findings.
@@ -235,6 +236,8 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 				kind = cfgGithubActions
 			case isSpringConfigName(d.Name()) && looksSpringConfig(data):
 				kind = cfgSpringConfig
+			case looksOpenAPI(data):
+				kind = cfgOpenAPI
 			case looksCompose(data):
 				kind = cfgCompose
 			case looksKubernetes(data):
@@ -273,6 +276,8 @@ func (s *Scanner) ScanConfigsReport(ctx context.Context, root string) (ports.Mis
 			out = append(out, scanGitHubActions(rel, data)...)
 		case cfgSpringConfig:
 			out = append(out, scanSpringConfig(rel, data)...)
+		case cfgOpenAPI:
+			out = append(out, scanOpenAPI(rel, data)...)
 		}
 		return nil
 	})

@@ -13,6 +13,7 @@ func misconfigRules() []rule.Rule {
 	rules = append(rules, dockerfileRules()...)
 	rules = append(rules, ghaRules()...)
 	rules = append(rules, k8sRules()...)
+	rules = append(rules, openAPIRules()...)
 	rules = append(rules, springRules()...)
 	rules = append(rules, tfRules()...)
 	return rules

@@ -2143,6 +2143,11 @@ okta-api-token
 onepassword-service-account
 open-redirect-user-url
 openai-api-key
+openapi-apikey-over-cleartext
+openapi-no-global-security
+openapi-operation-security-empty
+openapi-request-array-unbounded
+openapi-response-collection-unbounded
 openshift-token
 pagerduty-api-token
 password-md5-hash
