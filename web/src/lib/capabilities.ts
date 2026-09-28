@@ -50,6 +50,7 @@ export function disabledCapability(index: CapabilityIndex, key: string | undefin
 
 /** One sentence naming the switch an operator sets, for a tooltip on a disabled nav item. */
 export function capabilityHint(capability: Capability): string {
+  if (capability.planned || !capability.switch) return `${capability.name} is not available in this build yet.`
   const unmet = capability.requires.length > 0 ? ` It also needs: ${capability.requires.join(', ')}.` : ''
   return `${capability.name} is disabled. Set ${capability.switch}=true on the API and restart it.${unmet}`
 }

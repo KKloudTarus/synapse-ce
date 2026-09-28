@@ -8285,7 +8285,9 @@ components:
       properties:
         key:
           type: string
-          description: Stable subsystem identifier a client keys its navigation off.
+          description: >
+            Stable subsystem identifier a client keys its navigation off. Includes `notifications`,
+            `notifications.channel_types`, `ticketing` and `docpublish`.
           example: fleet
         name:
           type: string
@@ -8296,7 +8298,9 @@ components:
           description: Whether this deployment serves the subsystem's routes.
         switch:
           type: string
-          description: The SYNAPSE_* environment variable an operator sets to change `enabled`.
+          description: >
+            The SYNAPSE_* environment variable an operator sets to change `enabled`. Empty when
+            `planned` is true.
           example: SYNAPSE_FLEET_ENABLED
         requires:
           type: array
@@ -8304,6 +8308,18 @@ components:
             Keys of the capabilities this one depends on. Present only when the subsystem needs more
             than its own switch, so a client can explain an enabled switch that is still disabled.
           items: {type: string}
+        values:
+          type: array
+          description: >
+            Options the capability offers. `notifications.channel_types` lists the channel types this
+            build can deliver to. Omitted when the capability has no options.
+          items: {type: string}
+          example: [webhook, slack, email]
+        planned:
+          type: boolean
+          description: >
+            True for a subsystem this build does not ship yet, such as `ticketing` and `docpublish`.
+            It is always disabled and names no switch. Omitted when false.
 
     UserChoice:
       type: object

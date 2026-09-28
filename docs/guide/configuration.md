@@ -29,6 +29,20 @@ broken one both answer `404`. Read this endpoint first and render a disabled sub
 still report `enabled: false`. The response carries booleans and variable names, never a configured
 value. Any authenticated role may read it.
 
+Some entries carry more than a switch:
+
+- `notifications.channel_types` lists, in `values`, the channel types this build can deliver to
+  (`webhook`, `slack`, `email`). The console offers only these types when creating a channel.
+- `ticketing` and `docpublish` report `planned: true`. They are not in this build yet, so they are
+  always disabled and their `switch` is empty.
+
+```json
+{"key": "notifications.channel_types", "name": "Notification channel types", "enabled": true,
+ "switch": "SYNAPSE_NOTIFICATIONS_ENABLED", "requires": ["notifications"],
+ "values": ["webhook", "slack", "email"]}
+{"key": "ticketing", "name": "Ticketing", "enabled": false, "switch": "", "planned": true}
+```
+
 ## Required
 
 | Variable | Default | Description |

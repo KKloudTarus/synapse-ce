@@ -1674,6 +1674,7 @@ func main() {
 		SingleTenant:         cfg.SingleTenant,
 		OIDC:                 cfg.OIDCEnabled,
 		Ownership:            cfg.OwnershipMode != "off" && databasePool != nil,
+		Notifications:        cfg.NotificationEnabled,
 	})
 	if err != nil {
 		log.Error("capability catalog init failed", "err", err)

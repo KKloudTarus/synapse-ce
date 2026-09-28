@@ -20,6 +20,8 @@ import {
   Spinner,
 } from '../../components/ui'
 import { useToast } from '../../components/synapse/Toast'
+import { capabilityHint, disabledCapability, loadCapabilities } from '../../lib/capabilities'
+import type { Capability } from '../../lib/types'
 import { useFetch } from '../../hooks'
 import { RuleTargetPicker } from './RuleTargetPicker'
 
@@ -53,20 +55,26 @@ export function Alerting() {
   const [editingRule, setEditingRule] = useState<NotificationRule | undefined>()
   const [historyVersion, setHistoryVersion] = useState(0)
   const [rules, setRules] = useState<NotificationRule[]>([])
-  const [unsupported, setUnsupported] = useState(false)
+  const [disabled, setDisabled] = useState<Capability | null>(null)
+  const [channelTypes, setChannelTypes] = useState<string[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(async () => {
     setError(null)
+    // The capability catalog says whether the framework is on. A deployment that does not report
+    // capabilities is assumed on, so a working framework is never hidden.
+    const capabilities = await loadCapabilities()
+    const off = disabledCapability(capabilities, 'notifications')
+    if (off) {
+      setDisabled(off)
+      setChannels([])
+      return
+    }
+    setDisabled(null)
+    const types = capabilities?.get('notifications.channel_types')?.values
+    setChannelTypes(types && types.length > 0 ? types : null)
     try {
-      const c = await api.listNotificationChannels()
-      if (c === null) {
-        setUnsupported(true)
-        setChannels([])
-        return
-      }
-      setUnsupported(false)
-      setChannels(c)
-      setRules((await api.listNotificationRules()) ?? [])
+      setChannels(await api.listNotificationChannels())
+      setRules(await api.listNotificationRules())
       setHistoryVersion((v) => v + 1)
     } catch (e) {
       setChannels([])
@@ -89,11 +97,11 @@ export function Alerting() {
           title="Administrator access required"
           hint="Only tenant administrators can manage notification settings and delivery history."
         />
-      ) : unsupported ? (
+      ) : disabled ? (
         <EmptyState
           icon={BellRinging01}
           title="Notification framework is not enabled"
-          hint="Contact your deployment administrator to enable notifications."
+          hint={capabilityHint(disabled)}
         />
       ) : (
         <>
@@ -101,6 +109,7 @@ export function Alerting() {
             key={editingChannel?.id ?? 'new-channel'}
             initial={editingChannel}
             canAdmin={canAdmin}
+            types={channelTypes}
             onCreated={() => {
               setEditingChannel(undefined)
               void load()
@@ -225,17 +234,31 @@ function LegacyAlertTest({ canAdmin }: { canAdmin: boolean }) {
   )
 }
 
+const CHANNEL_TYPES: { value: NotificationChannelType; label: string }[] = [
+  { value: 'webhook', label: 'Signed webhook' },
+  { value: 'slack', label: 'Slack incoming webhook' },
+  { value: 'email', label: 'Email (SMTP)' },
+]
+
 function ChannelCreate({
   initial,
   canAdmin,
+  types,
   onCreated,
 }: {
   initial?: NotificationChannel
   canAdmin: boolean
+  /** Channel types the server advertises; null means it does not say, so offer every known type. */
+  types: string[] | null
   onCreated: () => void
 }) {
+  // An existing channel keeps its type in the list even if the server no longer offers it.
+  const typeOptions = CHANNEL_TYPES.filter(
+    (option) =>
+      !types || types.includes(option.value) || option.value === initial?.type,
+  )
   const [type, setType] = useState<NotificationChannelType>(
-    initial?.type ?? 'webhook',
+    initial?.type ?? typeOptions[0]?.value ?? 'webhook',
   )
   const [name, setName] = useState(initial?.name ?? '')
   const [url, setURL] = useState('')
@@ -295,11 +318,7 @@ function ChannelCreate({
             disabled={!!initial}
             value={type}
             onValueChange={(v) => setType(v as NotificationChannelType)}
-            options={[
-              { value: 'webhook', label: 'Signed webhook' },
-              { value: 'slack', label: 'Slack incoming webhook' },
-              { value: 'email', label: 'Email (SMTP)' },
-            ]}
+            options={typeOptions}
           />
         </Field>
         <Field label="Name" htmlFor="notification-name">

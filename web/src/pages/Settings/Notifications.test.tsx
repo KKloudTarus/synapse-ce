@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
+import { resetCapabilityCache } from '../../lib/capabilities'
 import { Alerting } from './Alerting'
 
 vi.mock('../../lib/api', async (original) => ({
@@ -8,6 +9,7 @@ vi.mock('../../lib/api', async (original) => ({
   api: {
     me: vi.fn(),
     testAlert: vi.fn(),
+    listCapabilities: vi.fn(),
     listNotificationChannels: vi.fn(),
     listNotificationRules: vi.fn(),
     notificationDeliveryPage: vi.fn(),
@@ -36,6 +38,8 @@ const channel = {
 describe('notification settings', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    resetCapabilityCache()
+    vi.mocked(api.listCapabilities).mockResolvedValue(null)
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
       value: vi.fn(),
@@ -135,6 +139,24 @@ describe('notification settings', () => {
     )
     expect(await screen.findByText(/http_503/)).toBeInTheDocument()
     expect(screen.queryByText('Acknowledged')).not.toBeInTheDocument()
+  })
+  it('offers only the channel types the server advertises', async () => {
+    vi.mocked(api.listCapabilities).mockResolvedValue([
+      {
+        key: 'notifications', name: 'Tenant notifications', enabled: true,
+        switch: 'SYNAPSE_NOTIFICATIONS_ENABLED', requires: [], values: [], planned: false,
+      },
+      {
+        key: 'notifications.channel_types', name: 'Notification channel types', enabled: true,
+        switch: 'SYNAPSE_NOTIFICATIONS_ENABLED', requires: ['notifications'], values: ['slack', 'email'], planned: false,
+      },
+    ])
+    vi.mocked(api.listNotificationChannels).mockResolvedValue([])
+    render(<Alerting />)
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Type' }))
+    expect(await screen.findByRole('option', { name: 'Slack incoming webhook' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Email (SMTP)' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Signed webhook' })).not.toBeInTheDocument()
   })
   it('does not call administrator APIs for a member', async () => {
     vi.mocked(api.me).mockResolvedValue({ role: 'member' } as never)

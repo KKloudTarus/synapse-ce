@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
@@ -69,6 +70,27 @@ func TestCapabilitiesReportsDisabledSubsystemWithItsSwitchName(t *testing.T) {
 		}
 		if got.Name == "" {
 			t.Errorf("%s has no human name to render", c.key)
+		}
+	}
+}
+
+// TestCapabilitiesReportsNotificationChannelsAndPlannedSubsystems pins the #1350 wire shape: the
+// channel type list rides in `values`, and a subsystem this build does not ship answers `planned`
+// with an empty switch.
+func TestCapabilitiesReportsNotificationChannelsAndPlannedSubsystems(t *testing.T) {
+	rt := newCapabilityRouter(t, capabilities.Flags{Notifications: true})
+	_, byKey := getCapabilities(t, rt, "readonly")
+	if got := byKey["notifications"]; !got.Enabled || got.Switch != "SYNAPSE_NOTIFICATIONS_ENABLED" {
+		t.Errorf("notifications = %+v, want enabled with its switch", got)
+	}
+	types := byKey["notifications.channel_types"]
+	if !types.Enabled || strings.Join(types.Values, ",") != "webhook,slack,email" {
+		t.Errorf("notifications.channel_types = %+v, want enabled with webhook, slack and email", types)
+	}
+	for _, key := range []string{"ticketing", "docpublish"} {
+		got, ok := byKey[key]
+		if !ok || !got.Planned || got.Enabled || got.Switch != "" {
+			t.Errorf("%s = %+v (present %v), want planned and disabled without a switch", key, got, ok)
 		}
 	}
 }

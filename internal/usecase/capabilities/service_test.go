@@ -49,6 +49,10 @@ func TestCatalogReportsSwitchPerSubsystem(t *testing.T) {
 		{"single_tenant", "SYNAPSE_SINGLE_TENANT"},
 		{"oidc", "SYNAPSE_OIDC_ENABLED"},
 		{"ownership", "SYNAPSE_OWNERSHIP_MODE"},
+		{"notifications", "SYNAPSE_NOTIFICATIONS_ENABLED"},
+		{"notifications.channel_types", "SYNAPSE_NOTIFICATIONS_ENABLED"},
+		{"ticketing", ""},
+		{"docpublish", ""},
 	}
 	if len(list) != len(cases) {
 		t.Fatalf("catalog has %d entries, want %d", len(list), len(cases))
@@ -73,12 +77,18 @@ func TestEnabledFlagsResolve(t *testing.T) {
 		FleetTelemetryIngest: true, FleetDetectionIngest: true, CSPM: true, Agent: true,
 		FPTriage: true, SLA: true, Judgments: true, Sandbox: true, WriteupDrafts: true,
 		Taint: true, JSReachability: true, SingleTenant: true, OIDC: true,
-		Ownership: true,
+		Ownership: true, Notifications: true,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
 	for _, capability := range svc.List() {
+		if capability.Planned {
+			if capability.Enabled {
+				t.Errorf("%s is planned but reported enabled", capability.Key)
+			}
+			continue
+		}
 		if !capability.Enabled {
 			t.Errorf("%s is disabled with every flag on", capability.Key)
 		}
@@ -119,6 +129,54 @@ func TestDependentSubsystemsStayDisabled(t *testing.T) {
 	}
 }
 
+// TestNotificationCapabilities is #1350: the console reads whether notifications are on, and which
+// channel types it can offer, from the catalog instead of probing a route for 404.
+func TestNotificationCapabilities(t *testing.T) {
+	off, err := NewService(Flags{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if got := find(t, off.List(), "notifications.channel_types"); got.Enabled || len(got.Requires) != 1 || got.Requires[0] != "notifications" {
+		t.Errorf("channel types with notifications off = %+v, want disabled and requiring notifications", got)
+	}
+	on, err := NewService(Flags{Notifications: true})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if got := find(t, on.List(), "notifications"); !got.Enabled {
+		t.Error("notifications reported disabled with SYNAPSE_NOTIFICATIONS_ENABLED on")
+	}
+	types := find(t, on.List(), "notifications.channel_types")
+	if !types.Enabled {
+		t.Error("channel types reported disabled with notifications on")
+	}
+	want := []string{"webhook", "slack", "email"}
+	if len(types.Values) != len(want) {
+		t.Fatalf("channel types = %v, want %v", types.Values, want)
+	}
+	for i := range want {
+		if types.Values[i] != want[i] {
+			t.Errorf("channel types = %v, want %v", types.Values, want)
+			break
+		}
+	}
+}
+
+// TestPlannedSubsystemsNameNoSwitch covers ticketing and documentation publishing, which this build
+// does not ship: they stay disabled whatever the flags, and name no switch an operator could set.
+func TestPlannedSubsystemsNameNoSwitch(t *testing.T) {
+	svc, err := NewService(Flags{Notifications: true, Fleet: true, FleetAssets: true})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	for _, key := range []string{"ticketing", "docpublish"} {
+		got := find(t, svc.List(), key)
+		if !got.Planned || got.Enabled || got.Switch != "" {
+			t.Errorf("%s = %+v, want planned, disabled and without a switch", key, got)
+		}
+	}
+}
+
 func TestListReturnsACopy(t *testing.T) {
 	svc, err := NewService(Flags{})
 	if err != nil {
@@ -134,6 +192,17 @@ func TestListReturnsACopy(t *testing.T) {
 	if second[2].Requires[0] == "mutated" {
 		t.Error("List shared the Requires slice with the caller")
 	}
+	first = svc.List()
+	for i := range first {
+		if len(first[i].Values) > 0 {
+			first[i].Values[0] = "mutated"
+		}
+	}
+	for _, capability := range svc.List() {
+		if len(capability.Values) > 0 && capability.Values[0] == "mutated" {
+			t.Errorf("List shared the Values slice of %s with the caller", capability.Key)
+		}
+	}
 }
 
 func TestNewServiceRejectsAnInvalidCatalog(t *testing.T) {
@@ -146,6 +215,12 @@ func TestNewServiceRejectsAnInvalidCatalog(t *testing.T) {
 	}
 	if err := validate([]Capability{{Key: "a", Name: "A"}}); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("missing switch: want ErrValidation, got %v", err)
+	}
+	if err := validate([]Capability{{Key: "a", Name: "A", Planned: true, Enabled: true}}); !errors.Is(err, shared.ErrValidation) {
+		t.Errorf("enabled planned capability: want ErrValidation, got %v", err)
+	}
+	if err := validate([]Capability{{Key: "a", Name: "A", Planned: true, Switch: "S"}}); !errors.Is(err, shared.ErrValidation) {
+		t.Errorf("planned capability with a switch: want ErrValidation, got %v", err)
 	}
 	if err := validate([]Capability{{Key: "a", Name: "A", Switch: "S", Requires: []string{"ghost"}}}); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("unknown dependency: want ErrValidation, got %v", err)

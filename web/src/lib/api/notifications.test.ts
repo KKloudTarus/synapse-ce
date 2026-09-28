@@ -13,9 +13,10 @@ describe('notification API', () => {
       json: async () => body,
     } as Response)
   }
-  it('distinguishes an absent framework from an empty tenant', async () => {
+  it('surfaces a 404 instead of reading it as a disabled framework', async () => {
+    // Whether notifications are on comes from the `notifications` capability (#1350).
     respond({ error: 'not found' }, 404)
-    expect(await notificationsApi.listNotificationChannels()).toBeNull()
+    await expect(notificationsApi.listNotificationChannels()).rejects.toThrow()
     respond({ items: [] })
     expect(await notificationsApi.listNotificationChannels()).toEqual([])
   })

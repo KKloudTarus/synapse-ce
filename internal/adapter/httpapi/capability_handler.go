@@ -24,6 +24,8 @@ type capabilityView struct {
 	Enabled  bool     `json:"enabled"`
 	Switch   string   `json:"switch"`
 	Requires []string `json:"requires,omitempty"`
+	Values   []string `json:"values,omitempty"`
+	Planned  bool     `json:"planned,omitempty"`
 }
 
 type capabilitiesResponse struct {
@@ -43,6 +45,8 @@ func (rt *Router) listCapabilities(w http.ResponseWriter, _ *http.Request) {
 			Enabled:  capability.Enabled,
 			Switch:   capability.Switch,
 			Requires: capability.Requires,
+			Values:   capability.Values,
+			Planned:  capability.Planned,
 		})
 	}
 	writeJSON(w, http.StatusOK, capabilitiesResponse{Capabilities: out})

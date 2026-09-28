@@ -41,6 +41,10 @@ export interface Capability {
   enabled: boolean
   switch: string
   requires: string[]
+  /** Options an enabled capability offers, e.g. the notification channel types. */
+  values: string[]
+  /** Not shipped in this build: always disabled, and `switch` is empty. */
+  planned: boolean
 }
 
 /** Offensive rules of engagement. riskCeiling is '' | 'low' | 'medium' | 'high' | 'prohibited'. */
