@@ -277,10 +277,20 @@ describe('notification settings', () => {
     fireEvent.click(screen.getByRole('combobox', { name: 'Event filter' }))
     expect(await screen.findByRole('option', { name: 'Channel test' })).toBeInTheDocument()
   })
-  it('shows an error instead of the rule form when the catalog cannot load', async () => {
-    vi.mocked(api.listNotificationEventTypes).mockRejectedValue(new Error('event catalog unavailable'))
+  it('keeps channels usable and retries when the catalog cannot load', async () => {
+    vi.mocked(api.listNotificationEventTypes).mockRejectedValueOnce(new Error('event catalog unavailable'))
     render(<Alerting />)
     expect(await screen.findByText('event catalog unavailable')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add rule' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit channel' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByRole('button', { name: 'Add rule' })).toBeInTheDocument()
+    expect(screen.queryByText('event catalog unavailable')).not.toBeInTheDocument()
+  })
+  it('explains an empty catalog instead of rendering an unusable form', async () => {
+    vi.mocked(api.listNotificationEventTypes).mockResolvedValue([catalog[3]])
+    render(<Alerting />)
+    expect(await screen.findByText('No routable event types')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add rule' })).not.toBeInTheDocument()
   })
 })

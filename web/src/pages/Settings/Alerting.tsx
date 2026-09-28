@@ -54,8 +54,20 @@ export function Alerting() {
   const [historyVersion, setHistoryVersion] = useState(0)
   const [rules, setRules] = useState<NotificationRule[]>([])
   const [eventTypes, setEventTypes] = useState<NotificationEventSpec[]>()
+  const [catalogError, setCatalogError] = useState<string | null>(null)
   const [unsupported, setUnsupported] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The catalog loads on its own so a failure there leaves channels and rules usable.
+  const loadCatalog = useCallback(async () => {
+    setCatalogError(null)
+    try {
+      setEventTypes(await api.listNotificationEventTypes())
+    } catch (e) {
+      setCatalogError(
+        e instanceof Error ? e.message : 'Could not load notification event types',
+      )
+    }
+  }, [])
   const load = useCallback(async () => {
     setError(null)
     try {
@@ -67,12 +79,8 @@ export function Alerting() {
       }
       setUnsupported(false)
       setChannels(c)
-      const [ruleItems, types] = await Promise.all([
-        api.listNotificationRules(),
-        api.listNotificationEventTypes(),
-      ])
-      setRules(ruleItems ?? [])
-      setEventTypes(types)
+      void loadCatalog()
+      setRules((await api.listNotificationRules()) ?? [])
       setHistoryVersion((v) => v + 1)
     } catch (e) {
       setChannels([])
@@ -80,7 +88,7 @@ export function Alerting() {
         e instanceof Error ? e.message : 'Failed to load notification settings',
       )
     }
-  }, [])
+  }, [loadCatalog])
   useEffect(() => {
     if (canAdmin) void load()
   }, [load, canAdmin])
@@ -125,10 +133,35 @@ export function Alerting() {
               onEdit={setEditingChannel}
             />
           )}
-          {channels && channels.length > 0 && !eventTypes && !error && (
-            <Spinner label="Loading event types…" />
+          {channels && channels.length > 0 && catalogError && (
+            <Card title="Add routing rule">
+              <ErrorState message={catalogError} />
+              <div className="mt-3">
+                <Button variant="secondary" onClick={() => void loadCatalog()}>
+                  Retry
+                </Button>
+              </div>
+            </Card>
           )}
-          {channels && channels.length > 0 && eventTypes && (
+          {channels &&
+            channels.length > 0 &&
+            !eventTypes &&
+            !catalogError &&
+            !error && <Spinner label="Loading event types…" />}
+          {channels &&
+            channels.length > 0 &&
+            eventTypes &&
+            !eventTypes.some((e) => !e.operator_only) && (
+              <EmptyState
+                icon={BellRinging01}
+                title="No routable event types"
+                hint="This deployment declares no event types that routing rules can match."
+              />
+            )}
+          {channels &&
+            channels.length > 0 &&
+            eventTypes &&
+            eventTypes.some((e) => !e.operator_only) && (
             <RuleCreate
               channels={channels}
               eventTypes={eventTypes}
@@ -775,6 +808,7 @@ function RuleCreate({
             disabled={
               !canAdmin ||
               !name.trim() ||
+              !event ||
               selected.length === 0 ||
               (allows('lead_time_seconds') &&
                 (!Number.isFinite(Number(leadHours)) ||
