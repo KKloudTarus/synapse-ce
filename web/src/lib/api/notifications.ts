@@ -161,6 +161,9 @@ export const notificationsApi = {
         min_severity: input.min_severity,
         action_types: input.action_types,
         engagement_ids: input.engagement_ids,
+        // PATCH replaces the whole rule, so an ownership rule must resend its team scope.
+        team_ids: input.team_ids,
+        all_teams: input.all_teams,
         channel_ids: input.channel_ids,
         lead_time_seconds: input.lead_time_seconds,
         revision: input.revision,
