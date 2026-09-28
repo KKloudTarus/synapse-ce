@@ -14,7 +14,7 @@ func TestCatalogIsConsistent(t *testing.T) {
 		t.Fatal("EventCatalog is not ordered by type")
 	}
 	for _, spec := range specs {
-		if !spec.Type.Valid() || spec.SchemaVersion < 1 || spec.SubjectKind == "" || spec.MaxDataClass.Rank() == 0 {
+		if !spec.Type.Valid() || spec.SchemaVersion < 1 || spec.SubjectKind == "" || spec.Label == "" || spec.MaxDataClass.Rank() == 0 {
 			t.Fatalf("incomplete spec %+v", spec)
 		}
 		// A filter is only declared when the producer fills the field it reads.

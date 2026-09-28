@@ -37,6 +37,12 @@ func notificationID(r *http.Request) (shared.ID, error) {
 	return id, nil
 }
 
+// listNotificationEventTypes serves the event catalog so the console builds rule and template forms
+// from EventSpec instead of hard-coded lists. It holds no tenant data, so any member may read it.
+func (rt *Router) listNotificationEventTypes(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"items": domain.EventCatalog()})
+}
+
 func (rt *Router) listNotificationChannels(w http.ResponseWriter, r *http.Request) {
 	items, err := rt.notifications.ListChannels(r.Context())
 	if err != nil {

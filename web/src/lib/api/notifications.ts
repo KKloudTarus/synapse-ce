@@ -1,14 +1,37 @@
 import { ApiError, req } from './client'
 
 export type NotificationChannelType = 'webhook' | 'slack' | 'email'
-export type NotificationEventType =
-  | 'vulnerability_action.created'
-  | 'scan.completed'
-  | 'quality_gate.failed'
-  | 'sla.approaching_deadline'
-  | 'fleet.agent.offline'
-  | 'incident.created'
-  | 'finding.ownership_changed'
+// The server's event catalog is the source of truth for event types, so the console accepts any
+// type it declares instead of a hard-coded union.
+export type NotificationEventType = string
+export type NotificationRuleFilter =
+  | 'min_severity'
+  | 'action_types'
+  | 'engagement_ids'
+  | 'team_ids'
+  | 'lead_time_seconds'
+export type NotificationDataClass = 'signal' | 'summary' | 'detail'
+export interface NotificationEventVariable {
+  name: string
+  class: NotificationDataClass
+  description: string
+  list_cap: number
+}
+export interface NotificationEventSpec {
+  type: NotificationEventType
+  label: string
+  schema_version: number
+  subject_kind: string
+  has_engagement: boolean
+  has_severity: boolean
+  has_team: boolean
+  has_lead_time: boolean
+  filters: NotificationRuleFilter[]
+  max_data_class: NotificationDataClass
+  mandatory: boolean
+  operator_only: boolean
+  variables: NotificationEventVariable[]
+}
 export type NotificationDeliveryState =
   | 'pending'
   | 'retrying'
@@ -106,6 +129,10 @@ async function optional<T>(path: string): Promise<T | null> {
 }
 
 export const notificationsApi = {
+  listNotificationEventTypes: async (): Promise<NotificationEventSpec[]> =>
+    ((await req('/notifications/event-types')) as {
+      items?: NotificationEventSpec[]
+    }).items ?? [],
   listNotificationChannels: async (): Promise<NotificationChannel[] | null> =>
     (
       await optional<{ items: NotificationChannel[] }>(

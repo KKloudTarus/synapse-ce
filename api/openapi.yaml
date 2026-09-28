@@ -2927,6 +2927,21 @@ paths:
         '200': {description: Bounded review page, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/AssigneeReviewItem'}}, next: {type: object, nullable: true, properties: {engagement_id: {type: string}, finding_id: {type: string}}}}}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
 
+  /api/v1/notifications/event-types:
+    get:
+      tags: [notifications]
+      operationId: listNotificationEventTypes
+      summary: List the notification event catalog
+      description: >
+        Every declared event type with its console label, the rule filters it accepts, its maximum data
+        class and its template variables, ordered by type. Operator-only types are included and flagged;
+        rules never match them. The response is derived only from the built-in catalog and carries no
+        tenant data.
+      responses:
+        '200': {description: Event catalog, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationEventSpec'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/notifications/channels:
     get:
       tags: [notifications]
@@ -12135,6 +12150,42 @@ components:
     NotificationEventType:
       type: string
       enum: [vulnerability_action.created, scan.completed, quality_gate.failed, sla.approaching_deadline, fleet.agent.offline, incident.created, finding.ownership_changed]
+
+    NotificationEventSpec:
+      type: object
+      additionalProperties: false
+      required: [type, label, schema_version, subject_kind, has_engagement, has_severity, has_team, has_lead_time, filters, max_data_class, mandatory, operator_only, variables]
+      properties:
+        type: {type: string, description: Event type; the catalog may declare types newer than the NotificationEventType enum}
+        label: {type: string}
+        schema_version: {type: integer, minimum: 1}
+        subject_kind: {type: string, description: Entity the event is about}
+        has_engagement: {type: boolean}
+        has_severity: {type: boolean}
+        has_team: {type: boolean}
+        has_lead_time: {type: boolean}
+        filters:
+          type: array
+          description: Rule filters this event type accepts; a rule using any other filter is rejected.
+          items: {type: string, enum: [min_severity, action_types, engagement_ids, team_ids, lead_time_seconds]}
+        max_data_class: {$ref: '#/components/schemas/NotificationDataClass'}
+        mandatory: {type: boolean, description: Cannot be muted by a rule or a user preference}
+        operator_only: {type: boolean, description: Sent on demand to one channel and never matched by rules}
+        variables: {type: array, items: {$ref: '#/components/schemas/NotificationEventVariable'}}
+
+    NotificationEventVariable:
+      type: object
+      additionalProperties: false
+      required: [name, class, description, list_cap]
+      properties:
+        name: {type: string}
+        class: {$ref: '#/components/schemas/NotificationDataClass'}
+        description: {type: string}
+        list_cap: {type: integer, minimum: 0, description: Maximum items of a list variable; 0 marks a scalar}
+
+    NotificationDataClass:
+      type: string
+      enum: [signal, summary, detail]
 
     NotificationDeliveryState:
       type: string

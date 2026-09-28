@@ -43,12 +43,15 @@ type Variable struct {
 	Name        string    `json:"name"`
 	Class       DataClass `json:"class"`
 	Description string    `json:"description"`
+	// ListCap bounds the items of a list variable; zero marks a scalar.
+	ListCap int `json:"list_cap"`
 }
 
 // EventSpec is the single declaration of an event type. Rule validation and matching read it,
 // and the event-type API, the rule form and the docs derive from it.
 type EventSpec struct {
 	Type          EventType `json:"type"`
+	Label         string    `json:"label"`
 	SchemaVersion int       `json:"schema_version"`
 	// SubjectKind is the entity the event is about, distinct from its idempotency source.
 	SubjectKind   string    `json:"subject_kind"`

@@ -5,8 +5,10 @@ import type {
   NotificationChannel,
   NotificationChannelType,
   NotificationDelivery,
+  NotificationEventSpec,
   NotificationEventType,
   NotificationRule,
+  NotificationRuleFilter,
 } from '../../lib/api'
 import {
   Button,
@@ -23,15 +25,13 @@ import { useToast } from '../../components/synapse/Toast'
 import { useFetch } from '../../hooks'
 import { RuleTargetPicker } from './RuleTargetPicker'
 
-const EVENTS: { value: NotificationEventType; label: string }[] = [
-  { value: 'vulnerability_action.created', label: 'Vulnerability risk action' },
-  { value: 'quality_gate.failed', label: 'Quality gate failed' },
-  { value: 'sla.approaching_deadline', label: 'SLA approaching deadline' },
-  { value: 'fleet.agent.offline', label: 'Fleet agent offline' },
-  { value: 'scan.completed', label: 'Scan completed' },
-  { value: 'incident.created', label: 'Incident created' },
-  { value: 'finding.ownership_changed', label: 'Finding ownership changed' },
-]
+// A new rule starts on the most common subscription when the catalog offers it.
+const DEFAULT_RULE_EVENT = 'vulnerability_action.created'
+// eventLabel names an event type from the server catalog, falling back to the raw type for one the
+// catalog no longer declares.
+function eventLabel(eventTypes: NotificationEventSpec[], type: string) {
+  return eventTypes.find((e) => e.type === type)?.label ?? type
+}
 const stateTone: Record<string, string> = {
   delivered: 'text-success-primary',
   pending: 'text-tertiary',
@@ -53,6 +53,7 @@ export function Alerting() {
   const [editingRule, setEditingRule] = useState<NotificationRule | undefined>()
   const [historyVersion, setHistoryVersion] = useState(0)
   const [rules, setRules] = useState<NotificationRule[]>([])
+  const [eventTypes, setEventTypes] = useState<NotificationEventSpec[]>()
   const [unsupported, setUnsupported] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(async () => {
@@ -66,7 +67,12 @@ export function Alerting() {
       }
       setUnsupported(false)
       setChannels(c)
-      setRules((await api.listNotificationRules()) ?? [])
+      const [ruleItems, types] = await Promise.all([
+        api.listNotificationRules(),
+        api.listNotificationEventTypes(),
+      ])
+      setRules(ruleItems ?? [])
+      setEventTypes(types)
       setHistoryVersion((v) => v + 1)
     } catch (e) {
       setChannels([])
@@ -119,9 +125,13 @@ export function Alerting() {
               onEdit={setEditingChannel}
             />
           )}
-          {channels && channels.length > 0 && (
+          {channels && channels.length > 0 && !eventTypes && !error && (
+            <Spinner label="Loading event types…" />
+          )}
+          {channels && channels.length > 0 && eventTypes && (
             <RuleCreate
               channels={channels}
+              eventTypes={eventTypes}
               canAdmin={canAdmin}
               key={editingRule?.id ?? 'new-rule'}
               initial={editingRule}
@@ -135,11 +145,16 @@ export function Alerting() {
             onEdit={setEditingRule}
             rules={rules}
             channels={channels ?? []}
+            eventTypes={eventTypes ?? []}
             canAdmin={canAdmin}
             refresh={load}
           />
           {canAdmin && channels !== undefined && (
-            <DeliveryHistory key={historyVersion} channels={channels ?? []} />
+            <DeliveryHistory
+              key={historyVersion}
+              channels={channels ?? []}
+              eventTypes={eventTypes ?? []}
+            />
           )}
         </>
       )}
@@ -510,18 +525,30 @@ function teamCursor(cursor?: string): { offset: number; apiCursor?: string } {
 function RuleCreate({
   initial,
   channels,
+  eventTypes,
   canAdmin,
   onCreated,
 }: {
   initial?: NotificationRule
   channels: NotificationChannel[]
+  eventTypes: NotificationEventSpec[]
   canAdmin: boolean
   onCreated: () => void
 }) {
+  // Operator-only events are sent on demand and never matched by rules, so the form omits them.
+  const ruleEvents = eventTypes.filter((e) => !e.operator_only)
   const [name, setName] = useState(initial?.name ?? '')
   const [event, setEvent] = useState<NotificationEventType>(
-    initial?.event_type ?? 'vulnerability_action.created',
+    initial?.event_type ??
+      (ruleEvents.find((e) => e.type === DEFAULT_RULE_EVENT) ?? ruleEvents[0])
+        ?.type ??
+      '',
   )
+  // Each field below renders only when the catalog says this event type accepts its filter, so the
+  // form cannot build a rule the server would reject or that could never match.
+  const spec = eventTypes.find((e) => e.type === event)
+  const allows = (filter: NotificationRuleFilter) =>
+    spec?.filters.includes(filter) ?? false
   const [selected, setSelected] = useState<string[]>(
     initial?.channel_ids ?? [channels[0]?.id].filter(Boolean),
   )
@@ -584,7 +611,7 @@ function RuleCreate({
     setBusy(true)
     setError(null)
     try {
-      if (event === 'finding.ownership_changed' && !allTeams && teams.length === 0) {
+      if (allows('team_ids') && !allTeams && teams.length === 0) {
         throw new Error('Choose at least one team or select all teams.')
       }
       const input = {
@@ -592,27 +619,21 @@ function RuleCreate({
         enabled: initial?.enabled ?? true,
         event_type: event,
         channel_ids: selected,
-        engagement_ids: engagements,
-        team_ids: event === 'finding.ownership_changed' && !allTeams ? teams : undefined,
-        all_teams: event === 'finding.ownership_changed' ? allTeams : undefined,
-        action_types:
-          event === 'vulnerability_action.created'
-            ? actions
-                .split(',')
-                .map((x) => x.trim())
-                .filter(Boolean)
-            : undefined,
+        // A saved engagement scope on an event without engagements is cleared rather than resent.
+        engagement_ids: allows('engagement_ids') ? engagements : [],
+        team_ids: allows('team_ids') && !allTeams ? teams : undefined,
+        all_teams: allows('team_ids') ? allTeams : undefined,
+        action_types: allows('action_types')
+          ? actions
+              .split(',')
+              .map((x) => x.trim())
+              .filter(Boolean)
+          : undefined,
         min_severity:
-          event === 'vulnerability_action.created' ||
-          event === 'incident.created'
-            ? severity === 'any'
-              ? undefined
-              : severity
-            : undefined,
-        lead_time_seconds:
-          event === 'sla.approaching_deadline'
-            ? Number(leadHours) * 3600
-            : undefined,
+          allows('min_severity') && severity !== 'any' ? severity : undefined,
+        lead_time_seconds: allows('lead_time_seconds')
+          ? Number(leadHours) * 3600
+          : undefined,
       }
       if (initial)
         await api.updateNotificationRule(initial.id, {
@@ -643,8 +664,14 @@ function RuleCreate({
           <Select
             id="notification-event"
             value={event}
-            onValueChange={(v) => setEvent(v as NotificationEventType)}
-            options={EVENTS}
+            onValueChange={setEvent}
+            options={[
+              ...ruleEvents.map((e) => ({ value: e.type, label: e.label })),
+              // Keep a saved rule's type selectable even if the catalog stopped offering it.
+              ...(event && !ruleEvents.some((e) => e.type === event)
+                ? [{ value: event, label: eventLabel(eventTypes, event) }]
+                : []),
+            ]}
           />
         </Field>
         <fieldset className="space-y-2">
@@ -668,15 +695,17 @@ function RuleCreate({
             </label>
           ))}
         </fieldset>
-        <RuleTargetPicker
-          label="Engagements (optional)"
-          hint="Leave unselected to match every engagement. A saved engagement that is missing from this directory stays on the rule until you remove it."
-          selected={engagements}
-          onChange={setEngagements}
-          disabled={!canAdmin}
-          search={searchEngagements}
-        />
-        {event === 'vulnerability_action.created' && (
+        {allows('engagement_ids') && (
+          <RuleTargetPicker
+            label="Engagements (optional)"
+            hint="Leave unselected to match every engagement. A saved engagement that is missing from this directory stays on the rule until you remove it."
+            selected={engagements}
+            onChange={setEngagements}
+            disabled={!canAdmin}
+            search={searchEngagements}
+          />
+        )}
+        {allows('action_types') && (
           <Field
             label="Action types (optional)"
             htmlFor="notification-actions"
@@ -689,7 +718,7 @@ function RuleCreate({
             />
           </Field>
         )}
-        {event === 'finding.ownership_changed' && (
+        {allows('team_ids') && (
           <fieldset className="space-y-3 md:col-span-2">
             <legend className="text-sm font-medium text-secondary">Affected teams</legend>
             <label className="flex gap-2 text-sm text-secondary">
@@ -710,8 +739,7 @@ function RuleCreate({
             />
           </fieldset>
         )}
-        {(event === 'vulnerability_action.created' ||
-          event === 'incident.created') && (
+        {allows('min_severity') && (
           <Field label="Minimum severity" htmlFor="notification-severity">
             <Select
               id="notification-severity"
@@ -727,7 +755,7 @@ function RuleCreate({
             />
           </Field>
         )}
-        {event === 'sla.approaching_deadline' && (
+        {allows('lead_time_seconds') && (
           <Field label="Lead time (hours)" htmlFor="notification-lead">
             <Input
               id="notification-lead"
@@ -748,7 +776,7 @@ function RuleCreate({
               !canAdmin ||
               !name.trim() ||
               selected.length === 0 ||
-              (event === 'sla.approaching_deadline' &&
+              (allows('lead_time_seconds') &&
                 (!Number.isFinite(Number(leadHours)) ||
                   Number(leadHours) < 1 ||
                   Number(leadHours) > 720))
@@ -772,12 +800,14 @@ function RuleList({
   onEdit,
   rules,
   channels,
+  eventTypes,
   canAdmin,
   refresh,
 }: {
   onEdit: (rule: NotificationRule) => void
   rules: NotificationRule[]
   channels: NotificationChannel[]
+  eventTypes: NotificationEventSpec[]
   canAdmin: boolean
   refresh: () => void
 }) {
@@ -812,7 +842,7 @@ function RuleList({
                 </Pill>
               </div>
               <p className="text-sm text-tertiary">
-                {EVENTS.find((e) => e.value === r.event_type)?.label} →{' '}
+                {eventLabel(eventTypes, r.event_type)} →{' '}
                 {r.channel_ids.map(channelName).join(', ')}
               </p>
               {r.engagement_ids && r.engagement_ids.length > 0 && (
@@ -866,7 +896,13 @@ function RuleList({
   )
 }
 
-function DeliveryHistory({ channels }: { channels: NotificationChannel[] }) {
+function DeliveryHistory({
+  channels,
+  eventTypes,
+}: {
+  channels: NotificationChannel[]
+  eventTypes: NotificationEventSpec[]
+}) {
   const historyRequest = useRef(0)
   const attemptRequest = useRef(0)
   const [items, setItems] = useState<NotificationDelivery[]>([])
@@ -958,8 +994,8 @@ function DeliveryHistory({ channels }: { channels: NotificationChannel[] }) {
             onValueChange={setEvent}
             options={[
               { value: 'all', label: 'All events' },
-              { value: 'notification.test', label: 'Channel test' },
-              ...EVENTS,
+              // Operator-only events such as channel tests also leave deliveries, so all are listed.
+              ...eventTypes.map((e) => ({ value: e.type, label: e.label })),
             ]}
           />
         </Field>

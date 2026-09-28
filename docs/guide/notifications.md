@@ -95,6 +95,12 @@ this check were disabled on upgrade with `disabled_reason: engagement_filter_uns
 their engagement list is kept so you can see what was intended. Remove the engagement
 scope and save the rule to enable it again.
 
+`GET /api/v1/notifications/event-types` returns this catalog to any signed-in member:
+each type's label, accepted filters, maximum data class, template variables and whether
+it is mandatory or operator-only. The rule form in **Settings → Alerting** is built from
+it, so it offers only rule-eligible types and shows only the filters the selected type
+accepts.
+
 An incident carries the engagement its fleet correlation was scoped to. Incidents recorded
 before correlation was scoped to an engagement may carry none, and an engagement-scoped
 incident rule does not see them. Leave the scope empty to receive every incident.

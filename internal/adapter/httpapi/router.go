@@ -494,6 +494,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/alerts/test", rt.authz(userdom.PermAdminister, rt.testAlert))
 	}
 	if rt.notifications != nil {
+		mux.HandleFunc("GET /api/v1/notifications/event-types", rt.authz(userdom.PermView, rt.listNotificationEventTypes))
 		mux.HandleFunc("GET /api/v1/notifications/channels", rt.authz(userdom.PermAdminister, rt.listNotificationChannels))
 		mux.HandleFunc("POST /api/v1/notifications/channels", rt.authz(userdom.PermAdminister, rt.createNotificationChannel))
 		mux.HandleFunc("GET /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermAdminister, rt.getNotificationChannel))

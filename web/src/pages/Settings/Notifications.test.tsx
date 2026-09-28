@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
+import type { NotificationEventSpec, NotificationRuleFilter } from '../../lib/api'
 import { Alerting } from './Alerting'
 
 vi.mock('../../lib/api', async (original) => ({
@@ -10,6 +11,7 @@ vi.mock('../../lib/api', async (original) => ({
     testAlert: vi.fn(),
     listNotificationChannels: vi.fn(),
     listNotificationRules: vi.fn(),
+    listNotificationEventTypes: vi.fn(),
     notificationDeliveryPage: vi.fn(),
     listNotificationAttempts: vi.fn(),
     createNotificationChannel: vi.fn(),
@@ -32,6 +34,29 @@ const channel = {
   created_at: '',
   updated_at: '',
 }
+function eventSpec(
+  type: string,
+  label: string,
+  filters: NotificationRuleFilter[],
+  operator_only = false,
+): NotificationEventSpec {
+  return {
+    type, label, filters, operator_only,
+    schema_version: 1, subject_kind: 'subject', max_data_class: 'summary', mandatory: false,
+    has_engagement: filters.includes('engagement_ids'), has_severity: filters.includes('min_severity'),
+    has_team: filters.includes('team_ids'), has_lead_time: filters.includes('lead_time_seconds'),
+    variables: [],
+  }
+}
+// Mirrors the server catalog so the form is exercised the way GET /notifications/event-types drives it.
+const catalog = [
+  eventSpec('finding.ownership_changed', 'Finding ownership changed', ['engagement_ids', 'team_ids']),
+  eventSpec('fleet.agent.offline', 'Fleet agent offline', []),
+  eventSpec('incident.created', 'Incident created', ['min_severity', 'engagement_ids']),
+  eventSpec('notification.test', 'Channel test', [], true),
+  eventSpec('sla.approaching_deadline', 'SLA approaching deadline', ['engagement_ids', 'lead_time_seconds']),
+  eventSpec('vulnerability_action.created', 'Vulnerability risk action', ['min_severity', 'action_types', 'engagement_ids']),
+]
 
 describe('notification settings', () => {
   beforeEach(() => {
@@ -43,6 +68,7 @@ describe('notification settings', () => {
     vi.mocked(api.me).mockResolvedValue({ role: 'admin' } as never)
     vi.mocked(api.listNotificationChannels).mockResolvedValue([channel])
     vi.mocked(api.listNotificationRules).mockResolvedValue([])
+    vi.mocked(api.listNotificationEventTypes).mockResolvedValue(catalog)
     vi.mocked(api.notificationDeliveryPage).mockResolvedValue({ items: [] })
     vi.mocked(api.listEngagements).mockResolvedValue([])
     vi.mocked(api.ownershipTeams).mockResolvedValue({
@@ -195,5 +221,66 @@ describe('notification settings', () => {
     await waitFor(() => expect(api.updateNotificationRule).toHaveBeenCalledWith('rule',
       expect.objectContaining({ revision: 4, team_ids: ['pay', 'ops'], all_teams: false }),
     ))
+  })
+  it('offers rule events from the catalog and hides operator-only types', async () => {
+    render(<Alerting />)
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Event' }))
+    const options = (await screen.findAllByRole('option')).map((o) => o.textContent)
+    expect(options).toEqual([
+      'Finding ownership changed',
+      'Fleet agent offline',
+      'Incident created',
+      'SLA approaching deadline',
+      'Vulnerability risk action',
+    ])
+  })
+  it('renders only the filters the selected event type declares', async () => {
+    render(<Alerting />)
+    // The default event accepts severity, action type and engagement filters.
+    expect(await screen.findByLabelText('Action types (optional)')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Minimum severity' })).toBeInTheDocument()
+    expect(screen.getByRole('searchbox', { name: 'Engagements (optional)' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Event' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Fleet agent offline' }))
+    expect(screen.queryByLabelText('Action types (optional)')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Minimum severity' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('searchbox', { name: 'Engagements (optional)' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Lead time (hours)')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getAllByLabelText('Name')[1], { target: { value: 'Agents down' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add rule' }))
+    await waitFor(() => expect(api.createNotificationRule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'fleet.agent.offline',
+        engagement_ids: [],
+        min_severity: undefined,
+        action_types: undefined,
+        lead_time_seconds: undefined,
+      }),
+    ))
+  })
+  it('shows the lead time only for an event that declares it', async () => {
+    render(<Alerting />)
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Event' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'SLA approaching deadline' }))
+    expect(screen.getByLabelText('Lead time (hours)')).toHaveValue(24)
+    expect(screen.queryByRole('combobox', { name: 'Minimum severity' })).not.toBeInTheDocument()
+  })
+  it('labels rules and history filters from the catalog', async () => {
+    vi.mocked(api.listNotificationRules).mockResolvedValue([{
+      id: 'rule', name: 'Incidents', enabled: true, event_type: 'incident.created',
+      channel_ids: ['c'], revision: 1, created_at: '', updated_at: '',
+    }])
+    render(<Alerting />)
+    expect(await screen.findByText(/Incident created →/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('combobox', { name: 'Event filter' }))
+    expect(await screen.findByRole('option', { name: 'Channel test' })).toBeInTheDocument()
+  })
+  it('shows an error instead of the rule form when the catalog cannot load', async () => {
+    vi.mocked(api.listNotificationEventTypes).mockRejectedValue(new Error('event catalog unavailable'))
+    render(<Alerting />)
+    expect(await screen.findByText('event catalog unavailable')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add rule' })).not.toBeInTheDocument()
   })
 })

@@ -6,49 +6,49 @@ import "sort"
 // fills the field it reads, so a rule can never be saved with a filter that cannot match.
 var catalog = map[EventType]EventSpec{
 	EventVulnerabilityAction: {
-		Type: EventVulnerabilityAction, SchemaVersion: 1, SubjectKind: "vulnerability_action",
+		Type: EventVulnerabilityAction, Label: "Vulnerability risk action", SchemaVersion: 1, SubjectKind: "vulnerability_action",
 		HasEngagement: true, HasSeverity: true,
 		Filters:      []Filter{FilterMinSeverity, FilterActionTypes, FilterEngagements},
 		MaxDataClass: DataClassDetail,
 	},
 	EventScanCompleted: {
-		Type: EventScanCompleted, SchemaVersion: 1, SubjectKind: "scan_job",
+		Type: EventScanCompleted, Label: "Scan completed", SchemaVersion: 1, SubjectKind: "scan_job",
 		HasEngagement: true,
 		Filters:       []Filter{FilterEngagements},
 		MaxDataClass:  DataClassSummary,
 	},
 	EventQualityGateFailed: {
-		Type: EventQualityGateFailed, SchemaVersion: 1, SubjectKind: "project_analysis",
+		Type: EventQualityGateFailed, Label: "Quality gate failed", SchemaVersion: 1, SubjectKind: "project_analysis",
 		MaxDataClass: DataClassSummary,
 	},
 	EventSLAApproaching: {
-		Type: EventSLAApproaching, SchemaVersion: 1, SubjectKind: "finding",
+		Type: EventSLAApproaching, Label: "SLA approaching deadline", SchemaVersion: 1, SubjectKind: "finding",
 		HasEngagement: true, HasLeadTime: true,
 		Filters:      []Filter{FilterEngagements, FilterLeadTime},
 		MaxDataClass: DataClassSummary,
 	},
 	EventFleetAgentOffline: {
-		Type: EventFleetAgentOffline, SchemaVersion: 1, SubjectKind: "fleet_agent",
+		Type: EventFleetAgentOffline, Label: "Fleet agent offline", SchemaVersion: 1, SubjectKind: "fleet_agent",
 		MaxDataClass: DataClassSummary,
 	},
 	EventIncidentCreated: {
-		Type: EventIncidentCreated, SchemaVersion: 1, SubjectKind: "incident",
+		Type: EventIncidentCreated, Label: "Incident created", SchemaVersion: 1, SubjectKind: "incident",
 		HasEngagement: true, HasSeverity: true,
 		Filters:      []Filter{FilterMinSeverity, FilterEngagements},
 		MaxDataClass: DataClassDetail,
 	},
 	EventOwnershipChanged: {
-		Type: EventOwnershipChanged, SchemaVersion: 1, SubjectKind: "finding",
+		Type: EventOwnershipChanged, Label: "Finding ownership changed", SchemaVersion: 1, SubjectKind: "finding",
 		HasEngagement: true, HasTeam: true,
 		Filters:      []Filter{FilterEngagements, FilterTeams},
 		MaxDataClass: DataClassDetail,
 	},
 	EventDestinationChanged: {
-		Type: EventDestinationChanged, SchemaVersion: 1, SubjectKind: "user_contact",
+		Type: EventDestinationChanged, Label: "Destination changed", SchemaVersion: 1, SubjectKind: "user_contact",
 		MaxDataClass: DataClassSummary, OperatorOnly: true,
 	},
 	EventTest: {
-		Type: EventTest, SchemaVersion: 1, SubjectKind: "channel",
+		Type: EventTest, Label: "Channel test", SchemaVersion: 1, SubjectKind: "channel",
 		MaxDataClass: DataClassSignal, OperatorOnly: true,
 	},
 }
