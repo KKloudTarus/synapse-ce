@@ -297,6 +297,8 @@ type Delivery struct {
 	DeliveredAt    *time.Time    `json:"delivered_at,omitempty"`
 	CreatedAt      time.Time     `json:"created_at"`
 	UpdatedAt      time.Time     `json:"updated_at"`
+	// TemplateRef is the template pinned by the first attempt (#1365); retries render with it.
+	TemplateRef string `json:"template_ref,omitempty"`
 }
 
 type Attempt struct {
@@ -308,6 +310,8 @@ type Attempt struct {
 	Outcome      string     `json:"outcome"`
 	ResponseCode int        `json:"response_code,omitempty"`
 	ErrorCode    string     `json:"error_code,omitempty"`
+	// TemplateRef is the template this attempt rendered with (#1365).
+	TemplateRef string `json:"template_ref,omitempty"`
 }
 
 type Page struct {

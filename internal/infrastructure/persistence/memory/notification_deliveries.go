@@ -140,10 +140,10 @@ func (r *NotificationRepository) FleetAgentLastSeen(context.Context, shared.ID, 
 	return true, nil
 }
 
-// BeginAttempt records a started attempt on an open delivery, after the same checks as the
-// Postgres repository: the worker holds the job's claim, the channel is enabled, and neither the
+// BeginAttempt records a started attempt on an open delivery, pinning templateRef on the delivery
+// when it has none, after the same checks as the Postgres repository: the worker holds the job's claim, the channel is enabled, and neither the
 // tenant nor the channel is inside its delivery rate limit.
-func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time) (notification.Attempt, error) {
+func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, templateRef string) (notification.Attempt, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := notificationKey{tenant, delivery}
@@ -169,8 +169,11 @@ func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, deliver
 	r.tenantAttemptAt[tenant], r.channelAttemptAt[channel] = at, at
 	stored.delivery.Attempts++
 	stored.delivery.UpdatedAt = at
+	if stored.delivery.TemplateRef == "" {
+		stored.delivery.TemplateRef = templateRef
+	}
 	r.deliveries[key] = stored
-	started := notification.Attempt{ID: attempt, DeliveryID: delivery, Number: stored.delivery.Attempts, StartedAt: at, Outcome: "started"}
+	started := notification.Attempt{ID: attempt, DeliveryID: delivery, Number: stored.delivery.Attempts, StartedAt: at, Outcome: "started", TemplateRef: templateRef}
 	r.attempts[key] = append(r.attempts[key], started)
 	return cloneAttempt(started), nil
 }
@@ -337,7 +340,9 @@ func (r *NotificationRepository) RedriveDelivery(_ context.Context, tenant, id s
 	job.status, job.attempts, job.claimFence, job.availableAt = "queued", 0, job.claimFence+1, r.now().UTC()
 	d := &stored.delivery
 	d.State, d.LastError, d.NextAttemptAt, d.DeliveredAt = notification.DeliveryPending, "", nil, nil
-	d.RedriveFence, d.UpdatedAt = job.claimFence, r.now().UTC()
+	// A redrive renders again from a fresh resolution (#1365), as the Postgres redrive clears
+	// template_ref, so a template fixed since the dead letter is picked up.
+	d.RedriveFence, d.UpdatedAt, d.TemplateRef = job.claimFence, r.now().UTC(), ""
 	r.deliveries[key] = stored
 	return cloneDelivery(*d), cloneChannel(c), nil
 }

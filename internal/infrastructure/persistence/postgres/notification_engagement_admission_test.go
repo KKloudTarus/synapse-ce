@@ -86,7 +86,7 @@ func TestNotificationPostgresEngagementNoneAfterLoadStopsTheAttempt(t *testing.T
 
 	a.setNone(t, "admission-after-load-eng", 1)
 
-	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "after-load-attempt", a.now.Add(2*time.Second)); !errors.Is(err, ports.ErrRetryable) {
+	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "after-load-attempt", a.now.Add(2*time.Second), ""); !errors.Is(err, ports.ErrRetryable) {
 		t.Fatalf("begin attempt after none = %v, want ErrRetryable", err)
 	}
 	if attempts, err := a.repo.ListAttempts(a.ctx, a.tenant, did); err != nil || len(attempts) != 0 {
@@ -103,7 +103,7 @@ func TestNotificationPostgresEngagementNoneAfterLoadStopsTheAttempt(t *testing.T
 func TestNotificationPostgresEngagementNoneLeavesAStartedAttempt(t *testing.T) {
 	a := newEngagementAdmission(t, "admission-started", "admission-started-eng")
 	did, job := a.claimed(t, "started", "admission-started-eng")
-	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "started-attempt", a.now); err != nil {
+	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "started-attempt", a.now, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -139,7 +139,7 @@ func TestNotificationPostgresEngagementWriteSerializesAdmission(t *testing.T) {
 
 	admitted := make(chan error, 1)
 	go func() {
-		_, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "serialized-attempt", a.now)
+		_, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "serialized-attempt", a.now, "")
 		admitted <- err
 	}()
 	select {

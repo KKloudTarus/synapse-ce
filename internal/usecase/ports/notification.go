@@ -45,10 +45,13 @@ type NotificationWork struct {
 	Channel    notification.Channel
 	Sealed     string
 	// CustomWebhookBody is a rendered custom JSON body for a webhook channel that opted into one
-	// (#1376). The send-time renderer (#1365) sets it with notification.RenderCustomWebhookBody;
-	// nothing sets it yet. When it is not empty the webhook driver sends exactly these bytes instead
+	// (#1376). The send-time renderer (#1365) sets it with notification.RenderCustomWebhookBody.
+	// When it is not empty the webhook driver sends exactly these bytes instead
 	// of the event envelope, signs them and sets X-Synapse-Body: custom.
 	CustomWebhookBody []byte
+	// Formatted is the channel's wire payload rendered from a template (#1365). When it is nil the
+	// driver sends its built-in content.
+	Formatted *FormattedMessage
 }
 
 type NotificationSendResult struct {
@@ -112,7 +115,9 @@ type NotificationRepository interface {
 	// PutEngagementNotificationSetting stores an override whose Revision is the stored one plus one
 	// (1 for the first), and reports ErrConflict when another write got there first.
 	PutEngagementNotificationSetting(ctx context.Context, setting notification.EngagementNotificationSetting) (notification.EngagementNotificationSetting, error)
-	BeginAttempt(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time) (notification.Attempt, error)
+	// BeginAttempt starts an attempt that renders with templateRef (#1365) and pins that ref on
+	// the delivery when it has none yet.
+	BeginAttempt(ctx context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, templateRef string) (notification.Attempt, error)
 	FinishAttempt(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time, string, int, string, *time.Time) error
 	CancelDelivery(context.Context, shared.ID, shared.ID, string, int64, string) error
 	// DeadLetterDelivery reports whether this call durably transitioned a pending

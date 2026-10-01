@@ -21,9 +21,17 @@ func (d slackDriver) Send(ctx context.Context, w ports.NotificationWork, config 
 	if !ok {
 		return ports.NotificationSendResult{ErrorCode: "channel_config_invalid"}
 	}
+	if w.Formatted != nil {
+		// A template rendered this message (#1365); its Block Kit payload is sent as it is.
+		return d.post(ctx, cfg.URL, w.Formatted.Body, false)
+	}
 	title, summary, fallback := eventText(w)
 	body, _ := json.Marshal(map[string]any{"text": title, "blocks": []map[string]any{{"type": "header", "text": map[string]string{"type": "plain_text", "text": limit(title, 150)}}, {"type": "section", "text": map[string]string{"type": "mrkdwn", "text": escapeSlack(limit(summary, 2500))}}, {"type": "context", "elements": []map[string]string{{"type": "mrkdwn", "text": "Event `" + string(w.Event.Type) + "` · `" + w.Event.ID.String() + "`"}}}}})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, bytes.NewReader(body))
+	return d.post(ctx, cfg.URL, body, fallback)
+}
+
+func (d slackDriver) post(ctx context.Context, url string, body []byte, fallback bool) ports.NotificationSendResult {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "request_invalid", TemplateFallback: fallback}
 	}

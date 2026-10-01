@@ -30,7 +30,7 @@ func TestDeliveryAttemptStateMachine(t *testing.T) {
 	delivery := publishedDelivery(t, repo)
 	retryAt := notificationTestNow.Add(time.Minute)
 
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-1", notificationTestNow); err != nil {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-1", notificationTestNow, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.FinishAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-1", notificationTestNow, "retrying", 503, "http_503", &retryAt); err != nil {
@@ -39,7 +39,7 @@ func TestDeliveryAttemptStateMachine(t *testing.T) {
 	if err := repo.FinishAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-1", notificationTestNow, "delivered", 200, "", nil); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("finishing a finished attempt err = %v", err)
 	}
-	second, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-2", retryAt)
+	second, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-2", retryAt, "")
 	if err != nil || second.Number != 2 {
 		t.Fatalf("second attempt = %+v err=%v", second, err)
 	}
@@ -54,7 +54,7 @@ func TestDeliveryAttemptStateMachine(t *testing.T) {
 	if err != nil || len(attempts) != 2 || attempts[0].Outcome != "retrying" || attempts[0].ErrorCode != "http_503" || attempts[1].Outcome != "delivered" {
 		t.Fatalf("attempts = %+v err=%v", attempts, err)
 	}
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-3", retryAt.Add(time.Minute)); !errors.Is(err, shared.ErrConflict) {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-3", retryAt.Add(time.Minute), ""); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("attempt on a delivered delivery err = %v", err)
 	}
 	if err := repo.FinishAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-2", retryAt, "bogus", 0, "", nil); !errors.Is(err, shared.ErrValidation) {
@@ -89,7 +89,7 @@ func TestRedrivePreservesHistoryAndFencesOldCallbacks(t *testing.T) {
 	if err != nil || job == nil {
 		t.Fatalf("claim: %v %v", job, err)
 	}
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, id, job.ID, job.Fence, "attempt", notificationTestNow); err != nil {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, id, job.ID, job.Fence, "attempt", notificationTestNow, "tenant:tpl@1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.FinishAttempt(ctx, notificationTestTenant, id, job.ID, job.Fence, "attempt", notificationTestNow, "failed", 503, "http_503", nil); err != nil {
@@ -106,7 +106,8 @@ func TestRedrivePreservesHistoryAndFencesOldCallbacks(t *testing.T) {
 		t.Fatalf("cross tenant: %v", err)
 	}
 	d, _, err = repo.RedriveDelivery(ctx, notificationTestTenant, id, job.Fence)
-	if err != nil || d.State != notification.DeliveryPending || d.Attempts != 1 || d.RedriveFence != job.Fence+1 {
+	// Redrive releases the template pin so the next attempt resolves again (#1365).
+	if err != nil || d.State != notification.DeliveryPending || d.Attempts != 1 || d.RedriveFence != job.Fence+1 || d.TemplateRef != "" {
 		t.Fatalf("redrive: %+v %v", d, err)
 	}
 	if _, _, err := repo.RedriveDelivery(ctx, notificationTestTenant, id, job.Fence); !errors.Is(err, shared.ErrConflict) {
@@ -129,7 +130,7 @@ func TestRedrivePreservesHistoryAndFencesOldCallbacks(t *testing.T) {
 		t.Fatalf("current callback: %v %v", changed, err)
 	}
 	attempts, err := repo.ListAttempts(ctx, notificationTestTenant, id)
-	if err != nil || len(attempts) != 1 || attempts[0].ErrorCode != "http_503" {
+	if err != nil || len(attempts) != 1 || attempts[0].ErrorCode != "http_503" || attempts[0].TemplateRef != "tenant:tpl@1" {
 		t.Fatalf("history: %+v %v", attempts, err)
 	}
 }
@@ -146,7 +147,7 @@ func TestDisablingAChannelCancelsIdleDeliveries(t *testing.T) {
 	if d, _ := repo.GetDelivery(ctx, notificationTestTenant, delivery); d.State != notification.DeliveryCancelled || d.LastError != "channel_disabled" {
 		t.Fatalf("delivery after disabling its channel = %+v", d)
 	}
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-1", notificationTestNow); !errors.Is(err, ports.ErrRetryable) {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "job", 1, "att-1", notificationTestNow, ""); !errors.Is(err, ports.ErrRetryable) {
 		t.Fatalf("attempt on a disabled channel err = %v", err)
 	}
 }
@@ -158,17 +159,17 @@ func TestAttemptTransitionsAreFencedByTheJobClaim(t *testing.T) {
 	jobs := NewJobQueue(idgen.RandomID{}, clock)
 	repo := NewNotificationRepository(jobs, clock)
 	delivery := publishedDelivery(t, repo)
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "unclaimed", 1, "att-0", now); !errors.Is(err, ports.ErrStaleLease) {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, "unclaimed", 1, "att-0", now, ""); !errors.Is(err, ports.ErrStaleLease) {
 		t.Fatalf("attempt without a claim err = %v", err)
 	}
 	job, err := jobs.Claim(ctx, time.Minute, notificationDeliverJobKey)
 	if err != nil || job == nil {
 		t.Fatalf("claim = %v err=%v", job, err)
 	}
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, job.ID, job.Fence+1, "att-0", now); !errors.Is(err, ports.ErrStaleLease) {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, job.ID, job.Fence+1, "att-0", now, ""); !errors.Is(err, ports.ErrStaleLease) {
 		t.Fatalf("attempt with a stale fence err = %v", err)
 	}
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, job.ID, job.Fence, "att-1", now); err != nil {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, delivery, job.ID, job.Fence, "att-1", now, ""); err != nil {
 		t.Fatalf("attempt with the live claim: %v", err)
 	}
 	now = now.Add(2 * time.Minute) // the lease expired
@@ -191,19 +192,19 @@ func TestBeginAttemptAppliesTheDeliveryRateLimits(t *testing.T) {
 		t.Fatalf("publish = %v err=%v", ids, err)
 	}
 	first, second := ids[0], ids[1]
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, first, "job", 1, "att-1", notificationTestNow); err != nil {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, first, "job", 1, "att-1", notificationTestNow, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, second, "job", 1, "att-2", notificationTestNow.Add(50*time.Millisecond)); !errors.Is(err, ports.ErrRetryable) {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, second, "job", 1, "att-2", notificationTestNow.Add(50*time.Millisecond), ""); !errors.Is(err, ports.ErrRetryable) {
 		t.Fatalf("attempt inside the tenant interval err = %v", err)
 	}
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, second, "job", 1, "att-2", notificationTestNow.Add(200*time.Millisecond)); err != nil {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, second, "job", 1, "att-2", notificationTestNow.Add(200*time.Millisecond), ""); err != nil {
 		t.Fatalf("attempt on another channel after the tenant interval: %v", err)
 	}
 	if err := repo.FinishAttempt(ctx, notificationTestTenant, first, "job", 1, "att-1", notificationTestNow, "retrying", 503, "http_503", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, first, "job", 1, "att-3", notificationTestNow.Add(500*time.Millisecond)); !errors.Is(err, ports.ErrRetryable) {
+	if _, err := repo.BeginAttempt(ctx, notificationTestTenant, first, "job", 1, "att-3", notificationTestNow.Add(500*time.Millisecond), ""); !errors.Is(err, ports.ErrRetryable) {
 		t.Fatalf("attempt inside the channel interval err = %v", err)
 	}
 }

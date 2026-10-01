@@ -38,9 +38,9 @@ func (r *killSwitchRepo) CancelDelivery(_ context.Context, _, _ shared.ID, _ str
 	r.cancelReason = reason
 	return nil
 }
-func (r *killSwitchRepo) BeginAttempt(ctx context.Context, tenant, delivery shared.ID, job string, fence int64, id shared.ID, at time.Time) (domain.Attempt, error) {
+func (r *killSwitchRepo) BeginAttempt(ctx context.Context, tenant, delivery shared.ID, job string, fence int64, id shared.ID, at time.Time, ref string) (domain.Attempt, error) {
 	r.began = true
-	return r.fakeRepo.BeginAttempt(ctx, tenant, delivery, job, fence, id, at)
+	return r.fakeRepo.BeginAttempt(ctx, tenant, delivery, job, fence, id, at, ref)
 }
 
 func killSwitchService(t *testing.T, repo *killSwitchRepo, sender ports.NotificationSender, disabled ...domain.ChannelType) *Service {

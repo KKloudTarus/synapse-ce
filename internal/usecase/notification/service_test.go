@@ -37,7 +37,7 @@ func (f *fakeRepo) LoadWork(context.Context, shared.ID, shared.ID) (ports.Notifi
 func (f *fakeRepo) ScanJobSucceeded(context.Context, shared.ID, string) (bool, error) {
 	return f.relevant, nil
 }
-func (f *fakeRepo) BeginAttempt(_ context.Context, _, _ shared.ID, _ string, _ int64, id shared.ID, at time.Time) (domain.Attempt, error) {
+func (f *fakeRepo) BeginAttempt(_ context.Context, _, _ shared.ID, _ string, _ int64, id shared.ID, at time.Time, _ string) (domain.Attempt, error) {
 	return domain.Attempt{ID: id, Number: 1, StartedAt: at}, nil
 }
 func (f *fakeRepo) FinishAttempt(_ context.Context, _, _ shared.ID, _ string, _ int64, _ shared.ID, _ time.Time, outcome string, _ int, _ string, next *time.Time) error {

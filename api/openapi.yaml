@@ -13304,6 +13304,7 @@ components:
         class: {$ref: '#/components/schemas/NotificationDataClass'}
         description: {type: string}
         list_cap: {type: integer, minimum: 0, description: Maximum items of a list variable; 0 marks a scalar}
+        format: {type: string, enum: [time], description: 'time marks an instant, rendered in the tenant time zone (#1365)'}
 
     NotificationDataClass:
       type: string
@@ -13670,6 +13671,7 @@ components:
         delivered_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        template_ref: {type: string, description: 'The template a message renders with (#1365): tenant:<template>@<version>, builtin:<event>:<family>:<locale>@<build>, or fallback for the channel built-in content'}
 
     NotificationDeliveryPage:
       type: object
@@ -13708,3 +13710,4 @@ components:
         outcome: {type: string, enum: [started, delivered, retrying, failed, cancelled]}
         response_code: {type: integer}
         error_code: {type: string}
+        template_ref: {type: string, description: 'The template a message renders with (#1365): tenant:<template>@<version>, builtin:<event>:<family>:<locale>@<build>, or fallback for the channel built-in content'}

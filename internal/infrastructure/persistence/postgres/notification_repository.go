@@ -657,14 +657,14 @@ func (r *NotificationRepository) ListSourceFailures(ctx context.Context, f ports
 	return out, err
 }
 
-const deliverySelect = `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,
+const deliverySelect = `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,
 COALESCE((SELECT j.claim_fence FROM jobs j WHERE j.tenant_id=d.tenant_id AND j.id='notification-'||d.id AND j.kind='notification.deliver'),0)
 FROM notification_deliveries d`
 
 func scanDelivery(row scanner, d *notification.Delivery) error {
 	var rules []byte
 	var typ, state string
-	if err := row.Scan(&d.TenantID, &d.ID, &d.EventID, &d.ChannelID, &typ, &d.Recipient, &rules, &state, &d.Attempts, &d.LastError, &d.NextAttemptAt, &d.DeliveredAt, &d.CreatedAt, &d.UpdatedAt, &d.RedriveFence); err != nil {
+	if err := row.Scan(&d.TenantID, &d.ID, &d.EventID, &d.ChannelID, &typ, &d.Recipient, &rules, &state, &d.Attempts, &d.LastError, &d.NextAttemptAt, &d.DeliveredAt, &d.CreatedAt, &d.UpdatedAt, &d.TemplateRef, &d.RedriveFence); err != nil {
 		return err
 	}
 	d.ChannelType = notification.ChannelType(typ)
@@ -677,14 +677,14 @@ func (r *NotificationRepository) ListAttempts(ctx context.Context, tenant, did s
 	}
 	var out []notification.Attempt
 	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id,delivery_id,attempt_number,started_at,finished_at,outcome,response_code,error_code FROM notification_delivery_attempts WHERE tenant_id=$1 AND delivery_id=$2 ORDER BY attempt_number`, tenant, did)
+		rows, err := tx.Query(ctx, `SELECT id,delivery_id,attempt_number,started_at,finished_at,outcome,response_code,error_code,template_ref FROM notification_delivery_attempts WHERE tenant_id=$1 AND delivery_id=$2 ORDER BY attempt_number`, tenant, did)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var a notification.Attempt
-			if err := rows.Scan(&a.ID, &a.DeliveryID, &a.Number, &a.StartedAt, &a.FinishedAt, &a.Outcome, &a.ResponseCode, &a.ErrorCode); err != nil {
+			if err := rows.Scan(&a.ID, &a.DeliveryID, &a.Number, &a.StartedAt, &a.FinishedAt, &a.Outcome, &a.ResponseCode, &a.ErrorCode, &a.TemplateRef); err != nil {
 				return err
 			}
 			out = append(out, a)
@@ -699,7 +699,7 @@ func (r *NotificationRepository) LoadWork(ctx context.Context, tenant, did share
 	var rules, eventData, eventContext, recipients []byte
 	var ctyp, state, etype string
 	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,e.event_type,e.source_kind,e.source_id,e.engagement_id,e.severity,e.schema_version,e.occurred_at,e.data,e.subject_kind,e.subject_id,e.context,c.name,c.enabled,c.destination,c.recipients,c.revision,d.channel_version,c.created_at,c.updated_at,v.sealed_config,c.consecutive_permanent_failures,c.last_failure_code,c.last_failure_at,c.paused_at,COALESCE(c.paused_reason,''),COALESCE(c.template_id,''),COALESCE(c.locale,''),c.custom_body,c.data_class,COALESCE((SELECT s.external_notifications FROM notification_engagement_settings s WHERE s.tenant_id=d.tenant_id AND s.engagement_id=e.engagement_id),'inherit') FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id JOIN notification_channels c ON c.tenant_id=d.tenant_id AND c.id=d.channel_id JOIN notification_channel_versions v ON v.tenant_id=d.tenant_id AND v.channel_id=d.channel_id AND v.version=d.channel_version WHERE d.tenant_id=$1 AND d.id=$2`, tenant, did).Scan(&w.Delivery.TenantID, &w.Delivery.ID, &w.Delivery.EventID, &w.Delivery.ChannelID, &ctyp, &w.Delivery.Recipient, &rules, &state, &w.Delivery.Attempts, &w.Delivery.LastError, &w.Delivery.NextAttemptAt, &w.Delivery.DeliveredAt, &w.Delivery.CreatedAt, &w.Delivery.UpdatedAt, &etype, &w.Event.SourceKind, &w.Event.SourceID, &w.Event.EngagementID, &w.Event.Severity, &w.Event.SchemaVersion, &w.Event.OccurredAt, &eventData, &w.Event.SubjectKind, &w.Event.SubjectID, &eventContext, &w.Channel.Name, &w.Channel.Enabled, &w.Channel.Destination, &recipients, &w.Channel.Revision, &w.Channel.SecretVersion, &w.Channel.CreatedAt, &w.Channel.UpdatedAt, &w.Sealed, &w.Channel.Health.ConsecutiveFailures, &w.Channel.Health.LastFailureCode, &w.Channel.Health.LastFailureAt, &w.Channel.Health.PausedAt, &w.Channel.Health.PausedReason, &w.Channel.TemplateID, &w.Channel.Locale, &w.Channel.CustomBody, &w.Channel.DataClass, &w.Engagement)
+		return tx.QueryRow(ctx, `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,e.event_type,e.source_kind,e.source_id,e.engagement_id,e.severity,e.schema_version,e.occurred_at,e.data,e.subject_kind,e.subject_id,e.context,c.name,c.enabled,c.destination,c.recipients,c.revision,d.channel_version,c.created_at,c.updated_at,v.sealed_config,c.consecutive_permanent_failures,c.last_failure_code,c.last_failure_at,c.paused_at,COALESCE(c.paused_reason,''),COALESCE(c.template_id,''),COALESCE(c.locale,''),c.custom_body,c.data_class,COALESCE((SELECT s.external_notifications FROM notification_engagement_settings s WHERE s.tenant_id=d.tenant_id AND s.engagement_id=e.engagement_id),'inherit') FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id JOIN notification_channels c ON c.tenant_id=d.tenant_id AND c.id=d.channel_id JOIN notification_channel_versions v ON v.tenant_id=d.tenant_id AND v.channel_id=d.channel_id AND v.version=d.channel_version WHERE d.tenant_id=$1 AND d.id=$2`, tenant, did).Scan(&w.Delivery.TenantID, &w.Delivery.ID, &w.Delivery.EventID, &w.Delivery.ChannelID, &ctyp, &w.Delivery.Recipient, &rules, &state, &w.Delivery.Attempts, &w.Delivery.LastError, &w.Delivery.NextAttemptAt, &w.Delivery.DeliveredAt, &w.Delivery.CreatedAt, &w.Delivery.UpdatedAt, &w.Delivery.TemplateRef, &etype, &w.Event.SourceKind, &w.Event.SourceID, &w.Event.EngagementID, &w.Event.Severity, &w.Event.SchemaVersion, &w.Event.OccurredAt, &eventData, &w.Event.SubjectKind, &w.Event.SubjectID, &eventContext, &w.Channel.Name, &w.Channel.Enabled, &w.Channel.Destination, &recipients, &w.Channel.Revision, &w.Channel.SecretVersion, &w.Channel.CreatedAt, &w.Channel.UpdatedAt, &w.Sealed, &w.Channel.Health.ConsecutiveFailures, &w.Channel.Health.LastFailureCode, &w.Channel.Health.LastFailureAt, &w.Channel.Health.PausedAt, &w.Channel.Health.PausedReason, &w.Channel.TemplateID, &w.Channel.Locale, &w.Channel.CustomBody, &w.Channel.DataClass, &w.Engagement)
 	})
 	w.Channel.Health.State = healthState(w.Channel.Health.PausedAt)
 	w.Delivery.ChannelType = notification.ChannelType(ctyp)
@@ -720,7 +720,7 @@ func (r *NotificationRepository) LoadWork(ctx context.Context, tenant, did share
 	return w, err
 }
 
-func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did shared.ID, jobID string, fence int64, aid shared.ID, at time.Time) (notification.Attempt, error) {
+func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did shared.ID, jobID string, fence int64, aid shared.ID, at time.Time, templateRef string) (notification.Attempt, error) {
 	var out notification.Attempt
 	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
 		var ok int
@@ -766,16 +766,16 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 		if _, err := tx.Exec(ctx, `UPDATE notification_channels SET last_attempt_at=$3 WHERE tenant_id=$1 AND id=(SELECT channel_id FROM notification_deliveries WHERE tenant_id=$1 AND id=$2)`, tenant, did, at); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `UPDATE notification_deliveries SET attempts=attempts+1,updated_at=$3 WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying') RETURNING attempts`, tenant, did, at).Scan(&n); err != nil {
+		if err := tx.QueryRow(ctx, `UPDATE notification_deliveries SET attempts=attempts+1,updated_at=$3,template_ref=CASE WHEN template_ref='' THEN $4 ELSE template_ref END WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying') RETURNING attempts`, tenant, did, at, templateRef).Scan(&n); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("notification delivery is terminal: %w", shared.ErrConflict)
 			}
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO notification_delivery_attempts(tenant_id,id,delivery_id,attempt_number,started_at,outcome) VALUES($1,$2,$3,$4,$5,'started')`, tenant, aid, did, n, at); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO notification_delivery_attempts(tenant_id,id,delivery_id,attempt_number,started_at,outcome,template_ref) VALUES($1,$2,$3,$4,$5,'started',$6)`, tenant, aid, did, n, at, templateRef); err != nil {
 			return err
 		}
-		out = notification.Attempt{ID: aid, DeliveryID: did, Number: n, StartedAt: at, Outcome: "started"}
+		out = notification.Attempt{ID: aid, DeliveryID: did, Number: n, StartedAt: at, Outcome: "started", TemplateRef: templateRef}
 		return nil
 	})
 	return out, err
