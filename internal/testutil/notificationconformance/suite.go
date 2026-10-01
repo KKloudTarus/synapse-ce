@@ -51,6 +51,8 @@ func Run(t *testing.T, newBackend func(t *testing.T) Backend) {
 		{"a rule names only channels and engagements that exist", ruleReferencesMustExist},
 		{"a channel publication is listed, paged and loaded", channelPublicationIsListedPagedAndLoaded},
 		{"an event keeps its subject and template context snapshot", eventKeepsSubjectAndContext},
+		{"a channel keeps its data class, defaulting by type", channelKeepsDataClass},
+		{"an engagement override is revision checked and reaches the work", engagementOverrideReachesWork},
 		{"channel tests are rate limited per channel", channelTestsAreRateLimited},
 		{"disabling or deleting a channel cancels its undelivered deliveries", closingChannelCancelsDeliveries},
 		{"a new destination or secret cancels the deliveries meant for the old one", retargetingChannelCancelsDeliveries},
@@ -458,6 +460,74 @@ func eventKeepsSubjectAndContext(t *testing.T, f *fixture) {
 	plain := f.work(t, f.publishTest(t, channel.ID, 1))
 	if empty, err := notification.DecodeTemplateContext(plain.Event.Context); err != nil || len(empty.Vars) != 0 || plain.Event.SubjectID != "" {
 		t.Fatalf("event without a snapshot = %+v/%q, %v", empty, plain.Event.SubjectID, err)
+	}
+}
+
+func channelKeepsDataClass(t *testing.T, f *fixture) {
+	plain := f.channel(t, f.tenant, "plain")
+	if plain.DataClass != notification.DataClassSummary {
+		t.Fatalf("a webhook without a class = %q, want summary", plain.DataClass)
+	}
+	detailed := notification.Channel{TenantID: f.tenant, ID: "detailed", Name: "detailed", Type: notification.ChannelWebhook, Enabled: true,
+		Destination: "https://hooks.example.test", Revision: 1, SecretVersion: 1, CreatedAt: f.base, UpdatedAt: f.base, DataClass: notification.DataClassDetail}
+	if _, err := f.Repository.CreateChannel(f.ctx, detailed, sealedConfig("detailed", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.Repository.GetChannel(f.ctx, f.tenant, "detailed"); err != nil || got.DataClass != notification.DataClassDetail {
+		t.Fatalf("stored class = %+v, %v", got, err)
+	}
+	plain.DataClass, plain.Revision, plain.UpdatedAt = notification.DataClassSignal, 2, f.at(time.Second)
+	if _, err := f.Repository.UpdateChannel(f.ctx, plain, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.Repository.GetChannel(f.ctx, f.tenant, "plain"); err != nil || got.DataClass != notification.DataClassSignal {
+		t.Fatalf("updated class = %+v, %v", got, err)
+	}
+	if w := f.work(t, f.publishTest(t, "detailed", 1)); w.Channel.DataClass != notification.DataClassDetail {
+		t.Fatalf("work channel class = %q", w.Channel.DataClass)
+	}
+}
+
+func engagementOverrideReachesWork(t *testing.T, f *fixture) {
+	f.AddEngagement(t, f.tenant, "eng-1")
+	if _, err := f.Repository.GetEngagementNotificationSetting(f.ctx, f.tenant, "eng-unknown"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("unknown engagement = %v, want ErrNotFound", err)
+	}
+	current, err := f.Repository.GetEngagementNotificationSetting(f.ctx, f.tenant, "eng-1")
+	if err != nil || current.ExternalNotifications != notification.EngagementNotificationsInherit || current.Revision != 0 {
+		t.Fatalf("default = %+v, %v", current, err)
+	}
+	at := f.at(time.Second)
+	setting := notification.EngagementNotificationSetting{TenantID: f.tenant, EngagementID: "eng-1", ExternalNotifications: notification.EngagementNotificationsNone,
+		Revision: 1, UpdatedAt: &at, UpdatedBy: "admin"}
+	if _, err := f.Repository.PutEngagementNotificationSetting(f.ctx, setting); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if _, err := f.Repository.PutEngagementNotificationSetting(f.ctx, setting); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("second revision 1 = %v, want ErrConflict", err)
+	}
+	skipped := setting
+	skipped.Revision = 3
+	if _, err := f.Repository.PutEngagementNotificationSetting(f.ctx, skipped); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("skipped revision = %v, want ErrConflict", err)
+	}
+	stored, err := f.Repository.GetEngagementNotificationSetting(f.ctx, f.tenant, "eng-1")
+	if err != nil || stored.ExternalNotifications != notification.EngagementNotificationsNone || stored.Revision != 1 || stored.UpdatedBy != "admin" {
+		t.Fatalf("stored = %+v, %v", stored, err)
+	}
+
+	channel := f.channel(t, f.tenant, "hook")
+	e := notification.Event{TenantID: f.tenant, ID: "test-event-engagement", Type: notification.EventTest, SourceKind: "notification_test",
+		SourceID: "test-engagement", EngagementID: "eng-1", SchemaVersion: 1, OccurredAt: f.base, Data: json.RawMessage(`{"title":"Test notification"}`)}
+	id, err := f.Repository.PublishToChannel(f.ctx, e, channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := f.work(t, id); w.Engagement != notification.EngagementNotificationsNone {
+		t.Fatalf("work engagement override = %q, want none", w.Engagement)
+	}
+	if w := f.work(t, f.publishTest(t, channel.ID, 2)); w.Engagement != notification.EngagementNotificationsInherit {
+		t.Fatalf("an event without an engagement = %q, want inherit", w.Engagement)
 	}
 }
 

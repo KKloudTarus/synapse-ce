@@ -121,7 +121,8 @@ func (r *NotificationRepository) LoadWork(_ context.Context, tenant, delivery sh
 	channel = cloneChannel(channel)
 	channel.SecretVersion = stored.channelVersion
 	channel.DeletedAt = nil
-	return ports.NotificationWork{Delivery: cloneDelivery(d), Event: cloneNotificationEvent(event.event), Channel: channel, Sealed: sealed}, nil
+	return ports.NotificationWork{Delivery: cloneDelivery(d), Event: cloneNotificationEvent(event.event), Channel: channel, Sealed: sealed,
+		Engagement: r.engagementNotifications(tenant, event.event.EngagementID)}, nil
 }
 
 // ScanJobSucceeded, SLAReminderDue and FleetAgentLastSeen report true: the scan job, SLA and fleet

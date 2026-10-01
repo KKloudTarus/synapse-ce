@@ -562,6 +562,8 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/test", rt.authz(userdom.PermManageIntegrations, rt.testNotificationChannel))
 		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/resume", rt.authz(userdom.PermManageIntegrations, rt.resumeNotificationChannel))
 		mux.HandleFunc("GET /api/v1/notifications/channels/{nid}/health-events", rt.authz(userdom.PermManageIntegrations, rt.listNotificationChannelHealthEvents))
+		mux.HandleFunc("GET /api/v1/notifications/engagements/{nid}/settings", rt.authz(userdom.PermManageIntegrations, rt.getNotificationEngagementSetting))
+		mux.HandleFunc("PUT /api/v1/notifications/engagements/{nid}/settings", rt.authz(userdom.PermManageIntegrations, rt.putNotificationEngagementSetting))
 		mux.HandleFunc("GET /api/v1/notifications/rules", rt.authz(userdom.PermManageIntegrations, rt.listNotificationRules))
 		mux.HandleFunc("POST /api/v1/notifications/rules", rt.authz(userdom.PermManageIntegrations, rt.createNotificationRule))
 		mux.HandleFunc("GET /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermManageIntegrations, rt.getNotificationRule))

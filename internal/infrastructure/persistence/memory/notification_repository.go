@@ -58,6 +58,8 @@ type NotificationRepository struct {
 	tenantAttemptAt  map[shared.ID]time.Time
 	// healthEvents is each channel's append-only pause and resume history, keyed by channel.
 	healthEvents map[notificationKey][]notification.ChannelHealthEvent
+	// engagementSettings are the engagement overrides (#1360).
+	engagementSettings map[notificationKey]notification.EngagementNotificationSetting
 	// sourceFailures are the source records NotificationSource quarantined.
 	sourceFailures []storedSourceFailure
 }
@@ -123,7 +125,8 @@ func NewNotificationRepository(jobs *JobQueue, now func() time.Time) *Notificati
 		attempts:    map[notificationKey][]notification.Attempt{},
 		engagements: map[notificationKey]bool{}, teams: map[notificationKey]bool{},
 		channelAttemptAt: map[notificationKey]time.Time{}, tenantAttemptAt: map[shared.ID]time.Time{},
-		healthEvents: map[notificationKey][]notification.ChannelHealthEvent{},
+		healthEvents:       map[notificationKey][]notification.ChannelHealthEvent{},
+		engagementSettings: map[notificationKey]notification.EngagementNotificationSetting{},
 	}
 }
 
@@ -167,6 +170,7 @@ func (r *NotificationRepository) CreateChannel(_ context.Context, c notification
 		c.Recipients = []string{}
 	}
 	c.Health = notification.ChannelHealth{State: notification.ChannelActive}
+	c.DataClass = c.Class()
 	r.channels[key] = c
 	r.versions[channelVersionKey{c.TenantID, c.ID, c.SecretVersion}] = sealed
 	return cloneChannel(c), nil
@@ -193,6 +197,7 @@ func (r *NotificationRepository) UpdateChannel(_ context.Context, c notification
 		c.Recipients = []string{}
 	}
 	c.CreatedAt = current.CreatedAt
+	c.DataClass = c.Class()
 	// Health is not configuration: an edit keeps a pause, and a new destination or secret resets
 	// the failure count of an active channel, as the Postgres update does.
 	c.Health = cloneHealth(current.Health)

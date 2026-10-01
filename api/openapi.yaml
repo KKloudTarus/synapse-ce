@@ -3185,6 +3185,35 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/notifications/engagements/{nid}/settings:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}, description: Engagement ID}]
+    get:
+      tags: [notifications]
+      operationId: getNotificationEngagementSetting
+      summary: Get an engagement's external notification override (#1360)
+      responses:
+        '200': {description: Setting, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationEngagementSetting'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [notifications]
+      operationId: putNotificationEngagementSetting
+      summary: Change an engagement's external notification override
+      description: >-
+        Lowering the override needs manage_integrations; letting more data out (none to signal or
+        inherit, signal to inherit) needs administer. Every change is audited as
+        `notification.engagement_setting.updated`. While the override is none, queued deliveries about
+        the engagement are cancelled with `engagement_suppressed` instead of sent.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationEngagementSettingInput'}}}}
+      responses:
+        '200': {description: Stored setting, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationEngagementSetting'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Stale revision}
+
   /api/v1/notifications/rules:
     get:
       tags: [notifications]
@@ -13326,6 +13355,12 @@ components:
             Webhook channels only (#1376): send the body of the resolved webhook template as a custom
             JSON body instead of the event envelope, with `X-Synapse-Body: custom`; the signature covers
             the body as sent. Needs a bound template whose body still validates; omitted keeps the value.
+        data_class:
+          $ref: '#/components/schemas/NotificationDataClass'
+          description: >-
+            The most sensitive content the channel's messages may carry (#1360). Omitted keeps the
+            current class, or the type's default on creation (signal for chat, summary for email and
+            webhooks). Raising it needs administer and is audited; lowering it needs manage_integrations.
 
     NotificationChannel:
       type: object
@@ -13345,6 +13380,30 @@ components:
         template_id: {type: string, description: The bound template (#1371); absent when none is bound}
         locale: {type: string, enum: [en, vi], description: The channel locale; absent when the tenant default applies}
         custom_body: {type: boolean, description: The webhook channel sends its template body as a custom JSON body (#1376)}
+        data_class: {$ref: '#/components/schemas/NotificationDataClass'}
+
+    NotificationEngagementSetting:
+      type: object
+      required: [engagement_id, external_notifications, revision]
+      properties:
+        engagement_id: {type: string}
+        external_notifications:
+          type: string
+          enum: [inherit, signal, none]
+          description: >-
+            inherit sends at each channel's class, signal caps every channel at signal, none sends
+            nothing external about the engagement; the lower of the channel class and this wins.
+        revision: {type: integer, minimum: 0, description: 0 when the engagement has no stored setting}
+        updated_at: {type: string, format: date-time}
+        updated_by: {type: string}
+
+    NotificationEngagementSettingInput:
+      type: object
+      additionalProperties: false
+      required: [external_notifications, revision]
+      properties:
+        external_notifications: {type: string, enum: [inherit, signal, none]}
+        revision: {type: integer, minimum: 0, description: The revision read; 0 for an engagement without a stored setting}
 
     NotificationTemplatePreviewInput:
       type: object

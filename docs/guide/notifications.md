@@ -253,9 +253,9 @@ the webhook body has always carried; the trigger keeps writing the data until
 every running worker can compose it. No event declares a list variable yet, so a template
 cannot `range` over one. The `webhook` family's `body` is compiled as text; the
 structured JSON body of a custom webhook is validated separately when that
-feature lands. Channels carry no data class and cannot be bound to a template
-yet, so saving does not yet warn about bound channels whose class is below a
-variable the template uses.
+feature lands. Saving a template does not yet warn about bound channels whose
+data class is below a variable the template uses (see
+[Data classes](#data-classes)); such a variable renders empty on that channel.
 
 ### Template preview
 
@@ -290,6 +290,44 @@ version's checksum, and a diff summary. The summary lists each changed field as
 `field:+added/-removed`, counting lines added and removed (for example
 `body:+2/-1,title:+1/-0`), or `none`. It never quotes template source.
 
+## Data classes
+
+Every channel has a data class, the most sensitive content its messages may carry:
+
+| Class | Carries |
+| --- | --- |
+| `signal` | The event type, severity, counts and a link |
+| `summary` | Adds titles, engagement, project and finding names, and target hosts |
+| `detail` | Adds advisories, assets, file paths and item lists |
+
+A new chat or pager channel is `signal`, and a new email or webhook channel is `summary`;
+channels that existed before data classes got the same defaults. Set `data_class` on
+`POST` or `PATCH /api/v1/notifications/channels`. Each template variable declares its
+class in the event catalog, and a message renders only the variables at or below the
+class that applies.
+
+An engagement can lower that class for every message about it with
+`PUT /api/v1/notifications/engagements/{id}/settings`:
+
+```json
+{"external_notifications": "signal", "revision": 0}
+```
+
+`inherit` (the default) keeps each channel's class, `signal` caps every channel at
+`signal`, and `none` keeps every notification about the engagement inside Synapse. The
+lower of the channel class and the engagement setting wins. While an engagement is set
+to `none`, its queued deliveries are cancelled with `engagement_suppressed` instead of
+sent. `GET` on the same path returns the setting, `inherit` at revision 0 when none is
+stored. Every change is audited as `notification.engagement_setting.updated` with the
+previous and new values.
+
+Lowering a class or an override needs `manage_integrations`. Raising either one lets
+more data leave Synapse, so it needs `administer` and answers `403` otherwise.
+
+Classes take effect on message content when messages are rendered from templates
+(#1365). The built-in webhook and Slack bodies are not filtered yet; the engagement
+`none` setting already applies to every delivery.
+
 ## Personal inbox
 
 When notifications are enabled, each human user has an inbox at `/inbox` and a bell in the application header. `GET /api/v1/me/inbox` and `GET /api/v1/me/inbox/unread` are scoped to the signed-in user. Machine roles are denied. The bell polls at most every 30 seconds and pauses while the tab is hidden. A deployment without the inbox returns 404 and the bell stops asking.
@@ -317,13 +355,15 @@ quarantined sources. Actions that point Synapse at a new destination still requi
 | Create, edit or delete a routing rule; read delivery history | yes | yes |
 | Create a channel | no (`403`) | yes |
 | Change a channel's URL, secret or email recipients | no (`403`) | yes |
+| Lower a channel's data class or an engagement's override | yes | yes |
+| Raise a channel's data class or an engagement's override | no (`403`) | yes |
 
 A `PATCH` that sends the channel's current recipients back is not a change. Machine
 roles (`agent`, `mcp`) never hold either permission. Every channel audit entry records
 the actor and the destination masked to `scheme://host` (`mailto://` and the recipient
 domains for email); an update also records `destination_changed` and, when it is
-`true`, the previous masked destination. Channels carry no data class yet, so none is
-recorded.
+`true`, the previous masked destination. Every channel audit entry also records the
+channel's `data_class`, and an update that changes it records `previous_data_class`.
 
 Channel type is immutable. Editing a URL or
 HMAC key creates a new encrypted version; pending deliveries retain their original
