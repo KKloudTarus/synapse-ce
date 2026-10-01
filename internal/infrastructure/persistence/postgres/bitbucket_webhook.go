@@ -13,7 +13,7 @@ import (
 )
 
 var _ ports.BitbucketWebhookDeduper = (*InboundWebhookRepository)(nil)
-var errBitbucketReplay = errors.New("Bitbucket replay")
+var errBitbucketReplay = errors.New("bitbucket replay")
 
 func (s *InboundWebhookRepository) AcceptBitbucketWebhook(ctx context.Context, id ports.InboundWebhookIdentity, requestID, digest string, receive func(context.Context) error) (bool, error) {
 	raw, err := hex.DecodeString(digest)

@@ -33,7 +33,7 @@ These screenshots render the real console using Chromium against a local Vite se
 
 ## Validation run
 
-Commands use Go 1.27.0 and pnpm 9. PostgreSQL is version 17.11; tests set `SYNAPSE_TEST_DB_DSN` to an isolated local database.
+Commands use Go 1.27.0, pnpm 9 and golangci-lint 2.13.2 (the CI version). PostgreSQL is version 17.11; tests set `SYNAPSE_TEST_DB_DSN` to an isolated local database. Helm 3.17.3 was built from official source; its compression dependency was reconstructed from the exact upstream tag and verified against the pinned module checksum before use.
 
 | Check | Result |
 | --- | --- |
@@ -42,12 +42,16 @@ Commands use Go 1.27.0 and pnpm 9. PostgreSQL is version 17.11; tests set `SYNAP
 | HTTP hostile harness and inbound/GitHub/Bitbucket regressions | Passed |
 | OpenAPI and docs checks | Passed |
 | `go vet` for changed packages, acquisition, API and docs | Passed |
+| `go vet` and golangci-lint on all packages with available dependencies | Passed: 457 packages; lint reports 0 issues after fixing the Bitbucket replay error capitalization |
 | Full frontend suite after maintainer audit fixes | Passed: 157 files, 984 tests (237.44s) |
 | Final Integrations tests | Passed: 11 tests, including UTF-8 byte length and whitespace validation |
 | `pnpm typecheck` and frontend build | Passed |
-| `make build`, full `go vet`, full Go test command | Not green: module download for `modernc.org/libc@v1.75.7` returns HTTP 403 at storage.googleapis.com |
-| Other full-Go-suite environment checks | Helm is absent and its download returns HTTP 403. The Go capture fixture VCS-stamping failure passes on rerun with `GOFLAGS=-buildvcs=false` (test-only environment setting; no source change) |
-| Full PostgreSQL package after queue transaction fix | Passed all tests against real PostgreSQL: `go test -count=1 -timeout=30m ./internal/infrastructure/persistence/postgres`, 376.337s. The earlier full `-race` attempt timed out; focused race tests passed separately |
+| `make build`, full `go vet`, `make typecheck`, full lint | Not green: module download for `modernc.org/libc@v1.75.7` returns Forbidden at storage.googleapis.com. Frontend typecheck passed separately |
+| Full Go test command with real PostgreSQL | `go test -p 1 -count=1 -timeout=30m ./...` remains failed: 9 packages cannot load libc. Combining this run with successful chart and benchmark reruns yields 421 passing test packages and 36 packages with no test files; this does not claim a green full command |
+| Helm chart security and data-governance tests | Passed with Helm 3.17.3 (1.240s), clearing the earlier missing-Helm failure |
+| Capture and benchmark environment checks | Capture fixtures pass with test-only `GOFLAGS=-buildvcs=false`. The candidate builder intentionally clears Go overrides, so it needs the normal module cache and a writable default build cache; restoring those paths and setting `XDG_CACHE_HOME` clears the benchmark failure (full scabench package passed in 49.989s). No benchmark isolation or dependency declarations were changed |
+| Full PostgreSQL package after queue transaction fix | Passed all tests against real PostgreSQL in the broader serialized Go run (398.193s), after an earlier full-package pass (376.337s). The earlier full `-race` attempt timed out; focused Bitbucket/migration race tests passed again after the lint fix (6.251s) |
+| Additional backend CI checks | Passed: 73 Python tests and AWS staging static security/data-governance checks |
 
 ## Remaining acceptance evidence
 
