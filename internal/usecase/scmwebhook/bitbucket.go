@@ -70,7 +70,10 @@ func bitbucketScanTargets(eventType string, body []byte) ([]ports.BitbucketScanT
 		return nil, nil
 	}
 	var payload struct {
-		Push *struct {
+		Comment        json.RawMessage `json:"comment"`
+		Approval       json.RawMessage `json:"approval"`
+		ChangesRequest json.RawMessage `json:"changes_request"`
+		Push           *struct {
 			Changes []struct {
 				Closed bool `json:"closed"`
 				New    *struct {
@@ -135,7 +138,7 @@ func bitbucketScanTargets(eventType string, body []byte) ([]ports.BitbucketScanT
 			}
 		}
 	} else {
-		if payload.PullRequest == nil || payload.Push != nil {
+		if payload.PullRequest == nil || payload.Push != nil || payload.Comment != nil || payload.Approval != nil || payload.ChangesRequest != nil {
 			return nil, fmt.Errorf("%w: invalid Bitbucket pull request", shared.ErrValidation)
 		}
 		pr := payload.PullRequest

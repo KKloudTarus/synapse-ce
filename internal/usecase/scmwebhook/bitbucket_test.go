@@ -131,3 +131,18 @@ func TestBitbucketRejectsHeaderBodyMismatchAndIgnoresDeletedTags(t *testing.T) {
 		t.Fatalf("deleted/tag targets=%+v err=%v", targets, err)
 	}
 }
+
+func TestBitbucketRejectsUnsignedEventHeaderReclassification(t *testing.T) {
+	a := "{11111111-1111-1111-1111-111111111111}"
+	for _, field := range []string{"comment", "approval", "changes_request"} {
+		t.Run(field, func(t *testing.T) {
+			r, scans, id := bitbucketFixture(t)
+			body := bbPR(a, a, "OPEN")
+			body = append(body[:len(body)-1], []byte(`,"`+field+`":{"id":1}}`)...)
+			err := r.ReceiveInboundWebhook(context.Background(), id, ports.InboundWebhookEvent{Provider: "bitbucket", EventType: "pullrequest:created", EventID: "id", Body: body})
+			if !errors.Is(err, shared.ErrValidation) || len(scans.targets) != 0 {
+				t.Fatalf("reclassified %s event queued: %v", field, err)
+			}
+		})
+	}
+}

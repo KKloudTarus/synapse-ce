@@ -2159,6 +2159,10 @@ func (s *Service) StartDurableScanWithOptions(ctx context.Context, actor string,
 }
 
 func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions) (ports.ScanJob, error) {
+	return s.startScanWithOptions(ctx, actor, engagementID, req, opts, false)
+}
+
+func (s *Service) startScanWithOptions(ctx context.Context, actor string, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions, deferredAdmission bool) (ports.ScanJob, error) {
 	if s.jobs == nil || s.ids == nil {
 		return ports.ScanJob{}, fmt.Errorf("async scan is not configured: %w", shared.ErrValidation)
 	}
@@ -2215,7 +2219,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 		StartedAt:     now,
 		DebugEvents:   []ports.ScanDebugEvent{},
 	}
-	if s.jobs != nil {
+	if s.jobs != nil && !deferredAdmission {
 		if err := s.jobs.CreateRunning(ctx, job); err != nil {
 			return ports.ScanJob{}, fmt.Errorf("create scan job: %w", err)
 		}
@@ -2229,7 +2233,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 			return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
 		}
 		tenant := tenantID.String()
-		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, TenantID: &tenant, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job, InventoryAdmission: admission})
+		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, TenantID: &tenant, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job, InventoryAdmission: admission, DeferredAdmission: deferredAdmission})
 		if mErr != nil {
 			return ports.ScanJob{}, fmt.Errorf("marshal scan job: %w", mErr)
 		}
@@ -2278,6 +2282,7 @@ const ScanJobKind = "sca"
 
 // scaJobPayload is the durable-queue payload for one SCA scan run.
 type scaJobPayload struct {
+	DeferredAdmission  bool                    `json:"deferred_admission,omitempty"`
 	Actor              string                  `json:"actor"`
 	TenantID           *string                 `json:"tenant_id"`
 	EngagementID       string                  `json:"engagement_id"`
@@ -2372,6 +2377,17 @@ func (s *Service) RunScanJob(ctx context.Context, payload []byte) error {
 		}
 		ctx = context.WithValue(ctx, inventoryAdmissionContextKey{}, p.InventoryAdmission)
 	}
+	if p.DeferredAdmission {
+		terminal, err := s.admitQueuedScanJob(ctx, p)
+		if err != nil || terminal {
+			return err
+		}
+		// A webhook can wait behind another scan. Recheck current scope and
+		// authorization before executing rather than trusting the enqueue time.
+		if _, err := s.gateAndAudit(ctx, p.Actor, shared.ID(p.EngagementID), p.Req, opts); err != nil {
+			return fmt.Errorf("authorize queued scan execution: %w", err)
+		}
+	}
 	return s.runScanJob(ctx, p.Actor, shared.ID(p.EngagementID), p.Now, p.Req, opts, p.Job)
 }
 
@@ -2389,6 +2405,9 @@ func (s *Service) FailStrandedScanJob(ctx context.Context, payload []byte, cause
 	if !ok || p.TenantID == nil || *p.TenantID != tenantID.String() {
 		return fmt.Errorf("%w: scan job tenant context is missing or mismatched", shared.ErrValidation)
 	}
+	if p.DeferredAdmission && !validQueuedScanIdentity(p) {
+		return fmt.Errorf("%w: invalid queued scan identity", shared.ErrValidation)
+	}
 	if s.jobs == nil {
 		return nil
 	}
@@ -2403,14 +2422,20 @@ func (s *Service) FailStrandedScanJob(ctx context.Context, payload []byte, cause
 		defer release()
 	}
 	// Load the SPECIFIC dead-lettered job by its id (parity with recon's load-by-runID), so a
-	// newer scan for the same engagement cannot mislead the terminal-guard. An absent row means
-	// nothing to finalize.
+	// newer scan for the same engagement cannot mislead the terminal-guard. A deferred scan
+	// may not have acquired a running slot yet; it still needs a visible failure record.
 	job, err := s.jobs.GetJob(ctx, p.Job.ID)
 	if err != nil {
-		if errors.Is(err, shared.ErrNotFound) {
+		if errors.Is(err, shared.ErrNotFound) && p.DeferredAdmission {
+			job = p.Job
+		} else if errors.Is(err, shared.ErrNotFound) {
 			return nil
+		} else {
+			return fmt.Errorf("load stranded scan job %s: %w", p.Job.ID, err)
 		}
-		return fmt.Errorf("load stranded scan job %s: %w", p.Job.ID, err)
+	}
+	if p.DeferredAdmission && (job.EngagementID != p.EngagementID || job.Target != p.Job.Target || job.Kind != p.Job.Kind) {
+		return fmt.Errorf("%w: queued scan identity changed", shared.ErrValidation)
 	}
 	if job.Status == ports.ScanSucceeded || job.Status == ports.ScanFailed {
 		return nil // already terminal

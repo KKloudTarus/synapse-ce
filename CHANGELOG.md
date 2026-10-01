@@ -9,7 +9,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
-- Bitbucket Cloud inbound `repo:push` and open pull-request creation/update webhooks (#1453), with HMAC-SHA256 verification, request UUID and authenticated-body replay protection, and PostgreSQL transactions covering receipts and durable scan enqueue. Administrators can bind one existing Git Project and configure or rotate the sealed webhook secret in the console. Fork PR scans disable Git credentials and build execution and do not decorate the forge; repository acquisition always uses the Project's stored origin.
+- Bitbucket Cloud inbound `repo:push` and open pull-request creation/update webhooks (#1453), with HMAC-SHA256 verification, request UUID and authenticated-body replay protection, and PostgreSQL transactions covering receipts and durable scan enqueue. Multi-ref pushes and deliveries during an active scan remain queued until a running slot is available; workers recheck scope before executing. Administrators can bind one existing Git Project and configure or rotate the sealed webhook secret in the console. Fork PR scans disable Git credentials and build execution and do not decorate the forge; repository acquisition always uses the Project's stored origin.
 
 ### Fixed
 

@@ -19,6 +19,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
 
 func TestMigration0204BitbucketWebhookLifecycle(t *testing.T) {
@@ -298,5 +299,59 @@ func TestBitbucketWebhookHostileTenantAndLifecycle(t *testing.T) {
 	})
 	if err != nil || rotated {
 		t.Fatalf("hostile rotation=%v err=%v", rotated, err)
+	}
+}
+
+// Keep the physical queue kind isolated while exercising the production SCA
+// serializer and PostgreSQL enqueue transaction.
+type bitbucketIsolatedSCAQueue struct {
+	*JobQueue
+	kind string
+}
+
+func (q bitbucketIsolatedSCAQueue) Enqueue(ctx context.Context, _ string, payload []byte) (string, error) {
+	return q.JobQueue.Enqueue(ctx, q.kind, payload)
+}
+func TestBitbucketMultiRefScanAdmissionCommitsEveryQueuedTarget(t *testing.T) {
+	f := newBitbucketAtomicFixture(t)
+	ctx := shared.WithTenant(context.Background(), f.id.TenantID)
+	repoURL := "https://bitbucket.org/trusted/multi-ref.git"
+	if _, err := f.owner.Exec(ctx, `UPDATE engagements SET status='active',authorized_from=now()-interval '1 hour',authorized_to=now()+interval '1 hour' WHERE id=$1`, rls817EngA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.owner.Exec(ctx, `INSERT INTO scope_targets(id,tenant_id,engagement_id,in_scope,kind,value) VALUES($1,$2,$3,true,'repo',$4)`, "bb-scope-"+randHex(t), rls817TenantA, rls817EngA, repoURL); err != nil {
+		t.Fatal(err)
+	}
+	jobs := NewScanJobStore(f.runtime)
+	svc := scauc.NewService(NewEngagementRepository(f.runtime), nil, nil, nil, jobs, nil, nil, idgen.RandomID{}, ports.Provenance{}, ownershipWallClock{}, ciNotificationAudit{}, shared.SeverityHigh, 0, nil, nil, nil, nil, nil, nil, nil)
+	svc.SetQueue(bitbucketIsolatedSCAQueue{JobQueue: f.queue, kind: f.kind})
+	for _, fail := range []bool{true, false} {
+		event := bitbucketAtomicEvent("multi-ref-delivery")
+		accepted, err := f.store.AcceptBitbucketWebhook(ctx, f.id, event.EventID, event.PayloadSHA256, func(txCtx context.Context) error {
+			for _, ref := range []string{"feature/one", "feature/two"} {
+				if _, err := svc.StartQueuedScanWithOptions(txCtx, "system:bitbucket-webhook", rls817EngA, ports.AcquireRequest{Kind: ports.TargetGit, Value: repoURL, Ref: ref, Commit: strings.Repeat("a", 40)}, scauc.ScanOptions{ProjectAnalysis: true}); err != nil {
+					return err
+				}
+			}
+			if fail {
+				return errors.New("failure after queuing both branches")
+			}
+			return nil
+		})
+		if fail {
+			if accepted || err == nil {
+				t.Fatal("failed batch committed")
+			}
+			f.assertCounts(t, 0, 0)
+		} else {
+			if !accepted || err != nil {
+				t.Fatalf("valid multi-ref delivery rejected: %v", err)
+			}
+			f.assertCounts(t, 1, 2)
+		}
+	}
+	var running int
+	if err := f.owner.QueryRow(ctx, `SELECT count(*) FROM scan_jobs WHERE engagement_id=$1 AND status='running'`, rls817EngA).Scan(&running); err != nil || running != 0 {
+		t.Fatalf("enqueue reserved scan slot: %d %v", running, err)
 	}
 }

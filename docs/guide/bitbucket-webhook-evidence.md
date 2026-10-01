@@ -27,8 +27,9 @@ These screenshots render the real console using Chromium against a local Vite se
 - Request UUID and authenticated-body digest receipts commit in the same PostgreSQL transaction as scan enqueue. Tests cover failure after enqueue, cancellation, terminated DB connection, retries and concurrent replay with changed request UUIDs.
 - Real PostgreSQL tests use a `NOSUPERUSER NOBYPASSRLS` runtime role. Owner privileges are restricted to fixture setup/cleanup. Hostile tenant/owner identities cannot provision, rotate or accept another endpoint. PUBLIC cannot execute the new SECURITY DEFINER functions. Migration 0204 is tested up and down; runtime direct endpoint DML remains revoked.
 - Bitbucket integrations bind one Git Project; concurrent second bindings are rejected. Payload clone URLs cannot override the stored Project repository. Multi-change pushes validate all targets before any enqueue.
+- Supported PR deliveries reject comment, approval and change-request payloads, preventing an unsigned event header from reclassifying those signed bodies as PR creation/update events.
 - Fork and missing repository identities restrict scans: credential-free acquisition, no build resolvers and no forge writes, including when Project decoration is opted in. An unrestricted control confirms resolver probes actually execute in the corresponding test.
-- New queue-only SCA entry point refuses missing queues. PR source SHA and destination base ref are pinned in the queued request.
+- The queue-only SCA entry point refuses missing queues/tracking stores. Multi-ref pushes enqueue without reserving the single running-scan slot; workers retry slot contention without spending delivery attempts, recheck live scope before execution, skip terminal deliveries by job ID, and expose unstarted dead letters as failed scans. PR source SHA and destination base ref remain pinned in each queued request.
 
 ## Validation run
 
@@ -37,16 +38,16 @@ Commands use Go 1.27.0 and pnpm 9. PostgreSQL is version 17.11; tests set `SYNAP
 | Check | Result |
 | --- | --- |
 | Changed backend packages and acquisition regressions, `go test -race` | Passed |
-| Focused Bitbucket/migration/lifecycle/hostile tests and webhook/integration regressions, `go test -race` | Passed on real PostgreSQL (17.015s) |
+| Focused Bitbucket/migration/lifecycle/hostile tests and webhook/integration regressions, `go test -race` | Passed on real PostgreSQL (17.015s); additional multi-ref queue transaction and migration race tests passed (5.448s) |
 | HTTP hostile harness and inbound/GitHub/Bitbucket regressions | Passed |
 | OpenAPI and docs checks | Passed |
 | `go vet` for changed packages, acquisition, API and docs | Passed |
-| Full frontend suite | Passed: 157 files, 983 tests |
-| Final Integrations tests | Passed: 10 tests |
+| Full frontend suite after maintainer audit fixes | Passed: 157 files, 984 tests (237.44s) |
+| Final Integrations tests | Passed: 11 tests, including UTF-8 byte length and whitespace validation |
 | `pnpm typecheck` and frontend build | Passed |
 | `make build`, full `go vet`, full Go test command | Not green: module download for `modernc.org/libc@v1.75.7` returns HTTP 403 at storage.googleapis.com |
 | Other full-Go-suite environment checks | Helm is absent and its download returns HTTP 403. The Go capture fixture VCS-stamping failure passes on rerun with `GOFLAGS=-buildvcs=false` (test-only environment setting; no source change) |
-| Full PostgreSQL package with `-race` | Timed out at the default 10-minute limit while running the existing migration-heavy suite; this is not a full-suite pass |
+| Full PostgreSQL package after queue transaction fix | Passed all tests against real PostgreSQL: `go test -count=1 -timeout=30m ./internal/infrastructure/persistence/postgres`, 376.337s. The earlier full `-race` attempt timed out; focused race tests passed separately |
 
 ## Remaining acceptance evidence
 

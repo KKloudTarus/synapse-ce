@@ -76,7 +76,7 @@ func TestConfigureBitbucketWebhookRejectsInvalidSecretWithoutPersisting(t *testi
 	}
 }
 
-func TestConfigureBitbucketWebhookRequiresSingleBoundGitHubProject(t *testing.T) {
+func TestConfigureBitbucketWebhookRequiresSingleBoundProject(t *testing.T) {
 	svc, _, _ := webhookFixture()
 	svc.integrations.(*fakeIntegrations).item.Provider = "bitbucket"
 	fi := svc.integrations.(*fakeIntegrations)

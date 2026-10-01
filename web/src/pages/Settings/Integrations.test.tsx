@@ -294,4 +294,21 @@ describe('Integrations settings', () => {
     expect(input).toHaveValue('')
   })
 
+  it('validates webhook secrets by UTF-8 bytes and refuses surrounding whitespace', async () => {
+    const bb = { ...integration, provider: 'bitbucket' }
+    vi.mocked(api.listIntegrationProviders).mockResolvedValue([{ ...provider, provider: 'bitbucket', name: 'Bitbucket Cloud', capabilities: [], secretFields: [] }])
+    vi.mocked(api.listIntegrations).mockResolvedValue([bb])
+    vi.mocked(api.getIntegration).mockResolvedValue(bb)
+    vi.mocked(api.listIntegrationBindings).mockResolvedValue([{ id: 'binding', projectId: 'p1' } as never])
+    render(<MemoryRouter><Integrations /></MemoryRouter>)
+    const input = await screen.findByLabelText('Webhook secret')
+    const save = screen.getByRole('button', { name: 'Save webhook secret' })
+    for (const [value, enabled] of [['é'.repeat(16), true], ['界'.repeat(43), false], ['a'.repeat(31), false], ['a'.repeat(128), true], ['a'.repeat(32) + ' ', false]] as const) {
+      fireEvent.change(input, { target: { value } })
+      if (enabled) expect(save).toBeEnabled()
+      else expect(save).toBeDisabled()
+    }
+    expect(api.configureInboundWebhook).not.toHaveBeenCalled()
+  })
+
 })

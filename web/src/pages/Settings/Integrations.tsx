@@ -553,6 +553,8 @@ function BitbucketWebhookCard({ canAdmin, integration, bound }: { canAdmin: bool
   const [saving, setSaving] = useState(false)
   const [path, setPath] = useState('')
   const [error, setError] = useState('')
+  const secretBytes = new Blob([secret]).size
+  const validSecret = secretBytes >= 32 && secretBytes <= 128 && secret.trim() === secret
 
   async function save(event: FormEvent) {
     event.preventDefault()
@@ -576,9 +578,9 @@ function BitbucketWebhookCard({ canAdmin, integration, bound }: { canAdmin: bool
       {!bound && <p className="text-sm text-tertiary">Bind one Git Project before configuring the webhook.</p>}
       {!canAdmin ? <p className="text-sm text-tertiary">An administrator must configure or rotate the webhook secret.</p> : <form onSubmit={save} className="space-y-3">
         <Field label="Webhook secret" htmlFor="bitbucket-webhook-secret" hint="Use a random secret of 32–128 bytes. Saving again rotates the secret; the previous secret remains valid for less than 24 hours.">
-          <Input id="bitbucket-webhook-secret" type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} disabled={!bound || saving} required minLength={32} maxLength={128} />
+          <Input id="bitbucket-webhook-secret" type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} disabled={!bound || saving} required maxLength={128} />
         </Field>
-        <Button type="submit" disabled={!bound || secret.length < 32} loading={saving}>Save webhook secret</Button>
+        <Button type="submit" disabled={!bound || !validSecret} loading={saving}>Save webhook secret</Button>
       </form>}
       {error && <ErrorState message={error} />}
       {path && <div className="space-y-2">
