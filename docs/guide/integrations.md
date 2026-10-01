@@ -115,3 +115,12 @@ Custom CA bundles and insecure TLS are intentionally unsupported in this MVP. Ad
 ```
 
 Set `KEEP_JENKINS=1` to leave the fixture running on `http://localhost:18080` for manual Synapse API/UI testing. The fixture password and generated token are test-only and must never be reused outside this local harness.
+
+
+### Bitbucket Cloud push and pull-request webhooks
+
+The Bitbucket Cloud provider receives repository pushes and open pull-request creation/update events for **one existing Git Project per integration**. It does not discover pipelines or poll Bitbucket, so no polling token is needed. Bind your Git Project directly in the CI/CD integration settings, have an administrator save the webhook secret, configure the returned path and the same secret in Bitbucket Cloud, and enable the integration. Non-administrators can inspect bindings but cannot configure or rotate the secret.
+
+Webhook scans pin the source SHA and use the Project's stored repository URL. Fork PR scans suppress Git credentials, build execution and forge writes. Fork commits that cannot be fetched anonymously from the stored origin fail closed. See [Bitbucket Cloud webhook configuration](configuration.md#bitbucket-cloud-inbound-webhooks) for headers, events, rotation, replay behavior and deployment requirements.
+
+Local console screenshots and validation limits are recorded in [the Bitbucket webhook review evidence](bitbucket-webhook-evidence.md).

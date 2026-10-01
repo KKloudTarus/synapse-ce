@@ -56,6 +56,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
 	azurepipelinesintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/azurepipelines"
+	bitbucketintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/bitbucket"
 	githubintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/github"
 	gitlabintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/gitlab"
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
@@ -979,6 +980,10 @@ func main() {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
 	}
+	if err := bitbucketintegration.Register(integrationRegistry); err != nil {
+		log.Error("integration provider registry init failed", "err", err)
+		os.Exit(1)
+	}
 	integrationRules, err := cfg.IntegrationSelfHostedRules()
 	if err != nil {
 		log.Error("integration endpoint configuration invalid", "err", err)
@@ -1504,6 +1509,12 @@ func main() {
 			log.Error("GitHub inbound webhook administration init failed", "err", err)
 			os.Exit(1)
 		}
+		bitbucketReceiver, err := scmwebhookuc.NewBitbucketReceiver(integrationService, projectService, webhookRepository)
+		if err != nil {
+			log.Error("Bitbucket webhook receiver init failed", "err", err)
+			os.Exit(1)
+		}
+		githubWebhookReceiver.SetBitbucketReceiver(bitbucketReceiver)
 		gitlabWebhookReceiver, err := scmwebhookuc.NewReceiver(integrationStore, projectService, webhookRepository, clock)
 		if err != nil {
 			log.Error("GitLab inbound webhook receiver init failed", "err", err)

@@ -531,6 +531,17 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 			"GRANT EXECUTE ON FUNCTION synapse_rotate_github_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
 		)
 	}
+	var bitbucketInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_lock_bitbucket_inbound_webhook(text,text,text)') IS NOT NULL").Scan(&bitbucketInstalled); err != nil {
+		return fmt.Errorf("inspect Bitbucket webhook functions: %w", err)
+	}
+	if bitbucketInstalled {
+		statements = append(statements,
+			"GRANT EXECUTE ON FUNCTION synapse_lock_bitbucket_inbound_webhook(TEXT,TEXT,TEXT) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_provision_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,TEXT,INT) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_rotate_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
+		)
+	}
 	for _, statement := range statements {
 		// #nosec G701 -- SQL is fixed apart from quoteIdentifier-escaped DSN identifiers; PostgreSQL cannot bind identifiers as parameters.
 		if _, err := adminDB.ExecContext(ctx, statement); err != nil {
