@@ -22,8 +22,8 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
 
-func TestMigration0206BitbucketWebhookLifecycle(t *testing.T) {
-	isolated := newIsolatedMigrationDB(t, 206, 205)
+func TestMigration0207BitbucketWebhookLifecycle(t *testing.T) {
+	isolated := newIsolatedMigrationDB(t, 207, 205)
 	// Upgrade a database already at shipped 0205 through the production entry point.
 	if err := Migrate(context.Background(), isolated.dsn); err != nil {
 		t.Fatal(err)

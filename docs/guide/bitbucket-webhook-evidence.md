@@ -25,7 +25,7 @@ These screenshots were captured before the rebase and render the real console us
 
 - HMAC-SHA256 over raw bytes uses `X-Hub-Signature`; generic/GitHub signature headers do not authenticate a Bitbucket endpoint. Missing/duplicate headers, invalid signatures and tenant/header overrides are tested. Previous-secret rotation is tested.
 - Request UUID and authenticated-body digest receipts commit in the same PostgreSQL transaction as scan enqueue. Tests cover failure after enqueue, cancellation, terminated DB connection, retries and concurrent replay with changed request UUIDs.
-- Real PostgreSQL tests use a `NOSUPERUSER NOBYPASSRLS` runtime role. Owner privileges are restricted to fixture setup/cleanup. Hostile tenant/owner identities cannot provision, rotate or accept another endpoint. PUBLIC cannot execute the new SECURITY DEFINER functions. Migration 0206 upgrades from shipped 0205 and rolls back to 0205 while preserving the GitLab payload and notification indexes; runtime direct endpoint DML remains revoked.
+- Real PostgreSQL tests use a `NOSUPERUSER NOBYPASSRLS` runtime role. Owner privileges are restricted to fixture setup/cleanup. Hostile tenant/owner identities cannot provision, rotate or accept another endpoint. PUBLIC cannot execute the new SECURITY DEFINER functions. Migration 0207 upgrades from shipped 0205 and rolls back to 0205 while preserving the GitLab payload and notification indexes; runtime direct endpoint DML remains revoked.
 - Bitbucket integrations bind one Git Project; concurrent second bindings are rejected. Payload clone URLs cannot override the stored Project repository. Multi-change pushes validate all targets before any enqueue.
 - Supported PR deliveries reject comment, approval and change-request payloads, preventing an unsigned event header from reclassifying those signed bodies as PR creation/update events.
 - Fork and missing repository identities restrict scans: credential-free acquisition, no build resolvers and no forge writes, including when Project decoration is opted in. An unrestricted control confirms resolver probes actually execute in the corresponding test.
@@ -57,9 +57,9 @@ Commands use Go 1.27.0, pnpm 9 and golangci-lint 2.13.2 (the CI version). Postgr
 
 A real Bitbucket Cloud repository/connection has not been supplied, so no actual delivery history, forge status/comment or Vietnamese forge screenshot is claimed. Outbound PR decoration is outside this receiver's scope. The change should stay draft until required full build/CI checks and actual-forge evidence are completed.
 
-The branch is rebased onto upstream `main` at `43e4136bd36ec30021244072506fe017d616d0ee`, which includes shipped migrations 0203 and 0205. The unshipped Bitbucket lifecycle migration is now 0206. Recheck the merged maximum immediately before merge and move only this unshipped migration if another PR has advanced it.
+The branch is rebased onto upstream `main` at `696bd990dc61d376ed6137f6ff1e536168943a61`, which includes shipped migrations 0203 and 0205. The unshipped Bitbucket lifecycle migration is now 0207, as requested in the latest maintainer allocation; 0206 is assigned to identity foundation PR #1542. Recheck the merged maximum immediately before merge and move only this unshipped migration if another PR has advanced it.
 
-## Validation after rebase (2026-10-02)
+## Validation before the 0207 allocation (2026-10-02)
 
 The API wires GitHub, GitLab and Bitbucket directly into `ProviderReceiver`. The combined receiver test covers GitHub fork restrictions, GitLab replay, Bitbucket enqueue failure/retry, UUID and body replay, fork PR routing, bound tenant/project identity, and refusal of unknown providers. GitLab retains transactional payload dedupe; Bitbucket retains its separate transactional UUID/body receipts. The HTTP delivery claim remains GitHub-specific because the other receivers commit their receipts atomically with enqueue.
 
@@ -79,6 +79,10 @@ This run uses Go 1.27.1, pnpm 11.19.0 and a local PostgreSQL 17.11 database. Go 
 
 These local checks do not supply actual Bitbucket delivery evidence or English/Vietnamese forge screenshots. Those acceptance items still require a real test repository and reachable deployment.
 
+## Validation after the 0207 allocation (2026-10-02)
+
+The migration SQL is unchanged; only its unshipped version and lifecycle test name/fixture number moved from 0206 to 0207. On the branch rebased onto `696bd990`, the full Go build and scoped SCM webhook, Project, integrations, HTTP, OpenAPI and docs race tests passed. The PostgreSQL migration 0203/0207, Bitbucket lifecycle/replay/atomic enqueue/tenant isolation and GitLab atomic replay/concurrent binding race tests passed against a fresh PostgreSQL 17.11 database (23.937s), including upgrade from 0205 and rollback to 0205.
+
 ## Review disposition
 
 All currently published review summaries and maintainer comments on PR #1544 were checked on 2026-10-02.
@@ -88,7 +92,10 @@ All currently published review summaries and maintainer comments on PR #1544 wer
 | [Initial migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5944232391) | Superseded by the allocation update below; the already shipped 0203/0205 are unchanged. |
 | [First review](https://github.com/KKloudTarus/synapse-ce/pull/1544#pullrequestreview-5387730777) | Rebase conflicts are resolved. Bitbucket UUID/body dedupe is transactional with enqueue, as confirmed by the later review and real PostgreSQL retry/concurrency tests. |
 | [Integration review](https://github.com/KKloudTarus/synapse-ce/pull/1544#pullrequestreview-5388456991) | Three-provider dispatcher/composition test and shared queue test helper are fixed. Real Bitbucket delivery and English/Vietnamese forge evidence remain pending. |
-| [Updated migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5948201783) | Rebased onto current main; unshipped migration moved to 0206 and tested from a database already at 0205. Recheck main's maximum before merge. |
+| [Updated migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5948201783) | The initial move to 0206 was tested from a database at 0205; the later 0207 allocation supersedes it. |
+| [Approval](https://github.com/KKloudTarus/synapse-ce/pull/1544#pullrequestreview-5390679561) | Reviewer confirmed transactional dedupe, dispatcher composition and helper consolidation; implementation findings are closed. |
+| [Outstanding evidence](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5950150855) | Real signed push/PR delivery, forge screenshots and corresponding console scans remain pending. |
+| [Final migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5950579065) | Unshipped migration and lifecycle test renamed to 0207; 0206 is assigned to PR #1542. Approval stands. |
 
 ## Collecting the remaining provider evidence
 
