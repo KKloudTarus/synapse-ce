@@ -192,8 +192,8 @@ func TestIntegrationAdminHarness(t *testing.T) {
 		case "PermAdminister":
 			for _, role := range []string{"integration_admin", "member", "consultant", "readonly", "reviewer", "agent", "mcp", ""} {
 				response := serveAs(rt, method, path, role)
-				if response.Code != http.StatusForbidden {
-					t.Errorf("%s as %q = %d, want 403", route.Pattern, role, response.Code)
+				if response.Code != wantDenied(role) {
+					t.Errorf("%s as %q = %d, want %d", route.Pattern, role, response.Code, wantDenied(role))
 				}
 				if role == "integration_admin" && !strings.Contains(response.Body.String(), "administer") {
 					t.Errorf("%s as integration_admin: 403 body %q does not name the administer capability", route.Pattern, response.Body.String())
@@ -201,8 +201,8 @@ func TestIntegrationAdminHarness(t *testing.T) {
 			}
 		case "PermManageIntegrations":
 			for _, role := range []string{"member", "consultant", "readonly", "reviewer", "agent", "mcp", ""} {
-				if response := serveAs(rt, method, path, role); response.Code != http.StatusForbidden {
-					t.Errorf("%s as %q = %d, want 403", route.Pattern, role, response.Code)
+				if response := serveAs(rt, method, path, role); response.Code != wantDenied(role) {
+					t.Errorf("%s as %q = %d, want %d", route.Pattern, role, response.Code, wantDenied(role))
 				}
 			}
 			for _, role := range []userdom.Role{userdom.RoleIntegrationAdmin, userdom.RoleAdmin} {

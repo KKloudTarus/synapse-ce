@@ -278,8 +278,11 @@ broker DaemonSet enabled and an execution node selector.
   value: {{ required "oidc.frontendURL is required when oidc.enabled" .Values.oidc.frontendURL | quote }}
 - name: SYNAPSE_OIDC_TENANT_ID
   value: {{ required "oidc.tenantID is required when oidc.enabled" .Values.oidc.tenantID | quote }}
+{{- with .Values.oidc.groupRoleMapping }}
+{{- /* Deprecated: provider groups no longer assign roles. Passed through only so the API logs its deprecation warning. */}}
 - name: SYNAPSE_OIDC_GROUP_ROLE_MAPPING
-  value: {{ required "oidc.groupRoleMapping must map at least one provider group to a role" (join "," .Values.oidc.groupRoleMapping) | quote }}
+  value: {{ join "," . | quote }}
+{{- end }}
 - name: SYNAPSE_OIDC_TRANSACTION_TTL
   value: {{ .Values.oidc.transactionTTL | quote }}
 - name: SYNAPSE_OIDC_SESSION_TTL

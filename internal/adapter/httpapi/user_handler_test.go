@@ -196,9 +196,10 @@ func TestRotateKeyInvalidatesTheOldKey(t *testing.T) {
 	}
 }
 
-// TestDisableRejectsTheKeyAndEnableRestoresIt proves the product can revoke access without deleting
-// the identity, and put it back.
-func TestDisableRejectsTheKeyAndEnableRestoresIt(t *testing.T) {
+// TestDisableRevokesTheKeyPermanently proves the product can revoke access without deleting the
+// identity, and that re-enabling does not resurrect the revoked key: the administrator rotates to
+// issue a new one.
+func TestDisableRevokesTheKeyPermanently(t *testing.T) {
 	rt, svc := usersRouterWithService(t)
 	adminID, _ := seedTenantAdmin(t, svc, "acme", "Admin")
 	admin := ctxAsUser(adminID, "admin", "acme")
@@ -214,8 +215,17 @@ func TestDisableRejectsTheKeyAndEnableRestoresIt(t *testing.T) {
 	if rec := callUsers(t, rt, admin, http.MethodPost, "/api/v1/users/"+targetID+"/enable", ""); rec.Code != http.StatusOK {
 		t.Fatalf("enable: %d %s", rec.Code, rec.Body.String())
 	}
-	if _, err := svc.Authenticate(context.Background(), key); err != nil {
-		t.Errorf("a re-enabled user's key must authenticate: %v", err)
+	if _, err := svc.Authenticate(context.Background(), key); err == nil {
+		t.Error("re-enabling resurrected the key revoked by disable")
+	}
+	rotated := callUsers(t, rt, admin, http.MethodPost, "/api/v1/users/"+targetID+"/rotate-key", "")
+	if rotated.Code != http.StatusOK {
+		t.Fatalf("rotate after re-enable: %d %s", rotated.Code, rotated.Body.String())
+	}
+	if _, newKey := decodeUserKey(t, rotated); newKey == "" {
+		t.Fatal("rotate returned no key")
+	} else if _, err := svc.Authenticate(context.Background(), newKey); err != nil {
+		t.Errorf("the key issued after re-enable must authenticate: %v", err)
 	}
 }
 

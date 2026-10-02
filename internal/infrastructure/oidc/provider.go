@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 
 	coreoidc "github.com/coreos/go-oidc/v3/oidc"
@@ -20,12 +19,13 @@ import (
 // Config is the fixed, operator-supplied OIDC relying-party configuration.
 var _ ports.OIDCProvider = (*Provider)(nil)
 
+// There is deliberately no group-to-role mapping: provider groups never assign or change a
+// Synapse role, so the adapter neither requests nor reads a groups claim.
 type Config struct {
-	Issuer           string
-	ClientID         string
-	ClientSecret     string
-	RedirectURL      string
-	GroupRoleMapping []string
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+	RedirectURL  string
 }
 
 // Provider executes the authorization-code OIDC protocol. It neither persists nor logs tokens.
@@ -33,7 +33,6 @@ type Provider struct {
 	issuer   string
 	verifier *coreoidc.IDTokenVerifier
 	oauth    oauth2.Config
-	roles    map[string]user.Role
 }
 
 // New discovers a fixed HTTPS issuer and builds its verifier and OAuth client.
@@ -45,10 +44,6 @@ func New(ctx context.Context, cfg Config) (*Provider, error) {
 	if strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" || strings.TrimSpace(cfg.RedirectURL) == "" {
 		return nil, fmt.Errorf("OIDC client id, client secret, and redirect URL are required")
 	}
-	roles, err := parseGroupRoleMapping(cfg.GroupRoleMapping)
-	if err != nil {
-		return nil, err
-	}
 	provider, err := coreoidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("discover OIDC issuer: %w", err)
@@ -58,9 +53,8 @@ func New(ctx context.Context, cfg Config) (*Provider, error) {
 		verifier: provider.Verifier(&coreoidc.Config{ClientID: cfg.ClientID}),
 		oauth: oauth2.Config{
 			ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, RedirectURL: cfg.RedirectURL,
-			Endpoint: provider.Endpoint(), Scopes: []string{coreoidc.ScopeOpenID, "profile", "groups", "email"},
+			Endpoint: provider.Endpoint(), Scopes: []string{coreoidc.ScopeOpenID, "profile", "email"},
 		},
-		roles: roles,
 	}, nil
 }
 
@@ -99,7 +93,6 @@ func (p *Provider) ExchangeAndVerify(ctx context.Context, code, verifier, nonce 
 	var claims struct {
 		Nonce         string          `json:"nonce"`
 		AtHash        string          `json:"at_hash"`
-		Groups        json.RawMessage `json:"groups"`
 		Email         string          `json:"email"`
 		EmailVerified json.RawMessage `json:"email_verified"`
 	}
@@ -114,10 +107,6 @@ func (p *Provider) ExchangeAndVerify(ctx context.Context, code, verifier, nonce 
 			return ports.OIDCIdentity{}, fmt.Errorf("verify OIDC access-token hash: %w", err)
 		}
 	}
-	role, err := p.roleForGroups(claims.Groups)
-	if err != nil {
-		return ports.OIDCIdentity{}, err
-	}
 	if idToken.Issuer != p.issuer || strings.TrimSpace(idToken.Subject) == "" {
 		return ports.OIDCIdentity{}, fmt.Errorf("OIDC issuer or subject is invalid")
 	}
@@ -125,7 +114,7 @@ func (p *Provider) ExchangeAndVerify(ctx context.Context, code, verifier, nonce 
 	if err != nil {
 		return ports.OIDCIdentity{}, err
 	}
-	return ports.OIDCIdentity{Issuer: idToken.Issuer, Subject: idToken.Subject, Role: role, Email: email, EmailVerified: verifiedEmail}, nil
+	return ports.OIDCIdentity{Issuer: idToken.Issuer, Subject: idToken.Subject, Email: email, EmailVerified: verifiedEmail}, nil
 }
 
 // Only the JSON boolean true from the verified ID token grants email authority.
@@ -141,36 +130,9 @@ func verifiedEmailClaim(email string, claim json.RawMessage) (string, bool, erro
 	return address, true, nil
 }
 
-func (p *Provider) roleForGroups(raw json.RawMessage) (user.Role, error) {
-	var groups []string
-	if len(raw) == 0 || string(raw) == "null" || json.Unmarshal(raw, &groups) != nil || len(groups) == 0 {
-		return "", fmt.Errorf("OIDC groups claim is required")
-	}
-	roles := make(map[user.Role]struct{})
-	seen := make(map[string]struct{}, len(groups))
-	for _, group := range groups {
-		group = strings.TrimSpace(group)
-		if group == "" {
-			return "", fmt.Errorf("OIDC groups claim is invalid")
-		}
-		if _, duplicate := seen[group]; duplicate {
-			return "", fmt.Errorf("OIDC groups claim is ambiguous")
-		}
-		seen[group] = struct{}{}
-		role, ok := p.roles[group]
-		if !ok {
-			return "", fmt.Errorf("OIDC group is not allowlisted")
-		}
-		roles[role] = struct{}{}
-	}
-	if len(roles) != 1 {
-		return "", fmt.Errorf("OIDC groups map to ambiguous roles")
-	}
-	for role := range roles {
-		return role, nil
-	}
-	return "", fmt.Errorf("OIDC groups claim is required")
-}
+// NormalizeIssuer returns the exact issuer string the provider compares ID tokens against, so an
+// operator-approved link and a verified callback use the same issuer value.
+func NormalizeIssuer(value string) (string, error) { return httpsIssuer(value) }
 
 func httpsIssuer(value string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(value))
@@ -178,34 +140,4 @@ func httpsIssuer(value string) (string, error) {
 		return "", fmt.Errorf("OIDC issuer must be an absolute HTTPS URL without query or fragment")
 	}
 	return strings.TrimRight(u.String(), "/"), nil
-}
-
-func parseGroupRoleMapping(values []string) (map[string]user.Role, error) {
-	if len(values) == 0 {
-		return nil, fmt.Errorf("OIDC group-role mapping is required")
-	}
-	roles := make(map[string]user.Role, len(values))
-	for _, value := range values {
-		group, roleText, ok := strings.Cut(value, "=")
-		group, roleText = strings.TrimSpace(group), strings.TrimSpace(roleText)
-		role := user.Role(roleText)
-		if !ok || group == "" || !role.Valid() || role == user.RoleMember {
-			return nil, fmt.Errorf("OIDC group-role mapping is invalid")
-		}
-		if _, exists := roles[group]; exists {
-			return nil, fmt.Errorf("OIDC group-role mapping has duplicate group")
-		}
-		roles[group] = role
-	}
-	return roles, nil
-}
-
-// GroupRoleMappings returns normalized mappings for validation and test inspection.
-func (p *Provider) GroupRoleMappings() []string {
-	result := make([]string, 0, len(p.roles))
-	for group, role := range p.roles {
-		result = append(result, group+"="+string(role))
-	}
-	sort.Strings(result)
-	return result
 }

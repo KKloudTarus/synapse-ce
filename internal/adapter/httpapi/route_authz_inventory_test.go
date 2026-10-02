@@ -14,19 +14,17 @@ import (
 // test is the cheap guard, since the hostile harness can only cover routes someone remembered to
 // add to its table.
 //
-// publicRoutePatterns are the deliberate exceptions: liveness and readiness probes, the identity
-// and consent routes a brand-new principal must reach before it has any role, and the OIDC login
-// callback. Adding to this list is a security decision, so it lives here in one visible place.
+// publicRoutePatterns are the deliberate unauthenticated exceptions: liveness and readiness
+// probes, and the OIDC login redirect, callback and session probe, which run before any principal
+// exists. Adding to this list is a security decision, so it lives here in one visible place. The
+// consent gate, the identity echo and logout are not public: they need an authenticated principal
+// (rt.authenticated or rt.recoverable) but no role.
 var publicRoutePatterns = map[string]string{
 	"GET /healthz":                "liveness probe, documented as unauthenticated",
 	"GET /readyz":                 "readiness probe, documented as unauthenticated",
-	"GET /api/v1/aup":             "a new principal must read the policy before it can accept it",
-	"POST /api/v1/aup/accept":     "the consent gate itself; the caller is authenticated but has no role yet",
-	"GET /api/v1/me":              "identity echo for the authenticated caller, no tenant data",
 	"GET /api/auth/oidc/login":    "starts the login redirect, before any principal exists",
 	"GET /api/auth/oidc/callback": "completes the login redirect, before any principal exists",
-	"GET /api/auth/session":       "session probe the dashboard calls on every page",
-	"POST /api/auth/logout":       "ends the caller's own session; must work for any role",
+	"GET /api/auth/session":       "session probe the dashboard calls on every page; answers unauthenticated itself",
 }
 
 // registeredRoutes parses router.go into the routes it actually registers. Parsing rather than
@@ -46,22 +44,28 @@ func registeredRoutes(t *testing.T) []RouteRegistration {
 }
 
 // TestEveryHumanRouteGoesThroughAuthz walks the route table in router.go and fails for any route
-// registered without rt.authz, unless it is listed above as a deliberate exception.
+// that is not guarded by one of the authorization guards (each calls authz.Decide), unless it is
+// listed above as a deliberate public exception.
 func TestEveryHumanRouteGoesThroughAuthz(t *testing.T) {
 	var unguarded []string
 	for _, route := range registeredRoutes(t) {
-		if _, public := publicRoutePatterns[route.Pattern]; public {
-			continue
-		}
-		if route.Guard == "rt.authz" {
+		if route.Class(publicSet()) != RouteUnclassified {
 			continue
 		}
 		unguarded = append(unguarded, fmt.Sprintf("%s (router.go:%d, outermost wrapper %q)", route.Pattern, route.Line, route.Guard))
 	}
 	sort.Strings(unguarded)
 	for _, route := range unguarded {
-		t.Errorf("route %s is registered without rt.authz and is not a documented public route", route)
+		t.Errorf("route %s is registered without an authorization guard and is not a documented public route", route)
 	}
+}
+
+func publicSet() map[string]bool {
+	out := make(map[string]bool, len(publicRoutePatterns))
+	for pattern := range publicRoutePatterns {
+		out[pattern] = true
+	}
+	return out
 }
 
 // TestPublicRouteExceptionsAreAllRegistered keeps the exception list honest in both directions: an
@@ -78,8 +82,8 @@ func TestPublicRouteExceptionsAreAllRegistered(t *testing.T) {
 			t.Errorf("public-route exception %q matches no registered route; remove the stale exemption", pattern)
 			continue
 		}
-		if route.Guard == "rt.authz" {
-			t.Errorf("public-route exception %q is in fact wrapped in rt.authz; remove the exemption rather than leaving it to cover a future route", pattern)
+		if route.Guard != "" {
+			t.Errorf("public-route exception %q is in fact wrapped in %s; remove the exemption rather than leaving it to cover a future route", pattern, route.Guard)
 		}
 	}
 }

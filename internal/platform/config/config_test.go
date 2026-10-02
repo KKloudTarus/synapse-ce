@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
 )
 
 func TestLoadOwnershipIsExplicitOptIn(t *testing.T) {
@@ -967,9 +969,40 @@ func TestValidateOIDCPosture(t *testing.T) {
 		t.Fatal("missing OIDC client secret must fail")
 	}
 	valid.OIDCClientSecret = "secret"
+	for _, issuer := range []string{"http://issuer.example", "https://issuer.example/?tenant=a", "https://issuer.example/#x", "issuer.example", "https://"} {
+		valid.OIDCIssuer = issuer
+		err := valid.ValidateOIDCPosture()
+		if err == nil || !strings.Contains(err.Error(), "SYNAPSE_OIDC_ISSUER") {
+			t.Fatalf("issuer %q must fail OIDC posture naming SYNAPSE_OIDC_ISSUER, got %v", issuer, err)
+		}
+	}
+	valid.OIDCIssuer = "https://issuer.example/realms/synapse/"
+	if err := valid.ValidateOIDCPosture(); err != nil {
+		t.Fatalf("an issuer with a path and trailing slash is valid: %v", err)
+	}
 	valid.OIDCFrontendURL = "https://synapse.example/?next=https://attacker.example"
 	if err := valid.ValidateOIDCPosture(); err == nil {
 		t.Fatal("request-like OIDC frontend URL must fail")
+	}
+}
+
+// The group-role mapping is no longer required and is only parsed for compatibility: a
+// deployment that still sets it starts, with a deprecation warning.
+func TestOIDCGroupRoleMappingIsOptionalAndDeprecated(t *testing.T) {
+	cfg := Config{OIDCEnabled: true, OIDCIssuer: "https://issuer.example", OIDCClientID: "client", OIDCClientSecret: "secret", OIDCRedirectURL: "https://synapse.example/api/auth/oidc/callback", OIDCFrontendURL: "https://synapse.example/", OIDCTenantID: "tenant", OIDCTransactionTTL: time.Minute, OIDCSessionTTL: time.Hour}
+	if err := cfg.ValidateOIDCPosture(); err != nil {
+		t.Fatalf("OIDC without a group mapping must be valid: %v", err)
+	}
+	if warnings := cfg.OIDCDeprecationWarnings(); len(warnings) != 0 {
+		t.Fatalf("no mapping must produce no warning: %v", warnings)
+	}
+	t.Setenv("SYNAPSE_OIDC_GROUP_ROLE_MAPPING", "admins=admin,readers=readonly")
+	loaded := Load()
+	if len(loaded.OIDCGroupRoleMapping) != 2 {
+		t.Fatalf("legacy mapping must stay parse-compatible: %v", loaded.OIDCGroupRoleMapping)
+	}
+	if warnings := loaded.OIDCDeprecationWarnings(); len(warnings) != 1 || !strings.Contains(warnings[0], "SYNAPSE_OIDC_GROUP_ROLE_MAPPING") {
+		t.Fatalf("legacy mapping must warn: %v", warnings)
 	}
 }
 
@@ -1215,5 +1248,35 @@ func TestVulnerabilityMaintenanceDefaultsDryRunAndBounded(t *testing.T) {
 	cfg.VulnerabilityMaintenanceBatchSize = 1001
 	if err := cfg.ValidateVulnerabilityMaintenance(); err == nil {
 		t.Fatal("unbounded maintenance batch must fail")
+	}
+}
+
+// The configuration preflight must accept exactly the issuers the OIDC provider accepts, so a
+// value that passes validation never fails late in startup and a value the provider would take
+// is never refused.
+func TestOIDCIssuerPreflightAgreesWithTheProvider(t *testing.T) {
+	for _, issuer := range []string{
+		"https://issuer.example",
+		"https://issuer.example/",
+		"  https://issuer.example/realms/synapse  ",
+		"https://issuer.example:8443/tenant/v2.0",
+		"https://user@issuer.example",
+		"https://issuer.example/?",
+		"http://issuer.example",
+		"HTTPS://issuer.example",
+		"https://issuer.example?x=1",
+		"https://issuer.example/#frag",
+		"https://",
+		"https:///path",
+		"issuer.example",
+		"",
+		"://bad",
+		"https://iss\x00uer.example",
+		"https://[::1",
+	} {
+		_, providerErr := oidc.NormalizeIssuer(issuer)
+		if got, want := validOIDCIssuer(issuer), providerErr == nil; got != want {
+			t.Errorf("issuer %q: config preflight accepts=%v, provider accepts=%v", issuer, got, want)
+		}
 	}
 }

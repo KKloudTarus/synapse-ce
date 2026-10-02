@@ -641,7 +641,7 @@ func TestHostileHarness(t *testing.T) {
 	}{
 		// Fail-closed: no principal → 403 at the authz chokepoint (the 401-producing auth middleware
 		// is bypassed here on purpose to isolate the authorization layer).
-		{"no principal is denied", "", "", false, http.MethodGet, "/api/v1/engagements", http.StatusForbidden},
+		{"no principal is denied", "", "", false, http.MethodGet, "/api/v1/engagements", http.StatusUnauthorized},
 		// A machine role is granted NOTHING – not even view (separation of duties).
 		{"machine role denied even view", "agent", "tenantA", true, http.MethodGet, "/api/v1/engagements", http.StatusForbidden},
 		// RBAC allow (view): every human role reads.
@@ -760,21 +760,21 @@ func TestHostileHarness(t *testing.T) {
 		// but only inside its own tenant, and an unauthenticated caller may not see them at all.
 		{"readonly may read imported findings (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusOK},
 		{"cross-tenant imported-finding read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusNotFound},
-		{"principal-less imported-finding read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusForbidden},
+		{"principal-less imported-finding read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/imported-findings", http.StatusUnauthorized},
 		{"readonly may read detections (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusOK},
 		{"cross-tenant detection read → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusNotFound},
-		{"principal-less detection read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusForbidden},
+		{"principal-less detection read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/detections", http.StatusUnauthorized},
 		// #426 purple coverage (PermView): readonly may read; cross-tenant is 404 before the handler; a
 		// principal-less read is denied.
 		{"readonly may read purple coverage", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/purple-coverage", http.StatusOK},
 		{"cross-tenant purple coverage → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/purple-coverage", http.StatusNotFound},
-		{"principal-less purple coverage read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/purple-coverage", http.StatusForbidden},
+		{"principal-less purple coverage read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/purple-coverage", http.StatusUnauthorized},
 		// #427 unified per-asset risk story (PermView): readonly may read; a cross-tenant read is 404 at
 		// the withEngTenant chokepoint before any correlation runs; a principal-less read is denied. Both
 		// the list route and the single-asset route are gated, so the story never crosses a tenant.
 		{"readonly may read risk stories", "readonly", "tenantA", true, http.MethodGet, "/api/v1/engagements/engA/risk-stories", http.StatusOK},
 		{"cross-tenant risk story list → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/risk-stories", http.StatusNotFound},
-		{"principal-less risk story read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/risk-stories", http.StatusForbidden},
+		{"principal-less risk story read is denied", "", "", false, http.MethodGet, "/api/v1/engagements/engA/risk-stories", http.StatusUnauthorized},
 		{"cross-tenant single risk story → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/engagements/engA/risk-stories/asset-A", http.StatusNotFound},
 		// Fleet coverage (#413, PermView): machine roles denied; readonly may read; cross-tenant agent
 		// detail is 404 (never an existence-revealing 403). The cross-tenant LIST emptiness (a 200 that
@@ -794,7 +794,7 @@ func TestHostileHarness(t *testing.T) {
 		// on the body below the table.
 		{"readonly may list hosts (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/assets/hosts", http.StatusOK},
 		{"machine may not list hosts (view/SoD)", "agent", "tenantA", true, http.MethodGet, "/api/v1/assets/hosts", http.StatusForbidden},
-		{"principal-less host list is denied", "", "", false, http.MethodGet, "/api/v1/assets/hosts", http.StatusForbidden},
+		{"principal-less host list is denied", "", "", false, http.MethodGet, "/api/v1/assets/hosts", http.StatusUnauthorized},
 		{"readonly may read a host's vulnerabilities (view)", "readonly", "tenantA", true, http.MethodGet, "/api/v1/assets/host-A/vulnerabilities", http.StatusOK},
 		{"cross-tenant host vulnerabilities → 404", "consultant", "tenantB", true, http.MethodGet, "/api/v1/assets/host-A/vulnerabilities", http.StatusNotFound},
 	}

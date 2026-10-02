@@ -27,7 +27,10 @@ func NewIdentityStore(pool *pgxpool.Pool) (*IdentityStore, error) {
 	return &IdentityStore{pool: pool}, nil
 }
 
-var _ ports.IdentityStore = (*IdentityStore)(nil)
+var (
+	_ ports.IdentityStore                 = (*IdentityStore)(nil)
+	_ ports.ExternalIdentitySessionIssuer = (*IdentityStore)(nil)
+)
 
 func (s *IdentityStore) CreateExternalIdentity(ctx context.Context, external identity.ExternalIdentity) error {
 	return WithTenant(ctx, s.pool, external.TenantID.String(), func(tx pgx.Tx) error {
@@ -63,6 +66,55 @@ func (s *IdentityStore) GetExternalIdentity(ctx context.Context, issuer, subject
 		return nil
 	})
 	return external, err
+}
+
+// DeleteExternalIdentity removes one approved link of a user, joining the tenant transaction bound
+// to ctx. The tenant and user predicates confine it on top of RLS.
+func (s *IdentityStore) DeleteExternalIdentity(ctx context.Context, tenantID, userID, linkID shared.ID) (external identity.ExternalIdentity, err error) {
+	if tenantID.IsZero() || userID.IsZero() || linkID.IsZero() {
+		return identity.ExternalIdentity{}, fmt.Errorf("%w: identity link tenant, user and id are required", shared.ErrValidation)
+	}
+	err = WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if err := lockIdentityUser(ctx, tx, tenantID, userID); err != nil {
+			return err
+		}
+		external, err = scanExternalIdentity(tx.QueryRow(ctx, `DELETE FROM oidc_external_identities
+			WHERE id=$1 AND tenant_id=$2 AND user_id=$3
+			RETURNING id, tenant_id, user_id, issuer, subject, created_at, updated_at`, linkID.String(), tenantID.String(), userID.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("OIDC external identity %s: %w", linkID, shared.ErrNotFound)
+		}
+		if err != nil {
+			return fmt.Errorf("delete OIDC external identity: %w", err)
+		}
+		return nil
+	})
+	return external, err
+}
+
+// ListExternalIdentities returns one user's approved issuer/subject links, oldest first.
+func (s *IdentityStore) ListExternalIdentities(ctx context.Context, tenantID, userID shared.ID) ([]identity.ExternalIdentity, error) {
+	if tenantID.IsZero() || userID.IsZero() {
+		return nil, fmt.Errorf("%w: identity link tenant and user are required", shared.ErrValidation)
+	}
+	var out []identity.ExternalIdentity
+	err := WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, tenant_id, user_id, issuer, subject, created_at, updated_at
+			FROM oidc_external_identities WHERE tenant_id=$1 AND user_id=$2 ORDER BY created_at, id`, tenantID.String(), userID.String())
+		if err != nil {
+			return fmt.Errorf("list OIDC external identities: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			external, scanErr := scanExternalIdentity(rows)
+			if scanErr != nil {
+				return fmt.Errorf("scan OIDC external identity: %w", scanErr)
+			}
+			out = append(out, external)
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func (s *IdentityStore) CreateAuthorizationTransaction(ctx context.Context, transaction identity.AuthorizationTransaction) error {
@@ -106,28 +158,54 @@ func (s *IdentityStore) ConsumeAuthorizationTransaction(ctx context.Context, ten
 }
 
 func (s *IdentityStore) CreateSession(ctx context.Context, session identity.Session) error {
+	return WithTenant(ctx, s.pool, session.TenantID.String(), func(tx pgx.Tx) error {
+		return insertSession(ctx, tx, session)
+	})
+}
+
+func (s *IdentityStore) CreateSessionForExternalIdentity(ctx context.Context, issuer, subject string, approvedUserUpdatedAt time.Time, session identity.Session) error {
+	if session.TenantID.IsZero() || session.UserID.IsZero() || issuer == "" || subject == "" || approvedUserUpdatedAt.IsZero() {
+		return fmt.Errorf("%w: OIDC session tenant, user, issuer, subject and approval version are required", shared.ErrValidation)
+	}
+	return WithTenant(ctx, s.pool, session.TenantID.String(), func(tx pgx.Tx) error {
+		var enabled bool
+		err := tx.QueryRow(ctx, `SELECT NOT u.disabled
+			FROM users u
+			WHERE u.tenant_id=$1 AND u.id=$2 AND u.id <> 'operator' AND u.updated_at=$5
+				AND EXISTS (SELECT 1 FROM oidc_external_identities e
+					WHERE e.tenant_id=u.tenant_id AND e.user_id=u.id AND e.issuer=$3 AND e.subject=$4)
+			FOR UPDATE OF u`, session.TenantID, session.UserID, issuer, subject, approvedUserUpdatedAt).Scan(&enabled)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !enabled) {
+			return shared.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("validate OIDC session subject and user: %w", err)
+		}
+		return insertSession(ctx, tx, session)
+	})
+}
+
+func insertSession(ctx context.Context, tx pgx.Tx, session identity.Session) error {
 	metadata, err := json.Marshal(session.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal session metadata: %w", err)
 	}
-	return WithTenant(ctx, s.pool, session.TenantID.String(), func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO oidc_sessions
-			(id, tenant_id, user_id, token_hash, csrf_token_hash, metadata, created_at, updated_at, expires_at, revoked_at, origin_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, session.ID.String(), session.TenantID.String(), session.UserID.String(), session.TokenHash, session.CSRFTokenHash, metadata, session.CreatedAt, session.UpdatedAt, session.ExpiresAt, session.RevokedAt, session.OriginAt)
-		if err == nil {
-			return nil
+	_, err = tx.Exec(ctx, `INSERT INTO oidc_sessions
+		(id, tenant_id, user_id, token_hash, csrf_token_hash, metadata, created_at, updated_at, expires_at, revoked_at, origin_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, session.ID.String(), session.TenantID.String(), session.UserID.String(), session.TokenHash, session.CSRFTokenHash, metadata, session.CreatedAt, session.UpdatedAt, session.ExpiresAt, session.RevokedAt, session.OriginAt)
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505":
+			return fmt.Errorf("OIDC session already exists: %w", shared.ErrConflict)
+		case "23503":
+			return fmt.Errorf("OIDC session user tenant link is invalid: %w", shared.ErrForbidden)
 		}
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
-			switch pgErr.Code {
-			case "23505":
-				return fmt.Errorf("OIDC session already exists: %w", shared.ErrConflict)
-			case "23503":
-				return fmt.Errorf("OIDC session user tenant link is invalid: %w", shared.ErrForbidden)
-			}
-		}
-		return fmt.Errorf("create OIDC session: %w", err)
-	})
+	}
+	return fmt.Errorf("create OIDC session: %w", err)
 }
 
 // RotateSession creates replacement and revokes the active previous session in one transaction.
@@ -188,6 +266,38 @@ func (s *IdentityStore) RevokeSession(ctx context.Context, tenantID, sessionID s
 		}
 		return shared.ErrNotFound
 	})
+}
+
+// RevokeUserSessions terminally revokes every unrevoked session of one user. Expired sessions
+// are revoked too, so no row of the lineage can ever be reactivated by a later change.
+func (s *IdentityStore) RevokeUserSessions(ctx context.Context, tenantID, userID shared.ID, now time.Time) (int, error) {
+	if tenantID.IsZero() || userID.IsZero() {
+		return 0, fmt.Errorf("%w: session revocation tenant and user are required", shared.ErrValidation)
+	}
+	var revoked int
+	err := WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
+		if err := lockIdentityUser(ctx, tx, tenantID, userID); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE oidc_sessions SET revoked_at=$3, updated_at=GREATEST(updated_at, $3)
+			WHERE tenant_id=$1 AND user_id=$2 AND revoked_at IS NULL`, tenantID.String(), userID.String(), now)
+		if err != nil {
+			return fmt.Errorf("revoke user OIDC sessions: %w", err)
+		}
+		revoked = int(tag.RowsAffected())
+		return nil
+	})
+	return revoked, err
+}
+
+func lockIdentityUser(ctx context.Context, tx pgx.Tx, tenantID, userID shared.ID) error {
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT id FROM users WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenantID, userID).Scan(&id); errors.Is(err, pgx.ErrNoRows) {
+		return shared.ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("lock OIDC session user: %w", err)
+	}
+	return nil
 }
 
 func scanExternalIdentity(row rowScanner) (identity.ExternalIdentity, error) {

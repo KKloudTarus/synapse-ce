@@ -1,16 +1,12 @@
 package ports
 
-import (
-	"context"
-
-	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
-)
+import "context"
 
 // OIDCIdentity is the verified non-secret identity output of a configured OpenID Provider.
+// It carries no role: provider groups never assign or change a Synapse role.
 type OIDCIdentity struct {
 	Issuer  string
 	Subject string
-	Role    user.Role
 	// Email is advisory unless EmailVerified is true in the signed ID token.
 	// Neither value is an account lookup key.
 	Email         string

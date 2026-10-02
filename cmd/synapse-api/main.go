@@ -399,6 +399,9 @@ func main() {
 		log.Error("OIDC posture invalid", "err", err)
 		os.Exit(1)
 	}
+	for _, warning := range cfg.OIDCDeprecationWarnings() {
+		log.Warn("deprecated OIDC configuration", "detail", warning)
+	}
 	if err := cfg.ValidateSecretVerification(); err != nil {
 		log.Error("active secret verification configuration invalid", "err", err)
 		os.Exit(1)
@@ -1432,22 +1435,28 @@ func main() {
 		log.Error("users service init failed", "err", err)
 		os.Exit(1)
 	}
+	// The last-admin guard counts the roster and then writes, and every user mutation commits with
+	// its audit record. Both need one transaction: PostgreSQL uses the tenant runner, and the
+	// no-DSN stores use the in-memory runner, whose repositories register compensations.
 	if vulnerabilityTransactions != nil {
-		// The last-admin guard counts the roster and then writes. Both statements must be one
-		// transaction, or two concurrent demotions each see the other admin still enabled and the
-		// tenant is left with nobody who can administer it.
 		usersService.SetTransactionRunner(vulnerabilityTransactions)
+	} else {
+		usersService.SetTransactionRunner(memory.NewTenantTransactionRunner())
 	}
 	if err := usersService.EnsureBootstrapAdmin(context.Background(), cfg.APIToken); err != nil {
 		log.Error("bootstrap admin seed failed", "err", err)
 		os.Exit(1)
 	}
-	auth := httpapi.NewAuthenticator(func(ctx context.Context, token string) (httpapi.Principal, bool) {
-		u, err := usersService.Authenticate(ctx, token)
+	// Disabling a user revokes its browser sessions in the same transaction as the user write.
+	usersService.SetIdentityStore(identityStore)
+	auth := httpapi.NewAuthenticator(func(ctx context.Context, token string) (httpapi.Principal, error) {
+		// The users service classifies the failure (invalid credential versus dependency outage)
+		// and constructs the bootstrap principal explicitly from SYNAPSE_API_TOKEN.
+		p, u, err := usersService.AuthenticatePrincipal(ctx, token)
 		if err != nil {
-			return httpapi.Principal{}, false
+			return httpapi.Principal{}, err
 		}
-		return httpapi.Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: u.TenantID}, true
+		return httpapi.Principal{ID: p.ActorID, Name: u.Name, Role: string(p.Role), TenantID: u.TenantID, Credential: p.Credential.Kind, Provenance: p.Provenance}, nil
 	})
 	// Audit read/verify use case: same signer as evidence, so the audit head is
 	// origin-attested at parity with the evidence chain.
@@ -1837,7 +1846,7 @@ func main() {
 	if cfg.OIDCEnabled {
 		provider, oidcErr := oidcadapter.New(context.Background(), oidcadapter.Config{
 			Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,
-			RedirectURL: cfg.OIDCRedirectURL, GroupRoleMapping: cfg.OIDCGroupRoleMapping,
+			RedirectURL: cfg.OIDCRedirectURL,
 		})
 		if oidcErr != nil {
 			log.Error("OIDC provider initialization failed", "err", oidcErr)
@@ -1858,6 +1867,15 @@ func main() {
 		if userContactService != nil {
 			oidcService.SetVerifiedEmailImporter(userContactService)
 		}
+		// Operator-approved subject linking uses the issuer exactly as the provider verifies it.
+		linkIssuer, oidcErr := oidcadapter.NormalizeIssuer(cfg.OIDCIssuer)
+		if oidcErr == nil {
+			oidcErr = usersService.SetOIDCLinking(linkIssuer, shared.ID(cfg.OIDCTenantID))
+		}
+		if oidcErr != nil {
+			log.Error("OIDC identity linking initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
 		httpOIDCService, oidcErr := httpapi.NewOIDCService(
 			func(ctx context.Context) (httpapi.OIDCAuthorization, error) {
 				result, err := oidcService.Begin(ctx)
@@ -1865,15 +1883,15 @@ func main() {
 			},
 			func(ctx context.Context, state, code, nonce string) (httpapi.OIDCSession, error) {
 				result, err := oidcService.Complete(ctx, state, code, nonce)
-				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: httpapi.OIDCPrincipal{ID: result.Principal.ID, Name: result.Principal.Name, Role: result.Principal.Role, TenantID: result.Principal.TenantID}}, err
+				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: oidcHTTPPrincipal(result.Principal)}, err
 			},
 			func(ctx context.Context, token string) (httpapi.OIDCSession, error) {
 				result, err := oidcService.Discover(ctx, token)
-				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: httpapi.OIDCPrincipal{ID: result.Principal.ID, Name: result.Principal.Name, Role: result.Principal.Role, TenantID: result.Principal.TenantID}}, err
+				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: oidcHTTPPrincipal(result.Principal)}, err
 			},
 			func(ctx context.Context, token, csrf string, unsafe bool) (httpapi.OIDCPrincipal, error) {
 				result, err := oidcService.Authenticate(ctx, token, csrf, unsafe)
-				return httpapi.OIDCPrincipal{ID: result.ID, Name: result.Name, Role: result.Role, TenantID: result.TenantID}, err
+				return oidcHTTPPrincipal(result), err
 			},
 			oidcService.Logout,
 		)
@@ -3951,6 +3969,12 @@ func (h scaJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, ca
 
 // channelTypeNames converts the notification registry's channel types to the plain names the
 // capability catalog carries.
+// oidcHTTPPrincipal maps the BFF principal to the HTTP boundary shape, keeping the session id and
+// lineage origin the authorization principal carries.
+func oidcHTTPPrincipal(p identitybff.Principal) httpapi.OIDCPrincipal {
+	return httpapi.OIDCPrincipal{ID: p.ID, Name: p.Name, Role: p.Role, TenantID: p.TenantID, SessionID: p.SessionID, AuthenticatedAt: p.AuthenticatedAt}
+}
+
 func channelTypeNames[T ~string](types []T) []string {
 	out := make([]string, len(types))
 	for i, channelType := range types {

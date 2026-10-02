@@ -8,11 +8,16 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"unicode"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -21,7 +26,11 @@ import (
 // BootstrapID is the stable id of the bootstrap admin. Historical actions were
 // attributed to "operator", so the bootstrap user owns that id and history stays
 // coherent ("who did this?" resolves to the bootstrap admin, not a dangling string).
-const BootstrapID = "operator"
+const BootstrapID = authz.BootstrapActorID
+
+// maxOIDCSubjectLen bounds an operator-supplied subject. OpenID Connect caps sub at 255 ASCII
+// characters.
+const maxOIDCSubjectLen = 255
 
 const apiKeyPrefix = "syn_"
 
@@ -40,12 +49,37 @@ type Service struct {
 	// because user management is a rare, human-paced operation; across replicas the row lock taken
 	// by ports.UserRosterLocker inside the transaction is what serializes them.
 	roster sync.Mutex
+	// identities revokes a user's browser sessions on disable and stores operator-approved OIDC
+	// links. Optional: without it there are no browser sessions to revoke and linking is off.
+	identities ports.IdentityStore
+	// oidcIssuer and oidcTenant are the fixed OIDC relying-party configuration. Linking is
+	// available only when both are set.
+	oidcIssuer string
+	oidcTenant shared.ID
+	// bootstrapDigest is the digest of SYNAPSE_API_TOKEN recorded by EnsureBootstrapAdmin. The
+	// bootstrap principal is constructed only when the presented token matches it.
+	bootstrapDigest string
 }
 
-// SetTransactionRunner makes the last-admin guard atomic against a concurrent second mutation.
-// Without it the count and the write commit separately, and the roster can change in between.
+// SetTransactionRunner makes every consequential mutation and its audit record one unit, and the
+// last-admin guard atomic against a concurrent second mutation.
 func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
 	s.transactions = transactions
+}
+
+// SetIdentityStore lets disable and re-enable revoke the user's browser sessions in the same
+// transaction as the user write.
+func (s *Service) SetIdentityStore(identities ports.IdentityStore) { s.identities = identities }
+
+// SetOIDCLinking enables the operator-approved (issuer, subject) link command for the fixed OIDC
+// tenant. issuer must be the exact normalized issuer the provider verifies ID tokens against.
+func (s *Service) SetOIDCLinking(issuer string, tenant shared.ID) error {
+	issuer = strings.TrimSpace(issuer)
+	if s.identities == nil || issuer == "" || tenant.IsZero() {
+		return fmt.Errorf("%w: OIDC linking requires an identity store, issuer, and tenant", shared.ErrValidation)
+	}
+	s.oidcIssuer, s.oidcTenant = issuer, shared.TenantOrDefault(tenant)
+	return nil
 }
 
 // NewService validates dependencies and returns the users service.
@@ -95,6 +129,7 @@ func (s *Service) EnsureBootstrapAdmin(ctx context.Context, token string) error 
 	}); err != nil {
 		return fmt.Errorf("seed bootstrap admin: %w", err)
 	}
+	s.bootstrapDigest = u.APIKeyHash
 	return nil
 }
 
@@ -176,15 +211,33 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, tenantID string, 
 	if err != nil {
 		return nil, "", err
 	}
-	if err := s.repo.Create(ctx, u); err != nil {
-		return nil, "", fmt.Errorf("create user: %w", err)
-	}
-	_ = s.audit.Record(ctx, ports.AuditEntry{
-		Actor: actor.ID, Action: "user.created", Target: u.ID.String(),
-		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": target.String()},
-		At:       s.clock.Now(),
+	created, err := guarded(ctx, s, actor, func(txCtx context.Context) (*user.User, error) {
+		if err := s.repo.Create(txCtx, u); err != nil {
+			return nil, fmt.Errorf("create user: %w", err)
+		}
+		if err := s.record(txCtx, ports.AuditEntry{
+			Actor: actor.ID, Action: "user.created", Target: u.ID.String(),
+			Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": target.String()},
+			At:       s.clock.Now(),
+		}); err != nil {
+			return nil, err
+		}
+		return u, nil
 	})
-	return u, plaintext, nil
+	if err != nil {
+		return nil, "", err
+	}
+	return created, plaintext, nil
+}
+
+// record appends the audit record of a consequential mutation. It runs inside the mutation's
+// tenant transaction when one exists, so an audit failure rolls the mutation back; either way the
+// failure is returned rather than dropped.
+func (s *Service) record(ctx context.Context, entry ports.AuditEntry) error {
+	if err := s.audit.Record(ctx, entry); err != nil {
+		return fmt.Errorf("record %s audit: %w", entry.Action, err)
+	}
+	return nil
 }
 
 // List returns the users of the actor's own tenant (the hash is on the struct; the adapter must not
@@ -206,9 +259,9 @@ func (s *Service) Update(ctx context.Context, actor Actor, id shared.ID, name st
 }
 
 func (s *Service) update(ctx context.Context, actor Actor, id shared.ID, name string, role user.Role) (*user.User, error) {
-	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
+	u, roster, err := s.lockedTarget(ctx, actor.tenant(), id)
 	if err != nil {
-		return nil, fmt.Errorf("load user: %w", err)
+		return nil, err
 	}
 	before := *u
 	now := s.clock.Now()
@@ -222,7 +275,7 @@ func (s *Service) update(ctx context.Context, actor Actor, id shared.ID, name st
 			return nil, err
 		}
 		if before.Role.Can(user.PermAdminister) && !u.Role.Can(user.PermAdminister) {
-			if err := s.assertNotLastEnabledAdmin(ctx, actor, u.ID, "demote"); err != nil {
+			if err := assertNotLastEnabledAdmin(roster, actor, u.ID, "demote"); err != nil {
 				return nil, err
 			}
 		}
@@ -230,14 +283,16 @@ func (s *Service) update(ctx context.Context, actor Actor, id shared.ID, name st
 	if err := s.repo.Update(ctx, actor.tenant(), u); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
-	_ = s.audit.Record(ctx, ports.AuditEntry{
+	if err := s.record(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: "user.updated", Target: u.ID.String(),
 		Metadata: map[string]string{
 			"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String(),
 			"previous_name": before.Name, "previous_role": string(before.Role),
 		},
 		At: now,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return u, nil
 }
 
@@ -255,30 +310,68 @@ func (s *Service) SetDisabled(ctx context.Context, actor Actor, id shared.ID, di
 }
 
 func (s *Service) setDisabled(ctx context.Context, actor Actor, id shared.ID, disabled bool) (*user.User, error) {
-	u, err := s.repo.GetByID(ctx, actor.tenant(), id)
+	u, roster, err := s.lockedTarget(ctx, actor.tenant(), id)
 	if err != nil {
-		return nil, fmt.Errorf("load user: %w", err)
+		return nil, err
 	}
 	if disabled && u.Role.Can(user.PermAdminister) && !u.Disabled {
-		if err := s.assertNotLastEnabledAdmin(ctx, actor, u.ID, "disable"); err != nil {
+		if err := assertNotLastEnabledAdmin(roster, actor, u.ID, "disable"); err != nil {
 			return nil, err
 		}
 	}
+	if u.Disabled == disabled {
+		// Nothing changes, so nothing is revoked or audited. Without this, enabling an enabled user
+		// would discard a working key, and repeating a disable would record a second revocation.
+		return u, nil
+	}
 	now := s.clock.Now()
 	u.SetDisabled(disabled, now)
+	metadata := map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String()}
+	// Both transitions permanently revoke the credentials the user holds now: the key digest is
+	// replaced with a fresh unusable one and every browser session is revoked. Revoking on enable as
+	// well covers an account disabled before disable revoked anything, whose row still holds the old
+	// digest and whose sessions were never revoked. After re-enabling, the administrator rotates to
+	// issue a new key.
+	unusable, err := unusableDigest()
+	if err != nil {
+		return nil, err
+	}
+	if err := u.SetAPIKeyHash(unusable, now); err != nil {
+		return nil, err
+	}
 	if err := s.repo.Update(ctx, actor.tenant(), u); err != nil {
 		return nil, fmt.Errorf("update user: %w", err)
 	}
+	if s.identities != nil {
+		// Same transaction as the user write: a failure here rolls the change back rather than
+		// leaving live browser sessions behind it.
+		revoked, err := s.identities.RevokeUserSessions(ctx, actor.tenant(), u.ID, now.UTC())
+		if err != nil {
+			return nil, fmt.Errorf("revoke user sessions: %w", err)
+		}
+		metadata["sessions_revoked"] = fmt.Sprintf("%d", revoked)
+	}
+	metadata["api_key_revoked"] = "true"
 	action := "user.enabled"
 	if disabled {
 		action = "user.disabled"
 	}
-	_ = s.audit.Record(ctx, ports.AuditEntry{
-		Actor: actor.ID, Action: action, Target: u.ID.String(),
-		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String()},
-		At:       now,
-	})
+	if err := s.record(ctx, ports.AuditEntry{
+		Actor: actor.ID, Action: action, Target: u.ID.String(), Metadata: metadata, At: now,
+	}); err != nil {
+		return nil, err
+	}
 	return u, nil
+}
+
+// unusableDigest is a random 256-bit value in the digest format. No token hashes to it, so a user
+// holding it has no working bearer key.
+func unusableDigest() (string, error) {
+	b := make([]byte, sha256.Size)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate unusable credential digest: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // RotateAPIKey issues a new API key for a user in the actor's tenant and returns it ONCE. The
@@ -298,24 +391,11 @@ func (s *Service) RotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (
 	return u, plaintext, nil
 }
 
-// rotateAPIKey issues the new key. It reads the user from the LOCKED roster rather than through a
-// plain lookup: Update writes the whole aggregate, so a read outside the lock lets a rotation on
-// one replica silently revert a disable or a demotion committed on another between the two
-// statements. Reading under the same row lock the guard takes makes the read-modify-write atomic.
+// rotateAPIKey issues the new key, reading the user from the locked roster (see lockedTarget).
 func (s *Service) rotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (*user.User, string, error) {
-	roster, err := s.lockedRoster(ctx, actor.tenant())
+	u, _, err := s.lockedTarget(ctx, actor.tenant(), id)
 	if err != nil {
-		return nil, "", fmt.Errorf("load user: %w", err)
-	}
-	var u *user.User
-	for _, candidate := range roster {
-		if candidate.ID == id {
-			u = candidate
-			break
-		}
-	}
-	if u == nil {
-		return nil, "", fmt.Errorf("load user: %w", shared.ErrNotFound)
+		return nil, "", err
 	}
 	plaintext, hash, err := generateKey()
 	if err != nil {
@@ -328,22 +408,20 @@ func (s *Service) rotateAPIKey(ctx context.Context, actor Actor, id shared.ID) (
 	if err := s.repo.Update(ctx, actor.tenant(), u); err != nil {
 		return nil, "", fmt.Errorf("update user: %w", err)
 	}
-	_ = s.audit.Record(ctx, ports.AuditEntry{
+	if err := s.record(ctx, ports.AuditEntry{
 		Actor: actor.ID, Action: "user.api_key_rotated", Target: u.ID.String(),
 		Metadata: map[string]string{"name": u.Name, "role": string(u.Role), "tenant": actor.tenant().String()},
 		At:       now,
-	})
+	}); err != nil {
+		return nil, "", err
+	}
 	return u, plaintext, nil
 }
 
 // assertNotLastEnabledAdmin refuses an action that would leave the tenant with no enabled admin.
 // It counts the tenant's OTHER enabled admins, so an admin cannot lock the tenant out by disabling
-// or demoting itself.
-func (s *Service) assertNotLastEnabledAdmin(ctx context.Context, actor Actor, id shared.ID, action string) error {
-	roster, err := s.lockedRoster(ctx, actor.tenant())
-	if err != nil {
-		return fmt.Errorf("count tenant admins: %w", err)
-	}
+// or demoting itself. roster must be the locked roster read by the same transaction.
+func assertNotLastEnabledAdmin(roster []*user.User, actor Actor, id shared.ID, action string) error {
 	for _, other := range roster {
 		if other.ID == id || other.Disabled {
 			continue
@@ -397,6 +475,25 @@ func guardedKey(ctx context.Context, s *Service, actor Actor, fn func(context.Co
 	return out, plaintext, nil
 }
 
+// lockedTarget reads one user from the LOCKED roster rather than through a plain lookup, and
+// returns that roster for the last-admin guard. Every mutation writes the whole aggregate, so a read
+// outside the lock lets a write on one replica silently revert a disable or a demotion committed on
+// another between the two statements. Reading every mutation's target under the same roster lock
+// makes each read-modify-write atomic, and taking the same locks in the same order means two user
+// mutations cannot deadlock against each other.
+func (s *Service) lockedTarget(ctx context.Context, tenant, id shared.ID) (*user.User, []*user.User, error) {
+	roster, err := s.lockedRoster(ctx, tenant)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load user: %w", err)
+	}
+	for _, candidate := range roster {
+		if candidate.ID == id {
+			return candidate, roster, nil
+		}
+	}
+	return nil, nil, fmt.Errorf("load user: %w", shared.ErrNotFound)
+}
+
 // lockedRoster reads the tenant's roster, locking the rows for the rest of the caller's transaction
 // where the repository supports it. A repository that cannot lock falls back to a plain read, which
 // leaves the in-process mutex as the only serialization.
@@ -407,17 +504,190 @@ func (s *Service) lockedRoster(ctx context.Context, tenant shared.ID) ([]*user.U
 	return s.repo.List(ctx, tenant)
 }
 
-// Authenticate resolves a presented bearer token to its (enabled) user, or an error.
+// Authenticate resolves a presented bearer token to its (enabled) user. The error wraps
+// authz.ErrCredentialInvalid for an unknown token or a disabled user, and
+// authz.ErrAuthenticationUnavailable when the repository failed, so a storage outage is never
+// reported as a bad credential.
 func (s *Service) Authenticate(ctx context.Context, token string) (*user.User, error) {
 	if token == "" {
-		return nil, fmt.Errorf("%w: empty token", shared.ErrValidation)
+		return nil, fmt.Errorf("empty token: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
 	}
 	u, err := s.repo.GetByAPIKeyHash(ctx, HashToken(token))
+	if errors.Is(err, shared.ErrNotFound) {
+		return nil, fmt.Errorf("unknown bearer token: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("resolve bearer token: %w: %w", authz.ErrAuthenticationUnavailable, err)
 	}
 	if u.Disabled {
-		return nil, fmt.Errorf("%w: user disabled", shared.ErrForbidden)
+		return nil, fmt.Errorf("user disabled: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
 	}
 	return u, nil
+}
+
+// AuthenticatePrincipal resolves a bearer token to a typed principal. The bootstrap principal is
+// constructed explicitly: only the user seeded from SYNAPSE_API_TOKEN, presenting exactly that
+// token, gets credential kind bootstrap. Every other user gets api_key. A row carrying the
+// bootstrap id whose digest is not the configured token's is refused rather than trusted.
+func (s *Service) AuthenticatePrincipal(ctx context.Context, token string) (authz.Principal, *user.User, error) {
+	u, err := s.Authenticate(ctx, token)
+	if err != nil {
+		return authz.Principal{}, nil, err
+	}
+	p := authz.Principal{
+		ActorID:    u.ID.String(),
+		TenantID:   shared.TenantOrDefault(shared.ID(u.TenantID)).String(),
+		Role:       u.Role,
+		Credential: authz.Credential{Kind: authz.KindAPIKey},
+		Provenance: "bearer",
+	}
+	if u.ID.String() == BootstrapID {
+		digest := HashToken(token)
+		if s.bootstrapDigest == "" || subtle.ConstantTimeCompare([]byte(digest), []byte(s.bootstrapDigest)) != 1 {
+			return authz.Principal{}, nil, fmt.Errorf("bootstrap credential does not match SYNAPSE_API_TOKEN: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
+		}
+		p.Credential.Kind = authz.KindBootstrap
+	}
+	return p, u, nil
+}
+
+// OIDCLink is the non-secret view of an approved (issuer, subject) link.
+type OIDCLink = identity.ExternalIdentity
+
+// LinkOIDCIdentity approves one exact (issuer, subject) for an existing user of the fixed OIDC
+// tenant, so that subject's next successful callback signs in as that user. It is the only way a
+// new subject gains access: there is no provisioning, email lookup, or group lookup.
+//
+// The command is confined to the configured OIDC tenant and the configured issuer (exact match),
+// refuses the bootstrap operator and disabled users, and writes the link and its audit record in
+// one tenant transaction, so an audit failure leaves no link behind.
+func (s *Service) LinkOIDCIdentity(ctx context.Context, actor Actor, id shared.ID, issuer, subject string) (OIDCLink, error) {
+	if s.identities == nil || s.oidcIssuer == "" || s.oidcTenant.IsZero() {
+		return OIDCLink{}, fmt.Errorf("%w: OIDC identity linking is not enabled", shared.ErrNotFound)
+	}
+	if err := actor.mayMutate(id); err != nil {
+		return OIDCLink{}, err
+	}
+	if actor.tenant() != s.oidcTenant {
+		return OIDCLink{}, fmt.Errorf("%w: OIDC identity links are confined to the configured OIDC tenant", shared.ErrForbidden)
+	}
+	if issuer != s.oidcIssuer {
+		return OIDCLink{}, fmt.Errorf("%w: issuer must exactly match the configured OIDC issuer", shared.ErrValidation)
+	}
+	if err := validSubject(subject); err != nil {
+		return OIDCLink{}, err
+	}
+	var link OIDCLink
+	_, err := guarded(ctx, s, actor, func(txCtx context.Context) (*user.User, error) {
+		target, _, err := s.lockedTarget(txCtx, actor.tenant(), id)
+		if err != nil {
+			return nil, err
+		}
+		if target.Disabled {
+			return nil, fmt.Errorf("%w: a disabled user cannot be linked to an external identity", shared.ErrConflict)
+		}
+		now := s.clock.Now().UTC()
+		link, err = identity.NewExternalIdentity(s.ids.NewID(), actor.tenant(), target.ID, issuer, subject, now)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.identities.CreateExternalIdentity(txCtx, link); err != nil {
+			return nil, fmt.Errorf("link OIDC identity: %w", err)
+		}
+		if err := s.record(txCtx, ports.AuditEntry{
+			Actor: actor.ID, Action: "user.oidc_identity_linked", Target: target.ID.String(),
+			Metadata: map[string]string{"tenant": actor.tenant().String(), "issuer": issuer, "subject": subject, "link_id": link.ID.String()},
+			At:       now,
+		}); err != nil {
+			return nil, err
+		}
+		return target, nil
+	})
+	if err != nil {
+		return OIDCLink{}, err
+	}
+	return link, nil
+}
+
+// UnlinkOIDCIdentity removes one approved (issuer, subject) link of a user of the fixed OIDC tenant,
+// so that subject's next callback is refused, and revokes every browser session of the user, since
+// a session minted through the removed link would otherwise outlive it. It is confined like
+// LinkOIDCIdentity: the configured OIDC tenant only, never the bootstrap operator. The removal, the
+// session revocation and the audit record are one tenant transaction, so an audit failure leaves
+// the link and the sessions in place. A link that does not belong to this user is not found.
+func (s *Service) UnlinkOIDCIdentity(ctx context.Context, actor Actor, id, linkID shared.ID) (OIDCLink, error) {
+	if s.identities == nil || s.oidcIssuer == "" || s.oidcTenant.IsZero() {
+		return OIDCLink{}, fmt.Errorf("%w: OIDC identity linking is not enabled", shared.ErrNotFound)
+	}
+	if err := actor.mayMutate(id); err != nil {
+		return OIDCLink{}, err
+	}
+	if actor.tenant() != s.oidcTenant {
+		return OIDCLink{}, fmt.Errorf("%w: OIDC identity links are confined to the configured OIDC tenant", shared.ErrForbidden)
+	}
+	if linkID.IsZero() {
+		return OIDCLink{}, fmt.Errorf("OIDC identity link: %w", shared.ErrNotFound)
+	}
+	var link OIDCLink
+	_, err := guarded(ctx, s, actor, func(txCtx context.Context) (*user.User, error) {
+		// The same roster lock every user mutation takes first, so unlinking orders its locks like
+		// a concurrent disable or link and cannot deadlock against one.
+		target, _, err := s.lockedTarget(txCtx, actor.tenant(), id)
+		if err != nil {
+			return nil, err
+		}
+		link, err = s.identities.DeleteExternalIdentity(txCtx, actor.tenant(), target.ID, linkID)
+		if err != nil {
+			return nil, fmt.Errorf("unlink OIDC identity: %w", err)
+		}
+		now := s.clock.Now().UTC()
+		revoked, err := s.identities.RevokeUserSessions(txCtx, actor.tenant(), target.ID, now)
+		if err != nil {
+			return nil, fmt.Errorf("revoke user sessions: %w", err)
+		}
+		if err := s.record(txCtx, ports.AuditEntry{
+			Actor: actor.ID, Action: "user.oidc_identity_unlinked", Target: target.ID.String(),
+			Metadata: map[string]string{
+				"tenant": actor.tenant().String(), "issuer": link.Issuer, "subject": link.Subject,
+				"link_id": link.ID.String(), "sessions_revoked": fmt.Sprintf("%d", revoked),
+			},
+			At: now,
+		}); err != nil {
+			return nil, err
+		}
+		return target, nil
+	})
+	if err != nil {
+		return OIDCLink{}, err
+	}
+	return link, nil
+}
+
+// ListOIDCLinks returns the approved links of one user in the actor's tenant.
+func (s *Service) ListOIDCLinks(ctx context.Context, actor Actor, id shared.ID) ([]OIDCLink, error) {
+	if s.identities == nil {
+		return nil, fmt.Errorf("%w: OIDC identity linking is not enabled", shared.ErrNotFound)
+	}
+	if _, err := s.repo.GetByID(ctx, actor.tenant(), id); err != nil {
+		return nil, fmt.Errorf("load user: %w", err)
+	}
+	links, err := s.identities.ListExternalIdentities(ctx, actor.tenant(), id)
+	if err != nil {
+		return nil, fmt.Errorf("list OIDC identity links: %w", err)
+	}
+	return links, nil
+}
+
+// validSubject accepts an OpenID Connect subject: 1 to 255 printable characters, compared
+// exactly, never trimmed or case-folded.
+func validSubject(subject string) error {
+	if subject == "" || len(subject) > maxOIDCSubjectLen || strings.TrimSpace(subject) != subject {
+		return fmt.Errorf("%w: subject must be 1 to %d characters without surrounding whitespace", shared.ErrValidation, maxOIDCSubjectLen)
+	}
+	for _, r := range subject {
+		if !unicode.IsPrint(r) {
+			return fmt.Errorf("%w: subject contains a non-printable character", shared.ErrValidation)
+		}
+	}
+	return nil
 }

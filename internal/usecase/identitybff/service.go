@@ -6,18 +6,25 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	identityuc "github.com/KKloudTarus/synapse-ce/internal/usecase/identityuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
+
+// ErrAccessDenied is returned by Complete when a verified subject has no approved link to an
+// available user in the fixed tenant. It wraps shared.ErrForbidden.
+var ErrAccessDenied = fmt.Errorf("OIDC access denied: %w", shared.ErrForbidden)
 
 type Config struct {
 	TenantID       shared.ID
@@ -30,7 +37,14 @@ type Session struct {
 	Token, CSRFToken string
 	Principal        Principal
 }
-type Principal struct{ ID, Name, Role, TenantID string }
+
+// Principal is the application identity a browser session resolves to. SessionID is the
+// non-secret session row id and AuthenticatedAt is the lineage origin (first login).
+type Principal struct {
+	ID, Name, Role, TenantID string
+	SessionID                string
+	AuthenticatedAt          time.Time
+}
 
 type Service struct {
 	provider   ports.OIDCProvider
@@ -55,6 +69,7 @@ func (s *Service) SetVerifiedEmailImporter(importer interface {
 	s.contacts = importer
 }
 
+// NewService validates the BFF dependencies.
 func NewService(provider ports.OIDCProvider, identities *identityuc.Service, store ports.IdentityStore, users ports.UserRepository, clock ports.Clock, ids ports.IDGenerator, cfg Config) (*Service, error) {
 	if provider == nil || identities == nil || store == nil || users == nil || clock == nil || ids == nil || cfg.TenantID.IsZero() || cfg.TransactionTTL <= 0 || cfg.SessionTTL <= 0 {
 		return nil, fmt.Errorf("%w: OIDC BFF service has invalid configuration", shared.ErrValidation)
@@ -75,7 +90,9 @@ func (s *Service) Begin(ctx context.Context) (Authorization, error) {
 	return Authorization{URL: url, Nonce: start.Nonce}, nil
 }
 
-// Complete burns state before exchange, validates cookie and signed token nonce, then accepts an exact issuer/subject link in the fixed tenant.
+// Complete burns state before exchange, validates cookie and signed token nonce, then accepts
+// only a preapproved exact issuer/subject link in the fixed tenant. An unknown subject is denied:
+// no user, link, or session is created, and provider groups never touch any Synapse role.
 func (s *Service) Complete(ctx context.Context, state, code, nonce string) (Session, error) {
 	if strings.TrimSpace(nonce) == "" {
 		return Session{}, fmt.Errorf("OIDC nonce cookie is missing: %w", shared.ErrForbidden)
@@ -90,9 +107,6 @@ func (s *Service) Complete(ctx context.Context, state, code, nonce string) (Sess
 	verified, err := s.provider.ExchangeAndVerify(ctx, code, transaction.PKCEVerifier, nonce)
 	if err != nil {
 		return Session{}, fmt.Errorf("verify OIDC callback: %w", err)
-	}
-	if !verified.Role.Valid() {
-		return Session{}, fmt.Errorf("OIDC group mapping produced no valid role: %w", shared.ErrForbidden)
 	}
 	tenantCtx := shared.WithTenant(ctx, s.cfg.TenantID)
 	u, err := s.resolveUser(tenantCtx, verified)
@@ -110,113 +124,118 @@ func (s *Service) Complete(ctx context.Context, state, code, nonce string) (Sess
 			return Session{}, fmt.Errorf("synchronize verified OIDC contact: %w", syncErr)
 		}
 	}
-	created, err := s.identities.CreateSession(ctx, s.cfg.TenantID, u.ID, nil, s.cfg.SessionTTL)
+	created, err := s.createSessionForExternalIdentity(ctx, u.ID, u.Audit.UpdatedAt, verified.Issuer, verified.Subject)
 	if err != nil {
-		return Session{}, fmt.Errorf("create OIDC session: %w", err)
+		return Session{}, err
 	}
-	return Session{Token: created.Token, CSRFToken: created.CSRFToken, Principal: Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: s.cfg.TenantID.String()}}, nil
+	return Session{Token: created.Token, CSRFToken: created.CSRFToken, Principal: s.principal(u, created.Session)}, nil
 }
 
-// resolveUser maps a verified issuer/subject to a tenant-scoped user, provisioning the link on
-// first login. The operator-configured group mapping is authoritative for the role, so a group
-// change at the provider is applied here rather than rejecting the login as a mismatch.
+// createSessionForExternalIdentity generates opaque credentials, then delegates the final exact
+// subject, enabled-user, and unchanged-approval checks plus persistence to one atomic store write.
+func (s *Service) createSessionForExternalIdentity(ctx context.Context, userID shared.ID, approvedUserUpdatedAt time.Time, issuer, subject string) (identityuc.CreatedSession, error) {
+	issuerStore, ok := s.store.(ports.ExternalIdentitySessionIssuer)
+	if !ok {
+		return identityuc.CreatedSession{}, fmt.Errorf("create OIDC session: %w", authz.ErrAuthenticationUnavailable)
+	}
+	if s.cfg.TenantID.IsZero() || userID.IsZero() || s.cfg.SessionTTL <= 0 {
+		return identityuc.CreatedSession{}, fmt.Errorf("%w: tenant, user, and positive session lifetime are required", shared.ErrValidation)
+	}
+	token, err := opaqueToken()
+	if err != nil {
+		return identityuc.CreatedSession{}, err
+	}
+	csrfToken, err := opaqueToken()
+	if err != nil {
+		return identityuc.CreatedSession{}, err
+	}
+	now := s.clock.Now().UTC()
+	session, err := identity.NewSession(s.ids.NewID(), s.cfg.TenantID, userID, hash(token), hash(csrfToken), nil, now.Add(s.cfg.SessionTTL), now)
+	if err != nil {
+		return identityuc.CreatedSession{}, err
+	}
+	if err := issuerStore.CreateSessionForExternalIdentity(ctx, issuer, subject, approvedUserUpdatedAt, session); err != nil {
+		if errors.Is(err, shared.ErrNotFound) {
+			return identityuc.CreatedSession{}, fmt.Errorf("OIDC subject or user is no longer available: %w", ErrAccessDenied)
+		}
+		return identityuc.CreatedSession{}, fmt.Errorf("create OIDC session: %w", err)
+	}
+	return identityuc.CreatedSession{Session: session, Token: token, CSRFToken: csrfToken}, nil
+}
+
+// resolveUser maps a verified issuer/subject to its preapproved tenant-scoped user. It only reads:
+// the link must already exist (approved by an operator or carried over from earlier releases), and
+// the user's stored role is authoritative.
 func (s *Service) resolveUser(ctx context.Context, verified ports.OIDCIdentity) (*user.User, error) {
 	external, err := s.store.GetExternalIdentity(ctx, verified.Issuer, verified.Subject)
 	switch {
-	case err == nil:
-		if external.TenantID != s.cfg.TenantID {
-			return nil, fmt.Errorf("OIDC linked identity tenant mismatch: %w", shared.ErrForbidden)
-		}
-		u, getErr := s.users.GetByID(ctx, external.TenantID, external.UserID)
-		if getErr != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID {
-			return nil, fmt.Errorf("OIDC user is unavailable: %w", shared.ErrForbidden)
-		}
-		if u.ID.String() == usersuc.BootstrapID {
-			// The bootstrap principal is the deployment operator, seeded from SYNAPSE_API_TOKEN,
-			// and user management refuses to mutate it for exactly that reason. This path writes
-			// the same table through Upsert, so it has to refuse too, or an identity-provider
-			// group change would demote the one identity that administers the deployment. No code
-			// path links an external identity to this id today; the guard is here so that stays
-			// true if one ever does.
-			return nil, fmt.Errorf("the bootstrap operator cannot be linked to an external identity: %w", shared.ErrForbidden)
-		}
-		if u.Role != verified.Role {
-			u.Role = verified.Role
-			u.Audit.UpdatedAt = s.clock.Now().UTC()
-			if err := s.users.Upsert(ctx, u); err != nil {
-				return nil, fmt.Errorf("apply mapped OIDC role: %w", err)
-			}
-		}
-		return u, nil
 	case errors.Is(err, shared.ErrNotFound):
-		return s.provisionUser(ctx, verified)
-	default:
-		return nil, fmt.Errorf("resolve linked OIDC identity: %w", err)
+		return nil, fmt.Errorf("OIDC subject has no approved link: %w", ErrAccessDenied)
+	case err != nil:
+		return nil, fmt.Errorf("resolve linked OIDC identity: %w: %w", authz.ErrAuthenticationUnavailable, err)
 	}
-}
-
-// provisionUser creates the tenant-scoped user for a first-time subject and links it. The
-// API-key hash is an unguessable random value, so a provisioned identity can never be
-// authenticated with a bearer token.
-func (s *Service) provisionUser(ctx context.Context, verified ports.OIDCIdentity) (*user.User, error) {
-	unusableAPIKeyHash, err := randomHex()
-	if err != nil {
-		return nil, err
+	if external.TenantID != s.cfg.TenantID {
+		return nil, fmt.Errorf("OIDC linked identity tenant mismatch: %w", ErrAccessDenied)
 	}
-	now := s.clock.Now().UTC()
-	u, err := user.New(s.ids.NewID(), s.cfg.TenantID.String(), oidcDisplayName(verified), verified.Role, unusableAPIKeyHash, now)
-	if err != nil {
-		return nil, fmt.Errorf("build provisioned OIDC user: %w", err)
+	u, err := s.users.GetByID(ctx, external.TenantID, external.UserID)
+	switch {
+	case errors.Is(err, shared.ErrNotFound):
+		return nil, fmt.Errorf("OIDC user is unavailable: %w", ErrAccessDenied)
+	case err != nil:
+		return nil, fmt.Errorf("load linked OIDC user: %w: %w", authz.ErrAuthenticationUnavailable, err)
 	}
-	if err := s.users.Create(ctx, u); err != nil {
-		return nil, fmt.Errorf("create provisioned OIDC user: %w", err)
-	}
-	if _, err := s.identities.LinkExternalIdentity(ctx, s.cfg.TenantID, u.ID, verified.Issuer, verified.Subject); err != nil {
-		// A concurrent replica may have won the link. Re-read so both requests converge on the
-		// same user rather than leaving this login broken.
-		if errors.Is(err, shared.ErrConflict) {
-			external, getErr := s.store.GetExternalIdentity(ctx, verified.Issuer, verified.Subject)
-			if getErr == nil && external.TenantID == s.cfg.TenantID {
-				if existing, userErr := s.users.GetByID(ctx, external.TenantID, external.UserID); userErr == nil && !existing.Disabled {
-					return existing, nil
-				}
-			}
-		}
-		return nil, fmt.Errorf("link provisioned OIDC identity: %w", err)
+	if !s.available(u) {
+		return nil, fmt.Errorf("OIDC user is unavailable: %w", ErrAccessDenied)
 	}
 	return u, nil
 }
 
-// oidcDisplayName never trusts a provider-supplied display string for identity; the subject is
-// the stable identifier and the name is only shown in the UI.
-func oidcDisplayName(verified ports.OIDCIdentity) string {
-	if name := strings.TrimSpace(verified.Name); name != "" {
-		return name
-	}
-	return verified.Subject
+// available reports whether u may hold a browser session: enabled, a valid human role, in the fixed
+// tenant, and never the bootstrap operator, whose only credential is SYNAPSE_API_TOKEN.
+func (s *Service) available(u *user.User) bool {
+	return !u.Disabled && u.Role.Valid() && u.ID.String() != usersuc.BootstrapID &&
+		shared.TenantOrDefault(shared.ID(u.TenantID)) == s.cfg.TenantID
 }
 
-func randomHex() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate provisioned credential placeholder: %w", err)
+func (s *Service) principal(u *user.User, session identity.Session) Principal {
+	return Principal{
+		ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: s.cfg.TenantID.String(),
+		SessionID: session.ID.String(), AuthenticatedAt: session.OriginAt,
 	}
-	return hex.EncodeToString(buf), nil
 }
 
+// sessionUser loads the user behind an authenticated session. A missing, disabled, or otherwise
+// unavailable user makes the session invalid; a repository failure is a dependency outage.
+func (s *Service) sessionUser(ctx context.Context, session identity.Session) (*user.User, error) {
+	u, err := s.users.GetByID(ctx, session.TenantID, session.UserID)
+	if errors.Is(err, shared.ErrNotFound) {
+		return nil, fmt.Errorf("session user not found: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load session user: %w: %w", authz.ErrAuthenticationUnavailable, err)
+	}
+	if !s.available(u) {
+		return nil, fmt.Errorf("session user is unavailable: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
+	}
+	return u, nil
+}
+
+// Authenticate resolves a browser session for one request. The lineage cap, revocation, and the
+// user's availability are checked every time. Errors wrap authz.ErrCredentialInvalid,
+// authz.ErrCSRFInvalid, or authz.ErrAuthenticationUnavailable.
 func (s *Service) Authenticate(ctx context.Context, token, csrfToken string, unsafe bool) (Principal, error) {
 	session, err := s.identities.AuthenticateSession(ctx, s.cfg.TenantID, token)
 	if err != nil {
 		return Principal{}, err
 	}
 	if unsafe && (csrfToken == "" || subtle.ConstantTimeCompare([]byte(hash(csrfToken)), []byte(session.CSRFTokenHash)) != 1) {
-		return Principal{}, fmt.Errorf("CSRF token mismatch: %w", shared.ErrForbidden)
+		return Principal{}, fmt.Errorf("CSRF token mismatch: %w: %w", authz.ErrCSRFInvalid, shared.ErrForbidden)
 	}
-	u, err := s.users.GetByID(ctx, session.TenantID, session.UserID)
-	if err != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID {
-		return Principal{}, shared.ErrForbidden
+	u, err := s.sessionUser(ctx, session)
+	if err != nil {
+		return Principal{}, err
 	}
-	return Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: s.cfg.TenantID.String()}, nil
+	return s.principal(u, session), nil
 }
 
 // Discover validates a browser session and rotates its opaque session and CSRF tokens.
@@ -226,24 +245,29 @@ func (s *Service) Discover(ctx context.Context, token string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	u, err := s.users.GetByID(ctx, session.TenantID, session.UserID)
-	if err != nil || u.Disabled || shared.TenantOrDefault(shared.ID(u.TenantID)) != s.cfg.TenantID || !u.Role.Valid() {
-		return Session{}, shared.ErrForbidden
+	u, err := s.sessionUser(ctx, session)
+	if err != nil {
+		return Session{}, err
 	}
 	created, err := s.identities.RotateSession(ctx, session, nil, s.cfg.SessionTTL)
 	if err != nil {
 		return Session{}, fmt.Errorf("rotate discovered OIDC session: %w", err)
 	}
-	return Session{Token: created.Token, CSRFToken: created.CSRFToken, Principal: Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: s.cfg.TenantID.String()}}, nil
+	return Session{Token: created.Token, CSRFToken: created.CSRFToken, Principal: s.principal(u, created.Session)}, nil
 }
 
+// Logout revokes the presented session. A session that is already invalid needs no revocation, so
+// it succeeds; a dependency failure is returned so the caller can retry.
 func (s *Service) Logout(ctx context.Context, token string) error {
 	session, err := s.identities.AuthenticateSession(ctx, s.cfg.TenantID, token)
+	if errors.Is(err, authz.ErrCredentialInvalid) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	if err := s.store.RevokeSession(ctx, s.cfg.TenantID, session.ID, s.clock.Now().UTC()); err != nil {
-		return fmt.Errorf("revoke OIDC session: %w", err)
+	if err := s.store.RevokeSession(ctx, s.cfg.TenantID, session.ID, s.clock.Now().UTC()); err != nil && !errors.Is(err, shared.ErrConflict) {
+		return fmt.Errorf("revoke OIDC session: %w: %w", authz.ErrAuthenticationUnavailable, err)
 	}
 	return nil
 }
@@ -251,4 +275,12 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 func hash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func opaqueToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate secure random value: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -45,7 +46,7 @@ func TestIsPlatformAdminFailsClosed(t *testing.T) {
 		{"empty principal", context.WithValue(context.Background(), principalKey, Principal{}), false},
 		{"tenant admin", context.WithValue(context.Background(), principalKey, Principal{ID: "u1", Role: "admin", TenantID: "tenant-a"}), false},
 		{"tenant member", context.WithValue(context.Background(), principalKey, Principal{ID: "u2", Role: "member", TenantID: "tenant-a"}), false},
-		{"platform operator", context.WithValue(context.Background(), principalKey, Principal{ID: PrincipalOperator, Role: "admin"}), true},
+		{"platform operator", context.WithValue(context.Background(), principalKey, Principal{ID: PrincipalOperator, Role: "admin", Credential: authz.KindBootstrap}), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,7 +85,7 @@ func TestRequirePlatformAdminRejectsTenantAdmin(t *testing.T) {
 		reached = false
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/vulnerability/sources", nil)
-		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: PrincipalOperator, Role: "admin"}))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: PrincipalOperator, Role: "admin", Credential: authz.KindBootstrap}))
 		h(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)

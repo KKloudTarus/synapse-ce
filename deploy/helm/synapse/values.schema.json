@@ -826,10 +826,10 @@
           "type": "string"
         },
         "groupRoleMapping": {
+          "description": "Deprecated and ignored: provider groups never assign or change a Synapse role.",
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[^=]+=(admin|consultant|reviewer|readonly|member)$"
+            "type": "string"
           }
         },
         "transactionTTL": {

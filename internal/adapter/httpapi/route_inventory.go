@@ -25,8 +25,60 @@ type RouteRegistration struct {
 	// "PermManageIntegrations". Empty when the guard is not rt.authz or its first argument is not a
 	// selector such as userdom.PermView.
 	Permission string
-	// Line is the line in router.go the registration sits on.
+	// Recovery names the identity-recovery action an rt.recoverable guard declares, for example
+	// "RecoveryLogout". Empty otherwise.
+	Recovery string
+	// PlatformOnly is true when rt.requirePlatformAdmin appears anywhere in the handler chain.
+	PlatformOnly bool
+	// Line is the line in the source file the registration sits on.
 	Line int
+}
+
+// RouteClass is the one authentication and authorization classification of a human route.
+type RouteClass string
+
+const (
+	// RoutePublic carries no human authentication.
+	RoutePublic RouteClass = "public"
+	// RouteAuthenticated needs an authenticated human principal but no role.
+	RouteAuthenticated RouteClass = "authenticated"
+	// RoutePermission needs a role permission (see Permission).
+	RoutePermission RouteClass = "permission"
+	// RoutePlatformOnly needs the permission and the bootstrap principal.
+	RoutePlatformOnly RouteClass = "platform_only"
+	// RouteUnclassified is a registration the inventory cannot place. It is always a failure.
+	RouteUnclassified RouteClass = "unclassified"
+)
+
+// routeGuards are the human authorization guards and whether they carry a permission argument.
+// Every one of them calls authz.Decide.
+var routeGuards = map[string]bool{
+	"rt.authz":               true,
+	"rt.recoverable":         true,
+	"rt.ownershipAuthorized": true,
+	"rt.authenticated":       false,
+}
+
+// Class returns the route's single classification. A route with no guard is public only if it is
+// listed in public; anything else unguarded, or guarded by an unknown wrapper, is unclassified.
+func (r RouteRegistration) Class(public map[string]bool) RouteClass {
+	takesPermission, guarded := routeGuards[r.Guard]
+	switch {
+	case r.Guard == "" && public[r.Pattern]:
+		return RoutePublic
+	case !guarded:
+		return RouteUnclassified
+	case r.PlatformOnly:
+		if r.Permission == "" {
+			return RouteUnclassified
+		}
+		return RoutePlatformOnly
+	case takesPermission && r.Permission != "":
+		return RoutePermission
+	case r.Guard == "rt.authenticated" || r.Guard == "rt.recoverable":
+		return RouteAuthenticated
+	}
+	return RouteUnclassified
 }
 
 // ParseRouteRegistrations reads a router source file and returns every route it registers.
@@ -76,7 +128,10 @@ func ParseRouteRegistrations(filename string) ([]RouteRegistration, error) {
 			problems = append(problems, fmt.Sprintf("%s:%d: route pattern %s is not a valid string literal", filename, line, lit.Value))
 			return true
 		}
-		routes = append(routes, RouteRegistration{Pattern: pattern, Guard: outermostCallee(call.Args[1]), Permission: authzPermission(call.Args[1]), Line: line})
+		routes = append(routes, RouteRegistration{
+			Pattern: pattern, Guard: outermostCallee(call.Args[1]), Permission: authzPermission(call.Args[1]),
+			Recovery: recoveryAction(call.Args[1]), PlatformOnly: mentionsCallee(call.Args[1], "rt.requirePlatformAdmin"), Line: line,
+		})
 		return true
 	})
 
@@ -88,16 +143,41 @@ func ParseRouteRegistrations(filename string) ([]RouteRegistration, error) {
 	return routes, nil
 }
 
-// authzPermission returns the permission constant passed to an outermost rt.authz guard.
+// authzPermission returns the permission constant passed to an outermost permission guard
+// (rt.authz, rt.recoverable or rt.ownershipAuthorized). An empty-string permission reports "".
 func authzPermission(expr ast.Expr) string {
 	call, ok := expr.(*ast.CallExpr)
-	if !ok || outermostCallee(expr) != "rt.authz" || len(call.Args) == 0 {
+	if !ok || !routeGuards[outermostCallee(expr)] || len(call.Args) == 0 {
 		return ""
 	}
 	if sel, ok := call.Args[0].(*ast.SelectorExpr); ok {
 		return sel.Sel.Name
 	}
 	return ""
+}
+
+// recoveryAction returns the recovery action constant an outermost rt.recoverable guard names.
+func recoveryAction(expr ast.Expr) string {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || outermostCallee(expr) != "rt.recoverable" || len(call.Args) < 2 {
+		return ""
+	}
+	if sel, ok := call.Args[1].(*ast.SelectorExpr); ok {
+		return sel.Sel.Name
+	}
+	return ""
+}
+
+// mentionsCallee reports whether callee is applied anywhere inside a handler expression.
+func mentionsCallee(expr ast.Expr, callee string) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if e, ok := n.(ast.Expr); ok && outermostCallee(e) == callee {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // outermostCallee names the function applied to a handler expression, so a route registered as

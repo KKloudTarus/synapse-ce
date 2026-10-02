@@ -116,3 +116,75 @@ func TestIdentityStoreSessionRevocationAndTenantLinkage(t *testing.T) {
 		t.Fatalf("revoked session must remain persisted but inactive: got=%+v err=%v", got, err)
 	}
 }
+
+func TestIdentityMemoryCreateSessionForExternalIdentityRequiresCurrentApproval(t *testing.T) {
+	store, ctx, now := identityMemoryStore(t)
+	external, err := identity.NewExternalIdentity("link-1", "tenant-a", "user", "https://issuer.example", "sub", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateExternalIdentity(ctx, external); err != nil {
+		t.Fatal(err)
+	}
+	session, err := identity.NewSession("session-approval", "tenant-a", "user", "token-approval", "csrf-approval", nil, now.Add(time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateSessionForExternalIdentity(ctx, external.Issuer, external.Subject, now.Add(-time.Second), session); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("stale user approval = %v, want not found", err)
+	}
+	if _, err := store.GetSessionByTokenHash(ctx, session.TokenHash); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("stale approval persisted session: %v", err)
+	}
+	if _, err := store.DeleteExternalIdentity(ctx, external.TenantID, external.UserID, external.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateSessionForExternalIdentity(ctx, external.Issuer, external.Subject, now, session); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("removed subject approval = %v, want not found", err)
+	}
+	if _, err := store.GetSessionByTokenHash(ctx, session.TokenHash); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("removed approval persisted session: %v", err)
+	}
+}
+
+// DeleteExternalIdentity removes only a link of the named tenant and user, and inside a tenant
+// transaction that fails the link is restored.
+func TestIdentityMemoryDeleteExternalIdentity(t *testing.T) {
+	store, ctx, now := identityMemoryStore(t)
+	external, err := identity.NewExternalIdentity("link-1", "tenant-a", "user", "https://issuer.example", "sub", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateExternalIdentity(ctx, external); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DeleteExternalIdentity(ctx, "tenant-b", "user", "link-1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("another tenant: want ErrNotFound, got %v", err)
+	}
+	if _, err := store.DeleteExternalIdentity(ctx, "tenant-a", "someone-else", "link-1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("another user: want ErrNotFound, got %v", err)
+	}
+	runner := NewTenantTransactionRunner()
+	rollback := errors.New("audit failed")
+	if err := runner.Run(ctx, "tenant-a", func(txCtx context.Context) error {
+		if _, err := store.DeleteExternalIdentity(txCtx, "tenant-a", "user", "link-1"); err != nil {
+			t.Fatalf("delete inside transaction: %v", err)
+		}
+		return rollback
+	}); !errors.Is(err, rollback) {
+		t.Fatalf("run: %v", err)
+	}
+	if _, err := store.GetExternalIdentity(ctx, "https://issuer.example", "sub"); err != nil {
+		t.Fatalf("a rolled-back delete must restore the link: %v", err)
+	}
+	got, err := store.DeleteExternalIdentity(ctx, "tenant-a", "user", "link-1")
+	if err != nil || got.ID != "link-1" {
+		t.Fatalf("delete = %+v, %v", got, err)
+	}
+	if _, err := store.GetExternalIdentity(ctx, "https://issuer.example", "sub"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("deleted link still resolves: %v", err)
+	}
+	if _, err := store.DeleteExternalIdentity(ctx, "tenant-a", "user", "link-1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("repeated delete: want ErrNotFound, got %v", err)
+	}
+}

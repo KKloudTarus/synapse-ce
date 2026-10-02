@@ -18,9 +18,11 @@ Browser OIDC uses a backend-for-frontend (BFF) model:
   are not authorization.
 - Each deployment has one fixed Synapse tenant for browser sessions. The BFF does not choose a tenant
   from an OIDC claim, request parameter, host header, or client-side state.
-- A matched identity maps only to an explicitly allowlisted existing role: `admin`, `consultant`,
-  `reviewer`, or `read-only`. Unknown, missing, or newly asserted provider roles deny sign-in; the BFF
-  never creates roles or expands privileges from provider claims.
+- A matched identity signs in as the existing Synapse user it is linked to, with that user's Synapse
+  role. Provider claims, including groups, never create a user, assign a role, or change one. An unknown
+  subject is denied until an administrator approves its exact issuer and subject link, an audited
+  operation. (Amended: earlier behavior provisioned unknown subjects and derived the role from an
+  allowlisted group mapping; both were removed.)
 - The browser receives only an opaque, high-entropy session identifier in a `Secure`, `HttpOnly` cookie.
   Session identity, expiry, revocation state, and role live in a shared durable session store so any API
   replica can validate or revoke the session. No bearer or OIDC token is exposed to browser JavaScript.

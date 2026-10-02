@@ -1,11 +1,11 @@
-import { ChevronDown, Eye, EyeOff, Key01, Loading01, LogIn04, ShieldTick } from '@untitledui/icons'
-import { useState, type ReactNode } from 'react'
+import { ChevronDown, Eye, EyeOff, Key01, Loading01, LogIn04, RefreshCw01, ShieldTick } from '@untitledui/icons'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { Button, ErrorState, Field, Input } from '../components/ui'
 import logo from '../assets/logo.png'
 
 export function Connect() {
-  const { phase, aup, error, connecting, connect, acceptAup, logout, oidcAvailable } = useAuth()
+  const { phase, aup, error, errorRequestId, canRetry, retrying, retry, connecting, connect, acceptAup, logout, oidcAvailable } = useAuth()
   const [token, setToken] = useState('')
   const [showToken, setShowToken] = useState(false)
   const [accepting, setAccepting] = useState(false)
@@ -35,7 +35,7 @@ export function Connect() {
           <div className="max-h-[46vh] overflow-y-auto rounded-xl border border-secondary bg-secondary/30 p-4">
             <p className="whitespace-pre-line text-sm leading-relaxed text-secondary">{aup.text}</p>
           </div>
-          {error && <div className="mt-4"><ErrorState message={error} /></div>}
+          {error && <AuthError className="mt-4" message={error} requestId={errorRequestId} canRetry={canRetry} retrying={retrying} onRetry={retry} />}
           <div className="mt-5 flex items-center justify-between gap-3">
             <button
               type="button"
@@ -60,7 +60,7 @@ export function Connect() {
             </p>
           </div>
 
-          {error && <div className="mb-4"><ErrorState message={error} /></div>}
+          {error && <AuthError className="mb-4" message={error} requestId={errorRequestId} canRetry={canRetry} retrying={retrying} onRetry={retry} />}
 
           {oidcAvailable && (
             <>
@@ -134,6 +134,54 @@ export function Connect() {
         </Panel>
       )}
     </AuthShell>
+  )
+}
+
+// The failure region for the sign-in gate. It takes focus when a new error appears so keyboard and
+// screen-reader users land on it, and it offers Retry only when the credential was kept and repeating
+// restoration may succeed. Retry is disabled while an attempt is running, so a double activation
+// sends one request.
+function AuthError({ message, requestId, canRetry, retrying, onRetry, className }: {
+  message: string
+  requestId: string | null
+  canRetry: boolean
+  retrying: boolean
+  onRetry: () => Promise<void>
+  className?: string
+}) {
+  const regionRef = useRef<HTMLDivElement>(null)
+  const retryRef = useRef<HTMLDivElement>(null)
+  // Refocus after each finished attempt too: the disabled button drops focus while a retry runs.
+  useEffect(() => {
+    if (retrying) return
+    if (canRetry) retryRef.current?.querySelector('button')?.focus()
+    else regionRef.current?.focus()
+  }, [message, canRetry, retrying])
+  return (
+    <div className={className}>
+      <div ref={regionRef} tabIndex={-1} className="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+        <ErrorState message={message} />
+      </div>
+      {requestId && (
+        <p className="mt-2 break-all text-[11px] text-tertiary">
+          Request ID <span className="font-mono text-secondary">{requestId}</span>
+        </p>
+      )}
+      {canRetry && (
+        <div ref={retryRef} className="mt-3">
+          <Button
+            type="button"
+            variant="secondary"
+            loading={retrying}
+            onClick={() => { void onRetry() }}
+            className="w-full"
+          >
+            {!retrying && <RefreshCw01 className="size-4" />}
+            {retrying ? 'Retrying…' : 'Retry'}
+          </Button>
+        </div>
+      )}
+    </div>
   )
 }
 

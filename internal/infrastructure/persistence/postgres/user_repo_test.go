@@ -84,6 +84,105 @@ func TestBootstrapIsConcurrentAndAuditedOnce(t *testing.T) {
 	}
 }
 
+func TestUserRepoListForUpdateUsesCanonicalLockOrderAndPresentationOrder(t *testing.T) {
+	dsn := testDSN(t)
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	tenant := shared.ID("lock-order-" + randHex(t))
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES($1,$2)`, tenant.String(), "Lock order"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE ownership_tenant_id=$1`, tenant.String())
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tenants WHERE id=$1`, tenant.String())
+	})
+	// ID order is a,z while presentation order is z,a.
+	for _, row := range []struct {
+		id      string
+		created time.Time
+	}{{"z", time.Unix(1, 0).UTC()}, {"a", time.Unix(2, 0).UTC()}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO users(id,name,role,api_key_hash,tenant_id,created_at,updated_at)
+			VALUES($1,$1,'member',$2,$3,$4,$4)`, row.id, identityDigest("lock-order-"+tenant.String()+row.id), tenant.String(), row.created); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.current_tenant',$1,true)`, tenant.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT id FROM users WHERE ownership_tenant_id=$1 AND id='a' FOR UPDATE`, tenant.String()); err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	listDone := make(chan struct {
+		users []*user.User
+		err   error
+	}, 1)
+	mutateDone := make(chan error, 1)
+	go func() {
+		close(started)
+		var users []*user.User
+		err := NewTenantTransactionRunner(pool).Run(context.Background(), tenant, func(callCtx context.Context) error {
+			var err error
+			users, err = NewUserRepository(pool).ListForUpdate(callCtx, tenant)
+			return err
+		})
+		listDone <- struct {
+			users []*user.User
+			err   error
+		}{users: users, err: err}
+	}()
+	<-started
+	// Give ListForUpdate time to block on a before this transaction asks for z. A legacy
+	// created_at lock order would already hold z and deadlock here.
+	time.Sleep(100 * time.Millisecond)
+	go func() {
+		_, err := tx.Exec(context.Background(), `UPDATE users SET name=name WHERE ownership_tenant_id=$1 AND id='z'`, tenant.String())
+		if err == nil {
+			err = tx.Commit(context.Background())
+		}
+		mutateDone <- err
+	}()
+
+	select {
+	case err := <-mutateDone:
+		if err != nil {
+			t.Fatalf("reverse lock transaction: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reverse lock transaction deadlocked")
+	}
+	select {
+	case got := <-listDone:
+		if got.err != nil {
+			t.Fatalf("ListForUpdate: %v", got.err)
+		}
+		if len(got.users) != 2 || got.users[0].ID != "z" || got.users[1].ID != "a" {
+			t.Fatalf("presentation order = %+v, want z,a", got.users)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ListForUpdate remained blocked")
+	}
+}
+
 func TestUserRepoTenantRoundTrip(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()

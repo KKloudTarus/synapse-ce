@@ -4,307 +4,556 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
+	"net/url"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	identityuc "github.com/KKloudTarus/synapse-ce/internal/usecase/identityuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
 
-type bffClock struct{ now time.Time }
+const (
+	testIssuer = "https://issuer.example"
+	testTenant = shared.ID("tenant")
+)
 
-func (c bffClock) Now() time.Time { return c.now }
+type testClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
 
-type bffIDs struct{ n int }
+func (c *testClock) Now() time.Time  { c.mu.Lock(); defer c.mu.Unlock(); return c.now }
+func (c *testClock) set(t time.Time) { c.mu.Lock(); defer c.mu.Unlock(); c.now = t }
 
-func (g *bffIDs) NewID() shared.ID { g.n++; return shared.ID(fmt.Sprintf("id-%d", g.n)) }
+type testIDs struct {
+	mu sync.Mutex
+	n  int
+}
 
-type bffProtector struct{}
+func (g *testIDs) NewID() shared.ID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.n++
+	return shared.ID(fmt.Sprintf("id-%d", g.n))
+}
 
-func (bffProtector) Seal(_ context.Context, plain, _ []byte) (string, error) {
+type testProtector struct{}
+
+func (testProtector) Seal(_ context.Context, plain, _ []byte) (string, error) {
 	return string(plain), nil
 }
-func (bffProtector) Open(_ context.Context, ciphertext string, _ []byte) ([]byte, error) {
+func (testProtector) Open(_ context.Context, ciphertext string, _ []byte) ([]byte, error) {
 	return []byte(ciphertext), nil
 }
 
-type bffProvider struct {
-	expectedNonce string
-	identity      ports.OIDCIdentity
+type nopAudit struct{}
+
+func (nopAudit) Record(context.Context, ports.AuditEntry) error { return nil }
+
+// fakeProvider is a deterministic OpenID Provider: it returns exactly the identity it is given
+// once the nonce round-trips. Signature, issuer, and audience validation belong to the real
+// adapter and are not simulated here.
+type fakeProvider struct {
+	nonce    string
+	identity ports.OIDCIdentity
 }
 
-func (p *bffProvider) GenerateVerifier() string { return "test-pkce-verifier-value-0123456789" }
-func (p *bffProvider) AuthorizationURL(state, nonce, _ string) (string, error) {
-	p.expectedNonce = nonce
-	return "https://issuer.example/auth?state=" + state, nil
+func (p *fakeProvider) GenerateVerifier() string { return "test-pkce-verifier-value-0123456789" }
+func (p *fakeProvider) AuthorizationURL(state, nonce, _ string) (string, error) {
+	p.nonce = nonce
+	return "https://issuer.example/auth?state=" + url.QueryEscape(state), nil
 }
-func (p *bffProvider) ExchangeAndVerify(_ context.Context, _, _, nonce string) (ports.OIDCIdentity, error) {
-	if nonce != p.expectedNonce {
-		return ports.OIDCIdentity{}, fmt.Errorf("nonce mismatch")
+func (p *fakeProvider) ExchangeAndVerify(_ context.Context, _, _, nonce string) (ports.OIDCIdentity, error) {
+	if nonce != p.nonce {
+		return ports.OIDCIdentity{}, errors.New("nonce mismatch")
 	}
-	if p.identity.Subject != "" {
-		return p.identity, nil
-	}
-	return ports.OIDCIdentity{Issuer: "https://issuer.example", Subject: "subject", Role: user.RoleAdmin}, nil
+	return p.identity, nil
 }
 
-type bffStore struct {
-	transaction  identity.AuthorizationTransaction
-	identity     identity.ExternalIdentity
-	tamperTenant bool
-	sessions     int
+// countingStore wraps the in-memory identity store to count writes and inject dependency failures.
+type countingStore struct {
+	*memory.IdentityStore
+	mu                   sync.Mutex
+	sessions             int
+	links                int
+	tamperTenant         bool
+	getIdentityErr       error
+	getSessionErr        error
+	beforeSessionWrite   chan struct{}
+	continueSessionWrite chan struct{}
 }
 
-func (s *bffStore) CreateExternalIdentity(_ context.Context, external identity.ExternalIdentity) error {
-	s.identity = external
-	return nil
-}
-func (s *bffStore) GetExternalIdentity(_ context.Context, _, _ string) (identity.ExternalIdentity, error) {
-	if s.identity.ID.IsZero() {
-		return identity.ExternalIdentity{}, shared.ErrNotFound
+func (s *countingStore) CreateSession(ctx context.Context, session identity.Session) error {
+	s.pauseBeforeSessionWrite()
+	if err := s.IdentityStore.CreateSession(ctx, session); err != nil {
+		return err
 	}
-	return s.identity, nil
-}
-func (s *bffStore) CreateAuthorizationTransaction(_ context.Context, transaction identity.AuthorizationTransaction) error {
-	s.transaction = transaction
-	return nil
-}
-func (s *bffStore) ConsumeAuthorizationTransaction(_ context.Context, _ shared.ID, _ string, _ time.Time) (identity.AuthorizationTransaction, error) {
-	transaction := s.transaction
-	s.transaction = identity.AuthorizationTransaction{}
-	if transaction.ID.IsZero() {
-		return identity.AuthorizationTransaction{}, shared.ErrNotFound
-	}
-	if s.tamperTenant {
-		transaction.TenantID = "other"
-	}
-	return transaction, nil
-}
-func (s *bffStore) CreateSession(context.Context, identity.Session) error {
+	s.mu.Lock()
 	s.sessions++
+	s.mu.Unlock()
 	return nil
 }
-func (s *bffStore) RotateSession(context.Context, shared.ID, identity.Session, time.Time) error {
-	return nil
-}
-func (s *bffStore) GetSessionByTokenHash(context.Context, string) (identity.Session, error) {
-	return identity.Session{}, shared.ErrNotFound
-}
-func (s *bffStore) RevokeSession(context.Context, shared.ID, shared.ID, time.Time) error { return nil }
 
-type bffUsers struct {
-	user    *user.User
-	created []*user.User
-	upserts []*user.User
-}
-
-func (s *bffUsers) Create(_ context.Context, u *user.User) error {
-	s.created = append(s.created, u)
-	if s.user == nil {
-		s.user = u
+func (s *countingStore) pauseBeforeSessionWrite() {
+	s.mu.Lock()
+	before, resume := s.beforeSessionWrite, s.continueSessionWrite
+	s.beforeSessionWrite = nil
+	s.continueSessionWrite = nil
+	s.mu.Unlock()
+	if before != nil {
+		close(before)
+		<-resume
 	}
-	return nil
 }
-func (s *bffUsers) Bootstrap(context.Context, *user.User, ports.AuditEntry) error { return nil }
-
-// GetByID mirrors the production repositories: the lookup is scoped to tenantID, so a user in
-// another tenant reads as not found.
-func (s *bffUsers) GetByID(_ context.Context, tenantID, id shared.ID) (*user.User, error) {
-	match := func(u *user.User) bool {
-		return u.ID == id && shared.TenantOrDefault(shared.ID(u.TenantID)) == shared.TenantOrDefault(tenantID)
+func (s *countingStore) CreateExternalIdentity(ctx context.Context, external identity.ExternalIdentity) error {
+	if err := s.IdentityStore.CreateExternalIdentity(ctx, external); err != nil {
+		return err
 	}
-	if s.user != nil && match(s.user) {
-		return s.user, nil
-	}
-	for _, u := range s.created {
-		if match(u) {
-			return u, nil
-		}
-	}
-	return nil, shared.ErrNotFound
-}
-func (s *bffUsers) GetByAPIKeyHash(context.Context, string) (*user.User, error) {
-	return nil, shared.ErrNotFound
-}
-func (s *bffUsers) List(context.Context, shared.ID) ([]*user.User, error) { return nil, nil }
-func (s *bffUsers) Update(_ context.Context, _ shared.ID, u *user.User) error {
-	s.upserts = append(s.upserts, u)
-	return nil
-}
-func (s *bffUsers) Upsert(_ context.Context, u *user.User) error {
-	s.upserts = append(s.upserts, u)
+	s.mu.Lock()
+	s.links++
+	s.mu.Unlock()
 	return nil
 }
 
-func newBFFTestService(t *testing.T, store *bffStore) (*Service, *bffProvider) {
-	service, provider, _ := newBFFTestServiceWithUsers(t, store, true)
-	return service, provider
+func (s *countingStore) CreateSessionForExternalIdentity(ctx context.Context, issuer, subject string, approvedUserUpdatedAt time.Time, session identity.Session) error {
+	s.pauseBeforeSessionWrite()
+	if err := s.IdentityStore.CreateSessionForExternalIdentity(ctx, issuer, subject, approvedUserUpdatedAt, session); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.sessions++
+	s.mu.Unlock()
+	return nil
 }
 
-// newBFFTestServiceWithUsers builds the BFF. When linked is false the store starts with no
-// external identity, exercising first-login provisioning.
-func newBFFTestServiceWithUsers(t *testing.T, store *bffStore, linked bool) (*Service, *bffProvider, *bffUsers) {
+func (s *countingStore) GetExternalIdentity(ctx context.Context, issuer, subject string) (identity.ExternalIdentity, error) {
+	if s.getIdentityErr != nil {
+		return identity.ExternalIdentity{}, s.getIdentityErr
+	}
+	return s.IdentityStore.GetExternalIdentity(ctx, issuer, subject)
+}
+func (s *countingStore) GetSessionByTokenHash(ctx context.Context, tokenHash string) (identity.Session, error) {
+	if s.getSessionErr != nil {
+		return identity.Session{}, s.getSessionErr
+	}
+	return s.IdentityStore.GetSessionByTokenHash(ctx, tokenHash)
+}
+func (s *countingStore) ConsumeAuthorizationTransaction(ctx context.Context, tenantID shared.ID, stateHash string, now time.Time) (identity.AuthorizationTransaction, error) {
+	tx, err := s.IdentityStore.ConsumeAuthorizationTransaction(ctx, tenantID, stateHash, now)
+	if err == nil && s.tamperTenant {
+		tx.TenantID = "other-tenant"
+	}
+	return tx, err
+}
+func (s *countingStore) counts() (int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessions, s.links
+}
+
+// watchedUsers wraps the in-memory users repository to observe role writes and inject a lookup
+// failure.
+type watchedUsers struct {
+	*memory.UserRepository
+	mu     sync.Mutex
+	writes int
+	getErr error
+}
+
+func (u *watchedUsers) GetByID(ctx context.Context, tenantID, id shared.ID) (*user.User, error) {
+	if u.getErr != nil {
+		return nil, u.getErr
+	}
+	return u.UserRepository.GetByID(ctx, tenantID, id)
+}
+func (u *watchedUsers) Update(ctx context.Context, tenantID shared.ID, v *user.User) error {
+	u.mu.Lock()
+	u.writes++
+	u.mu.Unlock()
+	return u.UserRepository.Update(ctx, tenantID, v)
+}
+func (u *watchedUsers) Upsert(ctx context.Context, v *user.User) error {
+	u.mu.Lock()
+	u.writes++
+	u.mu.Unlock()
+	return u.UserRepository.Upsert(ctx, v)
+}
+func (u *watchedUsers) writeCount() int { u.mu.Lock(); defer u.mu.Unlock(); return u.writes }
+
+type bffRig struct {
+	svc      *Service
+	users    *usersuc.Service
+	repo     *watchedUsers
+	store    *countingStore
+	provider *fakeProvider
+	clock    *testClock
+	admin    usersuc.Actor
+	tenant   shared.ID
+}
+
+var loginTime = time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+
+func newBFFRig(t *testing.T, tenant shared.ID) *bffRig {
 	t.Helper()
-	now := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
-	ids := &bffIDs{}
-	clock := bffClock{now: now}
-	identityService, err := identityuc.NewService(store, bffProtector{}, clock, ids)
+	clock := &testClock{now: loginTime}
+	ids := &testIDs{}
+	repo := &watchedUsers{UserRepository: memory.NewUserRepository()}
+	raw, err := memory.NewIdentityStore(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	users := &bffUsers{}
-	if linked {
-		u, err := user.New("user-1", "tenant", "OIDC Admin", user.RoleAdmin, "hash", now)
-		if err != nil {
-			t.Fatal(err)
+	store := &countingStore{IdentityStore: raw}
+	users, err := usersuc.NewService(repo, nopAudit{}, clock, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users.SetTransactionRunner(memory.NewTenantTransactionRunner())
+	users.SetIdentityStore(store)
+	if err := users.SetOIDCLinking(testIssuer, tenant); err != nil {
+		t.Fatal(err)
+	}
+	admin, _, err := users.CreateUser(context.Background(), usersuc.Actor{ID: usersuc.BootstrapID}, tenant.String(), "Admin", user.RoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities, err := identityuc.NewService(store, testProtector{}, clock, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeProvider{}
+	// A 24h sliding TTL keeps expiry out of the way so the 12h lineage cap is what is measured.
+	svc, err := NewService(provider, identities, store, repo, clock, ids, Config{TenantID: tenant, TransactionTTL: time.Minute, SessionTTL: 24 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &bffRig{svc: svc, users: users, repo: repo, store: store, provider: provider, clock: clock, admin: usersuc.Actor{ID: admin.ID.String(), TenantID: tenant.String()}, tenant: tenant}
+}
+
+func (r *bffRig) login(t *testing.T, id ports.OIDCIdentity) (Session, error) {
+	t.Helper()
+	r.provider.identity = id
+	start, err := r.svc.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(start.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r.svc.Complete(context.Background(), parsed.Query().Get("state"), "code", r.provider.nonce)
+}
+
+type loginResult struct {
+	value Session
+	err   error
+}
+
+type pausedLogin struct {
+	result <-chan loginResult
+	resume chan struct{}
+}
+
+func (r *bffRig) pauseLoginBeforeSessionWrite(t *testing.T, id ports.OIDCIdentity) pausedLogin {
+	t.Helper()
+	paused, resume := make(chan struct{}), make(chan struct{})
+	r.store.mu.Lock()
+	r.store.beforeSessionWrite, r.store.continueSessionWrite = paused, resume
+	r.store.mu.Unlock()
+	result := make(chan loginResult, 1)
+	go func() {
+		value, err := r.login(t, id)
+		result <- loginResult{value: value, err: err}
+	}()
+	<-paused
+	return pausedLogin{result: result, resume: resume}
+}
+
+func (r *bffRig) member(t *testing.T, name string, role user.Role) *user.User {
+	t.Helper()
+	u, _, err := r.users.CreateUser(context.Background(), r.admin, "", name, role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
+// preexistingLink writes a link the way earlier releases did, outside the link command.
+func (r *bffRig) preexistingLink(t *testing.T, userID shared.ID, subject string) {
+	t.Helper()
+	link, err := identity.NewExternalIdentity(shared.ID("legacy-"+subject), r.tenant, userID, testIssuer, subject, loginTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.store.IdentityStore.CreateExternalIdentity(shared.WithTenant(context.Background(), r.tenant), link); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func subject(sub string) ports.OIDCIdentity {
+	return ports.OIDCIdentity{Issuer: testIssuer, Subject: sub}
+}
+
+func TestPreexistingApprovedLinkSignsIn(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	alice := rig.member(t, "Alice", user.RoleReviewer)
+	rig.preexistingLink(t, alice.ID, "sub-alice")
+	session, err := rig.login(t, subject("sub-alice"))
+	if err != nil {
+		t.Fatalf("preexisting link must keep working: %v", err)
+	}
+	if session.Token == "" || session.Principal.ID != alice.ID.String() || session.Principal.Role != string(user.RoleReviewer) || session.Principal.TenantID != testTenant.String() {
+		t.Fatalf("session = %+v", session.Principal)
+	}
+	p, err := rig.svc.Authenticate(context.Background(), session.Token, "", false)
+	if err != nil || p.ID != alice.ID.String() || p.SessionID == "" || !p.AuthenticatedAt.Equal(loginTime) {
+		t.Fatalf("Authenticate = %+v, %v", p, err)
+	}
+}
+
+func TestUnknownSubjectIsDeniedWithNoRowsCreated(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	before, _ := rig.repo.List(context.Background(), testTenant)
+	sessions, links := rig.store.counts()
+	_, err := rig.login(t, ports.OIDCIdentity{Issuer: testIssuer, Subject: "stranger", Email: "admin@example.com", EmailVerified: true, Name: "Admin"})
+	if !errors.Is(err, ErrAccessDenied) || !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("unknown subject must be access denied: %v", err)
+	}
+	after, _ := rig.repo.List(context.Background(), testTenant)
+	gotSessions, gotLinks := rig.store.counts()
+	if len(after) != len(before) || gotSessions != sessions || gotLinks != links || rig.repo.writeCount() != 0 {
+		t.Fatalf("unknown subject created rows: users %d->%d sessions %d->%d links %d->%d writes=%d", len(before), len(after), sessions, gotSessions, links, gotLinks, rig.repo.writeCount())
+	}
+}
+
+func TestOperatorApprovedLinkThenCallbackSucceeds(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	bob := rig.member(t, "Bob", user.RoleConsultant)
+	if _, err := rig.login(t, subject("sub-bob")); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("before approval: %v", err)
+	}
+	if _, err := rig.users.LinkOIDCIdentity(context.Background(), rig.admin, bob.ID, testIssuer, "sub-bob"); err != nil {
+		t.Fatalf("approve link: %v", err)
+	}
+	session, err := rig.login(t, subject("sub-bob"))
+	if err != nil || session.Principal.ID != bob.ID.String() {
+		t.Fatalf("approved subject must sign in: %+v %v", session.Principal, err)
+	}
+}
+
+// The provider no longer delivers a role, so nothing about the IdP identity (groups, name, email)
+// can change a Synapse role, integration_admin included, and the callback never writes the user.
+func TestIdentityProviderChangesNeverTouchTheRole(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	for _, role := range []user.Role{user.RoleIntegrationAdmin, user.RoleReadOnly, user.RoleAdmin} {
+		t.Run(string(role), func(t *testing.T) {
+			u := rig.member(t, "User "+string(role), role)
+			rig.preexistingLink(t, u.ID, "sub-"+string(role))
+			for _, variant := range []ports.OIDCIdentity{
+				{Issuer: testIssuer, Subject: "sub-" + string(role), Name: "Renamed"},
+				{Issuer: testIssuer, Subject: "sub-" + string(role), Email: "boss@example.com", EmailVerified: true},
+			} {
+				session, err := rig.login(t, variant)
+				if err != nil || session.Principal.Role != string(role) {
+					t.Fatalf("login = %+v %v, want role %q", session.Principal, err, role)
+				}
+			}
+			stored, err := rig.repo.GetByID(context.Background(), testTenant, u.ID)
+			if err != nil || stored.Role != role {
+				t.Fatalf("stored role = %v %v, want %q", stored, err, role)
+			}
+		})
+	}
+	if rig.repo.writeCount() != 0 {
+		t.Fatalf("callbacks wrote users rows %d times", rig.repo.writeCount())
+	}
+}
+
+func TestDisableThenReenableKeepsOldSessionDead(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	carol := rig.member(t, "Carol", user.RoleConsultant)
+	rig.preexistingLink(t, carol.ID, "sub-carol")
+	session, err := rig.login(t, subject("sub-carol"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.users.SetDisabled(context.Background(), rig.admin, carol.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.svc.Authenticate(context.Background(), session.Token, "", false); !errors.Is(err, authz.ErrCredentialInvalid) {
+		t.Fatalf("session of a disabled user: %v", err)
+	}
+	if _, err := rig.login(t, subject("sub-carol")); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("a disabled user must not sign in: %v", err)
+	}
+	if _, err := rig.users.SetDisabled(context.Background(), rig.admin, carol.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.svc.Authenticate(context.Background(), session.Token, "", false); !errors.Is(err, authz.ErrCredentialInvalid) {
+		t.Fatalf("re-enable restored an old session: %v", err)
+	}
+	if _, err := rig.svc.Discover(context.Background(), session.Token); !errors.Is(err, authz.ErrCredentialInvalid) {
+		t.Fatalf("re-enable let an old session rotate: %v", err)
+	}
+	if _, err := rig.login(t, subject("sub-carol")); err != nil {
+		t.Fatalf("a re-enabled user signs in again with a new session: %v", err)
+	}
+}
+
+func TestSessionLineageCapOnEveryAuthentication(t *testing.T) {
+	cases := []struct {
+		name  string
+		after time.Duration
+		allow bool
+	}{
+		{"before the cap", identity.MaxSessionAge - time.Second, true},
+		{"at the cap", identity.MaxSessionAge, false},
+		{"after the cap", identity.MaxSessionAge + time.Minute, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newBFFRig(t, testTenant)
+			dave := rig.member(t, "Dave", user.RoleReadOnly)
+			rig.preexistingLink(t, dave.ID, "sub-dave")
+			session, err := rig.login(t, subject("sub-dave"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rig.clock.set(loginTime.Add(tc.after))
+			_, authErr := rig.svc.Authenticate(context.Background(), session.Token, "", false)
+			_, discoverErr := rig.svc.Discover(context.Background(), session.Token)
+			for name, err := range map[string]error{"Authenticate": authErr, "Discover": discoverErr} {
+				if tc.allow && err != nil {
+					t.Errorf("%s within the cap: %v", name, err)
+				}
+				if !tc.allow && !errors.Is(err, authz.ErrCredentialInvalid) {
+					t.Errorf("%s at or past the cap = %v, want invalid credential", name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestDependencyOutageIsUnavailableNeverInvalid(t *testing.T) {
+	outage := errors.New("database connection refused")
+	rig := newBFFRig(t, testTenant)
+	erin := rig.member(t, "Erin", user.RoleReadOnly)
+	rig.preexistingLink(t, erin.ID, "sub-erin")
+	session, err := rig.login(t, subject("sub-erin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(name string, err error) {
+		t.Helper()
+		if !errors.Is(err, authz.ErrAuthenticationUnavailable) || errors.Is(err, authz.ErrCredentialInvalid) {
+			t.Errorf("%s during an outage = %v, want unavailable only", name, err)
 		}
-		external, err := identity.NewExternalIdentity("external-1", "tenant", u.ID, "https://issuer.example", "subject", now)
-		if err != nil {
-			t.Fatal(err)
-		}
-		store.identity = external
-		users.user = u
 	}
-	provider := &bffProvider{}
-	service, err := NewService(provider, identityService, store, users, clock, &bffIDs{n: 100}, Config{TenantID: "tenant", TransactionTTL: time.Minute, SessionTTL: time.Hour})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return service, provider, users
-}
+	rig.store.getSessionErr = outage
+	_, err = rig.svc.Authenticate(context.Background(), session.Token, "", false)
+	check("session lookup", err)
+	_, err = rig.svc.Discover(context.Background(), session.Token)
+	check("session discovery", err)
+	check("logout", rig.svc.Logout(context.Background(), session.Token))
+	rig.store.getSessionErr = nil
 
-// A first-time subject must be provisioned and linked; before this the callback failed with
-// ErrNotFound and no OIDC login could ever succeed.
-func TestCompleteProvisionsAndLinksFirstTimeSubject(t *testing.T) {
-	store := &bffStore{}
-	service, provider, users := newBFFTestServiceWithUsers(t, store, false)
-	start, err := service.Begin(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce)
-	if err != nil {
-		t.Fatalf("first login must provision the subject: %v", err)
-	}
-	if len(users.created) != 1 {
-		t.Fatalf("created users = %d, want 1", len(users.created))
-	}
-	created := users.created[0]
-	if created.Role != user.RoleAdmin || created.TenantID != "tenant" {
-		t.Fatalf("provisioned user has wrong identity: %+v", created)
-	}
-	if store.identity.Subject != "subject" || store.identity.UserID != created.ID {
-		t.Fatalf("external identity was not linked: %+v", store.identity)
-	}
-	if session.Principal.Role != string(user.RoleAdmin) || session.Token == "" || session.CSRFToken == "" {
-		t.Fatalf("unexpected session: %+v", session)
-	}
-	if created.APIKeyHash == "" || created.APIKeyHash == "hash" {
-		t.Fatalf("provisioned user must carry an unusable random API key hash")
+	rig.repo.getErr = outage
+	_, err = rig.svc.Authenticate(context.Background(), session.Token, "", false)
+	check("session user lookup", err)
+	rig.repo.getErr = nil
+
+	rig.store.getIdentityErr = outage
+	_, err = rig.login(t, subject("sub-erin"))
+	check("callback link lookup", err)
+	rig.store.getIdentityErr = nil
+
+	if _, err := rig.svc.Authenticate(context.Background(), session.Token, "", false); err != nil {
+		t.Fatalf("the session must still be valid after the outage: %v", err)
 	}
 }
 
-// The operator-configured group mapping is authoritative, so a changed provider group updates
-// the stored role instead of rejecting the login.
-func TestCompleteAppliesMappedRoleToLinkedUser(t *testing.T) {
-	store := &bffStore{}
-	service, provider, users := newBFFTestServiceWithUsers(t, store, true)
-	users.user.Role = user.RoleReadOnly
-	start, err := service.Begin(context.Background())
+func TestAuthenticateCSRFAndLogout(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	fay := rig.member(t, "Fay", user.RoleConsultant)
+	rig.preexistingLink(t, fay.ID, "sub-fay")
+	session, err := rig.login(t, subject("sub-fay"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := rig.svc.Authenticate(context.Background(), session.Token, "wrong", true); !errors.Is(err, authz.ErrCSRFInvalid) {
+		t.Fatalf("CSRF mismatch: %v", err)
 	}
-	if len(users.upserts) != 1 || users.upserts[0].Role != user.RoleAdmin {
-		t.Fatalf("mapped role was not applied: %+v", users.upserts)
+	if _, err := rig.svc.Authenticate(context.Background(), session.Token, session.CSRFToken, true); err != nil {
+		t.Fatalf("matching CSRF: %v", err)
 	}
-	if session.Principal.Role != string(user.RoleAdmin) {
-		t.Fatalf("session role = %q", session.Principal.Role)
+	if err := rig.svc.Logout(context.Background(), session.Token); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if _, err := rig.svc.Authenticate(context.Background(), session.Token, "", false); !errors.Is(err, authz.ErrCredentialInvalid) {
+		t.Fatalf("session after logout: %v", err)
+	}
+	if err := rig.svc.Logout(context.Background(), session.Token); err != nil {
+		t.Fatalf("logout of an already invalid session is a no-op: %v", err)
 	}
 }
 
-func TestCompleteRejectsStateReplay(t *testing.T) {
-	store := &bffStore{}
-	service, provider := newBFFTestService(t, store)
-	start, err := service.Begin(context.Background())
+func TestCompleteRejectsStateReplayAndTenantTamper(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	gus := rig.member(t, "Gus", user.RoleReadOnly)
+	rig.preexistingLink(t, gus.ID, "sub-gus")
+	rig.provider.identity = subject("sub-gus")
+	start, err := rig.svc.Begin(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); err != nil {
-		t.Fatalf("first callback: %v", err)
+	parsed, _ := url.Parse(start.URL)
+	state := parsed.Query().Get("state")
+	if _, err := rig.svc.Complete(context.Background(), state, "code", rig.provider.nonce); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); err == nil {
-		t.Fatal("replayed state must be rejected")
+	if _, err := rig.svc.Complete(context.Background(), state, "code", rig.provider.nonce); err == nil {
+		t.Fatal("state replay must fail")
+	}
+	rig.store.tamperTenant = true
+	if _, err := rig.login(t, subject("sub-gus")); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("authorization tenant tamper: %v", err)
 	}
 }
 
-func TestCompleteRejectsAuthorizationTenantTamper(t *testing.T) {
-	store := &bffStore{tamperTenant: true}
-	service, provider := newBFFTestService(t, store)
-	start, err := service.Begin(context.Background())
-	if err != nil {
+// A link to the bootstrap operator (which the link command refuses, but an old row could carry) is
+// still denied: the bootstrap principal's only credential is SYNAPSE_API_TOKEN.
+func TestCompleteRefusesTheBootstrapOperator(t *testing.T) {
+	rig := newBFFRig(t, shared.DefaultTenant)
+	if err := rig.users.EnsureBootstrapAdmin(context.Background(), "bootstrap-token"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); err == nil {
-		t.Fatal("tampered authorization tenant must be rejected")
+	rig.preexistingLink(t, usersuc.BootstrapID, "sub-operator")
+	sessions, _ := rig.store.counts()
+	if _, err := rig.login(t, subject("sub-operator")); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("bootstrap link must be denied: %v", err)
 	}
-}
-
-func extractState(url string) string { return url[len("https://issuer.example/auth?state="):] }
-
-// TestCompleteRefusesToTouchTheBootstrapOperator pins the second write path to the users table.
-//
-// User management refuses to mutate the bootstrap principal, because its API key is the platform
-// credential the deployment's global-resource guards test for. This service writes the same table
-// through Upsert to apply a mapped group, so it has to refuse the same identity. Nothing links an
-// external identity to that id today; the guard exists so that stays true if anything ever does.
-func TestCompleteRefusesToTouchTheBootstrapOperator(t *testing.T) {
-	store := &bffStore{}
-	service, provider, users := newBFFTestServiceWithUsers(t, store, true)
-
-	// Re-link the external identity to the bootstrap principal.
-	operator, err := user.New(usersuc.BootstrapID, "tenant", "Operator (bootstrap admin)", user.RoleAdmin, "hash", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatal(err)
-	}
-	users.user = operator
-	external, err := identity.NewExternalIdentity("external-1", "tenant", operator.ID, "https://issuer.example", "subject", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatal(err)
-	}
-	store.identity = external
-
-	start, err := service.Begin(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); !errors.Is(err, shared.ErrForbidden) {
-		t.Fatalf("Complete err = %v, want forbidden", err)
-	}
-	if len(users.upserts) != 0 {
-		t.Errorf("the bootstrap principal was written: %+v", users.upserts)
+	if got, _ := rig.store.counts(); got != sessions || rig.repo.writeCount() != 0 {
+		t.Fatalf("bootstrap login wrote state: sessions %d->%d writes=%d", sessions, got, rig.repo.writeCount())
 	}
 }
 
 type recordedContacts struct {
 	user    shared.ID
 	issuer  string
-	email   string
 	imports int
 	revokes int
 	fail    error
 }
 
-func (r *recordedContacts) ImportOIDCEmail(_ context.Context, _, user shared.ID, issuer, email string) error {
+func (r *recordedContacts) ImportOIDCEmail(_ context.Context, _, user shared.ID, issuer, _ string) error {
 	r.imports++
-	r.user, r.issuer, r.email = user, issuer, email
+	r.user, r.issuer = user, issuer
 	return r.fail
 }
 func (r *recordedContacts) RevokeOIDCEmail(_ context.Context, _, user shared.ID, issuer string) error {
@@ -313,52 +562,107 @@ func (r *recordedContacts) RevokeOIDCEmail(_ context.Context, _, user shared.ID,
 	return r.fail
 }
 
-func TestCompleteImportsVerifiedEmailForTheResolvedSubject(t *testing.T) {
-	store := &bffStore{}
-	service, provider, _ := newBFFTestServiceWithUsers(t, store, true)
+// Email is imported only for the subject already resolved by (issuer, subject); it never selects the
+// account, and a failed contact sync creates no session.
+func TestCompleteSynchronizesVerifiedEmailForTheResolvedSubjectOnly(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	hal := rig.member(t, "Hal", user.RoleReadOnly)
+	rig.preexistingLink(t, hal.ID, "sub-hal")
 	contacts := &recordedContacts{}
-	service.SetVerifiedEmailImporter(contacts)
-	provider.identity = ports.OIDCIdentity{Issuer: "https://issuer.example", Subject: "subject", Role: user.RoleAdmin, Email: "Ada@Example.com", EmailVerified: true}
-	for range 2 {
-		start, err := service.Begin(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); err != nil {
-			t.Fatal(err)
-		}
+	rig.svc.SetVerifiedEmailImporter(contacts)
+
+	if _, err := rig.login(t, ports.OIDCIdentity{Issuer: testIssuer, Subject: "sub-hal", Email: "hal@example.com", EmailVerified: true}); err != nil {
+		t.Fatal(err)
 	}
-	if contacts.imports != 2 || contacts.revokes != 0 || contacts.user != "user-1" || contacts.issuer != "https://issuer.example" || contacts.email != "Ada@Example.com" {
-		t.Fatalf("import tracked the wrong account: %+v", contacts)
+	if contacts.imports != 1 || contacts.user != hal.ID || contacts.issuer != testIssuer {
+		t.Fatalf("verified email import = %+v", contacts)
 	}
-	if store.sessions != 2 {
-		t.Fatalf("sessions = %d", store.sessions)
+	if _, err := rig.login(t, subject("sub-hal")); err != nil || contacts.revokes != 1 {
+		t.Fatalf("unverified email must revoke: %+v %v", contacts, err)
+	}
+	if _, err := rig.login(t, ports.OIDCIdentity{Issuer: testIssuer, Subject: "unknown", Email: "hal@example.com", EmailVerified: true}); !errors.Is(err, ErrAccessDenied) || contacts.imports != 1 {
+		t.Fatalf("an email must not resolve an unknown subject: %+v %v", contacts, err)
+	}
+	contacts.fail = errors.New("contact store unavailable")
+	sessions, _ := rig.store.counts()
+	if _, err := rig.login(t, subject("sub-hal")); err == nil {
+		t.Fatal("a failed contact sync must fail the login")
+	}
+	if got, _ := rig.store.counts(); got != sessions {
+		t.Fatalf("failed contact sync created a session: %d -> %d", sessions, got)
 	}
 }
 
-func TestCompleteRevokesUnverifiedOIDCEmailWithoutCreatingASessionOnFailure(t *testing.T) {
-	store := &bffStore{}
-	service, provider, _ := newBFFTestServiceWithUsers(t, store, true)
-	contacts := &recordedContacts{}
-	service.SetVerifiedEmailImporter(contacts)
-	provider.identity = ports.OIDCIdentity{Issuer: "https://issuer.example", Subject: "subject", Role: user.RoleAdmin, Email: "ada@example.com", EmailVerified: false}
-	start, err := service.Begin(context.Background())
+// After an approved link is removed, the subject's live session is dead and its next callback is
+// denied exactly like a subject that was never approved.
+func TestUnlinkedSubjectIsDeniedAndItsSessionIsDead(t *testing.T) {
+	rig := newBFFRig(t, "tenant-a")
+	dana := rig.member(t, "Dana", user.RoleConsultant)
+	link, err := rig.users.LinkOIDCIdentity(context.Background(), rig.admin, dana.ID, testIssuer, "sub-dana")
+	if err != nil {
+		t.Fatalf("approve link: %v", err)
+	}
+	session, err := rig.login(t, subject("sub-dana"))
+	if err != nil {
+		t.Fatalf("approved subject must sign in: %v", err)
+	}
+	if _, err := rig.users.UnlinkOIDCIdentity(context.Background(), rig.admin, dana.ID, link.ID); err != nil {
+		t.Fatalf("unlink: %v", err)
+	}
+	if _, err := rig.svc.Authenticate(context.Background(), session.Token, "", false); !errors.Is(err, authz.ErrCredentialInvalid) {
+		t.Fatalf("the session minted through the removed link must be dead: %v", err)
+	}
+	if _, err := rig.login(t, subject("sub-dana")); !errors.Is(err, ErrAccessDenied) {
+		t.Fatalf("a callback for the unlinked subject must be access_denied: %v", err)
+	}
+}
+
+func TestApprovedCallbackPausedBeforeIssuanceCannotSurviveUnlink(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	dana := rig.member(t, "Dana", user.RoleConsultant)
+	link, err := rig.users.LinkOIDCIdentity(context.Background(), rig.admin, dana.ID, testIssuer, "sub-dana-race")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); err != nil {
+
+	login := rig.pauseLoginBeforeSessionWrite(t, subject("sub-dana-race"))
+	if _, err := rig.users.UnlinkOIDCIdentity(context.Background(), rig.admin, dana.ID, link.ID); err != nil {
+		t.Fatalf("unlink while callback is paused: %v", err)
+	}
+	close(login.resume)
+
+	completed := <-login.result
+	if !errors.Is(completed.err, ErrAccessDenied) {
+		t.Fatalf("paused callback after unlink = %v, want access denied", completed.err)
+	}
+	if completed.value.Token != "" {
+		t.Fatal("callback returned a token after its approval was revoked")
+	}
+}
+
+func TestApprovedCallbackPausedBeforeIssuanceCannotSurviveDisableAndReenable(t *testing.T) {
+	rig := newBFFRig(t, testTenant)
+	dana := rig.member(t, "Dana", user.RoleConsultant)
+	if _, err := rig.users.LinkOIDCIdentity(context.Background(), rig.admin, dana.ID, testIssuer, "sub-dana-state-race"); err != nil {
 		t.Fatal(err)
 	}
-	if contacts.imports != 0 || contacts.revokes != 1 || contacts.user != "user-1" || contacts.issuer != "https://issuer.example" {
-		t.Fatalf("unverified claim imported a contact: %+v", contacts)
+
+	rig.clock.set(loginTime.Add(time.Second))
+	login := rig.pauseLoginBeforeSessionWrite(t, subject("sub-dana-state-race"))
+	rig.clock.set(loginTime.Add(2 * time.Second))
+	if _, err := rig.users.SetDisabled(context.Background(), rig.admin, dana.ID, true); err != nil {
+		t.Fatalf("disable while callback is paused: %v", err)
 	}
-	contacts.fail = errors.New("contact store unavailable")
-	provider.identity.EmailVerified = true
-	start, err = service.Begin(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	if _, err := rig.users.SetDisabled(context.Background(), rig.admin, dana.ID, false); err != nil {
+		t.Fatalf("re-enable while callback is paused: %v", err)
 	}
-	if _, err := service.Complete(context.Background(), extractState(start.URL), "code", provider.expectedNonce); err == nil || store.sessions != 1 {
-		t.Fatalf("failed import created a session: %v sessions=%d", err, store.sessions)
+	close(login.resume)
+
+	completed := <-login.result
+	if !errors.Is(completed.err, ErrAccessDenied) {
+		t.Fatalf("paused callback after disable/re-enable = %v, want access denied", completed.err)
+	}
+	if completed.value.Token != "" {
+		t.Fatal("callback returned a token after the user's credentials were revoked")
 	}
 }

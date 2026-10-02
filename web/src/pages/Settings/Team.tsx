@@ -167,7 +167,11 @@ function MemberRow({ user, onChanged }: { user: User; onChanged: () => void }) {
             onClick={() => void run(
               'disabled',
               async () => { await api.setUserDisabled(user.id, !user.disabled) },
-              user.disabled ? `${user.name} can sign in again.` : `${user.name} can no longer sign in.`,
+              // Enabling revokes the key and sessions held before the change, so the user needs a
+              // rotated key (or a new browser sign-in) before they can authenticate again.
+              user.disabled
+                ? `${user.name} is enabled. Rotate their API key to restore API access; they can sign in again in the browser.`
+                : `${user.name} can no longer sign in. Their API key and browser sessions were revoked.`,
             )}
           >
             {user.disabled ? 'Enable' : 'Disable'}

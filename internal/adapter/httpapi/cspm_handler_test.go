@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -79,7 +80,7 @@ func TestCSPMFullRunDoesNotLeakCredential(t *testing.T) {
 	if err := vaultStore.Put(context.Background(), "eng", "aws-prod", []byte(secret)); err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.WithValue(context.Background(), principalKey, Principal{ID: "operator", TenantID: "tenant"})
+	ctx := context.WithValue(context.Background(), principalKey, Principal{ID: "operator", TenantID: "tenant", Credential: authz.KindBootstrap})
 	audit := &cspmAudit{}
 	assetsStore := memory.NewAssetStore()
 	assets, _ := assetuc.NewService(assetsStore, audit, cspmClock{now}, &cspmIDs{})

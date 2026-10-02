@@ -145,10 +145,25 @@ Assessment lifecycle projections are additive and fail closed behind independent
 ## Browser OIDC access
 
 Browser OIDC uses a backend-for-frontend model. The server accepts an identity only for an exact approved
-issuer and subject pair, assigns it to the deployment's fixed tenant, and maps it only to the existing
-allowlisted roles: `admin`, `consultant`, `reviewer`, `read-only`, and `integration_admin`. It stores the authenticated browser
-state in an opaque, replica-safe server-side session and requires a session-bound CSRF token for every
-state-changing request. Existing bearer-token machine authentication is unchanged. See
+issuer and subject pair that is linked to an existing user in the deployment's fixed tenant. An unknown
+subject is denied: no user is created, and no email or group claim is used to find or create one. An
+administrator approves a new subject with `POST /api/v1/users/{id}/oidc-links`, which is audited in the
+same transaction as the link. `DELETE /api/v1/users/{id}/oidc-links/{linkId}` removes an approved link and
+revokes all of that user's browser sessions in one audited transaction (`user.oidc_identity_unlinked`); the
+subject's next sign-in is refused until it is linked again, and the user's API key is unaffected. The
+user's Synapse role is the only role: provider groups never assign or change it, including
+`integration_admin`. The 12-hour session lineage cap is enforced on every browser request. Disabling or
+re-enabling a user revokes its browser sessions and its API key, so after re-enabling an administrator
+rotates the key to restore API access.
+
+Authentication failures carry a stable `code`. Only `authentication_invalid` means the credential is
+definitively bad, and only that code clears a stored credential in the dashboard. A storage or provider
+outage is `503 authentication_unavailable` with `retryable: true`, and the credential is kept. When two
+browser tabs check the session at the same moment, one of them gets `409 conflict` with `retryable: true`
+and keeps its cookie; the dashboard retries once. The server stores
+the authenticated browser state in an opaque, replica-safe server-side session and requires a
+session-bound CSRF token for every state-changing request. Existing bearer-token machine authentication is
+unchanged. See
 [ADR 0006](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/adr/0006-oidc-bff-trust-model.md).
 
 ## Authorization is your responsibility

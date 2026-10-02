@@ -23,6 +23,7 @@ servers:
 
 security:
 - bearerAuth: []
+- cookieAuth: []
 
 tags:
   - name: users
@@ -5659,9 +5660,11 @@ paths:
       tags: [users]
       summary: Disable an operator's credentials
       description: >
-        Requires the `administer` capability. The identity and its attribution are preserved; only
-        authentication stops, immediately, for the operator's API key. Disabling the tenant's last
-        enabled admin is refused with `409`.
+        Requires the `administer` capability. The identity and its attribution are preserved;
+        authentication stops immediately. In the same transaction as the audit record, the API key
+        is replaced with an unusable digest and every browser session of the operator is revoked,
+        so re-enabling restores neither. Disabling the tenant's last enabled admin is refused with
+        `409`.
       responses:
         "200":
           description: The disabled operator
@@ -5682,7 +5685,9 @@ paths:
     post:
       tags: [users]
       summary: Re-enable a disabled operator
-      description: Requires the `administer` capability. The operator keeps the API key it had.
+      description: >
+        Requires the `administer` capability. Keys and browser sessions revoked by disable stay
+        revoked: rotate the key to issue a new one, and the operator signs in again through OIDC.
       responses:
         "200":
           description: The re-enabled operator
@@ -5711,6 +5716,93 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/UserWithAPIKey"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/users/{id}/oidc-links:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [users]
+      summary: List an operator's approved OIDC subject links
+      description: Requires the `administer` capability. Confined to the caller's tenant.
+      responses:
+        "200":
+          description: The approved links
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/OIDCLink"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [users]
+      summary: Approve an exact OIDC (issuer, subject) for an existing operator
+      description: >
+        Requires the `administer` capability. Available only when OIDC is enabled, and confined to
+        the configured fixed OIDC tenant. `issuer` must equal the configured issuer exactly and
+        `subject` is compared exactly; there is no email or group lookup and no provisioning. The
+        bootstrap operator and disabled operators are refused. The link and its audit record commit
+        together. The approved subject's next successful callback signs in as this operator with
+        the operator's Synapse role; identity-provider groups never change it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [issuer, subject]
+              properties:
+                issuer: {type: string}
+                subject: {type: string, minLength: 1, maxLength: 255}
+      responses:
+        "201":
+          description: The approved link
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OIDCLink"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The subject is already linked, or the operator is disabled}
+  /api/v1/users/{id}/oidc-links/{linkId}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    - name: linkId
+      in: path
+      required: true
+      schema: {type: string}
+    delete:
+      tags: [users]
+      summary: Remove an approved OIDC subject link from an operator
+      description: >
+        Requires the `administer` capability. Available only when OIDC is enabled, and confined to
+        the configured fixed OIDC tenant; the bootstrap operator is refused. Removes exactly this
+        link of this operator, revokes all of the operator's browser sessions, and records
+        `user.oidc_identity_unlinked` in one transaction; an audit failure leaves the link and the
+        sessions in place. The removed subject's next callback is denied as unapproved. The
+        operator's bearer API key is unaffected.
+      responses:
+        "200":
+          description: The removed link
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OIDCLink"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -6596,7 +6688,25 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Human/operator API token.
+      description: >
+        Human/operator API token: a per-user key, or SYNAPSE_API_TOKEN for the bootstrap operator,
+        which alone carries platform-only authority. No CSRF header is required.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-synapse_session
+      description: >
+        Opaque OIDC browser session issued by the callback. Unsafe methods also require the
+        `X-CSRF-Token` header returned by `GET /api/auth/session`. The session lineage is capped at
+        12 hours from sign-in on every request; disabling the user revokes it permanently.
+        `GET /api/auth/session` (served outside /api/v1) answers `{"authenticated": false}` and
+        clears the cookie only when no cookie is sent or the session is definitively invalid; a
+        storage or provider failure answers 503 `authentication_unavailable` and keeps the cookie.
+        When a concurrent discovery of the same session (another tab) rotated it first, the loser
+        answers 409 `conflict` with `retryable: true` and `Retry-After`, and does not touch the
+        cookie; the client retries discovery once.
+        An OIDC callback for a subject without an approved link answers 403 `access_denied` and
+        creates no user or session.
     fleetAgentAuth:
       type: http
       scheme: bearer
@@ -6785,12 +6895,28 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Unauthorized:
-      description: Missing or invalid bearer token
+      description: >
+        No credential (`authentication_required`) or a definitively invalid one
+        (`authentication_invalid`). A request without an authenticated principal is always refused;
+        it is never attributed to the operator.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Forbidden:
-      description: AUP not accepted, or target outside scope / authorization window
+      description: >
+        Authorization denied (`permission_denied`), AUP not accepted (`aup_required`), CSRF proof
+        missing on a cookie session (`csrf_invalid`), or target outside scope / authorization window.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    AuthenticationUnavailable:
+      description: >
+        A storage or provider dependency failed while authenticating (`authentication_unavailable`,
+        retryable) or the service is saturated (`saturated`). The presented credential may still be
+        valid and must not be discarded. Carries `Retry-After`.
+      headers:
+        Retry-After:
+          schema: {type: integer}
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -9076,6 +9202,16 @@ components:
           description: A disabled operator keeps its identity and history; its API key stops authenticating.
         createdAt: {type: string, format: date-time}
 
+    OIDCLink:
+      type: object
+      required: [id, userId, issuer, subject, createdAt]
+      properties:
+        id: {type: string}
+        userId: {type: string}
+        issuer: {type: string}
+        subject: {type: string}
+        createdAt: {type: string, format: date-time}
+
     UserWithAPIKey:
       type: object
       required: [user, apiKey]
@@ -9701,8 +9837,31 @@ components:
 
     Error:
       type: object
+      required: [error, code, request_id, retryable]
       properties:
-        error: {type: string}
+        error:
+          type: string
+          description: Human-readable message. Unchanged from earlier releases; do not parse it.
+        code:
+          type: string
+          description: >
+            Stable machine-readable error class. Clients must tolerate codes they do not know and
+            fall back on the HTTP status. Current values: `authentication_required` (401, no
+            credential presented), `authentication_invalid` (401, the credential is invalid, revoked,
+            expired, over its lineage cap, or its user is disabled; the only code on which a client
+            clears a stored credential), `authentication_unavailable` (503, retryable, a storage or
+            provider dependency failed while authenticating; keep the credential), `csrf_invalid`
+            (403, cookie session valid but the CSRF header is missing or wrong), `aup_required`
+            (403), `permission_denied` (403, never changes the caller's role or session),
+            `access_denied` (403, OIDC subject has no approved link or its user is unavailable),
+            `validation_failed` (400), `not_found` (404), `conflict` (409), `saturated` (503,
+            retryable), `internal` (500, retryable).
+        request_id:
+          type: string
+          description: The request correlation id, equal to the `X-Request-ID` response header.
+        retryable:
+          type: boolean
+          description: Whether retrying the same request later may succeed.
 
     AITriageReview:
       type: object

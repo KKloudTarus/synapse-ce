@@ -92,14 +92,14 @@ func TestAcceptAUPHandler(t *testing.T) {
 
 	// wrong version → 400 validation
 	rec := httptest.NewRecorder()
-	rt.acceptAUP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/aup/accept", strings.NewReader(`{"version":"9.9"}`)))
+	rt.acceptAUP(rec, asOperator(httptest.NewRequest(http.MethodPost, "/api/v1/aup/accept", strings.NewReader(`{"version":"9.9"}`))))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("wrong version: want 400, got %d", rec.Code)
 	}
 
 	// correct version → 200 + recorded + audited
 	rec = httptest.NewRecorder()
-	rt.acceptAUP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/aup/accept", strings.NewReader(`{"version":"1.0"}`)))
+	rt.acceptAUP(rec, asOperator(httptest.NewRequest(http.MethodPost, "/api/v1/aup/accept", strings.NewReader(`{"version":"1.0"}`))))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("correct version: want 200, got %d", rec.Code)
 	}

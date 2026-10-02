@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -78,8 +79,8 @@ func TestCreateUserReturnsKeyOnceAndAuthenticates(t *testing.T) {
 	if got.ID != u.ID {
 		t.Errorf("authenticated %s, want %s", got.ID, u.ID)
 	}
-	if _, err := svc.Authenticate(ctx, "syn_wrong"); !errors.Is(err, shared.ErrNotFound) {
-		t.Errorf("unknown token: want ErrNotFound, got %v", err)
+	if _, err := svc.Authenticate(ctx, "syn_wrong"); !errors.Is(err, authz.ErrCredentialInvalid) {
+		t.Errorf("unknown token: want ErrCredentialInvalid, got %v", err)
 	}
 }
 
@@ -219,7 +220,7 @@ func TestRotateAPIKeyInvalidatesTheOldKey(t *testing.T) {
 	if rotated.APIKeyHash != HashToken(newKey) {
 		t.Error("only the new key HASH must be stored")
 	}
-	if _, err := svc.Authenticate(ctx, oldKey); !errors.Is(err, shared.ErrNotFound) {
+	if _, err := svc.Authenticate(ctx, oldKey); !errors.Is(err, authz.ErrCredentialInvalid) {
 		t.Errorf("old key still authenticates: %v", err)
 	}
 	got, err := svc.Authenticate(ctx, newKey)
@@ -231,9 +232,9 @@ func TestRotateAPIKeyInvalidatesTheOldKey(t *testing.T) {
 	}
 }
 
-// TestDisableRejectsTheUsersKeyAndEnableRestoresIt covers revocation without deletion: the identity
-// (and its attribution) survives, only authentication stops.
-func TestDisableRejectsTheUsersKeyAndEnableRestoresIt(t *testing.T) {
+// TestDisableRevokesTheUsersKeyPermanently covers revocation without deletion: the identity (and
+// its attribution) survives, authentication stops, and re-enabling does not bring the old key back.
+func TestDisableRevokesTheUsersKeyPermanently(t *testing.T) {
 	svc, audit := newAuditedSvc(t)
 	ctx := context.Background()
 	_, _, admin := seedAdmin(t, svc, "acme", "Admin")
@@ -255,8 +256,15 @@ func TestDisableRejectsTheUsersKeyAndEnableRestoresIt(t *testing.T) {
 	if _, err := svc.SetDisabled(ctx, admin, target.ID, false); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	if got, err := svc.Authenticate(ctx, key); err != nil || got.ID != target.ID {
-		t.Fatalf("re-enabled user must authenticate with the same key: %+v %v", got, err)
+	if _, err := svc.Authenticate(ctx, key); !errors.Is(err, authz.ErrCredentialInvalid) {
+		t.Fatalf("re-enabling must not resurrect the revoked key: %v", err)
+	}
+	_, fresh, err := svc.RotateAPIKey(ctx, admin, target.ID)
+	if err != nil {
+		t.Fatalf("rotate after re-enable: %v", err)
+	}
+	if got, err := svc.Authenticate(ctx, fresh); err != nil || got.ID != target.ID {
+		t.Fatalf("a key issued after re-enable must authenticate: %+v %v", got, err)
 	}
 	if !audit.has("user.disabled", target.ID.String()) || !audit.has("user.enabled", target.ID.String()) {
 		t.Errorf("disable/enable were not audited: %v", audit.actions())
@@ -572,5 +580,87 @@ func TestRotationDoesNotRevertAConcurrentDisable(t *testing.T) {
 				t.Fatalf("iteration %d: the disable was reverted by a concurrent rotation", iteration)
 			}
 		}
+	}
+}
+
+// lockRecordingRepo records whether a mutation read its target through the roster lock or through
+// a plain lookup that a concurrent write on another replica could make stale.
+type lockRecordingRepo struct {
+	*memory.UserRepository
+	mu           sync.Mutex
+	lockedReads  int
+	plainLookups int
+}
+
+func (r *lockRecordingRepo) ListForUpdate(ctx context.Context, tenantID shared.ID) ([]*user.User, error) {
+	r.mu.Lock()
+	r.lockedReads++
+	r.mu.Unlock()
+	return r.List(ctx, tenantID)
+}
+
+func (r *lockRecordingRepo) GetByID(ctx context.Context, tenantID, id shared.ID) (*user.User, error) {
+	r.mu.Lock()
+	r.plainLookups++
+	r.mu.Unlock()
+	return r.UserRepository.GetByID(ctx, tenantID, id)
+}
+
+func (r *lockRecordingRepo) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lockedReads, r.plainLookups = 0, 0
+}
+
+func (r *lockRecordingRepo) counts() (locked, plain int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lockedReads, r.plainLookups
+}
+
+// TestEveryUserMutationReadsItsTargetUnderTheRosterLock pins that update, disable, enable and
+// rotation load the user they rewrite from the locked roster, never from a plain lookup, so a
+// demotion or disable committed on another replica cannot be reverted by a stale whole-aggregate
+// write, and every mutation takes the same locks in the same order.
+func TestEveryUserMutationReadsItsTargetUnderTheRosterLock(t *testing.T) {
+	repo := &lockRecordingRepo{UserRepository: memory.NewUserRepository()}
+	svc, err := NewService(repo, nopAudit{}, fixedClock{}, &seqIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetTransactionRunner(memory.NewTenantTransactionRunner())
+	ctx := context.Background()
+	_, _, admin := seedAdmin(t, svc, "acme", "Admin")
+	second, _, err := svc.CreateUser(ctx, admin, "", "Second", user.RoleAdmin)
+	if err != nil {
+		t.Fatalf("seed second admin: %v", err)
+	}
+	mutations := []struct {
+		name string
+		run  func() error
+	}{
+		{"rename", func() error { _, err := svc.Update(ctx, admin, second.ID, "Renamed", ""); return err }},
+		{"demote", func() error { _, err := svc.Update(ctx, admin, second.ID, "", user.RoleMember); return err }},
+		{"promote", func() error { _, err := svc.Update(ctx, admin, second.ID, "", user.RoleAdmin); return err }},
+		{"disable", func() error { _, err := svc.SetDisabled(ctx, admin, second.ID, true); return err }},
+		{"enable", func() error { _, err := svc.SetDisabled(ctx, admin, second.ID, false); return err }},
+		{"rotate", func() error { _, _, err := svc.RotateAPIKey(ctx, admin, second.ID); return err }},
+	}
+	for _, m := range mutations {
+		repo.reset()
+		if err := m.run(); err != nil {
+			t.Fatalf("%s: %v", m.name, err)
+		}
+		locked, plain := repo.counts()
+		if locked == 0 {
+			t.Errorf("%s did not read the roster under its lock", m.name)
+		}
+		if plain != 0 {
+			t.Errorf("%s loaded its target with %d plain lookup(s) outside the roster lock", m.name, plain)
+		}
+	}
+	repo.reset()
+	if _, err := svc.Update(ctx, admin, "missing", "Nobody", ""); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("update of an unknown user: want ErrNotFound, got %v", err)
 	}
 }

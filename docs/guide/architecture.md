@@ -72,6 +72,7 @@ An **Assessment Cycle** owns rooted Assessment/Re-test ancestry and a frozen Ass
 | `synapse-assessment-backfill` | Resumable tenant-scoped historical singleton-Cycle backfill. |
 | `synapse-assessment-snapshot-backfill` | Append-only projection of historical scan evidence into legacy Snapshots with explicit unknown coverage. |
 | `synapse-finding-lineage-backfill` | Resumable conversion of legacy Findings into versioned Identities, immutable Observations, review Candidates, or explicit redacted Skip records. |
+| `synapse-identity-backfill` | Fenced, resumable projection of legacy users into the identity model, plus shadow parity, rollback drill and person-audit delivery. `users` stays the writer of record. |
 | `synapse-assessment-comparison-backfill` | Tenant-scoped shadow Comparison generation and deterministic failed-item repair. |
 | `synapse-assessment-integrity` | Read-only Cycle integrity verification and deterministic repair-plan output. |
 | `synapse-assessment-rollout-gate` | Offline fail-closed evaluator for canary, read-cutover, UI-default, and rollback evidence. |

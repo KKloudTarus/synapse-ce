@@ -35,8 +35,8 @@ Disabling a user consumes open contact-verification challenges in that update.
 Send time checks the same disabled flag again before any queued mail leaves.
 
 Self-managed contacts and OIDC-imported contacts are separate records. An OIDC
-address is imported only after issuer/subject resolves an existing or newly
-provisioned user and only if the signed `email_verified` claim is the JSON
+address is imported only after issuer/subject resolves an existing user through
+an approved link and only if the signed `email_verified` claim is the JSON
 boolean true. A later unverified claim revokes that provider-managed contact.
 Contact versions fence queued mail; the queue payload contains only a challenge
 ID. User and tenant scope are derived from the authenticated principal at the

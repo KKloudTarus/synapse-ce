@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
@@ -34,9 +35,11 @@ func decodeNotificationBody(w http.ResponseWriter, r *http.Request, out any) err
 // callerCan reports whether the authenticated principal holds perm. Routes are gated by rt.authz;
 // this is for the few handlers whose route admits a narrower permission and that refuse one part of
 // the request to callers without a broader one.
+//
+// It asks the same decision as the route guard, so a credential restriction that denies a route
+// also denies the broader part of a request here.
 func callerCan(r *http.Request, perm userdom.Permission) bool {
-	p, ok := principalObj(r.Context())
-	return ok && userdom.Role(p.Role).Can(perm)
+	return decideRequest(r, authz.Action{Permission: perm}).Allowed
 }
 
 func notificationID(r *http.Request) (shared.ID, error) {

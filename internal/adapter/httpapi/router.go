@@ -9,6 +9,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aitriagereview"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
@@ -374,14 +375,44 @@ func NewRouter(log *slog.Logger, auth *Authenticator, eng *enguc.Service, sca *s
 // child routes (role 403 is decided first and cheaply, without revealing whether a cross-tenant
 // engagement exists; a role-allowed caller then hits the tenant 404). Machine (mcp/agent) and
 // unknown roles are granted nothing here (user.Role.Can), so the human REST API is closed to them.
+//
+// It asks the same decision (authz.Decide) that handler-level checks use. A request that reaches
+// it without a principal is refused with 401 authentication_required: a missing principal is never
+// treated as the operator or as any role.
 func (rt *Router) authz(perm userdom.Permission, h http.HandlerFunc) http.HandlerFunc {
+	return rt.authorize(authz.Action{Permission: perm}, h)
+}
+
+// authenticated guards a route that needs an authenticated human principal but no role, such as
+// the consent gate.
+func (rt *Router) authenticated(h http.HandlerFunc) http.HandlerFunc {
+	return rt.authorize(authz.Action{}, h)
+}
+
+// recoverable guards a route that is also one of the closed identity-recovery actions, so a
+// recovery-only credential may reach it. perm is still required ("" means no role); the recovery
+// tag never widens an ordinary credential.
+func (rt *Router) recoverable(perm userdom.Permission, action authz.RecoveryAction, h http.HandlerFunc) http.HandlerFunc {
+	return rt.authorize(authz.Action{Permission: perm, Recovery: action}, h)
+}
+
+// authorize is the one route-level enforcement point for authz.Decide.
+func (rt *Router) authorize(action authz.Action, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := principalObj(r.Context())
-		if !ok || !userdom.Role(p.Role).Can(perm) {
-			writeJSON(w, http.StatusForbidden, errorBody{Error: "insufficient permissions: this action requires the " + string(perm) + " capability"})
+		decision := decideRequest(r, action)
+		if decision.Allowed {
+			h(w, r)
 			return
 		}
-		h(w, r)
+		if decision.Reason == authz.ReasonUnauthenticated {
+			authenticationRequired(w)
+			return
+		}
+		message := "insufficient permissions for this action"
+		if action.Permission != "" {
+			message = "insufficient permissions: this action requires the " + string(action.Permission) + " capability"
+		}
+		writeJSON(w, http.StatusForbidden, errorBody{Error: message, Code: CodePermissionDenied})
 	}
 }
 
@@ -421,7 +452,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/auth/oidc/login", rt.oidcLogin)
 		mux.HandleFunc("GET /api/auth/oidc/callback", rt.oidcCallback)
 		mux.HandleFunc("GET /api/auth/session", rt.oidcSession)
-		mux.HandleFunc("POST /api/auth/logout", rt.oidcLogout)
+		mux.HandleFunc("POST /api/auth/logout", rt.recoverable("", authz.RecoveryLogout, rt.oidcLogout))
 	}
 	// Identity/consent routes carry NO role gate (a brand-new principal must reach them): /aup,
 	// /aup/accept, /me, and public probes. EVERY other route below is registered through
@@ -429,8 +460,8 @@ func (rt *Router) routes() *http.ServeMux {
 	// check. Engagement child routes compose authz OUTSIDE withEngTenant: the role 403 is decided
 	// first and cheaply (without revealing whether a cross-tenant engagement exists); a role-allowed
 	// caller then hits the tenant 404. Machine (mcp/agent) roles are granted nothing here.
-	mux.HandleFunc("GET /api/v1/aup", rt.getAUP)
-	mux.HandleFunc("POST /api/v1/aup/accept", rt.acceptAUP)
+	mux.HandleFunc("GET /api/v1/aup", rt.authenticated(rt.getAUP))
+	mux.HandleFunc("POST /api/v1/aup/accept", rt.authenticated(rt.acceptAUP))
 	if rt.integrations != nil {
 		mux.HandleFunc("GET /api/v1/integration-providers", rt.authz(userdom.PermView, rt.listIntegrationProviders))
 		mux.HandleFunc("POST /api/v1/integrations", rt.authz(userdom.PermAdminister, rt.createIntegration))
@@ -963,7 +994,7 @@ func (rt *Router) routes() *http.ServeMux {
 		// subsystem from a broken one.
 		mux.HandleFunc("GET /api/v1/capabilities", rt.authz(userdom.PermView, rt.listCapabilities))
 	}
-	mux.HandleFunc("GET /api/v1/me", rt.currentUser)
+	mux.HandleFunc("GET /api/v1/me", rt.recoverable("", authz.RecoveryReadSelf, rt.currentUser))
 	if rt.assigneeReview != nil {
 		mux.HandleFunc("GET /api/v1/findings/assignee-review", rt.authz(userdom.PermAdminister, rt.listAssigneeReview))
 	}
@@ -980,12 +1011,15 @@ func (rt *Router) routes() *http.ServeMux {
 	// User management is administer-only and confined to the caller's own tenant. Deleting a user is
 	// deliberately absent: an identity owns its audit, evidence, and finding attribution, so access is
 	// revoked by disabling the account or rotating its key, never by removing the row.
-	mux.HandleFunc("GET /api/v1/users", rt.authz(userdom.PermAdminister, rt.listUsers))
+	mux.HandleFunc("GET /api/v1/users", rt.recoverable(userdom.PermAdminister, authz.RecoveryListUsers, rt.listUsers))
 	mux.HandleFunc("POST /api/v1/users", rt.authz(userdom.PermAdminister, rt.createUser))
-	mux.HandleFunc("PATCH /api/v1/users/{id}", rt.authz(userdom.PermAdminister, rt.updateUser))
-	mux.HandleFunc("POST /api/v1/users/{id}/disable", rt.authz(userdom.PermAdminister, rt.disableUser))
-	mux.HandleFunc("POST /api/v1/users/{id}/enable", rt.authz(userdom.PermAdminister, rt.enableUser))
+	mux.HandleFunc("PATCH /api/v1/users/{id}", rt.recoverable(userdom.PermAdminister, authz.RecoveryAssignRole, rt.updateUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/disable", rt.recoverable(userdom.PermAdminister, authz.RecoveryDisableUser, rt.disableUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/enable", rt.recoverable(userdom.PermAdminister, authz.RecoveryEnableUser, rt.enableUser))
 	mux.HandleFunc("POST /api/v1/users/{id}/rotate-key", rt.authz(userdom.PermAdminister, rt.rotateUserAPIKey))
+	mux.HandleFunc("GET /api/v1/users/{id}/oidc-links", rt.authz(userdom.PermAdminister, rt.listUserOIDCLinks))
+	mux.HandleFunc("POST /api/v1/users/{id}/oidc-links", rt.authz(userdom.PermAdminister, rt.linkUserOIDCIdentity))
+	mux.HandleFunc("DELETE /api/v1/users/{id}/oidc-links/{linkId}", rt.authz(userdom.PermAdminister, rt.unlinkUserOIDCIdentity))
 	if rt.vulnerabilitySources != nil && rt.vulnerabilityMonitor != nil {
 		mux.HandleFunc("GET /api/v1/vulnerability/sources/types", rt.authz(userdom.PermView, rt.listVulnerabilityAdapterTypes))
 		mux.HandleFunc("GET /api/v1/vulnerability/sources", rt.authz(userdom.PermView, rt.listVulnerabilitySources))

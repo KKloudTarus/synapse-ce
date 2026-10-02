@@ -61,16 +61,16 @@ func TestContactRoutesDeriveUserAndTenantFromPrincipal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
+	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
 		switch token {
 		case "alice":
-			return Principal{ID: "alice", Name: "Alice", Role: "readonly", TenantID: "tenant-a"}, true
+			return Principal{ID: "alice", Name: "Alice", Role: "readonly", TenantID: "tenant-a"}, nil
 		case "bob":
-			return Principal{ID: "bob", Name: "Bob", Role: "consultant", TenantID: "tenant-b"}, true
+			return Principal{ID: "bob", Name: "Bob", Role: "consultant", TenantID: "tenant-b"}, nil
 		case "machine":
-			return Principal{ID: "machine", Role: "agent", TenantID: "tenant-a"}, true
+			return Principal{ID: "machine", Role: "agent", TenantID: "tenant-a"}, nil
 		default:
-			return Principal{}, false
+			return Principal{}, errTestCredentialInvalid
 		}
 	})
 	accepted := newFakeAUPStore()

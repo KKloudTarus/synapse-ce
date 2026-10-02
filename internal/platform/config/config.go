@@ -65,8 +65,11 @@ type Config struct {
 	OIDCRedirectURL  string
 	OIDCFrontendURL  string
 	// PublicBaseURL is the trusted console URL for outbound links, independent of OIDC enablement.
-	PublicBaseURL        string
-	OIDCTenantID         string
+	PublicBaseURL string
+	OIDCTenantID  string
+	// OIDCGroupRoleMapping is deprecated and ignored. It is still parsed so an existing
+	// SYNAPSE_OIDC_GROUP_ROLE_MAPPING does not break startup, and a non-empty value produces a
+	// deprecation warning. Provider groups never assign or change a Synapse role.
 	OIDCGroupRoleMapping []string
 	OIDCTransactionTTL   time.Duration
 	OIDCSessionTTL       time.Duration
@@ -1737,13 +1740,24 @@ func (c Config) ValidateOIDCPosture() error {
 	if !c.OIDCEnabled {
 		return nil
 	}
-	if strings.TrimSpace(c.OIDCIssuer) == "" || strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" || strings.TrimSpace(c.OIDCRedirectURL) == "" || strings.TrimSpace(c.OIDCTenantID) == "" || len(c.OIDCGroupRoleMapping) == 0 || c.OIDCTransactionTTL <= 0 || c.OIDCSessionTTL <= 0 {
-		return errors.New("OIDC requires issuer, client id, client secret, redirect URL, fixed tenant, group-role mapping, and positive lifetimes")
+	if strings.TrimSpace(c.OIDCIssuer) == "" || strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" || strings.TrimSpace(c.OIDCRedirectURL) == "" || strings.TrimSpace(c.OIDCTenantID) == "" || c.OIDCTransactionTTL <= 0 || c.OIDCSessionTTL <= 0 {
+		return errors.New("OIDC requires issuer, client id, client secret, redirect URL, fixed tenant, and positive lifetimes")
+	}
+	if !validOIDCIssuer(c.OIDCIssuer) {
+		return errors.New("OIDC requires SYNAPSE_OIDC_ISSUER to be an absolute HTTPS URL without query or fragment")
 	}
 	if !validOIDCFrontendURL(c.OIDCFrontendURL) {
 		return errors.New("OIDC requires an absolute HTTPS SYNAPSE_OIDC_FRONTEND_URL without query or fragment")
 	}
 	return nil
+}
+
+// OIDCDeprecationWarnings lists configuration that is accepted but ignored, for a startup warning.
+func (c Config) OIDCDeprecationWarnings() []string {
+	if len(c.OIDCGroupRoleMapping) == 0 {
+		return nil
+	}
+	return []string{"SYNAPSE_OIDC_GROUP_ROLE_MAPPING is deprecated and ignored: identity-provider groups no longer assign or change Synapse roles; roles are managed in Synapse and new subjects need an operator-approved link"}
 }
 
 // EffectivePublicBaseURL resolves the console origin even when OIDC is disabled.
@@ -1811,6 +1825,15 @@ func (c Config) ValidatePublicBaseURL() error {
 		return errors.New("SYNAPSE_PUBLIC_BASE_URL must be an absolute HTTPS console URL without credentials, query, or fragment")
 	}
 	return nil
+}
+
+// validOIDCIssuer applies the issuer rules the OIDC provider enforces when it normalizes the
+// issuer (absolute HTTPS URL, no query, no fragment), so a bad value fails configuration
+// validation instead of startup wiring. The config package cannot import the provider adapter;
+// a test asserts that both checks agree.
+func validOIDCIssuer(value string) bool {
+	u, err := url.Parse(strings.TrimSpace(value))
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.RawQuery == "" && u.Fragment == ""
 }
 
 func validOIDCFrontendURL(value string) bool {

@@ -81,16 +81,16 @@ func TestDetectionProvenanceRoutes(t *testing.T) {
 
 	aupStore := newFakeAUPStore()
 	aupStore.accepted["1.0"] = aup.Acceptance{Version: "1.0"}
-	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
+	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
 		switch token {
 		case "viewer":
-			return Principal{ID: "viewer", Role: "readonly", TenantID: "tenantA"}, true
+			return Principal{ID: "viewer", Role: "readonly", TenantID: "tenantA"}, nil
 		case "no-view":
-			return Principal{ID: "agent", Role: "agent", TenantID: "tenantA"}, true
+			return Principal{ID: "agent", Role: "agent", TenantID: "tenantA"}, nil
 		case "other-tenant":
-			return Principal{ID: "consultant", Role: "consultant", TenantID: "tenantB"}, true
+			return Principal{ID: "consultant", Role: "consultant", TenantID: "tenantB"}, nil
 		default:
-			return Principal{}, false
+			return Principal{}, errTestCredentialInvalid
 		}
 	})
 	rt := &Router{
@@ -189,8 +189,8 @@ func TestDetectionProvenanceRoutesAreAbsentWhenReaderUnwired(t *testing.T) {
 	aupStore.accepted["1.0"] = aup.Acceptance{Version: "1.0"}
 	rt := &Router{
 		log: discardLog(),
-		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
-			return Principal{ID: "viewer", Role: "readonly", TenantID: "tenantA"}, token == "viewer"
+		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
+			return Principal{ID: "viewer", Role: "readonly", TenantID: "tenantA"}, testCredentialErr(token == "viewer")
 		}),
 		aup: newTestAUP(aupStore, &fakeAudit{}),
 	}

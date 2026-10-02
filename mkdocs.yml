@@ -69,6 +69,7 @@ nav:
       - SIEM streams: siem-stream.md
       - Finding ownership and routing: finding-ownership.md
       - Assessment lifecycle rollout: assessment-lifecycle-operations.md
+      - Identity foundation rollout: identity-foundation-rollout.md
       - Deployment: deployment.md
       - Capacity and service objectives: capacity-slos.md
       - Backup, restore, and upgrade: backup-restore-upgrade.md

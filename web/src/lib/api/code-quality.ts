@@ -42,7 +42,8 @@ import {
   type MeasuresQuery,
   type ProjectMeasureResponse,
 } from '../projectMeasures'
-import { ApiError, blobDownload, getToken, getOnUnauthorized, req } from './client'
+import { ApiError, errorFromResponse } from './errors'
+import { blobDownload, req, snapshotAuth } from './client'
 import type { ProjectWire } from './wire'
 import { mapScanJob, mapCodeQualityReport } from './scan'
 
@@ -471,18 +472,12 @@ export const codeQualityApi = {
     form.append('key', key)
     form.append('gate_id', gateId)
     form.append('archive', archive)
-    const token = getToken()
-    const onUnauthorized = getOnUnauthorized()
-    const res = await fetch('/api/v1/projects', {
-      method: 'POST',
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-      body: form,
-    })
-    if (res.status === 401 && onUnauthorized) onUnauthorized()
+    const auth = snapshotAuth()
+    const res = await fetch('/api/v1/projects', auth.requestInit({ method: 'POST', body: form }, false))
     if (!res.ok) {
-      let message = `HTTP ${res.status}`
-      try { message = (await res.json())?.error ?? message } catch { /* non-JSON */ }
-      throw new ApiError(res.status, message)
+      const error = await errorFromResponse(res)
+      auth.notifyUnauthorized(error)
+      throw error
     }
     return mapProject(await res.json())
   },
@@ -640,14 +635,12 @@ export const codeQualityApi = {
     if (!coverage) return mapScanJob(await req(path, { method: 'POST' }))
     const form = new FormData()
     form.append('coverage', coverage)
-    const token = getToken()
-    const onUnauthorized = getOnUnauthorized()
-    const res = await fetch(`/api/v1${path}`, { method: 'POST', headers: token ? { authorization: `Bearer ${token}` } : {}, body: form })
-    if (res.status === 401 && onUnauthorized) onUnauthorized()
+    const auth = snapshotAuth()
+    const res = await fetch(`/api/v1${path}`, auth.requestInit({ method: 'POST', body: form }, false))
     if (!res.ok) {
-      let message = `HTTP ${res.status}`
-      try { message = (await res.json())?.error ?? message } catch { /* non-JSON */ }
-      throw new ApiError(res.status, message)
+      const error = await errorFromResponse(res)
+      auth.notifyUnauthorized(error)
+      throw error
     }
     return mapScanJob(await res.json())
   },

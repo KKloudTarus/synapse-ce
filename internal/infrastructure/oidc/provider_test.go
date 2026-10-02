@@ -3,8 +3,6 @@ package oidc
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 )
 
 func TestHTTPSIssuer(t *testing.T) {
@@ -19,55 +17,21 @@ func TestHTTPSIssuer(t *testing.T) {
 	}
 }
 
-func TestGroupRoleMappingRejectsMissingUnknownAndAmbiguousGroups(t *testing.T) {
-	roles, err := parseGroupRoleMapping([]string{"synapse-admins=admin", "synapse-readers=readonly"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider := &Provider{roles: roles}
-	cases := []struct {
-		name   string
-		groups any
-		want   user.Role
-		ok     bool
-	}{
-		{name: "one allowed group", groups: []string{"synapse-admins"}, want: user.RoleAdmin, ok: true},
-		{name: "missing groups", groups: []string{}, ok: false},
-		{name: "unknown group", groups: []string{"synapse-admins", "other"}, ok: false},
-		{name: "ambiguous roles", groups: []string{"synapse-admins", "synapse-readers"}, ok: false},
-		{name: "duplicate group", groups: []string{"synapse-admins", "synapse-admins"}, ok: false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			raw, err := json.Marshal(tc.groups)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err := provider.roleForGroups(raw)
-			if (err == nil) != tc.ok || got != tc.want {
-				t.Fatalf("roleForGroups() = %q, %v; want %q, success=%v", got, err, tc.want, tc.ok)
-			}
-		})
-	}
-}
-
-// integration_admin (#1358) is a human role an identity provider group may map to; machine roles
-// are never mappable.
-func TestGroupRoleMappingAcceptsIntegrationAdminButNoMachineRole(t *testing.T) {
-	roles, err := parseGroupRoleMapping([]string{"synapse-integrations=integration_admin"})
-	if err != nil || roles["synapse-integrations"] != user.RoleIntegrationAdmin {
-		t.Fatalf("integration_admin mapping = %v, %v", roles, err)
-	}
-	for _, machine := range []string{"agent", "mcp", "service"} {
-		if _, err := parseGroupRoleMapping([]string{"synapse-bots=" + machine}); err == nil {
-			t.Fatalf("machine role %q was accepted", machine)
+// An operator-approved link stores the issuer exactly as the provider compares it, so the
+// normalization the link command uses must be the verifier's own.
+func TestNormalizeIssuerMatchesVerifierForm(t *testing.T) {
+	for input, want := range map[string]string{
+		"https://issuer.example":        "https://issuer.example",
+		"https://issuer.example/":       "https://issuer.example",
+		" https://issuer.example/realm": "https://issuer.example/realm",
+	} {
+		got, err := NormalizeIssuer(input)
+		if err != nil || got != want {
+			t.Errorf("NormalizeIssuer(%q) = %q, %v; want %q", input, got, err, want)
 		}
 	}
-}
-
-func TestGroupRoleMappingRejectsMemberAlias(t *testing.T) {
-	if _, err := parseGroupRoleMapping([]string{"synapse-members=member"}); err == nil {
-		t.Fatal("member alias must not be configured for OIDC")
+	if _, err := NormalizeIssuer("http://issuer.example"); err == nil {
+		t.Fatal("a non-HTTPS issuer must be rejected")
 	}
 }
 

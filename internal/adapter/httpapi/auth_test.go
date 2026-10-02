@@ -11,8 +11,8 @@ import (
 // puts on the Principal flows through the auth middleware into the request context, readable via
 // TenantFrom – the plumbing that lets writes stamp + reads scope by tenant.
 func TestTenantPropagatesThroughContext(t *testing.T) {
-	auth := NewAuthenticator(func(_ context.Context, _ string) (Principal, bool) {
-		return Principal{ID: "u1", Name: "T", Role: "member", TenantID: "acme"}, true
+	auth := NewAuthenticator(func(_ context.Context, _ string) (Principal, error) {
+		return Principal{ID: "u1", Name: "T", Role: "member", TenantID: "acme"}, nil
 	})
 	var gotTenant, gotActor string
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -39,11 +39,11 @@ func TestTenantFromDefaultsEmpty(t *testing.T) {
 
 func TestAuthenticatorMiddleware(t *testing.T) {
 	// Resolver accepts only "secret", mapping it to a member principal.
-	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
+	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
 		if token == "secret" {
-			return Principal{ID: "u1", Name: "Tester", Role: "member"}, true
+			return Principal{ID: "u1", Name: "Tester", Role: "member"}, nil
 		}
-		return Principal{}, false
+		return Principal{}, errTestCredentialInvalid
 	})
 	public := map[string]bool{"/healthz": true, "/readyz": true}
 

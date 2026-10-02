@@ -6,7 +6,8 @@ import type {
   AgentSession,
   PendingApproval,
 } from '../types'
-import { ApiError, getToken, getOnUnauthorized, req } from './client'
+import { ApiError, errorFromResponse } from './errors'
+import { req, snapshotAuth } from './client'
 
 function mapAgentSession(r: any): AgentSession {
   return {
@@ -62,14 +63,17 @@ export async function streamAgentSession(
   const id = encodeURIComponent(engagementId)
   const sid = encodeURIComponent(sessionId)
   const qs = opts.lastEventId ? `?lastEventId=${opts.lastEventId}` : ''
-  const token = getToken()
-  const onUnauthorized = getOnUnauthorized()
-  const res = await fetch(`/api/v1/engagements/${id}/agent/sessions/${sid}/stream${qs}`, {
-    headers: token ? { authorization: `Bearer ${token}`, accept: 'text/event-stream' } : { accept: 'text/event-stream' },
-    signal: opts.signal,
-  })
-  if (res.status === 401 && onUnauthorized) onUnauthorized()
-  if (!res.ok || !res.body) throw new ApiError(res.status, `agent stream HTTP ${res.status}`)
+  const auth = snapshotAuth()
+  const res = await fetch(
+    `/api/v1/engagements/${id}/agent/sessions/${sid}/stream${qs}`,
+    auth.requestInit({ headers: { accept: 'text/event-stream' }, signal: opts.signal }, false),
+  )
+  if (!res.ok) {
+    const error = await errorFromResponse(res, `agent stream HTTP ${res.status}`)
+    auth.notifyUnauthorized(error)
+    throw error
+  }
+  if (!res.body) throw new ApiError(res.status, `agent stream HTTP ${res.status}`)
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()

@@ -3,9 +3,11 @@ package identityuc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -36,6 +38,8 @@ type identityTestStore struct {
 	transaction identity.AuthorizationTransaction
 	session     identity.Session
 	consumed    bool
+	getErr      error
+	rotateErr   error
 }
 
 func (s *identityTestStore) CreateExternalIdentity(context.Context, identity.ExternalIdentity) error {
@@ -60,10 +64,16 @@ func (s *identityTestStore) CreateSession(_ context.Context, session identity.Se
 	return nil
 }
 func (s *identityTestStore) RotateSession(_ context.Context, _ shared.ID, replacement identity.Session, _ time.Time) error {
+	if s.rotateErr != nil {
+		return s.rotateErr
+	}
 	s.session = replacement
 	return nil
 }
 func (s *identityTestStore) GetSessionByTokenHash(_ context.Context, hash string) (identity.Session, error) {
+	if s.getErr != nil {
+		return identity.Session{}, s.getErr
+	}
 	if s.session.TokenHash != hash {
 		return identity.Session{}, shared.ErrNotFound
 	}
@@ -71,6 +81,15 @@ func (s *identityTestStore) GetSessionByTokenHash(_ context.Context, hash string
 }
 func (s *identityTestStore) RevokeSession(context.Context, shared.ID, shared.ID, time.Time) error {
 	return nil
+}
+func (s *identityTestStore) ListExternalIdentities(context.Context, shared.ID, shared.ID) ([]identity.ExternalIdentity, error) {
+	return nil, nil
+}
+func (s *identityTestStore) DeleteExternalIdentity(context.Context, shared.ID, shared.ID, shared.ID) (identity.ExternalIdentity, error) {
+	return identity.ExternalIdentity{}, shared.ErrNotFound
+}
+func (s *identityTestStore) RevokeUserSessions(context.Context, shared.ID, shared.ID, time.Time) (int, error) {
+	return 0, nil
 }
 
 var _ ports.IdentityStore = (*identityTestStore)(nil)
@@ -142,5 +161,116 @@ func TestRotateSessionEnforcesAbsoluteMaxAge(t *testing.T) {
 	}
 	if _, err := svc.RotateSession(context.Background(), old, nil, time.Hour); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("past-cap rotation must be forbidden, got %v", err)
+	}
+}
+
+// Every browser-session authentication enforces the absolute lineage cap, not only rotation, and
+// refuses at exactly OriginAt + MaxSessionAge.
+func TestAuthenticateSessionEnforcesLineageCapAtTheBoundary(t *testing.T) {
+	origin := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name  string
+		now   time.Time
+		allow bool
+	}{
+		{"one second before the cap", origin.Add(identity.MaxSessionAge - time.Second), true},
+		{"exactly at the cap", origin.Add(identity.MaxSessionAge), false},
+		{"after the cap", origin.Add(identity.MaxSessionAge + time.Second), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The sliding expiry is well in the future, so only the lineage cap can refuse.
+			session, err := identity.NewSession("s1", "tenant", "user", stateHash("tok"), stateHash("csrf"), nil, tc.now.Add(time.Hour), origin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := &identityTestStore{session: session}
+			svc, err := NewService(store, identityTestProtector{}, identityTestClock{now: tc.now}, &identityTestIDs{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = svc.AuthenticateSession(context.Background(), "tenant", "tok")
+			if tc.allow && err != nil {
+				t.Fatalf("within the cap: %v", err)
+			}
+			if !tc.allow && !errors.Is(err, authz.ErrCredentialInvalid) {
+				t.Fatalf("at or past the cap must be an invalid credential, got %v", err)
+			}
+		})
+	}
+}
+
+func TestAuthenticateSessionClassifiesStoreOutcomes(t *testing.T) {
+	now := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	session, err := identity.NewSession("s1", "tenant", "user", stateHash("tok"), stateHash("csrf"), nil, now.Add(time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoked := session
+	revoked.Revoke(now)
+	cases := []struct {
+		name  string
+		store *identityTestStore
+		token string
+		want  error
+	}{
+		{"unknown token", &identityTestStore{session: session}, "other", authz.ErrCredentialInvalid},
+		{"revoked session", &identityTestStore{session: revoked}, "tok", authz.ErrCredentialInvalid},
+		{"empty token", &identityTestStore{session: session}, "", authz.ErrCredentialInvalid},
+		{"store outage", &identityTestStore{getErr: errors.New("connection reset")}, "tok", authz.ErrAuthenticationUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, err := NewService(tc.store, identityTestProtector{}, identityTestClock{now: now}, &identityTestIDs{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = svc.AuthenticateSession(context.Background(), "tenant", tc.token)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("AuthenticateSession() = %v, want %v", err, tc.want)
+			}
+			if tc.want == authz.ErrAuthenticationUnavailable && errors.Is(err, authz.ErrCredentialInvalid) {
+				t.Fatal("a store outage must never be reported as an invalid credential")
+			}
+		})
+	}
+}
+
+// A rotation that loses to a concurrent rotation of the same session (two tabs discovering at
+// once) is a retryable conflict, never an invalid credential: the browser may already hold the
+// winner's cookie, and an invalid credential would clear it. A storage failure stays unavailable.
+func TestRotateSessionClassifiesALostRaceAsAConflict(t *testing.T) {
+	now := time.Unix(1_000_000, 0).UTC()
+	previous, err := identity.NewSession("s1", "tenant", "user", stateHash("tok"), stateHash("csrf"), nil, now.Add(time.Hour), now.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name            string
+		storeErr        error
+		wantConflict    bool
+		wantUnavailable bool
+	}{
+		{"lost rotation race", fmt.Errorf("previous session no longer active: %w", shared.ErrConflict), true, false},
+		{"storage outage", errors.New("connection refused"), false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &identityTestStore{rotateErr: tc.storeErr}
+			svc, _ := NewService(store, identityTestProtector{}, identityTestClock{now}, &identityTestIDs{})
+			_, err := svc.RotateSession(context.Background(), previous, nil, time.Hour)
+			if err == nil {
+				t.Fatal("rotation must fail when the store refuses it")
+			}
+			if got := errors.Is(err, shared.ErrConflict); got != tc.wantConflict {
+				t.Fatalf("ErrConflict = %v, want %v (%v)", got, tc.wantConflict, err)
+			}
+			if errors.Is(err, authz.ErrCredentialInvalid) {
+				t.Fatalf("a failed rotation must never be classified as an invalid credential: %v", err)
+			}
+			if got := errors.Is(err, authz.ErrAuthenticationUnavailable); got != tc.wantUnavailable {
+				t.Fatalf("ErrAuthenticationUnavailable = %v, want %v (%v)", got, tc.wantUnavailable, err)
+			}
+		})
 	}
 }

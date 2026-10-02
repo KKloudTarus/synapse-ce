@@ -36,6 +36,7 @@ for migration order, dry-run examples, checkpoints, approval and rollback gates.
 | `synapse-assessment-backfill` | Create historical singleton Cycles with durable checkpoints. |
 | `synapse-assessment-snapshot-backfill` | Append immutable legacy Snapshots after Cycle backfill. |
 | `synapse-finding-lineage-backfill` | Project source Findings into Identities, Observations, review candidates or explicit skips. |
+| `synapse-identity-backfill` | Project legacy users into persons, memberships and credentials, check shadow parity, rehearse rollback, and deliver person-audit obligations. See [Identity foundation rollout](identity-foundation-rollout.md). |
 | `synapse-assessment-integrity` | Verify membership, boundaries and source reconciliation without repairing source data. |
 | `synapse-assessment-comparison-backfill` | Queue root-to-selected-head comparisons and optionally repair failed artifacts. |
 | `synapse-assessment-rollout-gate` | Evaluate supplied JSON rollout evidence; it does not enable feature flags or collect metrics. |

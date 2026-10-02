@@ -265,7 +265,9 @@ oidc:
   frontendURL: ""
   # The tenant is fixed by the operator and never read from a token claim.
   tenantID: ""
-  # Allowlist entries map one provider group to one Synapse role, e.g. "administrators=admin".
+  # Deprecated and ignored. Provider groups never assign or change a Synapse role; an
+  # administrator approves each (issuer, subject) link and sets the role in Synapse. A non-empty
+  # value is still accepted so existing values files render, and the API logs a deprecation warning.
   groupRoleMapping: []
   transactionTTL: 10m
   sessionTTL: 8h

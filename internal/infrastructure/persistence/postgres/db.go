@@ -542,6 +542,24 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 			"GRANT EXECUTE ON FUNCTION synapse_rotate_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
 		)
 	}
+	// The identity platform tables are global and owner-only. The runtime role reaches them solely
+	// through the exact-match SECURITY DEFINER functions of migration 0206; tenant-owned identity
+	// tables keep the ordinary grant under FORCE RLS.
+	var identityInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regclass('public.identity_credential_digests') IS NOT NULL").Scan(&identityInstalled); err != nil {
+		return fmt.Errorf("inspect identity foundation: %w", err)
+	}
+	if identityInstalled {
+		statements = append(statements,
+			"REVOKE ALL ON TABLE identity_persons, identity_person_audit, identity_person_membership_index, identity_credential_digests FROM "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_route_credential(TEXT) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_person_memberships(TEXT,TEXT) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_person_epoch(TEXT,TEXT) TO "+quotedRole,
+			// The general person command is owner-only; the runtime role may only create a person.
+			"REVOKE ALL ON FUNCTION synapse_identity_person_command(TEXT,TEXT,TEXT,TEXT) FROM "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_create_person(TEXT,TEXT) TO "+quotedRole,
+		)
+	}
 	for _, statement := range statements {
 		// #nosec G701 -- SQL is fixed apart from quoteIdentifier-escaped DSN identifiers; PostgreSQL cannot bind identifiers as parameters.
 		if _, err := adminDB.ExecContext(ctx, statement); err != nil {

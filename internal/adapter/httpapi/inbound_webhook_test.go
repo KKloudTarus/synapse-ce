@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -155,7 +156,7 @@ func setupHookWithObserver(t *testing.T, observer HTTPObserver) (http.Handler, *
 	receiver := &captureHookReceiver{}
 	// Route through the real root Handler, not only the isolated hook function.
 	// The human resolver deliberately rejects every bearer credential.
-	auth := NewAuthenticator(func(context.Context, string) (Principal, bool) { return Principal{}, false })
+	auth := NewAuthenticator(func(context.Context, string) (Principal, error) { return Principal{}, errTestCredentialInvalid })
 	rt := &Router{log: discardLog(), auth: auth}
 	rt.httpObserver = observer
 	rt.SetInboundWebhookPlane(store, cipher, receiver)
@@ -332,7 +333,7 @@ func TestInboundWebhookUniformFailuresAndHeaderChecks(t *testing.T) {
 	invalids = append(invalids, requestHook(h, http.MethodPost, a, body, good))
 	for i, got := range invalids {
 		assertHookCode(t, got, http.StatusUnauthorized)
-		if got.Body.String() != invalids[0].Body.String() {
+		if uniformHookBody(t, got) != uniformHookBody(t, invalids[0]) {
 			t.Errorf("negative path %d exposes a distinct response", i)
 		}
 	}
@@ -358,7 +359,7 @@ func TestInboundWebhookUniformFailuresAndHeaderChecks(t *testing.T) {
 	store.mu.Unlock()
 	corrupt := requestHook(h, http.MethodPost, a, body, good)
 	assertHookCode(t, corrupt, http.StatusUnauthorized)
-	if corrupt.Body.String() != invalids[0].Body.String() {
+	if uniformHookBody(t, corrupt) != uniformHookBody(t, invalids[0]) {
 		t.Fatal("corrupted vault ciphertext revealed a distinct error")
 	}
 }
@@ -452,7 +453,7 @@ func TestInboundWebhookKeyRotationAndNoSilentAcceptance(t *testing.T) {
 		t.Fatal("expired overlap key reached receiver")
 	}
 	// A receiver not yet registered must not report a successful ingestion.
-	auth := NewAuthenticator(func(context.Context, string) (Principal, bool) { return Principal{}, false })
+	auth := NewAuthenticator(func(context.Context, string) (Principal, error) { return Principal{}, errTestCredentialInvalid })
 	rt := &Router{log: discardLog(), auth: auth}
 	rt.SetInboundWebhookPlane(store, cipher, nil)
 	assertHookCode(t, requestHook(rt.Handler(), http.MethodPost, a, body, webhookSig(hookSecret('n'), body)), http.StatusServiceUnavailable)
@@ -475,6 +476,26 @@ func TestInboundWebhookEndpointAADIsTenantAndVersionBound(t *testing.T) {
 	if _, err := cipher.Open(e.CurrentSealed, ports.InboundWebhookAAD(e.TenantID, e.PublicID, e.OwnerKind, e.OwnerID, 2)); err == nil {
 		t.Fatal("previous vault ciphertext was reusable under another version")
 	}
+}
+
+// uniformHookBody returns a hook error body without its request_id. The id is the per-request
+// correlation value already sent as X-Request-ID, so it reveals nothing about why a request failed;
+// every other byte of the body must be identical across failure causes.
+func uniformHookBody(t *testing.T, got *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body map[string]any
+	if err := json.Unmarshal(got.Body.Bytes(), &body); err != nil {
+		t.Fatalf("hook error body is not JSON: %v", err)
+	}
+	if id, _ := body["request_id"].(string); id != got.Header().Get("X-Request-ID") {
+		t.Fatalf("hook request_id %q does not match X-Request-ID %q", id, got.Header().Get("X-Request-ID"))
+	}
+	delete(body, "request_id")
+	out, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
 }
 
 func gitLabSigningSecret(fill byte) []byte {

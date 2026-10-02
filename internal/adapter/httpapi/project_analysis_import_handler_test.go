@@ -29,11 +29,11 @@ func newImportRouter(t *testing.T) *Router {
 	rt := &Router{
 		log:      discardLog(),
 		projects: svc,
-		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
+		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
 			if token == "ci" {
-				return Principal{ID: "ci-bot", Role: "admin", TenantID: "tenant-a"}, true
+				return Principal{ID: "ci-bot", Role: "admin", TenantID: "tenant-a"}, nil
 			}
-			return Principal{}, false
+			return Principal{}, errTestCredentialInvalid
 		}),
 		aup: newTestAUP(aupStore, &fakeAudit{}),
 	}

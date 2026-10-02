@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
@@ -28,15 +29,16 @@ const (
 // evidence. Roles that already hold an investigative/mutating/review capability may see the source-side
 // redacted evidence. Unknown/machine roles fail closed even if this helper is ever called outside authz.
 func detectionFieldScopeFor(ctx context.Context) (detectionFieldScope, error) {
-	p, ok := principalObj(ctx)
-	if !ok {
+	if _, ok := principalObj(ctx); !ok {
 		return "", fmt.Errorf("%w: detection field authorization requires an authenticated principal", shared.ErrForbidden)
 	}
-	role := userdom.Role(p.Role)
-	if !role.Can(userdom.PermView) {
+	can := func(perm userdom.Permission) bool {
+		return decideContext(ctx, authz.Action{Permission: perm}).Allowed
+	}
+	if !can(userdom.PermView) {
 		return "", fmt.Errorf("%w: detection field authorization requires view permission", shared.ErrForbidden)
 	}
-	if role.Can(userdom.PermOperate) || role.Can(userdom.PermReview) || role.Can(userdom.PermAdminister) {
+	if can(userdom.PermOperate) || can(userdom.PermReview) || can(userdom.PermAdminister) {
 		return detectionFieldScopeFull, nil
 	}
 	return detectionFieldScopeRestricted, nil

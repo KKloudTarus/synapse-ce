@@ -1,5 +1,6 @@
 import type { ReconRun, ReconTool } from '../types'
-import { ApiError, getToken, getOnUnauthorized, req } from './client'
+import { ApiError, errorFromResponse } from './errors'
+import { req, snapshotAuth } from './client'
 import { mapEngagement } from './engagements'
 import type { Engagement } from '../types'
 
@@ -24,14 +25,17 @@ export async function streamReconLogs(
   const id = encodeURIComponent(engagementId)
   const rid = encodeURIComponent(runId)
   const qs = opts.lastEventId ? `?lastEventId=${opts.lastEventId}` : ''
-  const token = getToken()
-  const onUnauthorized = getOnUnauthorized()
-  const res = await fetch(`/api/v1/engagements/${id}/recon/runs/${rid}/logs${qs}`, {
-    headers: token ? { authorization: `Bearer ${token}`, accept: 'text/event-stream' } : { accept: 'text/event-stream' },
-    signal: opts.signal,
-  })
-  if (res.status === 401 && onUnauthorized) onUnauthorized()
-  if (!res.ok || !res.body) throw new ApiError(res.status, `log stream HTTP ${res.status}`)
+  const auth = snapshotAuth()
+  const res = await fetch(
+    `/api/v1/engagements/${id}/recon/runs/${rid}/logs${qs}`,
+    auth.requestInit({ headers: { accept: 'text/event-stream' }, signal: opts.signal }, false),
+  )
+  if (!res.ok) {
+    const error = await errorFromResponse(res, `log stream HTTP ${res.status}`)
+    auth.notifyUnauthorized(error)
+    throw error
+  }
+  if (!res.body) throw new ApiError(res.status, `log stream HTTP ${res.status}`)
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
