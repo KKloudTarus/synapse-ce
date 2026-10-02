@@ -1514,13 +1514,12 @@ func main() {
 			log.Error("Bitbucket webhook receiver init failed", "err", err)
 			os.Exit(1)
 		}
-		githubWebhookReceiver.SetBitbucketReceiver(bitbucketReceiver)
 		gitlabWebhookReceiver, err := scmwebhookuc.NewReceiver(integrationStore, projectService, webhookRepository, clock)
 		if err != nil {
 			log.Error("GitLab inbound webhook receiver init failed", "err", err)
 			os.Exit(1)
 		}
-		providerReceiver, err := scmwebhookuc.NewProviderReceiver(githubWebhookReceiver, gitlabWebhookReceiver)
+		providerReceiver, err := scmwebhookuc.NewProviderReceiver(githubWebhookReceiver, gitlabWebhookReceiver, bitbucketReceiver)
 		if err != nil {
 			log.Error("SCM inbound webhook receiver init failed", "err", err)
 			os.Exit(1)

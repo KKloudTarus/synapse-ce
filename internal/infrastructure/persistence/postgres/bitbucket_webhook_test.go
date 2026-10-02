@@ -22,11 +22,13 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
 
-func TestMigration0204BitbucketWebhookLifecycle(t *testing.T) {
-	isolated := newIsolatedMigrationDB(t, 204, 202)
-	if err := goose.UpTo(isolated.db, ".", 204); err != nil {
+func TestMigration0206BitbucketWebhookLifecycle(t *testing.T) {
+	isolated := newIsolatedMigrationDB(t, 206, 205)
+	// Upgrade a database already at shipped 0205 through the production entry point.
+	if err := Migrate(context.Background(), isolated.dsn); err != nil {
 		t.Fatal(err)
 	}
+	requireMigrationIndexes(t, isolated.db, "inbound_webhook_events_payload_unique", "notification_events_type_recent_idx")
 	for _, fn := range []string{"synapse_lock_bitbucket_inbound_webhook(text,text,text)", "synapse_provision_bitbucket_inbound_webhook(text,text,text,text,integer)", "synapse_rotate_bitbucket_inbound_webhook(text,text,text,integer,text,timestamp with time zone)"} {
 		var publicExecute bool
 		if err := isolated.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) acl WHERE p.oid=$1::regprocedure AND acl.grantee=0 AND acl.privilege_type='EXECUTE')`, fn).Scan(&publicExecute); err != nil {
@@ -36,9 +38,10 @@ func TestMigration0204BitbucketWebhookLifecycle(t *testing.T) {
 			t.Fatalf("PUBLIC execute on %s", fn)
 		}
 	}
-	if err := goose.DownTo(isolated.db, ".", 202); err != nil {
+	if err := goose.DownTo(isolated.db, ".", 205); err != nil {
 		t.Fatal(err)
 	}
+	requireMigrationIndexes(t, isolated.db, "inbound_webhook_events_payload_unique", "notification_events_type_recent_idx")
 	var installed bool
 	if err := isolated.db.QueryRow(`SELECT to_regprocedure('synapse_lock_bitbucket_inbound_webhook(text,text,text)') IS NOT NULL`).Scan(&installed); err != nil || installed {
 		t.Fatalf("function after down=%v err=%v", installed, err)

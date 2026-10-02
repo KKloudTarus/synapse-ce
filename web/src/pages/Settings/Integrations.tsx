@@ -452,7 +452,7 @@ function DynamicField({ field, value, onChange }: { field: IntegrationFieldDescr
 
 function BindingsCard({ canManage, integration, provider, projects, operations, bindings, busy, operate, onReload }: { canManage: boolean; integration: Integration; provider: IntegrationProviderDescriptor; projects: Project[]; operations: IntegrationOperation[]; bindings: IntegrationBinding[]; busy: string; operate: (key: string, action: () => Promise<void>, success: string) => Promise<void>; onReload: () => Promise<void> }) {
   const supportsDiscover = provider.capabilities.includes('discover_pipelines')
-  const bindableProjects = integration.provider === 'gitlab' ? projects.filter((item) => item.sourceBinding.kind === 'git') : projects
+  const bindableProjects = !supportsDiscover ? projects.filter((item) => item.sourceBinding.kind === 'git') : projects
   const pipelines = useMemo(() => operations.find((operation) => operation.type === 'discover' && operation.pipelines.length > 0)?.pipelines ?? [], [operations])
   const available = pipelines.filter((pipeline) => !bindings.some((binding) => binding.externalKey === pipeline.externalKey))
   const [pipelineKey, setPipelineKey] = useState('')

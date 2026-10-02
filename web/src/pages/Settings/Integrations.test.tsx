@@ -178,10 +178,11 @@ describe('Integrations settings', () => {
     await waitFor(() => expect(api.setIntegrationEnabled).toHaveBeenCalledWith(gitlabIntegration, true))
   })
 
-  it('offers only Git projects for the inbound GitLab binding', async () => {
-    vi.mocked(api.listIntegrationProviders).mockResolvedValue([gitlabProvider])
-    vi.mocked(api.listIntegrations).mockResolvedValue([gitlabIntegration])
-    vi.mocked(api.getIntegration).mockResolvedValue(gitlabIntegration)
+  it.each(['gitlab', 'bitbucket'])('offers only Git projects for the inbound %s binding', async (providerSlug) => {
+    const inboundIntegration = { ...gitlabIntegration, provider: providerSlug }
+    vi.mocked(api.listIntegrationProviders).mockResolvedValue([{ ...gitlabProvider, provider: providerSlug }])
+    vi.mocked(api.listIntegrations).mockResolvedValue([inboundIntegration])
+    vi.mocked(api.getIntegration).mockResolvedValue(inboundIntegration)
     vi.mocked(api.listProjects).mockResolvedValue([
       { id: 'git-project', name: 'Git app', sourceBinding: { kind: 'git', value: 'https://gitlab.example.com/org/app' } } as never,
       { id: 'local-project', name: 'Local checkout', sourceBinding: { kind: 'local', value: '/repo' } } as never,
@@ -191,6 +192,9 @@ describe('Integrations settings', () => {
     await user.click(await screen.findByLabelText('Synapse Project'))
     expect(await screen.findByRole('option', { name: 'Git app' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'Local checkout' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: 'Git app' }))
+    await user.click(screen.getByRole('button', { name: 'Bind Project' }))
+    await waitFor(() => expect(api.createIntegrationBinding).toHaveBeenCalledWith(inboundIntegration.id, 'git-project', '/inbound/git-project', 'Git app'))
   })
 
   it('requires a successful test before enabling and never renders stored plaintext', async () => {

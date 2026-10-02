@@ -40,7 +40,6 @@ type webhookSealer interface {
 type Service struct {
 	integrations integrationReader
 	projects     projectScanStarter
-	bitbucket    ports.InboundWebhookReceiver
 	admin        ports.InboundWebhookAdminStore
 	sealer       webhookSealer
 	audit        ports.AuditLogger
@@ -102,9 +101,6 @@ func (s *Service) ConfigureInboundWebhook(ctx context.Context, tenantID, integra
 	}
 	return s.configureWebhook(ctx, tenantID, integrationID, actor, secret, string(item.Provider))
 }
-
-// SetBitbucketReceiver attaches the provider receiver at the composition root.
-func (s *Service) SetBitbucketReceiver(receiver ports.InboundWebhookReceiver) { s.bitbucket = receiver }
 
 func (s *Service) configureWebhook(ctx context.Context, tenantID, integrationID shared.ID, actor, secret, provider string) (GitHubWebhookConfiguration, error) {
 	if s == nil || s.admin == nil || s.sealer == nil || s.audit == nil || s.clock == nil || s.transactions == nil {
@@ -197,12 +193,6 @@ func (s *Service) configureWebhook(ctx context.Context, tenantID, integrationID 
 }
 
 func (s *Service) ReceiveInboundWebhook(ctx context.Context, identity ports.InboundWebhookIdentity, event ports.InboundWebhookEvent) error {
-	if event.Provider == "bitbucket" {
-		if s == nil || s.bitbucket == nil {
-			return fmt.Errorf("%w: Bitbucket webhook receiver is not configured", shared.ErrValidation)
-		}
-		return s.bitbucket.ReceiveInboundWebhook(ctx, identity, event)
-	}
 	if s == nil || s.integrations == nil || s.projects == nil {
 		return fmt.Errorf("%w: SCM webhook receiver is not configured", shared.ErrValidation)
 	}

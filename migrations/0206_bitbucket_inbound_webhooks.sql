@@ -1,5 +1,5 @@
 -- +goose Up
--- #1453. Version 0203 is reserved by the concurrent GitLab webhook PR #1540.
+-- #1453. Append after shipped GitLab 0203 and notification index 0205.
 -- Tenant-authorized endpoint lifecycle. Runtime direct DML remains revoked:
 -- these SECURITY DEFINER functions bind every mutation to the caller's tenant
 -- GUC and to an existing Bitbucket integration.

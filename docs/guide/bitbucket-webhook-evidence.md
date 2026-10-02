@@ -4,7 +4,7 @@ Implementation scope: signed Bitbucket Cloud push and open PR creation/update de
 
 ## Local console evidence
 
-These screenshots render the real console using Chromium against a local Vite server and mocked HTTP API responses. All fixture names, repository URLs and hook paths are synthetic. No real credentials are captured. The secret is cleared immediately on submit, including API failure; the screenshot runner verifies the input is empty. All screenshots are English because the changed console strings currently render in English. Real forge screenshots in English/Vietnamese remain outstanding.
+These screenshots were captured before the rebase and render the real console using Chromium against a local Vite server and mocked HTTP API responses. All fixture names, repository URLs and hook paths are synthetic. No real credentials are captured. The secret is cleared immediately on submit, including API failure; the screenshot runner verifies the input is empty. All screenshots are English because the changed console strings currently render in English. Real forge screenshots in English/Vietnamese remain outstanding.
 
 | State | Light | Dark |
 | --- | --- | --- |
@@ -25,13 +25,13 @@ These screenshots render the real console using Chromium against a local Vite se
 
 - HMAC-SHA256 over raw bytes uses `X-Hub-Signature`; generic/GitHub signature headers do not authenticate a Bitbucket endpoint. Missing/duplicate headers, invalid signatures and tenant/header overrides are tested. Previous-secret rotation is tested.
 - Request UUID and authenticated-body digest receipts commit in the same PostgreSQL transaction as scan enqueue. Tests cover failure after enqueue, cancellation, terminated DB connection, retries and concurrent replay with changed request UUIDs.
-- Real PostgreSQL tests use a `NOSUPERUSER NOBYPASSRLS` runtime role. Owner privileges are restricted to fixture setup/cleanup. Hostile tenant/owner identities cannot provision, rotate or accept another endpoint. PUBLIC cannot execute the new SECURITY DEFINER functions. Migration 0204 is tested up and down; runtime direct endpoint DML remains revoked.
+- Real PostgreSQL tests use a `NOSUPERUSER NOBYPASSRLS` runtime role. Owner privileges are restricted to fixture setup/cleanup. Hostile tenant/owner identities cannot provision, rotate or accept another endpoint. PUBLIC cannot execute the new SECURITY DEFINER functions. Migration 0206 upgrades from shipped 0205 and rolls back to 0205 while preserving the GitLab payload and notification indexes; runtime direct endpoint DML remains revoked.
 - Bitbucket integrations bind one Git Project; concurrent second bindings are rejected. Payload clone URLs cannot override the stored Project repository. Multi-change pushes validate all targets before any enqueue.
 - Supported PR deliveries reject comment, approval and change-request payloads, preventing an unsigned event header from reclassifying those signed bodies as PR creation/update events.
 - Fork and missing repository identities restrict scans: credential-free acquisition, no build resolvers and no forge writes, including when Project decoration is opted in. An unrestricted control confirms resolver probes actually execute in the corresponding test.
 - The queue-only SCA entry point refuses missing queues/tracking stores. Multi-ref pushes enqueue without reserving the single running-scan slot; workers retry slot contention without spending delivery attempts, recheck live scope before execution, skip terminal deliveries by job ID, and expose unstarted dead letters as failed scans. PR source SHA and destination base ref remain pinned in each queued request.
 
-## Validation run
+## Validation before rebase
 
 Commands use Go 1.27.0, pnpm 9 and golangci-lint 2.13.2 (the CI version). PostgreSQL is version 17.11; tests set `SYNAPSE_TEST_DB_DSN` to an isolated local database. Helm 3.17.3 was built from official source; its compression dependency was reconstructed from the exact upstream tag and verified against the pinned module checksum before use.
 
@@ -57,4 +57,46 @@ Commands use Go 1.27.0, pnpm 9 and golangci-lint 2.13.2 (the CI version). Postgr
 
 A real Bitbucket Cloud repository/connection has not been supplied, so no actual delivery history, forge status/comment or Vietnamese forge screenshot is claimed. Outbound PR decoration is outside this receiver's scope. The change should stay draft until required full build/CI checks and actual-forge evidence are completed.
 
-The branch starts from `e73a899a0de8bc891f0acb341730bc0c8bed2274` (main after #1539). Migration 0204 avoids the 0203 file reserved by concurrent GitLab PR #1540. Whichever PR merges second must refresh its base, resolve shared webhook administration/HTTP/provider changes, and recheck migration ordering; avoiding a filename collision does not establish compatibility between the two independent PRs.
+The branch is rebased onto upstream `main` at `43e4136bd36ec30021244072506fe017d616d0ee`, which includes shipped migrations 0203 and 0205. The unshipped Bitbucket lifecycle migration is now 0206. Recheck the merged maximum immediately before merge and move only this unshipped migration if another PR has advanced it.
+
+## Validation after rebase (2026-10-02)
+
+The API wires GitHub, GitLab and Bitbucket directly into `ProviderReceiver`. The combined receiver test covers GitHub fork restrictions, GitLab replay, Bitbucket enqueue failure/retry, UUID and body replay, fork PR routing, bound tenant/project identity, and refusal of unknown providers. GitLab retains transactional payload dedupe; Bitbucket retains its separate transactional UUID/body receipts. The HTTP delivery claim remains GitHub-specific because the other receivers commit their receipts atomically with enqueue.
+
+The Project webhook tests share one queue capture helper. The console retains provider capability checks and allows only Git Projects for GitLab/Bitbucket direct binding; its regression test submits the binding for both providers.
+
+This run uses Go 1.27.1, pnpm 11.19.0 and a local PostgreSQL 17.11 database. Go dependencies were downloaded from the configured public module proxy or their upstream source without changing go.mod/go.sum.
+
+| Check | Result |
+| --- | --- |
+| Scoped backend race tests: SCM webhook, Project, integrations, SCA, HTTP, Bitbucket provider, memory and Postgres | Passed |
+| PostgreSQL race tests: migrations 0203/0206, Bitbucket lifecycle/replay/atomic enqueue/tenant checks, GitLab atomic replay and concurrent bindings | Passed against real PostgreSQL (14.189s) |
+| OpenAPI and documentation race tests | Passed |
+| `go build ./...` | Passed |
+| Scoped `go vet`, including API/worker composition roots | Passed |
+| Integrations UI tests, including GitLab/Bitbucket Git-only binding | Passed: 14 tests |
+| Frontend typecheck and production build | Passed |
+
+These local checks do not supply actual Bitbucket delivery evidence or English/Vietnamese forge screenshots. Those acceptance items still require a real test repository and reachable deployment.
+
+## Review disposition
+
+All currently published review summaries and maintainer comments on PR #1544 were checked on 2026-10-02.
+
+| Review/comment | Disposition |
+| --- | --- |
+| [Initial migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5944232391) | Superseded by the allocation update below; the already shipped 0203/0205 are unchanged. |
+| [First review](https://github.com/KKloudTarus/synapse-ce/pull/1544#pullrequestreview-5387730777) | Rebase conflicts are resolved. Bitbucket UUID/body dedupe is transactional with enqueue, as confirmed by the later review and real PostgreSQL retry/concurrency tests. |
+| [Integration review](https://github.com/KKloudTarus/synapse-ce/pull/1544#pullrequestreview-5388456991) | Three-provider dispatcher/composition test and shared queue test helper are fixed. Real Bitbucket delivery and English/Vietnamese forge evidence remain pending. |
+| [Updated migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5948201783) | Rebased onto current main; unshipped migration moved to 0206 and tested from a database already at 0205. Recheck main's maximum before merge. |
+
+## Collecting the remaining provider evidence
+
+A real Bitbucket Cloud test repository and a reachable Synapse deployment are required for these steps:
+
+1. Create an inbound Bitbucket integration, bind one existing Git Project whose persisted source is the test repository, provision its webhook secret, and enable the integration. Configure the returned HTTPS hook URL and the same secret in Bitbucket. Select repository push and pull-request created/updated events.
+2. Push a commit on a branch and capture Bitbucket's successful delivery history together with the corresponding queued/completed Synapse analysis and immutable commit SHA. Retry that delivery and verify it does not create a second scan.
+3. Open a pull request and push an update. Capture the created/updated deliveries, analysis source SHA and destination base branch. Exercise a fork PR and record credential-free acquisition, disabled build execution, and absence of forge writes.
+4. Record the required real forge screenshots and the English/Vietnamese acceptance evidence, with links to the delivery and analysis records. The existing synthetic console images do not satisfy this step.
+
+Until those records are attached, #1453's provider acceptance remains open and the PR should remain draft. The local integration and PostgreSQL results above establish implementation behavior, while actual provider delivery is still unverified.

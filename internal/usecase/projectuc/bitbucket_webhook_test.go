@@ -13,16 +13,6 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
 
-type webhookQueueCapture struct {
-	ports.JobQueue
-	payload []byte
-}
-
-func (q *webhookQueueCapture) Enqueue(_ context.Context, _ string, payload []byte) (string, error) {
-	q.payload = append([]byte(nil), payload...)
-	return "queue-job", nil
-}
-
 func TestBitbucketQueuesStoredRepoAndSuppressesForkExecution(t *testing.T) {
 	svc, analyses, jobs, engagements := newImportService(t)
 	ctx := shared.WithTenant(context.Background(), "tenant")

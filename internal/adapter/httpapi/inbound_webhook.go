@@ -193,7 +193,8 @@ func (p *inboundWebhookPlane) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Bind ONLY the authenticated record's tenant; do not use TenantOrDefault.
-	// GitLab commits replay receipts with durable enqueue in its receiver.
+	// GitLab and Bitbucket commit replay receipts with durable enqueue in
+	// their provider receivers. Bitbucket claims both UUID and body receipts.
 	// GitHub retains the existing transport-level delivery claim.
 	ctx := shared.WithTenant(r.Context(), endpoint.TenantID)
 	if event.Provider == "github" && event.EventID != "" {
