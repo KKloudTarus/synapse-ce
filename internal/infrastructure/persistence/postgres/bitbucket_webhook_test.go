@@ -23,8 +23,8 @@ import (
 )
 
 func TestMigration0207BitbucketWebhookLifecycle(t *testing.T) {
-	isolated := newIsolatedMigrationDB(t, 207, 205)
-	// Upgrade a database already at shipped 0205 through the production entry point.
+	isolated := newIsolatedMigrationDB(t, 207, 206)
+	// Upgrade a database already at shipped 0206 through the production entry point.
 	if err := Migrate(context.Background(), isolated.dsn); err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestMigration0207BitbucketWebhookLifecycle(t *testing.T) {
 			t.Fatalf("PUBLIC execute on %s", fn)
 		}
 	}
-	if err := goose.DownTo(isolated.db, ".", 205); err != nil {
+	if err := goose.DownTo(isolated.db, ".", 206); err != nil {
 		t.Fatal(err)
 	}
 	requireMigrationIndexes(t, isolated.db, "inbound_webhook_events_payload_unique", "notification_events_type_recent_idx")

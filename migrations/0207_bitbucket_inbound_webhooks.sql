@@ -1,5 +1,5 @@
 -- +goose Up
--- #1453. Append after shipped GitLab 0203 and notification index 0205.
+-- #1453. Append after shipped GitLab 0203, notification index 0205 and identity 0206.
 -- Tenant-authorized endpoint lifecycle. Runtime direct DML remains revoked:
 -- these SECURITY DEFINER functions bind every mutation to the caller's tenant
 -- GUC and to an existing Bitbucket integration.
