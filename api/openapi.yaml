@@ -66,6 +66,8 @@ tags:
     description: Tenant-managed channels, routing rules, and durable delivery history
   - name: ownership
     description: Finding teams, immutable routing policies, assignment and ownership history
+  - name: enterprise-identity
+    description: Organization identity connections, native membership administration, invitations, and break-glass recovery operations
 
   - name: inbound-webhooks
     description: Separate HMAC-authenticated ingress, never human/OIDC authorization
@@ -6657,6 +6659,155 @@ paths:
       summary: Show cursors, lag, and coverage limits
       responses:
         "200": {description: Sink status, content: {application/json: {schema: {$ref: "#/components/schemas/SIEMStatus"}}}}
+
+  /api/v1/identity/memberships:
+    get:
+      tags: [enterprise-identity]
+      operationId: listEnterpriseMemberships
+      summary: List the authenticated person's active organization memberships
+      responses:
+        '200': {description: Membership choices, each scoped by the authenticated session}
+        '401': {description: Authentication required}
+  /api/v1/identity/connections:
+    get:
+      tags: [enterprise-identity]
+      operationId: listIdentityConnections
+      summary: List organization identity connection drafts and active connections
+      responses:
+        '200': {description: Connection list}
+        '403': {description: Administrator or permitted break-glass recovery action required}
+  /api/v1/identity/connections/draft:
+    post:
+      tags: [enterprise-identity]
+      operationId: saveIdentityConnectionDraft
+      summary: Save an OIDC connection draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name, issuer, client_id]
+              additionalProperties: false
+              properties:
+                id: {type: string, description: Existing connection ID for a routine draft revision}
+                version: {type: integer, minimum: 0, description: Current connection version; zero for a new connection}
+                display_name: {type: string}
+                issuer: {type: string, format: uri}
+                client_id: {type: string}
+                client_secret: {type: string, writeOnly: true}
+                bootstrap_eligibility: {type: string, writeOnly: true}
+      responses: {'200': {description: Draft saved}, '403': {description: Administrator or recovery repair permission required}}
+  /api/v1/identity/connections/activate:
+    post:
+      tags: [enterprise-identity]
+      operationId: activateIdentityConnection
+      summary: Activate a tested identity connection revision
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id, revision, version], properties: {id: {type: string}, revision: {type: integer}, version: {type: integer}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Connection activated}, '409': {description: Stale version or untested revision}}
+  /api/v1/identity/connections/disable:
+    post:
+      tags: [enterprise-identity]
+      operationId: disableIdentityConnection
+      summary: Disable an identity connection
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id, version], properties: {id: {type: string}, version: {type: integer}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Connection disabled}, '409': {description: Stale version or unsafe last connection change}}
+  /api/v1/identity/connections/test:
+    post:
+      tags: [enterprise-identity]
+      operationId: testIdentityConnection
+      summary: Begin a proof-bound identity connection test
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id], properties: {id: {type: string}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Authorization URL for the test}, '403': {description: Administrator or recovery repair permission required}}
+  /api/v1/identity/bootstrap:
+    post:
+      tags: [enterprise-identity]
+      operationId: beginIdentityBootstrap
+      summary: Begin explicit bootstrap administrator verification
+      responses: {'200': {description: Short-lived bootstrap eligibility proof}, '403': {description: Administrator permission required}}
+  /api/v1/identity/policy:
+    get:
+      tags: [enterprise-identity]
+      operationId: getIdentityPolicy
+      summary: Read organization SSO and recovery readiness policy
+      responses: {'200': {description: Policy with requirement, version, readiness and grace cutoff}}
+    put:
+      tags: [enterprise-identity]
+      operationId: updateIdentityPolicy
+      summary: Update SSO requirement using server-held recovery evidence
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [requirement, version], properties: {requirement: {type: string, enum: [optional, required]}, version: {type: integer, minimum: 1}, legacy_grace_enabled: {type: boolean}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Policy saved}, '409': {description: Stale policy or missing current recovery evidence}}
+  /api/v1/identity/policy/rehearse:
+    post:
+      tags: [enterprise-identity]
+      operationId: rehearseIdentityRecovery
+      summary: Record a server-verified recovery rehearsal
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Rehearsal timestamp}, '403': {description: Fresh administrator proof required}}
+  /api/v1/identity/policy/recovery-code:
+    post:
+      tags: [enterprise-identity]
+      operationId: createIdentityRecoveryCode
+      summary: Rotate and return a one-time recovery activation code
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {membership_id: {type: string}, person_id: {type: string}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: One-time recovery code; clients must not persist it}, '403': {description: Fresh administrator proof required}}
+  /api/v1/identity/policy/test-alert:
+    post:
+      tags: [enterprise-identity]
+      operationId: testIdentityRecoveryAlert
+      summary: Send and record a recovery alert test to an authoritative verified contact
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Alert test succeeded}, '409': {description: No verified contact or delivery failed}}
+  /api/v1/identity/recovery/alerts:
+    get:
+      tags: [enterprise-identity]
+      operationId: listIdentityRecoveryAlerts
+      summary: List retained recovery alert delivery states
+      responses: {'200': {description: Pending, delivered, or exhausted alert obligations}}
+  /api/v1/identity/invitations:
+    get:
+      tags: [enterprise-identity]
+      operationId: listIdentityInvitations
+      summary: List pending organization invitations
+      responses: {'200': {description: Invitation list}}
+    post:
+      tags: [enterprise-identity]
+      operationId: createIdentityInvitation
+      summary: Create a single-use organization invitation
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [recipient, role], properties: {recipient: {type: string, format: email}, role: {type: string}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'201': {description: Invitation and one-time code}, '403': {description: Administrator permission required}}
+  /api/v1/identity/invitations/revoke:
+    post:
+      tags: [enterprise-identity]
+      operationId: revokeIdentityInvitation
+      summary: Revoke an invitation using optimistic versioning
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id, version], properties: {id: {type: string}, version: {type: integer}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'204': {description: Invitation revoked}, '409': {description: Stale invitation version}}
+  /api/v1/identity/roster:
+    get:
+      tags: [enterprise-identity]
+      operationId: listEnterpriseRoster
+      summary: List native organization membership roster
+      responses: {'200': {description: Members with id, person_id, role, state, and version}}
+  /api/v1/identity/memberships/change:
+    post:
+      tags: [enterprise-identity]
+      operationId: changeEnterpriseMembership
+      summary: Change a native membership role or active state
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id, kind, version], properties: {id: {type: string}, kind: {type: string, enum: [change_role, suspend, reactivate]}, role: {type: string}, version: {type: integer, minimum: 1}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Updated member}, '403': {description: Administrator or closed recovery action required}, '409': {description: Stale version or last usable administrator guard}}
+  /api/v1/identity/authenticators:
+    get:
+      tags: [enterprise-identity]
+      operationId: listOwnIdentityAuthenticators
+      summary: List identity authenticators belonging to the active browser-session person
+      responses: {'200': {description: Own connection names and states}, '403': {description: Browser session proof required}}
+  /api/v1/identity/link-connections:
+    get:
+      tags: [enterprise-identity]
+      operationId: listOwnLinkableIdentityConnections
+      summary: List approved connections available to the active browser-session person
+      responses: {'200': {description: Approved connection choices}, '403': {description: Browser session proof required}}
 
 components:
   securitySchemes:

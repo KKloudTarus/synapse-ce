@@ -23,14 +23,17 @@ import (
 // IdentityFoundationStore persists the additive identity model of migration 0206. Global access is
 // limited to the SECURITY DEFINER functions of that migration; every other statement runs inside a
 // tenant-bound RLS transaction.
-type IdentityFoundationStore struct{ pool *pgxpool.Pool }
+type IdentityFoundationStore struct {
+	pool                  *pgxpool.Pool
+	authorizationCapacity int
+}
 
 // NewIdentityFoundationStore returns a store backed by pool.
 func NewIdentityFoundationStore(pool *pgxpool.Pool) (*IdentityFoundationStore, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("%w: identity foundation store requires a pool", shared.ErrValidation)
 	}
-	return &IdentityFoundationStore{pool: pool}, nil
+	return &IdentityFoundationStore{pool: pool, authorizationCapacity: 256}, nil
 }
 
 var (
@@ -40,6 +43,7 @@ var (
 	_ ports.IdentityMembershipStore      = (*IdentityFoundationStore)(nil)
 	_ ports.IdentityAuditDeliveryStore   = (*IdentityFoundationStore)(nil)
 	_ ports.IdentityBackfillStore        = (*IdentityFoundationStore)(nil)
+	_ ports.IdentityCutoverStore         = (*IdentityFoundationStore)(nil)
 )
 
 var identityDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -61,6 +65,8 @@ func identityPersistenceError(err error) error {
 		return fmt.Errorf("%w: %w: %s", shared.ErrConflict, ports.ErrIdentityNotRepresentable, pgErr.Message)
 	case "SYN02":
 		return fmt.Errorf("%w: %w: %s", shared.ErrConflict, ports.ErrIdentityLifecycle, pgErr.Message)
+	case "SYN03":
+		return fmt.Errorf("%w: %w: %s", shared.ErrConflict, ports.ErrIdentityCutover, pgErr.Message)
 	case "P0002":
 		return fmt.Errorf("%w: %s", shared.ErrNotFound, pgErr.Message)
 	case "22023", "23514":
@@ -242,8 +248,8 @@ func (s *IdentityFoundationStore) AddMembership(ctx context.Context, tenantID, p
 	membershipID := legacyIdentityID("membership_", tenantID, personID)
 	var out ports.IdentityMembership
 	err = s.withIdentityTenant(ctx, tenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO users (`+userCols+`) VALUES ($1,$2,$3,$4,false,$5,$5,$6)`,
-			projected.ID.String(), projected.Name, string(role), unusable, at, tenantID.String()); err != nil {
+		if _, err := tx.Exec(ctx, `SELECT synapse_identity_project_member_user($1,$2,$3,$4,$5,$6)`,
+			tenantID.String(), projected.ID.String(), projected.Name, string(role), unusable, at); err != nil {
 			return fmt.Errorf("project member user: %w", err)
 		}
 		m, err := scanIdentityMembership(tx.QueryRow(ctx, `INSERT INTO identity_memberships
@@ -274,7 +280,7 @@ func (s *IdentityFoundationStore) ChangeMembership(ctx context.Context, tenantID
 		// Representability first: before declaration users is the writer of record, so no native
 		// membership change is meaningful regardless of the roster.
 		var phase string
-		if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT cutover_phase FROM identity_policies WHERE tenant_id=$1), 'legacy')`, tenantID.String()).Scan(&phase); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT cutover_phase FROM identity_policies WHERE tenant_id=$1 FOR UPDATE), 'legacy')`, tenantID.String()).Scan(&phase); err != nil {
 			return fmt.Errorf("read cutover phase: %w", err)
 		}
 		if phase != "declared" {
@@ -347,8 +353,8 @@ func (s *IdentityFoundationStore) ChangeMembership(ctx context.Context, tenantID
 		if !updated.LegacyUserID.IsZero() {
 			// After declaration the membership is authoritative; keep its tenant-local users row
 			// consistent so ownership, assignee and inbox eligibility follow it.
-			if _, err := tx.Exec(ctx, `UPDATE users SET role=$3, disabled=$4, updated_at=$5 WHERE ownership_tenant_id=$1 AND id=$2`,
-				tenantID.String(), updated.LegacyUserID.String(), string(updated.Role), updated.State != ports.IdentityMembershipActive, change.At); err != nil {
+			if _, err := tx.Exec(ctx, `SELECT synapse_identity_mirror_member_user($1,$2,$3)`,
+				tenantID.String(), updated.ID.String(), change.At); err != nil {
 				return fmt.Errorf("mirror membership user: %w", err)
 			}
 		}

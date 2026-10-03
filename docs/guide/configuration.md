@@ -65,6 +65,29 @@ The console link builder routes to engagements, incidents, the Findings tab (`#f
 
 ## Core and server
 
+### Shared organization authentication
+
+Existing bearer and fixed-tenant OIDC remain authoritative with the settings below disabled.
+Shared authentication requires durable PostgreSQL persistence, the trusted HTTPS
+`SYNAPSE_PUBLIC_BASE_URL`, and migrate-first rollout. The callback is
+`/api/auth/enterprise/callback` on that base. Provider discovery is lazy and does not block startup.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_IDENTITY_CUTOVER_ENABLED` | `false` | Register shared identity flows and administration. Durable tenant declaration decides authority; disabling this flag after declaration fails closed. |
+| `SYNAPSE_IDENTITY_CUTOVER_READ_TENANTS` | empty | Up to 100 explicit, unique tenant IDs. Wildcards are rejected. Required when enabled. |
+| `SYNAPSE_IDENTITY_CUTOVER_MUTATION_TENANTS` | empty | Explicit subset of read tenants eligible for protocol, administration and session mutations. |
+| `SYNAPSE_IDENTITY_LEGACY_BEARER_GRACE_DURATION` | `0s` | Deployment grace ceiling from `0s` through `24h`. Each organization must separately enable grace; required policy admits legacy bearer only before activation time plus this duration. |
+
+Without a configured contact SMTP sender, new-person invitation acceptance stays closed.
+Recovery uses the same direct sender and retains alert obligations independently of ordinary
+notification rules and channel switches. See [cutover](identity-cutover.md) and
+[recovery](identity-recovery.md) for the operator procedures.
+
+Helm deployments can pass these nonsecret variables through the existing `extraEnv` list;
+no chart value or schema change is required. Keep both allowlists empty with the flag disabled.
+Changing the settings does not declare cutover or enable required SSO for an organization.
+
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_HTTP_ADDR` | `:8080` | Listen address. |

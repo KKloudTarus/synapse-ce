@@ -67,6 +67,8 @@ type Router struct {
 	auth                     *Authenticator
 	oidc                     OIDCService
 	oidcFrontendURL          string
+	legacyOIDCFence          func(context.Context) error
+	enterprise               *enterpriseDeps
 	eng                      *enguc.Service
 	sca                      *scauc.Service
 	aup                      *aupuc.Service
@@ -444,13 +446,16 @@ func (rt *Router) withEngTenant(h http.HandlerFunc) http.HandlerFunc {
 func (rt *Router) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	rt.registerOwnership(mux)
+	rt.registerEnterprise(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "synapse-api"})
 	})
 	mux.HandleFunc("GET /readyz", rt.ready)
-	if rt.oidc != nil {
-		mux.HandleFunc("GET /api/auth/oidc/login", rt.oidcLogin)
-		mux.HandleFunc("GET /api/auth/oidc/callback", rt.oidcCallback)
+	if rt.oidc != nil || rt.enterprise != nil {
+		if rt.oidc != nil {
+			mux.HandleFunc("GET /api/auth/oidc/login", rt.oidcLogin)
+			mux.HandleFunc("GET /api/auth/oidc/callback", rt.oidcCallback)
+		}
 		mux.HandleFunc("GET /api/auth/session", rt.oidcSession)
 		mux.HandleFunc("POST /api/auth/logout", rt.recoverable("", authz.RecoveryLogout, rt.oidcLogout))
 	}
@@ -1110,6 +1115,12 @@ func publicPaths() map[string]bool {
 	return map[string]bool{
 		"/healthz": true, "/readyz": true,
 		"/api/auth/oidc/login": true, "/api/auth/oidc/callback": true, "/api/auth/session": true,
+		"/api/auth/enterprise/context": true, "/api/auth/enterprise/begin": true, "/api/auth/enterprise/callback": true,
+		"/api/auth/enterprise/recovery":             true,
+		"/api/auth/enterprise/switch":               true,
+		"/api/auth/enterprise/invitation":           true,
+		"/api/auth/enterprise/invitation/pending":   true,
+		"/api/auth/enterprise/invitation/challenge": true,
 	}
 }
 

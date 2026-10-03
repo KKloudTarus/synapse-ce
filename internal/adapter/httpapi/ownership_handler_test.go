@@ -123,8 +123,23 @@ func TestHostileHarnessOwnershipPostgres(t *testing.T) {
 	rt := &Router{log: discardLog(), eng: enguc.NewService(postgres.NewEngagementRepository(pool), clock, ids, audit), findings: fs}
 	rt.SetOwnership(svc, "observe", "")
 	routes := rt.routes()
-	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES('own-a','A'),('own-b','B'); INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('alice','Alice','admin','own-http-a','own-a'),('bob','Bob','consultant','own-http-b','own-a'),('reader','Reader','readonly','own-http-r','own-a'),('outsider','Other','admin','own-http-o','own-b')`); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES('own-a','A'),('own-b','B')`); err != nil {
 		t.Fatal(err)
+	}
+	for tenant, users := range map[string][]struct{ id, name, role, hash string }{
+		"own-a": {{"alice", "Alice", "admin", "own-http-a"}, {"bob", "Bob", "consultant", "own-http-b"}, {"reader", "Reader", "readonly", "own-http-r"}},
+		"own-b": {{"outsider", "Other", "admin", "own-http-o"}},
+	} {
+		if err := postgres.WithTenant(ctx, pool, tenant, func(tx pgx.Tx) error {
+			for _, user := range users {
+				if _, err := tx.Exec(ctx, `INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES($1,$2,$3,$4,$5)`, user.id, user.name, user.role, user.hash, tenant); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, tenant := range []string{"own-a", "own-b"} {
 		if err := postgres.WithTenant(ctx, pool, tenant, func(tx pgx.Tx) error {
@@ -350,7 +365,10 @@ func TestHostileHarnessOwnershipPostgres(t *testing.T) {
 	if sum != 609 {
 		t.Fatalf("CAS statuses sum=%d", sum)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE users SET disabled=true WHERE id='bob'`); err != nil {
+	if err := postgres.WithTenant(ctx, pool, "own-a", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE users SET disabled=true WHERE id='bob'`)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	denied = request("bob", "admin", "own-a", "POST", "/api/v1/ownership/teams", "", map[string]string{"name": "Disabled", "slug": "disabled"})
@@ -398,7 +416,10 @@ func TestHostileHarnessOwnershipPostgres(t *testing.T) {
 	call("POST", "/api/v1/ownership/runs/run/cancel", "", map[string]int{"revision": 1}, 409)
 	// Legacy bootstrap users with empty tenant IDs use the default tenant, even
 	// when a conflicting ambient context and other tenants' data are present.
-	if _, err := pool.Exec(ctx, `INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('bootstrap','Bootstrap','admin','own-http-default','')`); err != nil {
+	if err := postgres.WithTenant(ctx, pool, "default", func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('bootstrap','Bootstrap','admin','own-http-default','')`)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := postgres.WithTenant(ctx, pool, "default", func(tx pgx.Tx) error {

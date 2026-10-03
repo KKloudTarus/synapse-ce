@@ -78,15 +78,19 @@ func exitCode(err error) int {
 }
 
 type backfillOptions struct {
-	mode      string
-	tenants   []shared.ID
-	issuer    string
-	actor     string
-	batchSize int
-	maxDrift  int
-	limit     int
-	timeout   time.Duration
-	lease     time.Duration
+	mode                string
+	tenants             []shared.ID
+	issuer              string
+	actor               string
+	batchSize           int
+	maxDrift            int
+	limit               int
+	timeout             time.Duration
+	lease               time.Duration
+	policyVersion       int
+	shadowReportID      shared.ID
+	oldWriterGeneration string
+	migrationVersion    int
 }
 
 func main() {
@@ -123,6 +127,10 @@ func run(args []string, output io.Writer) error {
 		return err
 	}
 	svc, err := identityfoundation.NewService(store, store, idgen.SystemClock{}, idgen.RandomID{})
+	if err != nil {
+		return err
+	}
+	cutover, err := identityfoundation.NewCutoverService(store, idgen.SystemClock{})
 	if err != nil {
 		return err
 	}
@@ -169,6 +177,20 @@ func run(args []string, output io.Writer) error {
 			if err == nil {
 				log.Info("identity projection rolled back", "tenant_id", tenantID)
 			}
+		case "prepare":
+			_, err = cutover.Prepare(ctx, tenantID, options.policyVersion, options.actor)
+		case "canary":
+			var report ports.IdentityShadowReport
+			report, err = cutover.Canary(ctx, tenantID)
+			if err == nil {
+				recordParity(tenantID, report)
+			}
+		case "declare":
+			_, err = cutover.Declare(ctx, tenantID, options.policyVersion, ports.IdentityCutoverEvidence{ShadowReportID: options.shadowReportID, OldWriterGeneration: options.oldWriterGeneration, OldWriterCount: 0, MigrationVersion: options.migrationVersion}, options.actor)
+		case "contract":
+			_, err = cutover.Contract(ctx, tenantID, options.policyVersion, options.actor)
+		case "abort":
+			_, err = cutover.Abort(ctx, tenantID, options.policyVersion, options.actor)
 		}
 		if err != nil {
 			combined = errors.Join(combined, fmt.Errorf("tenant %s: %w", tenantID, err))
@@ -208,7 +230,7 @@ func parseOptions(args []string, output io.Writer) (backfillOptions, error) {
 		flags.PrintDefaults()
 		_, _ = fmt.Fprint(flags.Output(), exitCodeUsage)
 	}
-	mode := flags.String("mode", "backfill", "backfill, shadow, rollback or deliver")
+	mode := flags.String("mode", "backfill", "backfill, shadow, rollback, deliver, prepare, canary, declare, contract or abort")
 	tenantsValue := flags.String("tenants", "", fmt.Sprintf("comma-separated tenant IDs; maximum %d", maxTenants))
 	issuer := flags.String("oidc-issuer", "", "configured fixed OIDC issuer whose approved links are imported; empty imports none")
 	actor := flags.String("actor", "identity-backfill", "audit actor")
@@ -219,6 +241,14 @@ func parseOptions(args []string, output io.Writer) (backfillOptions, error) {
 	limit := flags.Int("delivery-limit", 100, "obligations per tenant per delivery pass (1-500)")
 	timeout := flags.Duration("timeout", 30*time.Minute, "overall command timeout")
 	lease := flags.Duration("lease-duration", 10*time.Minute, "a running backfill updated within this window blocks a new one")
+	policyVersion := flags.Int("expected-policy-version", 0, "optimistic identity policy version required by a cutover transition")
+	shadowReport := flags.String("shadow-report-id", "", "clean, current shadow report required by declare")
+	oldWriterGeneration := flags.String("old-writer-generation", "", "deployed old-writer generation proven drained before declare")
+	ceiling, ceilingErr := postgres.EmbeddedMigrationCeiling()
+	if ceilingErr != nil {
+		return backfillOptions{}, ceilingErr
+	}
+	migrationVersion := flags.Int("migration-version", ceiling, "migrate-first schema version evidenced before declare")
 	if err := flags.Parse(args); err != nil {
 		return backfillOptions{}, err
 	}
@@ -226,9 +256,9 @@ func parseOptions(args []string, output io.Writer) (backfillOptions, error) {
 		return backfillOptions{}, fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
 	}
 	switch *mode {
-	case "backfill", "shadow", "rollback", "deliver":
+	case "backfill", "shadow", "rollback", "deliver", "prepare", "canary", "declare", "contract", "abort":
 	default:
-		return backfillOptions{}, fmt.Errorf("--mode %q is not one of backfill, shadow, rollback, deliver", *mode)
+		return backfillOptions{}, fmt.Errorf("--mode %q is not a supported identity workflow mode", *mode)
 	}
 	seen := map[shared.ID]bool{}
 	var tenants []shared.ID
@@ -263,8 +293,15 @@ func parseOptions(args []string, output io.Writer) (backfillOptions, error) {
 	if *timeout <= 0 || *lease <= 0 {
 		return backfillOptions{}, errors.New("--timeout and --lease-duration must be positive")
 	}
+	if *policyVersion < 0 || *migrationVersion < 209 {
+		return backfillOptions{}, errors.New("--expected-policy-version must not be negative and --migration-version must be at least 209")
+	}
+	if *mode == "declare" && (strings.TrimSpace(*shadowReport) == "" || strings.TrimSpace(*oldWriterGeneration) == "") {
+		return backfillOptions{}, errors.New("declare requires --shadow-report-id and --old-writer-generation")
+	}
 	return backfillOptions{
 		mode: *mode, tenants: tenants, issuer: trimmedIssuer, actor: trimmedActor, batchSize: *batchSize,
 		maxDrift: *maxDrift, limit: *limit, timeout: *timeout, lease: *lease,
+		policyVersion: *policyVersion, shadowReportID: shared.ID(strings.TrimSpace(*shadowReport)), oldWriterGeneration: strings.TrimSpace(*oldWriterGeneration), migrationVersion: *migrationVersion,
 	}, nil
 }

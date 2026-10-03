@@ -14,13 +14,14 @@ import (
 
 // IdentityStore is a race-safe in-memory ports.IdentityStore for development and tests.
 type IdentityStore struct {
-	mu               sync.RWMutex
-	authorizationMu  sync.Mutex
-	users            ports.UserRepository
-	identitiesByKey  map[string]identity.ExternalIdentity
-	transactions     map[string]identity.AuthorizationTransaction
-	sessionsByID     map[shared.ID]identity.Session
-	sessionIDsByHash map[string]shared.ID
+	mu                    sync.RWMutex
+	authorizationMu       sync.Mutex
+	authorizationCapacity int
+	users                 ports.UserRepository
+	identitiesByKey       map[string]identity.ExternalIdentity
+	transactions          map[string]identity.AuthorizationTransaction
+	sessionsByID          map[shared.ID]identity.Session
+	sessionIDsByHash      map[string]shared.ID
 }
 
 // NewIdentityStore returns an empty store linked to the supplied user repository.
@@ -29,7 +30,7 @@ func NewIdentityStore(users ports.UserRepository) (*IdentityStore, error) {
 		return nil, fmt.Errorf("%w: identity store requires user repository", shared.ErrValidation)
 	}
 	return &IdentityStore{
-		users: users, identitiesByKey: make(map[string]identity.ExternalIdentity),
+		users: users, authorizationCapacity: 256, identitiesByKey: make(map[string]identity.ExternalIdentity),
 		transactions: make(map[string]identity.AuthorizationTransaction), sessionsByID: make(map[shared.ID]identity.Session), sessionIDsByHash: make(map[string]shared.ID),
 	}, nil
 }
@@ -181,6 +182,24 @@ func (s *IdentityStore) CreateAuthorizationTransaction(ctx context.Context, tran
 	defer s.mu.Unlock()
 	if _, exists := s.transactions[transaction.StateHash]; exists {
 		return fmt.Errorf("authorization state already exists: %w", shared.ErrConflict)
+	}
+	for stateHash, existing := range s.transactions {
+		if !existing.Usable(transaction.CreatedAt) {
+			delete(s.transactions, stateHash)
+		}
+	}
+	if s.authorizationCapacity <= 0 {
+		return shared.ErrSaturated
+	}
+	for len(s.transactions) >= s.authorizationCapacity {
+		var oldestStateHash string
+		var oldest identity.AuthorizationTransaction
+		for stateHash, existing := range s.transactions {
+			if oldestStateHash == "" || existing.CreatedAt.Before(oldest.CreatedAt) || (existing.CreatedAt.Equal(oldest.CreatedAt) && stateHash < oldestStateHash) {
+				oldestStateHash, oldest = stateHash, existing
+			}
+		}
+		delete(s.transactions, oldestStateHash)
 	}
 	s.transactions[transaction.StateHash] = transaction
 	return nil

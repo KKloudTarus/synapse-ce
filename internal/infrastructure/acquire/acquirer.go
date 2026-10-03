@@ -621,34 +621,6 @@ func (a *Acquirer) resolveComparison(ctx context.Context, dir, url string, gitEn
 	return base, mergeBase
 }
 
-func (a *Acquirer) gitFetchPinnedCommit(ctx context.Context, dir, url string, gitEnv, roPaths []string, commit string) bool {
-	args := []string{"-c", "credential.helper=", "-c", "http.followRedirects=false",
-		"fetch", "--depth", "1", "--no-tags", "origin", commit}
-	if a.sandbox != nil {
-		host, err := gitHost(url)
-		if err != nil {
-			return false
-		}
-		egress, hostNet := a.sandboxNet([]string{host})
-		res, err := a.sandbox.Run(ctx, ports.ToolSpec{Name: "git", Args: args, Env: gitEnv, Workdir: dir, ReadOnlyPaths: roPaths, EgressPolicy: egress, HostNetwork: hostNet})
-		return err == nil && res.ExitCode == 0
-	}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir, cmd.Env = dir, append(os.Environ(), gitEnv...)
-	return cmd.Run() == nil
-}
-
-func (a *Acquirer) gitCheckoutPinnedCommit(ctx context.Context, dir, url string, gitEnv []string) bool {
-	args := []string{"checkout", "--detach", "FETCH_HEAD"}
-	if a.sandbox != nil {
-		res, err := a.sandbox.Run(ctx, ports.ToolSpec{Name: "git", Args: args, Env: gitEnv, Workdir: dir})
-		return err == nil && res.ExitCode == 0
-	}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir, cmd.Env = dir, append(os.Environ(), gitEnv...)
-	return cmd.Run() == nil
-}
-
 func (a *Acquirer) gitFetch(ctx context.Context, dir, url string, gitEnv, roPaths []string, ref, destination string) bool {
 	// The comparison fetch is the other networked git op on a possibly-authenticated origin, so it carries
 	// the SAME credential hardening as the clone: no ambient credential helper may supply or persist the

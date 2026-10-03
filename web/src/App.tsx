@@ -43,6 +43,7 @@ const Rules = lazy(() => import('./pages/Rules/index'))
 const RuleDetail = lazy(() => import('./pages/Rules/RuleDetail'))
 const Audit = lazy(() => import('./pages/Settings/Audit').then(m => ({ default: m.Audit })))
 const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })))
+const Authentication = lazy(() => import('./pages/Authentication'))
 const Profile = lazy(() => import('./pages/Profile/ProfilePage').then(m => ({ default: m.ProfilePage })))
 const Inbox = lazy(() => import('./pages/Inbox/InboxPage').then(m => ({ default: m.InboxPage })))
 const SettingsConfig = lazy(() => import('./pages/Settings/SettingsConfig').then(m => ({ default: m.SettingsConfig })))
@@ -150,6 +151,7 @@ function Gate() {
 
           <Route path="relationships" element={<AssessmentRelationships />} />
           <Route path="config" element={<SettingsConfig />} />
+          <Route path="authentication" element={<EnterpriseAuthenticationRoute />} />
           <Route path="sla" element={<SLAPolicy />} />
           <Route path="offensive-policy" element={<OffensivePolicy />} />
           <Route path="alerting" element={<Alerting />} />
@@ -177,6 +179,11 @@ function AssessmentLifecycleRoute({ children }: { children: ReactNode }) {
   const { currentUser } = useAuth()
   if (currentUser?.features?.assessmentLifecycleUIDefault !== true) return <Navigate to="/engagements" replace />
   return children
+}
+
+function EnterpriseAuthenticationRoute() {
+  const { currentUser } = useAuth()
+  return <Authentication enabled={currentUser?.features?.enterpriseIdentity === true} />
 }
 
 function Shell() {

@@ -62,7 +62,23 @@ func (rt *Router) SetOIDC(service OIDCService, frontendURL string) {
 	}
 }
 
+// SetLegacyOIDCFence checks durable authority before any public legacy session write.
+func (rt *Router) SetLegacyOIDCFence(fence func(context.Context) error) { rt.legacyOIDCFence = fence }
+
+func (rt *Router) checkLegacyOIDC(w http.ResponseWriter, r *http.Request) bool {
+	if rt.legacyOIDCFence != nil {
+		if err := rt.legacyOIDCFence(r.Context()); err != nil {
+			writeAuthenticationError(w, err)
+			return false
+		}
+	}
+	return true
+}
+
 func (rt *Router) oidcLogin(w http.ResponseWriter, r *http.Request) {
+	if !rt.checkLegacyOIDC(w, r) {
+		return
+	}
 	authorization, err := rt.oidc.Begin(r.Context())
 	if err != nil {
 		writeError(w, rt.log, err)
@@ -73,6 +89,11 @@ func (rt *Router) oidcLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Router) oidcCallback(w http.ResponseWriter, r *http.Request) {
+	enterprisePrivate(w)
+	if !rt.checkLegacyOIDC(w, r) {
+		clearNonceCookie(w)
+		return
+	}
 	state, code := r.URL.Query().Get("state"), r.URL.Query().Get("code")
 	nonce, err := r.Cookie(nonceCookieName)
 	if state == "" || code == "" || err != nil || nonce.Value == "" {
@@ -125,8 +146,18 @@ func frontendURLWithAuthError(frontendURL, reason string) (string, bool) {
 // or provider credentials. A successful discovery rotates the opaque cookie and CSRF token.
 func (rt *Router) oidcSession(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil || cookie.Value == "" || rt.oidc == nil {
+	if err != nil || cookie.Value == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+		return
+	}
+	if rt.enterpriseDiscover(w, r, cookie.Value) {
+		return
+	}
+	if rt.oidc == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+		return
+	}
+	if !rt.checkLegacyOIDC(w, r) {
 		return
 	}
 	session, err := rt.oidc.Discover(r.Context(), cookie.Value)
@@ -149,6 +180,12 @@ func (rt *Router) oidcSession(w http.ResponseWriter, r *http.Request) {
 		writeCodedError(w, CodeAuthenticationUnavailable, "authentication is temporarily unavailable; retry shortly")
 		return
 	}
+	if rt.enterprise != nil {
+		if err := rt.enterprise.browser.RefuseDeclaredLegacy(r.Context(), shared.ID(session.Principal.TenantID)); err != nil {
+			writeAuthenticationError(w, err)
+			return
+		}
+	}
 	setSessionCookie(w, session.Token)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
@@ -165,7 +202,13 @@ func (rt *Router) oidcSession(w http.ResponseWriter, r *http.Request) {
 func (rt *Router) oidcLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err == nil && cookie.Value != "" {
-		if err := rt.oidc.Logout(r.Context(), cookie.Value); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, authz.ErrCredentialInvalid) {
+		var logoutErr error
+		if p, ok := principalObj(r.Context()); ok && p.Provenance == "enterprise_oidc" && rt.enterprise != nil {
+			logoutErr = rt.enterprise.browser.Logout(r.Context(), cookie.Value)
+		} else if rt.oidc != nil {
+			logoutErr = rt.oidc.Logout(r.Context(), cookie.Value)
+		}
+		if err := logoutErr; err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, authz.ErrCredentialInvalid) {
 			writeError(w, rt.log, err)
 			return
 		}

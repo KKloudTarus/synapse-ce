@@ -45,6 +45,13 @@ func (s *Sender) SendPersonalNotice(ctx context.Context, recipient, title, summa
 	return s.sendSMTP(ctx, recipient, title, summary, messageID)
 }
 
+// SendIdentityRecoveryAlert deliberately bypasses notification rules and preferences. Its
+// persisted obligation contains no recipient address or activation value; this transport receives
+// only the resolved destination at delivery time.
+func (s *Sender) SendIdentityRecoveryAlert(ctx context.Context, recipient string, sessionID shared.ID) ports.NotificationSendResult {
+	return s.sendSMTP(ctx, recipient, "Emergency recovery session issued", "An emergency identity recovery session was issued. If you did not initiate recovery, contact an organization administrator immediately.", sessionID)
+}
+
 func (s *Sender) sendSMTP(ctx context.Context, destination, title, summary string, messageID shared.ID) ports.NotificationSendResult {
 	if strings.TrimSpace(s.smtp.Host) == "" || strings.TrimSpace(s.smtp.From) == "" {
 		return ports.NotificationSendResult{ErrorCode: "smtp_not_configured"}

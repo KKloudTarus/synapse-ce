@@ -104,18 +104,24 @@ const (
 	// RecoveryDisableUser cuts off a compromised account in the caller's tenant.
 	RecoveryDisableUser RecoveryAction = "disable_user"
 	// RecoveryEnableUser re-enables an account in the caller's tenant.
-	RecoveryEnableUser RecoveryAction = "enable_user"
+	RecoveryEnableUser       RecoveryAction = "enable_user"
+	RecoveryReadIdentity     RecoveryAction = "read_identity_configuration"
+	RecoveryRepairConnection RecoveryAction = "repair_identity_connection"
+	RecoveryRelaxSSO         RecoveryAction = "relax_sso"
 )
 
 // recoveryAllowlist is closed. It deliberately omits organization switching, identity linking,
 // ordinary key issuance, scans, fleet and integration management, and every data read.
 var recoveryAllowlist = map[RecoveryAction]bool{
-	RecoveryLogout:      true,
-	RecoveryReadSelf:    true,
-	RecoveryListUsers:   true,
-	RecoveryAssignRole:  true,
-	RecoveryDisableUser: true,
-	RecoveryEnableUser:  true,
+	RecoveryLogout:           true,
+	RecoveryReadSelf:         true,
+	RecoveryListUsers:        true,
+	RecoveryAssignRole:       true,
+	RecoveryDisableUser:      true,
+	RecoveryEnableUser:       true,
+	RecoveryReadIdentity:     true,
+	RecoveryRepairConnection: true,
+	RecoveryRelaxSSO:         true,
 }
 
 // Allowed reports whether r is in the recovery allowlist. The empty action is not.

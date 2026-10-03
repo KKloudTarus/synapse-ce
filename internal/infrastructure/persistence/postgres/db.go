@@ -329,6 +329,15 @@ func embeddedMigrationVersions() ([]int64, error) {
 	return migrationVersions(migrations.FS)
 }
 
+// EmbeddedMigrationCeiling returns the newest migration compiled into this binary.
+func EmbeddedMigrationCeiling() (int, error) {
+	v, err := embeddedMigrationVersions()
+	if err != nil {
+		return 0, err
+	}
+	return int(v[len(v)-1]), nil
+}
+
 func migrationVersions(source fs.FS) ([]int64, error) {
 	entries, err := fs.ReadDir(source, ".")
 	if err != nil {
@@ -559,6 +568,64 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 			"REVOKE ALL ON FUNCTION synapse_identity_person_command(TEXT,TEXT,TEXT,TEXT) FROM "+quotedRole,
 			"GRANT EXECUTE ON FUNCTION synapse_identity_create_person(TEXT,TEXT) TO "+quotedRole,
 		)
+	}
+	var sessionRetryInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_identity_switch_retry_tenant(text,text,text)') IS NOT NULL").Scan(&sessionRetryInstalled); err != nil {
+		return fmt.Errorf("inspect identity retry locator: %w", err)
+	}
+	if sessionRetryInstalled {
+		statements = append(statements, "GRANT EXECUTE ON FUNCTION synapse_identity_switch_retry_tenant(TEXT,TEXT,TEXT) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_lock_person_epoch(TEXT,TEXT) TO "+quotedRole,
+			"REVOKE ALL ON TABLE identity_session_switch_retry_routes FROM "+quotedRole)
+	}
+	var sessionRetryDestinationLocatorInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_identity_switch_retry_destination_tenant(text,text,text)') IS NOT NULL").Scan(&sessionRetryDestinationLocatorInstalled); err != nil {
+		return fmt.Errorf("inspect identity retry destination locator: %w", err)
+	}
+	if sessionRetryDestinationLocatorInstalled {
+		statements = append(statements, "GRANT EXECUTE ON FUNCTION synapse_identity_switch_retry_destination_tenant(TEXT,TEXT,TEXT) TO "+quotedRole)
+	}
+	var recoveryLocatorInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_identity_recovery_activation_tenant(text)') IS NOT NULL").Scan(&recoveryLocatorInstalled); err != nil {
+		return fmt.Errorf("inspect identity recovery locator: %w", err)
+	}
+	if recoveryLocatorInstalled {
+		statements = append(statements,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_recovery_activation_tenant(TEXT) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_recovery_person_epoch(TEXT,TEXT) TO "+quotedRole,
+		)
+	}
+	var identityWriterFenceInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_identity_project_member_user(text,text,text,text,text,timestamptz)') IS NOT NULL").Scan(&identityWriterFenceInstalled); err != nil {
+		return fmt.Errorf("inspect identity writer fence: %w", err)
+	}
+	if identityWriterFenceInstalled {
+		statements = append(statements,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_project_member_user(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_mirror_member_user(TEXT,TEXT,TIMESTAMPTZ) TO "+quotedRole)
+	}
+	var identityAccessGuardInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_identity_usable_admin_access(text,text,timestamptz)') IS NOT NULL").Scan(&identityAccessGuardInstalled); err != nil {
+		return err
+	}
+	if identityAccessGuardInstalled {
+		statements = append(statements, "GRANT EXECUTE ON FUNCTION synapse_identity_usable_admin_access(TEXT,TEXT,TIMESTAMPTZ) TO "+quotedRole)
+	}
+	var identityInvitationRouteInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_identity_invitation_tenant(text)') IS NOT NULL").Scan(&identityInvitationRouteInstalled); err != nil {
+		return err
+	}
+	if identityInvitationRouteInstalled {
+		statements = append(statements, "GRANT EXECUTE ON FUNCTION synapse_identity_invitation_tenant(TEXT) TO "+quotedRole)
+	}
+	var identityCrossTenantAdmissionInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_identity_admission_source(text,text,text,timestamptz)') IS NOT NULL").Scan(&identityCrossTenantAdmissionInstalled); err != nil {
+		return err
+	}
+	if identityCrossTenantAdmissionInstalled {
+		statements = append(statements,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_admission_source(TEXT,TEXT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_identity_revoke_admission_source(TEXT,TEXT,TEXT,TIMESTAMPTZ) TO "+quotedRole)
 	}
 	for _, statement := range statements {
 		// #nosec G701 -- SQL is fixed apart from quoteIdentifier-escaped DSN identifiers; PostgreSQL cannot bind identifiers as parameters.

@@ -256,6 +256,7 @@ func recoveryValue(name string) string {
 	return map[string]string{
 		"": "", "RecoveryLogout": string(authz.RecoveryLogout), "RecoveryReadSelf": string(authz.RecoveryReadSelf), "RecoveryListUsers": string(authz.RecoveryListUsers),
 		"RecoveryAssignRole": string(authz.RecoveryAssignRole), "RecoveryDisableUser": string(authz.RecoveryDisableUser), "RecoveryEnableUser": string(authz.RecoveryEnableUser),
+		"RecoveryReadIdentity": string(authz.RecoveryReadIdentity), "RecoveryRepairConnection": string(authz.RecoveryRepairConnection), "RecoveryRelaxSSO": string(authz.RecoveryRelaxSSO),
 	}[name]
 }
 
@@ -263,11 +264,14 @@ func recoveryValue(name string) string {
 func allHumanRoutes(t *testing.T) []RouteRegistration {
 	t.Helper()
 	routes := registeredRoutes(t)
-	ownership, err := ParseRouteRegistrations("ownership_handler.go")
-	if err != nil {
-		t.Fatal(err)
+	for _, file := range []string{"ownership_handler.go", "enterprise_handler.go", "enterprise_admin_handler.go"} {
+		additional, err := ParseRouteRegistrations(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		routes = append(routes, additional...)
 	}
-	return append(routes, ownership...)
+	return routes
 }
 
 // Every human route has exactly one classification, and the classification is backed by the
@@ -364,6 +368,9 @@ func TestBreakGlassReachesOnlyRecoveryRoutes(t *testing.T) {
 	wantRecovery := map[string]bool{
 		"POST /api/auth/logout": true, "GET /api/v1/me": true, "GET /api/v1/users": true,
 		"PATCH /api/v1/users/{id}": true, "POST /api/v1/users/{id}/disable": true, "POST /api/v1/users/{id}/enable": true,
+		"GET /api/v1/identity/connections": true, "POST /api/v1/identity/connections/draft": true, "POST /api/v1/identity/connections/test": true, "POST /api/v1/identity/connections/activate": true, "POST /api/v1/identity/connections/disable": true,
+		"GET /api/v1/identity/policy": true, "PUT /api/v1/identity/policy": true, "GET /api/v1/identity/recovery/alerts": true,
+		"GET /api/v1/identity/roster": true, "POST /api/v1/identity/memberships/change": true,
 	}
 	gotRecovery := map[string]bool{}
 	for _, route := range allHumanRoutes(t) {

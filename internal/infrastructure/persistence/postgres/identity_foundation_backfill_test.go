@@ -465,10 +465,16 @@ func TestIdentityShadowDriftReportNeverRepairs(t *testing.T) {
 	if res := f.backfill(t, "org-a", 10); !res.Report.Ready {
 		t.Fatalf("initial report not ready: %+v", res.Report)
 	}
-	// An older binary writes users directly, bypassing projection.
-	f.exec(t, `UPDATE users SET role='readonly' WHERE id='bob'`)
-	f.exec(t, `UPDATE users SET api_key_hash=$1 WHERE id='carol'`, identityDigest("carol-direct"))
-	f.exec(t, `UPDATE users SET disabled=true WHERE id='alice'`)
+	// An older binary writes users directly, bypassing projection, but remains tenant-bound.
+	if err := f.runtimeExec("org-a", `UPDATE users SET role='readonly' WHERE id='bob'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.runtimeExec("org-a", `UPDATE users SET api_key_hash=$1 WHERE id='carol'`, identityDigest("carol-direct")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.runtimeExec("org-a", `UPDATE users SET disabled=true WHERE id='alice'`); err != nil {
+		t.Fatal(err)
+	}
 	svc := f.service(t)
 	strict, err := svc.Shadow(ctx, "org-a", ports.IdentityShadowThresholds{MaxDrift: 0})
 	if err != nil {
@@ -808,14 +814,18 @@ func TestIdentityBackfillBatchedEvidence(t *testing.T) {
 		t.Fatalf("own derived credential counted as duplicate: issued=%v reissued=%v linked=%v",
 			got["issued"].DuplicateHash, got["reissued"].DuplicateHash, got["linked"].DuplicateHash)
 	}
-	f.exec(t, `UPDATE users SET api_key_hash=$1 WHERE id='none'`, identityDigest("seed-org-a-issued"))
+	if err := f.runtimeExec("org-a", `UPDATE users SET api_key_hash=$1 WHERE id='none'`, identityDigest("seed-org-a-issued")); err != nil {
+		t.Fatal(err)
+	}
 	if got = load(); !got["none"].DuplicateHash || !got["issued"].DuplicateHash {
 		t.Fatal("digest held by two users and routed to one of them not flagged on both")
 	}
 	// A cross-tenant route of the same digest is a duplicate too.
 	f.seedIssued(t, "org-b", "copy", user.RoleMember, false)
 	f.backfill(t, "org-b", 4)
-	f.exec(t, `UPDATE users SET api_key_hash=$1 WHERE id='disable-only'`, identityDigest("seed-org-b-copy"))
+	if err := f.runtimeExec("org-a", `UPDATE users SET api_key_hash=$1 WHERE id='disable-only'`, identityDigest("seed-org-b-copy")); err != nil {
+		t.Fatal(err)
+	}
 	if got = load(); !got["disable-only"].DuplicateHash {
 		t.Fatal("digest routed to another tenant not flagged")
 	}

@@ -83,7 +83,7 @@ func TestDecideUnderSSORequired(t *testing.T) {
 }
 
 func TestRecoveryAllowlistIsClosed(t *testing.T) {
-	want := map[RecoveryAction]bool{RecoveryLogout: true, RecoveryReadSelf: true, RecoveryListUsers: true, RecoveryAssignRole: true, RecoveryDisableUser: true, RecoveryEnableUser: true}
+	want := map[RecoveryAction]bool{RecoveryLogout: true, RecoveryReadSelf: true, RecoveryListUsers: true, RecoveryAssignRole: true, RecoveryDisableUser: true, RecoveryEnableUser: true, RecoveryReadIdentity: true, RecoveryRepairConnection: true, RecoveryRelaxSSO: true}
 	got := RecoveryActions()
 	if len(got) != len(want) {
 		t.Fatalf("recovery allowlist = %v, want exactly %d actions", got, len(want))

@@ -158,8 +158,12 @@ func (f *identityFixture) tenants(t *testing.T, ids ...string) {
 // seedUser inserts a legacy users row directly, as an older binary would have.
 func (f *identityFixture) seedUser(t *testing.T, tenant, id string, role user.Role, hash string, disabled bool) {
 	t.Helper()
-	f.exec(t, `INSERT INTO users(id, name, role, api_key_hash, disabled, tenant_id) VALUES ($1,$2,$3,$4,$5,$6)`,
-		id, "User "+id, string(role), hash, disabled, tenant)
+	if err := WithTenant(context.Background(), f.admin, tenant, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `INSERT INTO users(id, name, role, api_key_hash, disabled, tenant_id) VALUES ($1,$2,$3,$4,$5,$6)`, id, "User "+id, string(role), hash, disabled, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // seedAudit appends a tenant audit record the way the users service does.
@@ -212,6 +216,11 @@ func (f *identityFixture) declare(t *testing.T, tenant string) {
 	t.Helper()
 	if err := WithTenant(context.Background(), f.runtime, tenant, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(context.Background(), `INSERT INTO identity_policies(tenant_id, id, cutover_phase) VALUES ($1,'policy','shadow')`, tenant); err != nil {
+			return err
+		}
+		// Component tests seed declaration evidence directly. Operator workflow tests separately
+		// exercise shadow, writer-drain and declaration admission through the cutover commands.
+		if _, err := tx.Exec(context.Background(), `INSERT INTO identity_cutover_ledger(tenant_id,action,actor,policy_version,created_at) VALUES($1,'declared','test-fixture',1,now())`, tenant); err != nil {
 			return err
 		}
 		_, err := tx.Exec(context.Background(), `UPDATE identity_policies SET cutover_phase='declared' WHERE tenant_id=$1`, tenant)

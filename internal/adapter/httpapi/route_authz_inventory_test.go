@@ -20,11 +20,19 @@ import (
 // consent gate, the identity echo and logout are not public: they need an authenticated principal
 // (rt.authenticated or rt.recoverable) but no role.
 var publicRoutePatterns = map[string]string{
-	"GET /healthz":                "liveness probe, documented as unauthenticated",
-	"GET /readyz":                 "readiness probe, documented as unauthenticated",
-	"GET /api/auth/oidc/login":    "starts the login redirect, before any principal exists",
-	"GET /api/auth/oidc/callback": "completes the login redirect, before any principal exists",
-	"GET /api/auth/session":       "session probe the dashboard calls on every page; answers unauthenticated itself",
+	"GET /healthz":                                   "liveness probe, documented as unauthenticated",
+	"GET /readyz":                                    "readiness probe, documented as unauthenticated",
+	"GET /api/auth/oidc/login":                       "starts the login redirect, before any principal exists",
+	"GET /api/auth/oidc/callback":                    "completes the login redirect, before any principal exists",
+	"GET /api/auth/session":                          "session probe the dashboard calls on every page; answers unauthenticated itself",
+	"GET /api/auth/enterprise/context":               "deployment-defined approved login choices",
+	"POST /api/auth/enterprise/begin":                "caller-bound purpose and protocol state before login",
+	"GET /api/auth/enterprise/callback":              "one-use caller-bound protocol callback",
+	"POST /api/auth/enterprise/recovery":             "exact one-use emergency activation, rate bounded",
+	"POST /api/auth/enterprise/switch":               "exact source/CSRF response recovery before authenticating revoked source; fresh commands authenticate internally",
+	"POST /api/auth/enterprise/invitation":           "exact typed invitation code and caller-bound approved destination protocol",
+	"GET /api/auth/enterprise/invitation/pending":    "only a boolean for a sealed caller-bound pending mailbox proof",
+	"POST /api/auth/enterprise/invitation/challenge": "sealed verified invitation context plus bound one-time mailbox proof",
 }
 
 // registeredRoutes parses router.go into the routes it actually registers. Parsing rather than
@@ -73,7 +81,7 @@ func publicSet() map[string]bool {
 // and an entry for a route that IS wrapped in rt.authz is an exemption nobody needs.
 func TestPublicRouteExceptionsAreAllRegistered(t *testing.T) {
 	registered := map[string]RouteRegistration{}
-	for _, route := range registeredRoutes(t) {
+	for _, route := range allHumanRoutes(t) {
 		registered[route.Pattern] = route
 	}
 	for pattern := range publicRoutePatterns {

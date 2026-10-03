@@ -19,9 +19,12 @@ const PrincipalOperator = authz.BootstrapActorID
 
 // Principal is the authenticated subject for a request.
 type Principal struct {
-	ID   string
-	Name string
-	Role string
+	ID           string
+	Name         string
+	Role         string
+	PersonID     string
+	MembershipID string
+	Epochs       authz.Epochs
 	// TenantID is the tenant the principal belongs to – it scopes the request's data and stamps
 	// new records. Empty = the single default tenant (single-tenant mode).
 	TenantID string
@@ -45,6 +48,9 @@ func (p Principal) authz() authz.Principal {
 	}
 	return authz.Principal{
 		ActorID:         p.ID,
+		PersonID:        p.PersonID,
+		MembershipID:    p.MembershipID,
+		Epochs:          p.Epochs,
 		TenantID:        shared.TenantOrDefault(shared.ID(p.TenantID)).String(),
 		Role:            userdom.Role(p.Role),
 		Credential:      authz.Credential{Kind: kind, ID: p.CredentialID},
@@ -114,9 +120,15 @@ type SessionResolver interface {
 // Authenticator validates the bearer token or browser session on each request and stamps the
 // resolved principal into the request context for attribution and authorization.
 type Authenticator struct {
-	resolve Resolver
-	session SessionResolver
+	resolve        Resolver
+	session        SessionResolver
+	authorityFence func(context.Context, Principal) error
 }
+
+func (a *Authenticator) SetAuthorityFence(fence func(context.Context, Principal) error) {
+	a.authorityFence = fence
+}
+func (a *Authenticator) WrapBearerResolver(wrap func(Resolver) Resolver) { a.resolve = wrap(a.resolve) }
 
 // SetSessionResolver enables the OIDC BFF cookie session fallback while retaining bearer authentication.
 func (a *Authenticator) SetSessionResolver(resolve SessionResolver) { a.session = resolve }
@@ -164,9 +176,24 @@ func (a *Authenticator) Middleware(publicPaths map[string]bool, next http.Handle
 				writeAuthenticationError(w, err)
 				return
 			}
-			principal.Credential = authz.KindBrowserSession
+			switch principal.Credential {
+			case "":
+				principal.Credential = authz.KindBrowserSession
+			case authz.KindBrowserSession, authz.KindBreakGlass:
+				// The resolver has validated the session's persisted credential kind. Recovery
+				// sessions retain their restriction through the shared authorization decision.
+			default:
+				writeAuthenticationError(w, authz.ErrCredentialInvalid)
+				return
+			}
 		}
 		principal.TenantID = shared.TenantOrDefault(shared.ID(principal.TenantID)).String()
+		if a.authorityFence != nil {
+			if err := a.authorityFence(r.Context(), principal); err != nil {
+				writeAuthenticationError(w, err)
+				return
+			}
+		}
 		ctx := context.WithValue(r.Context(), principalKey, principal)
 		ctx = shared.WithTenant(ctx, shared.ID(principal.TenantID))
 		if observation := requestObservationFrom(ctx); observation != nil {

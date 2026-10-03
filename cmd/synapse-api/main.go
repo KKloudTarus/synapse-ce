@@ -1901,6 +1901,10 @@ func main() {
 		}
 		router.SetOIDC(httpOIDCService, cfg.OIDCFrontendURL)
 	}
+	if err := wireEnterpriseIdentity(cfg, router, auth, databasePool, vaultCipher, notificationSender, clock, ids); err != nil {
+		log.Error("enterprise identity initialization failed", "err", err)
+		os.Exit(1)
+	}
 	router.SetReadinessChecks(readinessChecks)
 	if slaService != nil {
 		router.SetSLA(slaService)
@@ -3615,6 +3619,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	startIdentityMaintenance(ctx, cfg, databasePool, notificationSender, clock, ids, log)
 	if promotionRunner != nil {
 		startupTimeout := cfg.PromotionReconcileInterval
 		if startupTimeout <= 0 {

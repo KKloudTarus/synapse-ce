@@ -40,6 +40,11 @@ interface AuthState {
   acceptAup: () => Promise<void>
   logout: () => Promise<void>
   retry: () => Promise<void>
+  /**
+   * Applies the server-issued CSRF token after an organization switch, clears the old tenant's
+   * visible identity, and restores the authenticated state for the destination tenant.
+   */
+  completeOrganizationSwitch: (csrfToken: string) => Promise<void>
 }
 
 const Ctx = createContext<AuthState | null>(null)
@@ -89,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [failure, setFailure] = useState<Failure | null>(() => {
     const reason = readAuthErrorParam()
-    if (!reason) return null
+    if (!reason || reason === 'mailbox_verification_required') return null
     return { message: reason === 'access_denied' ? ACCESS_DENIED : SIGN_IN_FAILED, requestId: null, canRetry: false }
   })
   const [connecting, setConnecting] = useState(false)
@@ -140,7 +145,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const applyAuthenticated = useCallback((result: { status: AupStatus; me: CurrentUser | null }) => {
     setAup(result.status)
     setCurrentUser(result.me)
-    setPhase(result.status.accepted ? 'ready' : 'need-aup')
+    const nextPhase = result.status.accepted ? 'ready' : 'need-aup'
+    phaseRef.current = nextPhase
+    setPhase(nextPhase)
   }, [])
 
   // Restoration: try the BFF cookie session, then a saved bearer token. Only a rejected credential
@@ -233,6 +240,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRetrying(false)
     }
   }, [restore])
+
+  const completeOrganizationSwitch = useCallback(async (csrfToken: string) => {
+    // A switch replaces the browser session. Clear tenant-derived UI before restoring so an
+    // in-flight request or cached component cannot present the previous organization's data as
+    // belonging to the destination.
+    generation.current++
+    setCurrentUser(null)
+    setAup(null)
+    setFailure(null)
+    setPhase('connecting')
+    setCSRFToken(csrfToken)
+    await retry()
+  }, [retry])
 
   // A bearer session is purely local, so it clears without a server call. A cookie session
   // stays signed in when revocation fails: the HttpOnly cookie is still valid server-side and
@@ -337,7 +357,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // The refusal notice was captured on first render; drop the parameter so a reload does not
     // show it again and the notice never triggers another sign-in attempt.
-    if (readAuthErrorParam() !== null) {
+    const reason = readAuthErrorParam()
+    // The invitation flow mounts after session restoration and owns this continuation marker.
+    if (reason !== null && reason !== 'mailbox_verification_required') {
       const url = new URL(window.location.href)
       url.searchParams.delete('auth_error')
       window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
@@ -356,8 +378,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const canRetry = failure?.canRetry ?? false
 
   const value = useMemo(
-    () => ({ phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry }),
-    [phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry],
+    () => ({ phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch }),
+    [phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

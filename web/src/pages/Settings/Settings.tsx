@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { cn } from '../../components/ui'
+import { useOptionalAuth } from '../../auth/AuthContext'
 
 const TABS = [
   { label: 'Audit', to: '/settings', end: true },
@@ -21,6 +22,8 @@ const TABS = [
 ]
 
 export function Settings() {
+  const identityEnabled = useOptionalAuth()?.currentUser?.features?.enterpriseIdentity === true
+  const tabs = identityEnabled ? [...TABS, { label: 'Authentication', to: '/settings/authentication' }] : TABS
   return (
     <div className="mx-auto max-w-[1600px] animate-fade-in space-y-6 pb-12">
       <header>
@@ -36,7 +39,7 @@ export function Settings() {
         aria-label="Settings sections"
         className="flex flex-wrap gap-1.5 rounded-xl border border-secondary bg-secondary/40 p-1.5"
       >
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <NavLink
             key={tab.to}
             to={tab.to}

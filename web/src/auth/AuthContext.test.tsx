@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { StrictMode } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider, useAuth } from './AuthContext'
 import { Connect } from '../pages/Connect'
 import { ApiError } from '../lib/api/errors'
@@ -25,6 +26,7 @@ import { discoverSession, logoutSession, setCSRFToken, setToken, setUnauthorized
 const ACCEPTED = { accepted: true, version: 'v1', text: 'Use responsibly.' }
 const PENDING_AUP = { accepted: false, version: 'v1', text: 'Use responsibly.' }
 const CURRENT_USER = { id: 'user-1', name: 'Operator', role: 'admin' }
+const fetchSpy = vi.fn<typeof fetch>()
 
 function apiError(status: number, code?: string, extra: Record<string, unknown> = {}) {
   const message = code ? `server says ${code}` : `HTTP ${status}`
@@ -41,6 +43,11 @@ function deferred<T>() {
 function PhaseProbe() {
   const { phase } = useAuth()
   return <output data-testid="phase">{phase}</output>
+}
+
+function SwitchProbe() {
+  const { completeOrganizationSwitch } = useAuth()
+  return <button type="button" onClick={() => { void completeOrganizationSwitch('destination-csrf') }}>Complete organization switch</button>
 }
 
 function renderConnect() {
@@ -66,9 +73,72 @@ beforeEach(() => {
   mocks.aup.mockReset().mockResolvedValue(ACCEPTED)
   mocks.me.mockReset().mockResolvedValue(CURRENT_USER)
   mocks.acceptAup.mockReset().mockResolvedValue({})
+  // Connect also loads the enterprise-context feature hook. The legacy authentication scenarios
+  // deliberately model a deployment where that route is absent, rather than relying on jsdom's
+  // unimplemented relative fetch behavior.
+  fetchSpy.mockReset().mockResolvedValue({
+    ok: false,
+    status: 404,
+    headers: new Headers(),
+    json: async () => ({ error: 'not found' }),
+  } as Response)
+  vi.stubGlobal('fetch', fetchSpy)
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('BFF authentication', () => {
+  it('continues mailbox verification after provider restoration and StrictMode replay', async () => {
+    window.history.replaceState(null, '', '/?auth_error=mailbox_verification_required')
+    const discovery = deferred<{ authenticated: boolean; csrfToken: string }>()
+    vi.mocked(discoverSession).mockReturnValue(discovery.promise)
+    fetchSpy.mockImplementation(async (url) => new Response(JSON.stringify(String(url).endsWith('/invitation/pending') ? { challenge_required: true } : { enabled: true, tenant_id: 'tenant-a', requirement: 'optional', connections: [], bootstrap_eligible: false }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    render(<StrictMode><AuthProvider><Connect /></AuthProvider></StrictMode>)
+    await act(async () => discovery.resolve({ authenticated: false, csrfToken: '' }))
+    expect(await screen.findByLabelText('Mailbox verification code')).toBeInTheDocument()
+    expect(fetchSpy).toHaveBeenCalledWith('/api/auth/enterprise/invitation/pending', expect.anything())
+    expect(window.location.search).not.toContain('auth_error')
+    expect(screen.queryByText(/Organization sign-in could not be completed/)).not.toBeInTheDocument()
+  })
+
+  it('shows callback denial with approved enterprise sign-in choices', async () => {
+    window.history.replaceState(null, '', '/?auth_error=access_denied')
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ enabled: true, tenant_id: 'tenant-a', requirement: 'optional', connections: [{ id: 'approved', name: 'Approved SSO' }], bootstrap_eligible: false }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    renderConnect()
+    expect(await screen.findByRole('button', { name: 'Continue with Approved SSO' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('This sign-in is not approved for Synapse.')
+  })
+
+  it('retries the initial pending mailbox lookup after a dependency failure', async () => {
+    window.history.replaceState(null, '', '/?auth_error=mailbox_verification_required')
+    let pendingLookups = 0
+    fetchSpy.mockImplementation(async (url) => {
+      const pending = String(url).endsWith('/invitation/pending')
+      if (pending && ++pendingLookups === 1) return new Response(JSON.stringify({ error: 'Mailbox service unavailable.' }), { status: 503, headers: { 'content-type': 'application/json' } })
+      return new Response(JSON.stringify(pending ? { challenge_required: true } : { enabled: true, tenant_id: 'tenant-a', requirement: 'optional', connections: [], bootstrap_eligible: false }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    renderConnect()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Mailbox service unavailable.')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByLabelText('Mailbox verification code')).toBeInTheDocument()
+    expect(pendingLookups).toBe(2)
+  })
+  it('clears the prior tenant state and restores the destination session after a switch', async () => {
+    vi.mocked(discoverSession)
+      .mockResolvedValueOnce({ authenticated: true, csrfToken: 'source-csrf' })
+      .mockResolvedValueOnce({ authenticated: true, csrfToken: 'destination-csrf' })
+    render(<AuthProvider><PhaseProbe /><SwitchProbe /></AuthProvider>)
+
+    await waitFor(() => expect(phase()).toBe('ready'))
+    fireEvent.click(screen.getByRole('button', { name: 'Complete organization switch' }))
+
+    await waitFor(() => expect(setCSRFToken).toHaveBeenCalledWith('destination-csrf'))
+    expect(discoverSession).toHaveBeenCalledTimes(2)
+    expect(phase()).toBe('ready')
+  })
+
   it('discovers an existing BFF session before loading the AUP', async () => {
     vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'csrf-1' })
     renderConnect()

@@ -52,6 +52,7 @@ describe('AuthProvider with the real API client', () => {
       const authorization = headers?.authorization
 
       if (url === '/api/auth/session') return respond(200, { authenticated: false })
+      if (url === '/api/auth/enterprise/context') return respond(404, { error: 'not found' })
       if (url === '/api/v1/aup' && authorization === 'Bearer old-token') {
         oldAupRequests++
         if (oldAupRequests === 1) {

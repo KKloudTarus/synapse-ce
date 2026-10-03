@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"net/http"
 	"time"
 
@@ -44,9 +45,12 @@ func (rt *Router) currentUser(w http.ResponseWriter, r *http.Request) {
 	tenantID := TenantFrom(r.Context())
 	readEnabled := rt.assessmentLifecycleRead != nil && rt.assessmentLifecycleRead(tenantID)
 	uiEnabled := rt.assessmentLifecycleUI != nil && rt.assessmentLifecycleUI(tenantID)
+	enterpriseEnabled := rt.enterprise != nil && (p.PersonID != "" || p.authz().IsBootstrap())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": p.ID, "name": p.Name, "role": p.Role,
-		"features": map[string]bool{"assessment_lifecycle_read": readEnabled, "assessment_lifecycle_ui_default": uiEnabled},
+		"tenant_id": p.TenantID, "person_id": p.PersonID, "membership_id": p.MembershipID, "credential_kind": p.Credential,
+		"recent_auth": p.Credential == authz.KindBrowserSession && authz.RecentlyAuthenticated(p.authz(), time.Now().UTC()),
+		"features":    map[string]bool{"assessment_lifecycle_read": readEnabled, "assessment_lifecycle_ui_default": uiEnabled, "enterprise_identity": enterpriseEnabled},
 	})
 }
 

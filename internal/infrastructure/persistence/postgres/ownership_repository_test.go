@@ -46,8 +46,25 @@ func newOwnershipFixture(t *testing.T) *ownershipFixture {
 		t.Fatal(err)
 	}
 	f := &ownershipFixture{pool: pool, ddl: ddl, repo: repo, ctx: ctx, at: at, queue: NewJobQueue(pool, &ownershipTestIDs{})}
-	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES('own-a','A'),('own-b','B'); INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES('alice','Alice','admin','own-alice','own-a'),('bob','Bob','consultant','own-bob','own-a'),('viewer','Viewer','readonly','own-viewer','own-a'),('outsider','Other tenant','admin','own-out','own-b')`); err != nil {
+	// Tenant rows are bootstrap data. User rows exercise the runtime RLS fence and
+	// must be inserted through their own tenant-bound transactions.
+	if _, err := ddl.Exec(`INSERT INTO tenants(id,name) VALUES('own-a','A'),('own-b','B')`); err != nil {
 		t.Fatal(err)
+	}
+	for _, seed := range []struct {
+		tenant, id, name, role, hash string
+	}{
+		{"own-a", "alice", "Alice", "admin", "own-alice"},
+		{"own-a", "bob", "Bob", "consultant", "own-bob"},
+		{"own-a", "viewer", "Viewer", "readonly", "own-viewer"},
+		{"own-b", "outsider", "Other tenant", "admin", "own-out"},
+	} {
+		if err := WithTenant(ctx, pool, seed.tenant, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO users(id,name,role,api_key_hash,tenant_id) VALUES($1,$2,$3,$4,$5)`, seed.id, seed.name, seed.role, seed.hash, seed.tenant)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, tenant := range []shared.ID{"own-a", "own-b"} {
 		if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
@@ -234,7 +251,10 @@ func TestOwnershipPostgresManualProtectionAndEligibility(t *testing.T) {
 	if _, err := f.repo.ApplyAssignment(f.ctx, assign); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("nonmember assignment=%v", err)
 	}
-	if _, err := f.pool.Exec(f.ctx, `UPDATE users SET disabled=true WHERE id='bob'`); err != nil {
+	if err := WithTenant(f.ctx, f.pool, "own-a", func(tx pgx.Tx) error {
+		_, err := tx.Exec(f.ctx, `UPDATE users SET disabled=true WHERE id='bob'`)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	assign.AssigneeID = "bob"

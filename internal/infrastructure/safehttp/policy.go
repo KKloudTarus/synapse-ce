@@ -20,6 +20,10 @@ type Policy struct {
 	AllowHost func(host, port string) bool
 }
 
+// AllowsAddress lets protocols that reject mixed DNS answers apply the same destination policy
+// to every resolved address before dialing any of them.
+func (p Policy) AllowsAddress(address netip.Addr) bool { return p.permits(address) }
+
 // OperatorPolicy is for endpoints an operator configures outside any tenant's control. It admits
 // private and loopback addresses, because such relays often run on the host or an internal
 // network, and still refuses cloud metadata and every other special-purpose range.

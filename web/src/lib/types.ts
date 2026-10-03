@@ -1386,9 +1386,15 @@ export interface CurrentUser {
   id: string
   name: string
   role: string
+  tenantId?: string
+  personId?: string
+  membershipId?: string
+  credentialKind?: string
+  recentAuth?: boolean
   features?: {
     assessmentLifecycleRead: boolean
     assessmentLifecycleUIDefault: boolean
+    enterpriseIdentity?: boolean
   }
 }
 

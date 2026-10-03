@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, ApiError, type UserContact } from '../../lib/api'
+import { useOptionalAuth } from '../../auth/AuthContext'
+import { EnterpriseIdentities } from './EnterpriseIdentities'
 
 export function ProfilePage() {
+  const enterprise = useOptionalAuth()?.currentUser?.features?.enterpriseIdentity === true
   const [contacts, setContacts] = useState<UserContact[] | null>(null)
   const [email, setEmail] = useState('')
   const [codes, setCodes] = useState<Record<string,string>>({})
@@ -63,7 +66,7 @@ export function ProfilePage() {
               </form>
             </div>}
           </article>) }
-      </section>
+      </section>{enterprise && <EnterpriseIdentities />}
     </>}
   </div>
 }

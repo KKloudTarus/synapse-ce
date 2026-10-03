@@ -280,11 +280,3 @@ func (q *JobQueue) holdsClaim(id string, tenant shared.ID, fence int64) bool {
 	j := q.jobs[id]
 	return j != nil && j.tenantID == tenant && j.status == "claimed" && j.claimFence == fence && j.claimedUntil.After(now)
 }
-
-// hasFailed reports whether the job was dead-lettered.
-func (q *JobQueue) hasFailed(id string) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	j := q.jobs[id]
-	return j != nil && j.status == "failed"
-}

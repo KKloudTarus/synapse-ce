@@ -70,6 +70,8 @@ nav:
       - Finding ownership and routing: finding-ownership.md
       - Assessment lifecycle rollout: assessment-lifecycle-operations.md
       - Identity foundation rollout: identity-foundation-rollout.md
+      - Identity cutover: identity-cutover.md
+      - Identity recovery: identity-recovery.md
       - Deployment: deployment.md
       - Capacity and service objectives: capacity-slos.md
       - Backup, restore, and upgrade: backup-restore-upgrade.md

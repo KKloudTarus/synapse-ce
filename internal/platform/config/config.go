@@ -524,15 +524,21 @@ type Config struct {
 	AssessmentSnapshotCompletionTenants []string
 	AssessmentShadowEnabled             bool
 	AssessmentShadowTenants             []string
-	AssessmentLifecycleReadEnabled      bool
-	AssessmentLifecycleReadTenants      []string
-	AssessmentLifecycleUIDefault        bool
-	AssessmentLifecycleUITenants        []string
-	AssessmentClosureEnabled            bool
-	AssessmentBatchSize                 int
-	AssessmentTenantJobs                int
-	AssessmentBacklogWarning            int
-	AssessmentBacklogHardLimit          int
+	// IdentityCutoverEnabled permits the shared enterprise identity request path. Tenant lists
+	// remain explicit and native mutation tenants are always a subset of read tenants.
+	IdentityCutoverEnabled            bool
+	IdentityCutoverReadTenants        []string
+	IdentityCutoverMutationTenants    []string
+	IdentityLegacyBearerGraceDuration time.Duration
+	AssessmentLifecycleReadEnabled    bool
+	AssessmentLifecycleReadTenants    []string
+	AssessmentLifecycleUIDefault      bool
+	AssessmentLifecycleUITenants      []string
+	AssessmentClosureEnabled          bool
+	AssessmentBatchSize               int
+	AssessmentTenantJobs              int
+	AssessmentBacklogWarning          int
+	AssessmentBacklogHardLimit        int
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -1153,6 +1159,10 @@ func Load() Config {
 		AssessmentSnapshotCompletionTenants:         splitList(getenv("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS", "")),
 		AssessmentShadowEnabled:                     getbool("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED", false),
 		AssessmentShadowTenants:                     splitList(getenv("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS", "")),
+		IdentityCutoverEnabled:                      getbool("SYNAPSE_IDENTITY_CUTOVER_ENABLED", false),
+		IdentityCutoverReadTenants:                  splitList(getenv("SYNAPSE_IDENTITY_CUTOVER_READ_TENANTS", "")),
+		IdentityCutoverMutationTenants:              splitList(getenv("SYNAPSE_IDENTITY_CUTOVER_MUTATION_TENANTS", "")),
+		IdentityLegacyBearerGraceDuration:           getduration("SYNAPSE_IDENTITY_LEGACY_BEARER_GRACE_DURATION", 0),
 		AssessmentLifecycleReadEnabled:              getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED", false),
 		AssessmentLifecycleReadTenants:              splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS", "")),
 		AssessmentLifecycleUIDefault:                getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED", false),
@@ -1833,7 +1843,7 @@ func (c Config) ValidatePublicBaseURL() error {
 // a test asserts that both checks agree.
 func validOIDCIssuer(value string) bool {
 	u, err := url.Parse(strings.TrimSpace(value))
-	return err == nil && u.Scheme == "https" && u.Host != "" && u.RawQuery == "" && u.Fragment == ""
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.Hostname() != "" && u.RawQuery == "" && u.Fragment == ""
 }
 
 func validOIDCFrontendURL(value string) bool {

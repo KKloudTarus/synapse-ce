@@ -6,6 +6,8 @@ import type { User, UserRole } from '../../lib/types'
 import { Button, Card, EmptyState, ErrorState, Input, Pill, Select, Spinner } from '../../components/ui'
 import { useToast } from '../../components/synapse/Toast'
 import { useUserList } from '../../hooks'
+import { useOptionalAuth } from '../../auth/AuthContext'
+import { EnterpriseTeam } from './EnterpriseTeam'
 
 const ROLE_OPTIONS = [
   { value: 'member', label: 'Member' },
@@ -17,12 +19,14 @@ const ROLE_OPTIONS = [
 ]
 
 export function Team() {
+  const enterprise = useOptionalAuth()?.currentUser?.features?.enterpriseIdentity === true
   const { data: users, loading, error, forbidden, refetch } = useUserList()
 
   if (forbidden) {
     return <EmptyState icon={ShieldTick} title="Admin only" hint="Ask an admin to add you to the team or grant the admin role." />
   }
 
+  if (enterprise) return <EnterpriseTeam />
   return (
     <div className="space-y-4">
       <Card

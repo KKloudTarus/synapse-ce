@@ -92,6 +92,99 @@ func TestIdentityStoreConsumesTransactionOnceUnderRace(t *testing.T) {
 	}
 }
 
+func TestIdentityStoreAuthorizationTransactionCapacityEvictsExpiredAndOldest(t *testing.T) {
+	store, ctx, now := identityMemoryStore(t)
+	if store.authorizationCapacity != 256 {
+		t.Fatalf("default authorization capacity=%d, want 256", store.authorizationCapacity)
+	}
+	store.authorizationCapacity = 2
+	expired, _ := identity.NewAuthorizationTransaction("expired", "tenant-a", "expired", "nonce", "ciphertext", now.Add(-time.Minute), now.Add(-2*time.Minute))
+	if err := store.CreateAuthorizationTransaction(ctx, expired); err != nil {
+		t.Fatal(err)
+	}
+	live, _ := identity.NewAuthorizationTransaction("live", "tenant-a", "live", "nonce", "ciphertext", now.Add(time.Hour), now.Add(-time.Minute))
+	if err := store.CreateAuthorizationTransaction(ctx, live); err != nil {
+		t.Fatal(err)
+	}
+	newest, _ := identity.NewAuthorizationTransaction("newest", "tenant-a", "newest", "nonce", "ciphertext", now.Add(time.Hour), now)
+	if err := store.CreateAuthorizationTransaction(ctx, newest); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.transactions) != 2 {
+		t.Fatalf("transactions after expired eviction=%d, want 2", len(store.transactions))
+	}
+	if _, ok := store.transactions[expired.StateHash]; ok {
+		t.Fatal("expired transaction was retained")
+	}
+
+	store.transactions = make(map[string]identity.AuthorizationTransaction)
+	first, _ := identity.NewAuthorizationTransaction("first", "tenant-a", "a-state", "nonce", "ciphertext", now.Add(time.Hour), now)
+	second, _ := identity.NewAuthorizationTransaction("second", "tenant-a", "b-state", "nonce", "ciphertext", now.Add(time.Hour), now)
+	third, _ := identity.NewAuthorizationTransaction("third", "tenant-a", "c-state", "nonce", "ciphertext", now.Add(time.Hour), now.Add(time.Second))
+	for _, transaction := range []identity.AuthorizationTransaction{second, first, third} {
+		if err := store.CreateAuthorizationTransaction(ctx, transaction); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(store.transactions) != 2 {
+		t.Fatalf("transactions after overbound create=%d, want 2", len(store.transactions))
+	}
+	if _, ok := store.transactions[first.StateHash]; ok {
+		t.Fatalf("oldest state %q was not evicted", first.StateHash)
+	}
+	if _, ok := store.transactions[second.StateHash]; !ok {
+		t.Fatalf("stable tie-break evicted %q", second.StateHash)
+	}
+}
+
+func TestIdentityStoreAuthorizationTransactionCapacityZeroOneAndConcurrent(t *testing.T) {
+	store, ctx, now := identityMemoryStore(t)
+	zero, _ := identity.NewAuthorizationTransaction("zero", "tenant-a", "zero", "nonce", "ciphertext", now.Add(time.Hour), now)
+	store.authorizationCapacity = 0
+	if err := store.CreateAuthorizationTransaction(ctx, zero); !errors.Is(err, shared.ErrSaturated) {
+		t.Fatalf("zero capacity create=%v", err)
+	}
+	store.authorizationCapacity = 1
+	first, _ := identity.NewAuthorizationTransaction("first", "tenant-a", "first", "nonce", "ciphertext", now.Add(time.Hour), now)
+	second, _ := identity.NewAuthorizationTransaction("second", "tenant-a", "second", "nonce", "ciphertext", now.Add(time.Hour), now.Add(time.Second))
+	if err := store.CreateAuthorizationTransaction(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateAuthorizationTransaction(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.transactions) != 1 {
+		t.Fatalf("one capacity transactions=%d, want 1", len(store.transactions))
+	}
+	if _, ok := store.transactions[first.StateHash]; ok {
+		t.Fatal("one-capacity oldest transaction was retained")
+	}
+	if err := store.CreateAuthorizationTransaction(ctx, second); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("duplicate retained state=%v", err)
+	}
+
+	store.transactions = make(map[string]identity.AuthorizationTransaction)
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		transaction, _ := identity.NewAuthorizationTransaction(shared.ID("race-"+string(rune('a'+i))), "tenant-a", "race-"+string(rune('a'+i)), "nonce", "ciphertext", now.Add(time.Hour), now)
+		wg.Add(1)
+		go func(i int, transaction identity.AuthorizationTransaction) {
+			defer wg.Done()
+			errs[i] = store.CreateAuthorizationTransaction(ctx, transaction)
+		}(i, transaction)
+	}
+	wg.Wait()
+	if len(store.transactions) != 1 {
+		t.Fatalf("concurrent capacity transactions=%d, want 1", len(store.transactions))
+	}
+	for _, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent positive-capacity create=%v", err)
+		}
+	}
+}
+
 func TestIdentityStoreSessionRevocationAndTenantLinkage(t *testing.T) {
 	store, ctx, now := identityMemoryStore(t)
 	session, _ := identity.NewSession("session", "tenant-a", "user", "token", "csrf", nil, now.Add(time.Hour), now)
