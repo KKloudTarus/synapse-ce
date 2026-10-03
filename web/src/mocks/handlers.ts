@@ -1,5 +1,7 @@
 import { http, HttpResponse } from 'msw'
 
+import { matchGenerated } from './generated'
+
 // ============================================================================
 // TIMESTAMPS
 // ============================================================================
@@ -35,13 +37,13 @@ const SCAN_RUNS = [
     engagement_id: 'eng-001',
     created_at: WEEK_AGO,
     manifest: {
-      tool_versions: { syft: '1.18.1', grype: '0.86.1', synapse: 'dev' },
+      tool_versions: { 'synapse-sbom': '1.18.1', 'synapse-match': '0.86.1', synapse: 'dev' },
       vuln_db_snapshot: 'osv.dev@2026-02-20T00:00:00Z',
-      grype_db_version: 'v5@2026-02-20',
+      advisory_db_version: 'v5@2026-02-20',
       correlation_version: 7,
       sbom_sha256: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
       repro_score: 82,
-      pinned_inputs: ['syft', 'grype', 'grype-db'],
+      pinned_inputs: ['synapse-sbom', 'synapse-match', 'advisory-db'],
       unpinned_inputs: ['osv.dev'],
     },
     finding_keys: [
@@ -55,13 +57,13 @@ const SCAN_RUNS = [
     engagement_id: 'eng-001',
     created_at: MONTH_AGO,
     manifest: {
-      tool_versions: { syft: '1.17.0', grype: '0.85.0', synapse: 'dev' },
+      tool_versions: { 'synapse-sbom': '1.17.0', 'synapse-match': '0.85.0', synapse: 'dev' },
       vuln_db_snapshot: 'osv.dev@2026-01-20T00:00:00Z',
-      grype_db_version: 'v5@2026-01-20',
+      advisory_db_version: 'v5@2026-01-20',
       correlation_version: 7,
       sbom_sha256: '00998877665544332211aabbccddeeff00112233445566778899aabbccddeeff',
       repro_score: 82,
-      pinned_inputs: ['syft', 'grype', 'grype-db'],
+      pinned_inputs: ['synapse-sbom', 'synapse-match', 'advisory-db'],
       unpinned_inputs: ['osv.dev'],
     },
     finding_keys: [
@@ -276,12 +278,12 @@ const SCAN_RESULT = {
     { finding_id: 'finding-001', dedup_key: 'sca:vuln:express:CVE-2026-1000', verdict: 'refuted', driver: 'input_sanitized', confidence: 87, suspected_fp: true, proposer_model: 'google/gemma-4-26b-a4b-it:free', proposer_provider: 'openrouter', proposer_model_family: 'google', verifier_model: 'nvidia/nemotron-3.5-lightning:free', verifier_provider: 'openrouter', verifier_model_family: 'nvidia', independence_policy: 'model_family', prompt_version: 'v3.2', policy_version: '2026.08', policy_reason: 'both_models_agree_refuted', shadow: false, would_gate_exempt: true, gate_exempt: false, review_required: true, verified: true, verifier_verdict: 'refuted', verifier_driver: 'input_sanitized', verifier_confidence: 82 },
     { finding_id: 'finding-005', dedup_key: 'sca:vuln:helmet:CVE-2026-1004', verdict: 'sound', driver: '', confidence: 92, suspected_fp: false, proposer_model: 'google/gemma-4-26b-a4b-it:free', proposer_provider: 'openrouter', proposer_model_family: 'google', verifier_model: 'nvidia/nemotron-3.5-lightning:free', verifier_provider: 'openrouter', verifier_model_family: 'nvidia', independence_policy: 'model_family', prompt_version: 'v3.2', policy_version: '2026.08', policy_reason: 'both_models_agree_sound', shadow: false, would_gate_exempt: false, gate_exempt: false, review_required: false, verified: true, verifier_verdict: 'sound', verifier_driver: '', verifier_confidence: 90 },
   ],
-  tool_versions: { syft: '1.18.1', grype: '0.87.0', 'synapse-callgraph': '0.4.2' },
+  tool_versions: { 'synapse-sbom': '1.18.1', 'synapse-match': '0.87.0', 'synapse-callgraph': '0.4.2' },
   vuln_db_snapshot: '2026-08-22T00:00:00Z',
   completeness: { lockfiles: ['package-lock.json', 'go.sum'], components_total: 52, components_resolved: 52, confident: true, warning: '' },
   license_coverage: { total: 52, detected: 50, unknown: 2, pct: 96.2 },
   finding_quality: { raw_findings: 45, actionable: 28, background: 5, production: 35, development: 10, example_test: 3, third_party: 30, first_party_historical: 2, version_coverage_pct: 94, path_coverage_pct: 88, confidence: 'high', by_priority: { '1': 5, '2': 12, '3': 18, '4': 7, '5': 3 } },
-  manifest: { tool_versions: { syft: '1.18.1', grype: '0.87.0' }, vuln_db_snapshot: '2026-08-22T00:00:00Z', grype_db_version: '5', correlation_version: 2, sbom_sha256: 'abc123def456', repro_score: 100, pinned_inputs: ['syft@1.18.1', 'grype@0.87.0'], unpinned_inputs: [] },
+  manifest: { tool_versions: { 'synapse-sbom': '1.18.1', 'synapse-match': '0.87.0' }, vuln_db_snapshot: '2026-08-22T00:00:00Z', advisory_db_version: '5', correlation_version: 2, sbom_sha256: 'abc123def456', repro_score: 100, pinned_inputs: ['synapse-sbom@1.18.1', 'synapse-match@0.87.0'], unpinned_inputs: [] },
   code_quality: {
     inventory: { languages: [{ language: 'Go', files: 245, code_lines: 38200, comment_lines: 4800, blank_lines: 6100, functions: 1420, functions_known: true }, { language: 'TypeScript', files: 156, code_lines: 22400, comment_lines: 1200, blank_lines: 3400, functions: 890, functions_known: true }] },
     findings: FINDINGS.slice(30, 45),
@@ -290,8 +292,8 @@ const SCAN_RESULT = {
   },
   debug_events: [
     { stage: 'acquire', step: 'git_clone', status: 'done', message: 'Cloned synapse-ce.git', tool: 'git', counts: {}, started_at: new Date(Date.now() - 300000).toISOString(), finished_at: new Date(Date.now() - 280000).toISOString(), duration_ms: 20000, error: '' },
-    { stage: 'sbom', step: 'syft_scan', status: 'done', message: '52 components identified', tool: 'syft', counts: { components: 52 }, started_at: new Date(Date.now() - 280000).toISOString(), finished_at: new Date(Date.now() - 250000).toISOString(), duration_ms: 30000, error: '' },
-    { stage: 'vuln', step: 'grype_match', status: 'done', message: '18 vulnerabilities matched', tool: 'grype', counts: { vulnerabilities: 18 }, started_at: new Date(Date.now() - 250000).toISOString(), finished_at: new Date(Date.now() - 220000).toISOString(), duration_ms: 30000, error: '' },
+    { stage: 'sbom', step: 'sbom_build', status: 'done', message: '52 components identified', tool: 'synapse-sbom', counts: { components: 52 }, started_at: new Date(Date.now() - 280000).toISOString(), finished_at: new Date(Date.now() - 250000).toISOString(), duration_ms: 30000, error: '' },
+    { stage: 'vuln', step: 'advisory_match', status: 'done', message: '18 vulnerabilities matched', tool: 'synapse-match', counts: { vulnerabilities: 18 }, started_at: new Date(Date.now() - 250000).toISOString(), finished_at: new Date(Date.now() - 220000).toISOString(), duration_ms: 30000, error: '' },
     { stage: 'license', step: 'classify', status: 'done', message: '50/52 licenses resolved', tool: 'synapse', counts: { resolved: 50, unknown: 2 }, started_at: new Date(Date.now() - 220000).toISOString(), finished_at: new Date(Date.now() - 200000).toISOString(), duration_ms: 20000, error: '' },
     { stage: 'quality', step: 'sast_scan', status: 'done', message: '15 code quality findings', tool: 'synapse-ast', counts: { findings: 15 }, started_at: new Date(Date.now() - 200000).toISOString(), finished_at: new Date(Date.now() - 150000).toISOString(), duration_ms: 50000, error: '' },
     { stage: 'correlate', step: 'dedup', status: 'done', message: 'Deduplicated findings', tool: 'synapse', counts: { raw: 63, deduped: 45 }, started_at: new Date(Date.now() - 150000).toISOString(), finished_at: new Date(Date.now() - 140000).toISOString(), duration_ms: 10000, error: '' },
@@ -471,7 +473,7 @@ const AUDIT_LOG = Array.from({ length: 25 }, (_, i) => ({
   target: ['eng-001', 'scan-042', 'finding-118', 'eng-002', 'user-003', 'scan-043', 'sla-policy-1', 'agent-001', 'review-77', 'proj-synapse'][i % 10],
   metadata: [
     { engagement: 'synapse-ce-audit', status: 'created' },
-    { engine: 'grype', scope: 'repo' },
+    { engine: 'synapse-match', scope: 'repo' },
     { verdict: 'false_positive', confidence: '0.92' },
     { from: 'active', to: 'completed' },
     { email: 'bob@synapse.local', role: 'viewer' },
@@ -822,7 +824,7 @@ export const handlers = [
       removed: ['pkg:npm/lodash@4.17.20|CVE-2021-23337'],
       unchanged: 2,
       explanation: [
-        'grype-db changed: "v5@2026-02-20" -> "v5@2026-01-20"',
+        'advisory-db changed: "v5@2026-02-20" -> "v5@2026-01-20"',
         'vuln-db snapshot changed: "osv.dev@2026-02-20T00:00:00Z" -> "osv.dev@2026-01-20T00:00:00Z"',
       ],
     }),
@@ -1361,6 +1363,13 @@ export const handlers = [
     const state = new URL(request.url).searchParams.get('state')
     const incidents = FLEET_INCIDENTS.filter((i) => !state || i.State === state)
     return HttpResponse.json({ incidents, truncated: false })
+  }),
+  // The detail read is registered in router.go but absent from api/openapi.yaml, where it sits on
+  // the coverage debt list, so the generated fallback cannot shape it. Written by hand from the
+  // same fixture the list serves, so a row and the screen it opens agree.
+  http.get('/api/v1/fleet/incidents/:id', ({ params }) => {
+    const incident = FLEET_INCIDENTS.find((i) => i.ID === params.id) ?? FLEET_INCIDENTS[0]
+    return HttpResponse.json(incident)
   }),
 
   // --- Code Quality Projects ---
@@ -1982,12 +1991,34 @@ export const handlers = [
   }),
 
   // --- Catch-all fallback ---
+  // Anything the hand-written handlers above do not cover falls through to the fixtures generated
+  // from api/openapi.yaml, so a screen reaches a schema-shaped answer instead of a 404. A route the
+  // spec does not describe either is still a 404 and still warns, which is the signal that the
+  // dashboard calls something undocumented.
   http.get('/api/v1/*', ({ request }) => {
-    console.warn('[MSW] Unhandled GET:', new URL(request.url).pathname)
+    const { pathname } = new URL(request.url)
+    const generated = matchGenerated('GET', pathname)
+    if (generated.found) {
+      return generated.body === null ? new HttpResponse(null, { status: 204 }) : HttpResponse.json(generated.body)
+    }
+    console.warn('[MSW] Unhandled GET:', pathname)
+    // api/testdata/openapi-coverage-debt.txt tracks 156 routes the router serves and the spec does
+    // not describe, so the generated layer cannot shape them. In the playground a 404 on one of
+    // those can leave a screen on its spinner, which reads as a broken site; a collection-shaped
+    // empty answer renders the screen's empty state instead. A normal dev run keeps the 404, so the
+    // signal that a route is unmocked is not softened where it is being worked on.
+    if (import.meta.env.VITE_PLAYGROUND === '1') {
+      const last = pathname.split('/').filter(Boolean).pop() ?? ''
+      const collection = /s$/.test(last) && !/status|address|analysis/.test(last)
+      return HttpResponse.json(collection ? { items: [], total: 0, truncated: false } : {})
+    }
     return HttpResponse.json({ error: 'Not mocked' }, { status: 404 })
   }),
-  http.post('/api/v1/*', () => HttpResponse.json({ ok: true })),
-  http.patch('/api/v1/*', () => HttpResponse.json({ ok: true })),
-  http.delete('/api/v1/*', () => HttpResponse.json({ ok: true })),
-  http.put('/api/v1/*', () => HttpResponse.json({ ok: true })),
+  ...(['post', 'patch', 'delete', 'put'] as const).map((method) =>
+    http[method]('/api/v1/*', ({ request }) => {
+      const generated = matchGenerated(method.toUpperCase(), new URL(request.url).pathname)
+      if (generated.found && generated.body !== null) return HttpResponse.json(generated.body)
+      return HttpResponse.json({ ok: true })
+    }),
+  ),
 ]
