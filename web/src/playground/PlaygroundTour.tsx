@@ -61,15 +61,41 @@ export function PlaygroundTour({
     cardRef.current?.focus()
   }, [index])
 
-  // An optional highlight. Measured after the route settles; absent selectors are not an error.
+  // An optional anchor, measured after the route settles. A `text:` anchor matches visible text,
+  // which survives a component being restructured better than a class name does; anything else is a
+  // CSS selector. An anchor that no longer resolves is not an error, the step just shows its card.
   useEffect(() => {
     setBox(null)
-    if (!step?.highlight) return
-    const timer = window.setTimeout(() => {
-      const el = document.querySelector(step.highlight!)
-      setBox(el ? el.getBoundingClientRect() : null)
-    }, 450)
-    return () => window.clearTimeout(timer)
+    const anchor = step?.anchor
+    if (!anchor) return
+    let cancelled = false
+    const find = (): Element | null => {
+      if (!anchor.startsWith('text:')) return document.querySelector(anchor)
+      const wanted = anchor.slice(5).toLowerCase()
+      const candidates = document.querySelectorAll('a, button, [role="tab"], h1, h2, h3')
+      for (const el of candidates) {
+        const text = (el.textContent ?? '').trim().toLowerCase()
+        if (text === wanted || (text.length < 48 && text.includes(wanted))) return el
+      }
+      return null
+    }
+    // The screen fetches after it routes, so retry briefly rather than measuring an empty frame.
+    let attempts = 0
+    const tick = () => {
+      if (cancelled) return
+      const el = find()
+      if (el) {
+        el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        window.setTimeout(() => !cancelled && setBox(el.getBoundingClientRect()), 320)
+        return
+      }
+      if (attempts++ < 8) window.setTimeout(tick, 400)
+    }
+    const timer = window.setTimeout(tick, 400)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
   }, [step, location.pathname])
 
   const last = index >= TOUR_STEPS.length - 1
@@ -103,7 +129,7 @@ export function PlaygroundTour({
         aria-modal="false"
         aria-labelledby="playground-tour-title"
         tabIndex={-1}
-        className="fixed bottom-4 left-1/2 z-50 w-[min(34rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-secondary bg-primary p-4 shadow-lg outline-hidden focus-visible:ring-2 focus-visible:ring-brand-solid md:bottom-6"
+        className="fixed bottom-4 left-1/2 z-50 max-h-[min(70vh,34rem)] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto rounded-xl border border-secondary bg-primary p-4 shadow-lg outline-hidden focus-visible:ring-2 focus-visible:ring-brand-solid md:bottom-6"
       >
         <div className="flex items-start gap-3">
           <Flag05 className="mt-0.5 size-5 shrink-0 text-brand-secondary" aria-hidden="true" />
@@ -115,6 +141,12 @@ export function PlaygroundTour({
               {step.title}
             </h2>
             <p className="mt-1 text-sm text-secondary">{step.body}</p>
+            {step.why && (
+              <p className="mt-2 border-l-2 border-brand-solid pl-2.5 text-sm text-tertiary">
+                <span className="font-medium text-secondary">Why: </span>
+                {step.why}
+              </p>
+            )}
           </div>
           <Button size="sm" color="tertiary" iconLeading={X} aria-label="End the tour" onClick={stop} />
         </div>

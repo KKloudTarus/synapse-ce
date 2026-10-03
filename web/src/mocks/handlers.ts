@@ -158,10 +158,26 @@ const RISK_STORIES = [
 const CAPABILITIES = [
   { key: 'fleet', name: 'Agent fleet transport', enabled: true, switch: 'SYNAPSE_FLEET_ENABLED' },
   { key: 'fleet_assets', name: 'Fleet asset model', enabled: true, switch: 'SYNAPSE_FLEET_ASSETS_ENABLED' },
+  { key: 'fleet_host_ingest', name: 'Fleet host ingest', enabled: true, switch: 'SYNAPSE_FLEET_HOST_INGEST_ENABLED' },
+  { key: 'fleet_detection_ingest', name: 'Fleet detection ingest', enabled: true, switch: 'SYNAPSE_FLEET_DETECTION_INGEST_ENABLED' },
+  { key: 'fleet_telemetry_ingest', name: 'Fleet telemetry ingest', enabled: true, switch: 'SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED' },
+  { key: 'fleet_cluster_ingest', name: 'Fleet cluster ingest', enabled: true, switch: 'SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED' },
   { key: 'agent', name: 'AI agent orchestration', enabled: true, switch: 'SYNAPSE_AGENT_ENABLED' },
   { key: 'ai_triage', name: 'AI false-positive triage', enabled: true, switch: 'SYNAPSE_FP_TRIAGE_ENABLED' },
   { key: 'judgments', name: 'Judgment lifecycle', enabled: true, switch: 'SYNAPSE_JUDGMENTS_ENABLED' },
   { key: 'sla', name: 'SLA governance', enabled: true, switch: 'SYNAPSE_SLA_ENABLED' },
+  { key: 'cspm', name: 'Cloud posture', enabled: true, switch: 'SYNAPSE_CSPM_ENABLED' },
+  { key: 'dast', name: 'Dynamic testing', enabled: true, switch: 'SYNAPSE_DAST_ENABLED' },
+  { key: 'taint', name: 'Taint analysis', enabled: true, switch: 'SYNAPSE_TAINT_ENABLED' },
+  { key: 'js_reachability', name: 'JavaScript reachability', enabled: true, switch: 'SYNAPSE_JS_REACHABILITY_ENABLED' },
+  { key: 'sandbox', name: 'Sandboxed execution', enabled: true, switch: 'SYNAPSE_SANDBOX_ENABLED' },
+  { key: 'ownership', name: 'Ownership routing', enabled: true, switch: 'SYNAPSE_OWNERSHIP_MODE' },
+  { key: 'notifications', name: 'Notifications', enabled: true, switch: 'SYNAPSE_NOTIFICATIONS_ENABLED' },
+  { key: 'ticketing', name: 'Ticketing', enabled: true, switch: 'SYNAPSE_TICKETING_ENABLED' },
+  { key: 'inbound_webhooks', name: 'Inbound SCM webhooks', enabled: true, switch: 'SYNAPSE_INBOUND_WEBHOOKS_ENABLED' },
+  { key: 'writeup_drafts', name: 'Write-up drafts', enabled: true, switch: 'SYNAPSE_WRITEUP_DRAFTS_ENABLED' },
+  { key: 'docpublish', name: 'Document publishing', enabled: true, switch: 'SYNAPSE_DOCPUBLISH_ENABLED' },
+  { key: 'oidc', name: 'OIDC sign-in', enabled: true, switch: 'SYNAPSE_OIDC_ENABLED' },
 ]
 
 // --- Engagements ---
@@ -301,6 +317,42 @@ const SCAN_RESULT = {
 }
 
 // --- Business Assets ---
+// Technical assets and host rows. The ids are the ones /assets/edges references, so the asset graph
+// draws nodes for its edges instead of an empty canvas.
+const TECHNICAL_ASSETS = [
+  { ID: 'ta-host-web01', Kind: 'host', Key: 'host:web01.prod', Name: 'web01.prod', Attributes: { environment: 'production', region: 'us-east-1', os: 'ubuntu 24.04' } },
+  { ID: 'ta-host-db01', Kind: 'host', Key: 'host:db01.prod', Name: 'db01.prod', Attributes: { environment: 'production', region: 'us-east-1', os: 'ubuntu 24.04' } },
+  { ID: 'ta-wl-checkout', Kind: 'workload', Key: 'k8s:prod/checkout', Name: 'checkout', Attributes: { namespace: 'prod', replicas: '3', cluster: 'prod-use1' } },
+  { ID: 'ta-wl-orders', Kind: 'workload', Key: 'k8s:prod/orders', Name: 'orders', Attributes: { namespace: 'prod', replicas: '2', cluster: 'prod-use1' } },
+  { ID: 'ta-img-checkout', Kind: 'image', Key: 'oci:ghcr.io/acme/checkout@sha256:4f1a', Name: 'checkout:1.8.2', Attributes: { registry: 'ghcr.io', digest: 'sha256:4f1a9c2e' } },
+  { ID: 'ta-img-orders', Kind: 'image', Key: 'oci:ghcr.io/acme/orders@sha256:7b3d', Name: 'orders:2.1.0', Attributes: { registry: 'ghcr.io', digest: 'sha256:7b3d5e81' } },
+  { ID: 'ta-exposure-lb', Kind: 'exposure', Key: 'net:checkout.acme.example:443', Name: 'checkout.acme.example', Attributes: { port: '443', scheme: 'https', reachable: 'internet' } },
+  { ID: 'ta-repo-synapse', Kind: 'repository', Key: 'git:github.com/KKloudTarus/synapse-ce', Name: 'synapse-ce', Attributes: { default_branch: 'main', visibility: 'private' } },
+]
+
+type HostSummaryFixture = { total: number; critical: number; high: number; medium: number; low: number; info: number; fixable: number; kev: number }
+
+const hostRow = (
+  asset: (typeof TECHNICAL_ASSETS)[number],
+  engagement: string,
+  packages: number,
+  summary: HostSummaryFixture,
+  scanStatus: string,
+) => ({
+  asset,
+  engagement_id: engagement,
+  packages,
+  recorded_at: HOUR_AGO,
+  last_scan: { job_id: `scan-${asset.ID}`, status: scanStatus, stage: 'done', error: '', started_at: HOUR_AGO, finished_at: NOW },
+  summary,
+})
+
+const FLEET_HOST_ROWS = [
+  hostRow(TECHNICAL_ASSETS[0], 'eng-001', 412, { total: 31, critical: 2, high: 7, medium: 14, low: 6, info: 2, fixable: 22, kev: 1 }, 'succeeded'),
+  hostRow(TECHNICAL_ASSETS[1], 'eng-001', 388, { total: 18, critical: 1, high: 3, medium: 9, low: 4, info: 1, fixable: 12, kev: 0 }, 'succeeded'),
+  hostRow(TECHNICAL_ASSETS[2], 'eng-002', 204, { total: 9, critical: 0, high: 2, medium: 5, low: 2, info: 0, fixable: 7, kev: 0 }, 'succeeded'),
+]
+
 const BUSINESS_ASSETS = [
   { ID: 'ba-001', Key: 'synapse-platform', Name: 'Synapse Security Platform', Description: 'Core SCA/SAST platform', Lifecycle: 'active', Criticality: 'high', Owner: 'security-engineering', Type: 'application', Metadata: {}, Version: 1, Audit: { CreatedAt: MONTH_AGO, UpdatedAt: NOW }, posture: 'critical', posture_explanation: '' },
   { ID: 'ba-002', Key: 'acme-api', Name: 'Acme Public API', Description: 'Customer-facing REST API', Lifecycle: 'active', Criticality: 'high', Owner: 'platform-team', Type: 'application', Metadata: {}, Version: 1, Audit: { CreatedAt: MONTH_AGO, UpdatedAt: WEEK_AGO }, posture: 'high_risk', posture_explanation: '' },
@@ -786,7 +838,25 @@ export const handlers = [
     const eng = ENGAGEMENTS.find(e => e.id === params.id) ?? ENGAGEMENTS[0]
     return HttpResponse.json(eng)
   }),
-  http.get('/api/v1/engagements/:id/source', () => new HttpResponse(null, { status: 404 })),
+  // A real backend answers 404 here when nothing was published, which is the correct contract and a
+  // poor demo: the code viewer then shows "source unavailable" on the screen a visitor most wants to
+  // see. The playground publishes a package so the preview works; dev keeps the 404 so the empty
+  // state stays reachable while it is being worked on.
+  http.get('/api/v1/engagements/:id/source', ({ params }) =>
+    import.meta.env.VITE_PLAYGROUND === '1'
+      ? HttpResponse.json({
+          version_id: 'srcv-2f8a10c4',
+          associated_by: 'ci@synapse',
+          associated_at: HOUR_AGO,
+          filename: 'synapse-ce-9f1c2b7.tar.zst',
+          size: 4_718_592,
+          sha256: '9f1c2b7d4e5a6f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708',
+          target: `engagement:${params.id}`,
+          uploaded_by: 'ci@synapse',
+          uploaded_at: HOUR_AGO,
+        })
+      : new HttpResponse(null, { status: 404 }),
+  ),
   http.post('/api/v1/engagements', () => HttpResponse.json(ENGAGEMENTS[0])),
   http.patch('/api/v1/engagements/:id', ({ params }) => {
     const eng = ENGAGEMENTS.find(e => e.id === params.id) ?? ENGAGEMENTS[0]
@@ -812,10 +882,44 @@ export const handlers = [
   http.get('/api/v1/engagements/:id/findings', () => HttpResponse.json(FINDINGS)),
 
   // --- Engagement Scan ---
-  http.get('/api/v1/engagements/:id/sbom', () => new HttpResponse(null, { status: 404 })),
+  http.get('/api/v1/engagements/:id/sbom', ({ params }) =>
+    import.meta.env.VITE_PLAYGROUND === '1'
+      ? HttpResponse.json({
+          id: 'sbom-7c21',
+          engagement_id: params.id,
+          filename: 'synapse-ce.cdx.json',
+          format: 'CycloneDX',
+          spec_version: '1.6',
+          target_ref: 'git+https://github.com/KKloudTarus/synapse-ce@9f1c2b7',
+          component_count: 52,
+          dependency_count: 40,
+          sha256: 'abc123def4567890abc123def4567890abc123def4567890abc123def4567890',
+          created_by: 'ci@synapse',
+          created_at: HOUR_AGO,
+        })
+      : new HttpResponse(null, { status: 404 }),
+  ),
   // 404 matches the real backend (ErrNotFound) when no job exists. A 200 with a
   // null body made mapScanJob(null) throw on every poll tick.
-  http.get('/api/v1/engagements/:id/scan-status', () => new HttpResponse(null, { status: 404 })),
+  // The playground answers a terminal job instead, so the screen shows a finished run rather than an
+  // empty state. The status must stay terminal: a running job puts the UI into a poll that never ends.
+  http.get('/api/v1/engagements/:id/scan-status', ({ params }) =>
+    import.meta.env.VITE_PLAYGROUND === '1'
+      ? HttpResponse.json({
+          id: 'scan-9d41',
+          engagement_id: params.id,
+          target: 'git+https://github.com/KKloudTarus/synapse-ce@9f1c2b7',
+          kind: 'git',
+          status: 'succeeded',
+          stage: 'done',
+          progress: 100,
+          started_at: HOUR_AGO,
+          finished_at: NOW,
+          error: '',
+          debug_events: [],
+        })
+      : new HttpResponse(null, { status: 404 }),
+  ),
   http.get('/api/v1/engagements/:id/scan-runs/compare', () =>
     HttpResponse.json({
       run_a: SCAN_RUNS[0],
@@ -1053,10 +1157,28 @@ export const handlers = [
   http.get('/api/v1/ai-triage/observability', () => HttpResponse.json(OBSERVABILITY)),
 
   // --- Current User ---
-  http.get('/api/v1/me', () => HttpResponse.json({ id: 'user-001', username: 'admin', display_name: 'Admin User', email: 'admin@synapse.local', role: 'owner' })),
+  http.get('/api/v1/me', () => HttpResponse.json({ id: 'user-001', username: 'admin', display_name: 'Admin User', email: 'admin@synapse.local', role: 'admin' })),
 
   // --- Assets ---
-  http.get('/api/v1/assets', () => HttpResponse.json(BUSINESS_ASSETS.map(a => ({ ...a, type: 'host', tags: ['production'], finding_count: 12, last_scanned: HOUR_AGO })))),
+  // /assets is the TECHNICAL asset list (mapTechnicalAsset), which the asset graph, the chain
+  // rehearsal tab and the purple coverage tab all read. The business-asset shape returned here left
+  // the graph with edges pointing at nodes that did not exist, so it drew nothing. These ids are the
+  // ones /assets/edges references.
+  http.get('/api/v1/assets', () => HttpResponse.json(TECHNICAL_ASSETS)),
+  http.get('/api/v1/assets/hosts', () => HttpResponse.json(FLEET_HOST_ROWS)),
+  // Before /assets/:id on purpose: MSW matches handlers in order, and the parameterised route
+  // otherwise answers /assets/edges with a single object, which the client reads as no edges.
+  http.get('/api/v1/assets/edges', () =>
+    HttpResponse.json([
+      { TenantID: 'default', From: 'ta-host-web01', To: 'ta-wl-checkout', Kind: 'runs', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-wl-checkout', To: 'ta-img-checkout', Kind: 'depends_on', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-exposure-lb', To: 'ta-wl-checkout', Kind: 'exposes', Provenance: 'recon-1', Confidence: 'inferred' },
+      { TenantID: 'default', From: 'ta-host-db01', To: 'ta-wl-orders', Kind: 'runs', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-wl-orders', To: 'ta-img-orders', Kind: 'depends_on', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-wl-checkout', To: 'ta-repo-synapse', Kind: 'built_from', Provenance: 'ci', Confidence: 'observed' },
+    ]),
+  ),
+  http.post('/api/v1/assets/edges', () => new HttpResponse(null, { status: 204 })),
   http.get('/api/v1/assets/:id', ({ params }) => {
     const a = BUSINESS_ASSETS.find(x => x.ID === params.id) ?? BUSINESS_ASSETS[0]
     return HttpResponse.json({ ...a, type: 'host', tags: ['production'], finding_count: 12, last_scanned: HOUR_AGO, engagements: ENGAGEMENTS.slice(0, 2) })
@@ -1489,7 +1611,26 @@ export const handlers = [
       },
     })
   }),
-  http.get('/api/v1/projects/:key/analysis-status', () => new HttpResponse(null, { status: 404 })),
+  // 404 means "no analysis running", which the client maps to null and the screen renders as an
+  // empty state. The playground answers a finished run instead, so the panel shows a result. Terminal
+  // status only: a running job leaves the page polling forever.
+  http.get('/api/v1/projects/:key/analysis-status', ({ params }) =>
+    import.meta.env.VITE_PLAYGROUND === '1'
+      ? HttpResponse.json({
+          id: 'an-001',
+          engagement_id: 'eng-001',
+          target: `project:${params.key}`,
+          kind: 'git',
+          status: 'succeeded',
+          stage: 'done',
+          progress: 100,
+          started_at: HOUR_AGO,
+          finished_at: NOW,
+          error: '',
+          debug_events: [],
+        })
+      : new HttpResponse(null, { status: 404 }),
+  ),
   http.get('/api/v1/projects/:key/measures', ({ params, request }) => {
     const p = PROJECTS.find(pr => pr.key === params.key) ?? PROJECTS[0]
     const url = new URL(request.url)
@@ -1651,24 +1792,24 @@ export const handlers = [
     base: null,
     capabilities: { source: true, unified_diff: true, split_diff: false, line_coverage: true },
     files: [
-      { path: 'internal/handlers/user.go', status: 'unchanged', language: 'go', lines: 342 },
-      { path: 'internal/handlers/auth.go', status: 'unchanged', language: 'go', lines: 285 },
-      { path: 'internal/handlers/scan.go', status: 'addition', language: 'go', lines: 156 },
-      { path: 'internal/handlers/report.go', status: 'unchanged', language: 'go', lines: 198 },
-      { path: 'internal/usecase/sca.go', status: 'unchanged', language: 'go', lines: 412 },
-      { path: 'internal/usecase/sast.go', status: 'modification', language: 'go', lines: 523 },
-      { path: 'internal/usecase/reachability.go', status: 'unchanged', language: 'go', lines: 267 },
-      { path: 'internal/adapter/postgres.go', status: 'unchanged', language: 'go', lines: 380 },
-      { path: 'internal/adapter/redis.go', status: 'unchanged', language: 'go', lines: 145 },
-      { path: 'internal/adapter/s3.go', status: 'modification', language: 'go', lines: 92 },
-      { path: 'cmd/synapse-api/main.go', status: 'unchanged', language: 'go', lines: 78 },
+      { path: 'internal/handlers/user.go', status: 'unchanged', language: 'go', lines: 342, source_available: true, source_reason: null },
+      { path: 'internal/handlers/auth.go', status: 'unchanged', language: 'go', lines: 285, source_available: true, source_reason: null },
+      { path: 'internal/handlers/scan.go', status: 'addition', language: 'go', lines: 156, source_available: true, source_reason: null },
+      { path: 'internal/handlers/report.go', status: 'unchanged', language: 'go', lines: 198, source_available: true, source_reason: null },
+      { path: 'internal/usecase/sca.go', status: 'unchanged', language: 'go', lines: 412, source_available: true, source_reason: null },
+      { path: 'internal/usecase/sast.go', status: 'modification', language: 'go', lines: 523, source_available: true, source_reason: null },
+      { path: 'internal/usecase/reachability.go', status: 'unchanged', language: 'go', lines: 267, source_available: true, source_reason: null },
+      { path: 'internal/adapter/postgres.go', status: 'unchanged', language: 'go', lines: 380, source_available: true, source_reason: null },
+      { path: 'internal/adapter/redis.go', status: 'unchanged', language: 'go', lines: 145, source_available: true, source_reason: null },
+      { path: 'internal/adapter/s3.go', status: 'modification', language: 'go', lines: 92, source_available: true, source_reason: null },
+      { path: 'cmd/synapse-api/main.go', status: 'unchanged', language: 'go', lines: 78, source_available: true, source_reason: null },
     ],
   })),
   http.get('/api/v1/projects/:key/analyses/:analysisId/code/file', () => HttpResponse.json({
     analysis_id: 'an-001',
     head: { ref: 'refs/heads/main', commit: 'a1b2c3d', artifact_digest: 'sha256:abc123' },
     base: null,
-    file: { path: 'internal/handlers/user.go', status: 'unchanged', language: 'go', lines: 342 },
+    file: { path: 'internal/handlers/user.go', status: 'unchanged', language: 'go', lines: 342, source_available: true, source_reason: null },
     from_line: 1,
     to_line: 50,
     total_lines: 342,
@@ -1835,14 +1976,6 @@ export const handlers = [
   ),
 
   // --- Technical asset relationship graph. Edge has no Go json tags: PascalCase wire. ---
-  http.get('/api/v1/assets/edges', () =>
-    HttpResponse.json([
-      { TenantID: 'default', From: 'ta-host-web01', To: 'ta-wl-checkout', Kind: 'runs', Provenance: 'cluster-inventory', Confidence: 'observed' },
-      { TenantID: 'default', From: 'ta-wl-checkout', To: 'ta-img-checkout', Kind: 'depends_on', Provenance: 'cluster-inventory', Confidence: 'observed' },
-      { TenantID: 'default', From: 'ta-exposure-lb', To: 'ta-wl-checkout', Kind: 'exposes', Provenance: 'recon-1', Confidence: 'inferred' },
-    ]),
-  ),
-  http.post('/api/v1/assets/edges', () => new HttpResponse(null, { status: 204 })),
 
   // --- DAST scan + runtime verification. Proposal/Decision/Result have no Go json tags: PascalCase. ---
   http.post('/api/v1/engagements/:id/dast/proposals', () =>
