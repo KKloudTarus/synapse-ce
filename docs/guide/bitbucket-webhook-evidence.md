@@ -94,10 +94,10 @@ The first full PostgreSQL run (520.147s) exposed an existing assessment relation
 | Check | Result |
 | --- | --- |
 | `go build ./...` | Passed |
-| Scoped `go vet` and golangci-lint on the seven affected backend packages | Passed; lint reports 0 issues |
+| Scoped `go vet` and golangci-lint on the seven affected backend packages and assessment cycle package; API/worker root vet | Passed; lint reports 0 issues |
 | Scoped backend, memory, docs, OpenAPI and platform race tests | Passed |
 | Real PostgreSQL migration 0219, inventory, Bitbucket atomic enqueue/retry/replay/tenant isolation and GitLab replay/binding race tests | Passed (9.094s) |
-| Full PostgreSQL package on a fresh database | Rerun in progress after the assessment concurrency fix; final result will be recorded when the run completes |
+| Full PostgreSQL package on a fresh database after the assessment concurrency fix | Passed (437.005s): 517 top-level tests passed, 0 failed, 4 opt-in tests skipped |
 | Integrations UI tests | Passed: 14 tests |
 | Frontend typecheck and production build | Passed |
 
