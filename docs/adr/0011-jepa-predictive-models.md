@@ -4,6 +4,8 @@
   telemetry tier**)
 - Date: 2026-10-03
 - Relates to: ADR 0001 (columnar telemetry store), the judgment primitive, `ports.TelemetryStore`
+- Not to be confused with: ADR 0012, which assesses TypeSafe's Jev. The two model families share
+  nothing but an abbreviation, and Jev is the one this repository was actually asked about.
 
 ## Context
 
