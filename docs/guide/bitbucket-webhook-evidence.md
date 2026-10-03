@@ -89,13 +89,15 @@ Upstream main at `61fefd13` is merged. The Bitbucket migration is 0219 and its l
 
 This run uses Go 1.27.1, PostgreSQL 17.11, pnpm 11.19.0 and golangci-lint 2.13.2. Dependencies unavailable from the configured module proxy were obtained from their pinned upstream Git tags and verified against the existing module checksums; `go.mod` and `go.sum` are unchanged.
 
+The first full PostgreSQL run (520.147s) exposed an existing assessment relationship concurrency bug: another commit could change the selected head between the stale-token check and rebuilding the preview, producing a validation error instead of a stale-preview conflict. Relationship commits now take the existing cycle row lock before both reads. The existing PostgreSQL concurrency/RLS/rollback regression passed 20 consecutive race-enabled runs (82.550s); the assessment cycle/comparison race suites, lint and full build also passed after this fix.
+
 | Check | Result |
 | --- | --- |
 | `go build ./...` | Passed |
 | Scoped `go vet` and golangci-lint on the seven affected backend packages | Passed; lint reports 0 issues |
 | Scoped backend, memory, docs, OpenAPI and platform race tests | Passed |
 | Real PostgreSQL migration 0219, inventory, Bitbucket atomic enqueue/retry/replay/tenant isolation and GitLab replay/binding race tests | Passed (9.094s) |
-| Full PostgreSQL package on a fresh database | In progress; final result will be recorded when the run completes |
+| Full PostgreSQL package on a fresh database | Rerun in progress after the assessment concurrency fix; final result will be recorded when the run completes |
 | Integrations UI tests | Passed: 14 tests |
 | Frontend typecheck and production build | Passed |
 
