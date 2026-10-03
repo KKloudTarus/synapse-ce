@@ -80,13 +80,6 @@ func randomWebhookPublicID(bytes int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-// ConfigureGitHubWebhook provisions the endpoint on first use and rotates its
-// secret thereafter. The caller supplies the GitHub secret; Synapse seals it
-// immediately and never returns plaintext credential material in an API response.
-func (s *Service) ConfigureGitHubWebhook(ctx context.Context, tenantID, integrationID shared.ID, actor, secret string) (GitHubWebhookConfiguration, error) {
-	return s.configureWebhook(ctx, tenantID, integrationID, actor, secret, "github")
-}
-
 // ConfigureInboundWebhook configures only registered inbound SCM providers.
 func (s *Service) ConfigureInboundWebhook(ctx context.Context, tenantID, integrationID shared.ID, actor, secret string) (GitHubWebhookConfiguration, error) {
 	if s == nil || s.integrations == nil {

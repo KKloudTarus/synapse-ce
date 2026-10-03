@@ -22,12 +22,14 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
 
-func TestMigration0207BitbucketWebhookLifecycle(t *testing.T) {
-	isolated := newIsolatedMigrationDB(t, 207, 206)
-	// Upgrade a database already at shipped 0206 through the production entry point.
+func TestMigration0219BitbucketWebhookLifecycle(t *testing.T) {
+	isolated := newIsolatedMigrationDB(t, 219, 218)
+	// Upgrade a database already at shipped 0218 through the production entry point.
+	requireIdentityMigrationReadiness(t, isolated.db)
 	if err := Migrate(context.Background(), isolated.dsn); err != nil {
 		t.Fatal(err)
 	}
+	requireIdentityMigrationVersion(t, isolated.db, 219)
 	requireMigrationIndexes(t, isolated.db, "inbound_webhook_events_payload_unique", "notification_events_type_recent_idx")
 	for _, fn := range []string{"synapse_lock_bitbucket_inbound_webhook(text,text,text)", "synapse_provision_bitbucket_inbound_webhook(text,text,text,text,integer)", "synapse_rotate_bitbucket_inbound_webhook(text,text,text,integer,text,timestamp with time zone)"} {
 		var publicExecute bool
@@ -38,9 +40,10 @@ func TestMigration0207BitbucketWebhookLifecycle(t *testing.T) {
 			t.Fatalf("PUBLIC execute on %s", fn)
 		}
 	}
-	if err := goose.DownTo(isolated.db, ".", 206); err != nil {
+	if err := goose.DownTo(isolated.db, ".", 218); err != nil {
 		t.Fatal(err)
 	}
+	requireIdentityMigrationReadiness(t, isolated.db)
 	requireMigrationIndexes(t, isolated.db, "inbound_webhook_events_payload_unique", "notification_events_type_recent_idx")
 	var installed bool
 	if err := isolated.db.QueryRow(`SELECT to_regprocedure('synapse_lock_bitbucket_inbound_webhook(text,text,text)') IS NOT NULL`).Scan(&installed); err != nil || installed {
