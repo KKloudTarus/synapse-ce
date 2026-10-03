@@ -53,7 +53,7 @@ func TestDecodeChannelConfigReadsLegacyBlobs(t *testing.T) {
 }
 
 func TestDecodeChannelConfigFailuresAreStableCodes(t *testing.T) {
-	if _, code := decodeChannelConfig("teams", []byte(`{}`)); code != codeUnsupportedChannel {
+	if _, code := decodeChannelConfig("carrier_pigeon", []byte(`{}`)); code != codeUnsupportedChannel {
 		t.Errorf("unknown type code = %q", code)
 	}
 	if _, code := decodeChannelConfig(domain.ChannelWebhook, []byte(`not json`)); code != codeChannelConfigInvalid {
@@ -67,7 +67,7 @@ func TestEveryValidChannelTypeHasASchema(t *testing.T) {
 			t.Errorf("channel type %s has no schema", kind)
 		}
 	}
-	if _, _, _, err := validateChannel(ChannelInput{Name: "x", Type: "teams", URL: "https://example.com"}, true); !errors.Is(err, shared.ErrValidation) {
+	if _, _, _, err := validateChannel(ChannelInput{Name: "x", Type: "carrier_pigeon", URL: "https://example.com"}, true); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("unknown channel type accepted: %v", err)
 	}
 }

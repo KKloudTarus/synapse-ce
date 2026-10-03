@@ -42,7 +42,9 @@ type Sender struct {
 	dial    func(ctx context.Context, network, address string) (net.Conn, error)
 	now     func() time.Time
 	timeout time.Duration
-	drivers map[notification.ChannelType]Driver
+	// telegramAPI is the Bot API origin; only tests change it.
+	telegramAPI string
+	drivers     map[notification.ChannelType]Driver
 	// order is the registration order, so the types a deployment offers are listed stably.
 	order []notification.ChannelType
 }
@@ -59,7 +61,7 @@ func New(smtpConfig SMTPConfig, timeout time.Duration) *Sender {
 	// The relay comes from operator configuration, not from a tenant, and is often a local MTA, so
 	// it may be private or loopback; metadata and other special-purpose ranges stay refused.
 	relay := safehttp.NewDialer(safehttp.OperatorPolicy(), timeout)
-	s := &Sender{http: safehttp.New(timeout, false), smtp: smtpConfig, dial: relay.DialContext, now: time.Now, timeout: timeout}
+	s := &Sender{http: safehttp.New(timeout, false), smtp: smtpConfig, dial: relay.DialContext, now: time.Now, timeout: timeout, telegramAPI: telegramAPIBase}
 	s.drivers = map[notification.ChannelType]Driver{}
 	for _, driver := range builtinDrivers(s) {
 		s.drivers[driver.ChannelType()] = driver
@@ -71,7 +73,7 @@ func New(smtpConfig SMTPConfig, timeout time.Duration) *Sender {
 // builtinDrivers are the channel types every deployment has. Their types are distinct constants,
 // which TestBuiltinDriversCoverEveryChannelType checks, so New needs no duplicate handling.
 func builtinDrivers(s *Sender) []Driver {
-	return []Driver{webhookDriver{s}, slackDriver{s}, emailDriver{s}}
+	return []Driver{webhookDriver{s}, slackDriver{s}, emailDriver{s}, teamsDriver{s}, telegramDriver{s}, googleChatDriver{s}, discordDriver{s}}
 }
 
 // Register adds a driver. Registering a second driver for a channel type is an error rather than

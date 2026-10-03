@@ -12,12 +12,16 @@ import { Field, Select } from '../../components/ui'
 
 /**
  * The template family each channel type renders (#1371). It mirrors
- * notification.FamilyForChannelType on the server; Teams and Google Chat will join chat.
+ * notification.FamilyForChannelType on the server.
  */
 export const CHANNEL_FAMILY: Record<NotificationChannelType, NotificationTemplateFamily> = {
   webhook: 'webhook',
   slack: 'chat',
   email: 'email',
+  teams: 'chat',
+  telegram: 'chat',
+  google_chat: 'chat',
+  discord: 'chat',
 }
 
 // Radix Select refuses an empty item value, so the unset choices use sentinels that map to ''.

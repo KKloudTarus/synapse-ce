@@ -33,6 +33,10 @@ var notificationMetricFamilies = [...]notificationMetricFamily{
 	{notification.ChannelWebhook, "generic"},
 	{notification.ChannelSlack, "slack"},
 	{notification.ChannelEmail, "smtp"},
+	{notification.ChannelTeams, "teams"},
+	{notification.ChannelTelegram, "telegram"},
+	{notification.ChannelGoogleChat, "google_chat"},
+	{notification.ChannelDiscord, "discord"},
 	{"other", "other"},
 }
 
@@ -44,6 +48,9 @@ func workerNotificationLabels(channel notification.ChannelType) (string, string)
 		return string(channel), "slack"
 	case notification.ChannelEmail:
 		return string(channel), "smtp"
+	case notification.ChannelTeams, notification.ChannelTelegram, notification.ChannelGoogleChat, notification.ChannelDiscord:
+		// One provider per chat channel type, so the provider label is the type itself.
+		return string(channel), string(channel)
 	default:
 		// Never turn an untrusted/future database value into a label.
 		return "other", "other"

@@ -116,7 +116,12 @@ type ChannelInput struct {
 	URL        string             `json:"url,omitempty"`
 	Secret     string             `json:"secret,omitempty"`
 	Recipients []string           `json:"recipients,omitempty"`
-	Revision   int                `json:"revision,omitempty"`
+	// ChatID and ThreadID address a Telegram chat and, optionally, one of its forum topics; the bot
+	// token travels in Secret. Like a URL they are part of the destination: changing either is a
+	// destination change and needs the token re-entered.
+	ChatID   string `json:"chat_id,omitempty"`
+	ThreadID int64  `json:"thread_id,omitempty"`
+	Revision int    `json:"revision,omitempty"`
 	// AllowDestinationChange is set by the caller, never decoded from a request: true only when the
 	// principal holds PermAdminister. Without it an update that changes the URL, the secret or the
 	// email recipients is refused with shared.ErrForbidden (#1358), so an integration_admin can
@@ -190,7 +195,7 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 	if in.Type != current.Type {
 		return domain.Channel{}, fmt.Errorf("%w: channel type is immutable", shared.ErrValidation)
 	}
-	replace := strings.TrimSpace(in.URL) != "" || strings.TrimSpace(in.Secret) != "" || in.Type != current.Type
+	replace := strings.TrimSpace(in.URL) != "" || strings.TrimSpace(in.Secret) != "" || strings.TrimSpace(in.ChatID) != "" || in.ThreadID != 0 || in.Type != current.Type
 	if replace && !in.AllowDestinationChange {
 		return domain.Channel{}, errDestinationChange
 	}
@@ -488,7 +493,7 @@ func (s *Service) RedriveDelivery(ctx context.Context, actor string, id shared.I
 			return domain.Delivery{}, err
 		}
 		scheme, host := "", ""
-		if channel.Type == domain.ChannelWebhook || channel.Type == domain.ChannelSlack {
+		if channel.Type.HTTPEndpoint() {
 			scheme, host, _ = domain.MaskedEndpoint(channel.Destination)
 		} else if channel.Type == domain.ChannelEmail {
 			// The public channel summary may contain an email local-part when there is one

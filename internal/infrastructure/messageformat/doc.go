@@ -13,8 +13,7 @@
 // Links come only from ports.RenderedMessage.Links, are checked to be absolute https URLs without
 // credentials, and are placed by the formatter after the content.
 //
-// Slack and Email are registered as ports.NotificationFormatter for the channel types that exist
-// today. Teams, GoogleChat, Telegram and Discord are exported renderers until their channel type
-// lands with its driver (WS3), which then registers them. JiraADF and JiraWiki render ticket
-// bodies for Jira Cloud and Data Center.
+// Slack, Email, TeamsFormatter, TelegramFormatter, GoogleChatFormatter and DiscordFormatter are
+// registered as ports.NotificationFormatter, one per channel type. JiraADF and JiraWiki render
+// ticket bodies for Jira Cloud and Data Center.
 package messageformat
