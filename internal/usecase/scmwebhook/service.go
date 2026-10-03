@@ -80,10 +80,22 @@ func randomWebhookPublicID(bytes int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-// ConfigureGitHubWebhook provisions the endpoint on first use and rotates its
-// secret thereafter. The caller supplies the GitHub secret; Synapse seals it
-// immediately and never returns plaintext credential material in an API response.
-func (s *Service) ConfigureGitHubWebhook(ctx context.Context, tenantID, integrationID shared.ID, actor, secret string) (GitHubWebhookConfiguration, error) {
+// ConfigureInboundWebhook configures only registered inbound SCM providers.
+func (s *Service) ConfigureInboundWebhook(ctx context.Context, tenantID, integrationID shared.ID, actor, secret string) (GitHubWebhookConfiguration, error) {
+	if s == nil || s.integrations == nil {
+		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: webhook administration is not configured", shared.ErrValidation)
+	}
+	item, err := s.integrations.Get(ctx, tenantID, integrationID)
+	if err != nil {
+		return GitHubWebhookConfiguration{}, err
+	}
+	if item.Provider != "github" && item.Provider != "bitbucket" {
+		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: integration does not support inbound webhook administration", shared.ErrValidation)
+	}
+	return s.configureWebhook(ctx, tenantID, integrationID, actor, secret, string(item.Provider))
+}
+
+func (s *Service) configureWebhook(ctx context.Context, tenantID, integrationID shared.ID, actor, secret, provider string) (GitHubWebhookConfiguration, error) {
 	if s == nil || s.admin == nil || s.sealer == nil || s.audit == nil || s.clock == nil || s.transactions == nil {
 		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: inbound webhook administration is not configured", shared.ErrValidation)
 	}
@@ -91,21 +103,21 @@ func (s *Service) ConfigureGitHubWebhook(ctx context.Context, tenantID, integrat
 		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: webhook administration identity is required", shared.ErrValidation)
 	}
 	if len(secret) < 32 || len(secret) > 128 || strings.TrimSpace(secret) != secret {
-		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: GitHub webhook secret must be 32-128 non-whitespace-trimmed bytes", shared.ErrValidation)
+		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: SCM webhook secret must be 32-128 non-whitespace-trimmed bytes", shared.ErrValidation)
 	}
 	item, err := s.integrations.Get(ctx, tenantID, integrationID)
 	if err != nil {
 		return GitHubWebhookConfiguration{}, err
 	}
-	if item.Provider != integration.Provider("github") || item.Archived {
-		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: integration is not an eligible GitHub integration", shared.ErrValidation)
+	if item.Provider != integration.Provider(provider) || item.Archived {
+		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: integration is not an eligible SCM integration", shared.ErrValidation)
 	}
 	bindings, err := s.integrations.ListBindings(ctx, tenantID, integrationID)
 	if err != nil {
 		return GitHubWebhookConfiguration{}, err
 	}
 	if len(bindings) != 1 || bindings[0].ProjectID.IsZero() {
-		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: bind exactly one Project before configuring the GitHub webhook", shared.ErrConflict)
+		return GitHubWebhookConfiguration{}, fmt.Errorf("%w: bind exactly one Project before configuring the SCM webhook", shared.ErrConflict)
 	}
 
 	var result GitHubWebhookConfiguration
@@ -115,7 +127,7 @@ func (s *Service) ConfigureGitHubWebhook(ctx context.Context, tenantID, integrat
 			return err
 		}
 		now := s.clock.Now().UTC()
-		action := "integration.github_webhook_provisioned"
+		action := "integration." + provider + "_webhook_provisioned"
 		if !found {
 			publicID, err := randomWebhookPublicID(32)
 			if err != nil {
@@ -123,27 +135,27 @@ func (s *Service) ConfigureGitHubWebhook(ctx context.Context, tenantID, integrat
 			}
 			sealed, err := s.sealer.Seal([]byte(secret), ports.InboundWebhookAAD(tenantID, publicID, "integration", integrationID.String(), 1))
 			if err != nil {
-				return fmt.Errorf("seal GitHub webhook secret: %w", err)
+				return fmt.Errorf("seal SCM webhook secret: %w", err)
 			}
 			created, err := s.admin.ProvisionInboundWebhook(txCtx, ports.InboundWebhookEndpoint{
 				PublicID: publicID, TenantID: tenantID, OwnerKind: "integration", OwnerID: integrationID.String(),
-				Provider: "github", CurrentVersion: 1, CurrentSealed: sealed, Enabled: true, RatePerMinute: 60,
+				Provider: provider, CurrentVersion: 1, CurrentSealed: sealed, Enabled: true, RatePerMinute: 60,
 			})
 			if err != nil {
 				return err
 			}
 			if !created {
-				return fmt.Errorf("%w: GitHub webhook endpoint already exists", shared.ErrConflict)
+				return fmt.Errorf("%w: SCM webhook endpoint already exists", shared.ErrConflict)
 			}
 			result = GitHubWebhookConfiguration{Path: "/api/v1/hooks/" + publicID, Version: 1}
 		} else {
-			if existing.Provider != "github" || existing.RevokedAt != nil || existing.CurrentVersion < 1 {
-				return fmt.Errorf("%w: GitHub webhook endpoint cannot be rotated", shared.ErrConflict)
+			if existing.Provider != provider || existing.RevokedAt != nil || existing.CurrentVersion < 1 {
+				return fmt.Errorf("%w: SCM webhook endpoint cannot be rotated", shared.ErrConflict)
 			}
 			nextVersion := existing.CurrentVersion + 1
 			sealed, err := s.sealer.Seal([]byte(secret), ports.InboundWebhookAAD(tenantID, existing.PublicID, "integration", integrationID.String(), nextVersion))
 			if err != nil {
-				return fmt.Errorf("seal rotated GitHub webhook secret: %w", err)
+				return fmt.Errorf("seal rotated SCM webhook secret: %w", err)
 			}
 			// Leave a small clock-skew margin below the hard 24-hour database cap.
 			expires := now.Add(23*time.Hour + 59*time.Minute)
@@ -154,17 +166,17 @@ func (s *Service) ConfigureGitHubWebhook(ctx context.Context, tenantID, integrat
 				return err
 			}
 			if !rotated {
-				return fmt.Errorf("%w: GitHub webhook endpoint changed concurrently", shared.ErrConflict)
+				return fmt.Errorf("%w: SCM webhook endpoint changed concurrently", shared.ErrConflict)
 			}
-			action = "integration.github_webhook_rotated"
+			action = "integration." + provider + "_webhook_rotated"
 			result = GitHubWebhookConfiguration{
-				Path: "/api/v1/hooks/" + existing.PublicID,
+				Path:    "/api/v1/hooks/" + existing.PublicID,
 				Version: nextVersion, Rotated: true, PreviousSecretExpiresAt: &expires,
 			}
 		}
 		return s.audit.Record(txCtx, ports.AuditEntry{
 			Actor: strings.TrimSpace(actor), Action: action, Target: integrationID.String(), At: now,
-			Metadata: map[string]string{"provider": "github", "webhook_version": fmt.Sprintf("%d", result.Version)},
+			Metadata: map[string]string{"provider": provider, "webhook_version": fmt.Sprintf("%d", result.Version)},
 		})
 	})
 	if err != nil {

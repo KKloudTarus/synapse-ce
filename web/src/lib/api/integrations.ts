@@ -136,6 +136,8 @@ function integrationBody(input: IntegrationInput) {
 }
 
 export const integrationsApi = {
+  configureInboundWebhook: async (integrationId: string, secret: string): Promise<{ path: string; version: number; rotated: boolean }> =>
+    req(`/integrations/${id(integrationId)}/inbound-webhook`, { method: 'POST', body: JSON.stringify({ secret }) }),
   listIntegrationProviders: async (): Promise<IntegrationProviderDescriptor[]> =>
     ((await req('/integration-providers')) ?? []).map(mapDescriptor),
 

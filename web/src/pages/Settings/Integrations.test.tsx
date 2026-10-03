@@ -14,7 +14,7 @@ vi.mock('../../lib/api', () => ({
     setIntegrationCredential: vi.fn(), deleteIntegrationCredential: vi.fn(), startIntegrationOperation: vi.fn(),
     listIntegrationOperations: vi.fn(), getIntegrationOperation: vi.fn(), cancelIntegrationOperation: vi.fn(),
     listIntegrationBindings: vi.fn(), createIntegrationBinding: vi.fn(), deleteIntegrationBinding: vi.fn(),
-    listIntegrationExternalRuns: vi.fn(),
+    listIntegrationExternalRuns: vi.fn(), configureInboundWebhook: vi.fn(),
   },
 }))
 
@@ -178,10 +178,11 @@ describe('Integrations settings', () => {
     await waitFor(() => expect(api.setIntegrationEnabled).toHaveBeenCalledWith(gitlabIntegration, true))
   })
 
-  it('offers only Git projects for the inbound GitLab binding', async () => {
-    vi.mocked(api.listIntegrationProviders).mockResolvedValue([gitlabProvider])
-    vi.mocked(api.listIntegrations).mockResolvedValue([gitlabIntegration])
-    vi.mocked(api.getIntegration).mockResolvedValue(gitlabIntegration)
+  it.each(['gitlab', 'bitbucket'])('offers only Git projects for the inbound %s binding', async (providerSlug) => {
+    const inboundIntegration = { ...gitlabIntegration, provider: providerSlug }
+    vi.mocked(api.listIntegrationProviders).mockResolvedValue([{ ...gitlabProvider, provider: providerSlug }])
+    vi.mocked(api.listIntegrations).mockResolvedValue([inboundIntegration])
+    vi.mocked(api.getIntegration).mockResolvedValue(inboundIntegration)
     vi.mocked(api.listProjects).mockResolvedValue([
       { id: 'git-project', name: 'Git app', sourceBinding: { kind: 'git', value: 'https://gitlab.example.com/org/app' } } as never,
       { id: 'local-project', name: 'Local checkout', sourceBinding: { kind: 'local', value: '/repo' } } as never,
@@ -191,6 +192,9 @@ describe('Integrations settings', () => {
     await user.click(await screen.findByLabelText('Synapse Project'))
     expect(await screen.findByRole('option', { name: 'Git app' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'Local checkout' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: 'Git app' }))
+    await user.click(screen.getByRole('button', { name: 'Bind Project' }))
+    await waitFor(() => expect(api.createIntegrationBinding).toHaveBeenCalledWith(inboundIntegration.id, 'git-project', '/inbound/git-project', 'Git app'))
   })
 
   it('requires a successful test before enabling and never renders stored plaintext', async () => {
@@ -248,4 +252,67 @@ describe('Integrations settings', () => {
     expect(screen.queryByText('Late primary response')).not.toBeInTheDocument()
     expect(screen.getAllByText('Current secondary response').length).toBeGreaterThan(0)
   })
+  it('configures a Bitbucket webhook without polling credentials or tests', async () => {
+    const bb = {...integration,provider:'bitbucket',name:'Bitbucket project',credentialConfigured:false}
+    vi.mocked(api.listIntegrationProviders).mockResolvedValue([{...provider,provider:'bitbucket',name:'Bitbucket Cloud',capabilities:[],secretFields:[]}])
+    vi.mocked(api.listIntegrations).mockResolvedValue([bb]);vi.mocked(api.getIntegration).mockResolvedValue(bb)
+    vi.mocked(api.listIntegrationBindings).mockResolvedValue([{id:'binding',integrationId:bb.id,projectId:'p1',externalKey:'p1',externalName:'Repo',version:1} as never])
+    vi.mocked(api.configureInboundWebhook).mockResolvedValue({path:'/api/v1/hooks/opaque-public-id',version:1,rotated:false})
+    render(<MemoryRouter><Integrations /></MemoryRouter>)
+    const input = await screen.findByLabelText('Webhook secret')
+    expect(screen.getByRole('button',{name:'Enable'})).toBeEnabled()
+    expect(screen.queryByRole('button',{name:'Test connection'})).not.toBeInTheDocument()
+    expect(screen.queryByRole('button',{name:'Poll now'})).not.toBeInTheDocument()
+    expect(screen.queryByRole('button',{name:'Add credentials'})).not.toBeInTheDocument()
+    const secret='bitbucket-random-webhook-secret-123456'
+    fireEvent.change(input,{target:{value:secret}})
+    fireEvent.click(screen.getByRole('button',{name:'Save webhook secret'}))
+    expect(await screen.findByText('/api/v1/hooks/opaque-public-id')).toBeInTheDocument()
+    expect(api.configureInboundWebhook).toHaveBeenCalledWith(bb.id,secret)
+    expect(input).toHaveValue('')
+    expect(screen.queryByText(secret)).not.toBeInTheDocument()
+  })
+
+  it('keeps the Bitbucket secret form unavailable without administrator permission', async () => {
+    const bb={...integration,provider:'bitbucket'}
+    vi.mocked(api.me).mockResolvedValue({id:'u-read',role:'readonly'} as never)
+    vi.mocked(api.listIntegrationProviders).mockResolvedValue([{...provider,provider:'bitbucket',name:'Bitbucket Cloud',capabilities:[],secretFields:[]}])
+    vi.mocked(api.listIntegrations).mockResolvedValue([bb]);vi.mocked(api.getIntegration).mockResolvedValue(bb)
+    render(<MemoryRouter><Integrations /></MemoryRouter>)
+    expect(await screen.findByText('An administrator must configure or rotate the webhook secret.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Webhook secret')).not.toBeInTheDocument()
+    expect(api.configureInboundWebhook).not.toHaveBeenCalled()
+  })
+
+  it('shows Bitbucket configuration failures and clears the submitted secret', async () => {
+    const bb={...integration,provider:'bitbucket'}
+    vi.mocked(api.listIntegrationProviders).mockResolvedValue([{...provider,provider:'bitbucket',name:'Bitbucket Cloud',capabilities:[],secretFields:[]}])
+    vi.mocked(api.listIntegrations).mockResolvedValue([bb]);vi.mocked(api.getIntegration).mockResolvedValue(bb)
+    vi.mocked(api.listIntegrationBindings).mockResolvedValue([{id:'binding',projectId:'p1'} as never])
+    vi.mocked(api.configureInboundWebhook).mockRejectedValue(new Error('Webhook service unavailable'))
+    render(<MemoryRouter><Integrations /></MemoryRouter>)
+    const input=await screen.findByLabelText('Webhook secret')
+    fireEvent.change(input,{target:{value:'bitbucket-random-webhook-secret-123456'}})
+    fireEvent.click(screen.getByRole('button',{name:'Save webhook secret'}))
+    expect(await screen.findByText('Webhook service unavailable')).toBeInTheDocument()
+    expect(input).toHaveValue('')
+  })
+
+  it('validates webhook secrets by UTF-8 bytes and refuses surrounding whitespace', async () => {
+    const bb = { ...integration, provider: 'bitbucket' }
+    vi.mocked(api.listIntegrationProviders).mockResolvedValue([{ ...provider, provider: 'bitbucket', name: 'Bitbucket Cloud', capabilities: [], secretFields: [] }])
+    vi.mocked(api.listIntegrations).mockResolvedValue([bb])
+    vi.mocked(api.getIntegration).mockResolvedValue(bb)
+    vi.mocked(api.listIntegrationBindings).mockResolvedValue([{ id: 'binding', projectId: 'p1' } as never])
+    render(<MemoryRouter><Integrations /></MemoryRouter>)
+    const input = await screen.findByLabelText('Webhook secret')
+    const save = screen.getByRole('button', { name: 'Save webhook secret' })
+    for (const [value, enabled] of [['é'.repeat(16), true], ['界'.repeat(43), false], ['a'.repeat(31), false], ['a'.repeat(128), true], ['a'.repeat(32) + ' ', false]] as const) {
+      fireEvent.change(input, { target: { value } })
+      if (enabled) expect(save).toBeEnabled()
+      else expect(save).toBeDisabled()
+    }
+    expect(api.configureInboundWebhook).not.toHaveBeenCalled()
+  })
+
 })

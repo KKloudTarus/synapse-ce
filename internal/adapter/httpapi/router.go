@@ -141,7 +141,7 @@ type Router struct {
 	chainRehearsal           chainRehearser             // optional: governed exploitation chain rehearsal (simulation)
 	fleet                    *fleetRouter               // optional; nil ⇒ agent transport plane is not served
 	inboundWebhooks          *inboundWebhookPlane       // separate header-HMAC auth plane, no human fallback
-	inboundWebhookAdmin      *scmwebhookuc.Service      // tenant-authorized GitHub endpoint provision/rotation
+	inboundWebhookAdmin      *scmwebhookuc.Service      // tenant-authorized SCM endpoint provision/rotation
 	fleetAdmin               fleetAdminService          // optional; nil ⇒ operator agent-admin routes not registered
 	fleetKeys                fleetKeyAdmin              // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
 	qualityGates             qualityGateService         // optional; nil ⇒ quality-gate routes are not registered
@@ -487,8 +487,8 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("DELETE /api/v1/integrations/{id}/bindings/{bindingID}", rt.authz(userdom.PermManageIntegrations, rt.deleteIntegrationBinding))
 		mux.HandleFunc("GET /api/v1/integrations/{id}/external-runs", rt.authz(userdom.PermView, rt.listIntegrationExternalRuns))
 		if rt.inboundWebhookAdmin != nil {
-			// This route returns a new plaintext webhook secret exactly once, so it
-			// stays on administer rather than manage_integrations.
+			// The caller supplies a secret for vault sealing. Changing endpoint
+			// authentication requires administer, never manage_integrations.
 			mux.HandleFunc("POST /api/v1/integrations/{id}/inbound-webhook", rt.authz(userdom.PermAdminister, rt.configureIntegrationInboundWebhook))
 		}
 	}

@@ -165,7 +165,7 @@ func (store *IntegrationStore) SetIntegrationEnabled(ctx context.Context, id sha
 			}
 			return appendTenantAudit(ctx, tx, updated.TenantID.String(), audit)
 		}
-		// GitHub is inbound-only: its authentication credential belongs to the
+		// GitHub and Bitbucket are inbound-only: each authentication credential belongs to the
 		// webhook endpoint, not integration_credentials, and the provider exposes
 		// no outbound test operation. Other providers retain the exact tested-
 		// credential invariant before enablement.
@@ -342,8 +342,8 @@ func (store *IntegrationStore) CreateIntegrationBinding(ctx context.Context, bin
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM integration_bindings WHERE integration_id=$1`, binding.IntegrationID.String()).Scan(&bindingCount); err != nil {
 			return fmt.Errorf("count integration bindings: %w", err)
 		}
-		if provider == "gitlab" && bindingCount > 0 {
-			return fmt.Errorf("%w: GitLab inbound integration supports one project binding", shared.ErrConflict)
+		if (provider == "gitlab" || provider == "bitbucket") && bindingCount > 0 {
+			return fmt.Errorf("%w: SCM inbound integration supports one project binding", shared.ErrConflict)
 		}
 		if bindingCount >= integration.MaxBindingsPerPoll {
 			return fmt.Errorf("%w: an integration supports at most %d bindings", shared.ErrValidation, integration.MaxBindingsPerPoll)

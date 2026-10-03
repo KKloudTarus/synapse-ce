@@ -81,12 +81,19 @@ paths:
       description: >-
         The public ID identifies an enabled tenant-owned integration. Tenant identity
         never comes from a header, query or body. Provider-neutral endpoints use
-        X-Synapse-Hook-Signature over the raw body. GitLab endpoints prefer Standard
+        X-Synapse-Hook-Signature over the raw body. GitHub uses X-Hub-Signature-256;
+        Bitbucket Cloud uses X-Hub-Signature and requires X-Event-Key and
+        X-Request-UUID. Bitbucket request UUID and authenticated body digest receipts
+        commit atomically with durable scan enqueue. GitLab endpoints prefer Standard
         Webhooks webhook-signature over webhook-id.timestamp.raw-body with a ±5 minute
         timestamp window, and fall back to X-Gitlab-Token only when no signature is
-        present. The signed webhook-id (or legacy event UUID) and authenticated body digest are deduplicated atomically with durable job enqueue. Conflicting event headers and payload object_kind are rejected. No human bearer token is used.
+        present. The signed webhook-id (or legacy event UUID) and authenticated body
+        digest are deduplicated atomically with durable job enqueue. Conflicting event
+        headers and payload object_kind are rejected. No human bearer token is used.
       security:
         - inboundWebhookHMAC: []
+        - githubWebhookHMAC: []
+        - bitbucketWebhookHMAC: []
         - gitlabWebhookSignature: []
         - gitlabWebhookToken: []
       parameters:
@@ -94,6 +101,18 @@ paths:
           in: path
           required: true
           schema: {type: string, minLength: 32, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$'}
+        - name: X-Hub-Signature
+          in: header
+          description: Required for Bitbucket Cloud; HMAC-SHA256 over the exact raw request body.
+          schema: {type: string, pattern: '^sha256=[0-9a-fA-F]{64}$'}
+        - name: X-Event-Key
+          in: header
+          description: Required for Bitbucket Cloud. Scans repo:push and pullrequest:created/updated; other valid event types are acknowledged.
+          schema: {type: string, maxLength: 64}
+        - name: X-Request-UUID
+          in: header
+          description: Required for Bitbucket Cloud; delivery UUID, optionally enclosed in braces. X-Hook-UUID is not a delivery ID.
+          schema: {type: string, minLength: 36, maxLength: 38}
       requestBody:
         required: true
         content:
@@ -102,7 +121,7 @@ paths:
           application/octet-stream:
             schema: {type: string, format: binary, maxLength: 1048576}
       responses:
-        '202': {description: Authenticated event accepted by a provider receiver.}
+        '202': {description: Authenticated event accepted, replay acknowledged, or unsupported event ignored.}
         '400': {description: Invalid request body or provider event metadata.}
         '401': {description: Uniform response for invalid signatures, unknown IDs and disabled or revoked endpoints.}
         '413': {description: Body exceeds 1 MiB.}
@@ -5518,11 +5537,11 @@ paths:
     post:
       tags: [integrations]
       operationId: configureGitHubInboundWebhook
-      summary: Provision or rotate a GitHub inbound webhook secret
+      summary: Provision or rotate a GitHub or Bitbucket Cloud inbound webhook secret
       description: >
         Requires the administer capability and is registered only when inbound webhooks are enabled.
-        The integration must be an unarchived GitHub integration with exactly one Project binding.
-        The caller supplies the same secret that will be configured in GitHub. Synapse seals it immediately
+        The integration must be an unarchived GitHub or Bitbucket integration with exactly one Git Project binding.
+        The caller supplies the same secret that will be configured in the forge. Synapse seals it immediately
         and never returns plaintext credential material. The first call creates an opaque hook path; later
         calls keep that path and rotate the sealed secret.
       security:
@@ -6807,6 +6826,16 @@ components:
       in: header
       name: X-Gitlab-Token
       description: Legacy GitLab secret token, used only when webhook-signature is absent.
+    githubWebhookHMAC:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature-256
+      description: GitHub HMAC-SHA256 over the exact raw request body; only valid for a GitHub endpoint.
+    bitbucketWebhookHMAC:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature
+      description: Bitbucket Cloud HMAC-SHA256 over the exact raw request body; only valid for a Bitbucket endpoint.
     bearerAuth:
       type: http
       scheme: bearer
@@ -8232,7 +8261,7 @@ components:
           minLength: 32
           maxLength: 128
           writeOnly: true
-          description: Caller-supplied GitHub webhook secret. Synapse seals it and never echoes it.
+          description: Caller-supplied SCM webhook secret (32–128 UTF-8 bytes). Synapse seals it and never echoes it.
 
     GitHubInboundWebhookConfiguration:
       type: object

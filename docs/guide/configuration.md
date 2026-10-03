@@ -860,3 +860,24 @@ Read and propose only. It never executes. The token and engagement ID are requir
 | `SYNAPSE_MCP_ADDR` | `:8081` | Listen address. |
 
 Next: [CLI](cli.md)
+
+
+### Bitbucket Cloud inbound webhooks
+
+Enable `SYNAPSE_INBOUND_WEBHOOKS_ENABLED=true` with PostgreSQL, a tenant-isolated runtime role, and `SYNAPSE_VAULT_MASTER_KEY`. Apply migration `0204_bitbucket_inbound_webhooks.sql` and grant runtime privileges using the normal migration/startup flow. The durable scan queue and its worker must be running; webhook requests never run scans inline. Upgrade external `synapse-worker` processes to the same release before enabling Bitbucket inbound webhooks, so they understand deferred scan admission.
+
+In **Settings → Integrations → CI/CD**, create a **Bitbucket Cloud** integration and bind exactly one existing Git Project. As an administrator, enter a randomly generated 32–128-byte secret and save it. The equivalent API is `POST /api/v1/integrations/{id}/inbound-webhook` with `{"secret":"<the same secret configured in Bitbucket>"}`. Synapse seals the secret and returns only the opaque relative hook path, its version and rotation metadata. Combine the path with your public HTTPS origin, configure that URL and the same secret in Bitbucket Cloud's repository webhook settings, then enable the integration. Do not put credentials or tenant IDs in the URL. Bitbucket integrations accept no outbound polling credentials.
+
+Subscribe to `repo:push`, `pullrequest:created` and `pullrequest:updated`. Bitbucket Cloud deliveries must carry exactly one of each header:
+
+- `X-Hub-Signature: sha256=<hex HMAC-SHA256 over the exact raw body>`;
+- `X-Event-Key` identifying the event;
+- `X-Request-UUID`, a delivery UUID, optionally enclosed in braces. `X-Hook-UUID` identifies the webhook configuration and cannot replace the request UUID.
+
+Bodies are capped at 1 MiB. Replays of either a request UUID or the authenticated raw body are acknowledged without a second job. Receipt insertion, frozen scan requests, queue enqueue and admission audit writes share one PostgreSQL transaction. A multi-ref push queues every validated branch. Workers reserve the single running-scan slot only at execution; contention retries without consuming delivery attempts. Scan tracking becomes visible when the worker admits the scan, and scope/authorization are checked again before execution. Failures roll back the receipt so a retry can succeed; integration and endpoint locks prevent disabling or archiving from racing acceptance. Rotating the secret preserves the hook path and accepts the previous key for less than 24 hours. Neither responses nor audit payloads include the secret.
+
+Pushes scan distinct live branch/ref and commit pairs; branch deletion and tags are ignored. A push contains at most 100 changes and all scan targets are validated before enqueue. Open PR creation/update scans use the source commit and destination base branch. Closed PRs and other valid event types are acknowledged without scanning. Commits must be exactly 40 or 64 lowercase hexadecimal characters, and refs must pass Git branch-name restrictions. Payload clone URLs never override the Project repository.
+
+A PR whose source and destination repository UUIDs differ, or whose identities are missing/invalid, uses the restricted fork path: no Git credentials (including ambient credential helpers), no Maven/Gradle/npm or other build execution, and no forge status/comment writes. Acquisition still uses only the stored origin. Consequently, a fork commit must be reachable anonymously from that origin; unavailable fork commits and private origins fail closed. This change does not fetch arbitrary fork URLs or add Bitbucket PR decoration.
+
+Protocol references: [Bitbucket Cloud webhook management](https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/), [event payloads](https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/), and the [Jenkins Bitbucket plugin signature verifier](https://github.com/jenkinsci/bitbucket-push-and-pull-request-plugin/blob/b5b8b6a134d513e80ed62307306168d6c906584f/src/main/java/io/jenkins/plugins/bitbucketpushandpullrequest/receiver/SignatureUtils.java). This implementation targets Bitbucket Cloud, not Server/Data Center payloads.

@@ -183,8 +183,18 @@ func (p *inboundWebhookPlane) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if endpoint.Provider == "bitbucket" {
+		var ok bool
+		event, ok = bitbucketEventMetadata(r.Header, body)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid_webhook_event"})
+			return
+		}
+	}
+
 	// Bind ONLY the authenticated record's tenant; do not use TenantOrDefault.
-	// GitLab commits replay receipts with durable enqueue in its receiver.
+	// GitLab and Bitbucket commit replay receipts with durable enqueue in
+	// their provider receivers. Bitbucket claims both UUID and body receipts.
 	// GitHub retains the existing transport-level delivery claim.
 	ctx := shared.WithTenant(r.Context(), endpoint.TenantID)
 	if event.Provider == "github" && event.EventID != "" {
@@ -246,6 +256,8 @@ func (p *inboundWebhookPlane) verifyRequest(e ports.InboundWebhookEndpoint, publ
 	signatureHeader := inboundWebhookSignature
 	if e.Provider == "github" {
 		signatureHeader = githubSignatureHeader
+	} else if e.Provider == "bitbucket" {
+		signatureHeader = bitbucketSignatureHeader
 	}
 	presented, signatureOK := inboundSignature(header.Values(signatureHeader))
 	valid, usedPrevious := p.verify(e, publicID, body, presented, now)

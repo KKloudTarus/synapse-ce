@@ -285,7 +285,7 @@ func (rt *Router) configureIntegrationInboundWebhook(w http.ResponseWriter, r *h
 	if !decodeIntegrationJSON(w, r, &body) {
 		return
 	}
-	configuration, err := rt.inboundWebhookAdmin.ConfigureGitHubWebhook(
+	configuration, err := rt.inboundWebhookAdmin.ConfigureInboundWebhook(
 		r.Context(),
 		shared.ID(TenantFrom(r.Context())),
 		shared.ID(r.PathValue("id")),

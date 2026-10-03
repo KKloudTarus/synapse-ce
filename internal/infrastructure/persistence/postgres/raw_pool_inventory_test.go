@@ -240,6 +240,9 @@ var securityDefinerExceptions = map[string]string{
 	"synapse_identity_admission_source":                       "callable: identity exact cross-tenant invitation source fence",
 	"synapse_identity_revoke_admission_source":                "callable: identity exact cross-tenant invitation source revoke",
 	"synapse_identity_index_recovery_activation":              "trigger: identity recovery exact-digest routing index",
+	"synapse_lock_bitbucket_inbound_webhook":                  "callable: Bitbucket endpoint liveness lock held across receipt and enqueue",
+	"synapse_provision_bitbucket_inbound_webhook":             "callable: tenant-bound Bitbucket webhook endpoint provisioning",
+	"synapse_rotate_bitbucket_inbound_webhook":                "callable: tenant-bound Bitbucket webhook secret rotation",
 }
 
 // runtimeExecuteGrants is the complete set of function EXECUTE grants GrantRuntimePrivileges gives
@@ -250,6 +253,9 @@ var runtimeExecuteGrants = []string{
 	"synapse_lock_inbound_webhook_event(TEXT,TEXT,TEXT,TEXT,TEXT)",
 	"synapse_provision_github_inbound_webhook(TEXT,TEXT,TEXT,TEXT,INT)",
 	"synapse_rotate_github_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ)",
+	"synapse_lock_bitbucket_inbound_webhook(TEXT,TEXT,TEXT)",
+	"synapse_provision_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,TEXT,INT)",
+	"synapse_rotate_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ)",
 	"synapse_identity_route_credential(TEXT)",
 	"synapse_identity_person_memberships(TEXT,TEXT)",
 	"synapse_identity_person_epoch(TEXT,TEXT)",

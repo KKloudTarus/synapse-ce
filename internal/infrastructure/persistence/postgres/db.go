@@ -540,6 +540,17 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 			"GRANT EXECUTE ON FUNCTION synapse_rotate_github_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
 		)
 	}
+	var bitbucketInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_lock_bitbucket_inbound_webhook(text,text,text)') IS NOT NULL").Scan(&bitbucketInstalled); err != nil {
+		return fmt.Errorf("inspect Bitbucket webhook functions: %w", err)
+	}
+	if bitbucketInstalled {
+		statements = append(statements,
+			"GRANT EXECUTE ON FUNCTION synapse_lock_bitbucket_inbound_webhook(TEXT,TEXT,TEXT) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_provision_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,TEXT,INT) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_rotate_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
+		)
+	}
 	// The identity platform tables are global and owner-only. The runtime role reaches them solely
 	// through the exact-match SECURITY DEFINER functions of migration 0206; tenant-owned identity
 	// tables keep the ordinary grant under FORCE RLS.
