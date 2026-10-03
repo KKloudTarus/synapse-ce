@@ -8,17 +8,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   },
   "DELETE /api/v1/users/{id}/oidc-links/{linkId}": {
     "createdAt": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "issuer": "demo",
     "subject": "demo",
     "userId": "demo.operator"
   },
   "GET /api/v1/agents/{id}/keys": {
-    "agent_id": "demo-001",
+    "agent_id": "agent-001",
     "keys": [
       {
         "algorithm": "demo",
-        "key_id": "demo-001",
+        "key_id": "key-001",
         "not_after": "2026-10-03T09:00:00Z",
         "not_before": "2026-10-03T09:00:00Z",
         "purpose": "telemetry-batch",
@@ -27,7 +27,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       {
         "algorithm": "demo",
-        "key_id": "demo-001",
+        "key_id": "key-002",
         "not_after": "2026-10-03T09:00:00Z",
         "not_before": "2026-10-03T09:00:00Z",
         "purpose": "telemetry-batch",
@@ -36,7 +36,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       {
         "algorithm": "demo",
-        "key_id": "demo-001",
+        "key_id": "key-003",
         "not_after": "2026-10-03T09:00:00Z",
         "not_before": "2026-10-03T09:00:00Z",
         "purpose": "telemetry-batch",
@@ -56,8 +56,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "observed_basis_points": 2,
           "sample_size": 2048
         },
-        "project_id": "demo-001",
-        "project_name": "Demo record"
+        "project_id": "project-001",
+        "project_name": "Platform Security"
       },
       {
         "alert": {
@@ -68,8 +68,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "observed_basis_points": 2,
           "sample_size": 2048
         },
-        "project_id": "demo-001",
-        "project_name": "Demo record"
+        "project_id": "project-002",
+        "project_name": "Payments Core"
       },
       {
         "alert": {
@@ -80,8 +80,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "observed_basis_points": 2,
           "sample_size": 2048
         },
-        "project_id": "demo-001",
-        "project_name": "Demo record"
+        "project_id": "project-003",
+        "project_name": "Edge Delivery"
       }
     ],
     "by_cwe": [
@@ -312,16 +312,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "decision_rationale": "demo",
         "dedup_key": "demo-key",
         "driver": "demo",
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-001",
         "evidence_ref": "main",
-        "finding_id": "demo-001",
+        "finding_id": "finding-001",
         "gate_exempt": true,
-        "id": "demo-001",
+        "id": "id-001",
         "independence_policy": "model_family",
         "owner": "demo.operator",
         "policy_reason": "Seeded playground record, not a real result.",
         "policy_version": "1.4.2",
-        "project_id": "demo-001",
+        "project_id": "project-001",
         "prompt_version": "1.4.2",
         "proposer_model": "demo",
         "proposer_model_family": "demo",
@@ -332,7 +332,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "state": "pending",
         "suspected_fp": true,
         "tenant_id": "demo-tenant",
-        "title": "Demo record",
+        "title": "Platform Security",
         "updated_at": "2026-10-03T09:00:00Z",
         "verdict": "demo",
         "verified": true,
@@ -353,16 +353,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "decision_rationale": "demo",
         "dedup_key": "demo-key",
         "driver": "demo",
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-002",
         "evidence_ref": "main",
-        "finding_id": "demo-001",
+        "finding_id": "finding-002",
         "gate_exempt": true,
-        "id": "demo-001",
+        "id": "id-002",
         "independence_policy": "model_family",
         "owner": "demo.operator",
         "policy_reason": "Seeded playground record, not a real result.",
         "policy_version": "1.4.2",
-        "project_id": "demo-001",
+        "project_id": "project-002",
         "prompt_version": "1.4.2",
         "proposer_model": "demo",
         "proposer_model_family": "demo",
@@ -373,7 +373,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "state": "pending",
         "suspected_fp": true,
         "tenant_id": "demo-tenant",
-        "title": "Demo record",
+        "title": "Payments Core",
         "updated_at": "2026-10-03T09:00:00Z",
         "verdict": "demo",
         "verified": true,
@@ -394,16 +394,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "decision_rationale": "demo",
         "dedup_key": "demo-key",
         "driver": "demo",
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-003",
         "evidence_ref": "main",
-        "finding_id": "demo-001",
+        "finding_id": "finding-003",
         "gate_exempt": true,
-        "id": "demo-001",
+        "id": "id-003",
         "independence_policy": "model_family",
         "owner": "demo.operator",
         "policy_reason": "Seeded playground record, not a real result.",
         "policy_version": "1.4.2",
-        "project_id": "demo-001",
+        "project_id": "project-003",
         "prompt_version": "1.4.2",
         "proposer_model": "demo",
         "proposer_model_family": "demo",
@@ -414,7 +414,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "state": "pending",
         "suspected_fp": true,
         "tenant_id": "demo-tenant",
-        "title": "Demo record",
+        "title": "Edge Delivery",
         "updated_at": "2026-10-03T09:00:00Z",
         "verdict": "demo",
         "verified": true,
@@ -441,13 +441,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "Audit": {},
         "Criticality": "high",
         "Description": "Seeded playground record, not a real result.",
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Key": "demo-key",
         "Lifecycle": "active",
         "Metadata": {
           "demo": "demo"
         },
-        "Name": "Demo record",
+        "Name": "Platform Security",
         "Owner": "demo.operator",
         "TenantID": "demo-tenant",
         "Type": "product",
@@ -457,13 +457,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "Audit": {},
         "Criticality": "high",
         "Description": "Seeded playground record, not a real result.",
-        "ID": "demo-001",
+        "ID": "ID-002",
         "Key": "demo-key",
         "Lifecycle": "active",
         "Metadata": {
           "demo": "demo"
         },
-        "Name": "Demo record",
+        "Name": "Payments Core",
         "Owner": "demo.operator",
         "TenantID": "demo-tenant",
         "Type": "product",
@@ -473,13 +473,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "Audit": {},
         "Criticality": "high",
         "Description": "Seeded playground record, not a real result.",
-        "ID": "demo-001",
+        "ID": "ID-003",
         "Key": "demo-key",
         "Lifecycle": "active",
         "Metadata": {
           "demo": "demo"
         },
-        "Name": "Demo record",
+        "Name": "Edge Delivery",
         "Owner": "demo.operator",
         "TenantID": "demo-tenant",
         "Type": "product",
@@ -494,13 +494,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "Audit": {},
     "Criticality": "high",
     "Description": "Seeded playground record, not a real result.",
-    "ID": "demo-001",
+    "ID": "ID-001",
     "Key": "demo-key",
     "Lifecycle": "active",
     "Metadata": {
       "demo": "demo"
     },
-    "Name": "Demo record",
+    "Name": "Platform Security",
     "Owner": "demo.operator",
     "TenantID": "demo-tenant",
     "Type": "product",
@@ -525,8 +525,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/appsec/assets/{assetID}/findings": [
     {
       "can_self_promote": true,
-      "engagement_id": "demo-001",
-      "engagement_name": "Demo record",
+      "engagement_id": "engagement-001",
+      "engagement_name": "Platform Security",
       "external": true,
       "finding": {
         "Assignee": "demo.operator",
@@ -548,7 +548,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "EngagementID": "demo",
         "EvidenceScore": 7,
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Impact": "demo",
         "KEV": true,
         "Kind": "sca",
@@ -569,14 +569,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "Status": "open",
-        "Title": "Demo record",
+        "Title": "Platform Security",
         "Version": 1,
         "assignee_user_id": "demo.operator",
         "compliance_controls": [
           {
             "Framework": "demo",
-            "ID": "demo-001",
-            "Title": "Demo record"
+            "ID": "ID-001",
+            "Title": "Platform Security"
           }
         ],
         "reachability_evidence": {
@@ -601,7 +601,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "history": [
           {
             "confidence": 2,
-            "judgment_id": "demo-001",
+            "judgment_id": "judgment-001",
             "observed_at": "2026-10-03T09:00:00Z",
             "path": [
               "src/service/handler.go"
@@ -623,8 +623,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     {
       "can_self_promote": true,
-      "engagement_id": "demo-001",
-      "engagement_name": "Demo record",
+      "engagement_id": "engagement-002",
+      "engagement_name": "Payments Core",
       "external": true,
       "finding": {
         "Assignee": "demo.operator",
@@ -646,7 +646,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "EngagementID": "demo",
         "EvidenceScore": 7,
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Impact": "demo",
         "KEV": true,
         "Kind": "sca",
@@ -667,14 +667,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "Status": "open",
-        "Title": "Demo record",
+        "Title": "Platform Security",
         "Version": 1,
         "assignee_user_id": "demo.operator",
         "compliance_controls": [
           {
             "Framework": "demo",
-            "ID": "demo-001",
-            "Title": "Demo record"
+            "ID": "ID-001",
+            "Title": "Platform Security"
           }
         ],
         "reachability_evidence": {
@@ -699,7 +699,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "history": [
           {
             "confidence": 2,
-            "judgment_id": "demo-001",
+            "judgment_id": "judgment-001",
             "observed_at": "2026-10-03T09:00:00Z",
             "path": [
               "src/service/handler.go"
@@ -721,8 +721,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     {
       "can_self_promote": true,
-      "engagement_id": "demo-001",
-      "engagement_name": "Demo record",
+      "engagement_id": "engagement-003",
+      "engagement_name": "Edge Delivery",
       "external": true,
       "finding": {
         "Assignee": "demo.operator",
@@ -744,7 +744,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "EngagementID": "demo",
         "EvidenceScore": 7,
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Impact": "demo",
         "KEV": true,
         "Kind": "sca",
@@ -765,14 +765,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "Status": "open",
-        "Title": "Demo record",
+        "Title": "Platform Security",
         "Version": 1,
         "assignee_user_id": "demo.operator",
         "compliance_controls": [
           {
             "Framework": "demo",
-            "ID": "demo-001",
-            "Title": "Demo record"
+            "ID": "ID-001",
+            "Title": "Platform Security"
           }
         ],
         "reachability_evidence": {
@@ -797,7 +797,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "history": [
           {
             "confidence": 2,
-            "judgment_id": "demo-001",
+            "judgment_id": "judgment-001",
             "observed_at": "2026-10-03T09:00:00Z",
             "path": [
               "src/service/handler.go"
@@ -820,27 +820,27 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   ],
   "GET /api/v1/appsec/assets/{assetID}/history": [
     {
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-001",
       "finding_count": 3,
-      "name": "Demo record",
+      "name": "Platform Security",
       "retest_count": 3,
       "scope_count": 3,
       "status": "active",
       "updated_at": "2026-10-03T09:00:00Z"
     },
     {
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-002",
       "finding_count": 3,
-      "name": "Demo record",
+      "name": "Payments Core",
       "retest_count": 3,
       "scope_count": 3,
       "status": "active",
       "updated_at": "2026-10-03T09:00:00Z"
     },
     {
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-003",
       "finding_count": 3,
-      "name": "Demo record",
+      "name": "Edge Delivery",
       "retest_count": 3,
       "scope_count": 3,
       "status": "active",
@@ -860,17 +860,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/appsec/assets/{assetID}/projects": {
     "items": [
       {
-        "id": "demo-001",
+        "id": "id-001",
         "provenance": "demo",
         "role": "primary"
       },
       {
-        "id": "demo-001",
+        "id": "id-002",
         "provenance": "demo",
         "role": "primary"
       },
       {
-        "id": "demo-001",
+        "id": "id-003",
         "provenance": "demo",
         "role": "primary"
       }
@@ -879,17 +879,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/appsec/assets/{assetID}/technical-assets": {
     "items": [
       {
-        "id": "demo-001",
+        "id": "id-001",
         "provenance": "demo",
         "role": "primary"
       },
       {
-        "id": "demo-001",
+        "id": "id-002",
         "provenance": "demo",
         "role": "primary"
       },
       {
-        "id": "demo-001",
+        "id": "id-003",
         "provenance": "demo",
         "role": "primary"
       }
@@ -898,16 +898,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/assessment-comparisons/{comparisonId}": {
     "algorithm_version": 1,
     "attempts": 2,
-    "baseline_snapshot_id": "demo-001",
+    "baseline_snapshot_id": "baseline-snapshot-001",
     "completed_at": "2026-10-03T09:00:00Z",
     "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
     "coverage_policy_version": 1,
     "created_at": "2026-10-03T09:00:00Z",
-    "current_snapshot_id": "demo-001",
-    "cycle_id": "demo-001",
+    "current_snapshot_id": "current-snapshot-001",
+    "cycle_id": "cycle-001",
     "failure_code": "demo",
     "fingerprint_version": 1,
-    "id": "demo-001",
+    "id": "id-001",
     "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
     "mode": "lifecycle",
     "risk_model_version": 1,
@@ -923,8 +923,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "medium": 2,
         "unknown": 2
       },
-      "baseline_snapshot_id": "demo-001",
-      "comparison_id": "demo-001",
+      "baseline_snapshot_id": "baseline-snapshot-001",
+      "comparison_id": "comparison-001",
       "count_reduction": {
         "denominator": 2,
         "na_reason": "Seeded playground record, not a real result.",
@@ -940,7 +940,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "medium": 2,
         "unknown": 2
       },
-      "current_snapshot_id": "demo-001",
+      "current_snapshot_id": "current-snapshot-001",
       "fixed_count": 3,
       "fixed_rate": {
         "denominator": 2,
@@ -978,14 +978,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "reachability": "demo",
           "scanner": {
             "lane_key": "demo-key",
-            "rule_id": "demo-001",
-            "scan_run_id": "demo-001",
-            "tool_name": "Demo record",
+            "rule_id": "rule-001",
+            "scan_run_id": "scan-run-001",
+            "tool_name": "Platform Security",
             "tool_version": "1.4.2"
           },
           "severity": "high"
         },
-        "baseline_observation_id": "demo-001",
+        "baseline_observation_id": "baseline-observation-001",
         "baseline_risk_milli": 2,
         "change_flags": [
           "severity_increased"
@@ -1001,19 +1001,19 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "reachability": "demo",
           "scanner": {
             "lane_key": "demo-key",
-            "rule_id": "demo-001",
-            "scan_run_id": "demo-001",
-            "tool_name": "Demo record",
+            "rule_id": "rule-001",
+            "scan_run_id": "scan-run-001",
+            "tool_name": "Platform Security",
             "tool_version": "1.4.2"
           },
           "severity": "high"
         },
-        "current_observation_id": "demo-001",
+        "current_observation_id": "current-observation-001",
         "current_risk_milli": 2,
         "finding_kind": "demo",
         "fixed_basis": "comparable_absence",
-        "id": "demo-001",
-        "identity_id": "demo-001",
+        "id": "id-001",
+        "identity_id": "identity-001",
         "match_methods": [
           "override"
         ],
@@ -1026,14 +1026,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "review_candidates": [
           {
-            "id": "demo-001",
+            "id": "id-001",
             "source_observation_ids": [
               "demo"
             ]
           }
         ],
         "target_canonical": "demo",
-        "verification_id": "demo-001",
+        "verification_id": "verification-001",
         "verification_state": "active"
       },
       {
@@ -1046,14 +1046,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "reachability": "demo",
           "scanner": {
             "lane_key": "demo-key",
-            "rule_id": "demo-001",
-            "scan_run_id": "demo-001",
-            "tool_name": "Demo record",
+            "rule_id": "rule-002",
+            "scan_run_id": "scan-run-002",
+            "tool_name": "Payments Core",
             "tool_version": "1.4.2"
           },
           "severity": "high"
         },
-        "baseline_observation_id": "demo-001",
+        "baseline_observation_id": "baseline-observation-002",
         "baseline_risk_milli": 2,
         "change_flags": [
           "severity_increased"
@@ -1069,19 +1069,19 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "reachability": "demo",
           "scanner": {
             "lane_key": "demo-key",
-            "rule_id": "demo-001",
-            "scan_run_id": "demo-001",
-            "tool_name": "Demo record",
+            "rule_id": "rule-002",
+            "scan_run_id": "scan-run-002",
+            "tool_name": "Payments Core",
             "tool_version": "1.4.2"
           },
           "severity": "high"
         },
-        "current_observation_id": "demo-001",
+        "current_observation_id": "current-observation-002",
         "current_risk_milli": 2,
         "finding_kind": "demo",
         "fixed_basis": "comparable_absence",
-        "id": "demo-001",
-        "identity_id": "demo-001",
+        "id": "id-002",
+        "identity_id": "identity-002",
         "match_methods": [
           "override"
         ],
@@ -1094,14 +1094,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "review_candidates": [
           {
-            "id": "demo-001",
+            "id": "id-001",
             "source_observation_ids": [
               "demo"
             ]
           }
         ],
         "target_canonical": "demo",
-        "verification_id": "demo-001",
+        "verification_id": "verification-002",
         "verification_state": "active"
       },
       {
@@ -1114,14 +1114,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "reachability": "demo",
           "scanner": {
             "lane_key": "demo-key",
-            "rule_id": "demo-001",
-            "scan_run_id": "demo-001",
-            "tool_name": "Demo record",
+            "rule_id": "rule-003",
+            "scan_run_id": "scan-run-003",
+            "tool_name": "Edge Delivery",
             "tool_version": "1.4.2"
           },
           "severity": "high"
         },
-        "baseline_observation_id": "demo-001",
+        "baseline_observation_id": "baseline-observation-003",
         "baseline_risk_milli": 2,
         "change_flags": [
           "severity_increased"
@@ -1137,19 +1137,19 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "reachability": "demo",
           "scanner": {
             "lane_key": "demo-key",
-            "rule_id": "demo-001",
-            "scan_run_id": "demo-001",
-            "tool_name": "Demo record",
+            "rule_id": "rule-003",
+            "scan_run_id": "scan-run-003",
+            "tool_name": "Edge Delivery",
             "tool_version": "1.4.2"
           },
           "severity": "high"
         },
-        "current_observation_id": "demo-001",
+        "current_observation_id": "current-observation-003",
         "current_risk_milli": 2,
         "finding_kind": "demo",
         "fixed_basis": "comparable_absence",
-        "id": "demo-001",
-        "identity_id": "demo-001",
+        "id": "id-003",
+        "identity_id": "identity-003",
         "match_methods": [
           "override"
         ],
@@ -1162,14 +1162,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "review_candidates": [
           {
-            "id": "demo-001",
+            "id": "id-001",
             "source_observation_ids": [
               "demo"
             ]
           }
         ],
         "target_canonical": "demo",
-        "verification_id": "demo-001",
+        "verification_id": "verification-003",
         "verification_state": "active"
       }
     ],
@@ -1186,8 +1186,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "medium": 2,
       "unknown": 2
     },
-    "baseline_snapshot_id": "demo-001",
-    "comparison_id": "demo-001",
+    "baseline_snapshot_id": "baseline-snapshot-001",
+    "comparison_id": "comparison-001",
     "count_reduction": {
       "denominator": 2,
       "na_reason": "Seeded playground record, not a real result.",
@@ -1203,7 +1203,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "medium": 2,
       "unknown": 2
     },
-    "current_snapshot_id": "demo-001",
+    "current_snapshot_id": "current-snapshot-001",
     "fixed_count": 3,
     "fixed_rate": {
       "denominator": 2,
@@ -1229,10 +1229,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "active_branch_count": 3,
         "active_closure_cycle_version": 1,
-        "active_closure_manifest_id": "demo-001",
+        "active_closure_manifest_id": "active-closure-manifest-001",
         "boundary_kind": "standalone",
-        "business_asset_id": "demo-001",
-        "comparison_id": "demo-001",
+        "business_asset_id": "business-asset-001",
+        "comparison_id": "comparison-001",
         "comparison_status": "complete",
         "comparison_summary": {
           "baseline_count": 3,
@@ -1245,8 +1245,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "medium": 2,
             "unknown": 2
           },
-          "baseline_snapshot_id": "demo-001",
-          "comparison_id": "demo-001",
+          "baseline_snapshot_id": "baseline-snapshot-001",
+          "comparison_id": "comparison-001",
           "count_reduction": {
             "denominator": 2,
             "na_reason": "Seeded playground record, not a real result.",
@@ -1262,7 +1262,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "medium": 2,
             "unknown": 2
           },
-          "current_snapshot_id": "demo-001",
+          "current_snapshot_id": "current-snapshot-001",
           "fixed_count": 3,
           "fixed_rate": {
             "denominator": 2,
@@ -1285,32 +1285,32 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         },
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
-        "current_snapshot_id": "demo-001",
-        "id": "demo-001",
-        "latest_assessment_id": "demo-001",
+        "current_snapshot_id": "current-snapshot-001",
+        "id": "id-001",
+        "latest_assessment_id": "latest-assessment-001",
         "latest_retest_number": 2,
         "member_count": 3,
         "members": [
           {
-            "assessment_id": "demo-001",
+            "assessment_id": "assessment-001",
             "assessment_status": "active",
             "assessment_type": "initial",
             "created_at": "2026-10-03T09:00:00Z",
             "created_by": "demo",
             "planned_date": "2026-10-03",
-            "predecessor_assessment_id": "demo-001",
+            "predecessor_assessment_id": "predecessor-assessment-001",
             "relationship_version": 1,
             "retest_number": 2
           }
         ],
         "members_next_cursor": "demo",
-        "name": "Demo record",
+        "name": "Platform Security",
         "next_retest_number": 2,
-        "project_id": "demo-001",
-        "root_assessment_id": "demo-001",
-        "root_snapshot_id": "demo-001",
+        "project_id": "project-001",
+        "root_assessment_id": "root-assessment-001",
+        "root_snapshot_id": "root-snapshot-001",
         "scan_staleness": "fresh",
-        "selected_head_assessment_id": "demo-001",
+        "selected_head_assessment_id": "selected-head-assessment-001",
         "selected_head_last_scan_at": "2026-10-03T09:00:00Z",
         "status": "open",
         "updated_at": "2026-10-03T09:00:00Z",
@@ -1320,10 +1320,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "active_branch_count": 3,
         "active_closure_cycle_version": 1,
-        "active_closure_manifest_id": "demo-001",
+        "active_closure_manifest_id": "active-closure-manifest-001",
         "boundary_kind": "standalone",
-        "business_asset_id": "demo-001",
-        "comparison_id": "demo-001",
+        "business_asset_id": "business-asset-001",
+        "comparison_id": "comparison-001",
         "comparison_status": "complete",
         "comparison_summary": {
           "baseline_count": 3,
@@ -1336,8 +1336,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "medium": 2,
             "unknown": 2
           },
-          "baseline_snapshot_id": "demo-001",
-          "comparison_id": "demo-001",
+          "baseline_snapshot_id": "baseline-snapshot-001",
+          "comparison_id": "comparison-001",
           "count_reduction": {
             "denominator": 2,
             "na_reason": "Seeded playground record, not a real result.",
@@ -1353,7 +1353,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "medium": 2,
             "unknown": 2
           },
-          "current_snapshot_id": "demo-001",
+          "current_snapshot_id": "current-snapshot-001",
           "fixed_count": 3,
           "fixed_rate": {
             "denominator": 2,
@@ -1376,32 +1376,32 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         },
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
-        "current_snapshot_id": "demo-001",
-        "id": "demo-001",
-        "latest_assessment_id": "demo-001",
+        "current_snapshot_id": "current-snapshot-001",
+        "id": "id-001",
+        "latest_assessment_id": "latest-assessment-001",
         "latest_retest_number": 2,
         "member_count": 3,
         "members": [
           {
-            "assessment_id": "demo-001",
+            "assessment_id": "assessment-001",
             "assessment_status": "active",
             "assessment_type": "initial",
             "created_at": "2026-10-03T09:00:00Z",
             "created_by": "demo",
             "planned_date": "2026-10-03",
-            "predecessor_assessment_id": "demo-001",
+            "predecessor_assessment_id": "predecessor-assessment-001",
             "relationship_version": 1,
             "retest_number": 2
           }
         ],
         "members_next_cursor": "demo",
-        "name": "Demo record",
+        "name": "Platform Security",
         "next_retest_number": 2,
-        "project_id": "demo-001",
-        "root_assessment_id": "demo-001",
-        "root_snapshot_id": "demo-001",
+        "project_id": "project-001",
+        "root_assessment_id": "root-assessment-001",
+        "root_snapshot_id": "root-snapshot-001",
         "scan_staleness": "fresh",
-        "selected_head_assessment_id": "demo-001",
+        "selected_head_assessment_id": "selected-head-assessment-001",
         "selected_head_last_scan_at": "2026-10-03T09:00:00Z",
         "status": "open",
         "updated_at": "2026-10-03T09:00:00Z",
@@ -1411,10 +1411,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "active_branch_count": 3,
         "active_closure_cycle_version": 1,
-        "active_closure_manifest_id": "demo-001",
+        "active_closure_manifest_id": "active-closure-manifest-001",
         "boundary_kind": "standalone",
-        "business_asset_id": "demo-001",
-        "comparison_id": "demo-001",
+        "business_asset_id": "business-asset-001",
+        "comparison_id": "comparison-001",
         "comparison_status": "complete",
         "comparison_summary": {
           "baseline_count": 3,
@@ -1427,8 +1427,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "medium": 2,
             "unknown": 2
           },
-          "baseline_snapshot_id": "demo-001",
-          "comparison_id": "demo-001",
+          "baseline_snapshot_id": "baseline-snapshot-001",
+          "comparison_id": "comparison-001",
           "count_reduction": {
             "denominator": 2,
             "na_reason": "Seeded playground record, not a real result.",
@@ -1444,7 +1444,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "medium": 2,
             "unknown": 2
           },
-          "current_snapshot_id": "demo-001",
+          "current_snapshot_id": "current-snapshot-001",
           "fixed_count": 3,
           "fixed_rate": {
             "denominator": 2,
@@ -1467,32 +1467,32 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         },
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
-        "current_snapshot_id": "demo-001",
-        "id": "demo-001",
-        "latest_assessment_id": "demo-001",
+        "current_snapshot_id": "current-snapshot-001",
+        "id": "id-001",
+        "latest_assessment_id": "latest-assessment-001",
         "latest_retest_number": 2,
         "member_count": 3,
         "members": [
           {
-            "assessment_id": "demo-001",
+            "assessment_id": "assessment-001",
             "assessment_status": "active",
             "assessment_type": "initial",
             "created_at": "2026-10-03T09:00:00Z",
             "created_by": "demo",
             "planned_date": "2026-10-03",
-            "predecessor_assessment_id": "demo-001",
+            "predecessor_assessment_id": "predecessor-assessment-001",
             "relationship_version": 1,
             "retest_number": 2
           }
         ],
         "members_next_cursor": "demo",
-        "name": "Demo record",
+        "name": "Platform Security",
         "next_retest_number": 2,
-        "project_id": "demo-001",
-        "root_assessment_id": "demo-001",
-        "root_snapshot_id": "demo-001",
+        "project_id": "project-001",
+        "root_assessment_id": "root-assessment-001",
+        "root_snapshot_id": "root-snapshot-001",
         "scan_staleness": "fresh",
-        "selected_head_assessment_id": "demo-001",
+        "selected_head_assessment_id": "selected-head-assessment-001",
         "selected_head_last_scan_at": "2026-10-03T09:00:00Z",
         "status": "open",
         "updated_at": "2026-10-03T09:00:00Z",
@@ -1502,26 +1502,26 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ],
     "migration_pending": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "boundary_kind": "standalone",
-        "business_asset_id": "demo-001",
-        "name": "Demo record",
+        "business_asset_id": "business-asset-001",
+        "name": "Platform Security",
         "status": "active",
         "updated_at": "2026-10-03T09:00:00Z"
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "boundary_kind": "standalone",
-        "business_asset_id": "demo-001",
-        "name": "Demo record",
+        "business_asset_id": "business-asset-002",
+        "name": "Payments Core",
         "status": "active",
         "updated_at": "2026-10-03T09:00:00Z"
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "boundary_kind": "standalone",
-        "business_asset_id": "demo-001",
-        "name": "Demo record",
+        "business_asset_id": "business-asset-003",
+        "name": "Edge Delivery",
         "status": "active",
         "updated_at": "2026-10-03T09:00:00Z"
       }
@@ -1532,52 +1532,52 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/assessment-cycles/{cycleId}": {
     "branch_heads": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
         "relationship_version": 1,
         "retest_number": 2
       }
     ],
     "cycle": {
       "active_closure_cycle_version": 1,
-      "active_closure_manifest_id": "demo-001",
+      "active_closure_manifest_id": "active-closure-manifest-001",
       "boundary_kind": "standalone",
-      "business_asset_id": "demo-001",
+      "business_asset_id": "business-asset-001",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "next_retest_number": 2,
-      "project_id": "demo-001",
-      "root_assessment_id": "demo-001",
-      "selected_head_assessment_id": "demo-001",
+      "project_id": "project-001",
+      "root_assessment_id": "root-assessment-001",
+      "selected_head_assessment_id": "selected-head-assessment-001",
       "status": "open",
       "updated_at": "2026-10-03T09:00:00Z",
       "updated_by": "demo",
@@ -1585,35 +1585,35 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     "members": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
         "relationship_version": 1,
         "retest_number": 2
       }
@@ -1626,23 +1626,23 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "as_of_at": "2026-10-03T09:00:00Z",
         "canonical_input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "comparison_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "comparison_id": "demo-001",
+        "comparison_id": "comparison-001",
         "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "coverage_decisions": {
           "final": [
             {
-              "dimension_id": "demo-001",
+              "dimension_id": "dimension-001",
               "reason_code": "demo",
-              "snapshot_id": "demo-001",
+              "snapshot_id": "snapshot-001",
               "state": "complete",
               "waived": true
             }
           ],
           "initial": [
             {
-              "dimension_id": "demo-001",
+              "dimension_id": "dimension-001",
               "reason_code": "demo",
-              "snapshot_id": "demo-001",
+              "snapshot_id": "snapshot-001",
               "state": "complete",
               "waived": true
             }
@@ -1650,15 +1650,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         },
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
-        "cycle_id": "demo-001",
+        "cycle_id": "cycle-001",
         "cycle_version": 1,
-        "final_assessment_id": "demo-001",
+        "final_assessment_id": "final-assessment-001",
         "final_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "final_snapshot_id": "demo-001",
+        "final_snapshot_id": "final-snapshot-001",
         "fingerprint_version": "1.4.2",
-        "id": "demo-001",
+        "id": "id-001",
         "initial_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "initial_snapshot_id": "demo-001",
+        "initial_snapshot_id": "initial-snapshot-001",
         "lifecycle": "active",
         "manifest_version": 1,
         "override_blocker_ids": [
@@ -1667,19 +1667,19 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "override_reason": "Seeded playground record, not a real result.",
         "path": [
           {
-            "assessment_id": "demo-001",
+            "assessment_id": "assessment-001",
             "assessment_type": "initial",
             "path_position": 2,
             "relationship_version": 1,
             "retest_number": 2,
-            "snapshot_id": "demo-001"
+            "snapshot_id": "snapshot-001"
           }
         ],
         "policy_version": "1.4.2",
         "reason": "Seeded playground record, not a real result.",
         "renderer_contract_version": "1.4.2",
         "risk_version": "1.4.2",
-        "root_assessment_id": "demo-001",
+        "root_assessment_id": "root-assessment-001",
         "sealed_at": "2026-10-03T09:00:00Z",
         "sealed_by": "demo",
         "superseded_at": "2026-10-03T09:00:00Z"
@@ -1689,23 +1689,23 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "as_of_at": "2026-10-03T09:00:00Z",
         "canonical_input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "comparison_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "comparison_id": "demo-001",
+        "comparison_id": "comparison-002",
         "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "coverage_decisions": {
           "final": [
             {
-              "dimension_id": "demo-001",
+              "dimension_id": "dimension-001",
               "reason_code": "demo",
-              "snapshot_id": "demo-001",
+              "snapshot_id": "snapshot-001",
               "state": "complete",
               "waived": true
             }
           ],
           "initial": [
             {
-              "dimension_id": "demo-001",
+              "dimension_id": "dimension-001",
               "reason_code": "demo",
-              "snapshot_id": "demo-001",
+              "snapshot_id": "snapshot-001",
               "state": "complete",
               "waived": true
             }
@@ -1713,15 +1713,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         },
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
-        "cycle_id": "demo-001",
+        "cycle_id": "cycle-002",
         "cycle_version": 1,
-        "final_assessment_id": "demo-001",
+        "final_assessment_id": "final-assessment-002",
         "final_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "final_snapshot_id": "demo-001",
+        "final_snapshot_id": "final-snapshot-002",
         "fingerprint_version": "1.4.2",
-        "id": "demo-001",
+        "id": "id-002",
         "initial_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "initial_snapshot_id": "demo-001",
+        "initial_snapshot_id": "initial-snapshot-002",
         "lifecycle": "active",
         "manifest_version": 1,
         "override_blocker_ids": [
@@ -1730,19 +1730,19 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "override_reason": "Seeded playground record, not a real result.",
         "path": [
           {
-            "assessment_id": "demo-001",
+            "assessment_id": "assessment-001",
             "assessment_type": "initial",
             "path_position": 2,
             "relationship_version": 1,
             "retest_number": 2,
-            "snapshot_id": "demo-001"
+            "snapshot_id": "snapshot-001"
           }
         ],
         "policy_version": "1.4.2",
         "reason": "Seeded playground record, not a real result.",
         "renderer_contract_version": "1.4.2",
         "risk_version": "1.4.2",
-        "root_assessment_id": "demo-001",
+        "root_assessment_id": "root-assessment-002",
         "sealed_at": "2026-10-03T09:00:00Z",
         "sealed_by": "demo",
         "superseded_at": "2026-10-03T09:00:00Z"
@@ -1752,23 +1752,23 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "as_of_at": "2026-10-03T09:00:00Z",
         "canonical_input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "comparison_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "comparison_id": "demo-001",
+        "comparison_id": "comparison-003",
         "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "coverage_decisions": {
           "final": [
             {
-              "dimension_id": "demo-001",
+              "dimension_id": "dimension-001",
               "reason_code": "demo",
-              "snapshot_id": "demo-001",
+              "snapshot_id": "snapshot-001",
               "state": "complete",
               "waived": true
             }
           ],
           "initial": [
             {
-              "dimension_id": "demo-001",
+              "dimension_id": "dimension-001",
               "reason_code": "demo",
-              "snapshot_id": "demo-001",
+              "snapshot_id": "snapshot-001",
               "state": "complete",
               "waived": true
             }
@@ -1776,15 +1776,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         },
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
-        "cycle_id": "demo-001",
+        "cycle_id": "cycle-003",
         "cycle_version": 1,
-        "final_assessment_id": "demo-001",
+        "final_assessment_id": "final-assessment-003",
         "final_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "final_snapshot_id": "demo-001",
+        "final_snapshot_id": "final-snapshot-003",
         "fingerprint_version": "1.4.2",
-        "id": "demo-001",
+        "id": "id-003",
         "initial_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "initial_snapshot_id": "demo-001",
+        "initial_snapshot_id": "initial-snapshot-003",
         "lifecycle": "active",
         "manifest_version": 1,
         "override_blocker_ids": [
@@ -1793,19 +1793,19 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "override_reason": "Seeded playground record, not a real result.",
         "path": [
           {
-            "assessment_id": "demo-001",
+            "assessment_id": "assessment-001",
             "assessment_type": "initial",
             "path_position": 2,
             "relationship_version": 1,
             "retest_number": 2,
-            "snapshot_id": "demo-001"
+            "snapshot_id": "snapshot-001"
           }
         ],
         "policy_version": "1.4.2",
         "reason": "Seeded playground record, not a real result.",
         "renderer_contract_version": "1.4.2",
         "risk_version": "1.4.2",
-        "root_assessment_id": "demo-001",
+        "root_assessment_id": "root-assessment-003",
         "sealed_at": "2026-10-03T09:00:00Z",
         "sealed_by": "demo",
         "superseded_at": "2026-10-03T09:00:00Z"
@@ -1817,51 +1817,51 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "as_of_at": "2026-10-03T09:00:00Z",
     "canonical_input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
     "comparison_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-    "comparison_id": "demo-001",
+    "comparison_id": "comparison-001",
     "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
     "coverage_decisions": {
       "final": [
         {
-          "dimension_id": "demo-001",
+          "dimension_id": "dimension-001",
           "reason_code": "demo",
-          "snapshot_id": "demo-001",
+          "snapshot_id": "snapshot-001",
           "state": "complete",
           "waived": true
         },
         {
-          "dimension_id": "demo-001",
+          "dimension_id": "dimension-002",
           "reason_code": "demo",
-          "snapshot_id": "demo-001",
+          "snapshot_id": "snapshot-002",
           "state": "complete",
           "waived": true
         },
         {
-          "dimension_id": "demo-001",
+          "dimension_id": "dimension-003",
           "reason_code": "demo",
-          "snapshot_id": "demo-001",
+          "snapshot_id": "snapshot-003",
           "state": "complete",
           "waived": true
         }
       ],
       "initial": [
         {
-          "dimension_id": "demo-001",
+          "dimension_id": "dimension-001",
           "reason_code": "demo",
-          "snapshot_id": "demo-001",
+          "snapshot_id": "snapshot-001",
           "state": "complete",
           "waived": true
         },
         {
-          "dimension_id": "demo-001",
+          "dimension_id": "dimension-002",
           "reason_code": "demo",
-          "snapshot_id": "demo-001",
+          "snapshot_id": "snapshot-002",
           "state": "complete",
           "waived": true
         },
         {
-          "dimension_id": "demo-001",
+          "dimension_id": "dimension-003",
           "reason_code": "demo",
-          "snapshot_id": "demo-001",
+          "snapshot_id": "snapshot-003",
           "state": "complete",
           "waived": true
         }
@@ -1869,15 +1869,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     "created_at": "2026-10-03T09:00:00Z",
     "created_by": "demo",
-    "cycle_id": "demo-001",
+    "cycle_id": "cycle-001",
     "cycle_version": 1,
-    "final_assessment_id": "demo-001",
+    "final_assessment_id": "final-assessment-001",
     "final_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-    "final_snapshot_id": "demo-001",
+    "final_snapshot_id": "final-snapshot-001",
     "fingerprint_version": "1.4.2",
-    "id": "demo-001",
+    "id": "id-001",
     "initial_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-    "initial_snapshot_id": "demo-001",
+    "initial_snapshot_id": "initial-snapshot-001",
     "lifecycle": "active",
     "manifest_version": 1,
     "override_blocker_ids": [
@@ -1888,35 +1888,35 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "override_reason": "Seeded playground record, not a real result.",
     "path": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_type": "initial",
         "path_position": 2,
         "relationship_version": 1,
         "retest_number": 2,
-        "snapshot_id": "demo-001"
+        "snapshot_id": "snapshot-001"
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_type": "initial",
         "path_position": 2,
         "relationship_version": 1,
         "retest_number": 2,
-        "snapshot_id": "demo-001"
+        "snapshot_id": "snapshot-002"
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_type": "initial",
         "path_position": 2,
         "relationship_version": 1,
         "retest_number": 2,
-        "snapshot_id": "demo-001"
+        "snapshot_id": "snapshot-003"
       }
     ],
     "policy_version": "1.4.2",
     "reason": "Seeded playground record, not a real result.",
     "renderer_contract_version": "1.4.2",
     "risk_version": "1.4.2",
-    "root_assessment_id": "demo-001",
+    "root_assessment_id": "root-assessment-001",
     "sealed_at": "2026-10-03T09:00:00Z",
     "sealed_by": "demo",
     "superseded_at": "2026-10-03T09:00:00Z"
@@ -1925,7 +1925,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "report": {
       "comparison": {
         "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "id": "demo-001",
+        "id": "id-001",
         "summary": {
           "baseline_count": 3,
           "baseline_risk": 2,
@@ -1937,8 +1937,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "medium": 2,
             "unknown": 2
           },
-          "baseline_snapshot_id": "demo-001",
-          "comparison_id": "demo-001",
+          "baseline_snapshot_id": "baseline-snapshot-001",
+          "comparison_id": "comparison-001",
           "count_reduction": {
             "denominator": 2,
             "na_reason": "Seeded playground record, not a real result.",
@@ -1954,7 +1954,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "medium": 2,
             "unknown": 2
           },
-          "current_snapshot_id": "demo-001",
+          "current_snapshot_id": "current-snapshot-001",
           "fixed_count": 3,
           "fixed_rate": {
             "denominator": 2,
@@ -1979,38 +1979,38 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "coverage_decisions": {
         "final": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
         ],
         "initial": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
         ]
       },
       "cycle": {
-        "final_assessment_id": "demo-001",
-        "id": "demo-001",
+        "final_assessment_id": "final-assessment-001",
+        "id": "id-001",
         "manifest_version": 1,
-        "root_assessment_id": "demo-001",
+        "root_assessment_id": "root-assessment-001",
         "version": 1
       },
       "final_snapshot": {
         "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "id": "demo-001"
+        "id": "id-001"
       },
       "generated_at": "2026-10-03T09:00:00Z",
       "initial_snapshot": {
         "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "id": "demo-001"
+        "id": "id-001"
       },
       "manifest": {
         "algorithm_version": "1.4.2",
@@ -2020,7 +2020,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "fingerprint_version": "1.4.2",
-        "id": "demo-001",
+        "id": "id-001",
         "override_reason": "Seeded playground record, not a real result.",
         "policy_version": "1.4.2",
         "reason": "Seeded playground record, not a real result.",
@@ -2034,28 +2034,28 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       ],
       "path": [
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-001",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-001"
         },
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-002",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-002"
         },
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-003",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-003"
         }
       ],
       "renderer_contract_version": "1.4.2",
@@ -2066,35 +2066,35 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/assessment-cycles/{cycleId}/members": {
     "items": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
         "relationship_version": 1,
         "retest_number": 2
       }
@@ -2112,24 +2112,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "action": "confirm",
           "actor": "demo.operator",
           "created_at": "2026-10-03T09:00:00Z",
-          "id": "demo-001",
+          "id": "id-001",
           "reason": "Seeded playground record, not a real result.",
           "version": 2
         },
         "expires_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-001",
         "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "predecessor_assessment_id": "demo-001",
-        "predecessor_cycle_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
+        "predecessor_cycle_id": "predecessor-cycle-001",
         "predecessor_relationship_version": 1,
-        "predecessor_snapshot_id": "demo-001",
+        "predecessor_snapshot_id": "predecessor-snapshot-001",
         "repair_plan": {
           "body": {
             "demo": null
           },
           "created_at": "2026-10-03T09:00:00Z",
           "created_by": "demo",
-          "id": "demo-001",
+          "id": "id-001",
           "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "plan_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b"
         },
@@ -2143,10 +2143,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           }
         ],
         "status": "open",
-        "successor_assessment_id": "demo-001",
-        "successor_cycle_id": "demo-001",
+        "successor_assessment_id": "successor-assessment-001",
+        "successor_cycle_id": "successor-cycle-001",
         "successor_relationship_version": 1,
-        "successor_snapshot_id": "demo-001",
+        "successor_snapshot_id": "successor-snapshot-001",
         "version": 1
       },
       {
@@ -2158,24 +2158,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "action": "confirm",
           "actor": "demo.operator",
           "created_at": "2026-10-03T09:00:00Z",
-          "id": "demo-001",
+          "id": "id-002",
           "reason": "Seeded playground record, not a real result.",
           "version": 2
         },
         "expires_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-002",
         "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "predecessor_assessment_id": "demo-001",
-        "predecessor_cycle_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
+        "predecessor_cycle_id": "predecessor-cycle-002",
         "predecessor_relationship_version": 1,
-        "predecessor_snapshot_id": "demo-001",
+        "predecessor_snapshot_id": "predecessor-snapshot-002",
         "repair_plan": {
           "body": {
             "demo": null
           },
           "created_at": "2026-10-03T09:00:00Z",
           "created_by": "demo",
-          "id": "demo-001",
+          "id": "id-002",
           "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "plan_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b"
         },
@@ -2189,10 +2189,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           }
         ],
         "status": "open",
-        "successor_assessment_id": "demo-001",
-        "successor_cycle_id": "demo-001",
+        "successor_assessment_id": "successor-assessment-002",
+        "successor_cycle_id": "successor-cycle-002",
         "successor_relationship_version": 1,
-        "successor_snapshot_id": "demo-001",
+        "successor_snapshot_id": "successor-snapshot-002",
         "version": 1
       },
       {
@@ -2204,24 +2204,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "action": "confirm",
           "actor": "demo.operator",
           "created_at": "2026-10-03T09:00:00Z",
-          "id": "demo-001",
+          "id": "id-003",
           "reason": "Seeded playground record, not a real result.",
           "version": 2
         },
         "expires_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-003",
         "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "predecessor_assessment_id": "demo-001",
-        "predecessor_cycle_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
+        "predecessor_cycle_id": "predecessor-cycle-003",
         "predecessor_relationship_version": 1,
-        "predecessor_snapshot_id": "demo-001",
+        "predecessor_snapshot_id": "predecessor-snapshot-003",
         "repair_plan": {
           "body": {
             "demo": null
           },
           "created_at": "2026-10-03T09:00:00Z",
           "created_by": "demo",
-          "id": "demo-001",
+          "id": "id-003",
           "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "plan_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b"
         },
@@ -2235,10 +2235,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           }
         ],
         "status": "open",
-        "successor_assessment_id": "demo-001",
-        "successor_cycle_id": "demo-001",
+        "successor_assessment_id": "successor-assessment-003",
+        "successor_cycle_id": "successor-cycle-003",
         "successor_relationship_version": 1,
-        "successor_snapshot_id": "demo-001",
+        "successor_snapshot_id": "successor-snapshot-003",
         "version": 1
       }
     ]
@@ -2252,24 +2252,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "action": "confirm",
       "actor": "demo.operator",
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
+      "id": "id-001",
       "reason": "Seeded playground record, not a real result.",
       "version": 2
     },
     "expires_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-    "predecessor_assessment_id": "demo-001",
-    "predecessor_cycle_id": "demo-001",
+    "predecessor_assessment_id": "predecessor-assessment-001",
+    "predecessor_cycle_id": "predecessor-cycle-001",
     "predecessor_relationship_version": 1,
-    "predecessor_snapshot_id": "demo-001",
+    "predecessor_snapshot_id": "predecessor-snapshot-001",
     "repair_plan": {
       "body": {
         "demo": null
       },
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
+      "id": "id-001",
       "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "plan_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b"
     },
@@ -2297,23 +2297,23 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       }
     ],
     "status": "open",
-    "successor_assessment_id": "demo-001",
-    "successor_cycle_id": "demo-001",
+    "successor_assessment_id": "successor-assessment-001",
+    "successor_cycle_id": "successor-cycle-001",
     "successor_relationship_version": 1,
-    "successor_snapshot_id": "demo-001",
+    "successor_snapshot_id": "successor-snapshot-001",
     "version": 1
   },
   "GET /api/v1/assessment-snapshots/{snapshotId}": {
-    "assessment_id": "demo-001",
+    "assessment_id": "assessment-001",
     "boundary": {
       "boundary_kind": "standalone",
-      "business_asset_id": "demo-001",
-      "project_id": "demo-001"
+      "business_asset_id": "business-asset-001",
+      "project_id": "project-001"
     },
     "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
     "created_at": "2026-10-03T09:00:00Z",
     "created_by": "demo",
-    "cycle_id": "demo-001",
+    "cycle_id": "cycle-001",
     "dimensions": [
       {
         "excluded_scope": [
@@ -2327,7 +2327,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "lane_manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "producer": "demo",
         "reason_code": "trusted_terminal_lane",
-        "run_id": "demo-001",
+        "run_id": "run-001",
         "state": "complete",
         "target": {
           "canonical": "demo",
@@ -2339,7 +2339,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           {
             "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "kind": "tool",
-            "name": "Demo record",
+            "name": "Platform Security",
             "version": "1.4.2"
           }
         ]
@@ -2356,7 +2356,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "lane_manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "producer": "demo",
         "reason_code": "trusted_terminal_lane",
-        "run_id": "demo-001",
+        "run_id": "run-002",
         "state": "complete",
         "target": {
           "canonical": "demo",
@@ -2368,7 +2368,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           {
             "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "kind": "tool",
-            "name": "Demo record",
+            "name": "Platform Security",
             "version": "1.4.2"
           }
         ]
@@ -2385,7 +2385,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "lane_manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "producer": "demo",
         "reason_code": "trusted_terminal_lane",
-        "run_id": "demo-001",
+        "run_id": "run-003",
         "state": "complete",
         "target": {
           "canonical": "demo",
@@ -2397,7 +2397,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           {
             "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "kind": "tool",
-            "name": "Demo record",
+            "name": "Platform Security",
             "version": "1.4.2"
           }
         ]
@@ -2405,7 +2405,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ],
     "finalized_at": "2026-10-03T09:00:00Z",
     "finalized_by": "demo",
-    "id": "demo-001",
+    "id": "id-001",
     "lifecycle": "finalized",
     "provenance": "native",
     "run_references": [
@@ -2417,7 +2417,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           }
         ],
         "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "run_id": "demo-001"
+        "run_id": "run-001"
       },
       {
         "lane_refs": [
@@ -2427,7 +2427,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           }
         ],
         "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "run_id": "demo-001"
+        "run_id": "run-002"
       },
       {
         "lane_refs": [
@@ -2437,7 +2437,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           }
         ],
         "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "run_id": "demo-001"
+        "run_id": "run-003"
       }
     ],
     "schema_version": 1,
@@ -2452,17 +2452,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo": "demo"
         },
         "Audit": {},
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Key": "demo-key",
         "Kind": "host",
-        "Name": "Demo record",
+        "Name": "Platform Security",
         "TenantID": "demo-tenant"
       },
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-001",
       "last_scan": {
         "error": "demo",
         "finished_at": "2026-10-03T09:00:00Z",
-        "job_id": "demo-001",
+        "job_id": "job-001",
         "stage": "demo",
         "started_at": "2026-10-03T09:00:00Z",
         "status": "succeeded"
@@ -2486,17 +2486,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo": "demo"
         },
         "Audit": {},
-        "ID": "demo-001",
+        "ID": "ID-002",
         "Key": "demo-key",
         "Kind": "host",
-        "Name": "Demo record",
+        "Name": "Payments Core",
         "TenantID": "demo-tenant"
       },
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-002",
       "last_scan": {
         "error": "demo",
         "finished_at": "2026-10-03T09:00:00Z",
-        "job_id": "demo-001",
+        "job_id": "job-002",
         "stage": "demo",
         "started_at": "2026-10-03T09:00:00Z",
         "status": "succeeded"
@@ -2520,17 +2520,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo": "demo"
         },
         "Audit": {},
-        "ID": "demo-001",
+        "ID": "ID-003",
         "Key": "demo-key",
         "Kind": "host",
-        "Name": "Demo record",
+        "Name": "Edge Delivery",
         "TenantID": "demo-tenant"
       },
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-003",
       "last_scan": {
         "error": "demo",
         "finished_at": "2026-10-03T09:00:00Z",
-        "job_id": "demo-001",
+        "job_id": "job-003",
         "stage": "demo",
         "started_at": "2026-10-03T09:00:00Z",
         "status": "succeeded"
@@ -2550,21 +2550,21 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     }
   ],
   "GET /api/v1/assets/{assetID}/packages": {
-    "asset_id": "demo-001",
-    "engagement_id": "demo-001",
+    "asset_id": "asset-001",
+    "engagement_id": "engagement-001",
     "packages": [
       {
-        "name": "Demo record",
+        "name": "Platform Security",
         "purl": "https://synapse.example/demo",
         "version": "1.4.2"
       },
       {
-        "name": "Demo record",
+        "name": "Payments Core",
         "purl": "https://synapse.example/demo",
         "version": "1.4.2"
       },
       {
-        "name": "Demo record",
+        "name": "Edge Delivery",
         "purl": "https://synapse.example/demo",
         "version": "1.4.2"
       }
@@ -2577,13 +2577,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "demo": "demo"
       },
       "Audit": {},
-      "ID": "demo-001",
+      "ID": "ID-001",
       "Key": "demo-key",
       "Kind": "host",
-      "Name": "Demo record",
+      "Name": "Platform Security",
       "TenantID": "demo-tenant"
     },
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "findings": [
       {
         "Assignee": "demo.operator",
@@ -2605,7 +2605,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "EngagementID": "demo",
         "EvidenceScore": 7,
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Impact": "demo",
         "KEV": true,
         "Kind": "sca",
@@ -2626,14 +2626,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "Status": "open",
-        "Title": "Demo record",
+        "Title": "Platform Security",
         "Version": 1,
         "assignee_user_id": "demo.operator",
         "compliance_controls": [
           {
             "Framework": "demo",
-            "ID": "demo-001",
-            "Title": "Demo record"
+            "ID": "ID-001",
+            "Title": "Platform Security"
           }
         ],
         "reachability_evidence": {
@@ -2665,7 +2665,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "EngagementID": "demo",
         "EvidenceScore": 7,
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Impact": "demo",
         "KEV": true,
         "Kind": "sca",
@@ -2686,14 +2686,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "Status": "open",
-        "Title": "Demo record",
+        "Title": "Platform Security",
         "Version": 1,
         "assignee_user_id": "demo.operator",
         "compliance_controls": [
           {
             "Framework": "demo",
-            "ID": "demo-001",
-            "Title": "Demo record"
+            "ID": "ID-001",
+            "Title": "Platform Security"
           }
         ],
         "reachability_evidence": {
@@ -2725,7 +2725,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "EngagementID": "demo",
         "EvidenceScore": 7,
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Impact": "demo",
         "KEV": true,
         "Kind": "sca",
@@ -2746,14 +2746,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "Status": "open",
-        "Title": "Demo record",
+        "Title": "Platform Security",
         "Version": 1,
         "assignee_user_id": "demo.operator",
         "compliance_controls": [
           {
             "Framework": "demo",
-            "ID": "demo-001",
-            "Title": "Demo record"
+            "ID": "ID-001",
+            "Title": "Platform Security"
           }
         ],
         "reachability_evidence": {
@@ -2769,7 +2769,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "last_scan": {
       "error": "demo",
       "finished_at": "2026-10-03T09:00:00Z",
-      "job_id": "demo-001",
+      "job_id": "job-001",
       "stage": "demo",
       "started_at": "2026-10-03T09:00:00Z",
       "status": "succeeded"
@@ -2819,7 +2819,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "toTargetKind": "canonical"
           }
         ],
-        "id": "demo-001",
+        "id": "id-001",
         "nodes": [
           {
             "asset": {
@@ -2827,10 +2827,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
                 "Attributes": {
                   "demo": null
                 },
-                "ID": "demo-001",
+                "ID": "ID-001",
                 "Key": "demo-key",
                 "Kind": "host",
-                "Name": "Demo record",
+                "Name": "Platform Security",
                 "TenantID": "demo-tenant"
               }
             },
@@ -2888,7 +2888,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "toTargetKind": "canonical"
           }
         ],
-        "id": "demo-001",
+        "id": "id-002",
         "nodes": [
           {
             "asset": {
@@ -2896,10 +2896,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
                 "Attributes": {
                   "demo": null
                 },
-                "ID": "demo-001",
+                "ID": "ID-001",
                 "Key": "demo-key",
                 "Kind": "host",
-                "Name": "Demo record",
+                "Name": "Platform Security",
                 "TenantID": "demo-tenant"
               }
             },
@@ -2957,7 +2957,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "toTargetKind": "canonical"
           }
         ],
-        "id": "demo-001",
+        "id": "id-003",
         "nodes": [
           {
             "asset": {
@@ -2965,10 +2965,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
                 "Attributes": {
                   "demo": null
                 },
-                "ID": "demo-001",
+                "ID": "ID-001",
                 "Key": "demo-key",
                 "Kind": "host",
-                "Name": "Demo record",
+                "Name": "Platform Security",
                 "TenantID": "demo-tenant"
               }
             },
@@ -3018,8 +3018,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "responses": [
       {
         "approver": "demo",
-        "evidence_id": "demo-001",
-        "id": "demo-001",
+        "evidence_id": "evidence-001",
+        "id": "id-001",
         "kind": "demo",
         "state": "pending",
         "target": "demo",
@@ -3027,8 +3027,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       {
         "approver": "demo",
-        "evidence_id": "demo-001",
-        "id": "demo-001",
+        "evidence_id": "evidence-002",
+        "id": "id-002",
         "kind": "demo",
         "state": "pending",
         "target": "demo",
@@ -3036,8 +3036,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       {
         "approver": "demo",
-        "evidence_id": "demo-001",
-        "id": "demo-001",
+        "evidence_id": "evidence-003",
+        "id": "id-003",
         "kind": "demo",
         "state": "pending",
         "target": "demo",
@@ -3101,8 +3101,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "auth_kind": "pat",
         "created_at": "2026-10-03T09:00:00Z",
         "host": "demo",
-        "id": "demo-001",
-        "name": "Demo record",
+        "id": "id-001",
+        "name": "Platform Security",
         "provider": "github",
         "updated_at": "2026-10-03T09:00:00Z",
         "username": "demo.operator"
@@ -3112,8 +3112,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "auth_kind": "pat",
         "created_at": "2026-10-03T09:00:00Z",
         "host": "demo",
-        "id": "demo-001",
-        "name": "Demo record",
+        "id": "id-002",
+        "name": "Payments Core",
         "provider": "github",
         "updated_at": "2026-10-03T09:00:00Z",
         "username": "demo.operator"
@@ -3123,8 +3123,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "auth_kind": "pat",
         "created_at": "2026-10-03T09:00:00Z",
         "host": "demo",
-        "id": "demo-001",
-        "name": "Demo record",
+        "id": "id-003",
+        "name": "Edge Delivery",
         "provider": "github",
         "updated_at": "2026-10-03T09:00:00Z",
         "username": "demo.operator"
@@ -3195,8 +3195,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   },
   "GET /api/v1/engagements": [
     {
-      "assessment_project_id": "demo-001",
-      "business_asset_id": "demo-001",
+      "assessment_project_id": "assessment-project-001",
+      "business_asset_id": "business-asset-001",
       "client": "demo",
       "created_at": "2026-10-03T09:00:00Z",
       "findings_count": {
@@ -3207,18 +3207,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "medium": 2,
         "total": 3
       },
-      "id": "demo-001",
+      "id": "id-001",
       "last_scan_date": "2026-10-03T09:00:00Z",
       "last_scan_status": "active",
       "live_recon_enabled": true,
-      "name": "Demo record",
+      "name": "Platform Security",
       "offensive_roe": {
         "customer_contact": "demo",
         "emergency_contact": "demo",
         "exclusions_checked": true,
         "risk_ceiling": "high"
       },
-      "project_id": "demo-001",
+      "project_id": "project-001",
       "requires_explicit_execution_authorization": true,
       "roe": {
         "allowed_tool_classes": [
@@ -3251,8 +3251,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "updated_at": "2026-10-03T09:00:00Z"
     },
     {
-      "assessment_project_id": "demo-001",
-      "business_asset_id": "demo-001",
+      "assessment_project_id": "assessment-project-002",
+      "business_asset_id": "business-asset-002",
       "client": "demo",
       "created_at": "2026-10-03T09:00:00Z",
       "findings_count": {
@@ -3263,18 +3263,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "medium": 2,
         "total": 3
       },
-      "id": "demo-001",
+      "id": "id-002",
       "last_scan_date": "2026-10-03T09:00:00Z",
       "last_scan_status": "active",
       "live_recon_enabled": true,
-      "name": "Demo record",
+      "name": "Payments Core",
       "offensive_roe": {
         "customer_contact": "demo",
         "emergency_contact": "demo",
         "exclusions_checked": true,
         "risk_ceiling": "high"
       },
-      "project_id": "demo-001",
+      "project_id": "project-002",
       "requires_explicit_execution_authorization": true,
       "roe": {
         "allowed_tool_classes": [
@@ -3307,8 +3307,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "updated_at": "2026-10-03T09:00:00Z"
     },
     {
-      "assessment_project_id": "demo-001",
-      "business_asset_id": "demo-001",
+      "assessment_project_id": "assessment-project-003",
+      "business_asset_id": "business-asset-003",
       "client": "demo",
       "created_at": "2026-10-03T09:00:00Z",
       "findings_count": {
@@ -3319,18 +3319,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "medium": 2,
         "total": 3
       },
-      "id": "demo-001",
+      "id": "id-003",
       "last_scan_date": "2026-10-03T09:00:00Z",
       "last_scan_status": "active",
       "live_recon_enabled": true,
-      "name": "Demo record",
+      "name": "Edge Delivery",
       "offensive_roe": {
         "customer_contact": "demo",
         "emergency_contact": "demo",
         "exclusions_checked": true,
         "risk_ceiling": "high"
       },
-      "project_id": "demo-001",
+      "project_id": "project-003",
       "requires_explicit_execution_authorization": true,
       "roe": {
         "allowed_tool_classes": [
@@ -3364,55 +3364,55 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     }
   ],
   "GET /api/v1/engagements/{assessmentId}/lifecycle": {
-    "assessment_id": "demo-001",
+    "assessment_id": "assessment-001",
     "branch_heads": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
         "relationship_version": 1,
         "retest_number": 2
       }
     ],
     "cycle": {
       "active_closure_cycle_version": 1,
-      "active_closure_manifest_id": "demo-001",
+      "active_closure_manifest_id": "active-closure-manifest-001",
       "boundary_kind": "standalone",
-      "business_asset_id": "demo-001",
+      "business_asset_id": "business-asset-001",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "next_retest_number": 2,
-      "project_id": "demo-001",
-      "root_assessment_id": "demo-001",
-      "selected_head_assessment_id": "demo-001",
+      "project_id": "project-001",
+      "root_assessment_id": "root-assessment-001",
+      "selected_head_assessment_id": "selected-head-assessment-001",
       "status": "open",
       "updated_at": "2026-10-03T09:00:00Z",
       "updated_by": "demo",
@@ -3420,55 +3420,55 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     "members": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
         "relationship_version": 1,
         "retest_number": 2
       }
     ]
   },
   "GET /api/v1/engagements/{assessmentId}/snapshots": {
-    "default_snapshot_id": "demo-001",
+    "default_snapshot_id": "default-snapshot-001",
     "default_version": 1,
     "items": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "boundary": {
           "boundary_kind": "standalone",
-          "business_asset_id": "demo-001",
-          "project_id": "demo-001"
+          "business_asset_id": "business-asset-001",
+          "project_id": "project-001"
         },
         "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
-        "cycle_id": "demo-001",
+        "cycle_id": "cycle-001",
         "dimensions": [
           {
             "excluded_scope": [
@@ -3482,7 +3482,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "lane_manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "producer": "demo",
             "reason_code": "trusted_terminal_lane",
-            "run_id": "demo-001",
+            "run_id": "run-001",
             "state": "complete",
             "target": {
               "canonical": "demo",
@@ -3494,7 +3494,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
               {
                 "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
                 "kind": "tool",
-                "name": "Demo record",
+                "name": "Platform Security",
                 "version": "1.4.2"
               }
             ]
@@ -3502,7 +3502,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "finalized_at": "2026-10-03T09:00:00Z",
         "finalized_by": "demo",
-        "id": "demo-001",
+        "id": "id-001",
         "lifecycle": "finalized",
         "provenance": "native",
         "run_references": [
@@ -3514,7 +3514,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
               }
             ],
             "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-            "run_id": "demo-001"
+            "run_id": "run-001"
           }
         ],
         "schema_version": 1,
@@ -3523,16 +3523,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "superseded_by": "demo"
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "boundary": {
           "boundary_kind": "standalone",
-          "business_asset_id": "demo-001",
-          "project_id": "demo-001"
+          "business_asset_id": "business-asset-002",
+          "project_id": "project-002"
         },
         "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
-        "cycle_id": "demo-001",
+        "cycle_id": "cycle-002",
         "dimensions": [
           {
             "excluded_scope": [
@@ -3546,7 +3546,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "lane_manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "producer": "demo",
             "reason_code": "trusted_terminal_lane",
-            "run_id": "demo-001",
+            "run_id": "run-001",
             "state": "complete",
             "target": {
               "canonical": "demo",
@@ -3558,7 +3558,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
               {
                 "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
                 "kind": "tool",
-                "name": "Demo record",
+                "name": "Platform Security",
                 "version": "1.4.2"
               }
             ]
@@ -3566,7 +3566,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "finalized_at": "2026-10-03T09:00:00Z",
         "finalized_by": "demo",
-        "id": "demo-001",
+        "id": "id-002",
         "lifecycle": "finalized",
         "provenance": "native",
         "run_references": [
@@ -3578,7 +3578,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
               }
             ],
             "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-            "run_id": "demo-001"
+            "run_id": "run-001"
           }
         ],
         "schema_version": 1,
@@ -3587,16 +3587,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "superseded_by": "demo"
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "boundary": {
           "boundary_kind": "standalone",
-          "business_asset_id": "demo-001",
-          "project_id": "demo-001"
+          "business_asset_id": "business-asset-003",
+          "project_id": "project-003"
         },
         "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
-        "cycle_id": "demo-001",
+        "cycle_id": "cycle-003",
         "dimensions": [
           {
             "excluded_scope": [
@@ -3610,7 +3610,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "lane_manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "producer": "demo",
             "reason_code": "trusted_terminal_lane",
-            "run_id": "demo-001",
+            "run_id": "run-001",
             "state": "complete",
             "target": {
               "canonical": "demo",
@@ -3622,7 +3622,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
               {
                 "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
                 "kind": "tool",
-                "name": "Demo record",
+                "name": "Platform Security",
                 "version": "1.4.2"
               }
             ]
@@ -3630,7 +3630,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "finalized_at": "2026-10-03T09:00:00Z",
         "finalized_by": "demo",
-        "id": "demo-001",
+        "id": "id-003",
         "lifecycle": "finalized",
         "provenance": "native",
         "run_references": [
@@ -3642,7 +3642,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
               }
             ],
             "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-            "run_id": "demo-001"
+            "run_id": "run-001"
           }
         ],
         "schema_version": 1,
@@ -3662,38 +3662,38 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {},
       {}
     ],
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "error_code": "demo",
     "evidence_refs": [
       {
         "hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "id": "demo-001",
+        "id": "id-001",
         "scope_key": "demo-key"
       },
       {
         "hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "id": "demo-001",
+        "id": "id-002",
         "scope_key": "demo-key"
       },
       {
         "hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "id": "demo-001",
+        "id": "id-003",
         "scope_key": "demo-key"
       }
     ],
     "findings": 3,
-    "id": "demo-001",
+    "id": "id-001",
     "started_at": "2026-10-03T09:00:00Z",
     "status": "succeeded"
   },
   "GET /api/v1/engagements/{id}/dast/runs/{rid}": {
-    "action_id": "demo-001",
+    "action_id": "action-001",
     "actor": "demo.operator",
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "error_code": "demo",
-    "evidence_id": "demo-001",
+    "evidence_id": "evidence-001",
     "http_status": 2,
-    "id": "demo-001",
+    "id": "id-001",
     "started_at": "2026-10-03T09:00:00Z",
     "status": "succeeded",
     "verdict": "demo"
@@ -3701,25 +3701,25 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/engagements/{id}/detection-provenance": {
     "provenance": [
       {
-        "detection_id": "demo-001",
-        "engagement_id": "demo-001",
-        "evidence_id": "demo-001",
+        "detection_id": "detection-001",
+        "engagement_id": "engagement-001",
+        "evidence_id": "evidence-001",
         "status": "pending",
         "tenant_id": "demo-tenant",
         "updated_at": "2026-10-03T09:00:00Z"
       },
       {
-        "detection_id": "demo-001",
-        "engagement_id": "demo-001",
-        "evidence_id": "demo-001",
+        "detection_id": "detection-002",
+        "engagement_id": "engagement-002",
+        "evidence_id": "evidence-002",
         "status": "pending",
         "tenant_id": "demo-tenant",
         "updated_at": "2026-10-03T09:00:00Z"
       },
       {
-        "detection_id": "demo-001",
-        "engagement_id": "demo-001",
-        "evidence_id": "demo-001",
+        "detection_id": "detection-003",
+        "engagement_id": "engagement-003",
+        "evidence_id": "evidence-003",
         "status": "pending",
         "tenant_id": "demo-tenant",
         "updated_at": "2026-10-03T09:00:00Z"
@@ -3729,11 +3729,11 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/engagements/{id}/detections/{did}/provenance": {
     "transitions": [
       {
-        "agent_id": "demo-001",
-        "asset_id": "demo-001",
-        "detection_id": "demo-001",
-        "engagement_id": "demo-001",
-        "evidence_id": "demo-001",
+        "agent_id": "agent-001",
+        "asset_id": "asset-001",
+        "detection_id": "detection-001",
+        "engagement_id": "engagement-001",
+        "evidence_id": "evidence-001",
         "kind": "received",
         "occurred_at": "2026-10-03T09:00:00Z",
         "reason": "Seeded playground record, not a real result.",
@@ -3743,19 +3743,19 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           {
             "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "epoch": 1,
-            "event_id": "demo-001",
+            "event_id": "event-001",
             "sequence": 2,
-            "stream_id": "demo-001"
+            "stream_id": "stream-001"
           }
         ],
         "tenant_id": "demo-tenant"
       },
       {
-        "agent_id": "demo-001",
-        "asset_id": "demo-001",
-        "detection_id": "demo-001",
-        "engagement_id": "demo-001",
-        "evidence_id": "demo-001",
+        "agent_id": "agent-002",
+        "asset_id": "asset-002",
+        "detection_id": "detection-002",
+        "engagement_id": "engagement-002",
+        "evidence_id": "evidence-002",
         "kind": "received",
         "occurred_at": "2026-10-03T09:00:00Z",
         "reason": "Seeded playground record, not a real result.",
@@ -3765,19 +3765,19 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           {
             "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "epoch": 1,
-            "event_id": "demo-001",
+            "event_id": "event-001",
             "sequence": 2,
-            "stream_id": "demo-001"
+            "stream_id": "stream-001"
           }
         ],
         "tenant_id": "demo-tenant"
       },
       {
-        "agent_id": "demo-001",
-        "asset_id": "demo-001",
-        "detection_id": "demo-001",
-        "engagement_id": "demo-001",
-        "evidence_id": "demo-001",
+        "agent_id": "agent-003",
+        "asset_id": "asset-003",
+        "detection_id": "detection-003",
+        "engagement_id": "engagement-003",
+        "evidence_id": "evidence-003",
         "kind": "received",
         "occurred_at": "2026-10-03T09:00:00Z",
         "reason": "Seeded playground record, not a real result.",
@@ -3787,9 +3787,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           {
             "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "epoch": 1,
-            "event_id": "demo-001",
+            "event_id": "event-001",
             "sequence": 2,
-            "stream_id": "demo-001"
+            "stream_id": "stream-001"
           }
         ],
         "tenant_id": "demo-tenant"
@@ -3822,7 +3822,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       ],
       "EngagementID": "demo",
       "EvidenceScore": 7,
-      "ID": "demo-001",
+      "ID": "ID-001",
       "Impact": "demo",
       "KEV": true,
       "Kind": "sca",
@@ -3845,24 +3845,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "demo"
       ],
       "Status": "open",
-      "Title": "Demo record",
+      "Title": "Platform Security",
       "Version": 1,
       "assignee_user_id": "demo.operator",
       "compliance_controls": [
         {
           "Framework": "demo",
-          "ID": "demo-001",
-          "Title": "Demo record"
+          "ID": "ID-001",
+          "Title": "Platform Security"
         },
         {
           "Framework": "demo",
-          "ID": "demo-001",
-          "Title": "Demo record"
+          "ID": "ID-002",
+          "Title": "Payments Core"
         },
         {
           "Framework": "demo",
-          "ID": "demo-001",
-          "Title": "Demo record"
+          "ID": "ID-003",
+          "Title": "Edge Delivery"
         }
       ],
       "reachability_evidence": {
@@ -3896,7 +3896,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       ],
       "EngagementID": "demo",
       "EvidenceScore": 7,
-      "ID": "demo-001",
+      "ID": "ID-001",
       "Impact": "demo",
       "KEV": true,
       "Kind": "sca",
@@ -3919,24 +3919,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "demo"
       ],
       "Status": "open",
-      "Title": "Demo record",
+      "Title": "Platform Security",
       "Version": 1,
       "assignee_user_id": "demo.operator",
       "compliance_controls": [
         {
           "Framework": "demo",
-          "ID": "demo-001",
-          "Title": "Demo record"
+          "ID": "ID-001",
+          "Title": "Platform Security"
         },
         {
           "Framework": "demo",
-          "ID": "demo-001",
-          "Title": "Demo record"
+          "ID": "ID-002",
+          "Title": "Payments Core"
         },
         {
           "Framework": "demo",
-          "ID": "demo-001",
-          "Title": "Demo record"
+          "ID": "ID-003",
+          "Title": "Edge Delivery"
         }
       ],
       "reachability_evidence": {
@@ -3970,7 +3970,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       ],
       "EngagementID": "demo",
       "EvidenceScore": 7,
-      "ID": "demo-001",
+      "ID": "ID-001",
       "Impact": "demo",
       "KEV": true,
       "Kind": "sca",
@@ -3993,24 +3993,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "demo"
       ],
       "Status": "open",
-      "Title": "Demo record",
+      "Title": "Platform Security",
       "Version": 1,
       "assignee_user_id": "demo.operator",
       "compliance_controls": [
         {
           "Framework": "demo",
-          "ID": "demo-001",
-          "Title": "Demo record"
+          "ID": "ID-001",
+          "Title": "Platform Security"
         },
         {
           "Framework": "demo",
-          "ID": "demo-001",
-          "Title": "Demo record"
+          "ID": "ID-002",
+          "Title": "Payments Core"
         },
         {
           "Framework": "demo",
-          "ID": "demo-001",
-          "Title": "Demo record"
+          "ID": "ID-003",
+          "Title": "Edge Delivery"
         }
       ],
       "reachability_evidence": {
@@ -4030,7 +4030,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "manual_generation": 1,
       "mode": "auto",
       "revision": 1,
-      "team_id": "demo-001"
+      "team_id": "team-001"
     },
     "finding_assignee": "demo.operator",
     "finding_version": 1,
@@ -4048,7 +4048,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "manual_generation": 1,
           "mode": "auto",
           "revision": 1,
-          "team_id": "demo-001"
+          "team_id": "team-001"
         },
         "before": {
           "assignee_id": "demo.operator",
@@ -4056,12 +4056,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "manual_generation": 1,
           "mode": "auto",
           "revision": 1,
-          "team_id": "demo-001"
+          "team_id": "team-001"
         },
         "created_at": "2026-10-03T09:00:00Z",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-001",
+        "finding_id": "finding-001",
+        "id": "id-001",
         "result": {
           "candidates": [
             "demo"
@@ -4081,9 +4081,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "reason": "Seeded playground record, not a real result.",
           "resolution": "resolved",
-          "rule_id": "demo-001",
+          "rule_id": "rule-001",
           "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-          "team_id": "demo-001"
+          "team_id": "team-001"
         },
         "transition_key": "demo-key"
       },
@@ -4095,7 +4095,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "manual_generation": 1,
           "mode": "auto",
           "revision": 1,
-          "team_id": "demo-001"
+          "team_id": "team-002"
         },
         "before": {
           "assignee_id": "demo.operator",
@@ -4103,12 +4103,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "manual_generation": 1,
           "mode": "auto",
           "revision": 1,
-          "team_id": "demo-001"
+          "team_id": "team-002"
         },
         "created_at": "2026-10-03T09:00:00Z",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-002",
+        "finding_id": "finding-002",
+        "id": "id-002",
         "result": {
           "candidates": [
             "demo"
@@ -4128,9 +4128,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "reason": "Seeded playground record, not a real result.",
           "resolution": "resolved",
-          "rule_id": "demo-001",
+          "rule_id": "rule-002",
           "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-          "team_id": "demo-001"
+          "team_id": "team-002"
         },
         "transition_key": "demo-key"
       },
@@ -4142,7 +4142,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "manual_generation": 1,
           "mode": "auto",
           "revision": 1,
-          "team_id": "demo-001"
+          "team_id": "team-003"
         },
         "before": {
           "assignee_id": "demo.operator",
@@ -4150,12 +4150,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "manual_generation": 1,
           "mode": "auto",
           "revision": 1,
-          "team_id": "demo-001"
+          "team_id": "team-003"
         },
         "created_at": "2026-10-03T09:00:00Z",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-003",
+        "finding_id": "finding-003",
+        "id": "id-003",
         "result": {
           "candidates": [
             "demo"
@@ -4175,9 +4175,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "reason": "Seeded playground record, not a real result.",
           "resolution": "resolved",
-          "rule_id": "demo-001",
+          "rule_id": "rule-003",
           "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-          "team_id": "demo-001"
+          "team_id": "team-003"
         },
         "transition_key": "demo-key"
       }
@@ -4189,13 +4189,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     {
       "complete_coverage": true,
       "created_at": "2026-10-03T09:00:00Z",
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-001",
       "finding_keys": [
         "demo",
         "demo",
         "demo"
       ],
-      "id": "demo-001",
+      "id": "id-001",
       "lane_count": 3,
       "manifest": {},
       "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
@@ -4205,13 +4205,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "associated_at": "2026-10-03T09:00:00Z",
         "associated_by": "demo",
         "filename": "demo",
-        "reused_from_version_id": "demo-001",
+        "reused_from_version_id": "reused-from-version-001",
         "sha256": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "size": 2048,
         "target": "demo",
         "uploaded_at": "2026-10-03T09:00:00Z",
         "uploaded_by": "demo",
-        "version_id": "demo-001"
+        "version_id": "version-001"
       },
       "target": "demo",
       "target_kind": "demo",
@@ -4220,13 +4220,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     {
       "complete_coverage": true,
       "created_at": "2026-10-03T09:00:00Z",
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-002",
       "finding_keys": [
         "demo",
         "demo",
         "demo"
       ],
-      "id": "demo-001",
+      "id": "id-002",
       "lane_count": 3,
       "manifest": {},
       "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
@@ -4236,13 +4236,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "associated_at": "2026-10-03T09:00:00Z",
         "associated_by": "demo",
         "filename": "demo",
-        "reused_from_version_id": "demo-001",
+        "reused_from_version_id": "reused-from-version-002",
         "sha256": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "size": 2048,
         "target": "demo",
         "uploaded_at": "2026-10-03T09:00:00Z",
         "uploaded_by": "demo",
-        "version_id": "demo-001"
+        "version_id": "version-002"
       },
       "target": "demo",
       "target_kind": "demo",
@@ -4251,13 +4251,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     {
       "complete_coverage": true,
       "created_at": "2026-10-03T09:00:00Z",
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-003",
       "finding_keys": [
         "demo",
         "demo",
         "demo"
       ],
-      "id": "demo-001",
+      "id": "id-003",
       "lane_count": 3,
       "manifest": {},
       "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
@@ -4267,13 +4267,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "associated_at": "2026-10-03T09:00:00Z",
         "associated_by": "demo",
         "filename": "demo",
-        "reused_from_version_id": "demo-001",
+        "reused_from_version_id": "reused-from-version-003",
         "sha256": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "size": 2048,
         "target": "demo",
         "uploaded_at": "2026-10-03T09:00:00Z",
         "uploaded_by": "demo",
-        "version_id": "demo-001"
+        "version_id": "version-003"
       },
       "target": "demo",
       "target_kind": "demo",
@@ -4289,9 +4289,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "config_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "created_at": "2026-10-03T09:00:00Z",
           "deadline_anchor_at": "2026-10-03T09:00:00Z",
-          "engagement_id": "demo-001",
-          "finding_id": "demo-001",
-          "id": "demo-001",
+          "engagement_id": "engagement-001",
+          "finding_id": "finding-001",
+          "id": "id-001",
           "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "inputs": {
             "active_exploitation": true,
@@ -4304,7 +4304,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "public_poc": true,
             "severity": "high"
           },
-          "previous_assessment_id": "demo-001",
+          "previous_assessment_id": "previous-assessment-001",
           "result": {
             "breakdown": {
               "criticality": 1.5,
@@ -4325,7 +4325,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "score": 7.4,
             "tier": "high"
           },
-          "source_risk_assessment_id": "demo-001",
+          "source_risk_assessment_id": "source-risk-assessment-001",
           "tenant_id": "demo-tenant"
         },
         "effective_state": "open",
@@ -4333,10 +4333,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "acceptance_expires_at": "2026-10-03T09:00:00Z",
           "accepted_at": "2026-10-03T09:00:00Z",
           "accepted_by": "demo",
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-001",
           "compensating_control": "demo",
-          "engagement_id": "demo-001",
-          "finding_id": "demo-001",
+          "engagement_id": "engagement-001",
+          "finding_id": "finding-001",
           "reason": "Seeded playground record, not a real result.",
           "status": "open",
           "tenant_id": "demo-tenant",
@@ -4353,9 +4353,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "config_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "created_at": "2026-10-03T09:00:00Z",
           "deadline_anchor_at": "2026-10-03T09:00:00Z",
-          "engagement_id": "demo-001",
-          "finding_id": "demo-001",
-          "id": "demo-001",
+          "engagement_id": "engagement-002",
+          "finding_id": "finding-002",
+          "id": "id-002",
           "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "inputs": {
             "active_exploitation": true,
@@ -4368,7 +4368,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "public_poc": true,
             "severity": "high"
           },
-          "previous_assessment_id": "demo-001",
+          "previous_assessment_id": "previous-assessment-002",
           "result": {
             "breakdown": {
               "criticality": 1.5,
@@ -4389,7 +4389,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "score": 7.4,
             "tier": "high"
           },
-          "source_risk_assessment_id": "demo-001",
+          "source_risk_assessment_id": "source-risk-assessment-002",
           "tenant_id": "demo-tenant"
         },
         "effective_state": "open",
@@ -4397,10 +4397,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "acceptance_expires_at": "2026-10-03T09:00:00Z",
           "accepted_at": "2026-10-03T09:00:00Z",
           "accepted_by": "demo",
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-002",
           "compensating_control": "demo",
-          "engagement_id": "demo-001",
-          "finding_id": "demo-001",
+          "engagement_id": "engagement-002",
+          "finding_id": "finding-002",
           "reason": "Seeded playground record, not a real result.",
           "status": "open",
           "tenant_id": "demo-tenant",
@@ -4417,9 +4417,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "config_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "created_at": "2026-10-03T09:00:00Z",
           "deadline_anchor_at": "2026-10-03T09:00:00Z",
-          "engagement_id": "demo-001",
-          "finding_id": "demo-001",
-          "id": "demo-001",
+          "engagement_id": "engagement-003",
+          "finding_id": "finding-003",
+          "id": "id-003",
           "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "inputs": {
             "active_exploitation": true,
@@ -4432,7 +4432,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "public_poc": true,
             "severity": "high"
           },
-          "previous_assessment_id": "demo-001",
+          "previous_assessment_id": "previous-assessment-003",
           "result": {
             "breakdown": {
               "criticality": 1.5,
@@ -4453,7 +4453,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "score": 7.4,
             "tier": "high"
           },
-          "source_risk_assessment_id": "demo-001",
+          "source_risk_assessment_id": "source-risk-assessment-003",
           "tenant_id": "demo-tenant"
         },
         "effective_state": "open",
@@ -4461,10 +4461,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "acceptance_expires_at": "2026-10-03T09:00:00Z",
           "accepted_at": "2026-10-03T09:00:00Z",
           "accepted_by": "demo",
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-003",
           "compensating_control": "demo",
-          "engagement_id": "demo-001",
-          "finding_id": "demo-001",
+          "engagement_id": "engagement-003",
+          "finding_id": "finding-003",
           "reason": "Seeded playground record, not a real result.",
           "status": "open",
           "tenant_id": "demo-tenant",
@@ -4483,9 +4483,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "config_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "created_at": "2026-10-03T09:00:00Z",
       "deadline_anchor_at": "2026-10-03T09:00:00Z",
-      "engagement_id": "demo-001",
-      "finding_id": "demo-001",
-      "id": "demo-001",
+      "engagement_id": "engagement-001",
+      "finding_id": "finding-001",
+      "id": "id-001",
       "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "inputs": {
         "active_exploitation": true,
@@ -4498,7 +4498,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "public_poc": true,
         "severity": "high"
       },
-      "previous_assessment_id": "demo-001",
+      "previous_assessment_id": "previous-assessment-001",
       "result": {
         "breakdown": {
           "criticality": 1.5,
@@ -4519,7 +4519,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "score": 7.4,
         "tier": "high"
       },
-      "source_risk_assessment_id": "demo-001",
+      "source_risk_assessment_id": "source-risk-assessment-001",
       "tenant_id": "demo-tenant"
     },
     "effective_state": "open",
@@ -4527,10 +4527,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "acceptance_expires_at": "2026-10-03T09:00:00Z",
       "accepted_at": "2026-10-03T09:00:00Z",
       "accepted_by": "demo",
-      "assessment_id": "demo-001",
+      "assessment_id": "assessment-001",
       "compensating_control": "demo",
-      "engagement_id": "demo-001",
-      "finding_id": "demo-001",
+      "engagement_id": "engagement-001",
+      "finding_id": "finding-001",
       "reason": "Seeded playground record, not a real result.",
       "status": "open",
       "tenant_id": "demo-tenant",
@@ -4547,9 +4547,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "config_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "created_at": "2026-10-03T09:00:00Z",
         "deadline_anchor_at": "2026-10-03T09:00:00Z",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-001",
+        "finding_id": "finding-001",
+        "id": "id-001",
         "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "inputs": {
           "active_exploitation": true,
@@ -4562,7 +4562,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "public_poc": true,
           "severity": "high"
         },
-        "previous_assessment_id": "demo-001",
+        "previous_assessment_id": "previous-assessment-001",
         "result": {
           "breakdown": {
             "criticality": 1.5,
@@ -4583,7 +4583,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "score": 7.4,
           "tier": "high"
         },
-        "source_risk_assessment_id": "demo-001",
+        "source_risk_assessment_id": "source-risk-assessment-001",
         "tenant_id": "demo-tenant"
       },
       {
@@ -4591,9 +4591,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "config_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "created_at": "2026-10-03T09:00:00Z",
         "deadline_anchor_at": "2026-10-03T09:00:00Z",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-002",
+        "finding_id": "finding-002",
+        "id": "id-002",
         "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "inputs": {
           "active_exploitation": true,
@@ -4606,7 +4606,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "public_poc": true,
           "severity": "high"
         },
-        "previous_assessment_id": "demo-001",
+        "previous_assessment_id": "previous-assessment-002",
         "result": {
           "breakdown": {
             "criticality": 1.5,
@@ -4627,7 +4627,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "score": 7.4,
           "tier": "high"
         },
-        "source_risk_assessment_id": "demo-001",
+        "source_risk_assessment_id": "source-risk-assessment-002",
         "tenant_id": "demo-tenant"
       },
       {
@@ -4635,9 +4635,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "config_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "created_at": "2026-10-03T09:00:00Z",
         "deadline_anchor_at": "2026-10-03T09:00:00Z",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-003",
+        "finding_id": "finding-003",
+        "id": "id-003",
         "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "inputs": {
           "active_exploitation": true,
@@ -4650,7 +4650,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "public_poc": true,
           "severity": "high"
         },
-        "previous_assessment_id": "demo-001",
+        "previous_assessment_id": "previous-assessment-003",
         "result": {
           "breakdown": {
             "criticality": 1.5,
@@ -4671,7 +4671,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "score": 7.4,
           "tier": "high"
         },
-        "source_risk_assessment_id": "demo-001",
+        "source_risk_assessment_id": "source-risk-assessment-003",
         "tenant_id": "demo-tenant"
       }
     ]
@@ -4682,14 +4682,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "acceptance_expires_at": "2026-10-03T09:00:00Z",
         "actor": "demo.operator",
         "after_version": 1,
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "at": "2026-10-03T09:00:00Z",
         "before_version": 1,
         "compensating_control": "demo",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
+        "engagement_id": "engagement-001",
+        "finding_id": "finding-001",
         "from": "open",
-        "id": "demo-001",
+        "id": "id-001",
         "reason": "Seeded playground record, not a real result.",
         "tenant_id": "demo-tenant",
         "to": "open"
@@ -4698,14 +4698,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "acceptance_expires_at": "2026-10-03T09:00:00Z",
         "actor": "demo.operator",
         "after_version": 1,
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "at": "2026-10-03T09:00:00Z",
         "before_version": 1,
         "compensating_control": "demo",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
+        "engagement_id": "engagement-002",
+        "finding_id": "finding-002",
         "from": "open",
-        "id": "demo-001",
+        "id": "id-002",
         "reason": "Seeded playground record, not a real result.",
         "tenant_id": "demo-tenant",
         "to": "open"
@@ -4714,14 +4714,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "acceptance_expires_at": "2026-10-03T09:00:00Z",
         "actor": "demo.operator",
         "after_version": 1,
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "at": "2026-10-03T09:00:00Z",
         "before_version": 1,
         "compensating_control": "demo",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
+        "engagement_id": "engagement-003",
+        "finding_id": "finding-003",
         "from": "open",
-        "id": "demo-001",
+        "id": "id-003",
         "reason": "Seeded playground record, not a real result.",
         "tenant_id": "demo-tenant",
         "to": "open"
@@ -4732,13 +4732,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "associated_at": "2026-10-03T09:00:00Z",
     "associated_by": "demo",
     "filename": "demo",
-    "reused_from_version_id": "demo-001",
+    "reused_from_version_id": "reused-from-version-001",
     "sha256": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
     "size": 2048,
     "target": "demo",
     "uploaded_at": "2026-10-03T09:00:00Z",
     "uploaded_by": "demo",
-    "version_id": "demo-001"
+    "version_id": "version-001"
   },
   "GET /api/v1/engine/accuracy": {
     "runs": [
@@ -4761,7 +4761,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             }
           }
         ],
-        "id": "demo-001",
+        "id": "id-001",
         "overall": {
           "f1": 1.5,
           "false_discovery_rate": 7.4,
@@ -4794,7 +4794,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             }
           }
         ],
-        "id": "demo-001",
+        "id": "id-002",
         "overall": {
           "f1": 1.5,
           "false_discovery_rate": 7.4,
@@ -4827,7 +4827,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             }
           }
         ],
-        "id": "demo-001",
+        "id": "id-003",
         "overall": {
           "f1": 1.5,
           "false_discovery_rate": 7.4,
@@ -4846,27 +4846,27 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/findings/assignee-review": {
     "items": [
       {
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
+        "engagement_id": "engagement-001",
+        "finding_id": "finding-001",
         "legacy_assignee": "demo.operator",
         "reason": "ambiguous"
       },
       {
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
+        "engagement_id": "engagement-002",
+        "finding_id": "finding-002",
         "legacy_assignee": "demo.operator",
         "reason": "ambiguous"
       },
       {
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
+        "engagement_id": "engagement-003",
+        "finding_id": "finding-003",
         "legacy_assignee": "demo.operator",
         "reason": "ambiguous"
       }
     ],
     "next": {
-      "engagement_id": "demo-001",
-      "finding_id": "demo-001"
+      "engagement_id": "engagement-001",
+      "finding_id": "finding-001"
     }
   },
   "GET /api/v1/fleet/assets/{id}/desired-capabilities": {
@@ -4958,8 +4958,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/fleet/coverage-windows": {
     "coverage_windows": [
       {
-        "agent_id": "demo-001",
-        "asset_id": "demo-001",
+        "agent_id": "agent-001",
+        "asset_id": "asset-001",
         "batch_count": 3,
         "coverage": {
           "file": 2,
@@ -4973,16 +4973,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "created_at": "2026-10-03T09:00:00Z",
         "dropped_count": 3,
         "gap_count": 3,
-        "host_id": "demo-001",
+        "host_id": "host-001",
         "input_digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "revision": "demo",
         "sampled_count": 3,
         "since": "2026-10-03T09:00:00Z",
         "states": [
           {
-            "agent_id": "demo-001",
+            "agent_id": "agent-001",
             "class": "process",
-            "host_id": "demo-001",
+            "host_id": "host-001",
             "reason": "Seeded playground record, not a real result.",
             "since": "2026-10-03T09:00:00Z",
             "state": "active"
@@ -4992,8 +4992,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "until": "2026-10-03T09:00:00Z"
       },
       {
-        "agent_id": "demo-001",
-        "asset_id": "demo-001",
+        "agent_id": "agent-002",
+        "asset_id": "asset-002",
         "batch_count": 3,
         "coverage": {
           "file": 2,
@@ -5007,16 +5007,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "created_at": "2026-10-03T09:00:00Z",
         "dropped_count": 3,
         "gap_count": 3,
-        "host_id": "demo-001",
+        "host_id": "host-002",
         "input_digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "revision": "demo",
         "sampled_count": 3,
         "since": "2026-10-03T09:00:00Z",
         "states": [
           {
-            "agent_id": "demo-001",
+            "agent_id": "agent-001",
             "class": "process",
-            "host_id": "demo-001",
+            "host_id": "host-001",
             "reason": "Seeded playground record, not a real result.",
             "since": "2026-10-03T09:00:00Z",
             "state": "active"
@@ -5026,8 +5026,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "until": "2026-10-03T09:00:00Z"
       },
       {
-        "agent_id": "demo-001",
-        "asset_id": "demo-001",
+        "agent_id": "agent-003",
+        "asset_id": "asset-003",
         "batch_count": 3,
         "coverage": {
           "file": 2,
@@ -5041,16 +5041,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "created_at": "2026-10-03T09:00:00Z",
         "dropped_count": 3,
         "gap_count": 3,
-        "host_id": "demo-001",
+        "host_id": "host-003",
         "input_digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "revision": "demo",
         "sampled_count": 3,
         "since": "2026-10-03T09:00:00Z",
         "states": [
           {
-            "agent_id": "demo-001",
+            "agent_id": "agent-001",
             "class": "process",
-            "host_id": "demo-001",
+            "host_id": "host-001",
             "reason": "Seeded playground record, not a real result.",
             "since": "2026-10-03T09:00:00Z",
             "state": "active"
@@ -5065,45 +5065,45 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "gaps": [
       {
         "agent_health": "healthy",
-        "agent_id": "demo-001",
-        "asset_id": "demo-001",
+        "agent_id": "agent-001",
+        "asset_id": "asset-001",
         "capability": "demo",
         "covered": true,
         "detail": "demo",
         "gap_reason": "agent_missing",
         "last_seen": "2026-10-03T09:00:00Z",
-        "policy_id": "demo-001",
+        "policy_id": "policy-001",
         "policy_version": 1
       },
       {
         "agent_health": "healthy",
-        "agent_id": "demo-001",
-        "asset_id": "demo-001",
+        "agent_id": "agent-002",
+        "asset_id": "asset-002",
         "capability": "demo",
         "covered": true,
         "detail": "demo",
         "gap_reason": "agent_missing",
         "last_seen": "2026-10-03T09:00:00Z",
-        "policy_id": "demo-001",
+        "policy_id": "policy-002",
         "policy_version": 1
       },
       {
         "agent_health": "healthy",
-        "agent_id": "demo-001",
-        "asset_id": "demo-001",
+        "agent_id": "agent-003",
+        "asset_id": "asset-003",
         "capability": "demo",
         "covered": true,
         "detail": "demo",
         "gap_reason": "agent_missing",
         "last_seen": "2026-10-03T09:00:00Z",
-        "policy_id": "demo-001",
+        "policy_id": "policy-003",
         "policy_version": 1
       }
     ]
   },
   "GET /api/v1/fleet/engagements/{id}/privacy-export": {
     "detection_count": 3,
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "generated_at": "2026-10-03T09:00:00Z"
   },
   "GET /api/v1/fleet/legal-holds": {},
@@ -5211,7 +5211,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           }
         ],
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Platform Security",
         "namespace": "demo",
         "service_account": "demo"
       },
@@ -5224,7 +5224,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           }
         ],
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Payments Core",
         "namespace": "demo",
         "service_account": "demo"
       },
@@ -5237,7 +5237,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           }
         ],
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Edge Delivery",
         "namespace": "demo",
         "service_account": "demo"
       }
@@ -5267,29 +5267,29 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "demo",
       "demo"
     ],
-    "id": "demo-001",
-    "integration_id": "demo-001",
-    "job_id": "demo-001",
+    "id": "id-001",
+    "integration_id": "integration-001",
+    "job_id": "job-001",
     "pipelines": [
       {
         "external_key": "demo-key",
-        "full_name": "Demo record",
+        "full_name": "Platform Security",
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Platform Security",
         "url": "https://synapse.example/demo"
       },
       {
         "external_key": "demo-key",
-        "full_name": "Demo record",
+        "full_name": "Payments Core",
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Payments Core",
         "url": "https://synapse.example/demo"
       },
       {
         "external_key": "demo-key",
-        "full_name": "Demo record",
+        "full_name": "Edge Delivery",
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Edge Delivery",
         "url": "https://synapse.example/demo"
       }
     ],
@@ -5309,48 +5309,48 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Platform Security",
+          "name": "Platform Security",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Payments Core",
+          "name": "Payments Core",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Edge Delivery",
+          "name": "Edge Delivery",
           "required": true
         }
       ],
       "description": "Seeded playground record, not a real result.",
-      "name": "Demo record",
+      "name": "Platform Security",
       "provider": "demo",
       "secret_fields": [
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Platform Security",
+          "name": "Platform Security",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Payments Core",
+          "name": "Payments Core",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Edge Delivery",
+          "name": "Edge Delivery",
           "required": true
         }
       ]
@@ -5365,48 +5365,48 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Platform Security",
+          "name": "Platform Security",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Payments Core",
+          "name": "Payments Core",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Edge Delivery",
+          "name": "Edge Delivery",
           "required": true
         }
       ],
       "description": "Seeded playground record, not a real result.",
-      "name": "Demo record",
+      "name": "Payments Core",
       "provider": "demo",
       "secret_fields": [
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Platform Security",
+          "name": "Platform Security",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Payments Core",
+          "name": "Payments Core",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Edge Delivery",
+          "name": "Edge Delivery",
           "required": true
         }
       ]
@@ -5421,48 +5421,48 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Platform Security",
+          "name": "Platform Security",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Payments Core",
+          "name": "Payments Core",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Edge Delivery",
+          "name": "Edge Delivery",
           "required": true
         }
       ],
       "description": "Seeded playground record, not a real result.",
-      "name": "Demo record",
+      "name": "Edge Delivery",
       "provider": "demo",
       "secret_fields": [
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Platform Security",
+          "name": "Platform Security",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Payments Core",
+          "name": "Payments Core",
           "required": true
         },
         {
           "description": "Seeded playground record, not a real result.",
           "kind": "text",
-          "label": "Demo record",
-          "name": "Demo record",
+          "label": "Edge Delivery",
+          "name": "Edge Delivery",
           "required": true
         }
       ]
@@ -5481,8 +5481,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "credential_revision": 1,
       "enabled": true,
       "endpoint": "https://synapse.example/demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "poll_interval_seconds": 2,
       "provider": "demo",
       "updated_at": "2026-10-03T09:00:00Z",
@@ -5500,8 +5500,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "credential_revision": 1,
       "enabled": true,
       "endpoint": "https://synapse.example/demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-002",
+      "name": "Payments Core",
       "poll_interval_seconds": 2,
       "provider": "demo",
       "updated_at": "2026-10-03T09:00:00Z",
@@ -5519,8 +5519,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "credential_revision": 1,
       "enabled": true,
       "endpoint": "https://synapse.example/demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-003",
+      "name": "Edge Delivery",
       "poll_interval_seconds": 2,
       "provider": "demo",
       "updated_at": "2026-10-03T09:00:00Z",
@@ -5539,8 +5539,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "credential_revision": 1,
     "enabled": true,
     "endpoint": "https://synapse.example/demo",
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "poll_interval_seconds": 2,
     "provider": "demo",
     "updated_at": "2026-10-03T09:00:00Z",
@@ -5550,10 +5550,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     {
       "created_at": "2026-10-03T09:00:00Z",
       "external_key": "demo-key",
-      "external_name": "Demo record",
-      "id": "demo-001",
-      "integration_id": "demo-001",
-      "project_id": "demo-001",
+      "external_name": "Platform Security",
+      "id": "id-001",
+      "integration_id": "integration-001",
+      "project_id": "project-001",
       "tenant_id": "demo-tenant",
       "updated_at": "2026-10-03T09:00:00Z",
       "version": 1
@@ -5561,10 +5561,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     {
       "created_at": "2026-10-03T09:00:00Z",
       "external_key": "demo-key",
-      "external_name": "Demo record",
-      "id": "demo-001",
-      "integration_id": "demo-001",
-      "project_id": "demo-001",
+      "external_name": "Payments Core",
+      "id": "id-002",
+      "integration_id": "integration-002",
+      "project_id": "project-002",
       "tenant_id": "demo-tenant",
       "updated_at": "2026-10-03T09:00:00Z",
       "version": 1
@@ -5572,10 +5572,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     {
       "created_at": "2026-10-03T09:00:00Z",
       "external_key": "demo-key",
-      "external_name": "Demo record",
-      "id": "demo-001",
-      "integration_id": "demo-001",
-      "project_id": "demo-001",
+      "external_name": "Edge Delivery",
+      "id": "id-003",
+      "integration_id": "integration-003",
+      "project_id": "project-003",
       "tenant_id": "demo-tenant",
       "updated_at": "2026-10-03T09:00:00Z",
       "version": 1
@@ -5583,13 +5583,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   ],
   "GET /api/v1/integrations/{id}/external-runs": [
     {
-      "analysis_id": "demo-001",
-      "binding_id": "demo-001",
+      "analysis_id": "analysis-001",
+      "binding_id": "binding-001",
       "branch": "main",
       "correlation": "linked",
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
-      "integration_id": "demo-001",
+      "id": "id-001",
+      "integration_id": "integration-001",
       "lifecycle": "queued",
       "number": "demo",
       "pipeline_key": "demo-key",
@@ -5602,13 +5602,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "url": "https://synapse.example/demo"
     },
     {
-      "analysis_id": "demo-001",
-      "binding_id": "demo-001",
+      "analysis_id": "analysis-002",
+      "binding_id": "binding-002",
       "branch": "main",
       "correlation": "linked",
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
-      "integration_id": "demo-001",
+      "id": "id-002",
+      "integration_id": "integration-002",
       "lifecycle": "queued",
       "number": "demo",
       "pipeline_key": "demo-key",
@@ -5621,13 +5621,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "url": "https://synapse.example/demo"
     },
     {
-      "analysis_id": "demo-001",
-      "binding_id": "demo-001",
+      "analysis_id": "analysis-003",
+      "binding_id": "binding-003",
       "branch": "main",
       "correlation": "linked",
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
-      "integration_id": "demo-001",
+      "id": "id-003",
+      "integration_id": "integration-003",
       "lifecycle": "queued",
       "number": "demo",
       "pipeline_key": "demo-key",
@@ -5657,29 +5657,29 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "demo",
         "demo"
       ],
-      "id": "demo-001",
-      "integration_id": "demo-001",
-      "job_id": "demo-001",
+      "id": "id-001",
+      "integration_id": "integration-001",
+      "job_id": "job-001",
       "pipelines": [
         {
           "external_key": "demo-key",
-          "full_name": "Demo record",
+          "full_name": "Platform Security",
           "kind": "demo",
-          "name": "Demo record",
+          "name": "Platform Security",
           "url": "https://synapse.example/demo"
         },
         {
           "external_key": "demo-key",
-          "full_name": "Demo record",
+          "full_name": "Payments Core",
           "kind": "demo",
-          "name": "Demo record",
+          "name": "Payments Core",
           "url": "https://synapse.example/demo"
         },
         {
           "external_key": "demo-key",
-          "full_name": "Demo record",
+          "full_name": "Edge Delivery",
           "kind": "demo",
-          "name": "Demo record",
+          "name": "Edge Delivery",
           "url": "https://synapse.example/demo"
         }
       ],
@@ -5704,29 +5704,29 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "demo",
         "demo"
       ],
-      "id": "demo-001",
-      "integration_id": "demo-001",
-      "job_id": "demo-001",
+      "id": "id-002",
+      "integration_id": "integration-002",
+      "job_id": "job-002",
       "pipelines": [
         {
           "external_key": "demo-key",
-          "full_name": "Demo record",
+          "full_name": "Platform Security",
           "kind": "demo",
-          "name": "Demo record",
+          "name": "Platform Security",
           "url": "https://synapse.example/demo"
         },
         {
           "external_key": "demo-key",
-          "full_name": "Demo record",
+          "full_name": "Payments Core",
           "kind": "demo",
-          "name": "Demo record",
+          "name": "Payments Core",
           "url": "https://synapse.example/demo"
         },
         {
           "external_key": "demo-key",
-          "full_name": "Demo record",
+          "full_name": "Edge Delivery",
           "kind": "demo",
-          "name": "Demo record",
+          "name": "Edge Delivery",
           "url": "https://synapse.example/demo"
         }
       ],
@@ -5751,29 +5751,29 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "demo",
         "demo"
       ],
-      "id": "demo-001",
-      "integration_id": "demo-001",
-      "job_id": "demo-001",
+      "id": "id-003",
+      "integration_id": "integration-003",
+      "job_id": "job-003",
       "pipelines": [
         {
           "external_key": "demo-key",
-          "full_name": "Demo record",
+          "full_name": "Platform Security",
           "kind": "demo",
-          "name": "Demo record",
+          "name": "Platform Security",
           "url": "https://synapse.example/demo"
         },
         {
           "external_key": "demo-key",
-          "full_name": "Demo record",
+          "full_name": "Payments Core",
           "kind": "demo",
-          "name": "Demo record",
+          "name": "Payments Core",
           "url": "https://synapse.example/demo"
         },
         {
           "external_key": "demo-key",
-          "full_name": "Demo record",
+          "full_name": "Edge Delivery",
           "kind": "demo",
-          "name": "Demo record",
+          "name": "Edge Delivery",
           "url": "https://synapse.example/demo"
         }
       ],
@@ -5786,7 +5786,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/me/contacts": [
     {
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
+      "id": "id-001",
       "kind": "email",
       "source": "manual",
       "updated_at": "2026-10-03T09:00:00Z",
@@ -5796,7 +5796,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     {
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
+      "id": "id-002",
       "kind": "email",
       "source": "manual",
       "updated_at": "2026-10-03T09:00:00Z",
@@ -5806,7 +5806,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     {
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
+      "id": "id-003",
       "kind": "email",
       "source": "manual",
       "updated_at": "2026-10-03T09:00:00Z",
@@ -5819,33 +5819,33 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "items": [
       {
         "created_at": "2026-10-03T09:00:00Z",
-        "event_id": "demo-001",
+        "event_id": "event-001",
         "event_type": "demo",
-        "id": "demo-001",
+        "id": "id-001",
         "link_path": "src/service/handler.go",
         "read_at": "2026-10-03T09:00:00Z",
         "summary": "Seeded playground record, not a real result.",
-        "title": "Demo record"
+        "title": "Platform Security"
       },
       {
         "created_at": "2026-10-03T09:00:00Z",
-        "event_id": "demo-001",
+        "event_id": "event-002",
         "event_type": "demo",
-        "id": "demo-001",
+        "id": "id-002",
         "link_path": "src/service/handler.go",
         "read_at": "2026-10-03T09:00:00Z",
         "summary": "Seeded playground record, not a real result.",
-        "title": "Demo record"
+        "title": "Payments Core"
       },
       {
         "created_at": "2026-10-03T09:00:00Z",
-        "event_id": "demo-001",
+        "event_id": "event-003",
         "event_type": "demo",
-        "id": "demo-001",
+        "id": "id-003",
         "link_path": "src/service/handler.go",
         "read_at": "2026-10-03T09:00:00Z",
         "summary": "Seeded playground record, not a real result.",
-        "title": "Demo record"
+        "title": "Edge Delivery"
       }
     ],
     "next": "demo"
@@ -5899,15 +5899,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "paused_reason": "consecutive_permanent_failures",
           "state": "active"
         },
-        "id": "demo-001",
+        "id": "id-001",
         "locale": "en",
-        "name": "Demo record",
+        "name": "Platform Security",
         "recipients": [
           "demo@synapse.example"
         ],
         "revision": 1,
         "secret_version": 1,
-        "template_id": "demo-001",
+        "template_id": "template-001",
         "type": "webhook",
         "updated_at": "2026-10-03T09:00:00Z"
       },
@@ -5924,15 +5924,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "paused_reason": "consecutive_permanent_failures",
           "state": "active"
         },
-        "id": "demo-001",
+        "id": "id-002",
         "locale": "en",
-        "name": "Demo record",
+        "name": "Payments Core",
         "recipients": [
           "demo@synapse.example"
         ],
         "revision": 1,
         "secret_version": 1,
-        "template_id": "demo-001",
+        "template_id": "template-002",
         "type": "webhook",
         "updated_at": "2026-10-03T09:00:00Z"
       },
@@ -5949,15 +5949,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "paused_reason": "consecutive_permanent_failures",
           "state": "active"
         },
-        "id": "demo-001",
+        "id": "id-003",
         "locale": "en",
-        "name": "Demo record",
+        "name": "Edge Delivery",
         "recipients": [
           "demo@synapse.example"
         ],
         "revision": 1,
         "secret_version": 1,
-        "template_id": "demo-001",
+        "template_id": "template-003",
         "type": "webhook",
         "updated_at": "2026-10-03T09:00:00Z"
       }
@@ -5976,9 +5976,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "paused_reason": "consecutive_permanent_failures",
       "state": "active"
     },
-    "id": "demo-001",
+    "id": "id-001",
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "recipients": [
       "demo@synapse.example",
       "demo@synapse.example",
@@ -5986,7 +5986,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ],
     "revision": 1,
     "secret_version": 1,
-    "template_id": "demo-001",
+    "template_id": "template-001",
     "type": "webhook",
     "updated_at": "2026-10-03T09:00:00Z"
   },
@@ -5995,36 +5995,36 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "action": "paused",
         "actor": "demo.operator",
-        "attempt_id": "demo-001",
-        "channel_id": "demo-001",
-        "delivery_id": "demo-001",
+        "attempt_id": "attempt-001",
+        "channel_id": "channel-001",
+        "delivery_id": "delivery-001",
         "failure_code": "demo",
         "failures": 2,
-        "id": "demo-001",
+        "id": "id-001",
         "occurred_at": "2026-10-03T09:00:00Z",
         "reason": "Seeded playground record, not a real result."
       },
       {
         "action": "paused",
         "actor": "demo.operator",
-        "attempt_id": "demo-001",
-        "channel_id": "demo-001",
-        "delivery_id": "demo-001",
+        "attempt_id": "attempt-002",
+        "channel_id": "channel-002",
+        "delivery_id": "delivery-002",
         "failure_code": "demo",
         "failures": 2,
-        "id": "demo-001",
+        "id": "id-002",
         "occurred_at": "2026-10-03T09:00:00Z",
         "reason": "Seeded playground record, not a real result."
       },
       {
         "action": "paused",
         "actor": "demo.operator",
-        "attempt_id": "demo-001",
-        "channel_id": "demo-001",
-        "delivery_id": "demo-001",
+        "attempt_id": "attempt-003",
+        "channel_id": "channel-003",
+        "delivery_id": "delivery-003",
         "failure_code": "demo",
         "failures": 2,
-        "id": "demo-001",
+        "id": "id-003",
         "occurred_at": "2026-10-03T09:00:00Z",
         "reason": "Seeded playground record, not a real result."
       }
@@ -6044,10 +6044,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "created_by": "demo",
       "event_type": "demo",
       "family": "chat",
-      "id": "demo-001",
+      "id": "id-001",
       "latest_version": 1,
       "locale": "en",
-      "name": "Demo record",
+      "name": "Platform Security",
       "revision": 1,
       "status": "active",
       "tenant_id": "demo-tenant",
@@ -6061,12 +6061,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "items": [
       {
         "attempts": 2,
-        "channel_id": "demo-001",
+        "channel_id": "channel-001",
         "channel_type": "webhook",
         "created_at": "2026-10-03T09:00:00Z",
         "delivered_at": "2026-10-03T09:00:00Z",
-        "event_id": "demo-001",
-        "id": "demo-001",
+        "event_id": "event-001",
+        "id": "id-001",
         "last_error": "demo",
         "matched_rule_ids": [
           "demo"
@@ -6079,12 +6079,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       {
         "attempts": 2,
-        "channel_id": "demo-001",
+        "channel_id": "channel-002",
         "channel_type": "webhook",
         "created_at": "2026-10-03T09:00:00Z",
         "delivered_at": "2026-10-03T09:00:00Z",
-        "event_id": "demo-001",
-        "id": "demo-001",
+        "event_id": "event-002",
+        "id": "id-002",
         "last_error": "demo",
         "matched_rule_ids": [
           "demo"
@@ -6097,12 +6097,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       {
         "attempts": 2,
-        "channel_id": "demo-001",
+        "channel_id": "channel-003",
         "channel_type": "webhook",
         "created_at": "2026-10-03T09:00:00Z",
         "delivered_at": "2026-10-03T09:00:00Z",
-        "event_id": "demo-001",
-        "id": "demo-001",
+        "event_id": "event-003",
+        "id": "id-003",
         "last_error": "demo",
         "matched_rule_ids": [
           "demo"
@@ -6118,12 +6118,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   },
   "GET /api/v1/notifications/deliveries/{nid}": {
     "attempts": 2,
-    "channel_id": "demo-001",
+    "channel_id": "channel-001",
     "channel_type": "webhook",
     "created_at": "2026-10-03T09:00:00Z",
     "delivered_at": "2026-10-03T09:00:00Z",
-    "event_id": "demo-001",
-    "id": "demo-001",
+    "event_id": "event-001",
+    "id": "id-001",
     "last_error": "demo",
     "matched_rule_ids": [
       "demo",
@@ -6139,30 +6139,30 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/notifications/deliveries/{nid}/attempts": {
     "items": [
       {
-        "delivery_id": "demo-001",
+        "delivery_id": "delivery-001",
         "error_code": "demo",
         "finished_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-001",
         "number": 2,
         "outcome": "started",
         "response_code": 2,
         "started_at": "2026-10-03T09:00:00Z"
       },
       {
-        "delivery_id": "demo-001",
+        "delivery_id": "delivery-002",
         "error_code": "demo",
         "finished_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-002",
         "number": 2,
         "outcome": "started",
         "response_code": 2,
         "started_at": "2026-10-03T09:00:00Z"
       },
       {
-        "delivery_id": "demo-001",
+        "delivery_id": "delivery-003",
         "error_code": "demo",
         "finished_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-003",
         "number": 2,
         "outcome": "started",
         "response_code": 2,
@@ -6180,7 +6180,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "has_lead_time": true,
         "has_severity": true,
         "has_team": true,
-        "label": "Demo record",
+        "label": "Platform Security",
         "mandatory": true,
         "max_data_class": "signal",
         "operator_only": true,
@@ -6192,7 +6192,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "class": "signal",
             "description": "Seeded playground record, not a real result.",
             "list_cap": 2,
-            "name": "Demo record"
+            "name": "Platform Security"
           }
         ]
       },
@@ -6204,7 +6204,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "has_lead_time": true,
         "has_severity": true,
         "has_team": true,
-        "label": "Demo record",
+        "label": "Payments Core",
         "mandatory": true,
         "max_data_class": "signal",
         "operator_only": true,
@@ -6216,7 +6216,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "class": "signal",
             "description": "Seeded playground record, not a real result.",
             "list_cap": 2,
-            "name": "Demo record"
+            "name": "Platform Security"
           }
         ]
       },
@@ -6228,7 +6228,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "has_lead_time": true,
         "has_severity": true,
         "has_team": true,
-        "label": "Demo record",
+        "label": "Edge Delivery",
         "mandatory": true,
         "max_data_class": "signal",
         "operator_only": true,
@@ -6240,7 +6240,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "class": "signal",
             "description": "Seeded playground record, not a real result.",
             "list_cap": 2,
-            "name": "Demo record"
+            "name": "Platform Security"
           }
         ]
       }
@@ -6253,7 +6253,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "failed_reason": "invalid_event",
         "occurred_at": "2026-10-03T09:00:00Z",
         "processed_at": "2026-10-03T09:00:00Z",
-        "source_id": "demo-001",
+        "source_id": "source-001",
         "source_kind": "demo"
       },
       {
@@ -6261,7 +6261,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "failed_reason": "invalid_event",
         "occurred_at": "2026-10-03T09:00:00Z",
         "processed_at": "2026-10-03T09:00:00Z",
-        "source_id": "demo-001",
+        "source_id": "source-002",
         "source_kind": "demo"
       },
       {
@@ -6269,7 +6269,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "failed_reason": "invalid_event",
         "occurred_at": "2026-10-03T09:00:00Z",
         "processed_at": "2026-10-03T09:00:00Z",
-        "source_id": "demo-001",
+        "source_id": "source-003",
         "source_kind": "demo"
       }
     ],
@@ -6292,10 +6292,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "event_type": "vulnerability_action.created",
-        "id": "demo-001",
+        "id": "id-001",
         "lead_time_seconds": 2,
         "min_severity": "high",
-        "name": "Demo record",
+        "name": "Platform Security",
         "revision": 1,
         "team_ids": [
           "demo"
@@ -6317,10 +6317,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "event_type": "vulnerability_action.created",
-        "id": "demo-001",
+        "id": "id-001",
         "lead_time_seconds": 2,
         "min_severity": "high",
-        "name": "Demo record",
+        "name": "Platform Security",
         "revision": 1,
         "team_ids": [
           "demo"
@@ -6342,10 +6342,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "event_type": "vulnerability_action.created",
-        "id": "demo-001",
+        "id": "id-001",
         "lead_time_seconds": 2,
         "min_severity": "high",
-        "name": "Demo record",
+        "name": "Platform Security",
         "revision": 1,
         "team_ids": [
           "demo"
@@ -6375,10 +6375,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "demo"
     ],
     "event_type": "vulnerability_action.created",
-    "id": "demo-001",
+    "id": "id-001",
     "lead_time_seconds": 2,
     "min_severity": "high",
-    "name": "Demo record",
+    "name": "Platform Security",
     "revision": 1,
     "team_ids": [
       "demo",
@@ -6395,10 +6395,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "created_by": "demo",
         "event_type": "demo",
         "family": "chat",
-        "id": "demo-001",
+        "id": "id-001",
         "latest_version": 1,
         "locale": "en",
-        "name": "Demo record",
+        "name": "Platform Security",
         "revision": 1,
         "status": "active",
         "tenant_id": "demo-tenant",
@@ -6411,10 +6411,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "created_by": "demo",
         "event_type": "demo",
         "family": "chat",
-        "id": "demo-001",
+        "id": "id-002",
         "latest_version": 1,
         "locale": "en",
-        "name": "Demo record",
+        "name": "Payments Core",
         "revision": 1,
         "status": "active",
         "tenant_id": "demo-tenant",
@@ -6427,10 +6427,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "created_by": "demo",
         "event_type": "demo",
         "family": "chat",
-        "id": "demo-001",
+        "id": "id-003",
         "latest_version": 1,
         "locale": "en",
-        "name": "Demo record",
+        "name": "Edge Delivery",
         "revision": 1,
         "status": "active",
         "tenant_id": "demo-tenant",
@@ -6442,25 +6442,25 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/notifications/templates/preview/events": {
     "items": [
       {
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-001",
         "event_type": "demo",
-        "id": "demo-001",
+        "id": "id-001",
         "occurred_at": "2026-10-03T09:00:00Z",
         "severity": "high",
         "subject_kind": "demo"
       },
       {
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-002",
         "event_type": "demo",
-        "id": "demo-001",
+        "id": "id-002",
         "occurred_at": "2026-10-03T09:00:00Z",
         "severity": "high",
         "subject_kind": "demo"
       },
       {
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-003",
         "event_type": "demo",
-        "id": "demo-001",
+        "id": "id-003",
         "occurred_at": "2026-10-03T09:00:00Z",
         "severity": "high",
         "subject_kind": "demo"
@@ -6475,17 +6475,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "active_version": 1,
-    "archived_template_id": "demo-001",
+    "archived_template_id": "archived-template-001",
     "created_at": "2026-10-03T09:00:00Z",
     "created_by": "demo",
     "event_type": "demo",
     "family": "chat",
-    "id": "demo-001",
+    "id": "id-001",
     "latest": {
       "checksum": "demo",
       "created_at": "2026-10-03T09:00:00Z",
@@ -6493,13 +6493,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "latest_version": 1,
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "revision": 1,
     "status": "active",
     "tenant_id": "demo-tenant",
@@ -6515,7 +6515,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "fields": {
           "demo": "demo"
         },
-        "template_id": "demo-001",
+        "template_id": "template-001",
         "tenant_id": "demo-tenant",
         "version": 1
       },
@@ -6526,7 +6526,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "fields": {
           "demo": "demo"
         },
-        "template_id": "demo-001",
+        "template_id": "template-002",
         "tenant_id": "demo-tenant",
         "version": 1
       },
@@ -6537,7 +6537,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "fields": {
           "demo": "demo"
         },
-        "template_id": "demo-001",
+        "template_id": "template-003",
         "tenant_id": "demo-tenant",
         "version": 1
       }
@@ -6547,22 +6547,22 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "items": [
       {
         "mapping": {
-          "asset_id": "demo-001",
-          "team_id": "demo-001"
+          "asset_id": "asset-001",
+          "team_id": "team-001"
         },
         "revision": 1
       },
       {
         "mapping": {
-          "asset_id": "demo-001",
-          "team_id": "demo-001"
+          "asset_id": "asset-002",
+          "team_id": "team-002"
         },
         "revision": 1
       },
       {
         "mapping": {
-          "asset_id": "demo-001",
-          "team_id": "demo-001"
+          "asset_id": "asset-003",
+          "team_id": "team-003"
         },
         "revision": 1
       }
@@ -6584,10 +6584,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "manual_generation": 1,
           "mode": "auto",
           "revision": 1,
-          "team_id": "demo-001"
+          "team_id": "team-001"
         },
-        "engagement_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-001",
+        "id": "id-001",
         "kind": "demo",
         "reason": "Seeded playground record, not a real result.",
         "remediate_by": "2026-10-03T09:00:00Z",
@@ -6595,7 +6595,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "severity": "high",
         "sla_status": "active",
         "status": "active",
-        "title": "Demo record",
+        "title": "Platform Security",
         "version": 1
       },
       {
@@ -6605,10 +6605,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "manual_generation": 1,
           "mode": "auto",
           "revision": 1,
-          "team_id": "demo-001"
+          "team_id": "team-002"
         },
-        "engagement_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-002",
+        "id": "id-002",
         "kind": "demo",
         "reason": "Seeded playground record, not a real result.",
         "remediate_by": "2026-10-03T09:00:00Z",
@@ -6616,7 +6616,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "severity": "high",
         "sla_status": "active",
         "status": "active",
-        "title": "Demo record",
+        "title": "Payments Core",
         "version": 1
       },
       {
@@ -6626,10 +6626,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "manual_generation": 1,
           "mode": "auto",
           "revision": 1,
-          "team_id": "demo-001"
+          "team_id": "team-003"
         },
-        "engagement_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-003",
+        "id": "id-003",
         "kind": "demo",
         "reason": "Seeded playground record, not a real result.",
         "remediate_by": "2026-10-03T09:00:00Z",
@@ -6637,7 +6637,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "severity": "high",
         "sla_status": "active",
         "status": "active",
-        "title": "Demo record",
+        "title": "Edge Delivery",
         "version": 1
       }
     ],
@@ -6651,7 +6651,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "owner": "demo.operator",
           "repository": "demo",
           "suggested_user_id": "demo.operator",
-          "team_id": "demo-001"
+          "team_id": "team-001"
         },
         "revision": 1
       },
@@ -6660,7 +6660,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "owner": "demo.operator",
           "repository": "demo",
           "suggested_user_id": "demo.operator",
-          "team_id": "demo-001"
+          "team_id": "team-002"
         },
         "revision": 1
       },
@@ -6669,7 +6669,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "owner": "demo.operator",
           "repository": "demo",
           "suggested_user_id": "demo.operator",
-          "team_id": "demo-001"
+          "team_id": "team-003"
         },
         "revision": 1
       }
@@ -6680,24 +6680,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "items": [
       {
         "active_version": 1,
-        "engagement_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-001",
+        "id": "id-001",
         "latest_version": 1,
         "repository": "demo",
         "revision": 1
       },
       {
         "active_version": 1,
-        "engagement_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-002",
+        "id": "id-002",
         "latest_version": 1,
         "repository": "demo",
         "revision": 1
       },
       {
         "active_version": 1,
-        "engagement_id": "demo-001",
-        "id": "demo-001",
+        "engagement_id": "engagement-003",
+        "id": "id-003",
         "latest_version": 1,
         "repository": "demo",
         "revision": 1
@@ -6707,8 +6707,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   },
   "GET /api/v1/ownership/policies/{pid}": {
     "active_version": 1,
-    "engagement_id": "demo-001",
-    "id": "demo-001",
+    "engagement_id": "engagement-001",
+    "id": "id-001",
     "latest_version": 1,
     "repository": "demo",
     "revision": 1
@@ -6718,33 +6718,33 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "policy": {
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "engagement_id": "demo-001",
-      "policy_id": "demo-001",
+      "engagement_id": "engagement-001",
+      "policy_id": "policy-001",
       "repository": "demo",
-      "snapshot_id": "demo-001",
+      "snapshot_id": "snapshot-001",
       "version": 1
     }
   },
   "GET /api/v1/ownership/runs/{rid}": {
     "created_at": "2026-10-03T09:00:00Z",
     "cutoff": "2026-10-03T09:00:00Z",
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "filter": {
       "assignee_id": "demo.operator",
       "due_before": "2026-10-03T09:00:00Z",
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-001",
       "kind": "demo",
       "my_teams": true,
       "severity": "high",
       "sla_status": "open",
       "status": "active",
-      "team_id": "demo-001",
+      "team_id": "team-001",
       "unresolved": true
     },
-    "id": "demo-001",
+    "id": "id-001",
     "mode": "preview",
     "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-    "policy_id": "demo-001",
+    "policy_id": "policy-001",
     "policy_revision": 1,
     "policy_version": 1,
     "processed": 2,
@@ -6755,8 +6755,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/ownership/runs/{rid}/items": {
     "items": [
       {
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
+        "engagement_id": "engagement-001",
+        "finding_id": "finding-001",
         "finding_version": 1,
         "manual_generation": 1,
         "outcome": "evaluated",
@@ -6780,15 +6780,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "reason": "Seeded playground record, not a real result.",
           "resolution": "resolved",
-          "rule_id": "demo-001",
+          "rule_id": "rule-001",
           "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-          "team_id": "demo-001"
+          "team_id": "team-001"
         },
-        "run_id": "demo-001"
+        "run_id": "run-001"
       },
       {
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
+        "engagement_id": "engagement-002",
+        "finding_id": "finding-002",
         "finding_version": 1,
         "manual_generation": 1,
         "outcome": "evaluated",
@@ -6812,15 +6812,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "reason": "Seeded playground record, not a real result.",
           "resolution": "resolved",
-          "rule_id": "demo-001",
+          "rule_id": "rule-002",
           "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-          "team_id": "demo-001"
+          "team_id": "team-002"
         },
-        "run_id": "demo-001"
+        "run_id": "run-002"
       },
       {
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
+        "engagement_id": "engagement-003",
+        "finding_id": "finding-003",
         "finding_version": 1,
         "manual_generation": 1,
         "outcome": "evaluated",
@@ -6844,11 +6844,11 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "reason": "Seeded playground record, not a real result.",
           "resolution": "resolved",
-          "rule_id": "demo-001",
+          "rule_id": "rule-003",
           "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-          "team_id": "demo-001"
+          "team_id": "team-003"
         },
-        "run_id": "demo-001"
+        "run_id": "run-003"
       }
     ],
     "next": "demo"
@@ -6867,9 +6867,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "line": 2
           }
         ],
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-001",
         "file_path": "src/service/handler.go",
-        "id": "demo-001",
+        "id": "id-001",
         "parser_version": "1.4.2",
         "repository": "demo",
         "source_revision": "demo",
@@ -6887,9 +6887,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "line": 2
           }
         ],
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-002",
         "file_path": "src/service/handler.go",
-        "id": "demo-001",
+        "id": "id-002",
         "parser_version": "1.4.2",
         "repository": "demo",
         "source_revision": "demo",
@@ -6907,9 +6907,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "line": 2
           }
         ],
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-003",
         "file_path": "src/service/handler.go",
-        "id": "demo-001",
+        "id": "id-003",
         "parser_version": "1.4.2",
         "repository": "demo",
         "source_revision": "demo",
@@ -6938,9 +6938,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "line": 2
       }
     ],
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "file_path": "src/service/handler.go",
-    "id": "demo-001",
+    "id": "id-001",
     "parser_version": "1.4.2",
     "repository": "demo",
     "source_revision": "demo",
@@ -6951,8 +6951,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "archived": false,
         "created_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
-        "name": "Demo record",
+        "id": "id-001",
+        "name": "Platform Security",
         "revision": 1,
         "slug": "demo-key",
         "updated_at": "2026-10-03T09:00:00Z"
@@ -6960,8 +6960,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "archived": false,
         "created_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
-        "name": "Demo record",
+        "id": "id-002",
+        "name": "Payments Core",
         "revision": 1,
         "slug": "demo-key",
         "updated_at": "2026-10-03T09:00:00Z"
@@ -6969,8 +6969,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "archived": false,
         "created_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
-        "name": "Demo record",
+        "id": "id-003",
+        "name": "Edge Delivery",
         "revision": 1,
         "slug": "demo-key",
         "updated_at": "2026-10-03T09:00:00Z"
@@ -6981,8 +6981,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/ownership/teams/{tid}": {
     "archived": false,
     "created_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "revision": 1,
     "slug": "demo-key",
     "updated_at": "2026-10-03T09:00:00Z"
@@ -6991,17 +6991,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "items": [
       {
         "created_at": "2026-10-03T09:00:00Z",
-        "team_id": "demo-001",
+        "team_id": "team-001",
         "user_id": "demo.operator"
       },
       {
         "created_at": "2026-10-03T09:00:00Z",
-        "team_id": "demo-001",
+        "team_id": "team-002",
         "user_id": "demo.operator"
       },
       {
         "created_at": "2026-10-03T09:00:00Z",
-        "team_id": "demo-001",
+        "team_id": "team-003",
         "user_id": "demo.operator"
       }
     ],
@@ -7010,7 +7010,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/projects/{key}/analyses/{analysisID}/behavioral-hotspots": {
     "analysis": {
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
+      "id": "id-001",
       "source_commit": "9f1c2b7d4e5a6f8091a2b3c4d5e6f708192a3b4c",
       "source_ref": "main"
     },
@@ -7044,7 +7044,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "path": "src/service/handler.go",
     "project": {
       "key": "demo-key",
-      "name": "Demo record"
+      "name": "Platform Security"
     },
     "reached_root": true,
     "requested_commits": 2,
@@ -7077,7 +7077,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       }
     },
     "diff": {
-      "analysis_id": "demo-001",
+      "analysis_id": "analysis-001",
       "base": {
         "artifact_digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
         "commit": "9f1c2b7d4e5a6f8091a2b3c4d5e6f708192a3b4c",
@@ -7155,7 +7155,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     }
   },
   "GET /api/v1/projects/{key}/analyses/{id}/code/file": {
-    "analysis_id": "demo-001",
+    "analysis_id": "analysis-001",
     "base": {
       "artifact_digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "commit": "9f1c2b7d4e5a6f8091a2b3c4d5e6f708192a3b4c",
@@ -7184,7 +7184,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "current_status": "active",
         "detection_status": "active",
-        "id": "demo-001",
+        "id": "id-001",
         "kind": "issue",
         "location": {
           "end_column": 2,
@@ -7196,14 +7196,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "message": "Seeded playground record, not a real result.",
         "new": true,
         "rule_key": "demo-key",
-        "rule_name": "Demo record",
+        "rule_name": "Platform Security",
         "severity": "high",
         "type": "bug"
       },
       {
         "current_status": "active",
         "detection_status": "active",
-        "id": "demo-001",
+        "id": "id-002",
         "kind": "issue",
         "location": {
           "end_column": 2,
@@ -7215,14 +7215,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "message": "Seeded playground record, not a real result.",
         "new": true,
         "rule_key": "demo-key",
-        "rule_name": "Demo record",
+        "rule_name": "Payments Core",
         "severity": "high",
         "type": "bug"
       },
       {
         "current_status": "active",
         "detection_status": "active",
-        "id": "demo-001",
+        "id": "id-003",
         "kind": "issue",
         "location": {
           "end_column": 2,
@@ -7234,7 +7234,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "message": "Seeded playground record, not a real result.",
         "new": true,
         "rule_key": "demo-key",
-        "rule_name": "Demo record",
+        "rule_name": "Edge Delivery",
         "severity": "high",
         "type": "bug"
       }
@@ -7272,7 +7272,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "total_lines": 2
   },
   "GET /api/v1/projects/{key}/analyses/{id}/code/files": {
-    "analysis_id": "demo-001",
+    "analysis_id": "analysis-001",
     "base": {
       "artifact_digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "commit": "9f1c2b7d4e5a6f8091a2b3c4d5e6f708192a3b4c",
@@ -7344,7 +7344,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ]
   },
   "GET /api/v1/projects/{key}/dependency-graph": {
-    "analysis_id": "demo-001",
+    "analysis_id": "analysis-001",
     "edges": [
       {
         "from": "demo",
@@ -7363,17 +7363,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "depth": 2,
         "direct": true,
-        "id": "demo-001",
+        "id": "id-001",
         "license_risk": true,
         "license_verdict": "allow",
         "licenses": [
           {
             "category": "permissive",
-            "id": "demo-001",
-            "name": "Demo record"
+            "id": "id-001",
+            "name": "Platform Security"
           }
         ],
-        "name": "Demo record",
+        "name": "Platform Security",
         "purl": "https://synapse.example/demo",
         "reachability": "demo",
         "scope": "demo",
@@ -7381,7 +7381,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "vulnerabilities": [
           {
             "fixed_version": "1.4.2",
-            "id": "demo-001",
+            "id": "id-001",
             "severity": "high",
             "source": "demo"
           }
@@ -7392,17 +7392,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "depth": 2,
         "direct": true,
-        "id": "demo-001",
+        "id": "id-002",
         "license_risk": true,
         "license_verdict": "allow",
         "licenses": [
           {
             "category": "permissive",
-            "id": "demo-001",
-            "name": "Demo record"
+            "id": "id-001",
+            "name": "Platform Security"
           }
         ],
-        "name": "Demo record",
+        "name": "Payments Core",
         "purl": "https://synapse.example/demo",
         "reachability": "demo",
         "scope": "demo",
@@ -7410,7 +7410,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "vulnerabilities": [
           {
             "fixed_version": "1.4.2",
-            "id": "demo-001",
+            "id": "id-001",
             "severity": "high",
             "source": "demo"
           }
@@ -7421,17 +7421,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "depth": 2,
         "direct": true,
-        "id": "demo-001",
+        "id": "id-003",
         "license_risk": true,
         "license_verdict": "allow",
         "licenses": [
           {
             "category": "permissive",
-            "id": "demo-001",
-            "name": "Demo record"
+            "id": "id-001",
+            "name": "Platform Security"
           }
         ],
-        "name": "Demo record",
+        "name": "Edge Delivery",
         "purl": "https://synapse.example/demo",
         "reachability": "demo",
         "scope": "demo",
@@ -7439,7 +7439,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "vulnerabilities": [
           {
             "fixed_version": "1.4.2",
-            "id": "demo-001",
+            "id": "id-001",
             "severity": "high",
             "source": "demo"
           }
@@ -7480,56 +7480,56 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "cwe": "demo",
         "description": "Seeded playground record, not a real result.",
         "finding_kind": "demo",
-        "first_seen_analysis_id": "demo-001",
+        "first_seen_analysis_id": "first-seen-analysis-001",
         "first_seen_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
-        "last_seen_analysis_id": "demo-001",
+        "id": "id-001",
+        "last_seen_analysis_id": "last-seen-analysis-001",
         "last_seen_at": "2026-10-03T09:00:00Z",
         "location": "src/service/handler.go",
         "rule_key": "demo-key",
-        "rule_name": "Demo record",
+        "rule_name": "Platform Security",
         "severity": "high",
         "status": "to_review",
-        "title": "Demo record",
+        "title": "Platform Security",
         "version": 1
       },
       {
         "cwe": "demo",
         "description": "Seeded playground record, not a real result.",
         "finding_kind": "demo",
-        "first_seen_analysis_id": "demo-001",
+        "first_seen_analysis_id": "first-seen-analysis-002",
         "first_seen_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
-        "last_seen_analysis_id": "demo-001",
+        "id": "id-002",
+        "last_seen_analysis_id": "last-seen-analysis-002",
         "last_seen_at": "2026-10-03T09:00:00Z",
         "location": "src/service/handler.go",
         "rule_key": "demo-key",
-        "rule_name": "Demo record",
+        "rule_name": "Payments Core",
         "severity": "high",
         "status": "to_review",
-        "title": "Demo record",
+        "title": "Payments Core",
         "version": 1
       },
       {
         "cwe": "demo",
         "description": "Seeded playground record, not a real result.",
         "finding_kind": "demo",
-        "first_seen_analysis_id": "demo-001",
+        "first_seen_analysis_id": "first-seen-analysis-003",
         "first_seen_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
-        "last_seen_analysis_id": "demo-001",
+        "id": "id-003",
+        "last_seen_analysis_id": "last-seen-analysis-003",
         "last_seen_at": "2026-10-03T09:00:00Z",
         "location": "src/service/handler.go",
         "rule_key": "demo-key",
-        "rule_name": "Demo record",
+        "rule_name": "Edge Delivery",
         "severity": "high",
         "status": "to_review",
-        "title": "Demo record",
+        "title": "Edge Delivery",
         "version": 1
       }
     ],
     "next": {
-      "before_id": "demo-001",
+      "before_id": "before-001",
       "before_last_seen_at": "2026-10-03T09:00:00Z"
     },
     "summary": {
@@ -7543,17 +7543,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "cwe": "demo",
     "description": "Seeded playground record, not a real result.",
     "finding_kind": "demo",
-    "first_seen_analysis_id": "demo-001",
+    "first_seen_analysis_id": "first-seen-analysis-001",
     "first_seen_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
-    "last_seen_analysis_id": "demo-001",
+    "id": "id-001",
+    "last_seen_analysis_id": "last-seen-analysis-001",
     "last_seen_at": "2026-10-03T09:00:00Z",
     "location": "src/service/handler.go",
     "rule_key": "demo-key",
-    "rule_name": "Demo record",
+    "rule_name": "Platform Security",
     "severity": "high",
     "status": "to_review",
-    "title": "Demo record",
+    "title": "Platform Security",
     "version": 1
   },
   "GET /api/v1/projects/{key}/hotspots/{id}/history": [
@@ -7561,7 +7561,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "actor": "demo.operator",
       "created_at": "2026-10-03T09:00:00Z",
       "from": "demo",
-      "id": "demo-001",
+      "id": "id-001",
       "previous_version": 1,
       "rationale": "demo",
       "to": "demo",
@@ -7571,7 +7571,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "actor": "demo.operator",
       "created_at": "2026-10-03T09:00:00Z",
       "from": "demo",
-      "id": "demo-001",
+      "id": "id-002",
       "previous_version": 1,
       "rationale": "demo",
       "to": "demo",
@@ -7581,7 +7581,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "actor": "demo.operator",
       "created_at": "2026-10-03T09:00:00Z",
       "from": "demo",
-      "id": "demo-001",
+      "id": "id-003",
       "previous_version": 1,
       "rationale": "demo",
       "to": "demo",
@@ -7591,7 +7591,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/projects/{key}/measures": {
     "analysis": {
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
+      "id": "id-001",
       "source_commit": "9f1c2b7d4e5a6f8091a2b3c4d5e6f708192a3b4c",
       "source_ref": "main"
     },
@@ -7614,7 +7614,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           },
           "complexity": {
             "baseline": {
-              "analysis_id": "demo-001",
+              "analysis_id": "analysis-001",
               "created_at": "2026-10-03T09:00:00Z",
               "source_ref": "main"
             },
@@ -7743,7 +7743,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           },
           "kind": "project",
           "language": "demo",
-          "name": "Demo record",
+          "name": "Platform Security",
           "path": "src/service/handler.go",
           "ratings": {
             "maintainability": {
@@ -7806,7 +7806,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           },
           "complexity": {
             "baseline": {
-              "analysis_id": "demo-001",
+              "analysis_id": "analysis-002",
               "created_at": "2026-10-03T09:00:00Z",
               "source_ref": "main"
             },
@@ -7935,7 +7935,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           },
           "kind": "project",
           "language": "demo",
-          "name": "Demo record",
+          "name": "Payments Core",
           "path": "src/service/handler.go",
           "ratings": {
             "maintainability": {
@@ -7998,7 +7998,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           },
           "complexity": {
             "baseline": {
-              "analysis_id": "demo-001",
+              "analysis_id": "analysis-003",
               "created_at": "2026-10-03T09:00:00Z",
               "source_ref": "main"
             },
@@ -8127,7 +8127,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           },
           "kind": "project",
           "language": "demo",
-          "name": "Demo record",
+          "name": "Edge Delivery",
           "path": "src/service/handler.go",
           "ratings": {
             "maintainability": {
@@ -8197,7 +8197,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       "complexity": {
         "baseline": {
-          "analysis_id": "demo-001",
+          "analysis_id": "analysis-001",
           "created_at": "2026-10-03T09:00:00Z",
           "source_ref": "main"
         },
@@ -8326,7 +8326,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       "kind": "project",
       "language": "demo",
-      "name": "Demo record",
+      "name": "Platform Security",
       "path": "src/service/handler.go",
       "ratings": {
         "maintainability": {
@@ -8375,7 +8375,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "path": "src/service/handler.go",
     "project": {
       "key": "demo-key",
-      "name": "Demo record"
+      "name": "Platform Security"
     },
     "state": "analyzed"
   },
@@ -8458,7 +8458,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     "project": {
       "key": "demo-key",
-      "name": "Demo record"
+      "name": "Platform Security"
     },
     "state": "not_analyzed"
   },
@@ -8520,7 +8520,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "detection": "ast",
       "key": "demo-key",
       "language": "demo",
-      "name": "Demo record",
+      "name": "Platform Security",
       "owasp": [
         "demo",
         "demo",
@@ -8550,7 +8550,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "detection": "ast",
       "key": "demo-key",
       "language": "demo",
-      "name": "Demo record",
+      "name": "Payments Core",
       "owasp": [
         "demo",
         "demo",
@@ -8580,7 +8580,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "detection": "ast",
       "key": "demo-key",
       "language": "demo",
-      "name": "Demo record",
+      "name": "Edge Delivery",
       "owasp": [
         "demo",
         "demo",
@@ -8612,7 +8612,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "detection": "ast",
     "key": "demo-key",
     "language": "demo",
-    "name": "Demo record",
+    "name": "Platform Security",
     "noncompliant_example": "demo",
     "owasp": [
       "demo",
@@ -8640,10 +8640,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {},
       {}
     ],
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "error": "demo",
     "finished_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "kind": "demo",
     "progress": 2,
     "source_package": {
@@ -8651,13 +8651,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "associated_by": "demo",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-001",
       "filename": "demo",
-      "reused_from_version_id": "demo-001",
+      "reused_from_version_id": "reused-from-version-001",
       "sha256": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "size": 2048,
       "tenant_id": "demo-tenant",
-      "version_id": "demo-001"
+      "version_id": "version-001"
     },
     "stage": "demo",
     "started_at": "2026-10-03T09:00:00Z",
@@ -8674,9 +8674,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "data_class": "signal",
         "enabled": true,
         "generation": 1,
-        "id": "demo-001",
+        "id": "id-001",
         "indexer_ack_supported": true,
-        "name": "Demo record",
+        "name": "Platform Security",
         "origin": "demo",
         "paused": true,
         "provider": "splunk_hec",
@@ -8694,9 +8694,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "data_class": "signal",
         "enabled": true,
         "generation": 1,
-        "id": "demo-001",
+        "id": "id-002",
         "indexer_ack_supported": true,
-        "name": "Demo record",
+        "name": "Payments Core",
         "origin": "demo",
         "paused": true,
         "provider": "splunk_hec",
@@ -8714,9 +8714,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "data_class": "signal",
         "enabled": true,
         "generation": 1,
-        "id": "demo-001",
+        "id": "id-003",
         "indexer_ack_supported": true,
-        "name": "Demo record",
+        "name": "Edge Delivery",
         "origin": "demo",
         "paused": true,
         "provider": "splunk_hec",
@@ -8736,9 +8736,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "data_class": "signal",
     "enabled": true,
     "generation": 1,
-    "id": "demo-001",
+    "id": "id-001",
     "indexer_ack_supported": true,
-    "name": "Demo record",
+    "name": "Platform Security",
     "origin": "demo",
     "paused": true,
     "provider": "splunk_hec",
@@ -8792,9 +8792,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "data_class": "signal",
       "enabled": true,
       "generation": 1,
-      "id": "demo-001",
+      "id": "id-001",
       "indexer_ack_supported": true,
-      "name": "Demo record",
+      "name": "Platform Security",
       "origin": "demo",
       "paused": true,
       "provider": "splunk_hec",
@@ -9020,38 +9020,38 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     {
       "createdAt": "2026-10-03T09:00:00Z",
       "disabled": false,
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "role": "admin"
     },
     {
       "createdAt": "2026-10-03T09:00:00Z",
       "disabled": false,
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-002",
+      "name": "Payments Core",
       "role": "admin"
     },
     {
       "createdAt": "2026-10-03T09:00:00Z",
       "disabled": false,
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-003",
+      "name": "Edge Delivery",
       "role": "admin"
     }
   ],
   "GET /api/v1/users/picker": {
     "items": [
       {
-        "id": "demo-001",
-        "name": "Demo record"
+        "id": "id-001",
+        "name": "Platform Security"
       },
       {
-        "id": "demo-001",
-        "name": "Demo record"
+        "id": "id-002",
+        "name": "Payments Core"
       },
       {
-        "id": "demo-001",
-        "name": "Demo record"
+        "id": "id-003",
+        "name": "Edge Delivery"
       }
     ],
     "next": "demo"
@@ -9060,21 +9060,21 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "items": [
       {
         "createdAt": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-001",
         "issuer": "demo",
         "subject": "demo",
         "userId": "demo.operator"
       },
       {
         "createdAt": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-002",
         "issuer": "demo",
         "subject": "demo",
         "userId": "demo.operator"
       },
       {
         "createdAt": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-003",
         "issuer": "demo",
         "subject": "demo",
         "userId": "demo.operator"
@@ -9087,18 +9087,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "acknowledged_at": "2026-10-03T09:00:00Z",
         "acknowledged_by": "demo",
         "created_at": "2026-10-03T09:00:00Z",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
-        "id": "demo-001",
-        "occurrence_id": "demo-001",
+        "engagement_id": "engagement-001",
+        "finding_id": "finding-001",
+        "id": "id-001",
+        "occurrence_id": "occurrence-001",
         "reason_codes": [
           "demo"
         ],
         "resolved_at": "2026-10-03T09:00:00Z",
         "resolved_by": "demo",
         "status": "open",
-        "title": "Demo record",
-        "transition_id": "demo-001",
+        "title": "Platform Security",
+        "transition_id": "transition-001",
         "type": "new_exposure",
         "updated_at": "2026-10-03T09:00:00Z"
       },
@@ -9106,18 +9106,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "acknowledged_at": "2026-10-03T09:00:00Z",
         "acknowledged_by": "demo",
         "created_at": "2026-10-03T09:00:00Z",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
-        "id": "demo-001",
-        "occurrence_id": "demo-001",
+        "engagement_id": "engagement-002",
+        "finding_id": "finding-002",
+        "id": "id-002",
+        "occurrence_id": "occurrence-002",
         "reason_codes": [
           "demo"
         ],
         "resolved_at": "2026-10-03T09:00:00Z",
         "resolved_by": "demo",
         "status": "open",
-        "title": "Demo record",
-        "transition_id": "demo-001",
+        "title": "Payments Core",
+        "transition_id": "transition-002",
         "type": "new_exposure",
         "updated_at": "2026-10-03T09:00:00Z"
       },
@@ -9125,25 +9125,25 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "acknowledged_at": "2026-10-03T09:00:00Z",
         "acknowledged_by": "demo",
         "created_at": "2026-10-03T09:00:00Z",
-        "engagement_id": "demo-001",
-        "finding_id": "demo-001",
-        "id": "demo-001",
-        "occurrence_id": "demo-001",
+        "engagement_id": "engagement-003",
+        "finding_id": "finding-003",
+        "id": "id-003",
+        "occurrence_id": "occurrence-003",
         "reason_codes": [
           "demo"
         ],
         "resolved_at": "2026-10-03T09:00:00Z",
         "resolved_by": "demo",
         "status": "open",
-        "title": "Demo record",
-        "transition_id": "demo-001",
+        "title": "Edge Delivery",
+        "transition_id": "transition-003",
         "type": "new_exposure",
         "updated_at": "2026-10-03T09:00:00Z"
       }
     ],
     "next": {
       "before_created_at": "2026-10-03T09:00:00Z",
-      "before_id": "demo-001"
+      "before_id": "before-001"
     }
   },
   "GET /api/v1/vulnerability/advisories": {
@@ -9400,7 +9400,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "AdvisoryID": "demo",
         "AdvisoryRevision": 1,
         "EngagementID": "demo",
-        "ID": "demo-001",
+        "ID": "ID-001",
         "State": "detected",
         "TenantID": "demo-tenant",
         "UpdatedAt": "2026-10-03T09:00:00Z"
@@ -9409,7 +9409,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "AdvisoryID": "demo",
         "AdvisoryRevision": 1,
         "EngagementID": "demo",
-        "ID": "demo-001",
+        "ID": "ID-002",
         "State": "detected",
         "TenantID": "demo-tenant",
         "UpdatedAt": "2026-10-03T09:00:00Z"
@@ -9418,14 +9418,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "AdvisoryID": "demo",
         "AdvisoryRevision": 1,
         "EngagementID": "demo",
-        "ID": "demo-001",
+        "ID": "ID-003",
         "State": "detected",
         "TenantID": "demo-tenant",
         "UpdatedAt": "2026-10-03T09:00:00Z"
       }
     ],
     "next": {
-      "before_id": "demo-001",
+      "before_id": "before-001",
       "before_time": "2026-10-03T09:00:00Z"
     }
   },
@@ -9442,7 +9442,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       }
     ],
     "next": {
-      "before_id": "demo-001",
+      "before_id": "before-001",
       "before_time": "2026-10-03T09:00:00Z"
     }
   },
@@ -9459,7 +9459,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       }
     ],
     "next": {
-      "before_id": "demo-001",
+      "before_id": "before-001",
       "before_time": "2026-10-03T09:00:00Z"
     }
   },
@@ -9497,9 +9497,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     "created_at": "2026-10-03T09:00:00Z",
     "dry_run": true,
-    "durable_job_id": "demo-001",
+    "durable_job_id": "durable-job-001",
     "finished_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "scope": "tenant",
     "snapshot_at": "2026-10-03T09:00:00Z",
     "started_at": "2026-10-03T09:00:00Z",
@@ -9517,8 +9517,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "details": {
           "demo": null
         },
-        "engagement_id": "demo-001",
-        "run_id": "demo-001",
+        "engagement_id": "engagement-001",
+        "run_id": "run-001",
         "tenant_id": "demo-tenant"
       },
       {
@@ -9529,8 +9529,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "details": {
           "demo": null
         },
-        "engagement_id": "demo-001",
-        "run_id": "demo-001",
+        "engagement_id": "engagement-002",
+        "run_id": "run-002",
         "tenant_id": "demo-tenant"
       },
       {
@@ -9541,8 +9541,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "details": {
           "demo": null
         },
-        "engagement_id": "demo-001",
-        "run_id": "demo-001",
+        "engagement_id": "engagement-003",
+        "run_id": "run-003",
         "tenant_id": "demo-tenant"
       }
     ],
@@ -9550,7 +9550,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "advisory_id": "CVE-2026-10101",
       "class": "missing_occurrence",
       "component_fingerprint": "demo",
-      "engagement_id": "demo-001"
+      "engagement_id": "engagement-001"
     }
   },
   "GET /api/v1/vulnerability/sources": [
@@ -9568,9 +9568,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "health": {
         "demo": null
       },
-      "id": "demo-001",
+      "id": "id-001",
       "key": "demo-key",
-      "name": "Demo record",
+      "name": "Platform Security",
       "stale_after_seconds": 2,
       "sync_mode": "incremental",
       "updated_at": "2026-10-03T09:00:00Z",
@@ -9590,9 +9590,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "health": {
         "demo": null
       },
-      "id": "demo-001",
+      "id": "id-002",
       "key": "demo-key",
-      "name": "Demo record",
+      "name": "Payments Core",
       "stale_after_seconds": 2,
       "sync_mode": "incremental",
       "updated_at": "2026-10-03T09:00:00Z",
@@ -9612,9 +9612,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "health": {
         "demo": null
       },
-      "id": "demo-001",
+      "id": "id-003",
       "key": "demo-key",
-      "name": "Demo record",
+      "name": "Edge Delivery",
       "stale_after_seconds": 2,
       "sync_mode": "incremental",
       "updated_at": "2026-10-03T09:00:00Z",
@@ -9649,14 +9649,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         },
         "created_at": "2026-10-03T09:00:00Z",
         "dead_lettered": true,
-        "durable_job_id": "demo-001",
+        "durable_job_id": "durable-job-001",
         "error_samples": [
           "demo"
         ],
         "finished_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-001",
         "mode": "incremental",
-        "source_id": "demo-001",
+        "source_id": "source-001",
         "started_at": "2026-10-03T09:00:00Z",
         "state": "succeeded",
         "trigger": "demo",
@@ -9688,14 +9688,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         },
         "created_at": "2026-10-03T09:00:00Z",
         "dead_lettered": true,
-        "durable_job_id": "demo-001",
+        "durable_job_id": "durable-job-002",
         "error_samples": [
           "demo"
         ],
         "finished_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-002",
         "mode": "incremental",
-        "source_id": "demo-001",
+        "source_id": "source-002",
         "started_at": "2026-10-03T09:00:00Z",
         "state": "succeeded",
         "trigger": "demo",
@@ -9727,14 +9727,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         },
         "created_at": "2026-10-03T09:00:00Z",
         "dead_lettered": true,
-        "durable_job_id": "demo-001",
+        "durable_job_id": "durable-job-003",
         "error_samples": [
           "demo"
         ],
         "finished_at": "2026-10-03T09:00:00Z",
-        "id": "demo-001",
+        "id": "id-003",
         "mode": "incremental",
-        "source_id": "demo-001",
+        "source_id": "source-003",
         "started_at": "2026-10-03T09:00:00Z",
         "state": "succeeded",
         "trigger": "demo",
@@ -9742,7 +9742,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       }
     ],
     "next": {
-      "before_id": "demo-001",
+      "before_id": "before-001",
       "before_time": "2026-10-03T09:00:00Z"
     }
   },
@@ -9782,16 +9782,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     "created_at": "2026-10-03T09:00:00Z",
     "dead_lettered": true,
-    "durable_job_id": "demo-001",
+    "durable_job_id": "durable-job-001",
     "error_samples": [
       "demo",
       "demo",
       "demo"
     ],
     "finished_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "mode": "incremental",
-    "source_id": "demo-001",
+    "source_id": "source-001",
     "started_at": "2026-10-03T09:00:00Z",
     "state": "succeeded",
     "trigger": "demo",
@@ -9811,21 +9811,21 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "Audit": {},
     "Criticality": "high",
     "Description": "Seeded playground record, not a real result.",
-    "ID": "demo-001",
+    "ID": "ID-001",
     "Key": "demo-key",
     "Lifecycle": "active",
     "Metadata": {
       "demo": "demo"
     },
-    "Name": "Demo record",
+    "Name": "Platform Security",
     "Owner": "demo.operator",
     "TenantID": "demo-tenant",
     "Type": "product",
     "Version": 1
   },
   "PATCH /api/v1/engagements/{id}": {
-    "assessment_project_id": "demo-001",
-    "business_asset_id": "demo-001",
+    "assessment_project_id": "assessment-project-001",
+    "business_asset_id": "business-asset-001",
     "client": "demo",
     "created_at": "2026-10-03T09:00:00Z",
     "findings_count": {
@@ -9836,18 +9836,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "medium": 2,
       "total": 3
     },
-    "id": "demo-001",
+    "id": "id-001",
     "last_scan_date": "2026-10-03T09:00:00Z",
     "last_scan_status": "active",
     "live_recon_enabled": true,
-    "name": "Demo record",
+    "name": "Platform Security",
     "offensive_roe": {
       "customer_contact": "demo",
       "emergency_contact": "demo",
       "exclusions_checked": true,
       "risk_ceiling": "high"
     },
-    "project_id": "demo-001",
+    "project_id": "project-001",
     "requires_explicit_execution_authorization": true,
     "roe": {
       "allowed_tool_classes": [
@@ -9927,7 +9927,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ],
     "EngagementID": "demo",
     "EvidenceScore": 7,
-    "ID": "demo-001",
+    "ID": "ID-001",
     "Impact": "demo",
     "KEV": true,
     "Kind": "sca",
@@ -9950,24 +9950,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "demo"
     ],
     "Status": "open",
-    "Title": "Demo record",
+    "Title": "Platform Security",
     "Version": 1,
     "assignee_user_id": "demo.operator",
     "compliance_controls": [
       {
         "Framework": "demo",
-        "ID": "demo-001",
-        "Title": "Demo record"
+        "ID": "ID-001",
+        "Title": "Platform Security"
       },
       {
         "Framework": "demo",
-        "ID": "demo-001",
-        "Title": "Demo record"
+        "ID": "ID-002",
+        "Title": "Payments Core"
       },
       {
         "Framework": "demo",
-        "ID": "demo-001",
-        "Title": "Demo record"
+        "ID": "ID-003",
+        "Title": "Edge Delivery"
       }
     ],
     "reachability_evidence": {
@@ -9994,9 +9994,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "paused_reason": "consecutive_permanent_failures",
       "state": "active"
     },
-    "id": "demo-001",
+    "id": "id-001",
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "recipients": [
       "demo@synapse.example",
       "demo@synapse.example",
@@ -10004,7 +10004,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ],
     "revision": 1,
     "secret_version": 1,
-    "template_id": "demo-001",
+    "template_id": "template-001",
     "type": "webhook",
     "updated_at": "2026-10-03T09:00:00Z"
   },
@@ -10029,10 +10029,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "demo"
     ],
     "event_type": "vulnerability_action.created",
-    "id": "demo-001",
+    "id": "id-001",
     "lead_time_seconds": 2,
     "min_severity": "high",
-    "name": "Demo record",
+    "name": "Platform Security",
     "revision": 1,
     "team_ids": [
       "demo",
@@ -10049,17 +10049,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "active_version": 1,
-    "archived_template_id": "demo-001",
+    "archived_template_id": "archived-template-001",
     "created_at": "2026-10-03T09:00:00Z",
     "created_by": "demo",
     "event_type": "demo",
     "family": "chat",
-    "id": "demo-001",
+    "id": "id-001",
     "latest": {
       "checksum": "demo",
       "created_at": "2026-10-03T09:00:00Z",
@@ -10067,13 +10067,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "latest_version": 1,
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "revision": 1,
     "status": "active",
     "tenant_id": "demo-tenant",
@@ -10083,8 +10083,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "PATCH /api/v1/ownership/teams/{tid}": {
     "archived": false,
     "created_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "revision": 1,
     "slug": "demo-key",
     "updated_at": "2026-10-03T09:00:00Z"
@@ -10097,9 +10097,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "data_class": "signal",
     "enabled": true,
     "generation": 1,
-    "id": "demo-001",
+    "id": "id-001",
     "indexer_ack_supported": true,
-    "name": "Demo record",
+    "name": "Platform Security",
     "origin": "demo",
     "paused": true,
     "provider": "splunk_hec",
@@ -10112,13 +10112,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "PATCH /api/v1/users/{id}": {
     "createdAt": "2026-10-03T09:00:00Z",
     "disabled": false,
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "role": "admin"
   },
   "POST /api/v1/agents/{id}/keys/{keyID}/revoke": {
-    "agent_id": "demo-001",
-    "key_id": "demo-001",
+    "agent_id": "agent-001",
+    "key_id": "key-001",
     "state": "active"
   },
   "POST /api/v1/ai-triage/reviews/{rid}/claim": {
@@ -10129,16 +10129,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "decision_rationale": "demo",
     "dedup_key": "demo-key",
     "driver": "demo",
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "evidence_ref": "main",
-    "finding_id": "demo-001",
+    "finding_id": "finding-001",
     "gate_exempt": true,
-    "id": "demo-001",
+    "id": "id-001",
     "independence_policy": "model_family",
     "owner": "demo.operator",
     "policy_reason": "Seeded playground record, not a real result.",
     "policy_version": "1.4.2",
-    "project_id": "demo-001",
+    "project_id": "project-001",
     "prompt_version": "1.4.2",
     "proposer_model": "demo",
     "proposer_model_family": "demo",
@@ -10149,7 +10149,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "state": "pending",
     "suspected_fp": true,
     "tenant_id": "demo-tenant",
-    "title": "Demo record",
+    "title": "Platform Security",
     "updated_at": "2026-10-03T09:00:00Z",
     "verdict": "demo",
     "verified": true,
@@ -10170,16 +10170,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "decision_rationale": "demo",
     "dedup_key": "demo-key",
     "driver": "demo",
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "evidence_ref": "main",
-    "finding_id": "demo-001",
+    "finding_id": "finding-001",
     "gate_exempt": true,
-    "id": "demo-001",
+    "id": "id-001",
     "independence_policy": "model_family",
     "owner": "demo.operator",
     "policy_reason": "Seeded playground record, not a real result.",
     "policy_version": "1.4.2",
-    "project_id": "demo-001",
+    "project_id": "project-001",
     "prompt_version": "1.4.2",
     "proposer_model": "demo",
     "proposer_model_family": "demo",
@@ -10190,7 +10190,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "state": "pending",
     "suspected_fp": true,
     "tenant_id": "demo-tenant",
-    "title": "Demo record",
+    "title": "Platform Security",
     "updated_at": "2026-10-03T09:00:00Z",
     "verdict": "demo",
     "verified": true,
@@ -10216,13 +10216,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "Audit": {},
     "Criticality": "high",
     "Description": "Seeded playground record, not a real result.",
-    "ID": "demo-001",
+    "ID": "ID-001",
     "Key": "demo-key",
     "Lifecycle": "active",
     "Metadata": {
       "demo": "demo"
     },
-    "Name": "Demo record",
+    "Name": "Platform Security",
     "Owner": "demo.operator",
     "TenantID": "demo-tenant",
     "Type": "product",
@@ -10232,16 +10232,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "comparison": {
       "algorithm_version": 1,
       "attempts": 2,
-      "baseline_snapshot_id": "demo-001",
+      "baseline_snapshot_id": "baseline-snapshot-001",
       "completed_at": "2026-10-03T09:00:00Z",
       "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "coverage_policy_version": 1,
       "created_at": "2026-10-03T09:00:00Z",
-      "current_snapshot_id": "demo-001",
-      "cycle_id": "demo-001",
+      "current_snapshot_id": "current-snapshot-001",
+      "cycle_id": "cycle-001",
       "failure_code": "demo",
       "fingerprint_version": 1,
-      "id": "demo-001",
+      "id": "id-001",
       "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "mode": "lifecycle",
       "risk_model_version": 1,
@@ -10257,8 +10257,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "medium": 2,
           "unknown": 2
         },
-        "baseline_snapshot_id": "demo-001",
-        "comparison_id": "demo-001",
+        "baseline_snapshot_id": "baseline-snapshot-001",
+        "comparison_id": "comparison-001",
         "count_reduction": {
           "denominator": 2,
           "na_reason": "Seeded playground record, not a real result.",
@@ -10274,7 +10274,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "medium": 2,
           "unknown": 2
         },
-        "current_snapshot_id": "demo-001",
+        "current_snapshot_id": "current-snapshot-001",
         "fixed_count": 3,
         "fixed_rate": {
           "denominator": 2,
@@ -10303,66 +10303,66 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "created": true
   },
   "POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/confirm": {
-    "override_event_id": "demo-001",
-    "replacement_comparison_id": "demo-001",
+    "override_event_id": "override-event-001",
+    "replacement_comparison_id": "replacement-comparison-001",
     "replacement_status": "queued",
-    "superseded_comparison_id": "demo-001"
+    "superseded_comparison_id": "superseded-comparison-001"
   },
   "POST /api/v1/assessment-comparisons/{comparisonId}/items/{itemId}/unlink": {
-    "override_event_id": "demo-001",
-    "replacement_comparison_id": "demo-001",
+    "override_event_id": "override-event-001",
+    "replacement_comparison_id": "replacement-comparison-001",
     "replacement_status": "queued",
-    "superseded_comparison_id": "demo-001"
+    "superseded_comparison_id": "superseded-comparison-001"
   },
   "POST /api/v1/assessment-cycles/{cycleId}/archive": {
     "branch_heads": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
         "relationship_version": 1,
         "retest_number": 2
       }
     ],
     "cycle": {
       "active_closure_cycle_version": 1,
-      "active_closure_manifest_id": "demo-001",
+      "active_closure_manifest_id": "active-closure-manifest-001",
       "boundary_kind": "standalone",
-      "business_asset_id": "demo-001",
+      "business_asset_id": "business-asset-001",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "next_retest_number": 2,
-      "project_id": "demo-001",
-      "root_assessment_id": "demo-001",
-      "selected_head_assessment_id": "demo-001",
+      "project_id": "project-001",
+      "root_assessment_id": "root-assessment-001",
+      "selected_head_assessment_id": "selected-head-assessment-001",
       "status": "open",
       "updated_at": "2026-10-03T09:00:00Z",
       "updated_by": "demo",
@@ -10370,35 +10370,35 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     "members": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
         "relationship_version": 1,
         "retest_number": 2
       }
@@ -10407,17 +10407,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/assessment-cycles/{cycleId}/closure-commits": {
     "cycle": {
       "active_closure_cycle_version": 1,
-      "active_closure_manifest_id": "demo-001",
+      "active_closure_manifest_id": "active-closure-manifest-001",
       "boundary_kind": "standalone",
-      "business_asset_id": "demo-001",
+      "business_asset_id": "business-asset-001",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "next_retest_number": 2,
-      "project_id": "demo-001",
-      "root_assessment_id": "demo-001",
-      "selected_head_assessment_id": "demo-001",
+      "project_id": "project-001",
+      "root_assessment_id": "root-assessment-001",
+      "selected_head_assessment_id": "selected-head-assessment-001",
       "status": "open",
       "updated_at": "2026-10-03T09:00:00Z",
       "updated_by": "demo",
@@ -10428,23 +10428,23 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "as_of_at": "2026-10-03T09:00:00Z",
       "canonical_input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "comparison_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "comparison_id": "demo-001",
+      "comparison_id": "comparison-001",
       "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "coverage_decisions": {
         "final": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
         ],
         "initial": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
@@ -10452,15 +10452,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "cycle_id": "demo-001",
+      "cycle_id": "cycle-001",
       "cycle_version": 1,
-      "final_assessment_id": "demo-001",
+      "final_assessment_id": "final-assessment-001",
       "final_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "final_snapshot_id": "demo-001",
+      "final_snapshot_id": "final-snapshot-001",
       "fingerprint_version": "1.4.2",
-      "id": "demo-001",
+      "id": "id-001",
       "initial_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "initial_snapshot_id": "demo-001",
+      "initial_snapshot_id": "initial-snapshot-001",
       "lifecycle": "active",
       "manifest_version": 1,
       "override_blocker_ids": [
@@ -10471,95 +10471,95 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "override_reason": "Seeded playground record, not a real result.",
       "path": [
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-001",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-001"
         },
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-002",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-002"
         },
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-003",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-003"
         }
       ],
       "policy_version": "1.4.2",
       "reason": "Seeded playground record, not a real result.",
       "renderer_contract_version": "1.4.2",
       "risk_version": "1.4.2",
-      "root_assessment_id": "demo-001",
+      "root_assessment_id": "root-assessment-001",
       "sealed_at": "2026-10-03T09:00:00Z",
       "sealed_by": "demo",
       "superseded_at": "2026-10-03T09:00:00Z"
     },
-    "report_job_id": "demo-001"
+    "report_job_id": "report-job-001"
   },
   "POST /api/v1/assessment-cycles/{cycleId}/closure-previews": {
-    "comparison_id": "demo-001",
-    "cycle_id": "demo-001",
+    "comparison_id": "comparison-001",
+    "cycle_id": "cycle-001",
     "cycle_version": 1,
     "expires_at": "2026-10-03T09:00:00Z",
-    "final_assessment_id": "demo-001",
-    "final_snapshot_id": "demo-001",
-    "initial_snapshot_id": "demo-001",
+    "final_assessment_id": "final-assessment-001",
+    "final_snapshot_id": "final-snapshot-001",
+    "initial_snapshot_id": "initial-snapshot-001",
     "manifest_version": 1,
     "path": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_type": "initial",
         "path_position": 2,
         "relationship_version": 1,
         "retest_number": 2,
-        "snapshot_id": "demo-001"
+        "snapshot_id": "snapshot-001"
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_type": "initial",
         "path_position": 2,
         "relationship_version": 1,
         "retest_number": 2,
-        "snapshot_id": "demo-001"
+        "snapshot_id": "snapshot-002"
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_type": "initial",
         "path_position": 2,
         "relationship_version": 1,
         "retest_number": 2,
-        "snapshot_id": "demo-001"
+        "snapshot_id": "snapshot-003"
       }
     ],
     "policy": {
       "blockers": [
         {
           "code": "demo",
-          "id": "demo-001",
+          "id": "id-001",
           "message": "Seeded playground record, not a real result.",
           "overridden": true,
           "overrideable": true
         },
         {
           "code": "demo",
-          "id": "demo-001",
+          "id": "id-002",
           "message": "Seeded playground record, not a real result.",
           "overridden": true,
           "overrideable": true
         },
         {
           "code": "demo",
-          "id": "demo-001",
+          "id": "id-003",
           "message": "Seeded playground record, not a real result.",
           "overridden": true,
           "overrideable": true
@@ -10569,18 +10569,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "coverage_decisions": {
         "final": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
         ],
         "initial": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
@@ -10608,17 +10608,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/assessment-cycles/{cycleId}/relationship-commits": {
     "cycle": {
       "active_closure_cycle_version": 1,
-      "active_closure_manifest_id": "demo-001",
+      "active_closure_manifest_id": "active-closure-manifest-001",
       "boundary_kind": "standalone",
-      "business_asset_id": "demo-001",
+      "business_asset_id": "business-asset-001",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "next_retest_number": 2,
-      "project_id": "demo-001",
-      "root_assessment_id": "demo-001",
-      "selected_head_assessment_id": "demo-001",
+      "project_id": "project-001",
+      "root_assessment_id": "root-assessment-001",
+      "selected_head_assessment_id": "selected-head-assessment-001",
       "status": "open",
       "updated_at": "2026-10-03T09:00:00Z",
       "updated_by": "demo",
@@ -10636,10 +10636,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ]
   },
   "POST /api/v1/assessment-cycles/{cycleId}/relationship-previews": {
-    "assessment_id": "demo-001",
+    "assessment_id": "assessment-001",
     "command": "reparent_within_cycle",
     "commit_allowed": true,
-    "cycle_id": "demo-001",
+    "cycle_id": "cycle-001",
     "cycle_version": 1,
     "descendant_assessment_ids": [
       "demo",
@@ -10679,62 +10679,62 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "demo",
       "demo"
     ],
-    "new_predecessor_assessment_id": "demo-001",
-    "new_selected_head_assessment_id": "demo-001",
-    "old_predecessor_assessment_id": "demo-001",
-    "old_selected_head_assessment_id": "demo-001",
+    "new_predecessor_assessment_id": "new-predecessor-assessment-001",
+    "new_selected_head_assessment_id": "new-selected-head-assessment-001",
+    "old_predecessor_assessment_id": "old-predecessor-assessment-001",
+    "old_selected_head_assessment_id": "old-selected-head-assessment-001",
     "preview_token": "demo",
     "reason_required": true
   },
   "POST /api/v1/assessment-cycles/{cycleId}/reopen": {
     "branch_heads": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
         "relationship_version": 1,
         "retest_number": 2
       }
     ],
     "cycle": {
       "active_closure_cycle_version": 1,
-      "active_closure_manifest_id": "demo-001",
+      "active_closure_manifest_id": "active-closure-manifest-001",
       "boundary_kind": "standalone",
-      "business_asset_id": "demo-001",
+      "business_asset_id": "business-asset-001",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "next_retest_number": 2,
-      "project_id": "demo-001",
-      "root_assessment_id": "demo-001",
-      "selected_head_assessment_id": "demo-001",
+      "project_id": "project-001",
+      "root_assessment_id": "root-assessment-001",
+      "selected_head_assessment_id": "selected-head-assessment-001",
       "status": "open",
       "updated_at": "2026-10-03T09:00:00Z",
       "updated_by": "demo",
@@ -10742,35 +10742,35 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     "members": [
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-001",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-001",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-002",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-002",
         "relationship_version": 1,
         "retest_number": 2
       },
       {
-        "assessment_id": "demo-001",
+        "assessment_id": "assessment-003",
         "assessment_status": "active",
         "assessment_type": "initial",
         "created_at": "2026-10-03T09:00:00Z",
         "created_by": "demo",
         "planned_date": "2026-10-03",
-        "predecessor_assessment_id": "demo-001",
+        "predecessor_assessment_id": "predecessor-assessment-003",
         "relationship_version": 1,
         "retest_number": 2
       }
@@ -10779,17 +10779,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/assessment-cycles/{cycleId}/reopen-commits": {
     "cycle": {
       "active_closure_cycle_version": 1,
-      "active_closure_manifest_id": "demo-001",
+      "active_closure_manifest_id": "active-closure-manifest-001",
       "boundary_kind": "standalone",
-      "business_asset_id": "demo-001",
+      "business_asset_id": "business-asset-001",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "next_retest_number": 2,
-      "project_id": "demo-001",
-      "root_assessment_id": "demo-001",
-      "selected_head_assessment_id": "demo-001",
+      "project_id": "project-001",
+      "root_assessment_id": "root-assessment-001",
+      "selected_head_assessment_id": "selected-head-assessment-001",
       "status": "open",
       "updated_at": "2026-10-03T09:00:00Z",
       "updated_by": "demo",
@@ -10800,23 +10800,23 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "as_of_at": "2026-10-03T09:00:00Z",
       "canonical_input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "comparison_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "comparison_id": "demo-001",
+      "comparison_id": "comparison-001",
       "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "coverage_decisions": {
         "final": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
         ],
         "initial": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
@@ -10824,15 +10824,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "cycle_id": "demo-001",
+      "cycle_id": "cycle-001",
       "cycle_version": 1,
-      "final_assessment_id": "demo-001",
+      "final_assessment_id": "final-assessment-001",
       "final_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "final_snapshot_id": "demo-001",
+      "final_snapshot_id": "final-snapshot-001",
       "fingerprint_version": "1.4.2",
-      "id": "demo-001",
+      "id": "id-001",
       "initial_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "initial_snapshot_id": "demo-001",
+      "initial_snapshot_id": "initial-snapshot-001",
       "lifecycle": "active",
       "manifest_version": 1,
       "override_blocker_ids": [
@@ -10843,42 +10843,42 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "override_reason": "Seeded playground record, not a real result.",
       "path": [
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-001",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-001"
         },
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-002",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-002"
         },
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-003",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-003"
         }
       ],
       "policy_version": "1.4.2",
       "reason": "Seeded playground record, not a real result.",
       "renderer_contract_version": "1.4.2",
       "risk_version": "1.4.2",
-      "root_assessment_id": "demo-001",
+      "root_assessment_id": "root-assessment-001",
       "sealed_at": "2026-10-03T09:00:00Z",
       "sealed_by": "demo",
       "superseded_at": "2026-10-03T09:00:00Z"
     }
   },
   "POST /api/v1/assessment-cycles/{cycleId}/reopen-previews": {
-    "cycle_id": "demo-001",
+    "cycle_id": "cycle-001",
     "cycle_version": 1,
     "expires_at": "2026-10-03T09:00:00Z",
     "impact": "demo",
@@ -10887,23 +10887,23 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "as_of_at": "2026-10-03T09:00:00Z",
       "canonical_input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "comparison_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "comparison_id": "demo-001",
+      "comparison_id": "comparison-001",
       "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "coverage_decisions": {
         "final": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
         ],
         "initial": [
           {
-            "dimension_id": "demo-001",
+            "dimension_id": "dimension-001",
             "reason_code": "demo",
-            "snapshot_id": "demo-001",
+            "snapshot_id": "snapshot-001",
             "state": "complete",
             "waived": true
           }
@@ -10911,15 +10911,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       },
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "cycle_id": "demo-001",
+      "cycle_id": "cycle-001",
       "cycle_version": 1,
-      "final_assessment_id": "demo-001",
+      "final_assessment_id": "final-assessment-001",
       "final_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "final_snapshot_id": "demo-001",
+      "final_snapshot_id": "final-snapshot-001",
       "fingerprint_version": "1.4.2",
-      "id": "demo-001",
+      "id": "id-001",
       "initial_snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "initial_snapshot_id": "demo-001",
+      "initial_snapshot_id": "initial-snapshot-001",
       "lifecycle": "active",
       "manifest_version": 1,
       "override_blocker_ids": [
@@ -10930,35 +10930,35 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "override_reason": "Seeded playground record, not a real result.",
       "path": [
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-001",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-001"
         },
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-002",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-002"
         },
         {
-          "assessment_id": "demo-001",
+          "assessment_id": "assessment-003",
           "assessment_type": "initial",
           "path_position": 2,
           "relationship_version": 1,
           "retest_number": 2,
-          "snapshot_id": "demo-001"
+          "snapshot_id": "snapshot-003"
         }
       ],
       "policy_version": "1.4.2",
       "reason": "Seeded playground record, not a real result.",
       "renderer_contract_version": "1.4.2",
       "risk_version": "1.4.2",
-      "root_assessment_id": "demo-001",
+      "root_assessment_id": "root-assessment-001",
       "sealed_at": "2026-10-03T09:00:00Z",
       "sealed_by": "demo",
       "superseded_at": "2026-10-03T09:00:00Z"
@@ -10974,24 +10974,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "action": "confirm",
       "actor": "demo.operator",
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
+      "id": "id-001",
       "reason": "Seeded playground record, not a real result.",
       "version": 2
     },
     "expires_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-    "predecessor_assessment_id": "demo-001",
-    "predecessor_cycle_id": "demo-001",
+    "predecessor_assessment_id": "predecessor-assessment-001",
+    "predecessor_cycle_id": "predecessor-cycle-001",
     "predecessor_relationship_version": 1,
-    "predecessor_snapshot_id": "demo-001",
+    "predecessor_snapshot_id": "predecessor-snapshot-001",
     "repair_plan": {
       "body": {
         "demo": null
       },
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
+      "id": "id-001",
       "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "plan_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b"
     },
@@ -11019,10 +11019,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       }
     ],
     "status": "open",
-    "successor_assessment_id": "demo-001",
-    "successor_cycle_id": "demo-001",
+    "successor_assessment_id": "successor-assessment-001",
+    "successor_cycle_id": "successor-cycle-001",
     "successor_relationship_version": 1,
-    "successor_snapshot_id": "demo-001",
+    "successor_snapshot_id": "successor-snapshot-001",
     "version": 1
   },
   "POST /api/v1/assessment-relationship-candidates/{candidateId}/decisions": {
@@ -11034,24 +11034,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "action": "confirm",
       "actor": "demo.operator",
       "created_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
+      "id": "id-001",
       "reason": "Seeded playground record, not a real result.",
       "version": 2
     },
     "expires_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-    "predecessor_assessment_id": "demo-001",
-    "predecessor_cycle_id": "demo-001",
+    "predecessor_assessment_id": "predecessor-assessment-001",
+    "predecessor_cycle_id": "predecessor-cycle-001",
     "predecessor_relationship_version": 1,
-    "predecessor_snapshot_id": "demo-001",
+    "predecessor_snapshot_id": "predecessor-snapshot-001",
     "repair_plan": {
       "body": {
         "demo": null
       },
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
+      "id": "id-001",
       "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "plan_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b"
     },
@@ -11079,17 +11079,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       }
     ],
     "status": "open",
-    "successor_assessment_id": "demo-001",
-    "successor_cycle_id": "demo-001",
+    "successor_assessment_id": "successor-assessment-001",
+    "successor_cycle_id": "successor-cycle-001",
     "successor_relationship_version": 1,
-    "successor_snapshot_id": "demo-001",
+    "successor_snapshot_id": "successor-snapshot-001",
     "version": 1
   },
   "POST /api/v1/aup/accept": null,
   "POST /api/v1/blueteam/engagements/{id}/response/apply": {
     "approver": "demo",
-    "evidence_id": "demo-001",
-    "id": "demo-001",
+    "evidence_id": "evidence-001",
+    "id": "id-001",
     "kind": "demo",
     "state": "pending",
     "target": "demo",
@@ -11103,29 +11103,29 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "blast_radius": "demo",
-        "label": "Demo record"
+        "label": "Platform Security"
       },
       {
         "argv": [
           "demo"
         ],
         "blast_radius": "demo",
-        "label": "Demo record"
+        "label": "Payments Core"
       },
       {
         "argv": [
           "demo"
         ],
         "blast_radius": "demo",
-        "label": "Demo record"
+        "label": "Edge Delivery"
       }
     ],
     "target": "demo"
   },
   "POST /api/v1/blueteam/response/{id}/decide": {
     "approver": "demo",
-    "evidence_id": "demo-001",
-    "id": "demo-001",
+    "evidence_id": "evidence-001",
+    "id": "id-001",
     "kind": "demo",
     "state": "pending",
     "target": "demo",
@@ -11133,8 +11133,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   },
   "POST /api/v1/blueteam/response/{id}/revert": {
     "approver": "demo",
-    "evidence_id": "demo-001",
-    "id": "demo-001",
+    "evidence_id": "evidence-001",
+    "id": "id-001",
     "kind": "demo",
     "state": "pending",
     "target": "demo",
@@ -11145,15 +11145,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "auth_kind": "pat",
     "created_at": "2026-10-03T09:00:00Z",
     "host": "demo",
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "provider": "github",
     "updated_at": "2026-10-03T09:00:00Z",
     "username": "demo.operator"
   },
   "POST /api/v1/engagements": {
-    "assessment_project_id": "demo-001",
-    "business_asset_id": "demo-001",
+    "assessment_project_id": "assessment-project-001",
+    "business_asset_id": "business-asset-001",
     "client": "demo",
     "created_at": "2026-10-03T09:00:00Z",
     "findings_count": {
@@ -11164,18 +11164,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "medium": 2,
       "total": 3
     },
-    "id": "demo-001",
+    "id": "id-001",
     "last_scan_date": "2026-10-03T09:00:00Z",
     "last_scan_status": "active",
     "live_recon_enabled": true,
-    "name": "Demo record",
+    "name": "Platform Security",
     "offensive_roe": {
       "customer_contact": "demo",
       "emergency_contact": "demo",
       "exclusions_checked": true,
       "risk_ceiling": "high"
     },
-    "project_id": "demo-001",
+    "project_id": "project-001",
     "requires_explicit_execution_authorization": true,
     "roe": {
       "allowed_tool_classes": [
@@ -11236,25 +11236,25 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/engagements/{assessmentId}/retests": {
     "cycle": {
       "active_closure_cycle_version": 1,
-      "active_closure_manifest_id": "demo-001",
+      "active_closure_manifest_id": "active-closure-manifest-001",
       "boundary_kind": "standalone",
-      "business_asset_id": "demo-001",
+      "business_asset_id": "business-asset-001",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "next_retest_number": 2,
-      "project_id": "demo-001",
-      "root_assessment_id": "demo-001",
-      "selected_head_assessment_id": "demo-001",
+      "project_id": "project-001",
+      "root_assessment_id": "root-assessment-001",
+      "selected_head_assessment_id": "selected-head-assessment-001",
       "status": "open",
       "updated_at": "2026-10-03T09:00:00Z",
       "updated_by": "demo",
       "version": 1
     },
     "engagement": {
-      "assessment_project_id": "demo-001",
-      "business_asset_id": "demo-001",
+      "assessment_project_id": "assessment-project-001",
+      "business_asset_id": "business-asset-001",
       "client": "demo",
       "created_at": "2026-10-03T09:00:00Z",
       "findings_count": {
@@ -11265,18 +11265,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "medium": 2,
         "total": 3
       },
-      "id": "demo-001",
+      "id": "id-001",
       "last_scan_date": "2026-10-03T09:00:00Z",
       "last_scan_status": "active",
       "live_recon_enabled": true,
-      "name": "Demo record",
+      "name": "Platform Security",
       "offensive_roe": {
         "customer_contact": "demo",
         "emergency_contact": "demo",
         "exclusions_checked": true,
         "risk_ceiling": "high"
       },
-      "project_id": "demo-001",
+      "project_id": "project-001",
       "requires_explicit_execution_authorization": true,
       "roe": {
         "allowed_tool_classes": [
@@ -11315,24 +11315,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "scope": "copy"
     },
     "member": {
-      "assessment_id": "demo-001",
+      "assessment_id": "assessment-001",
       "assessment_status": "active",
       "assessment_type": "initial",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
       "planned_date": "2026-10-03",
-      "predecessor_assessment_id": "demo-001",
+      "predecessor_assessment_id": "predecessor-assessment-001",
       "relationship_version": 1,
       "retest_number": 2
     },
     "source_selection": {
       "filename": "demo",
-      "reused_from_version_id": "demo-001",
+      "reused_from_version_id": "reused-from-version-001",
       "sha256": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "size": 2048,
-      "source_assessment_id": "demo-001",
+      "source_assessment_id": "source-assessment-001",
       "strategy": "reuse_current",
-      "version_id": "demo-001"
+      "version_id": "version-001"
     },
     "warnings": [
       "authorization_not_inherited",
@@ -11343,16 +11343,16 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/engagements/{assessmentId}/snapshots/finalize": {
     "default_version": 1,
     "snapshot": {
-      "assessment_id": "demo-001",
+      "assessment_id": "assessment-001",
       "boundary": {
         "boundary_kind": "standalone",
-        "business_asset_id": "demo-001",
-        "project_id": "demo-001"
+        "business_asset_id": "business-asset-001",
+        "project_id": "project-001"
       },
       "content_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "cycle_id": "demo-001",
+      "cycle_id": "cycle-001",
       "dimensions": [
         {
           "excluded_scope": [
@@ -11366,7 +11366,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "lane_manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "producer": "demo",
           "reason_code": "trusted_terminal_lane",
-          "run_id": "demo-001",
+          "run_id": "run-001",
           "state": "complete",
           "target": {
             "canonical": "demo",
@@ -11378,7 +11378,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             {
               "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
               "kind": "tool",
-              "name": "Demo record",
+              "name": "Platform Security",
               "version": "1.4.2"
             }
           ]
@@ -11395,7 +11395,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "lane_manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "producer": "demo",
           "reason_code": "trusted_terminal_lane",
-          "run_id": "demo-001",
+          "run_id": "run-002",
           "state": "complete",
           "target": {
             "canonical": "demo",
@@ -11407,7 +11407,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             {
               "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
               "kind": "tool",
-              "name": "Demo record",
+              "name": "Platform Security",
               "version": "1.4.2"
             }
           ]
@@ -11424,7 +11424,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "lane_manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
           "producer": "demo",
           "reason_code": "trusted_terminal_lane",
-          "run_id": "demo-001",
+          "run_id": "run-003",
           "state": "complete",
           "target": {
             "canonical": "demo",
@@ -11436,7 +11436,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             {
               "digest": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
               "kind": "tool",
-              "name": "Demo record",
+              "name": "Platform Security",
               "version": "1.4.2"
             }
           ]
@@ -11444,7 +11444,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       ],
       "finalized_at": "2026-10-03T09:00:00Z",
       "finalized_by": "demo",
-      "id": "demo-001",
+      "id": "id-001",
       "lifecycle": "finalized",
       "provenance": "native",
       "run_references": [
@@ -11456,7 +11456,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             }
           ],
           "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-          "run_id": "demo-001"
+          "run_id": "run-001"
         },
         {
           "lane_refs": [
@@ -11466,7 +11466,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             }
           ],
           "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-          "run_id": "demo-001"
+          "run_id": "run-002"
         },
         {
           "lane_refs": [
@@ -11476,7 +11476,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             }
           ],
           "manifest_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-          "run_id": "demo-001"
+          "run_id": "run-003"
         }
       ],
       "schema_version": 1,
@@ -11494,27 +11494,27 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {},
       {}
     ],
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "error_code": "demo",
     "evidence_refs": [
       {
         "hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "id": "demo-001",
+        "id": "id-001",
         "scope_key": "demo-key"
       },
       {
         "hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "id": "demo-001",
+        "id": "id-002",
         "scope_key": "demo-key"
       },
       {
         "hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-        "id": "demo-001",
+        "id": "id-003",
         "scope_key": "demo-key"
       }
     ],
     "findings": 3,
-    "id": "demo-001",
+    "id": "id-001",
     "started_at": "2026-10-03T09:00:00Z",
     "status": "succeeded"
   },
@@ -11523,7 +11523,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "run": {}
   },
   "POST /api/v1/engagements/{id}/exploitation/rehearsals": {
-    "chain_id": "demo-001",
+    "chain_id": "chain-001",
     "simulated": true,
     "state": "active",
     "steps": 2
@@ -11550,7 +11550,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ],
     "EngagementID": "demo",
     "EvidenceScore": 7,
-    "ID": "demo-001",
+    "ID": "ID-001",
     "Impact": "demo",
     "KEV": true,
     "Kind": "sca",
@@ -11573,24 +11573,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "demo"
     ],
     "Status": "open",
-    "Title": "Demo record",
+    "Title": "Platform Security",
     "Version": 1,
     "assignee_user_id": "demo.operator",
     "compliance_controls": [
       {
         "Framework": "demo",
-        "ID": "demo-001",
-        "Title": "Demo record"
+        "ID": "ID-001",
+        "Title": "Platform Security"
       },
       {
         "Framework": "demo",
-        "ID": "demo-001",
-        "Title": "Demo record"
+        "ID": "ID-002",
+        "Title": "Payments Core"
       },
       {
         "Framework": "demo",
-        "ID": "demo-001",
-        "Title": "Demo record"
+        "ID": "ID-003",
+        "Title": "Edge Delivery"
       }
     ],
     "reachability_evidence": {
@@ -11612,7 +11612,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "manual_generation": 1,
       "mode": "auto",
       "revision": 1,
-      "team_id": "demo-001"
+      "team_id": "team-001"
     },
     "before": {
       "assignee_id": "demo.operator",
@@ -11620,12 +11620,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "manual_generation": 1,
       "mode": "auto",
       "revision": 1,
-      "team_id": "demo-001"
+      "team_id": "team-001"
     },
     "created_at": "2026-10-03T09:00:00Z",
-    "engagement_id": "demo-001",
-    "finding_id": "demo-001",
-    "id": "demo-001",
+    "engagement_id": "engagement-001",
+    "finding_id": "finding-001",
+    "id": "id-001",
     "result": {
       "candidates": [
         "demo",
@@ -11665,9 +11665,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "reason": "Seeded playground record, not a real result.",
       "resolution": "resolved",
-      "rule_id": "demo-001",
+      "rule_id": "rule-001",
       "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-      "team_id": "demo-001"
+      "team_id": "team-001"
     },
     "transition_key": "demo-key"
   },
@@ -11679,9 +11679,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "config_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "created_at": "2026-10-03T09:00:00Z",
       "deadline_anchor_at": "2026-10-03T09:00:00Z",
-      "engagement_id": "demo-001",
-      "finding_id": "demo-001",
-      "id": "demo-001",
+      "engagement_id": "engagement-001",
+      "finding_id": "finding-001",
+      "id": "id-001",
       "input_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
       "inputs": {
         "active_exploitation": true,
@@ -11694,7 +11694,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "public_poc": true,
         "severity": "high"
       },
-      "previous_assessment_id": "demo-001",
+      "previous_assessment_id": "previous-assessment-001",
       "result": {
         "breakdown": {
           "criticality": 1.5,
@@ -11715,7 +11715,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "score": 7.4,
         "tier": "high"
       },
-      "source_risk_assessment_id": "demo-001",
+      "source_risk_assessment_id": "source-risk-assessment-001",
       "tenant_id": "demo-tenant"
     },
     "effective_state": "open",
@@ -11723,10 +11723,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "acceptance_expires_at": "2026-10-03T09:00:00Z",
       "accepted_at": "2026-10-03T09:00:00Z",
       "accepted_by": "demo",
-      "assessment_id": "demo-001",
+      "assessment_id": "assessment-001",
       "compensating_control": "demo",
-      "engagement_id": "demo-001",
-      "finding_id": "demo-001",
+      "engagement_id": "engagement-001",
+      "finding_id": "finding-001",
       "reason": "Seeded playground record, not a real result.",
       "status": "open",
       "tenant_id": "demo-tenant",
@@ -11737,7 +11737,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "overdue": true
   },
   "POST /api/v1/fleet/assets/{id}/behavior-baseline/rebaseline": {
-    "asset_id": "demo-001",
+    "asset_id": "asset-001",
     "rebaselined": true
   },
   "POST /api/v1/fleet/assets/{id}/processes": {
@@ -11750,7 +11750,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "Truncated": false
   },
   "POST /api/v1/fleet/detections": {
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "missing": 2,
     "replay": true,
     "sealed": 2,
@@ -11765,8 +11765,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   },
   "POST /api/v1/fleet/incidents/{id}/response/apply": {
     "approver": "demo",
-    "evidence_id": "demo-001",
-    "id": "demo-001",
+    "evidence_id": "evidence-001",
+    "id": "id-001",
     "kind": "demo",
     "state": "pending",
     "target": "demo",
@@ -11777,7 +11777,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "CreatedAt": "2026-10-03T09:00:00Z",
     "Disposition": "true_positive",
     "EngagementID": "demo",
-    "ID": "demo-001",
+    "ID": "ID-001",
     "MergedInto": "demo",
     "OwnerID": "demo",
     "Revision": 1,
@@ -11805,12 +11805,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     },
     "Severity": "high",
     "State": "new",
-    "Title": "Demo record",
+    "Title": "Platform Security",
     "UpdatedAt": "2026-10-03T09:00:00Z"
   },
   "POST /api/v1/fleet/keys": {
-    "agent_id": "demo-001",
-    "key_id": "demo-001",
+    "agent_id": "agent-001",
+    "key_id": "key-001",
     "not_after": "2026-10-03T09:00:00Z",
     "not_before": "2026-10-03T09:00:00Z",
     "purpose": "telemetry-batch"
@@ -11855,17 +11855,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     }
   },
   "POST /api/v1/fleet/processes": {
-    "asset_id": "demo-001",
+    "asset_id": "asset-001",
     "learned": true,
     "saved": 2
   },
   "POST /api/v1/fleet/response-verifications": {
     "acknowledged": true,
-    "report_id": "demo-001"
+    "report_id": "report-001"
   },
   "POST /api/v1/fleet/sensor-states": {
     "acknowledged": true,
-    "report_id": "demo-001"
+    "report_id": "report-001"
   },
   "POST /api/v1/fleet/telemetry": {
     "accepted": true,
@@ -11901,29 +11901,29 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "demo",
       "demo"
     ],
-    "id": "demo-001",
-    "integration_id": "demo-001",
-    "job_id": "demo-001",
+    "id": "id-001",
+    "integration_id": "integration-001",
+    "job_id": "job-001",
     "pipelines": [
       {
         "external_key": "demo-key",
-        "full_name": "Demo record",
+        "full_name": "Platform Security",
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Platform Security",
         "url": "https://synapse.example/demo"
       },
       {
         "external_key": "demo-key",
-        "full_name": "Demo record",
+        "full_name": "Payments Core",
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Payments Core",
         "url": "https://synapse.example/demo"
       },
       {
         "external_key": "demo-key",
-        "full_name": "Demo record",
+        "full_name": "Edge Delivery",
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Edge Delivery",
         "url": "https://synapse.example/demo"
       }
     ],
@@ -11944,8 +11944,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "credential_revision": 1,
     "enabled": true,
     "endpoint": "https://synapse.example/demo",
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "poll_interval_seconds": 2,
     "provider": "demo",
     "updated_at": "2026-10-03T09:00:00Z",
@@ -11954,10 +11954,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/integrations/{id}/bindings": {
     "created_at": "2026-10-03T09:00:00Z",
     "external_key": "demo-key",
-    "external_name": "Demo record",
-    "id": "demo-001",
-    "integration_id": "demo-001",
-    "project_id": "demo-001",
+    "external_name": "Platform Security",
+    "id": "id-001",
+    "integration_id": "integration-001",
+    "project_id": "project-001",
     "tenant_id": "demo-tenant",
     "updated_at": "2026-10-03T09:00:00Z",
     "version": 1
@@ -11974,8 +11974,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "credential_revision": 1,
     "enabled": true,
     "endpoint": "https://synapse.example/demo",
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "poll_interval_seconds": 2,
     "provider": "demo",
     "updated_at": "2026-10-03T09:00:00Z",
@@ -11993,8 +11993,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "credential_revision": 1,
     "enabled": true,
     "endpoint": "https://synapse.example/demo",
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "poll_interval_seconds": 2,
     "provider": "demo",
     "updated_at": "2026-10-03T09:00:00Z",
@@ -12022,29 +12022,29 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "demo",
       "demo"
     ],
-    "id": "demo-001",
-    "integration_id": "demo-001",
-    "job_id": "demo-001",
+    "id": "id-001",
+    "integration_id": "integration-001",
+    "job_id": "job-001",
     "pipelines": [
       {
         "external_key": "demo-key",
-        "full_name": "Demo record",
+        "full_name": "Platform Security",
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Platform Security",
         "url": "https://synapse.example/demo"
       },
       {
         "external_key": "demo-key",
-        "full_name": "Demo record",
+        "full_name": "Payments Core",
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Payments Core",
         "url": "https://synapse.example/demo"
       },
       {
         "external_key": "demo-key",
-        "full_name": "Demo record",
+        "full_name": "Edge Delivery",
         "kind": "demo",
-        "name": "Demo record",
+        "name": "Edge Delivery",
         "url": "https://synapse.example/demo"
       }
     ],
@@ -12055,7 +12055,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   },
   "POST /api/v1/me/contacts": {
     "created_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "kind": "email",
     "source": "manual",
     "updated_at": "2026-10-03T09:00:00Z",
@@ -12068,7 +12068,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   },
   "POST /api/v1/me/contacts/{id}/verify": {
     "created_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "kind": "email",
     "source": "manual",
     "updated_at": "2026-10-03T09:00:00Z",
@@ -12089,9 +12089,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "paused_reason": "consecutive_permanent_failures",
       "state": "active"
     },
-    "id": "demo-001",
+    "id": "id-001",
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "recipients": [
       "demo@synapse.example",
       "demo@synapse.example",
@@ -12099,7 +12099,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ],
     "revision": 1,
     "secret_version": 1,
-    "template_id": "demo-001",
+    "template_id": "template-001",
     "type": "webhook",
     "updated_at": "2026-10-03T09:00:00Z"
   },
@@ -12116,9 +12116,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "paused_reason": "consecutive_permanent_failures",
       "state": "active"
     },
-    "id": "demo-001",
+    "id": "id-001",
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "recipients": [
       "demo@synapse.example",
       "demo@synapse.example",
@@ -12126,22 +12126,22 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     ],
     "revision": 1,
     "secret_version": 1,
-    "template_id": "demo-001",
+    "template_id": "template-001",
     "type": "webhook",
     "updated_at": "2026-10-03T09:00:00Z"
   },
   "POST /api/v1/notifications/channels/{nid}/test": {
-    "delivery_id": "demo-001",
+    "delivery_id": "delivery-001",
     "state": "pending"
   },
   "POST /api/v1/notifications/deliveries/{nid}/redrive": {
     "attempts": 2,
-    "channel_id": "demo-001",
+    "channel_id": "channel-001",
     "channel_type": "webhook",
     "created_at": "2026-10-03T09:00:00Z",
     "delivered_at": "2026-10-03T09:00:00Z",
-    "event_id": "demo-001",
-    "id": "demo-001",
+    "event_id": "event-001",
+    "id": "id-001",
     "last_error": "demo",
     "matched_rule_ids": [
       "demo",
@@ -12175,10 +12175,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "demo"
     ],
     "event_type": "vulnerability_action.created",
-    "id": "demo-001",
+    "id": "id-001",
     "lead_time_seconds": 2,
     "min_severity": "high",
-    "name": "Demo record",
+    "name": "Platform Security",
     "revision": 1,
     "team_ids": [
       "demo",
@@ -12195,17 +12195,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "active_version": 1,
-    "archived_template_id": "demo-001",
+    "archived_template_id": "archived-template-001",
     "created_at": "2026-10-03T09:00:00Z",
     "created_by": "demo",
     "event_type": "demo",
     "family": "chat",
-    "id": "demo-001",
+    "id": "id-001",
     "latest": {
       "checksum": "demo",
       "created_at": "2026-10-03T09:00:00Z",
@@ -12213,13 +12213,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "latest_version": 1,
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "revision": 1,
     "status": "active",
     "tenant_id": "demo-tenant",
@@ -12229,12 +12229,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/notifications/templates/preview": {
     "channel": {
       "family": "chat",
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "type": "demo"
     },
     "draft": {
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "unsaved": true,
       "version": 1
     },
@@ -12253,10 +12253,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "created_by": "demo",
         "event_type": "demo",
         "family": "chat",
-        "id": "demo-001",
+        "id": "id-001",
         "latest_version": 1,
         "locale": "en",
-        "name": "Demo record",
+        "name": "Platform Security",
         "revision": 1,
         "status": "active",
         "tenant_id": "demo-tenant",
@@ -12267,9 +12267,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "version": 1
     },
     "sample": {
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-001",
       "event_type": "demo",
-      "id": "demo-001",
+      "id": "id-001",
       "occurred_at": "2026-10-03T09:00:00Z",
       "severity": "high",
       "source": "fixture",
@@ -12284,17 +12284,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "active_version": 1,
-    "archived_template_id": "demo-001",
+    "archived_template_id": "archived-template-001",
     "created_at": "2026-10-03T09:00:00Z",
     "created_by": "demo",
     "event_type": "demo",
     "family": "chat",
-    "id": "demo-001",
+    "id": "id-001",
     "latest": {
       "checksum": "demo",
       "created_at": "2026-10-03T09:00:00Z",
@@ -12302,13 +12302,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "latest_version": 1,
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "revision": 1,
     "status": "active",
     "tenant_id": "demo-tenant",
@@ -12323,17 +12323,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "active_version": 1,
-    "archived_template_id": "demo-001",
+    "archived_template_id": "archived-template-001",
     "created_at": "2026-10-03T09:00:00Z",
     "created_by": "demo",
     "event_type": "demo",
     "family": "chat",
-    "id": "demo-001",
+    "id": "id-001",
     "latest": {
       "checksum": "demo",
       "created_at": "2026-10-03T09:00:00Z",
@@ -12341,13 +12341,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "latest_version": 1,
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "revision": 1,
     "status": "active",
     "tenant_id": "demo-tenant",
@@ -12362,17 +12362,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "active_version": 1,
-    "archived_template_id": "demo-001",
+    "archived_template_id": "archived-template-001",
     "created_at": "2026-10-03T09:00:00Z",
     "created_by": "demo",
     "event_type": "demo",
     "family": "chat",
-    "id": "demo-001",
+    "id": "id-001",
     "latest": {
       "checksum": "demo",
       "created_at": "2026-10-03T09:00:00Z",
@@ -12380,13 +12380,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "fields": {
         "demo": "demo"
       },
-      "template_id": "demo-001",
+      "template_id": "template-001",
       "tenant_id": "demo-tenant",
       "version": 1
     },
     "latest_version": 1,
     "locale": "en",
-    "name": "Demo record",
+    "name": "Platform Security",
     "revision": 1,
     "status": "active",
     "tenant_id": "demo-tenant",
@@ -12404,7 +12404,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "manual_generation": 1,
             "mode": "auto",
             "revision": 1,
-            "team_id": "demo-001"
+            "team_id": "team-001"
           },
           "before": {
             "assignee_id": "demo.operator",
@@ -12412,12 +12412,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "manual_generation": 1,
             "mode": "auto",
             "revision": 1,
-            "team_id": "demo-001"
+            "team_id": "team-001"
           },
           "created_at": "2026-10-03T09:00:00Z",
-          "engagement_id": "demo-001",
-          "finding_id": "demo-001",
-          "id": "demo-001",
+          "engagement_id": "engagement-001",
+          "finding_id": "finding-001",
+          "id": "id-001",
           "result": {
             "candidates": [
               "demo"
@@ -12435,15 +12435,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "reason": "Seeded playground record, not a real result.",
             "resolution": "resolved",
-            "rule_id": "demo-001",
+            "rule_id": "rule-001",
             "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-            "team_id": "demo-001"
+            "team_id": "team-001"
           },
           "transition_key": "demo-key"
         },
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-001",
         "error": "demo",
-        "finding_id": "demo-001",
+        "finding_id": "finding-001",
         "status": 200
       },
       {
@@ -12455,7 +12455,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "manual_generation": 1,
             "mode": "auto",
             "revision": 1,
-            "team_id": "demo-001"
+            "team_id": "team-002"
           },
           "before": {
             "assignee_id": "demo.operator",
@@ -12463,12 +12463,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "manual_generation": 1,
             "mode": "auto",
             "revision": 1,
-            "team_id": "demo-001"
+            "team_id": "team-002"
           },
           "created_at": "2026-10-03T09:00:00Z",
-          "engagement_id": "demo-001",
-          "finding_id": "demo-001",
-          "id": "demo-001",
+          "engagement_id": "engagement-002",
+          "finding_id": "finding-002",
+          "id": "id-002",
           "result": {
             "candidates": [
               "demo"
@@ -12486,15 +12486,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "reason": "Seeded playground record, not a real result.",
             "resolution": "resolved",
-            "rule_id": "demo-001",
+            "rule_id": "rule-002",
             "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-            "team_id": "demo-001"
+            "team_id": "team-002"
           },
           "transition_key": "demo-key"
         },
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-002",
         "error": "demo",
-        "finding_id": "demo-001",
+        "finding_id": "finding-002",
         "status": 200
       },
       {
@@ -12506,7 +12506,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "manual_generation": 1,
             "mode": "auto",
             "revision": 1,
-            "team_id": "demo-001"
+            "team_id": "team-003"
           },
           "before": {
             "assignee_id": "demo.operator",
@@ -12514,12 +12514,12 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "manual_generation": 1,
             "mode": "auto",
             "revision": 1,
-            "team_id": "demo-001"
+            "team_id": "team-003"
           },
           "created_at": "2026-10-03T09:00:00Z",
-          "engagement_id": "demo-001",
-          "finding_id": "demo-001",
-          "id": "demo-001",
+          "engagement_id": "engagement-003",
+          "finding_id": "finding-003",
+          "id": "id-003",
           "result": {
             "candidates": [
               "demo"
@@ -12537,15 +12537,15 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
             "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
             "reason": "Seeded playground record, not a real result.",
             "resolution": "resolved",
-            "rule_id": "demo-001",
+            "rule_id": "rule-003",
             "snapshot_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-            "team_id": "demo-001"
+            "team_id": "team-003"
           },
           "transition_key": "demo-key"
         },
-        "engagement_id": "demo-001",
+        "engagement_id": "engagement-003",
         "error": "demo",
-        "finding_id": "demo-001",
+        "finding_id": "finding-003",
         "status": 200
       }
     ]
@@ -12555,33 +12555,33 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "policy": {
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "engagement_id": "demo-001",
-      "policy_id": "demo-001",
+      "engagement_id": "engagement-001",
+      "policy_id": "policy-001",
       "repository": "demo",
-      "snapshot_id": "demo-001",
+      "snapshot_id": "snapshot-001",
       "version": 1
     }
   },
   "POST /api/v1/ownership/policies/{pid}/preview": {
     "created_at": "2026-10-03T09:00:00Z",
     "cutoff": "2026-10-03T09:00:00Z",
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "filter": {
       "assignee_id": "demo.operator",
       "due_before": "2026-10-03T09:00:00Z",
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-001",
       "kind": "demo",
       "my_teams": true,
       "severity": "high",
       "sla_status": "open",
       "status": "active",
-      "team_id": "demo-001",
+      "team_id": "team-001",
       "unresolved": true
     },
-    "id": "demo-001",
+    "id": "id-001",
     "mode": "preview",
     "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-    "policy_id": "demo-001",
+    "policy_id": "policy-001",
     "policy_revision": 1,
     "policy_version": 1,
     "processed": 2,
@@ -12592,23 +12592,23 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/ownership/policies/{pid}/reroute": {
     "created_at": "2026-10-03T09:00:00Z",
     "cutoff": "2026-10-03T09:00:00Z",
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "filter": {
       "assignee_id": "demo.operator",
       "due_before": "2026-10-03T09:00:00Z",
-      "engagement_id": "demo-001",
+      "engagement_id": "engagement-001",
       "kind": "demo",
       "my_teams": true,
       "severity": "high",
       "sla_status": "open",
       "status": "active",
-      "team_id": "demo-001",
+      "team_id": "team-001",
       "unresolved": true
     },
-    "id": "demo-001",
+    "id": "id-001",
     "mode": "preview",
     "policy_hash": "sha256:3f786850e387550fdab836ed7e6dc881de23001b",
-    "policy_id": "demo-001",
+    "policy_id": "policy-001",
     "policy_revision": 1,
     "policy_version": 1,
     "processed": 2,
@@ -12621,10 +12621,10 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "policy": {
       "created_at": "2026-10-03T09:00:00Z",
       "created_by": "demo",
-      "engagement_id": "demo-001",
-      "policy_id": "demo-001",
+      "engagement_id": "engagement-001",
+      "policy_id": "policy-001",
       "repository": "demo",
-      "snapshot_id": "demo-001",
+      "snapshot_id": "snapshot-001",
       "version": 1
     }
   },
@@ -12648,9 +12648,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "line": 2
       }
     ],
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "file_path": "src/service/handler.go",
-    "id": "demo-001",
+    "id": "id-001",
     "parser_version": "1.4.2",
     "repository": "demo",
     "source_revision": "demo",
@@ -12676,9 +12676,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "line": 2
       }
     ],
-    "engagement_id": "demo-001",
+    "engagement_id": "engagement-001",
     "file_path": "src/service/handler.go",
-    "id": "demo-001",
+    "id": "id-001",
     "parser_version": "1.4.2",
     "repository": "demo",
     "source_revision": "demo",
@@ -12687,8 +12687,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/ownership/teams": {
     "archived": false,
     "created_at": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "revision": 1,
     "slug": "demo-key",
     "updated_at": "2026-10-03T09:00:00Z"
@@ -12701,7 +12701,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "provider": "demo",
       "pull_request": "demo",
       "repo_slug": "demo-key",
-      "run_id": "demo-001",
+      "run_id": "run-001",
       "run_url": "https://synapse.example/demo",
       "target_branch": "main"
     },
@@ -12718,7 +12718,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       ]
     },
     "gate_info": {},
-    "id": "demo-001",
+    "id": "id-001",
     "issues": {},
     "measures": {
       "demo": 1.5
@@ -12772,7 +12772,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "actor": "demo.operator",
       "created_at": "2026-10-03T09:00:00Z",
       "from": "demo",
-      "id": "demo-001",
+      "id": "id-001",
       "previous_version": 1,
       "rationale": "demo",
       "to": "demo",
@@ -12782,17 +12782,17 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "cwe": "demo",
       "description": "Seeded playground record, not a real result.",
       "finding_kind": "demo",
-      "first_seen_analysis_id": "demo-001",
+      "first_seen_analysis_id": "first-seen-analysis-001",
       "first_seen_at": "2026-10-03T09:00:00Z",
-      "id": "demo-001",
-      "last_seen_analysis_id": "demo-001",
+      "id": "id-001",
+      "last_seen_analysis_id": "last-seen-analysis-001",
       "last_seen_at": "2026-10-03T09:00:00Z",
       "location": "src/service/handler.go",
       "rule_key": "demo-key",
-      "rule_name": "Demo record",
+      "rule_name": "Platform Security",
       "severity": "high",
       "status": "to_review",
-      "title": "Demo record",
+      "title": "Platform Security",
       "version": 1
     }
   },
@@ -12836,7 +12836,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "EngagementID": "demo",
         "EvidenceScore": 7,
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Impact": "demo",
         "KEV": true,
         "Kind": "sca",
@@ -12857,14 +12857,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "Status": "open",
-        "Title": "Demo record",
+        "Title": "Platform Security",
         "Version": 1,
         "assignee_user_id": "demo.operator",
         "compliance_controls": [
           {
             "Framework": "demo",
-            "ID": "demo-001",
-            "Title": "Demo record"
+            "ID": "ID-001",
+            "Title": "Platform Security"
           }
         ],
         "reachability_evidence": {
@@ -12896,7 +12896,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "EngagementID": "demo",
         "EvidenceScore": 7,
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Impact": "demo",
         "KEV": true,
         "Kind": "sca",
@@ -12917,14 +12917,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "Status": "open",
-        "Title": "Demo record",
+        "Title": "Platform Security",
         "Version": 1,
         "assignee_user_id": "demo.operator",
         "compliance_controls": [
           {
             "Framework": "demo",
-            "ID": "demo-001",
-            "Title": "Demo record"
+            "ID": "ID-001",
+            "Title": "Platform Security"
           }
         ],
         "reachability_evidence": {
@@ -12956,7 +12956,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         ],
         "EngagementID": "demo",
         "EvidenceScore": 7,
-        "ID": "demo-001",
+        "ID": "ID-001",
         "Impact": "demo",
         "KEV": true,
         "Kind": "sca",
@@ -12977,14 +12977,14 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
           "demo"
         ],
         "Status": "open",
-        "Title": "Demo record",
+        "Title": "Platform Security",
         "Version": 1,
         "assignee_user_id": "demo.operator",
         "compliance_controls": [
           {
             "Framework": "demo",
-            "ID": "demo-001",
-            "Title": "Demo record"
+            "ID": "ID-001",
+            "Title": "Platform Security"
           }
         ],
         "reachability_evidence": {
@@ -13027,9 +13027,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "data_class": "signal",
     "enabled": true,
     "generation": 1,
-    "id": "demo-001",
+    "id": "id-001",
     "indexer_ack_supported": true,
-    "name": "Demo record",
+    "name": "Platform Security",
     "origin": "demo",
     "paused": true,
     "provider": "splunk_hec",
@@ -13050,9 +13050,9 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "data_class": "signal",
     "enabled": true,
     "generation": 1,
-    "id": "demo-001",
+    "id": "id-001",
     "indexer_ack_supported": true,
-    "name": "Demo record",
+    "name": "Platform Security",
     "origin": "demo",
     "paused": true,
     "provider": "splunk_hec",
@@ -13123,28 +13123,28 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "user": {
       "createdAt": "2026-10-03T09:00:00Z",
       "disabled": false,
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "role": "admin"
     }
   },
   "POST /api/v1/users/{id}/disable": {
     "createdAt": "2026-10-03T09:00:00Z",
     "disabled": false,
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "role": "admin"
   },
   "POST /api/v1/users/{id}/enable": {
     "createdAt": "2026-10-03T09:00:00Z",
     "disabled": false,
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "role": "admin"
   },
   "POST /api/v1/users/{id}/oidc-links": {
     "createdAt": "2026-10-03T09:00:00Z",
-    "id": "demo-001",
+    "id": "id-001",
     "issuer": "demo",
     "subject": "demo",
     "userId": "demo.operator"
@@ -13154,24 +13154,24 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "user": {
       "createdAt": "2026-10-03T09:00:00Z",
       "disabled": false,
-      "id": "demo-001",
-      "name": "Demo record",
+      "id": "id-001",
+      "name": "Platform Security",
       "role": "admin"
     }
   },
   "POST /api/v1/vulnerability/advisories/{id}/reconcile": {
     "advisory_id": "CVE-2026-10101",
     "created": true,
-    "job_id": "demo-001",
-    "run_id": "demo-001",
+    "job_id": "job-001",
+    "run_id": "run-001",
     "scope": "tenant",
     "state": "succeeded"
   },
   "POST /api/v1/vulnerability/reconcile/tenant": {
     "advisory_id": "CVE-2026-10101",
     "created": true,
-    "job_id": "demo-001",
-    "run_id": "demo-001",
+    "job_id": "job-001",
+    "run_id": "run-001",
     "scope": "tenant",
     "state": "succeeded"
   },
@@ -13179,13 +13179,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/vulnerability/sources/{id}/sync": {
     "created": true,
     "mode": "incremental",
-    "run_id": "demo-001",
-    "source_id": "demo-001",
+    "run_id": "run-001",
+    "source_id": "source-001",
     "state": "succeeded"
   },
   "PUT /api/v1/engagements/{id}/offensive-roe": {
-    "assessment_project_id": "demo-001",
-    "business_asset_id": "demo-001",
+    "assessment_project_id": "assessment-project-001",
+    "business_asset_id": "business-asset-001",
     "client": "demo",
     "created_at": "2026-10-03T09:00:00Z",
     "findings_count": {
@@ -13196,18 +13196,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "medium": 2,
       "total": 3
     },
-    "id": "demo-001",
+    "id": "id-001",
     "last_scan_date": "2026-10-03T09:00:00Z",
     "last_scan_status": "active",
     "live_recon_enabled": true,
-    "name": "Demo record",
+    "name": "Platform Security",
     "offensive_roe": {
       "customer_contact": "demo",
       "emergency_contact": "demo",
       "exclusions_checked": true,
       "risk_ceiling": "high"
     },
-    "project_id": "demo-001",
+    "project_id": "project-001",
     "requires_explicit_execution_authorization": true,
     "roe": {
       "allowed_tool_classes": [
@@ -13266,8 +13266,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "updated_at": "2026-10-03T09:00:00Z"
   },
   "PUT /api/v1/engagements/{id}/status": {
-    "assessment_project_id": "demo-001",
-    "business_asset_id": "demo-001",
+    "assessment_project_id": "assessment-project-001",
+    "business_asset_id": "business-asset-001",
     "client": "demo",
     "created_at": "2026-10-03T09:00:00Z",
     "findings_count": {
@@ -13278,18 +13278,18 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       "medium": 2,
       "total": 3
     },
-    "id": "demo-001",
+    "id": "id-001",
     "last_scan_date": "2026-10-03T09:00:00Z",
     "last_scan_status": "active",
     "live_recon_enabled": true,
-    "name": "Demo record",
+    "name": "Platform Security",
     "offensive_roe": {
       "customer_contact": "demo",
       "emergency_contact": "demo",
       "exclusions_checked": true,
       "risk_ceiling": "high"
     },
-    "project_id": "demo-001",
+    "project_id": "project-001",
     "requires_explicit_execution_authorization": true,
     "roe": {
       "allowed_tool_classes": [
@@ -13366,8 +13366,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "Version": 1
   },
   "PUT /api/v1/fleet/assets/{id}/response-observers/{agentID}": {
-    "agent_id": "demo-001",
-    "asset_id": "demo-001",
+    "agent_id": "agent-001",
+    "asset_id": "asset-001",
     "assigned_at": "2026-10-03T09:00:00Z",
     "assigned_by": "demo",
     "expires_at": "2026-10-03T09:00:00Z",
@@ -13395,8 +13395,8 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "credential_revision": 1,
     "enabled": true,
     "endpoint": "https://synapse.example/demo",
-    "id": "demo-001",
-    "name": "Demo record",
+    "id": "id-001",
+    "name": "Platform Security",
     "poll_interval_seconds": 2,
     "provider": "demo",
     "updated_at": "2026-10-03T09:00:00Z",

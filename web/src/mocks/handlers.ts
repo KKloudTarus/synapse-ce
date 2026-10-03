@@ -201,30 +201,107 @@ const FLEET_INCIDENTS = [
 ]
 
 // --- Findings (for engagement detail) -- PascalCase matching Go API output ---
-const FINDINGS = Array.from({ length: 45 }, (_, i) => ({
-  ID: `finding-${String(i + 1).padStart(3, '0')}`,
-  EngagementID: 'eng-001',
-  Title: ['SQL Injection in user input', 'Cross-site scripting (reflected)', 'Insecure deserialization', 'Server-side request forgery', 'Path traversal in file upload', 'Hardcoded API key', 'Missing rate limiting', 'Weak TLS configuration', 'Open redirect', 'Information disclosure via error'][i % 10],
-  Description: ['User input concatenated in SQL query without parameterization', 'Reflected user input in HTML response without encoding', 'Untrusted data deserialized via Java ObjectInputStream', 'Server follows user-supplied URLs to internal services', 'File path constructed from user input without sanitization', 'AWS secret key hardcoded in source', 'No rate limit on authentication endpoint', 'TLS 1.0 still enabled on production endpoint', 'Redirect URL not validated against allowlist', 'Stack trace exposed in error response'][i % 10],
-  Severity: (['critical', 'high', 'high', 'medium', 'medium', 'medium', 'low', 'low', 'low', 'info'])[i % 10],
-  CVSSVector: ['CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N', 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H', 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N', 'CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L', 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:N/I:L/A:N', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N'][i % 10],
-  CWE: `CWE-${[89, 79, 502, 918, 22, 798, 770, 326, 601, 209][i % 10]}`,
-  Status: (['open', 'open', 'open', 'triaged', 'triaged', 'resolved', 'open', 'open', 'false_positive', 'open'])[i % 10],
-  DedupKey: `sca:vuln:${['express', 'lodash', 'axios', 'jsonwebtoken', 'helmet'][i % 5]}:CVE-2026-${1000 + i}`,
-  KEV: i % 10 === 0,
-  RiskScore: [98, 82, 75, 62, 55, 48, 35, 28, 20, 10][i % 10],
-  Class: i % 3 === 0 ? 'third_party' : i % 3 === 1 ? 'first_party' : 'configuration',
-  Scope: (['production', 'production', 'production', 'staging', 'development', 'production', 'production', 'staging', 'development', 'production'])[i % 10],
-  Reachability: (['reachable', 'reachable', 'unknown', 'reachable', 'unreachable', 'unknown', 'reachable', 'unknown', 'unreachable', 'unknown'])[i % 10],
-  Impact: '',
-  Priority: [1, 1, 2, 2, 3, 3, 3, 4, 4, 5][i % 10],
-  Assignee: i % 5 === 0 ? 'alice' : i % 5 === 1 ? 'bob' : '',
-  Version: 1,
-  Kind: i % 3 === 0 ? 'vulnerability' : i % 3 === 1 ? 'license' : 'code_quality',
-  EvidenceScore: [95, 88, 72, 65, 50, 42, 30, 25, 15, 5][i % 10],
-  ProposedBy: '',
-  compliance_controls: i % 7 === 0 ? [{ Framework: 'OWASP', ID: 'A03:2021', Title: 'Injection' }] : [],
-}))
+// A coherent catalogue: every record's title, description, severity, CWE, CVSS, kind, package and
+// reachability describe the same vulnerability. The generator this replaced cycled each field on a
+// different modulus, so a cross-site scripting finding could be typed "license" and a package could
+// carry another package's PURL. A security demo that contradicts itself teaches the wrong thing.
+type FindingSeed = {
+  title: string
+  description: string
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  cwe: number
+  cvss: string
+  kind: 'vulnerability' | 'license' | 'code_quality'
+  pkg: string
+  version: string
+  advisory: string
+  reachability: 'reachable' | 'unreachable' | 'unknown'
+  cls: 'third_party' | 'first_party' | 'configuration'
+  kev?: boolean
+}
+
+const FINDING_SEEDS: FindingSeed[] = [
+  { title: 'Prototype pollution in lodash merge', description: 'lodash.merge walks attacker-controlled keys, so a crafted payload can reach Object.prototype and change application behaviour globally.', severity: 'critical', cwe: 1321, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', kind: 'vulnerability', pkg: 'lodash', version: '4.17.20', advisory: 'CVE-2021-23337', reachability: 'reachable', cls: 'third_party', kev: true },
+  { title: 'SQL injection in user lookup', description: 'The user id is concatenated into the query in handlers/user.go:42 instead of being bound as a parameter.', severity: 'critical', cwe: 89, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Remote code execution in express body parser', description: 'A malformed multipart body reaches an unbounded parser path and can execute attacker-controlled input.', severity: 'critical', cwe: 94, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', kind: 'vulnerability', pkg: 'express', version: '4.17.1', advisory: 'CVE-2024-29041', reachability: 'reachable', cls: 'third_party', kev: true },
+  { title: 'Hardcoded AWS secret key', description: 'A long-lived AWS secret is committed in config/dev.go:12 and is present in every build artefact.', severity: 'critical', cwe: 798, cvss: 'CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Server-side request forgery in webhook relay', description: 'The relay follows a user-supplied URL without an allowlist, so an internal metadata endpoint is reachable from the public API.', severity: 'critical', cwe: 918, cvss: 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+
+  { title: 'Cross-site scripting (reflected)', description: 'User input is echoed into the HTML response in handlers/auth.go without contextual encoding.', severity: 'high', cwe: 79, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Path traversal in file upload', description: 'The destination path is built from the uploaded filename in middleware/static.go:88 with no normalisation.', severity: 'high', cwe: 22, cvss: 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Regular expression denial of service in axios', description: 'A redirect header is matched by a backtracking expression, so a crafted response stalls the event loop.', severity: 'high', cwe: 1333, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H', kind: 'vulnerability', pkg: 'axios', version: '0.21.1', advisory: 'CVE-2021-3749', reachability: 'reachable', cls: 'third_party' },
+  { title: 'Signature bypass in jsonwebtoken', description: 'A token with alg "none" is accepted when the verifier does not pin the algorithm, so any session can be forged.', severity: 'high', cwe: 347, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N', kind: 'vulnerability', pkg: 'jsonwebtoken', version: '8.5.1', advisory: 'CVE-2022-23540', reachability: 'unknown', cls: 'third_party' },
+  { title: 'Insecure deserialization of session payload', description: 'Untrusted session data is deserialized before the signature is checked.', severity: 'high', cwe: 502, cvss: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'first_party' },
+  { title: 'Open redirect in login return path', description: 'The post-login redirect target is not validated against an allowlist.', severity: 'high', cwe: 601, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:N/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'GPL-3.0 dependency in a distributed binary', description: 'chart.js is GPL-3.0-only in this revision, which conflicts with the product license for a shipped artefact.', severity: 'high', cwe: 0, cvss: '', kind: 'license', pkg: 'chart.js', version: '3.9.1', advisory: '', reachability: 'reachable', cls: 'third_party' },
+
+  { title: 'Missing rate limit on the authentication endpoint', description: 'The sign-in route has no per-identity limit, so credential stuffing is bounded only by network speed.', severity: 'medium', cwe: 770, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'TLS 1.0 still enabled on the public listener', description: 'The listener negotiates TLS 1.0, which has no modern cipher suite worth keeping.', severity: 'medium', cwe: 326, cvss: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'Information disclosure through error responses', description: 'An unhandled error returns the stack trace to the caller, naming internal paths and package versions.', severity: 'medium', cwe: 209, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Denial of service in the helmet CSP builder', description: 'A long directive list is rebuilt per request, so a crafted configuration multiplies request cost.', severity: 'medium', cwe: 400, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L', kind: 'vulnerability', pkg: 'helmet', version: '4.6.0', advisory: 'CVE-2022-24999', reachability: 'unreachable', cls: 'third_party' },
+  { title: 'Permissive CORS allows credentialed cross-origin reads', description: 'The cors middleware reflects the request origin while allowing credentials.', severity: 'medium', cwe: 942, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N', kind: 'vulnerability', pkg: 'cors', version: '2.8.5', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'Session cookie missing SameSite', description: 'The session cookie is set without SameSite, so it rides cross-site requests.', severity: 'medium', cwe: 1275, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'Unpinned base image in the production Dockerfile', description: 'The build pulls a floating tag, so two builds of the same commit can ship different system packages.', severity: 'medium', cwe: 1104, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'configuration' },
+  { title: 'Duplicated validation logic across three handlers', description: 'The same input validation is reimplemented in three places and they have already drifted apart.', severity: 'medium', cwe: 1041, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'first_party' },
+  { title: 'AGPL-3.0 transitive dependency', description: 'A transitive dependency is AGPL-3.0, which the policy allows only for internal services.', severity: 'medium', cwe: 0, cvss: '', kind: 'license', pkg: 'date-fns', version: '2.29.3', advisory: '', reachability: 'unknown', cls: 'third_party' },
+
+  { title: 'Verbose request logging includes bearer tokens', description: 'The access log records the Authorization header at debug level.', severity: 'low', cwe: 532, cvss: 'CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'unreachable', cls: 'configuration' },
+  { title: 'Outdated typescript with no known advisory', description: 'The pinned compiler is four minor versions behind; no advisory applies, but the gap blocks newer fixes.', severity: 'low', cwe: 1104, cvss: '', kind: 'code_quality', pkg: 'typescript', version: '5.0.2', advisory: '', reachability: 'unknown', cls: 'third_party' },
+  { title: 'Missing integrity attribute on an external script', description: 'A third-party script is loaded without subresource integrity.', severity: 'low', cwe: 353, cvss: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'Unused export increases the reachable surface', description: 'A debug helper is exported from the package entry point and reachable from consumers.', severity: 'low', cwe: 1061, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'ISC and MIT dual license needs a recorded choice', description: 'The package offers two licenses and the policy requires the chosen one to be recorded.', severity: 'low', cwe: 0, cvss: '', kind: 'license', pkg: 'morgan', version: '1.10.0', advisory: '', reachability: 'unknown', cls: 'third_party' },
+
+  { title: 'Dependency graph depth exceeds the review threshold', description: 'The longest transitive path is eleven levels deep, which the policy flags for review rather than failure.', severity: 'info', cwe: 0, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'third_party' },
+  { title: 'SBOM recorded without a build identifier', description: 'The SBOM carries no build id, so it cannot be tied back to a pipeline run.', severity: 'info', cwe: 0, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'configuration' },
+]
+
+const SEVERITY_RISK = { critical: 95, high: 74, medium: 52, low: 28, info: 8 } as const
+const SEVERITY_PRIORITY = { critical: 1, high: 2, medium: 3, low: 4, info: 5 } as const
+
+// 45 findings from 27 seeds: the tail repeats earlier seeds against later advisory ids, which is what
+// a real engagement looks like when one package contributes several records.
+const FINDINGS = Array.from({ length: 45 }, (_, i) => {
+  const seed = FINDING_SEEDS[i % FINDING_SEEDS.length]
+  const repeat = Math.floor(i / FINDING_SEEDS.length)
+  const advisory = seed.advisory && repeat > 0 ? `${seed.advisory}-${repeat}` : seed.advisory
+  const status = seed.severity === 'critical' ? 'open' : i % 7 === 3 ? 'triaged' : i % 11 === 5 ? 'resolved' : i % 13 === 9 ? 'false_positive' : 'open'
+  return {
+    ID: `finding-${String(i + 1).padStart(3, '0')}`,
+    EngagementID: 'eng-001',
+    Title: seed.title,
+    Description: seed.description,
+    Severity: seed.severity,
+    CVSSVector: seed.cvss,
+    CWE: seed.cwe ? `CWE-${seed.cwe}` : '',
+    Status: status,
+    DedupKey: seed.pkg ? `sca:vuln:${seed.pkg}:${advisory || seed.version}` : `sast:${seed.cwe}:finding-${i + 1}`,
+    KEV: seed.kev === true,
+    RiskScore: SEVERITY_RISK[seed.severity] - repeat,
+    Class: seed.cls,
+    Scope: 'production',
+    Reachability: seed.reachability,
+    Impact: '',
+    Priority: SEVERITY_PRIORITY[seed.severity],
+    Assignee: i % 5 === 0 ? 'alice' : i % 5 === 1 ? 'bob' : '',
+    Version: 1,
+    Kind: seed.kind,
+    EvidenceScore: seed.reachability === 'reachable' ? 92 - repeat * 3 : seed.reachability === 'unknown' ? 61 : 38,
+    ProposedBy: '',
+    compliance_controls: seed.cwe === 89 || seed.cwe === 79 ? [{ Framework: 'OWASP', ID: 'A03:2021', Title: 'Injection' }] : [],
+  }
+})
+
+// The engagement's counts are derived rather than written down, so the list and the overview cannot
+// disagree. They did: the record claimed 4 critical and 12 high where the findings held 5 and 10.
+const FINDING_COUNTS = FINDINGS.reduce(
+  (acc, f) => ({ ...acc, total: acc.total + 1, [f.Severity]: (acc[f.Severity as keyof typeof acc] as number) + 1 }),
+  { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+)
+
+// Assigned rather than written into the literal above: ENGAGEMENTS is declared first, and the
+// overview and the list disagreed when the record carried its own hand-written totals.
+ENGAGEMENTS[0].findings_count = FINDING_COUNTS
+
 
 // --- Scan Result (PascalCase for components, snake_case for other fields) ---
 const SCAN_RESULT = {
@@ -238,27 +315,49 @@ const SCAN_RESULT = {
     { Name: 'Dockerfile', Percent: 2 },
   ],
   sbom: {
-    Components: Array.from({ length: 52 }, (_, i) => ({
-      Name: ['express', 'lodash', 'axios', 'jsonwebtoken', 'helmet', 'cors', 'morgan', 'dotenv', 'pg', 'redis', 'typescript', 'vite', 'react', 'react-dom', 'tailwindcss', 'vitest', 'msw', 'zod', 'date-fns', 'chart.js'][i % 20],
-      Version: `${Math.floor(i / 4)}.${i % 10}.${i % 3}`,
-      PURL: `pkg:npm/${['express', 'lodash', 'axios', 'react', 'vite'][i % 5]}@${Math.floor(i / 4)}.${i % 10}.${i % 3}`,
-      Licenses: [
-        [{ SPDXID: 'MIT', Name: 'MIT License', Category: 'permissive' }],
-        [{ SPDXID: 'Apache-2.0', Name: 'Apache License 2.0', Category: 'permissive' }],
-        [{ SPDXID: 'BSD-3-Clause', Name: 'BSD 3-Clause', Category: 'permissive' }],
-        [{ SPDXID: 'ISC', Name: 'ISC License', Category: 'permissive' }],
-        [{ SPDXID: 'GPL-3.0-only', Name: 'GNU GPL v3', Category: 'copyleft' }],
-      ][i % 5],
-      LicenseSource: ['declared', 'concluded', 'declared', 'declared', 'concluded'][i % 5],
-      LicenseConfidence: 'high',
-      UnknownReason: '',
-      FirstParty: i % 8 === 0,
-      Location: `node_modules/${['express', 'lodash', 'axios', 'react', 'vite'][i % 5]}/package.json`,
-    })),
-    Dependencies: Array.from({ length: 40 }, (_, i) => ({
-      Ref: `pkg:npm/${['express', 'lodash', 'axios'][i % 3]}@${i}.0.0`,
-      DependsOn: [`pkg:npm/${['lodash', 'axios', 'express'][(i + 1) % 3]}@${i + 1}.0.0`],
-    })),
+    Components: Array.from({ length: 52 }, (_, i) => {
+      // One source for the identity: PURL and on-disk location derive from the name, so a component
+      // called dotenv no longer carries the PURL of axios.
+      const [name, version, license, firstParty] = ([
+        ['express', '4.17.1', 'MIT', false], ['lodash', '4.17.20', 'MIT', false], ['axios', '0.21.1', 'MIT', false],
+        ['jsonwebtoken', '8.5.1', 'MIT', false], ['helmet', '4.6.0', 'MIT', false], ['cors', '2.8.5', 'MIT', false],
+        ['morgan', '1.10.0', 'MIT', false], ['dotenv', '16.3.1', 'BSD-2-Clause', false], ['pg', '8.11.3', 'MIT', false],
+        ['redis', '4.6.7', 'MIT', false], ['typescript', '5.0.2', 'Apache-2.0', false], ['vite', '8.3.0', 'MIT', false],
+        ['react', '19.0.0', 'MIT', false], ['react-dom', '19.0.0', 'MIT', false], ['tailwindcss', '4.3.3', 'MIT', false],
+        ['vitest', '5.0.1', 'MIT', false], ['msw', '2.15.0', 'MIT', false], ['zod', '3.22.4', 'MIT', false],
+        ['date-fns', '2.29.3', 'AGPL-3.0-only', false], ['chart.js', '3.9.1', 'GPL-3.0-only', false],
+        ['@synapse/report-templates', '1.4.2', 'MIT', true], ['@synapse/engine-core', '1.4.2', 'MIT', true],
+      ] as const)[i % 22]
+      const spdx: Record<string, string> = { MIT: 'MIT License', 'Apache-2.0': 'Apache License 2.0', 'BSD-2-Clause': 'BSD 2-Clause', 'AGPL-3.0-only': 'GNU AGPL v3', 'GPL-3.0-only': 'GNU GPL v3' }
+      const copyleft = license.startsWith('GPL') || license.startsWith('AGPL')
+      return {
+        Name: name,
+        Version: version,
+        PURL: `pkg:npm/${name}@${version}`,
+        Licenses: [{ SPDXID: license, Name: spdx[license], Category: copyleft ? 'copyleft' : 'permissive' }],
+        LicenseSource: i % 3 === 2 ? 'concluded' : 'declared',
+        LicenseConfidence: 'high',
+        UnknownReason: '',
+        FirstParty: firstParty,
+        Location: `node_modules/${name}/package.json`,
+      }
+    }),
+    // Edges reference PURLs that exist in Components above; the previous version invented a new
+    // version number per edge, so the graph pointed at packages the SBOM never listed.
+    Dependencies: Array.from({ length: 40 }, (_, i) => {
+      const edges = [
+        ['pkg:npm/express@4.17.1', 'pkg:npm/cors@2.8.5'],
+        ['pkg:npm/express@4.17.1', 'pkg:npm/helmet@4.6.0'],
+        ['pkg:npm/express@4.17.1', 'pkg:npm/morgan@1.10.0'],
+        ['pkg:npm/axios@0.21.1', 'pkg:npm/lodash@4.17.20'],
+        ['pkg:npm/jsonwebtoken@8.5.1', 'pkg:npm/lodash@4.17.20'],
+        ['pkg:npm/@synapse/engine-core@1.4.2', 'pkg:npm/zod@3.22.4'],
+        ['pkg:npm/@synapse/report-templates@1.4.2', 'pkg:npm/date-fns@2.29.3'],
+        ['pkg:npm/vite@8.3.0', 'pkg:npm/typescript@5.0.2'],
+      ] as const
+      const [ref, dep] = edges[i % edges.length]
+      return { Ref: ref, DependsOn: [dep] }
+    }),
   },
   vulnerabilities: Array.from({ length: 18 }, (_, i) => ({
     ID: `CVE-2026-${1000 + i}`,
@@ -731,6 +830,10 @@ export const handlers = [
         run('acc-2', '2026-01-02T02:00:00Z', 10, 1, 0),
         run('acc-1', '2026-01-01T02:00:00Z', 9, 1, 1),
       ],
+      findings: [
+  { id: 'iss-001', kind: 'issue', rule_key: 'go:S1001', rule_name: 'SQL injection', type: 'vulnerability', severity: 'critical', detection_status: 'open', current_status: null, message: 'Potential SQL injection in query builder', location: { file: 'internal/handlers/user.go', start_line: 42, end_line: 42, start_column: 12, end_column: 45 }, new: true },
+      ],
+      capabilities: { source: true, unified_diff: true, split_diff: false, line_coverage: true },
     })
   }),
 
@@ -857,7 +960,30 @@ export const handlers = [
         })
       : new HttpResponse(null, { status: 404 }),
   ),
-  http.post('/api/v1/engagements', () => HttpResponse.json(ENGAGEMENTS[0])),
+  // Creating used to answer with the first existing engagement, so the list total never moved and
+  // searching for the name just submitted returned nothing. The playground keeps the new record in
+  // memory for the session instead, so the result of the action is visible. Reset clears it.
+  http.post('/api/v1/engagements', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'untitled-engagement'
+    if (import.meta.env.VITE_PLAYGROUND !== '1') return HttpResponse.json(ENGAGEMENTS[0])
+    const now = new Date().toISOString()
+    const created = {
+      ...ENGAGEMENTS[0],
+      id: `eng-${String(ENGAGEMENTS.length + 1).padStart(3, '0')}`,
+      name,
+      client: typeof body.client === 'string' && body.client ? body.client : 'Playground',
+      status: 'active',
+      findings_count: { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+      last_scan_date: null,
+      last_scan_status: '',
+      scope: (body.scope as { in_scope: unknown[]; out_of_scope: unknown[] }) ?? { in_scope: [], out_of_scope: [] },
+      created_at: now,
+      updated_at: now,
+    }
+    ENGAGEMENTS.push(created as unknown as (typeof ENGAGEMENTS)[number])
+    return HttpResponse.json(created, { status: 201 })
+  }),
   http.patch('/api/v1/engagements/:id', ({ params }) => {
     const eng = ENGAGEMENTS.find(e => e.id === params.id) ?? ENGAGEMENTS[0]
     return HttpResponse.json(eng)
@@ -1805,26 +1931,120 @@ export const handlers = [
       { path: 'cmd/synapse-api/main.go', status: 'unchanged', language: 'go', lines: 78, source_available: true, source_reason: null },
     ],
   })),
-  http.get('/api/v1/projects/:key/analyses/:analysisId/code/file', () => HttpResponse.json({
-    analysis_id: 'an-001',
-    head: { ref: 'refs/heads/main', commit: 'a1b2c3d', artifact_digest: 'sha256:abc123' },
-    base: null,
-    file: { path: 'internal/handlers/user.go', status: 'unchanged', language: 'go', lines: 342, source_available: true, source_reason: null },
-    from_line: 1,
-    to_line: 50,
-    total_lines: 342,
-    lines: Array.from({ length: 50 }, (_, i) => ({
-      number: i + 1,
-      content: i === 0 ? 'package handlers' : i === 1 ? '' : i === 2 ? 'import (' : i === 3 ? '\t"context"' : i === 4 ? '\t"net/http"' : i === 5 ? ')' : i === 6 ? '' : `// Line ${i + 1}: handler implementation`,
-      change: 'unchanged',
-      duplicated: false,
-      coverage: i > 10 && i < 40 ? 'covered' : i >= 40 ? 'uncovered' : null,
-    })),
-    findings: [
-      { id: 'iss-001', kind: 'issue', rule_key: 'go:S1001', rule_name: 'SQL injection', type: 'vulnerability', severity: 'critical', detection_status: 'open', current_status: null, message: 'Potential SQL injection in query builder', location: { file: 'internal/handlers/user.go', start_line: 42, end_line: 42, start_column: 12, end_column: 45 }, new: true },
-    ],
-    capabilities: { source: true, unified_diff: true, split_diff: false, line_coverage: true },
-  })),
+  http.get('/api/v1/projects/:key/analyses/:analysisId/code/file', ({ request }) => {
+    // Real Go with the defect the findings describe, rather than "// Line 12: handler
+    // implementation" repeated fifty times. A reader can see the concatenated query on line 42 and
+    // match it to the SQL injection finding, which is what makes the demo worth reading.
+    const path = new URL(request.url).searchParams.get('path') || 'internal/handlers/user.go'
+    const SOURCES: Record<string, string> = {
+      'internal/handlers/user.go': `package handlers
+
+import (
+\t"database/sql"
+\t"encoding/json"
+\t"net/http"
+)
+
+type UserHandler struct {
+\tdb *sql.DB
+}
+
+func NewUserHandler(db *sql.DB) *UserHandler {
+\treturn &UserHandler{db: db}
+}
+
+// Get returns one user. The id arrives from the path and is used unchanged.
+func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
+\tid := r.PathValue("id")
+\tif id == "" {
+\t\thttp.Error(w, "missing id", http.StatusBadRequest)
+\t\treturn
+\t}
+
+\tuser, err := h.lookup(r.Context(), id)
+\tif err != nil {
+\t\t// The error is returned verbatim, so the caller sees the driver message.
+\t\thttp.Error(w, err.Error(), http.StatusInternalServerError)
+\t\treturn
+\t}
+\tif user == nil {
+\t\thttp.Error(w, "not found", http.StatusNotFound)
+\t\treturn
+\t}
+
+\tw.Header().Set("content-type", "application/json")
+\t_ = json.NewEncoder(w).Encode(user)
+}
+
+type User struct {
+\tID    string \`json:"id"\`
+\tEmail string \`json:"email"\`
+\tRole  string \`json:"role"\`
+}
+
+func (h *UserHandler) lookup(ctx context.Context, id string) (*User, error) {
+\t// The id is concatenated into the statement instead of being bound as a parameter.
+\tquery := "SELECT id, email, role FROM users WHERE id = '" + id + "'"
+
+\trow := h.db.QueryRowContext(ctx, query)
+
+\tvar u User
+\tif err := row.Scan(&u.ID, &u.Email, &u.Role); err != nil {
+\t\tif errors.Is(err, sql.ErrNoRows) {
+\t\t\treturn nil, nil
+\t\t}
+\t\treturn nil, err
+\t}
+\treturn &u, nil
+}`,
+      'internal/handlers/auth.go': `package handlers
+
+import (
+\t"fmt"
+\t"net/http"
+)
+
+// Login renders the sign-in page. The "next" parameter is echoed into the markup.
+func Login(w http.ResponseWriter, r *http.Request) {
+\tnext := r.URL.Query().Get("next")
+
+\tw.Header().Set("content-type", "text/html")
+\t// The value is written into the document without contextual encoding.
+\tfmt.Fprintf(w, "<form action=\\"/session\\"><input type=hidden name=next value=%s></form>", next)
+}
+
+// Callback sends the browser on after sign-in.
+func Callback(w http.ResponseWriter, r *http.Request) {
+\tnext := r.URL.Query().Get("next")
+\tif next == "" {
+\t\tnext = "/dashboard"
+\t}
+\t// The destination is not checked against an allowlist.
+\thttp.Redirect(w, r, next, http.StatusFound)
+}`,
+    }
+    const content = SOURCES[path] ?? SOURCES['internal/handlers/user.go']
+    const raw = content.split('\n')
+    const from = Number(new URL(request.url).searchParams.get('from') ?? 1)
+    const to = Number(new URL(request.url).searchParams.get('to') ?? raw.length)
+    const slice = raw.slice(from - 1, to)
+    return HttpResponse.json({
+      analysis_id: 'an-001',
+      head: { ref: 'refs/heads/main', commit: 'a1b2c3d', artifact_digest: 'sha256:abc123' },
+      base: null,
+      file: { path, status: 'unchanged', language: 'go', lines: raw.length, source_available: true, source_reason: null },
+      from_line: from,
+      to_line: from + slice.length - 1,
+      total_lines: raw.length,
+      lines: slice.map((content, i) => ({
+        number: from + i,
+        content,
+        change: 'unchanged',
+        duplicated: false,
+        coverage: /^\s*(func|if|return|query|row|user|next)/.test(content) ? 'covered' : content.trim() === '' ? null : 'uncovered',
+      })),
+    })
+  }),
   http.get('/api/v1/projects/:key/analyses/:analysisId/code/diff', () => HttpResponse.json({
     analysis_id: 'an-001',
     head: { ref: 'refs/heads/main', commit: 'a1b2c3d', artifact_digest: 'sha256:abc123' },

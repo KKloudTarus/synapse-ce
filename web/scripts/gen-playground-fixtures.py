@@ -41,10 +41,10 @@ STRING_BY_NAME = [
     (r"(^|_)version$", "1.4.2"),
     (r"(^|_)actor$|(^|_)owner$|user|assignee|author", "demo.operator"),
     (r"(^|_)tenant", "demo-tenant"),
-    (r"(^|_)name$|title$|label$|display", "Demo record"),
+    (r"(^|_)name$|title$|label$|display", "__NAME__"),
     (r"(^|_)description$|summary$|reason$|message$|note", "Seeded playground record, not a real result."),
     (r"(^|_)key$|slug$", "demo-key"),
-    (r"(^|_)id$", "demo-001"),
+    (r"(^|_)id$", "__ID__"),
     (r"kind$|type$|class$", "demo"),
 ]
 
@@ -98,7 +98,18 @@ class Generator:
                 return v
         return strings[0]
 
-    def example(self, schema, name="", depth=0, seen=()):
+    # Pools used to vary a generated list. The index is the array position, so three rows of a
+    # generated collection read as three different records rather than one record repeated.
+    NAME_POOL = [
+        "Platform Security", "Payments Core", "Edge Delivery", "Identity Services", "Data Platform",
+        "Checkout API", "Orders API", "Billing Worker", "Search Indexer", "Notification Relay",
+        "prod-use1 cluster", "staging-euw1 cluster", "web01.prod", "db01.prod", "cache02.prod",
+    ]
+
+    def named(self, index):
+        return self.NAME_POOL[index % len(self.NAME_POOL)]
+
+    def example(self, schema, name="", depth=0, seen=(), index=0):
         schema = self.deref(schema, seen)
         if not isinstance(schema, dict) or depth > MAX_DEPTH:
             return None
@@ -123,8 +134,8 @@ class Generator:
         if kind == "array":
             item = schema.get("items", {})
             out = []
-            for _ in range(ARRAY_ITEMS if depth < 3 else 1):
-                value = self.example(item, name, depth + 1, seen)
+            for position in range(ARRAY_ITEMS if depth < 3 else 1):
+                value = self.example(item, name, depth + 1, seen, position)
                 if value is None:
                     break
                 out.append(value)
@@ -132,7 +143,7 @@ class Generator:
         if kind == "object" or "properties" in schema:
             out = {}
             for prop, sub in (schema.get("properties") or {}).items():
-                value = self.example(sub, prop, depth + 1, seen)
+                value = self.example(sub, prop, depth + 1, seen, index)
                 if value is not None:
                     out[prop] = value
             if not out and schema.get("additionalProperties"):
@@ -156,7 +167,12 @@ class Generator:
                 return "https://synapse.example/demo"
             if fmt == "byte":
                 return "ZGVtbw=="
-            return pick(STRING_BY_NAME, name, "demo")
+            value = pick(STRING_BY_NAME, name, "demo")
+            if value == "__NAME__":
+                return self.named(index)
+            if value == "__ID__":
+                return f"{(name or 'id').removesuffix('_id').replace('_', '-')}-{index + 1:03d}"
+            return value
         # A schema with no type and no properties carries no shape to synthesise.
         return None
 

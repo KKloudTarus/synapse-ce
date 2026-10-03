@@ -14,6 +14,8 @@ export type TourStep = {
   why?: string
   /** Optional anchor. `text:` matches visible text, anything else is a CSS selector. */
   anchor?: string
+  /** Optional: something to do on this screen, and what the reader should see when it worked. */
+  task?: { do: string; expect: string }
 }
 
 export const TOUR_STEPS: TourStep[] = [
@@ -46,11 +48,11 @@ export const TOUR_STEPS: TourStep[] = [
     anchor: 'text:Remediation Priorities & Targets',
   },
   {
-    route: '/engagements/eng-001/supply-chain',
-    title: 'Supply chain',
+    route: '/engagements/eng-001/components',
+    title: 'Supply chain: packages',
     body: 'Components come from the SBOM this engagement recorded, and each advisory match links to the evidence it was confirmed from. "Composition & Provenance" at the bottom names the engine versions and the SBOM digest that produced this result.',
     why: 'The provenance block is what makes a result auditable months later: the same SBOM digest and the same advisory database revision reproduce the same answer.',
-    anchor: 'text:Supply Chain',
+    anchor: 'text:Packages',
   },
   {
     route: '/engagements/eng-001/findings',
@@ -58,13 +60,21 @@ export const TOUR_STEPS: TourStep[] = [
     body: 'Use the severity and kind filters to narrow the list, then open a finding to see its evidence, its location and its reachability verdict. From an open finding you can accept it, mark it a false positive, or assign an owner.',
     why: 'A disposition is recorded against the finding and kept in the audit log, so "we decided this was not exploitable" survives the person who decided it.',
     anchor: 'text:Findings',
+    task: {
+      do: 'Set the severity filter to Critical, then open the first row.',
+      expect: 'Five findings remain, and the one you open names the package, the advisory and whether the vulnerable symbol is reachable.',
+    },
   },
   {
-    route: '/engagements/eng-001/reachability',
-    title: 'Reachability: why most advisories do not matter',
+    route: '/engagements/eng-001/vulns',
+    title: 'Vulnerabilities and reachability',
     body: 'Each row says whether the vulnerable symbol is actually callable from this codebase, with the call path that proves it. Sort by state to put the reachable ones first.',
     why: 'Reachability here is build-aware rather than guessed from identifier names, so an advisory on a package nothing calls ranks below one on a path that executes. That ordering is the difference between 45 findings and the 28 worth anyone\'s afternoon.',
-    anchor: 'text:Reachability',
+    anchor: 'text:Vulnerabilities',
+    task: {
+      do: 'Find the lodash prototype pollution row and read its reachability state.',
+      expect: 'It is reachable and flagged as known-exploited, which is why it sorts above advisories on packages nothing calls.',
+    },
   },
   {
     route: '/engagements/eng-001/evidence',
@@ -86,6 +96,10 @@ export const TOUR_STEPS: TourStep[] = [
     body: 'Pick a file on the left to read it with the analysis overlaid: changed lines, duplicated blocks and coverage are marked in the gutter. Switch between the file and the diff to see what one analysis changed.',
     why: 'The source shown here is the snapshot the analysis actually read, pushed by the pipeline with --push-source. That is why the view is honest about files it does not have rather than fetching today\'s code and pretending it was the one analysed.',
     anchor: 'text:Code',
+    task: {
+      do: 'Open internal/handlers/user.go and read the lookup function near the end.',
+      expect: 'The user id is concatenated into the SQL string instead of being bound, which is the finding you saw on the Findings tab.',
+    },
   },
   {
     route: '/code-quality/gates',
@@ -137,7 +151,7 @@ export const TOUR_STEPS: TourStep[] = [
     anchor: 'text:Vulnerability Intelligence',
   },
   {
-    route: '/ownership',
+    route: '/settings/ownership',
     title: 'Ownership routes work to people',
     body: 'Teams, mappings and policies decide who a finding belongs to. A mapping binds an asset pattern to a team; a policy decides what happens when nothing matches.',
     why: 'Routing is a product feature rather than a spreadsheet because an unrouted finding is the one nobody fixes.',
@@ -152,8 +166,12 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     route: '/dashboard',
-    title: 'That is the trip',
-    body: 'Press Reset in the top bar to clear anything you changed and start over, or Hide to get the bar out of the way. Everything you saw runs from fixtures in your browser, so nothing here can be broken by clicking.',
-    why: 'To run this against your own code, the repository README has the docker compose setup; the same dashboard then talks to a real control plane.',
+    title: 'That is the trip. Three ways on',
+    body: 'Follow the thread: open Engagements, filter to Critical, open the lodash finding, read its evidence, then look at who owns it under Settings. Or explore freely, nothing here can break. Or run it for real: the repository README has a docker compose that brings up the same dashboard against a live control plane.',
+    why: 'The trip deliberately showed one engagement end to end rather than every screen, because the product is a path from a detection to a decision, not a collection of pages.',
+    task: {
+      do: 'Press Reset in the top bar whenever you want a clean slate.',
+      expect: 'Anything you created or changed is cleared and the trip can start again.',
+    },
   },
 ]

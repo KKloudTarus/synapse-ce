@@ -49,6 +49,9 @@ export function PlaygroundTour({
   const step = TOUR_STEPS[index]
   const cardRef = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<DOMRect | null>(null)
+  // The card waits for the screen it describes. Stepping fast otherwise showed the guidance while the
+  // page was still loading, so the reader had nothing to look at.
+  const [ready, setReady] = useState(false)
 
   // Navigate when the step asks for a different screen. Comparing against the current path keeps a
   // user who clicked around mid-tour from being yanked back on every render.
@@ -66,8 +69,14 @@ export function PlaygroundTour({
   // CSS selector. An anchor that no longer resolves is not an error, the step just shows its card.
   useEffect(() => {
     setBox(null)
+    setReady(false)
     const anchor = step?.anchor
-    if (!anchor) return
+    if (!anchor) {
+      // No anchor to wait for, so give the route one frame to paint rather than describing a screen
+      // that is still a spinner.
+      const t = window.setTimeout(() => setReady(true), 600)
+      return () => window.clearTimeout(t)
+    }
     let cancelled = false
     const find = (): Element | null => {
       if (!anchor.startsWith('text:')) return document.querySelector(anchor)
@@ -86,10 +95,17 @@ export function PlaygroundTour({
       const el = find()
       if (el) {
         el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-        window.setTimeout(() => !cancelled && setBox(el.getBoundingClientRect()), 320)
+        window.setTimeout(() => {
+          if (cancelled) return
+          setBox(el.getBoundingClientRect())
+          setReady(true)
+        }, 320)
         return
       }
+      // Give up after about three seconds and show the card anyway: a step whose anchor never
+      // resolves must not strand the reader with no way forward.
       if (attempts++ < 8) window.setTimeout(tick, 400)
+      else setReady(true)
     }
     const timer = window.setTimeout(tick, 400)
     return () => {
@@ -112,16 +128,39 @@ export function PlaygroundTour({
     return () => window.removeEventListener('keydown', onKey)
   }, [stop, next, back])
 
-  if (!step) return null
+  if (!step || !ready) return null
+
+  // The card sits away from whatever is highlighted, so the thing being explained stays visible.
+  const cardAtTop = box !== null && box.top > window.innerHeight * 0.55
 
   return (
     <>
-      {box && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed z-40 rounded-lg ring-2 ring-brand-solid"
-          style={{ top: box.top - 4, left: box.left - 4, width: box.width + 8, height: box.height + 8 }}
-        />
+      {/* Backdrop. Four panes around the highlighted box rather than one sheet with a hole, so the
+          spotlight stays perfectly sharp: a blurred overlay cannot exclude a region without a mask,
+          and masks are the part browsers disagree about. With no anchor it is a single pane. */}
+      {box ? (
+        <>
+          {[
+            { top: 0, left: 0, width: '100vw', height: Math.max(0, box.top - 6) },
+            { top: Math.max(0, box.top - 6), left: 0, width: Math.max(0, box.left - 6), height: box.height + 12 },
+            { top: Math.max(0, box.top - 6), left: box.right + 6, width: `calc(100vw - ${box.right + 6}px)`, height: box.height + 12 },
+            { top: box.bottom + 6, left: 0, width: '100vw', height: `calc(100vh - ${box.bottom + 6}px)` },
+          ].map((pane, i) => (
+            <div
+              key={i}
+              aria-hidden="true"
+              className="pointer-events-none fixed z-40 bg-black/35 backdrop-blur-[3px]"
+              style={pane}
+            />
+          ))}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none fixed z-40 rounded-lg ring-2 ring-brand-solid ring-offset-2 ring-offset-transparent"
+            style={{ top: box.top - 4, left: box.left - 4, width: box.width + 8, height: box.height + 8 }}
+          />
+        </>
+      ) : (
+        <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-40 bg-black/35 backdrop-blur-[3px]" />
       )}
       <div
         ref={cardRef}
@@ -129,7 +168,7 @@ export function PlaygroundTour({
         aria-modal="false"
         aria-labelledby="playground-tour-title"
         tabIndex={-1}
-        className="fixed bottom-4 left-1/2 z-50 max-h-[min(70vh,34rem)] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto rounded-xl border border-secondary bg-primary p-4 shadow-lg outline-hidden focus-visible:ring-2 focus-visible:ring-brand-solid md:bottom-6"
+        className={`fixed left-1/2 z-50 max-h-[min(70vh,34rem)] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto rounded-xl border border-secondary bg-primary p-4 shadow-xl outline-hidden focus-visible:ring-2 focus-visible:ring-brand-solid ${cardAtTop ? 'top-16' : 'bottom-4 md:bottom-6'}`}
       >
         <div className="flex items-start gap-3">
           <Flag05 className="mt-0.5 size-5 shrink-0 text-brand-secondary" aria-hidden="true" />
@@ -141,6 +180,18 @@ export function PlaygroundTour({
               {step.title}
             </h2>
             <p className="mt-1 text-sm text-secondary">{step.body}</p>
+            {step.task && (
+              <div className="mt-3 rounded-lg border border-brand-solid/30 bg-brand-primary/5 p-2.5">
+                <p className="text-sm text-primary">
+                  <span className="font-semibold">Try it: </span>
+                  {step.task.do}
+                </p>
+                <p className="mt-1 text-sm text-tertiary">
+                  <span className="font-medium text-secondary">You should see: </span>
+                  {step.task.expect}
+                </p>
+              </div>
+            )}
             {step.why && (
               <p className="mt-2 border-l-2 border-brand-solid pl-2.5 text-sm text-tertiary">
                 <span className="font-medium text-secondary">Why: </span>
