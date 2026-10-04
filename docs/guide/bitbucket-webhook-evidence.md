@@ -1,10 +1,59 @@
 # Bitbucket Cloud inbound webhook review evidence (#1453)
 
-Implementation scope: signed Bitbucket Cloud push and open PR creation/update deliveries scan one bound existing Git Project. This document records the validation that was actually run; it is not evidence of a real Bitbucket repository delivery.
+Implementation scope: signed Bitbucket Cloud push and open PR creation/update deliveries scan one bound existing Git Project. Real provider verification below was collected on 2026-10-04. Earlier validation sections are historical records.
+
+## Real provider verification (2026-10-04)
+
+The public [test repository](https://bitbucket.org/synapse-ce-webhooks-vku/webhook-validation/src/main/) belongs to the VKU account's `synapse-ce-webhooks-vku` workspace. [PR 1](https://bitbucket.org/synapse-ce-webhooks-vku/webhook-validation/pull-requests/1) and [PR 2](https://bitbucket.org/synapse-ce-webhooks-vku/webhook-validation/pull-requests/2) generated real signed deliveries to a local Synapse API backed by PostgreSQL 17. A temporary HTTPS tunnel exposed only the inbound POST hook route; management routes returned 404 and unsigned delivery returned 401. These Bitbucket PRs are provider test fixtures; the implementation contribution remains GitHub PR #1544.
+
+| Event | Request UUID | HTTP status | Completed analysis |
+| --- | --- | --- | --- |
+| `repo:push`, greeting | `7082c875-51ab-49e3-9a8f-fd535a825173` | 202 | `d84ed9f66716208330697473e2443228` |
+| `pullrequest:updated`, greeting | `6c337d4d-901f-4b72-969d-9421c9f8dac6` | 202 | `7f1a0dda52b3bea207fb33bacf0bd7d6` |
+| `repo:push`, message | `2e0cae03-5f04-49bb-bdbf-25c53b42a477` | 202 | `95cff09680edbc88f839e2330dfec0a2` |
+| `pullrequest:created`, message | `241cddd0-d389-4dc7-a121-04a6e013d81b` | 202 | `130e4cc4ea5841788f7e964f1413d2db` |
+| `pullrequest:updated`, automatic retry | `7034dd71-73e8-457c-8f8d-82b962a179dd` | 503, then 202 at provider; 202 at Synapse twice | `3d823122cdc7d3bb319a834fa707be8d`, exactly once |
+| `pullrequest:created`, fork | `38a1eea3-2248-4a82-a7db-1935627877ab` | 202 | `561f2837386b63c894e9568f23e57980` |
+
+Greeting analyses pin `8db8a7f191595e577998f9c970ddd6f74a8733e3`; message analyses pin `0ae05ec04b4263b665140145b5c77361dc111e16`. PR analyses retain destination `main`, with base and merge base `15778e2daa3c46a0d60961f9866c46b1ca4d3646`. The [selected analysis records and retry facts](assets/ui/bitbucket-webhooks/live/manifest.json) contain no webhook secret, signature headers or raw delivery body.
+
+The first real PR-created delivery returned 400: Bitbucket supplies a 12-character source commit hash. Its [documented event payload](https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/) uses this abbreviated form. The receiver now resolves that prefix through the [Bitbucket commit API](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-commits/#api-repositories-workspace-repo-slug-commit-commit-get), using only the persisted Project repository. Resolution occurs before receipt/enqueue locks, requires a matching 40-character hash, and rechecks the binding and stored source before enqueue. Queue and acquisition still require the full immutable SHA. Subsequent real PR-created and PR-updated deliveries completed successfully.
+
+For the retry proof, a temporary local proxy forwarded Bitbucket's original signed request to Synapse, then returned 503 after the first upstream 202. Bitbucket automatically retried the same UUID; the second attempt received 202. Analysis count increased from four to five, not six. The fault proxy was stopped and normal routing restored after capture.
+
+[Fork PR 3](https://bitbucket.org/synapse-ce-webhooks-vku/webhook-validation/pull-requests/3) uses a commit unique to the public fork, `66229771a7d4d20a4492555a0fb1ab1146e760ba`. The scan succeeded. Its completed PostgreSQL queue record pins that full SHA against the persisted destination repository, with `DisableGitCredentials=true` and `no_build_execution=true`. The fork page contains only its creation activity and zero builds; no forge decoration was produced. This verifies a public fork. Private repository and private fork delivery were not exercised.
+
+| Actual browser evidence | Record |
+| --- | --- |
+| Signed delivery history | [Bitbucket history](assets/ui/bitbucket-webhooks/live/delivery-history.jpg) |
+| Real PR with English and Vietnamese description | [Forge screenshot](assets/ui/bitbucket-webhooks/live/pull-request-bilingual.jpg) |
+| Automatic retry attempts | [First attempt, 503](assets/ui/bitbucket-webhooks/live/retry-attempt-one.jpg), [second attempt, 202](assets/ui/bitbucket-webhooks/live/retry-attempt-two.jpg) |
+| Completed analysis, light and dark | [Light](assets/ui/bitbucket-webhooks/live/console-light.jpg), [dark](assets/ui/bitbucket-webhooks/live/console-dark.jpg) |
+| Live enabled integration | [Console configuration](assets/ui/bitbucket-webhooks/live/integration-light.jpg) |
+| Public fork PR and completed scan | [Forge](assets/ui/bitbucket-webhooks/live/fork-pull-request.jpg), [console](assets/ui/bitbucket-webhooks/live/fork-console-dark.jpg) |
+
+Light/dark captures use the console's Appearance setting and live API data. Bitbucket's surrounding UI renders in English; the forge screenshot proves bilingual user content, not a native Vietnamese Bitbucket locale. Outbound PR decoration is outside this inbound receiver's scope.
+
+## Current verification (2026-10-04)
+
+| Check | Result |
+| --- | --- |
+| Full Go build and vet, Go 1.27 on Linux; native Windows build/vet | Passed |
+| Full Linux package run with isolated PostgreSQL, then environment repair reruns | 432 packages passed initially, 37 had no tests; all five initially failing packages passed on rerun (437 passing packages combined). The initial full command exited 1; this is not a claim that it exited 0. API/worker reruns supplied Git metadata, Helm rerun normalized the Windows copy to LF, and agent/eBPF reruns used an unprivileged user. Privileged kernel tests skipped; no privileged eBPF execution is claimed |
+| Full fresh PostgreSQL package | Passed: 523 top-level tests, 4 opt-in skips, 1202.747s |
+| Race tests: SCM webhook, Project, Bitbucket adapter, HTTP, API composition | Passed on Linux |
+| Changed backend lint, golangci-lint 2.13.2 | Passed, 0 issues |
+| Full frontend suite | Passed: 170 files, 1103 tests |
+| Integrations UI, frontend typecheck and production build | Passed: 14 focused tests, typecheck and build |
+| OpenAPI and documentation checks | Passed |
+| Independent security review of abbreviated-commit resolution | Passed, no findings |
+| Real signed push, PR-created/updated and automatic retry | Passed; full SHA and destination base retained, retry creates one analysis |
+
+The frontend is unchanged by the commit-resolution fix. Native Windows cannot execute the Linux Unix-socket broker tests or Go race mode without CGO; relevant race and broader package evidence comes from Linux. The suite's privileged kernel and opt-in checks remain outside this webhook verification.
 
 ## Local console evidence
 
-These screenshots were captured before the rebase and render the real console using Chromium against a local Vite server and mocked HTTP API responses. All fixture names, repository URLs and hook paths are synthetic. No real credentials are captured. The secret is cleared immediately on submit, including API failure; the screenshot runner verifies the input is empty. All screenshots are English because the changed console strings currently render in English. Real forge screenshots in English/Vietnamese remain outstanding.
+These screenshots were captured before the rebase and render the real console using Chromium against a local Vite server and mocked HTTP API responses. All fixture names, repository URLs and hook paths are synthetic. No real credentials are captured. The secret is cleared immediately on submit, including API failure; the screenshot runner verifies the input is empty. All screenshots are English because the changed console strings currently render in English. The real forge screenshots above contain English and Vietnamese user content; these fixtures cover console failure and loading states separately.
 
 | State | Light | Dark |
 | --- | --- | --- |
@@ -25,7 +74,7 @@ These screenshots were captured before the rebase and render the real console us
 
 - HMAC-SHA256 over raw bytes uses `X-Hub-Signature`; generic/GitHub signature headers do not authenticate a Bitbucket endpoint. Missing/duplicate headers, invalid signatures and tenant/header overrides are tested. Previous-secret rotation is tested.
 - Request UUID and authenticated-body digest receipts commit in the same PostgreSQL transaction as scan enqueue. Tests cover failure after enqueue, cancellation, terminated DB connection, retries and concurrent replay with changed request UUIDs.
-- Real PostgreSQL tests use a `NOSUPERUSER NOBYPASSRLS` runtime role. Owner privileges are restricted to fixture setup/cleanup. Hostile tenant/owner identities cannot provision, rotate or accept another endpoint. PUBLIC cannot execute the new SECURITY DEFINER functions. Migration 0219 upgrades from shipped 0218 and rolls back to 0218 while preserving the identity schema, GitLab payload and notification indexes; runtime direct endpoint DML remains revoked.
+- Real PostgreSQL tests use a `NOSUPERUSER NOBYPASSRLS` runtime role. Owner privileges are restricted to fixture setup/cleanup. Hostile tenant/owner identities cannot provision, rotate or accept another endpoint. PUBLIC cannot execute the new SECURITY DEFINER functions. Migration 0221 upgrades from shipped 0220 and rolls back to 0220 while preserving the identity schema, GitLab payload and notification indexes; runtime direct endpoint DML remains revoked.
 - Bitbucket integrations bind one Git Project; concurrent second bindings are rejected. Payload clone URLs cannot override the stored Project repository. Multi-change pushes validate all targets before any enqueue.
 - Supported PR deliveries reject comment, approval and change-request payloads, preventing an unsigned event header from reclassifying those signed bodies as PR creation/update events.
 - Fork and missing repository identities restrict scans: credential-free acquisition, no build resolvers and no forge writes, including when Project decoration is opted in. An unrestricted control confirms resolver probes actually execute in the corresponding test.
@@ -53,11 +102,9 @@ Commands use Go 1.27.0, pnpm 9 and golangci-lint 2.13.2 (the CI version). Postgr
 | Full PostgreSQL package after queue transaction fix | Passed all tests against real PostgreSQL in the broader serialized Go run (398.193s), after an earlier full-package pass (376.337s). The earlier full `-race` attempt timed out; focused Bitbucket/migration race tests passed again after the lint fix (6.251s) |
 | Additional backend CI checks | Passed: 73 Python tests and AWS staging static security/data-governance checks |
 
-## Remaining acceptance evidence
+## Current merge allocation
 
-A real Bitbucket Cloud repository/connection has not been supplied, so no actual delivery history, forge status/comment or Vietnamese forge screenshot is claimed. Outbound PR decoration is outside this receiver's scope. The change should stay draft until required full build/CI checks and actual-forge evidence are completed.
-
-The branch incorporates upstream `main` at `61fefd13b2ce85fc46759a6658cc976a2542eefd`, including PR #1547 and shipped migrations through 0218. The unshipped Bitbucket lifecycle migration is now 0219, following the maintainer's 2026-10-03 allocation. Slots 0204 and 0207 stay empty; they cannot be filled after higher versions have shipped. Recheck the merged maximum immediately before merge and move only this unshipped migration if another PR has advanced it.
+The branch contains upstream main `b1bc5adda23d545f0e821b3e480da5dc7ad3cd1b`. The unshipped Bitbucket lifecycle migration is **0221**, following shipped **0220** and the [maintainer allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5981019374). The lifecycle fixture upgrades from 0220 and rolls back to 0220; both security-function inventories retain the Bitbucket entries. Recheck the merged maximum immediately before merge. Earlier allocation numbers below are historical.
 
 ## Validation before the 0207 allocation (2026-10-02)
 
@@ -101,26 +148,26 @@ The first full PostgreSQL run (520.147s) exposed an existing assessment relation
 | Integrations UI tests | Passed: 14 tests |
 | Frontend typecheck and production build | Passed |
 
-Real Bitbucket delivery records and the required forge screenshots are still unavailable. These local checks do not complete #1453's provider acceptance.
+At the time of this historical run, real provider delivery and forge screenshots were unavailable. They were collected on 2026-10-04 as recorded above.
 
 ## Review disposition
 
-Published review summaries and maintainer comments on PR #1544 were checked through the 2026-10-03 migration allocation.
+Published review summaries and maintainer comments on PR #1544 were checked through the 2026-10-04 migration allocation.
 
 | Review/comment | Disposition |
 | --- | --- |
 | [Initial migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5944232391) | Superseded by the allocation update below; the already shipped 0203/0205 are unchanged. |
 | [First review](https://github.com/KKloudTarus/synapse-ce/pull/1544#pullrequestreview-5387730777) | Rebase conflicts are resolved. Bitbucket UUID/body dedupe is transactional with enqueue, as confirmed by the later review and real PostgreSQL retry/concurrency tests. |
-| [Integration review](https://github.com/KKloudTarus/synapse-ce/pull/1544#pullrequestreview-5388456991) | Three-provider dispatcher/composition test and shared queue test helper are fixed. Real Bitbucket delivery and English/Vietnamese forge evidence remain pending. |
+| [Integration review](https://github.com/KKloudTarus/synapse-ce/pull/1544#pullrequestreview-5388456991) | Three-provider dispatcher/composition test and shared queue test helper are fixed. Real signed delivery and bilingual forge evidence are recorded in the 2026-10-04 section. |
 | [Updated migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5948201783) | The initial move to 0206 was tested from a database at 0205; the later 0207 allocation supersedes it. |
 | [Approval](https://github.com/KKloudTarus/synapse-ce/pull/1544#pullrequestreview-5390679561) | Reviewer confirmed transactional dedupe, dispatcher composition and helper consolidation; implementation findings are closed. |
-| [Outstanding evidence](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5950150855) | Real signed push/PR delivery, forge screenshots and corresponding console scans remain pending. |
+| [Outstanding evidence](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5950150855) | Completed by the real signed deliveries, bilingual forge screenshot, light/dark console scans and automatic retry recorded above. |
 | [Earlier migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5950579065) | The move to 0207 is superseded by the 2026-10-03 allocation below. |
 | [Inventory guards](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5951246204) | All three Bitbucket functions remain in both `securityDefinerExceptions` and `runtimeExecuteGrants`, together with the identity additions from main. |
-| [Maintainer integration fixes](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5953230428) | The maintainer's merge and reviewed inventory entries are preserved. The lifecycle fixture now uses the new shipped ceiling, 0218. |
-| [Latest migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5967845893) | Migration and lifecycle test move to 0219; setup and rollback use 0218. Main is merged again and both inventories preserve all three Bitbucket entries. Approval stands; real provider evidence remains pending. |
+| [Maintainer integration fixes](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5953230428) | The maintainer's merge and reviewed inventory entries are preserved. The current lifecycle fixture uses shipped ceiling 0220. |
+| [Previous migration allocation](https://github.com/KKloudTarus/synapse-ce/pull/1544#issuecomment-5967845893) | Migration and lifecycle test move to 0219; setup and rollback use 0218. Main is merged again and both inventories preserve all three Bitbucket entries. Superseded by migration 0221; current real provider evidence is recorded above. |
 
-## Collecting the remaining provider evidence
+## Reproducing provider verification
 
 A real Bitbucket Cloud test repository and a reachable Synapse deployment are required for these steps:
 
@@ -129,4 +176,4 @@ A real Bitbucket Cloud test repository and a reachable Synapse deployment are re
 3. Open a pull request and push an update. Capture the created/updated deliveries, analysis source SHA and destination base branch. Exercise a fork PR and record credential-free acquisition, disabled build execution, and absence of forge writes.
 4. Record the required real forge screenshots and the English/Vietnamese acceptance evidence, with links to the delivery and analysis records. The existing synthetic console images do not satisfy this step.
 
-Until those records are attached, #1453's provider acceptance remains open and the PR should remain draft. The local integration and PostgreSQL results above establish implementation behavior, while actual provider delivery is still unverified.
+These steps were completed for the public test repository on 2026-10-04, as recorded above. Retest with a private repository before claiming private connector/fork compatibility. The commit lookup preserves the fail-closed credential boundary when a fork commit is unavailable anonymously from the persisted repository.

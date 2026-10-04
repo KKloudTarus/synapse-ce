@@ -52,6 +52,7 @@ type Service struct {
 	gateMutator                      ports.QualityGateMutator
 	profiles                         *qualityprofilesuc.Service
 	decorator                        ports.PRDecorator
+	bitbucketCommits                 ports.BitbucketCommitResolver
 	allowLocalSource                 bool
 	projectAnalysisCompletionTimeout time.Duration
 	shortLivedBranchKeep             int
@@ -63,6 +64,10 @@ func NewService(repo ports.ProjectRepository, engagements ports.EngagementReposi
 }
 
 func (s *Service) SetScanner(scanner *scauc.Service) { s.scanner = scanner }
+
+func (s *Service) SetBitbucketCommitResolver(resolver ports.BitbucketCommitResolver) {
+	s.bitbucketCommits = resolver
+}
 
 // SetScanJobs lets an imported analysis leave a scan-job record behind, so the project's analysis
 // status and its job history show the CI run the same way they show a server run.

@@ -13,4 +13,10 @@ type BitbucketWebhookDeduper interface {
 type BitbucketScanTarget struct {
 	Ref, SHA, BaseRef string
 	PullRequest, Fork bool
+	// ResolvedRepository is a server-owned source snapshot for commit expansion.
+	ResolvedRepository string
+}
+
+type BitbucketCommitResolver interface {
+	ResolveBitbucketCommit(context.Context, string, string, bool) (string, error)
 }

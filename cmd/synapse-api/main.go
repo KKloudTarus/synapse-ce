@@ -2195,6 +2195,12 @@ func main() {
 	}
 	router.SetAITriageReviews(aiTriageReviewService)
 	projectService.SetScanner(scaService)
+	bitbucketCommits, err := bitbucketintegration.NewCommitResolver(scmConnectorStore)
+	if err != nil {
+		log.Error("configure Bitbucket commit resolution", "error", err)
+		os.Exit(1)
+	}
+	projectService.SetBitbucketCommitResolver(bitbucketCommits)
 	scaService.SetProjectAnalysisRecorder(projectService)
 	scaService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
 	projectService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)

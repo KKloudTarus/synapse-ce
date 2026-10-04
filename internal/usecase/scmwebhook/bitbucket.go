@@ -14,6 +14,7 @@ import (
 
 type bitbucketProjectScanner interface {
 	StartBitbucketWebhookAnalysis(context.Context, string, shared.ID, shared.ID, ports.BitbucketScanTarget) (ports.ScanJob, error)
+	ResolveBitbucketWebhookTarget(context.Context, shared.ID, shared.ID, ports.BitbucketScanTarget) (ports.BitbucketScanTarget, error)
 }
 
 type BitbucketReceiver struct {
@@ -39,30 +40,54 @@ func (r *BitbucketReceiver) ReceiveInboundWebhook(ctx context.Context, id ports.
 	if err != nil || len(targets) == 0 {
 		return err
 	}
+	var resolvedProject shared.ID
+	if len(targets[0].SHA) == 12 {
+		// Resolve before the deduper takes its transaction/endpoint lock. The
+		// binding and persisted source are checked again during atomic enqueue.
+		resolvedProject, err = r.boundProject(ctx, id)
+		if err != nil {
+			return err
+		}
+		targets[0], err = r.projects.ResolveBitbucketWebhookTarget(ctx, id.TenantID, resolvedProject, targets[0])
+		if err != nil {
+			return err
+		}
+	}
 	digest := sha256.Sum256(event.Body)
 	_, err = r.deduper.AcceptBitbucketWebhook(ctx, id, event.EventID, hex.EncodeToString(digest[:]), func(txCtx context.Context) error {
-		item, err := r.integrations.Get(txCtx, id.TenantID, shared.ID(id.OwnerID))
+		projectID, err := r.boundProject(txCtx, id)
 		if err != nil {
 			return err
 		}
-		if item.Provider != "bitbucket" || !item.Enabled || item.Archived {
-			return fmt.Errorf("%w: Bitbucket integration is not active", shared.ErrValidation)
-		}
-		bindings, err := r.integrations.ListBindings(txCtx, id.TenantID, item.ID)
-		if err != nil {
-			return err
-		}
-		if len(bindings) != 1 || bindings[0].ProjectID.IsZero() {
-			return fmt.Errorf("%w: Bitbucket inbound integration must bind one Project", shared.ErrValidation)
+		if !resolvedProject.IsZero() && resolvedProject != projectID {
+			return fmt.Errorf("%w: Bitbucket binding changed during commit resolution", shared.ErrConflict)
 		}
 		for _, target := range targets {
-			if _, err := r.projects.StartBitbucketWebhookAnalysis(txCtx, "system:bitbucket-webhook", id.TenantID, bindings[0].ProjectID, target); err != nil {
+			if _, err := r.projects.StartBitbucketWebhookAnalysis(txCtx, "system:bitbucket-webhook", id.TenantID, projectID, target); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
 	return err
+}
+
+func (r *BitbucketReceiver) boundProject(ctx context.Context, id ports.InboundWebhookIdentity) (shared.ID, error) {
+	item, err := r.integrations.Get(ctx, id.TenantID, shared.ID(id.OwnerID))
+	if err != nil {
+		return "", err
+	}
+	if item.Provider != "bitbucket" || !item.Enabled || item.Archived {
+		return "", fmt.Errorf("%w: Bitbucket integration is not active", shared.ErrValidation)
+	}
+	bindings, err := r.integrations.ListBindings(ctx, id.TenantID, item.ID)
+	if err != nil {
+		return "", err
+	}
+	if len(bindings) != 1 || bindings[0].ProjectID.IsZero() {
+		return "", fmt.Errorf("%w: Bitbucket inbound integration must bind one Project", shared.ErrValidation)
+	}
+	return bindings[0].ProjectID, nil
 }
 
 func bitbucketScanTargets(eventType string, body []byte) ([]ports.BitbucketScanTarget, error) {
@@ -162,7 +187,16 @@ func bitbucketScanTargets(eventType string, body []byte) ([]ports.BitbucketScanT
 }
 
 func validateBitbucketTarget(t ports.BitbucketScanTarget) error {
-	if !githubCommitPattern.MatchString(t.SHA) || !validBitbucketRef(t.Ref) || (t.PullRequest && !validBitbucketRef(t.BaseRef)) {
+	validCommit := githubCommitPattern.MatchString(t.SHA)
+	if t.PullRequest && len(t.SHA) == 12 {
+		validCommit = true
+		for _, c := range t.SHA {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				validCommit = false
+			}
+		}
+	}
+	if !validCommit || !validBitbucketRef(t.Ref) || (t.PullRequest && !validBitbucketRef(t.BaseRef)) {
 		return fmt.Errorf("%w: invalid Bitbucket ref or commit", shared.ErrValidation)
 	}
 	return nil

@@ -32,6 +32,11 @@ func TestBitbucketQueuesStoredRepoAndSuppressesForkExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stale := in
+	stale.ResolvedRepository = "https://bitbucket.org/previous/app.git"
+	if _, err := svc.StartBitbucketWebhookAnalysis(ctx, "hook", "tenant", p.ID, stale); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("changed source accepted: %v", err)
+	}
 	var payload struct {
 		Req     ports.AcquireRequest `json:"req"`
 		Options scauc.ScanOptions    `json:"options"`
@@ -68,4 +73,41 @@ func TestBitbucketQueuesStoredRepoAndSuppressesForkExecution(t *testing.T) {
 		t.Fatal("fork analysis triggered forge writes")
 	}
 
+}
+
+type resolvedBitbucketCommit struct {
+	sha, repository string
+	fork            bool
+	err             error
+}
+
+func (r *resolvedBitbucketCommit) ResolveBitbucketCommit(_ context.Context, repository, _ string, fork bool) (string, error) {
+	r.repository, r.fork = repository, fork
+	return r.sha, r.err
+}
+
+func TestBitbucketCommitPreflightUsesStoredSourceAndRejectsMismatchedSHA(t *testing.T) {
+	svc, _, _, _ := newImportService(t)
+	ctx := shared.WithTenant(context.Background(), "tenant")
+	p, err := svc.Create(ctx, CreateInput{TenantID: "tenant", CreatedBy: "alice", Name: "Git project", Key: "git-project", SourceBinding: project.SourceBinding{Kind: project.SourceGit, Value: "https://bitbucket.org/trusted/app.git", DefaultBranch: "main"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &resolvedBitbucketCommit{sha: strings.Repeat("a", 40)}
+	svc.SetBitbucketCommitResolver(resolver)
+	in := ports.BitbucketScanTarget{Ref: "feature/fix", SHA: strings.Repeat("a", 12), BaseRef: "main", PullRequest: true, Fork: true}
+	resolved, err := svc.ResolveBitbucketWebhookTarget(ctx, "tenant", p.ID, in)
+	if err != nil || resolved.SHA != resolver.sha || resolved.ResolvedRepository != p.SourceBinding.Value || resolver.repository != p.SourceBinding.Value || !resolver.fork {
+		t.Fatalf("unsafe preflight: %+v err=%v resolver=%+v", resolved, err, resolver)
+	}
+	for _, sha := range []string{strings.Repeat("b", 40), strings.Repeat("a", 12), strings.Repeat("a", 12) + strings.Repeat("z", 28)} {
+		resolver.sha = sha
+		if _, err := svc.ResolveBitbucketWebhookTarget(ctx, "tenant", p.ID, in); !errors.Is(err, shared.ErrValidation) {
+			t.Fatalf("resolved invalid hash %q: %v", sha, err)
+		}
+	}
+	resolver.err = errors.New("lookup unavailable")
+	if _, err := svc.ResolveBitbucketWebhookTarget(ctx, "tenant", p.ID, in); err == nil {
+		t.Fatal("upstream error ignored")
+	}
 }

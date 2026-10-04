@@ -16,6 +16,17 @@ type bitbucketScans struct {
 	targets         []ports.BitbucketScanTarget
 	tenant, project shared.ID
 	err             error
+	resolveErr      error
+	onResolve       func()
+}
+
+func (s *bitbucketScans) ResolveBitbucketWebhookTarget(_ context.Context, _, _ shared.ID, target ports.BitbucketScanTarget) (ports.BitbucketScanTarget, error) {
+	if s.onResolve != nil {
+		s.onResolve()
+	}
+	target.SHA += strings.Repeat("b", 28)
+	target.ResolvedRepository = "https://bitbucket.org/trusted/app.git"
+	return target, s.resolveErr
 }
 
 func (s *bitbucketScans) StartBitbucketWebhookAnalysis(_ context.Context, _ string, tenant, project shared.ID, target ports.BitbucketScanTarget) (ports.ScanJob, error) {
@@ -142,6 +153,62 @@ func TestBitbucketRejectsUnsignedEventHeaderReclassification(t *testing.T) {
 			err := r.ReceiveInboundWebhook(context.Background(), id, ports.InboundWebhookEvent{Provider: "bitbucket", EventType: "pullrequest:created", EventID: "id", Body: body})
 			if !errors.Is(err, shared.ErrValidation) || len(scans.targets) != 0 {
 				t.Fatalf("reclassified %s event queued: %v", field, err)
+			}
+		})
+	}
+}
+
+func TestBitbucketPullRequestAcceptsProviderCommitPrefix(t *testing.T) {
+	a := "{11111111-1111-1111-1111-111111111111}"
+	for _, event := range []string{"pullrequest:created", "pullrequest:updated"} {
+		body := []byte(strings.ReplaceAll(string(bbPR(a, a, "OPEN")), strings.Repeat("b", 40), strings.Repeat("b", 12)))
+		targets, err := bitbucketScanTargets(event, body)
+		if err != nil || len(targets) != 1 || targets[0].SHA != strings.Repeat("b", 12) {
+			t.Fatalf("provider PR commit rejected: targets=%+v err=%v", targets, err)
+		}
+	}
+	if _, err := bitbucketScanTargets("repo:push", bbPush(strings.Repeat("b", 12))); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("abbreviated push accepted: %v", err)
+	}
+}
+
+func TestBitbucketCommitResolutionFailureRetriesWithoutConsumingReceipt(t *testing.T) {
+	r, scans, id := bitbucketFixture(t)
+	a := "{11111111-1111-1111-1111-111111111111}"
+	body := []byte(strings.ReplaceAll(string(bbPR(a, a, "OPEN")), strings.Repeat("b", 40), strings.Repeat("b", 12)))
+	event := ports.InboundWebhookEvent{Provider: "bitbucket", EventType: "pullrequest:created", EventID: "delivery", Body: body}
+	scans.resolveErr = errors.New("upstream unavailable")
+	if err := r.ReceiveInboundWebhook(context.Background(), id, event); err == nil || len(scans.targets) != 0 {
+		t.Fatalf("failed resolution queued: %v %+v", err, scans.targets)
+	}
+	scans.resolveErr = nil
+	for _, uuid := range []string{"delivery", "delivery", "changed-uuid"} {
+		event.EventID = uuid
+		if err := r.ReceiveInboundWebhook(context.Background(), id, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(scans.targets) != 1 || scans.targets[0].SHA != strings.Repeat("b", 40) {
+		t.Fatalf("retry/replay lost pinned commit: %+v", scans.targets)
+	}
+}
+
+func TestBitbucketRechecksBindingAfterCommitResolution(t *testing.T) {
+	for _, mutation := range []string{"binding", "disabled"} {
+		t.Run(mutation, func(t *testing.T) {
+			r, scans, id := bitbucketFixture(t)
+			reader := r.integrations.(*fakeIntegrations)
+			scans.onResolve = func() {
+				if mutation == "binding" {
+					reader.bindings[0].ProjectID = "another-project"
+				} else {
+					reader.item.Enabled = false
+				}
+			}
+			a := "{11111111-1111-1111-1111-111111111111}"
+			body := []byte(strings.ReplaceAll(string(bbPR(a, a, "OPEN")), strings.Repeat("b", 40), strings.Repeat("b", 12)))
+			if err := r.ReceiveInboundWebhook(context.Background(), id, ports.InboundWebhookEvent{Provider: "bitbucket", EventType: "pullrequest:created", EventID: "delivery", Body: body}); err == nil || len(scans.targets) != 0 {
+				t.Fatalf("stale resolution queued: err=%v targets=%+v", err, scans.targets)
 			}
 		})
 	}
