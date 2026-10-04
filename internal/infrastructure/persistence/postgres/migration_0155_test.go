@@ -69,6 +69,9 @@ func TestMigration0155RollbackGuard(t *testing.T) {
 	if err := goose.UpTo(db, ".", 155); err != nil {
 		t.Fatalf("up to 0155: %v", err)
 	}
+	if _, err := db.Exec(`ALTER TABLE scan_run_lanes ADD COLUMN engine_outcomes JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
+		t.Fatalf("add current scan-run fixture column: %v", err)
+	}
 	pool, err := Connect(context.Background(), dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +82,9 @@ func TestMigration0155RollbackGuard(t *testing.T) {
 		t.Fatalf("seed candidate tenant=%s created=%v err=%v", tenantID, created, err)
 	}
 	pool.Close()
+	if _, err := db.Exec(`ALTER TABLE scan_run_lanes DROP COLUMN engine_outcomes`); err != nil {
+		t.Fatalf("restore pre-0219 schema before rollback guard: %v", err)
+	}
 	if err := goose.DownTo(db, ".", 154); err == nil || !strings.Contains(err.Error(), "cannot roll back assessment relationship review while artifacts exist") {
 		t.Fatalf("rollback guard error=%v", err)
 	}

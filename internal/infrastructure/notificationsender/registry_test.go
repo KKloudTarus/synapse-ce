@@ -14,7 +14,7 @@ func TestChannelTypesListTheRegistryInRegistrationOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := s.ChannelTypes()
-	want := []notification.ChannelType{notification.ChannelWebhook, notification.ChannelSlack, notification.ChannelEmail, "recording"}
+	want := []notification.ChannelType{notification.ChannelWebhook, notification.ChannelSlack, notification.ChannelEmail, notification.ChannelTeams, notification.ChannelTelegram, notification.ChannelGoogleChat, notification.ChannelDiscord, "recording"}
 	if len(got) != len(want) {
 		t.Fatalf("channel types = %v, want %v", got, want)
 	}

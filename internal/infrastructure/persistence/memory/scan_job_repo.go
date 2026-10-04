@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -26,6 +27,9 @@ func NewScanJobStore() *ScanJobStore {
 var _ ports.ScanJobStore = (*ScanJobStore)(nil)
 
 func (s *ScanJobStore) CreateRunning(_ context.Context, j ports.ScanJob) error {
+	if _, err := scanrun.CanonicalEngineOutcomes(j.EngineOutcomes); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, current := range s.byID {
@@ -42,6 +46,9 @@ func (s *ScanJobStore) CreateRunning(_ context.Context, j ports.ScanJob) error {
 
 // Save upserts a job; a newly-seen id becomes the latest for its engagement.
 func (s *ScanJobStore) Save(_ context.Context, j ports.ScanJob) error {
+	if _, err := scanrun.CanonicalEngineOutcomes(j.EngineOutcomes); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if stored, existed := s.byID[j.ID]; !existed {
@@ -110,6 +117,8 @@ func (s *ScanJobStore) LatestForEngagements(_ context.Context, engagementIDs []s
 }
 
 func cloneScanJobSource(job ports.ScanJob) ports.ScanJob {
+	job.EngineOutcomes = scanrun.CloneEngineOutcomes(job.EngineOutcomes)
+	job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
 	if job.SourcePackage != nil {
 		item := *job.SourcePackage
 		item.Locator, item.ObjectKey = "", ""

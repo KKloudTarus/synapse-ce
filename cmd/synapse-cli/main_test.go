@@ -14,9 +14,11 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/coverage"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/gitdiff"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/sast"
+	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 )
 
 func TestSASTLocationNormalizesPath(t *testing.T) {
@@ -104,6 +106,24 @@ func TestFilterByConfidence(t *testing.T) {
 	}
 	if titles["medium"] || titles["low"] {
 		t.Fatalf("--min-confidence high must drop medium/low: %+v", titles)
+	}
+}
+
+func TestCompleteCoverageGate(t *testing.T) {
+	complete := &scauc.ScanResult{EngineCoverage: scanrun.EngineCoverage{Status: scanrun.CoverageComplete, Required: 3, Completed: 3}}
+	if err := completeCoverageGate(complete, true); err != nil {
+		t.Fatalf("complete coverage gate: %v", err)
+	}
+	partial := &scauc.ScanResult{EngineCoverage: scanrun.EngineCoverage{Status: scanrun.CoveragePartial, Required: 3, Completed: 2}}
+	if err := completeCoverageGate(partial, false); err != nil {
+		t.Fatalf("optional coverage gate: %v", err)
+	}
+	if err := completeCoverageGate(partial, true); err == nil || !strings.Contains(err.Error(), "partial (2/3") {
+		t.Fatalf("partial coverage gate error = %v", err)
+	}
+	unknown := &scauc.ScanResult{EngineCoverage: scanrun.EngineCoverage{Status: scanrun.CoverageUnknown}}
+	if err := completeCoverageGate(unknown, true); err == nil || !strings.Contains(err.Error(), "unknown (0/0") {
+		t.Fatalf("unknown coverage gate error = %v", err)
 	}
 }
 

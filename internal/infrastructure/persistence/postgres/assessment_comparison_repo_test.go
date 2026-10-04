@@ -303,6 +303,11 @@ func TestMigration0153RollbackGuard(t *testing.T) {
 	if err := goose.UpTo(db, ".", 153); err != nil {
 		t.Fatalf("up to 0153: %v", err)
 	}
+	// Current repository fixtures write the additive outcome column. Restore the
+	// historical schema before exercising the comparison migration's rollback.
+	if _, err := db.Exec(`ALTER TABLE scan_run_lanes ADD COLUMN engine_outcomes JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
+		t.Fatal(err)
+	}
 	pool, err := Connect(context.Background(), dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -323,6 +328,9 @@ func TestMigration0153RollbackGuard(t *testing.T) {
 		t.Fatalf("create rollback guard row created=%v err=%v", created, err)
 	}
 	pool.Close()
+	if _, err := db.Exec(`ALTER TABLE scan_run_lanes DROP COLUMN engine_outcomes`); err != nil {
+		t.Fatal(err)
+	}
 	if err := goose.DownTo(db, ".", 152); err == nil || !strings.Contains(err.Error(), "cannot roll back assessment comparisons") {
 		t.Fatalf("rollback guard error=%v", err)
 	}

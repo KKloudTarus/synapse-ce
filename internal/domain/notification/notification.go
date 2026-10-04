@@ -15,13 +15,28 @@ import (
 type ChannelType string
 
 const (
-	ChannelWebhook ChannelType = "webhook"
-	ChannelSlack   ChannelType = "slack"
-	ChannelEmail   ChannelType = "email"
+	ChannelWebhook    ChannelType = "webhook"
+	ChannelSlack      ChannelType = "slack"
+	ChannelEmail      ChannelType = "email"
+	ChannelTeams      ChannelType = "teams"
+	ChannelTelegram   ChannelType = "telegram"
+	ChannelGoogleChat ChannelType = "google_chat"
+	ChannelDiscord    ChannelType = "discord"
 )
 
 func (v ChannelType) Valid() bool {
-	return v == ChannelWebhook || v == ChannelSlack || v == ChannelEmail
+	switch v {
+	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord:
+		return true
+	}
+	return false
+}
+
+// HTTPEndpoint reports whether the channel type delivers to one HTTPS endpoint, so its masked
+// destination is "https://host/…" and a host change is a destination change admins are told about.
+// Email is the only type that delivers to recipients instead.
+func (v ChannelType) HTTPEndpoint() bool {
+	return v.Valid() && v != ChannelEmail
 }
 
 // CodeProviderDisabled is the reason a delivery is cancelled when the operator switched its channel

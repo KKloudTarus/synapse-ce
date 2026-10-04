@@ -28,6 +28,11 @@ var channelSchemas = map[domain.ChannelType]channelSchema{
 	domain.ChannelWebhook: {validate: validateWebhookChannel, decode: decodeConfig[ports.WebhookChannelConfig]},
 	domain.ChannelSlack:   {validate: validateSlackChannel, decode: decodeConfig[ports.SlackChannelConfig]},
 	domain.ChannelEmail:   {validate: validateEmailChannel, decode: decodeConfig[ports.EmailChannelConfig]},
+	// The WS3 chat channels (#1378 to #1381), validated in chat_channel_config.go.
+	domain.ChannelTeams:      {validate: validateTeamsChannel, decode: decodeConfig[ports.TeamsChannelConfig]},
+	domain.ChannelTelegram:   {validate: validateTelegramChannel, decode: decodeConfig[ports.TelegramChannelConfig]},
+	domain.ChannelGoogleChat: {validate: validateGoogleChatChannel, decode: decodeConfig[ports.GoogleChatChannelConfig]},
+	domain.ChannelDiscord:    {validate: validateDiscordChannel, decode: decodeConfig[ports.DiscordChannelConfig]},
 }
 
 const (

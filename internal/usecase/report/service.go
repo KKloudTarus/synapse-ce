@@ -18,6 +18,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -860,6 +861,14 @@ func scanSection(insight ports.ReportInsight) (ports.ReportSection, bool) {
 	}
 	sec := ports.ReportSection{Heading: "Scan & SBOM Insight"}
 	if insight.HasScan {
+		coverage := reportEngineCoverage(insight)
+		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("Required-engine coverage: %s (%d/%d completed).", coverage.Status, coverage.Completed, coverage.Required))
+		if insight.ExecutionMode != "" {
+			sec.Paragraphs = append(sec.Paragraphs, "Current execution mode: "+insight.ExecutionMode+".")
+		}
+		if insight.IncludesPreviousResults {
+			sec.Paragraphs = append(sec.Paragraphs, "This report includes retained findings from a previous result. Required-engine coverage applies only to the current execution and does not establish whole-assessment coverage.")
+		}
 		if insight.CompletenessNote != "" {
 			sec.Paragraphs = append(sec.Paragraphs, insight.CompletenessNote)
 		}
@@ -871,6 +880,13 @@ func scanSection(insight ports.ReportInsight) (ports.ReportSection, bool) {
 			sec.Paragraphs = append(sec.Paragraphs, "Grype DB version: "+insight.GrypeDBVersion)
 		}
 		sec.Paragraphs = append(sec.Paragraphs, fmt.Sprintf("License detection: %d known, %d unknown (%.0f%%).", insight.LicenseDetected, insight.LicenseUnknown, insight.LicensePct))
+		if outcomes := reportEngineOutcomes(insight.EngineOutcomes); len(outcomes) > 0 {
+			table := &ports.ReportTable{Headers: []string{"Engine", "Execution", "Coverage", "Reason"}}
+			for _, outcome := range outcomes {
+				table.Rows = append(table.Rows, []string{outcome.Engine, string(outcome.Execution), string(outcome.Coverage), string(outcome.Reason)})
+			}
+			sec.Table = table
+		}
 	}
 	// Accepted AI judgments, rendered as closed tokens (no model prose): risk rationale + cross-check.
 	for _, rr := range insight.RiskRationales {
@@ -920,18 +936,56 @@ func authorizationWindow(eng *engagement.Engagement) string {
 func executivePosture(findings []finding.Finding, insight ports.ReportInsight) string {
 	counts := severityCounts(findings)
 	crit, high := counts[shared.SeverityCritical], counts[shared.SeverityHigh]
+	coverage := reportEngineCoverage(insight)
+	incompleteCoverage := insight.HasScan && !coverage.Complete()
+	mixedResults := insight.HasScan && insight.IncludesPreviousResults
+	qualifier := ""
+	if incompleteCoverage {
+		qualifier = fmt.Sprintf(" Required-engine coverage is %s (%d/%d completed), so these findings are a lower bound.", coverage.Status, coverage.Completed, coverage.Required)
+	} else if mixedResults {
+		qualifier = " This report includes retained findings from a previous result; current required-engine coverage does not establish whole-assessment coverage."
+	}
 	switch {
 	case crit > 0:
-		return fmt.Sprintf("Overall posture: HIGH RISK – %d critical and %d high-severity finding(s) require prompt remediation.", crit, high)
+		return fmt.Sprintf("Overall posture: HIGH RISK – %d critical and %d high-severity finding(s) require prompt remediation.%s", crit, high, qualifier)
 	case high > 0:
-		return fmt.Sprintf("Overall posture: ELEVATED RISK – %d high-severity finding(s) should be remediated.", high)
+		return fmt.Sprintf("Overall posture: ELEVATED RISK – %d high-severity finding(s) should be remediated.%s", high, qualifier)
+	case incompleteCoverage || mixedResults:
+		return fmt.Sprintf("Overall posture: INCONCLUSIVE – %d finding(s) were identified, but %s; treat the result as indicative.", len(findings), reportCoverageLimitation(coverage, mixedResults))
 	case len(findings) > 0:
 		return "Overall posture: LOW RISK – findings were identified, none critical or high."
-	case insight.HasScan && !insight.Confident:
-		return "Overall posture: INCONCLUSIVE – no findings, but the scan was incomplete; treat as indicative."
 	default:
 		return "Overall posture: no findings at or above the reporting threshold were identified."
 	}
+}
+
+func reportCoverageLimitation(coverage scanrun.EngineCoverage, mixedResults bool) string {
+	if mixedResults {
+		return "the result includes retained findings from a previous execution and current coverage does not establish whole-assessment coverage"
+	}
+	return fmt.Sprintf("required-engine coverage is %s (%d/%d completed)", coverage.Status, coverage.Completed, coverage.Required)
+}
+
+// reportEngineCoverage derives the aggregate from canonical outcomes rather than
+// trusting a redundant projection. Missing, malformed, or historical facts remain
+// unknown; dependency confidence cannot establish scan coverage.
+func reportEngineCoverage(insight ports.ReportInsight) scanrun.EngineCoverage {
+	canonical, err := scanrun.CanonicalEngineOutcomes(insight.EngineOutcomes)
+	if err != nil {
+		return scanrun.EngineCoverage{Status: scanrun.CoverageUnknown}
+	}
+	return scanrun.ComputeEngineCoverage(canonical)
+}
+
+func reportEngineOutcomes(outcomes []scanrun.EngineOutcome) []scanrun.EngineOutcome {
+	if len(outcomes) == 0 || len(outcomes) > 64 {
+		return nil
+	}
+	result, err := scanrun.CanonicalEngineOutcomes(outcomes)
+	if err != nil {
+		return nil
+	}
+	return result
 }
 
 // priorityDistribution renders the P1..P5 risk-priority tallies deterministically.

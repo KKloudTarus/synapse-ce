@@ -16,7 +16,7 @@ func TestEveryChannelTypeHasAFamily(t *testing.T) {
 			t.Errorf("%s: family = %q ok=%v, want %q", channelType, got, ok, family)
 		}
 	}
-	if _, ok := FamilyForChannelType("teams"); ok {
+	if _, ok := FamilyForChannelType("carrier_pigeon"); ok {
 		t.Error("an unknown channel type has a family")
 	}
 }
@@ -45,9 +45,9 @@ func TestTemplateBindingValidate(t *testing.T) {
 		"template":         {TemplateBinding{TemplateID: "t1", Locale: "en"}, ChannelSlack, true},
 		"wildcard locale":  {TemplateBinding{Locale: "*"}, ChannelSlack, false},
 		"unknown locale":   {TemplateBinding{Locale: "en-US"}, ChannelSlack, false},
-		"type w/o family":  {TemplateBinding{TemplateID: "t1"}, "teams", false},
+		"type w/o family":  {TemplateBinding{TemplateID: "t1"}, "carrier_pigeon", false},
 		"unprintable id":   {TemplateBinding{TemplateID: "t\n1"}, ChannelSlack, false},
-		"unknown, no bind": {TemplateBinding{}, "teams", true},
+		"unknown, no bind": {TemplateBinding{}, "carrier_pigeon", true},
 		"custom body":      {TemplateBinding{TemplateID: "t1", CustomBody: true}, ChannelWebhook, true},
 		"custom, unbound":  {TemplateBinding{CustomBody: true}, ChannelWebhook, false},
 		"custom on slack":  {TemplateBinding{TemplateID: "t1", CustomBody: true}, ChannelSlack, false},

@@ -3,7 +3,7 @@
 [Documentation home](README.md)
 
 Synapse can route tenant events to signed HTTP webhooks, Slack incoming webhooks,
-and email recipients. Delivery runs in `synapse-worker`; API requests and scans do
+Microsoft Teams, Telegram, Google Chat and Discord channels, and email recipients. Delivery runs in `synapse-worker`; API requests and scans do
 not wait for a remote service.
 
 ## Personal email contacts
@@ -387,6 +387,48 @@ DNS-rebound destinations are blocked by the HTTP transport.
 Slack uses a fixed Block Kit message and observes Slack's `429 Retry-After`.
 Email creates one delivery per normalized recipient and uses a stable Message-ID.
 SMTP acceptance means the relay accepted the message; it does not prove inbox delivery.
+
+## Chat channels: Teams, Telegram, Google Chat and Discord
+
+Four more chat channel types deliver the same events (#1378 to #1381). For each of them the
+URL, or the Telegram bot token, is the credential: it is sealed like a webhook secret, the API
+and the console show only `https://host/…`, and editing a channel never shows it again. To point a
+channel somewhere else, an administrator enters the whole URL (or, for Telegram, the token and chat)
+again; a rename or an enable switch keeps it. Validation pins each type to its vendor's hosts, and
+`safehttp` still vets every address at dial time, so a chat channel cannot reach an internal host.
+A failed request is recorded only as a code (`network_error`, `destination_blocked`, `http_<status>`),
+never with the request URL.
+
+| Type | What to paste | Accepted destination |
+|---|---|---|
+| `teams` | The URL of a Teams **Workflows** "post to a channel when a webhook request is received" flow | `https://*.logic.azure.com/workflows/…`, `https://*.logic.azure.us/workflows/…` or `https://*.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/…`, with its `sig` parameter. Office 365 connector URLs (`*.webhook.office.com`) are retired by Microsoft and refused. |
+| `telegram` | A bot token from @BotFather, the chat ID, and optionally a forum topic ID | Bot API `sendMessage` on `api.telegram.org`. The chat is a numeric ID (groups and channels start with `-100`) or an `@channel` username; the bot must be a member of the chat. |
+| `google_chat` | The space's incoming-webhook URL | `https://chat.googleapis.com/v1/spaces/<space>/messages?key=…&token=…`, with no other parameters. |
+| `discord` | A channel webhook URL | `https://discord.com/api/webhooks/<id>/<token>` (also `discordapp.com`, `ptb.` and `canary.`), optionally with `thread_id`. |
+
+Each message has the event title, the event summary and the event type and ID, rendered by the
+channel's formatter so that no value can become formatting, a link or a mention:
+
+- **Teams** posts an Adaptive Card whose text is all `TextRun`s, which Teams shows literally. The
+  Workflows trigger answers `202 Accepted` and returns no message handle.
+- **Telegram** sends MarkdownV2 text with every special character escaped and link previews off. A
+  `429` carries its wait in the body (`parameters.retry_after`), which the worker honours. A group that
+  was upgraded to a supergroup fails with `telegram_chat_migrated`; re-enter the channel with the new
+  chat ID. The sent `message_id` is kept on the delivery for threading (#1384).
+- **Google Chat** posts a `cardsV2` card whose text is HTML with every value escaped, so
+  `<users/all>` is text. The created message's resource name is kept on the delivery.
+- **Discord** posts one embed with every punctuation character of a value escaped and
+  `allowed_mentions.parse` always empty, so `@everyone` and role mentions never ping. The driver adds
+  `wait=true` so Discord returns the created message, whose ID is kept on the delivery.
+
+Until the send-time renderer (#1365, #1367) lands, these channels use the same built-in title and
+summary as Slack, and a bound chat template does not change their content yet. The formatters are the
+ones the template preview uses, so the switch will not change how a message is escaped. Deep links
+arrive with the renderer.
+
+All four are `2xx` delivered, `408`, `429` and `5xx` retried with the usual budget, and any other
+status final. Each type can be switched off deployment-wide with
+`SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` (for example `telegram,discord`).
 
 ## Retry and cutover behavior
 

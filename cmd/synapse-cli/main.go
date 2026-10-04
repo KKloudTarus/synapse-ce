@@ -1119,7 +1119,7 @@ func usageTo(w io.Writer) {
 	out := func(line string) { _, _ = fmt.Fprintln(w, line) }
 	out("usage:")
 	out("  synapse-cli doctor [path] [--json]       # offline pre-scan readiness: toolchain, markers, and dimension coverage")
-	out("  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--sarif-out FILE] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--verify-secrets] [--ignore-unfixed] [--detection-priority comprehensive|precise] [--server URL (--project KEY | --engagement ID) [--coverage FILE] [--push-source] [--push-sbom] [--asset ID] [--branch REF] [--run-url URL] [--ci-provider NAME] [--insecure-http]]")
+	out("  synapse-cli scan <path|image-ref> [--image] [--offline] [--json] [--sarif] [--sarif-out FILE] [--mode full|vulnerabilities|licenses] [--fail-on critical|high|medium|low|info] [--require-complete] [--min-confidence low|medium|high|very_high] [--base REF] [--include-test] [--verify-secrets] [--ignore-unfixed] [--detection-priority comprehensive|precise] [--server URL (--project KEY | --engagement ID) [--coverage FILE] [--push-source] [--push-sbom] [--asset ID] [--branch REF] [--run-url URL] [--ci-provider NAME] [--insecure-http]]")
 	out("      --server   record the result on a Synapse server (token from SYNAPSE_API_TOKEN); needs --project, --engagement, or both")
 	out("      --project KEY     record a project analysis: history, trend and the managed gate in the console pick it up (source scans only)")
 	out("      --engagement ID   record the security findings on an engagement, where they appear under its Imported tab; works for an --image scan too")
@@ -1129,6 +1129,7 @@ func usageTo(w io.Writer) {
 	out("      --asset ID        bind the ingested findings to a business asset (needs --engagement)")
 	out("      --insecure-http   allow a plain-http --server that is not loopback (the token then travels in the clear)")
 	out("      --sarif    write a SARIF 2.1.0 report to stdout (for GitHub code-scanning upload); --fail-on still sets the exit code")
+	out("      --require-complete  fail after writing the report unless every required scan engine completed with complete coverage")
 	out("      --sarif-out FILE  write the SARIF report to FILE and keep the human report on stdout, so a CI log still shows what was found")
 	out("      --image    treat the argument as a container image reference (pulled daemonlessly, in-process) instead of a local path")
 	out("      --offline  no network egress: skip live OSV, every registry resolver (npm/composer/poetry/bundler/maven/gradle), KEV/EPSS, online NVD, license metadata and AI triage; detect with the local sources only – the owned advisory store, plus Grype's pre-synced DB when SYNAPSE_DETECTION_SOURCES lists it (air-gapped / fast)")
@@ -1173,6 +1174,7 @@ func runScan() {
 	sbomOut := false
 	includeTest := false
 	verifySecrets := false
+	requireComplete := false
 	minConfidence := ""
 	baseRef := ""
 	baseExplicit := false
@@ -1233,6 +1235,8 @@ func runScan() {
 			includeTest = true
 		case os.Args[i] == "--verify-secrets":
 			verifySecrets = true
+		case os.Args[i] == "--require-complete":
+			requireComplete = true
 		case os.Args[i] == "--mode" && i+1 < len(os.Args):
 			mode = os.Args[i+1]
 			i++
@@ -1321,7 +1325,7 @@ func runScan() {
 		fmt.Fprintln(os.Stderr, "synapse-cli: choose only one of --json, --sarif or --sbom")
 		os.Exit(2)
 	}
-	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, baseExplicit, ignoreUnfixed, image, offline, jsonOut, sarifOut, sarifPath, sbomOut, includeTest, verifySecrets, push); err != nil {
+	if err := run(os.Args[2], failOn, mode, priority, minConfidence, baseRef, baseExplicit, ignoreUnfixed, image, offline, jsonOut, sarifOut, sarifPath, sbomOut, includeTest, verifySecrets, requireComplete, push); err != nil {
 		fmt.Fprintln(os.Stderr, "synapse-cli:", err)
 		os.Exit(1)
 	}
@@ -1567,7 +1571,7 @@ func selectSBOMGenerator(cfg config.Config) (ports.SBOMGenerator, error) {
 	return reg, nil
 }
 
-func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, baseExplicit, ignoreUnfixed, image, offline, jsonOut, sarifOut bool, sarifPath string, sbomOut, includeTest, verifySecrets bool, push pushTarget) error {
+func run(path string, failOn shared.Severity, mode, priority, minConfidence, baseRef string, baseExplicit, ignoreUnfixed, image, offline, jsonOut, sarifOut bool, sarifPath string, sbomOut, includeTest, verifySecrets, requireComplete bool, push pushTarget) error {
 	// An image target is an OCI reference (acquired in-process into an OCI layout); a local
 	// target is a filesystem path that must be absolute for the scope check.
 	target := strings.TrimSpace(path)
@@ -1770,6 +1774,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	if cfg.JVMReachabilityEnabled {
 		sca.SetJVMReachability(jvmreach.New())
 	}
+	sca.SetSourceEngineSelection(cfg.SASTEnabled && !image, cfg.SecretScanEnabled, cfg.MisconfigEnabled)
 	if cfg.SASTEnabled && !image {
 		sca.SetSASTAnalyzer(sastAnalyzer()) // deterministic pattern-SAST (CI-friendly)
 	} else if cfg.SASTEnabled && image {
@@ -2171,7 +2176,20 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 	if over > 0 {
 		return fmt.Errorf("%d finding(s) at or above %s", over, failOn)
 	}
+	if err := completeCoverageGate(res, requireComplete); err != nil {
+		return err
+	}
 	return nil
+}
+
+// completeCoverageGate is intentionally independent of the finding gate: teams can
+// opt into a proof that all required engines completed, while the established
+// severity gate remains the default CI contract.
+func completeCoverageGate(res *scauc.ScanResult, required bool) error {
+	if !required || res.EngineCoverage.Complete() {
+		return nil
+	}
+	return fmt.Errorf("required scan coverage is %s (%d/%d required engine(s) completed)", res.EngineCoverage.Status, res.EngineCoverage.Completed, res.EngineCoverage.Required)
 }
 
 // formatToolVersions renders the tool-version map as a stable, readable list. Printing the map with %v

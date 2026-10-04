@@ -2,7 +2,14 @@ import { req } from './client'
 // One definition, shared with the template API client (#1373).
 import type { NotificationTemplateFamily } from './notification-templates'
 
-export type NotificationChannelType = 'webhook' | 'slack' | 'email'
+export type NotificationChannelType =
+  | 'webhook'
+  | 'slack'
+  | 'email'
+  | 'teams'
+  | 'telegram'
+  | 'google_chat'
+  | 'discord'
 // The server's event catalog is the source of truth for event types, so the console accepts any
 // type it declares instead of a hard-coded union.
 export type NotificationEventType = string
@@ -127,6 +134,10 @@ export interface NotificationChannelInput {
   url?: string
   secret?: string
   recipients?: string[]
+  /** Telegram only: a numeric chat ID or an @channel username. The bot token goes in `secret`. */
+  chat_id?: string
+  /** Telegram only: the forum topic to post into; omitted posts to the main chat. */
+  thread_id?: number
   revision?: number
   /** Omitted keeps the binding; an empty string unbinds. */
   template_id?: string

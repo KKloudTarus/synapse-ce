@@ -9269,7 +9269,7 @@ components:
             operator switched off with `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`. Omitted when the
             capability has no options, including when every channel type is switched off.
           items: {type: string}
-          example: [webhook, slack, email]
+          example: [webhook, slack, email, teams, telegram, google_chat, discord]
         planned:
           type: boolean
           description: >
@@ -11218,11 +11218,27 @@ components:
         debug_events:
           type: array
           items: {type: object}
+        engine_outcomes:
+          type: array
+          maxItems: 64
+          description: Server-computed outcomes for bounded scan engines. Missing on historical jobs means coverage is unknown.
+          items: {$ref: "#/components/schemas/EngineOutcome"}
+        engine_coverage:
+          $ref: "#/components/schemas/EngineCoverage"
 
     ScanResult:
       type: object
       properties:
         target: {type: string}
+        execution_mode: {type: string, enum: [full, vulnerabilities, licenses], description: Mode selected for this invocation; scan_mode may include retained prior results.}
+        includes_previous_results: {type: boolean, description: True when retained prior results contribute to this result.}
+        engine_outcomes:
+          type: array
+          maxItems: 64
+          description: Server-computed outcomes for bounded scan engines. Missing on historical results means coverage is unknown.
+          items: {$ref: "#/components/schemas/EngineOutcome"}
+        engine_coverage:
+          $ref: "#/components/schemas/EngineCoverage"
         languages:
           type: array
           items: {type: object}
@@ -11242,6 +11258,41 @@ components:
           type: object
           additionalProperties: {type: string}
         vuln_db_snapshot: {type: string}
+
+    EngineOutcome:
+      type: object
+      required: [engine, execution, coverage, required]
+      properties:
+        engine: {type: string, minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$"}
+        execution: {type: string, enum: [completed, failed, timed_out, cancelled, not_run]}
+        coverage: {type: string, enum: [complete, partial, unknown, not_applicable]}
+        reason: {type: string, enum: ["", not_selected, disabled, not_applicable, unavailable, legacy_reporter, deadline_exceeded, budget_exhausted, cancelled, engine_error, upstream_failure, truncated, source_budget, unrendered_charts, dependency_unresolved, analysis_incomplete]}
+        required: {type: boolean}
+        counts:
+          type: object
+          additionalProperties: false
+          properties:
+            findings: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_seen: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_parsed: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_skipped: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_unscanned: {$ref: "#/components/schemas/EngineMeasurement"}
+            source_budget_bytes: {$ref: "#/components/schemas/EngineMeasurement"}
+            unrendered_charts: {$ref: "#/components/schemas/EngineMeasurement"}
+            proposals: {$ref: "#/components/schemas/EngineMeasurement"}
+
+    EngineMeasurement:
+      type: integer
+      minimum: 0
+      maximum: 9007199254740991
+
+    EngineCoverage:
+      type: object
+      required: [status, required, completed]
+      properties:
+        status: {type: string, enum: [complete, partial, unknown, not_applicable]}
+        required: {type: integer, minimum: 0, maximum: 64}
+        completed: {type: integer, minimum: 0, maximum: 64}
 
     ProjectDependencyGraph:
       type: object
@@ -13231,14 +13282,30 @@ components:
     NotificationChannelInput:
       type: object
       additionalProperties: false
-      description: Creates a channel or replaces its metadata. PATCH requires revision. Channel type is immutable; blank URL and secret retain the encrypted configuration on PATCH. Webhook creation or rotation requires both URL and a secret of at least 16 bytes.
+      description: >-
+        Creates a channel or replaces its metadata. PATCH requires revision. Channel type is immutable;
+        blank URL, secret and chat_id retain the encrypted configuration on PATCH. Webhook creation or
+        rotation requires both URL and a secret of at least 16 bytes. Teams, Google Chat and Discord
+        channels take the full credential-bearing webhook URL, and replacing it requires the whole URL
+        again. A Telegram channel takes the bot token in `secret` and the chat in `chat_id`; replacing
+        either requires both. Credential-bearing URLs and tokens are write-only and never returned.
       required: [name, type, enabled]
       properties:
         name: {type: string, maxLength: 200}
-        type: {type: string, enum: [webhook, slack, email]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord]}
         enabled: {type: boolean}
-        url: {type: string, writeOnly: true, description: HTTPS endpoint for webhook and Slack channels; blank retains the current endpoint on PATCH}
-        secret: {type: string, writeOnly: true, description: At least 16 bytes on creation or rotation; blank retains the current secret on PATCH}
+        url:
+          type: string
+          writeOnly: true
+          description: >-
+            HTTPS endpoint for webhook, Slack, Teams, Google Chat and Discord channels; blank retains the
+            current endpoint on PATCH. Teams accepts a Workflows trigger URL on `*.logic.azure.com`,
+            `*.logic.azure.us` or `*.environment.api.powerplatform.com` with a `sig` parameter; Google
+            Chat an incoming-webhook URL on `chat.googleapis.com` with `key` and `token`; Discord a
+            channel webhook on `discord.com` (optionally with `thread_id`).
+        secret: {type: string, writeOnly: true, description: The webhook signing secret (at least 16 bytes) or the Telegram bot token; blank retains the current secret on PATCH}
+        chat_id: {type: string, writeOnly: true, maxLength: 33, description: 'Telegram only: a numeric chat ID or an @channel username.'}
+        thread_id: {type: integer, format: int64, minimum: 0, maximum: 2147483647, writeOnly: true, description: 'Telegram only: the forum topic (message_thread_id) to post into; 0 or omitted posts to the main chat.'}
         recipients: {type: array, maxItems: 50, items: {type: string, format: email}}
         revision: {type: integer, minimum: 1}
         template_id:
@@ -13266,7 +13333,7 @@ components:
       properties:
         id: {type: string}
         name: {type: string}
-        type: {type: string, enum: [webhook, slack, email]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord]}
         enabled: {type: boolean}
         destination: {type: string, description: Redacted destination metadata}
         recipients: {type: array, items: {type: string, format: email}}
@@ -13528,7 +13595,7 @@ components:
         id: {type: string}
         event_id: {type: string}
         channel_id: {type: string}
-        channel_type: {type: string, enum: [webhook, slack, email]}
+        channel_type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord]}
         redrive_fence: {type: integer, format: int64, minimum: 0, description: Current durable queue claim fence; submit it as expected_fence to prevent a stale redrive.}
         recipient: {type: string}
         matched_rule_ids: {type: array, items: {type: string}}

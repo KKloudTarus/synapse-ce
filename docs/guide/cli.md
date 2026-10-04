@@ -139,6 +139,7 @@ synapse-cli scan <path|image-ref> [flags]
 | --- | --- |
 | `--mode full\|vulnerabilities\|licenses` | What to scan. Default is full. |
 | `--fail-on critical\|high\|medium\|low\|info` | Exit non-zero if a finding at or above this severity is present. Default is high. |
+| `--require-complete` | After the report is written, exit non-zero unless every required scan engine completed with complete coverage. This is opt-in; it does not change the existing finding-severity gate. |
 | `--image` | Treat the argument as a container image reference, pulled daemonlessly in-process, instead of a local path. |
 | `--offline` | Make the scan run without network egress. Detection uses the local sources only, the owned advisory store, plus Grype's pre-synced database when `SYNAPSE_DETECTION_SOURCES` names it (Grype is not in the default set), and every network-capable resolver and enricher is switched off: npm, composer, poetry, Bundler, Maven, Gradle, the Maven Central JAR SHA-1 lookup, KEV/EPSS, online NVD CVSS backfill, deps.dev and PyPI license metadata, and AI false-positive triage. `SYNAPSE_OFFLINE=true` does the same. Recall drops in exchange; the run makes no outbound request. Target acquisition is the one step outside the flag: a registry `--image` reference or a remote git URL is still fetched, so on an air-gapped runner point the scan at a local path or a local OCI layout. |
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
@@ -197,7 +198,7 @@ synapse-cli scan . --mode licenses
 synapse-cli scan alpine:3.19 --image --offline
 ```
 
-The exit code is 0 when no finding meets the `--fail-on` threshold. See
+The exit code is 0 when no finding meets the `--fail-on` threshold and, when enabled, `--require-complete` finds complete required-engine coverage. See
 [Exit codes](#exit-codes) for the full contract, which distinguishes a gate result from a usage error.
 
 ### Push results to the console

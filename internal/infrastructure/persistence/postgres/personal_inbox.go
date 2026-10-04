@@ -316,7 +316,7 @@ func deleteInbox(ctx context.Context, tx pgx.Tx, query string, args ...any) erro
 func (r *NotificationRepository) EnableDestinationNotices() { r.destinationNotices = true }
 
 func (r *NotificationRepository) maybeDestinationNotice(ctx context.Context, tx pgx.Tx, channel notification.Channel, action string) error {
-	if !r.destinationNotices || (channel.Type != notification.ChannelWebhook && channel.Type != notification.ChannelSlack) {
+	if !r.destinationNotices || !channel.Type.HTTPEndpoint() {
 		return nil
 	}
 	event, err := notification.NewDestinationEvent(channel.TenantID, channel.ID, channel.Type, channel.Destination, action, notification.ActorFrom(ctx), channel.UpdatedAt)
