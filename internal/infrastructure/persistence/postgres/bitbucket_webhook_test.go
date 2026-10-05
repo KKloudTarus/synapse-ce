@@ -31,7 +31,10 @@ func TestMigration0221BitbucketWebhookLifecycle(t *testing.T) {
 	if err := Migrate(context.Background(), isolated.dsn); err != nil {
 		t.Fatal(err)
 	}
-	requireIdentityMigrationVersion(t, isolated.db, 221)
+	// Migrate runs every embedded migration, so a later one can sit above 0221.
+	if version, err := goose.GetDBVersion(isolated.db); err != nil || version < 221 {
+		t.Fatalf("migration version=%d (%v), want at least 221", version, err)
+	}
 	requireMigrationIndexes(t, isolated.db, "inbound_webhook_events_payload_unique", "notification_events_type_recent_idx")
 	for _, fn := range []string{"synapse_lock_bitbucket_inbound_webhook(text,text,text)", "synapse_provision_bitbucket_inbound_webhook(text,text,text,text,integer)", "synapse_rotate_bitbucket_inbound_webhook(text,text,text,integer,text,timestamp with time zone)"} {
 		var publicExecute bool
