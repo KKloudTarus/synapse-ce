@@ -148,7 +148,7 @@ synapse-cli scan <path|image-ref> [flags]
 | `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
 | `--include-test` | Also gate on findings in test, fixture, and example paths. They are reported but gate-exempt by default. |
 | `--verify-secrets` | Actively confirm each detected credential is live by making one minimal read-only API call to its provider's public host (GitHub, GitLab, OpenAI), stamping the finding verified/unverified/unknown. Opt-in and off by default, and IGNORED under `--offline` (which forbids network egress). It sends the raw leaked secret over the network to the public provider host, so use it only against credentials you are authorized to test; a self-managed-instance token is still sent to the public host and yields `unknown`. The secret is never logged or written to output; a verified live credential is raised to `very_high` confidence, and an unverified or unknown verdict never removes a finding. |
-| `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
+| `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. When the scan finishes, stderr gets a short engine-coverage summary (how many required engines completed, each one that did not with its execution and reason, and the engines excluded on purpose) followed by every source warning in full, so a partial scan is visible without reading the document. |
 | `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. Findings exempted from the CI gate by verified AI consensus remain present and carry an external suppression with the policy version and reason. `--fail-on` still sets the exit code. |
 | `--sarif-out <file>` | Write the same SARIF report to `<file>` and keep the human report on stdout. Prefer this in a pipeline: `--sarif` owns stdout, so redirecting it to a file leaves the job log with nothing but the exit code. |
 | `--sbom` | Print the generated CycloneDX SBOM to stdout instead of a findings report. |
@@ -162,7 +162,9 @@ synapse-cli scan <path|image-ref> [flags]
 | `--branch <ref>`, `--run-url <url>`, `--ci-provider <name>` | What the pipeline says about itself, shown on the analysis in the console. On GitHub Actions, GitLab CI, Bitbucket Pipelines, Jenkins and Azure Pipelines these are read from provider variables when not given. |
 
 `--json`, `--sarif`, and `--sbom` each take over stdout completely, so they are mutually exclusive.
-Passing more than one exits `2` rather than silently honoring the last flag.
+Passing more than one exits `2` rather than silently honoring the last flag. While one of them owns stdout,
+the `--server` push status lines (engagement ingest, SBOM import, source publication) go to stderr, so stdout
+stays exactly one document.
 
 ### Suppressing findings with `.synapseignore`
 

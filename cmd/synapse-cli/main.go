@@ -1987,6 +1987,8 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 			cfg.FPTriageModel, mode, cfg.FPTriageMode, budget.EligibleFindings, budget.AttemptedFindings, budget.SkippedFindings, len(res.AITriage), len(fpSuspect), len(fpWouldExempt), len(fpGateExempt), len(fpReview))
 	}
 
+	status := pushStatusWriter(jsonOut, sbomOut, sarifOut, sarifPath)
+
 	switch {
 	case sbomOut:
 		// CycloneDX to stdout, so nothing else mixes in. This is the SAME renderer the engagement
@@ -2069,6 +2071,9 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 		if err := enc.Encode(res); err != nil {
 			return fmt.Errorf("encode json result: %w", err)
 		}
+		// Deferred so it is the last thing the scan prints on every path, a failed push included,
+		// ahead of the gate verdict main reports.
+		defer writeScanCompletionSummary(os.Stderr, res)
 	default:
 		printReport(target, res)
 	}
@@ -2091,7 +2096,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 				// must not go green because the record did not happen.
 				return fmt.Errorf("record engagement findings on the server: %w", ierr)
 			}
-			reportEngagementIngest(os.Stdout, push.engagement, ingest)
+			reportEngagementIngest(status, push.engagement, ingest)
 			if push.sbom {
 				if res.SBOM == nil {
 					fmt.Fprintln(os.Stderr, "warning: --push-sbom was given but the scan produced no SBOM")
@@ -2105,7 +2110,7 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 						// the inventory half of the picture, and losing it must not fail a build twice.
 						fmt.Fprintf(os.Stderr, "warning: SBOM not imported for engagement %s: %v\n", push.engagement, uerr)
 					} else {
-						fmt.Printf("SBOM imported: %d component(s) on engagement %s\n", len(res.SBOM.Components), push.engagement)
+						_, _ = fmt.Fprintf(status, "SBOM imported: %d component(s) on engagement %s\n", len(res.SBOM.Components), push.engagement)
 					}
 				}
 			}
@@ -2131,9 +2136,9 @@ func run(path string, failOn shared.Severity, mode, priority, minConfidence, bas
 					fmt.Fprintf(os.Stderr, "         synapse-cli publish-source --server %s --project %s --analysis %s %s\n",
 						push.server, push.project, analysis.ID, target)
 				case manifest.Truncated:
-					fmt.Printf("Source published for the Code view: %d files retained, truncated at the server's limit\n", len(manifest.Files))
+					_, _ = fmt.Fprintf(status, "Source published for the Code view: %d files retained, truncated at the server's limit\n", len(manifest.Files))
 				default:
-					fmt.Printf("Source published for the Code view: %d files retained\n", len(manifest.Files))
+					_, _ = fmt.Fprintf(status, "Source published for the Code view: %d files retained\n", len(manifest.Files))
 				}
 			}
 		}
