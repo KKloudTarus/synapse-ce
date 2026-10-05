@@ -637,6 +637,11 @@ const (
 	NewCodeCoverageNotInReport    = "changed_lines_not_in_report"
 )
 
+// NewCodeCoverageLegacyUnavailable is the single reason snapshots stored before the three above existed.
+// Nothing writes it any more, but snapshots are immutable, so analyses recorded then still carry it and
+// the measures API returns it as stored.
+const NewCodeCoverageLegacyUnavailable = "changed_line_coverage_not_available"
+
 // newCodeCoverage measures coverage over the changed lines, or says exactly why it cannot. It never
 // returns a value it did not measure.
 func newCodeCoverage(coverage *CoverageReport, changed map[string]map[int]bool) DecimalMetric {

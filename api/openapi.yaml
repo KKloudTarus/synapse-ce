@@ -11906,6 +11906,10 @@ components:
 
     MeasureUnavailableReason:
       type: string
+      description: >-
+        Why a measure is unavailable. `changed_line_coverage_not_available` is a legacy value: snapshots
+        recorded before new-code coverage named its reason store it, and the API returns a stored reason
+        unchanged, so analyses from that period still report it.
       enum:
         - legacy_analysis
         - function_count_not_available
@@ -11916,6 +11920,7 @@ components:
         - no_coverage_report
         - no_changed_lines
         - changed_lines_not_in_report
+        - changed_line_coverage_not_available
         - duplication_not_available
         - issue_type_incomplete
         - issue_attribution_incomplete
