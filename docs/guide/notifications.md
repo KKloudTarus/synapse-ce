@@ -238,7 +238,12 @@ When an event is recorded, its builder takes a snapshot of these values and
 stores it with the event. The snapshot keeps only declared variables up to the
 event type's maximum data class, with invisible and direction-changing
 characters removed, line breaks turned into spaces, and each value capped at
-1,000 characters. Times are RFC 3339 in UTC. The snapshot is not part of the
+1,000 characters. Secrets are removed from every value first: keyed assignments
+such as `password=` or `api_key:`, bearer tokens, AWS access key IDs, PEM private
+keys and URL credentials become `[redacted]` (or `***` for URL user info), so a
+secret a scanner put in a finding title never reaches a message. Each value is
+scrubbed both before and after invisible characters are removed, so a key split
+by one (`pass`, a zero-width space, `word=`) is still caught. Times are RFC 3339 in UTC. The snapshot is not part of the
 webhook body, which stays the raw event. Names (engagement, project, finding,
 team, assignee, agent, asset) are read from the source records when the event
 is recorded, so a later rename does not change a message already queued.

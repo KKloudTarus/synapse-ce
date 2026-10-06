@@ -29,7 +29,10 @@ replace the latest published result or establish sealed coverage proof.
 For CI, the established `--fail-on` severity gate remains the default. Add
 `--require-complete` when a pipeline must also reject partial or unknown coverage. The
 report is emitted before either gate determines the exit code, so the result remains
-available for inspection even when a gate fails.
+available for inspection even when a gate fails. With `--json`, the CLI also ends the run
+with a summary on stderr, read from these outcomes rather than from warning text: each
+required engine that did not complete, its execution and reason, the engines excluded on
+purpose, and the source warnings in full.
 
 ## Compatibility and rollout
 

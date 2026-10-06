@@ -291,6 +291,9 @@ func TestGetMeasures(t *testing.T) {
 			{measure.DecimalMetric{Availability: measure.AvailabilityUnavailable, Reason: measure.NewCodeCoverageNoReport}, measure.NewCodeCoverageNoReport},
 			{measure.DecimalMetric{Availability: measure.AvailabilityUnavailable, Reason: measure.NewCodeCoverageNotInReport}, measure.NewCodeCoverageNotInReport},
 			{measure.DecimalMetric{Availability: measure.AvailabilityUnavailable, Reason: "legacy_analysis"}, "legacy_analysis"},
+			// The literal every snapshot stored before the three reasons existed (snapshots are immutable, so it
+			// is still in the database); those analyses must keep returning it, under its domain name.
+			{measure.DecimalMetric{Availability: measure.AvailabilityUnavailable, Reason: "changed_line_coverage_not_available"}, measure.NewCodeCoverageLegacyUnavailable},
 			{measure.DecimalMetric{Availability: measure.AvailabilityUnavailable}, measure.NewCodeCoverageNoChangedLines}, // no reason recorded: the diff-less default
 		} {
 			key := "p-ncc-" + string(rune('a'+i))
