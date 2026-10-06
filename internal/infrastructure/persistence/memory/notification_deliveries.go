@@ -158,6 +158,11 @@ func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, deliver
 	if err := r.checkDeliveryRate(tenant, channel, at); err != nil {
 		return notification.Attempt{}, err
 	}
+	if event, ok := r.events[notificationKey{tenant, stored.delivery.EventID}]; ok &&
+		r.engagementNotifications(tenant, event.event.EngagementID) == notification.EngagementNotificationsNone {
+		// The override was set to none after LoadWork; the retry reloads the work and cancels it.
+		return notification.Attempt{}, fmt.Errorf("%w: engagement suppressed", ports.ErrRetryable)
+	}
 	if !openDelivery(stored.delivery.State) {
 		return notification.Attempt{}, fmt.Errorf("notification delivery is terminal: %w", shared.ErrConflict)
 	}

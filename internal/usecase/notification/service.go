@@ -647,9 +647,11 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 		// No new sends to a paused channel: its queued work is cancelled like a disabled channel's.
 		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, "channel_paused")
 	}
-	// The engagement keeps its notifications inside Synapse (#1360): nothing about it is sent.
+	// The engagement keeps its notifications inside Synapse (#1360): nothing about it is sent. This
+	// reads the override LoadWork saw; BeginAttempt checks it again, serialized with setting writes,
+	// so a none committed after the load still stops the send.
 	if _, deliver := domain.EffectiveDataClass(work.Channel.Class(), work.Engagement); !deliver {
-		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, codeEngagementSuppressed)
+		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, domain.CodeEngagementSuppressed)
 	}
 	relevant, err := s.events.StillRelevant(ctx, s.repo, work)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // Engagement notification overrides (#1360, migration 0222). A missing row means inherit.
@@ -36,6 +37,9 @@ func (r *NotificationRepository) PutEngagementNotificationSetting(ctx context.Co
 		return notification.EngagementNotificationSetting{}, err
 	}
 	err := WithTenant(ctx, r.pool, s.TenantID.String(), func(tx pgx.Tx) error {
+		if err := lockEngagementSetting(ctx, tx, s.TenantID, s.EngagementID, true); err != nil {
+			return err
+		}
 		if err := requireEngagement(ctx, tx, s.TenantID, s.EngagementID); err != nil {
 			return err
 		}
@@ -54,12 +58,64 @@ func (r *NotificationRepository) PutEngagementNotificationSetting(ctx context.Co
 		if tag.RowsAffected() != 1 {
 			return fmt.Errorf("engagement notification setting revision is stale: %w", shared.ErrConflict)
 		}
-		return nil
+		if s.ExternalNotifications != notification.EngagementNotificationsNone {
+			return nil
+		}
+		// Queued deliveries about the engagement are cancelled now rather than at their next load.
+		// One whose attempt already started is in flight and is left to finish.
+		_, err = tx.Exec(ctx, `UPDATE notification_deliveries d SET state='cancelled',last_error=$3,next_attempt_at=NULL,updated_at=$4
+			WHERE d.tenant_id=$1 AND d.state IN ('pending','retrying')
+			AND EXISTS(SELECT 1 FROM notification_events e WHERE e.tenant_id=d.tenant_id AND e.id=d.event_id AND e.engagement_id=$2)
+			AND NOT EXISTS(SELECT 1 FROM notification_delivery_attempts a WHERE a.tenant_id=d.tenant_id AND a.delivery_id=d.id AND a.outcome='started')`,
+			s.TenantID, s.EngagementID, notification.CodeEngagementSuppressed, s.UpdatedAt)
+		return err
 	})
 	if err != nil {
 		return notification.EngagementNotificationSetting{}, err
 	}
 	return s, nil
+}
+
+// lockEngagementSetting serializes setting writes with attempt admission for one engagement. A
+// write takes the lock exclusively and an admission shares it, so an attempt is admitted either
+// before a write commits, and the write then sees its started attempt, or after, and the admission
+// reads the committed setting. A transaction lock also covers the first write, when there is no
+// settings row to lock yet.
+func lockEngagementSetting(ctx context.Context, tx pgx.Tx, tenant, engagement shared.ID, write bool) error {
+	lock := "pg_advisory_xact_lock_shared"
+	if write {
+		lock = "pg_advisory_xact_lock"
+	}
+	_, err := tx.Exec(ctx, `SELECT `+lock+`(hashtextextended('notification-engagement-setting:' || $1 || ':' || $2, 0))`, tenant, engagement)
+	return err
+}
+
+// admitEngagement refuses an attempt while the delivery's engagement allows no external
+// notification. The refusal is retryable, as for a channel paused after LoadWork: the retry
+// reloads the work and cancels the delivery with engagement_suppressed.
+func admitEngagement(ctx context.Context, tx pgx.Tx, tenant, delivery shared.ID) error {
+	var engagement *string
+	if err := tx.QueryRow(ctx, `SELECT e.engagement_id FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id WHERE d.tenant_id=$1 AND d.id=$2`, tenant, delivery).Scan(&engagement); err != nil {
+		return err
+	}
+	if engagement == nil || *engagement == "" {
+		return nil
+	}
+	if err := lockEngagementSetting(ctx, tx, tenant, shared.ID(*engagement), false); err != nil {
+		return err
+	}
+	var value string
+	err := tx.QueryRow(ctx, `SELECT external_notifications FROM notification_engagement_settings WHERE tenant_id=$1 AND engagement_id=$2`, tenant, *engagement).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if notification.EngagementNotifications(value) == notification.EngagementNotificationsNone {
+		return fmt.Errorf("%w: engagement suppressed", ports.ErrRetryable)
+	}
+	return nil
 }
 
 // requireEngagement reports ErrNotFound for an engagement the tenant does not have.

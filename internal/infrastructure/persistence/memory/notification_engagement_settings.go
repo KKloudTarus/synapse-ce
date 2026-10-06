@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -37,7 +38,25 @@ func (r *NotificationRepository) PutEngagementNotificationSetting(_ context.Cont
 		return notification.EngagementNotificationSetting{}, fmt.Errorf("engagement notification setting revision is stale: %w", shared.ErrConflict)
 	}
 	r.engagementSettings[key] = cloneEngagementSetting(s)
+	if s.ExternalNotifications == notification.EngagementNotificationsNone {
+		r.cancelEngagementDeliveries(s.TenantID, s.EngagementID, *s.UpdatedAt)
+	}
 	return cloneEngagementSetting(s), nil
+}
+
+// cancelEngagementDeliveries mirrors the Postgres update: open deliveries about the engagement with
+// no attempt in flight are cancelled with engagement_suppressed.
+func (r *NotificationRepository) cancelEngagementDeliveries(tenant, engagement shared.ID, at time.Time) {
+	for key, stored := range r.deliveries {
+		d := stored.delivery
+		event, ok := r.events[notificationKey{tenant, d.EventID}]
+		if key.tenant != tenant || !ok || event.event.EngagementID != engagement || !openDelivery(d.State) || r.attemptInFlight(key) {
+			continue
+		}
+		d.State, d.LastError, d.NextAttemptAt, d.UpdatedAt = notification.DeliveryCancelled, notification.CodeEngagementSuppressed, nil, at
+		stored.delivery = d
+		r.deliveries[key] = stored
+	}
 }
 
 // engagementNotifications is the override LoadWork reports for an event's engagement.

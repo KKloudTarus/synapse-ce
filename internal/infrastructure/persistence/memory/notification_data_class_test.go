@@ -172,3 +172,71 @@ func TestEngagementNoneSuppressesDelivery(t *testing.T) {
 		t.Fatalf("deliveries = %+v, %v", page.Items, err)
 	}
 }
+
+// noneAfterLoad commits an engagement's none right after the worker loads its work, the interleaving
+// of the #1360 review: the load still reads inherit, and the attempt is admitted after the write.
+type noneAfterLoad struct {
+	*NotificationRepository
+	engagement shared.ID
+	at         time.Time
+}
+
+func (r noneAfterLoad) LoadWork(ctx context.Context, tenant, delivery shared.ID) (ports.NotificationWork, error) {
+	work, err := r.NotificationRepository.LoadWork(ctx, tenant, delivery)
+	if err != nil {
+		return work, err
+	}
+	at := r.at
+	if _, err := r.PutEngagementNotificationSetting(ctx, notification.EngagementNotificationSetting{TenantID: tenant, EngagementID: r.engagement,
+		ExternalNotifications: notification.EngagementNotificationsNone, Revision: 1, UpdatedAt: &at, UpdatedBy: "admin"}); err != nil {
+		return work, err
+	}
+	return work, nil
+}
+
+// TestEngagementNoneAfterLoadIsNotSent drives the worker through that interleaving: nothing is
+// sent, no attempt is recorded, and the delivery ends cancelled with engagement_suppressed.
+func TestEngagementNoneAfterLoadIsNotSent(t *testing.T) {
+	h := newDataClassHarness(t)
+	h.repo.AddEngagement(notificationTestTenant, "eng-1")
+	channel := h.webhook(t)
+	if _, err := h.service.CreateRule(h.ctx, "admin", notificationuc.RuleInput{Name: "Scans", Enabled: true, EventType: notification.EventScanCompleted, ChannelIDs: []shared.ID{channel.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.source.Poll(h.ctx, notificationTestNow, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.tx.Run(context.Background(), notificationTestTenant, func(ctx context.Context) error {
+		return h.outbox.Append(ctx, notification.SourceRecord{TenantID: notificationTestTenant, SourceKind: "scan_job", SourceID: "scan-1",
+			EventType: notification.EventScanCompleted, EngagementID: "eng-1", OccurredAt: notificationTestNow.Add(time.Minute),
+			Data: json.RawMessage(`{"title":"Scan completed"}`)})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := h.source.Poll(h.ctx, notificationTestNow.Add(2*time.Minute), 0); err != nil || n != 1 {
+		t.Fatalf("poll = %d, %v", n, err)
+	}
+	cipher, err := vault.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err := notificationuc.NewService(noneAfterLoad{NotificationRepository: h.repo, engagement: "eng-1", at: notificationTestNow.Add(3 * time.Minute)},
+		cipher, h.sender, h.audit, fixedClock{notificationTestNow.Add(3 * time.Minute)}, idgen.RandomID{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := h.jobs.Claim(h.ctx, time.Minute, notificationDeliverJobKey)
+	if err != nil || job == nil {
+		t.Fatalf("claim = %v, %v", job, err)
+	}
+	if err := worker.HandleJob(h.ctx, *job); !errors.Is(err, ports.ErrRetryable) {
+		t.Fatalf("handle job = %v, want the retryable admission refusal", err)
+	}
+	if len(h.sender.sent) != 0 {
+		t.Fatalf("sent %d messages after the engagement was set to none", len(h.sender.sent))
+	}
+	page, err := h.service.ListDeliveries(h.ctx, ports.NotificationDeliveryFilter{})
+	if err != nil || len(page.Items) != 1 || page.Items[0].State != notification.DeliveryCancelled || page.Items[0].LastError != notification.CodeEngagementSuppressed || page.Items[0].Attempts != 0 {
+		t.Fatalf("deliveries = %+v, %v", page.Items, err)
+	}
+}

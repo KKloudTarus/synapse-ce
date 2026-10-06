@@ -757,6 +757,9 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 		if last != nil && at.Sub(*last) < time.Second {
 			return fmt.Errorf("%w: channel rate limited", ports.ErrRetryable)
 		}
+		if err := admitEngagement(ctx, tx, tenant, did); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE notification_source_state SET observed_at=$2 WHERE tenant_id=$1 AND source_kind='delivery_rate' AND source_id='tenant'`, tenant, at); err != nil {
 			return err
 		}

@@ -44,6 +44,11 @@ func (v ChannelType) HTTPEndpoint() bool {
 // of the channel, so channel health must not count it and the channel is not retried for it.
 const CodeProviderDisabled = "provider_disabled"
 
+// CodeEngagementSuppressed is the reason a delivery is cancelled when its engagement allows no
+// external notification (#1360). Like a disabled provider it is an operator decision, never a
+// fault of the channel.
+const CodeEngagementSuppressed = "engagement_suppressed"
+
 type EventType string
 
 const (

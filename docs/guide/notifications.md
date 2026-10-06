@@ -315,9 +315,11 @@ An engagement can lower that class for every message about it with
 
 `inherit` (the default) keeps each channel's class, `signal` caps every channel at
 `signal`, and `none` keeps every notification about the engagement inside Synapse. The
-lower of the channel class and the engagement setting wins. While an engagement is set
-to `none`, its queued deliveries are cancelled with `engagement_suppressed` instead of
-sent. `GET` on the same path returns the setting, `inherit` at revision 0 when none is
+lower of the channel class and the engagement setting wins. Setting an engagement to
+`none` cancels its queued deliveries with `engagement_suppressed` in the same
+transaction; a delivery whose attempt has already started is left to finish. The worker
+also checks the committed setting when it starts each attempt, serialized with setting
+writes, so a delivery it loaded just before the change is not sent either. `GET` on the same path returns the setting, `inherit` at revision 0 when none is
 stored. Every change is audited as `notification.engagement_setting.updated` with the
 previous and new values.
 

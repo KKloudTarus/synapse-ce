@@ -11,9 +11,6 @@ import (
 // Data classes per destination (#1360): a channel's class, an engagement's override, and the
 // worker's suppression of deliveries an engagement keeps inside Synapse.
 
-// codeEngagementSuppressed cancels a delivery whose engagement allows no external notification.
-const codeEngagementSuppressed = "engagement_suppressed"
-
 var errClassRaise = fmt.Errorf("%w: raising a data class requires the administer capability", shared.ErrForbidden)
 
 // channelDataClass is the class a create or update stores: the requested one, or current when the
