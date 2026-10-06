@@ -324,7 +324,10 @@ lower of the channel class and the engagement setting wins. Setting an engagemen
 `none` cancels its queued deliveries with `engagement_suppressed` in the same
 transaction; a delivery whose attempt has already started is left to finish. The worker
 also checks the committed setting when it starts each attempt, serialized with setting
-writes, so a delivery it loaded just before the change is not sent either. `GET` on the same path returns the setting, `inherit` at revision 0 when none is
+writes, so a delivery it loaded just before the change is not sent either. Personal
+email follows the same setting: no email job is queued for an engagement set to `none`,
+and a queued one is checked again, under the same lock, before it sends. The in-app
+inbox is inside Synapse, so its notices are kept. `GET` on the same path returns the setting, `inherit` at revision 0 when none is
 stored. Every change is audited as `notification.engagement_setting.updated` with the
 previous and new values.
 

@@ -98,24 +98,36 @@ func admitEngagement(ctx context.Context, tx pgx.Tx, tenant, delivery shared.ID)
 	if err := tx.QueryRow(ctx, `SELECT e.engagement_id FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id WHERE d.tenant_id=$1 AND d.id=$2`, tenant, delivery).Scan(&engagement); err != nil {
 		return err
 	}
+	suppressed, err := engagementSuppressed(ctx, tx, tenant, engagement)
+	if err != nil {
+		return err
+	}
+	if suppressed {
+		return fmt.Errorf("%w: engagement suppressed", ports.ErrRetryable)
+	}
+	return nil
+}
+
+// engagementSuppressed reports whether the engagement allows no external notification. It takes
+// the shared side of lockEngagementSetting first, so it reads the setting a concurrent write
+// commits rather than the one before it. An event without an engagement is never suppressed.
+// Channel deliveries and personal email both admit through it.
+func engagementSuppressed(ctx context.Context, tx pgx.Tx, tenant shared.ID, engagement *string) (bool, error) {
 	if engagement == nil || *engagement == "" {
-		return nil
+		return false, nil
 	}
 	if err := lockEngagementSetting(ctx, tx, tenant, shared.ID(*engagement), false); err != nil {
-		return err
+		return false, err
 	}
 	var value string
 	err := tx.QueryRow(ctx, `SELECT external_notifications FROM notification_engagement_settings WHERE tenant_id=$1 AND engagement_id=$2`, tenant, *engagement).Scan(&value)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
-	if notification.EngagementNotifications(value) == notification.EngagementNotificationsNone {
-		return fmt.Errorf("%w: engagement suppressed", ports.ErrRetryable)
-	}
-	return nil
+	return notification.EngagementNotifications(value) == notification.EngagementNotificationsNone, nil
 }
 
 // requireEngagement reports ErrNotFound for an engagement the tenant does not have.

@@ -118,6 +118,12 @@ func (r *NotificationRepository) projectPersonal(ctx context.Context, tx pgx.Tx,
 	if len(mailUsers) == 0 {
 		return nil
 	}
+	// Email leaves Synapse, so an engagement set to none gets no personal email job (#1360); the
+	// in-app rows above stay, because the inbox is inside Synapse.
+	engagement := e.EngagementID.String()
+	if suppressed, err := engagementSuppressed(ctx, tx, e.TenantID, &engagement); err != nil || suppressed {
+		return err
+	}
 	contacts, err := tx.Query(ctx, `SELECT DISTINCT ON (user_id) user_id, id, version
 		FROM user_contacts
 		WHERE tenant_id=$1 AND user_id = ANY($2) AND kind='email' AND verified_at IS NOT NULL
@@ -336,6 +342,8 @@ func (r *NotificationRepository) maybeDestinationNotice(ctx context.Context, tx 
 
 // LoadPersonalMail rechecks the recipient at send time. A changed contact
 // version or an explicit mute returns ok=false and must not retarget the job.
+// It is also where personal email is admitted: an engagement set to none
+// (#1360) returns ok=false, read under the lock its setting writes take.
 func (s *InboxStore) LoadPersonalMail(ctx context.Context, tenant, user, event, contact shared.ID, version int) (recipient, title, summary string, ok bool, err error) {
 	err = WithTenant(ctx, s.pool, tenant.String(), func(tx pgx.Tx) error {
 		var state *string
@@ -357,6 +365,13 @@ func (s *InboxStore) LoadPersonalMail(ctx context.Context, tenant, user, event, 
 		}
 		if !notification.Deliver(false, choice, false) {
 			return nil
+		}
+		var engagement *string
+		if scanErr = tx.QueryRow(ctx, `SELECT engagement_id FROM notification_events WHERE tenant_id=$1 AND id=$2`, tenant, event).Scan(&engagement); scanErr != nil && !errors.Is(scanErr, pgx.ErrNoRows) {
+			return scanErr
+		}
+		if suppressed, err := engagementSuppressed(ctx, tx, tenant, engagement); err != nil || suppressed {
+			return err
 		}
 		scanErr = tx.QueryRow(ctx, `SELECT value FROM user_contacts WHERE tenant_id=$1 AND user_id=$2 AND id=$3 AND version=$4 AND kind='email' AND verified_at IS NOT NULL`, tenant, user, contact, version).Scan(&recipient)
 		if errors.Is(scanErr, pgx.ErrNoRows) {
