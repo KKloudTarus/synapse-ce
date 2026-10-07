@@ -3059,7 +3059,11 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "values": [
           "webhook",
           "slack",
-          "email"
+          "email",
+          "teams",
+          "telegram",
+          "google_chat",
+          "discord"
         ]
       },
       {
@@ -3074,7 +3078,11 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "values": [
           "webhook",
           "slack",
-          "email"
+          "email",
+          "teams",
+          "telegram",
+          "google_chat",
+          "discord"
         ]
       },
       {
@@ -3089,7 +3097,11 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "values": [
           "webhook",
           "slack",
-          "email"
+          "email",
+          "teams",
+          "telegram",
+          "google_chat",
+          "discord"
         ]
       }
     ]
@@ -5889,6 +5901,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "created_at": "2026-10-03T09:00:00Z",
         "custom_body": true,
+        "data_class": "signal",
         "destination": "demo",
         "enabled": true,
         "health": {
@@ -5914,6 +5927,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "created_at": "2026-10-03T09:00:00Z",
         "custom_body": true,
+        "data_class": "signal",
         "destination": "demo",
         "enabled": true,
         "health": {
@@ -5939,6 +5953,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {
         "created_at": "2026-10-03T09:00:00Z",
         "custom_body": true,
+        "data_class": "signal",
         "destination": "demo",
         "enabled": true,
         "health": {
@@ -5966,6 +5981,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "GET /api/v1/notifications/channels/{nid}": {
     "created_at": "2026-10-03T09:00:00Z",
     "custom_body": true,
+    "data_class": "signal",
     "destination": "demo",
     "enabled": true,
     "health": {
@@ -6169,6 +6185,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         "started_at": "2026-10-03T09:00:00Z"
       }
     ]
+  },
+  "GET /api/v1/notifications/engagements/{nid}/settings": {
+    "engagement_id": "engagement-001",
+    "external_notifications": "inherit",
+    "revision": 1,
+    "updated_at": "2026-10-03T09:00:00Z",
+    "updated_by": "demo"
   },
   "GET /api/v1/notifications/event-types": {
     "items": [
@@ -8641,6 +8664,64 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
       {}
     ],
     "engagement_id": "engagement-001",
+    "engine_coverage": {
+      "completed": 2,
+      "required": 2,
+      "status": "complete"
+    },
+    "engine_outcomes": [
+      {
+        "counts": {
+          "files_parsed": 2,
+          "files_seen": 2,
+          "files_skipped": 2,
+          "files_unscanned": 2,
+          "findings": 3,
+          "proposals": 2,
+          "source_budget_bytes": 2048,
+          "unrendered_charts": 2
+        },
+        "coverage": "complete",
+        "engine": "demo",
+        "execution": "completed",
+        "reason": "not_selected",
+        "required": true
+      },
+      {
+        "counts": {
+          "files_parsed": 2,
+          "files_seen": 2,
+          "files_skipped": 2,
+          "files_unscanned": 2,
+          "findings": 3,
+          "proposals": 2,
+          "source_budget_bytes": 2048,
+          "unrendered_charts": 2
+        },
+        "coverage": "complete",
+        "engine": "demo",
+        "execution": "completed",
+        "reason": "not_selected",
+        "required": true
+      },
+      {
+        "counts": {
+          "files_parsed": 2,
+          "files_seen": 2,
+          "files_skipped": 2,
+          "files_unscanned": 2,
+          "findings": 3,
+          "proposals": 2,
+          "source_budget_bytes": 2048,
+          "unrendered_charts": 2
+        },
+        "coverage": "complete",
+        "engine": "demo",
+        "execution": "completed",
+        "reason": "not_selected",
+        "required": true
+      }
+    ],
     "error": "demo",
     "finished_at": "2026-10-03T09:00:00Z",
     "id": "id-001",
@@ -9984,6 +10065,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "PATCH /api/v1/notifications/channels/{nid}": {
     "created_at": "2026-10-03T09:00:00Z",
     "custom_body": true,
+    "data_class": "signal",
     "destination": "demo",
     "enabled": true,
     "health": {
@@ -12079,6 +12161,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/notifications/channels": {
     "created_at": "2026-10-03T09:00:00Z",
     "custom_body": true,
+    "data_class": "signal",
     "destination": "demo",
     "enabled": true,
     "health": {
@@ -12106,6 +12189,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
   "POST /api/v1/notifications/channels/{nid}/resume": {
     "created_at": "2026-10-03T09:00:00Z",
     "custom_body": true,
+    "data_class": "signal",
     "destination": "demo",
     "enabled": true,
     "health": {
@@ -12815,6 +12899,65 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "within_bound": true
   },
   "POST /api/v1/sca/scans": {
+    "engine_coverage": {
+      "completed": 2,
+      "required": 2,
+      "status": "complete"
+    },
+    "engine_outcomes": [
+      {
+        "counts": {
+          "files_parsed": 2,
+          "files_seen": 2,
+          "files_skipped": 2,
+          "files_unscanned": 2,
+          "findings": 3,
+          "proposals": 2,
+          "source_budget_bytes": 2048,
+          "unrendered_charts": 2
+        },
+        "coverage": "complete",
+        "engine": "demo",
+        "execution": "completed",
+        "reason": "not_selected",
+        "required": true
+      },
+      {
+        "counts": {
+          "files_parsed": 2,
+          "files_seen": 2,
+          "files_skipped": 2,
+          "files_unscanned": 2,
+          "findings": 3,
+          "proposals": 2,
+          "source_budget_bytes": 2048,
+          "unrendered_charts": 2
+        },
+        "coverage": "complete",
+        "engine": "demo",
+        "execution": "completed",
+        "reason": "not_selected",
+        "required": true
+      },
+      {
+        "counts": {
+          "files_parsed": 2,
+          "files_seen": 2,
+          "files_skipped": 2,
+          "files_unscanned": 2,
+          "findings": 3,
+          "proposals": 2,
+          "source_budget_bytes": 2048,
+          "unrendered_charts": 2
+        },
+        "coverage": "complete",
+        "engine": "demo",
+        "execution": "completed",
+        "reason": "not_selected",
+        "required": true
+      }
+    ],
+    "execution_mode": "full",
     "findings": [
       {
         "Assignee": "demo.operator",
@@ -12997,6 +13140,7 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
         }
       }
     ],
+    "includes_previous_results": true,
     "languages": [
       {},
       {},
@@ -13410,6 +13554,13 @@ export const GENERATED_FIXTURES: Record<string, unknown> = {
     "reason": "Seeded playground record, not a real result.",
     "revision": 1,
     "state": "enabled"
+  },
+  "PUT /api/v1/notifications/engagements/{nid}/settings": {
+    "engagement_id": "engagement-001",
+    "external_notifications": "inherit",
+    "revision": 1,
+    "updated_at": "2026-10-03T09:00:00Z",
+    "updated_by": "demo"
   },
   "PUT /api/v1/projects/{key}/decoration": {
     "decorate_pull_requests": true,
