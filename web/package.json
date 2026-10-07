@@ -12,7 +12,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ui:audit": "node scripts/ui-audit.mjs",
-    "ui:probe": "node scripts/ui-probe.mjs"
+    "ui:probe": "node scripts/ui-probe.mjs",
+    "playground:build": "VITE_PLAYGROUND=1 vite build",
+    "playground:preview": "vite preview --port 4173 --host 127.0.0.1",
+    "playground:fixtures": "python3 scripts/gen-playground-fixtures.py > src/mocks/generated.ts"
   },
   "dependencies": {
     "@internationalized/date": "^3.12.4",

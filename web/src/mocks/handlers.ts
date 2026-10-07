@@ -1,5 +1,7 @@
 import { http, HttpResponse } from 'msw'
 
+import { matchGenerated } from './generated'
+
 // ============================================================================
 // TIMESTAMPS
 // ============================================================================
@@ -35,13 +37,13 @@ const SCAN_RUNS = [
     engagement_id: 'eng-001',
     created_at: WEEK_AGO,
     manifest: {
-      tool_versions: { syft: '1.18.1', grype: '0.86.1', synapse: 'dev' },
+      tool_versions: { 'synapse-sbom': '1.18.1', 'synapse-match': '0.86.1', synapse: 'dev' },
       vuln_db_snapshot: 'osv.dev@2026-02-20T00:00:00Z',
-      grype_db_version: 'v5@2026-02-20',
+      advisory_db_version: 'v5@2026-02-20',
       correlation_version: 7,
       sbom_sha256: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
       repro_score: 82,
-      pinned_inputs: ['syft', 'grype', 'grype-db'],
+      pinned_inputs: ['synapse-sbom', 'synapse-match', 'advisory-db'],
       unpinned_inputs: ['osv.dev'],
     },
     finding_keys: [
@@ -55,13 +57,13 @@ const SCAN_RUNS = [
     engagement_id: 'eng-001',
     created_at: MONTH_AGO,
     manifest: {
-      tool_versions: { syft: '1.17.0', grype: '0.85.0', synapse: 'dev' },
+      tool_versions: { 'synapse-sbom': '1.17.0', 'synapse-match': '0.85.0', synapse: 'dev' },
       vuln_db_snapshot: 'osv.dev@2026-01-20T00:00:00Z',
-      grype_db_version: 'v5@2026-01-20',
+      advisory_db_version: 'v5@2026-01-20',
       correlation_version: 7,
       sbom_sha256: '00998877665544332211aabbccddeeff00112233445566778899aabbccddeeff',
       repro_score: 82,
-      pinned_inputs: ['syft', 'grype', 'grype-db'],
+      pinned_inputs: ['synapse-sbom', 'synapse-match', 'advisory-db'],
       unpinned_inputs: ['osv.dev'],
     },
     finding_keys: [
@@ -156,10 +158,26 @@ const RISK_STORIES = [
 const CAPABILITIES = [
   { key: 'fleet', name: 'Agent fleet transport', enabled: true, switch: 'SYNAPSE_FLEET_ENABLED' },
   { key: 'fleet_assets', name: 'Fleet asset model', enabled: true, switch: 'SYNAPSE_FLEET_ASSETS_ENABLED' },
+  { key: 'fleet_host_ingest', name: 'Fleet host ingest', enabled: true, switch: 'SYNAPSE_FLEET_HOST_INGEST_ENABLED' },
+  { key: 'fleet_detection_ingest', name: 'Fleet detection ingest', enabled: true, switch: 'SYNAPSE_FLEET_DETECTION_INGEST_ENABLED' },
+  { key: 'fleet_telemetry_ingest', name: 'Fleet telemetry ingest', enabled: true, switch: 'SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED' },
+  { key: 'fleet_cluster_ingest', name: 'Fleet cluster ingest', enabled: true, switch: 'SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED' },
   { key: 'agent', name: 'AI agent orchestration', enabled: true, switch: 'SYNAPSE_AGENT_ENABLED' },
   { key: 'ai_triage', name: 'AI false-positive triage', enabled: true, switch: 'SYNAPSE_FP_TRIAGE_ENABLED' },
   { key: 'judgments', name: 'Judgment lifecycle', enabled: true, switch: 'SYNAPSE_JUDGMENTS_ENABLED' },
   { key: 'sla', name: 'SLA governance', enabled: true, switch: 'SYNAPSE_SLA_ENABLED' },
+  { key: 'cspm', name: 'Cloud posture', enabled: true, switch: 'SYNAPSE_CSPM_ENABLED' },
+  { key: 'dast', name: 'Dynamic testing', enabled: true, switch: 'SYNAPSE_DAST_ENABLED' },
+  { key: 'taint', name: 'Taint analysis', enabled: true, switch: 'SYNAPSE_TAINT_ENABLED' },
+  { key: 'js_reachability', name: 'JavaScript reachability', enabled: true, switch: 'SYNAPSE_JS_REACHABILITY_ENABLED' },
+  { key: 'sandbox', name: 'Sandboxed execution', enabled: true, switch: 'SYNAPSE_SANDBOX_ENABLED' },
+  { key: 'ownership', name: 'Ownership routing', enabled: true, switch: 'SYNAPSE_OWNERSHIP_MODE' },
+  { key: 'notifications', name: 'Notifications', enabled: true, switch: 'SYNAPSE_NOTIFICATIONS_ENABLED' },
+  { key: 'ticketing', name: 'Ticketing', enabled: true, switch: 'SYNAPSE_TICKETING_ENABLED' },
+  { key: 'inbound_webhooks', name: 'Inbound SCM webhooks', enabled: true, switch: 'SYNAPSE_INBOUND_WEBHOOKS_ENABLED' },
+  { key: 'writeup_drafts', name: 'Write-up drafts', enabled: true, switch: 'SYNAPSE_WRITEUP_DRAFTS_ENABLED' },
+  { key: 'docpublish', name: 'Document publishing', enabled: true, switch: 'SYNAPSE_DOCPUBLISH_ENABLED' },
+  { key: 'oidc', name: 'OIDC sign-in', enabled: true, switch: 'SYNAPSE_OIDC_ENABLED' },
 ]
 
 // --- Engagements ---
@@ -183,30 +201,107 @@ const FLEET_INCIDENTS = [
 ]
 
 // --- Findings (for engagement detail) -- PascalCase matching Go API output ---
-const FINDINGS = Array.from({ length: 45 }, (_, i) => ({
-  ID: `finding-${String(i + 1).padStart(3, '0')}`,
-  EngagementID: 'eng-001',
-  Title: ['SQL Injection in user input', 'Cross-site scripting (reflected)', 'Insecure deserialization', 'Server-side request forgery', 'Path traversal in file upload', 'Hardcoded API key', 'Missing rate limiting', 'Weak TLS configuration', 'Open redirect', 'Information disclosure via error'][i % 10],
-  Description: ['User input concatenated in SQL query without parameterization', 'Reflected user input in HTML response without encoding', 'Untrusted data deserialized via Java ObjectInputStream', 'Server follows user-supplied URLs to internal services', 'File path constructed from user input without sanitization', 'AWS secret key hardcoded in source', 'No rate limit on authentication endpoint', 'TLS 1.0 still enabled on production endpoint', 'Redirect URL not validated against allowlist', 'Stack trace exposed in error response'][i % 10],
-  Severity: (['critical', 'high', 'high', 'medium', 'medium', 'medium', 'low', 'low', 'low', 'info'])[i % 10],
-  CVSSVector: ['CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N', 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H', 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N', 'CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L', 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:N/I:L/A:N', 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N'][i % 10],
-  CWE: `CWE-${[89, 79, 502, 918, 22, 798, 770, 326, 601, 209][i % 10]}`,
-  Status: (['open', 'open', 'open', 'triaged', 'triaged', 'resolved', 'open', 'open', 'false_positive', 'open'])[i % 10],
-  DedupKey: `sca:vuln:${['express', 'lodash', 'axios', 'jsonwebtoken', 'helmet'][i % 5]}:CVE-2026-${1000 + i}`,
-  KEV: i % 10 === 0,
-  RiskScore: [98, 82, 75, 62, 55, 48, 35, 28, 20, 10][i % 10],
-  Class: i % 3 === 0 ? 'third_party' : i % 3 === 1 ? 'first_party' : 'configuration',
-  Scope: (['production', 'production', 'production', 'staging', 'development', 'production', 'production', 'staging', 'development', 'production'])[i % 10],
-  Reachability: (['reachable', 'reachable', 'unknown', 'reachable', 'unreachable', 'unknown', 'reachable', 'unknown', 'unreachable', 'unknown'])[i % 10],
-  Impact: '',
-  Priority: [1, 1, 2, 2, 3, 3, 3, 4, 4, 5][i % 10],
-  Assignee: i % 5 === 0 ? 'alice' : i % 5 === 1 ? 'bob' : '',
-  Version: 1,
-  Kind: i % 3 === 0 ? 'vulnerability' : i % 3 === 1 ? 'license' : 'code_quality',
-  EvidenceScore: [95, 88, 72, 65, 50, 42, 30, 25, 15, 5][i % 10],
-  ProposedBy: '',
-  compliance_controls: i % 7 === 0 ? [{ Framework: 'OWASP', ID: 'A03:2021', Title: 'Injection' }] : [],
-}))
+// A coherent catalogue: every record's title, description, severity, CWE, CVSS, kind, package and
+// reachability describe the same vulnerability. The generator this replaced cycled each field on a
+// different modulus, so a cross-site scripting finding could be typed "license" and a package could
+// carry another package's PURL. A security demo that contradicts itself teaches the wrong thing.
+type FindingSeed = {
+  title: string
+  description: string
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  cwe: number
+  cvss: string
+  kind: 'vulnerability' | 'license' | 'code_quality'
+  pkg: string
+  version: string
+  advisory: string
+  reachability: 'reachable' | 'unreachable' | 'unknown'
+  cls: 'third_party' | 'first_party' | 'configuration'
+  kev?: boolean
+}
+
+const FINDING_SEEDS: FindingSeed[] = [
+  { title: 'Prototype pollution in lodash merge', description: 'lodash.merge walks attacker-controlled keys, so a crafted payload can reach Object.prototype and change application behaviour globally.', severity: 'critical', cwe: 1321, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', kind: 'vulnerability', pkg: 'lodash', version: '4.17.20', advisory: 'CVE-2021-23337', reachability: 'reachable', cls: 'third_party', kev: true },
+  { title: 'SQL injection in user lookup', description: 'The user id is concatenated into the query in handlers/user.go:42 instead of being bound as a parameter.', severity: 'critical', cwe: 89, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Remote code execution in express body parser', description: 'A malformed multipart body reaches an unbounded parser path and can execute attacker-controlled input.', severity: 'critical', cwe: 94, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', kind: 'vulnerability', pkg: 'express', version: '4.17.1', advisory: 'CVE-2024-29041', reachability: 'reachable', cls: 'third_party', kev: true },
+  { title: 'Hardcoded AWS secret key', description: 'A long-lived AWS secret is committed in config/dev.go:12 and is present in every build artefact.', severity: 'critical', cwe: 798, cvss: 'CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Server-side request forgery in webhook relay', description: 'The relay follows a user-supplied URL without an allowlist, so an internal metadata endpoint is reachable from the public API.', severity: 'critical', cwe: 918, cvss: 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+
+  { title: 'Cross-site scripting (reflected)', description: 'User input is echoed into the HTML response in handlers/auth.go without contextual encoding.', severity: 'high', cwe: 79, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Path traversal in file upload', description: 'The destination path is built from the uploaded filename in middleware/static.go:88 with no normalisation.', severity: 'high', cwe: 22, cvss: 'CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Regular expression denial of service in axios', description: 'A redirect header is matched by a backtracking expression, so a crafted response stalls the event loop.', severity: 'high', cwe: 1333, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H', kind: 'vulnerability', pkg: 'axios', version: '0.21.1', advisory: 'CVE-2021-3749', reachability: 'reachable', cls: 'third_party' },
+  { title: 'Signature bypass in jsonwebtoken', description: 'A token with alg "none" is accepted when the verifier does not pin the algorithm, so any session can be forged.', severity: 'high', cwe: 347, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N', kind: 'vulnerability', pkg: 'jsonwebtoken', version: '8.5.1', advisory: 'CVE-2022-23540', reachability: 'unknown', cls: 'third_party' },
+  { title: 'Insecure deserialization of session payload', description: 'Untrusted session data is deserialized before the signature is checked.', severity: 'high', cwe: 502, cvss: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'first_party' },
+  { title: 'Open redirect in login return path', description: 'The post-login redirect target is not validated against an allowlist.', severity: 'high', cwe: 601, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:N/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'GPL-3.0 dependency in a distributed binary', description: 'chart.js is GPL-3.0-only in this revision, which conflicts with the product license for a shipped artefact.', severity: 'high', cwe: 0, cvss: '', kind: 'license', pkg: 'chart.js', version: '3.9.1', advisory: '', reachability: 'reachable', cls: 'third_party' },
+
+  { title: 'Missing rate limit on the authentication endpoint', description: 'The sign-in route has no per-identity limit, so credential stuffing is bounded only by network speed.', severity: 'medium', cwe: 770, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'TLS 1.0 still enabled on the public listener', description: 'The listener negotiates TLS 1.0, which has no modern cipher suite worth keeping.', severity: 'medium', cwe: 326, cvss: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'Information disclosure through error responses', description: 'An unhandled error returns the stack trace to the caller, naming internal paths and package versions.', severity: 'medium', cwe: 209, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'Denial of service in the helmet CSP builder', description: 'A long directive list is rebuilt per request, so a crafted configuration multiplies request cost.', severity: 'medium', cwe: 400, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L', kind: 'vulnerability', pkg: 'helmet', version: '4.6.0', advisory: 'CVE-2022-24999', reachability: 'unreachable', cls: 'third_party' },
+  { title: 'Permissive CORS allows credentialed cross-origin reads', description: 'The cors middleware reflects the request origin while allowing credentials.', severity: 'medium', cwe: 942, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N', kind: 'vulnerability', pkg: 'cors', version: '2.8.5', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'Session cookie missing SameSite', description: 'The session cookie is set without SameSite, so it rides cross-site requests.', severity: 'medium', cwe: 1275, cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'Unpinned base image in the production Dockerfile', description: 'The build pulls a floating tag, so two builds of the same commit can ship different system packages.', severity: 'medium', cwe: 1104, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'configuration' },
+  { title: 'Duplicated validation logic across three handlers', description: 'The same input validation is reimplemented in three places and they have already drifted apart.', severity: 'medium', cwe: 1041, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'first_party' },
+  { title: 'AGPL-3.0 transitive dependency', description: 'A transitive dependency is AGPL-3.0, which the policy allows only for internal services.', severity: 'medium', cwe: 0, cvss: '', kind: 'license', pkg: 'date-fns', version: '2.29.3', advisory: '', reachability: 'unknown', cls: 'third_party' },
+
+  { title: 'Verbose request logging includes bearer tokens', description: 'The access log records the Authorization header at debug level.', severity: 'low', cwe: 532, cvss: 'CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'unreachable', cls: 'configuration' },
+  { title: 'Outdated typescript with no known advisory', description: 'The pinned compiler is four minor versions behind; no advisory applies, but the gap blocks newer fixes.', severity: 'low', cwe: 1104, cvss: '', kind: 'code_quality', pkg: 'typescript', version: '5.0.2', advisory: '', reachability: 'unknown', cls: 'third_party' },
+  { title: 'Missing integrity attribute on an external script', description: 'A third-party script is loaded without subresource integrity.', severity: 'low', cwe: 353, cvss: 'CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N', kind: 'vulnerability', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'configuration' },
+  { title: 'Unused export increases the reachable surface', description: 'A debug helper is exported from the package entry point and reachable from consumers.', severity: 'low', cwe: 1061, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'reachable', cls: 'first_party' },
+  { title: 'ISC and MIT dual license needs a recorded choice', description: 'The package offers two licenses and the policy requires the chosen one to be recorded.', severity: 'low', cwe: 0, cvss: '', kind: 'license', pkg: 'morgan', version: '1.10.0', advisory: '', reachability: 'unknown', cls: 'third_party' },
+
+  { title: 'Dependency graph depth exceeds the review threshold', description: 'The longest transitive path is eleven levels deep, which the policy flags for review rather than failure.', severity: 'info', cwe: 0, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'third_party' },
+  { title: 'SBOM recorded without a build identifier', description: 'The SBOM carries no build id, so it cannot be tied back to a pipeline run.', severity: 'info', cwe: 0, cvss: '', kind: 'code_quality', pkg: '', version: '', advisory: '', reachability: 'unknown', cls: 'configuration' },
+]
+
+const SEVERITY_RISK = { critical: 95, high: 74, medium: 52, low: 28, info: 8 } as const
+const SEVERITY_PRIORITY = { critical: 1, high: 2, medium: 3, low: 4, info: 5 } as const
+
+// 45 findings from 27 seeds: the tail repeats earlier seeds against later advisory ids, which is what
+// a real engagement looks like when one package contributes several records.
+const FINDINGS = Array.from({ length: 45 }, (_, i) => {
+  const seed = FINDING_SEEDS[i % FINDING_SEEDS.length]
+  const repeat = Math.floor(i / FINDING_SEEDS.length)
+  const advisory = seed.advisory && repeat > 0 ? `${seed.advisory}-${repeat}` : seed.advisory
+  const status = seed.severity === 'critical' ? 'open' : i % 7 === 3 ? 'triaged' : i % 11 === 5 ? 'resolved' : i % 13 === 9 ? 'false_positive' : 'open'
+  return {
+    ID: `finding-${String(i + 1).padStart(3, '0')}`,
+    EngagementID: 'eng-001',
+    Title: seed.title,
+    Description: seed.description,
+    Severity: seed.severity,
+    CVSSVector: seed.cvss,
+    CWE: seed.cwe ? `CWE-${seed.cwe}` : '',
+    Status: status,
+    DedupKey: seed.pkg ? `sca:vuln:${seed.pkg}:${advisory || seed.version}` : `sast:${seed.cwe}:finding-${i + 1}`,
+    KEV: seed.kev === true,
+    RiskScore: SEVERITY_RISK[seed.severity] - repeat,
+    Class: seed.cls,
+    Scope: 'production',
+    Reachability: seed.reachability,
+    Impact: '',
+    Priority: SEVERITY_PRIORITY[seed.severity],
+    Assignee: i % 5 === 0 ? 'alice' : i % 5 === 1 ? 'bob' : '',
+    Version: 1,
+    Kind: seed.kind,
+    EvidenceScore: seed.reachability === 'reachable' ? 92 - repeat * 3 : seed.reachability === 'unknown' ? 61 : 38,
+    ProposedBy: '',
+    compliance_controls: seed.cwe === 89 || seed.cwe === 79 ? [{ Framework: 'OWASP', ID: 'A03:2021', Title: 'Injection' }] : [],
+  }
+})
+
+// The engagement's counts are derived rather than written down, so the list and the overview cannot
+// disagree. They did: the record claimed 4 critical and 12 high where the findings held 5 and 10.
+const FINDING_COUNTS = FINDINGS.reduce(
+  (acc, f) => ({ ...acc, total: acc.total + 1, [f.Severity]: (acc[f.Severity as keyof typeof acc] as number) + 1 }),
+  { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+)
+
+// Assigned rather than written into the literal above: ENGAGEMENTS is declared first, and the
+// overview and the list disagreed when the record carried its own hand-written totals.
+ENGAGEMENTS[0].findings_count = FINDING_COUNTS
+
 
 // --- Scan Result (PascalCase for components, snake_case for other fields) ---
 const SCAN_RESULT = {
@@ -220,27 +315,49 @@ const SCAN_RESULT = {
     { Name: 'Dockerfile', Percent: 2 },
   ],
   sbom: {
-    Components: Array.from({ length: 52 }, (_, i) => ({
-      Name: ['express', 'lodash', 'axios', 'jsonwebtoken', 'helmet', 'cors', 'morgan', 'dotenv', 'pg', 'redis', 'typescript', 'vite', 'react', 'react-dom', 'tailwindcss', 'vitest', 'msw', 'zod', 'date-fns', 'chart.js'][i % 20],
-      Version: `${Math.floor(i / 4)}.${i % 10}.${i % 3}`,
-      PURL: `pkg:npm/${['express', 'lodash', 'axios', 'react', 'vite'][i % 5]}@${Math.floor(i / 4)}.${i % 10}.${i % 3}`,
-      Licenses: [
-        [{ SPDXID: 'MIT', Name: 'MIT License', Category: 'permissive' }],
-        [{ SPDXID: 'Apache-2.0', Name: 'Apache License 2.0', Category: 'permissive' }],
-        [{ SPDXID: 'BSD-3-Clause', Name: 'BSD 3-Clause', Category: 'permissive' }],
-        [{ SPDXID: 'ISC', Name: 'ISC License', Category: 'permissive' }],
-        [{ SPDXID: 'GPL-3.0-only', Name: 'GNU GPL v3', Category: 'copyleft' }],
-      ][i % 5],
-      LicenseSource: ['declared', 'concluded', 'declared', 'declared', 'concluded'][i % 5],
-      LicenseConfidence: 'high',
-      UnknownReason: '',
-      FirstParty: i % 8 === 0,
-      Location: `node_modules/${['express', 'lodash', 'axios', 'react', 'vite'][i % 5]}/package.json`,
-    })),
-    Dependencies: Array.from({ length: 40 }, (_, i) => ({
-      Ref: `pkg:npm/${['express', 'lodash', 'axios'][i % 3]}@${i}.0.0`,
-      DependsOn: [`pkg:npm/${['lodash', 'axios', 'express'][(i + 1) % 3]}@${i + 1}.0.0`],
-    })),
+    Components: Array.from({ length: 52 }, (_, i) => {
+      // One source for the identity: PURL and on-disk location derive from the name, so a component
+      // called dotenv no longer carries the PURL of axios.
+      const [name, version, license, firstParty] = ([
+        ['express', '4.17.1', 'MIT', false], ['lodash', '4.17.20', 'MIT', false], ['axios', '0.21.1', 'MIT', false],
+        ['jsonwebtoken', '8.5.1', 'MIT', false], ['helmet', '4.6.0', 'MIT', false], ['cors', '2.8.5', 'MIT', false],
+        ['morgan', '1.10.0', 'MIT', false], ['dotenv', '16.3.1', 'BSD-2-Clause', false], ['pg', '8.11.3', 'MIT', false],
+        ['redis', '4.6.7', 'MIT', false], ['typescript', '5.0.2', 'Apache-2.0', false], ['vite', '8.3.0', 'MIT', false],
+        ['react', '19.0.0', 'MIT', false], ['react-dom', '19.0.0', 'MIT', false], ['tailwindcss', '4.3.3', 'MIT', false],
+        ['vitest', '5.0.1', 'MIT', false], ['msw', '2.15.0', 'MIT', false], ['zod', '3.22.4', 'MIT', false],
+        ['date-fns', '2.29.3', 'AGPL-3.0-only', false], ['chart.js', '3.9.1', 'GPL-3.0-only', false],
+        ['@synapse/report-templates', '1.4.2', 'MIT', true], ['@synapse/engine-core', '1.4.2', 'MIT', true],
+      ] as const)[i % 22]
+      const spdx: Record<string, string> = { MIT: 'MIT License', 'Apache-2.0': 'Apache License 2.0', 'BSD-2-Clause': 'BSD 2-Clause', 'AGPL-3.0-only': 'GNU AGPL v3', 'GPL-3.0-only': 'GNU GPL v3' }
+      const copyleft = license.startsWith('GPL') || license.startsWith('AGPL')
+      return {
+        Name: name,
+        Version: version,
+        PURL: `pkg:npm/${name}@${version}`,
+        Licenses: [{ SPDXID: license, Name: spdx[license], Category: copyleft ? 'copyleft' : 'permissive' }],
+        LicenseSource: i % 3 === 2 ? 'concluded' : 'declared',
+        LicenseConfidence: 'high',
+        UnknownReason: '',
+        FirstParty: firstParty,
+        Location: `node_modules/${name}/package.json`,
+      }
+    }),
+    // Edges reference PURLs that exist in Components above; the previous version invented a new
+    // version number per edge, so the graph pointed at packages the SBOM never listed.
+    Dependencies: Array.from({ length: 40 }, (_, i) => {
+      const edges = [
+        ['pkg:npm/express@4.17.1', 'pkg:npm/cors@2.8.5'],
+        ['pkg:npm/express@4.17.1', 'pkg:npm/helmet@4.6.0'],
+        ['pkg:npm/express@4.17.1', 'pkg:npm/morgan@1.10.0'],
+        ['pkg:npm/axios@0.21.1', 'pkg:npm/lodash@4.17.20'],
+        ['pkg:npm/jsonwebtoken@8.5.1', 'pkg:npm/lodash@4.17.20'],
+        ['pkg:npm/@synapse/engine-core@1.4.2', 'pkg:npm/zod@3.22.4'],
+        ['pkg:npm/@synapse/report-templates@1.4.2', 'pkg:npm/date-fns@2.29.3'],
+        ['pkg:npm/vite@8.3.0', 'pkg:npm/typescript@5.0.2'],
+      ] as const
+      const [ref, dep] = edges[i % edges.length]
+      return { Ref: ref, DependsOn: [dep] }
+    }),
   },
   vulnerabilities: Array.from({ length: 18 }, (_, i) => ({
     ID: `CVE-2026-${1000 + i}`,
@@ -276,12 +393,12 @@ const SCAN_RESULT = {
     { finding_id: 'finding-001', dedup_key: 'sca:vuln:express:CVE-2026-1000', verdict: 'refuted', driver: 'input_sanitized', confidence: 87, suspected_fp: true, proposer_model: 'google/gemma-4-26b-a4b-it:free', proposer_provider: 'openrouter', proposer_model_family: 'google', verifier_model: 'nvidia/nemotron-3.5-lightning:free', verifier_provider: 'openrouter', verifier_model_family: 'nvidia', independence_policy: 'model_family', prompt_version: 'v3.2', policy_version: '2026.08', policy_reason: 'both_models_agree_refuted', shadow: false, would_gate_exempt: true, gate_exempt: false, review_required: true, verified: true, verifier_verdict: 'refuted', verifier_driver: 'input_sanitized', verifier_confidence: 82 },
     { finding_id: 'finding-005', dedup_key: 'sca:vuln:helmet:CVE-2026-1004', verdict: 'sound', driver: '', confidence: 92, suspected_fp: false, proposer_model: 'google/gemma-4-26b-a4b-it:free', proposer_provider: 'openrouter', proposer_model_family: 'google', verifier_model: 'nvidia/nemotron-3.5-lightning:free', verifier_provider: 'openrouter', verifier_model_family: 'nvidia', independence_policy: 'model_family', prompt_version: 'v3.2', policy_version: '2026.08', policy_reason: 'both_models_agree_sound', shadow: false, would_gate_exempt: false, gate_exempt: false, review_required: false, verified: true, verifier_verdict: 'sound', verifier_driver: '', verifier_confidence: 90 },
   ],
-  tool_versions: { syft: '1.18.1', grype: '0.87.0', 'synapse-callgraph': '0.4.2' },
+  tool_versions: { 'synapse-sbom': '1.18.1', 'synapse-match': '0.87.0', 'synapse-callgraph': '0.4.2' },
   vuln_db_snapshot: '2026-08-22T00:00:00Z',
   completeness: { lockfiles: ['package-lock.json', 'go.sum'], components_total: 52, components_resolved: 52, confident: true, warning: '' },
   license_coverage: { total: 52, detected: 50, unknown: 2, pct: 96.2 },
   finding_quality: { raw_findings: 45, actionable: 28, background: 5, production: 35, development: 10, example_test: 3, third_party: 30, first_party_historical: 2, version_coverage_pct: 94, path_coverage_pct: 88, confidence: 'high', by_priority: { '1': 5, '2': 12, '3': 18, '4': 7, '5': 3 } },
-  manifest: { tool_versions: { syft: '1.18.1', grype: '0.87.0' }, vuln_db_snapshot: '2026-08-22T00:00:00Z', grype_db_version: '5', correlation_version: 2, sbom_sha256: 'abc123def456', repro_score: 100, pinned_inputs: ['syft@1.18.1', 'grype@0.87.0'], unpinned_inputs: [] },
+  manifest: { tool_versions: { 'synapse-sbom': '1.18.1', 'synapse-match': '0.87.0' }, vuln_db_snapshot: '2026-08-22T00:00:00Z', advisory_db_version: '5', correlation_version: 2, sbom_sha256: 'abc123def456', repro_score: 100, pinned_inputs: ['synapse-sbom@1.18.1', 'synapse-match@0.87.0'], unpinned_inputs: [] },
   code_quality: {
     inventory: { languages: [{ language: 'Go', files: 245, code_lines: 38200, comment_lines: 4800, blank_lines: 6100, functions: 1420, functions_known: true }, { language: 'TypeScript', files: 156, code_lines: 22400, comment_lines: 1200, blank_lines: 3400, functions: 890, functions_known: true }] },
     findings: FINDINGS.slice(30, 45),
@@ -290,8 +407,8 @@ const SCAN_RESULT = {
   },
   debug_events: [
     { stage: 'acquire', step: 'git_clone', status: 'done', message: 'Cloned synapse-ce.git', tool: 'git', counts: {}, started_at: new Date(Date.now() - 300000).toISOString(), finished_at: new Date(Date.now() - 280000).toISOString(), duration_ms: 20000, error: '' },
-    { stage: 'sbom', step: 'syft_scan', status: 'done', message: '52 components identified', tool: 'syft', counts: { components: 52 }, started_at: new Date(Date.now() - 280000).toISOString(), finished_at: new Date(Date.now() - 250000).toISOString(), duration_ms: 30000, error: '' },
-    { stage: 'vuln', step: 'grype_match', status: 'done', message: '18 vulnerabilities matched', tool: 'grype', counts: { vulnerabilities: 18 }, started_at: new Date(Date.now() - 250000).toISOString(), finished_at: new Date(Date.now() - 220000).toISOString(), duration_ms: 30000, error: '' },
+    { stage: 'sbom', step: 'sbom_build', status: 'done', message: '52 components identified', tool: 'synapse-sbom', counts: { components: 52 }, started_at: new Date(Date.now() - 280000).toISOString(), finished_at: new Date(Date.now() - 250000).toISOString(), duration_ms: 30000, error: '' },
+    { stage: 'vuln', step: 'advisory_match', status: 'done', message: '18 vulnerabilities matched', tool: 'synapse-match', counts: { vulnerabilities: 18 }, started_at: new Date(Date.now() - 250000).toISOString(), finished_at: new Date(Date.now() - 220000).toISOString(), duration_ms: 30000, error: '' },
     { stage: 'license', step: 'classify', status: 'done', message: '50/52 licenses resolved', tool: 'synapse', counts: { resolved: 50, unknown: 2 }, started_at: new Date(Date.now() - 220000).toISOString(), finished_at: new Date(Date.now() - 200000).toISOString(), duration_ms: 20000, error: '' },
     { stage: 'quality', step: 'sast_scan', status: 'done', message: '15 code quality findings', tool: 'synapse-ast', counts: { findings: 15 }, started_at: new Date(Date.now() - 200000).toISOString(), finished_at: new Date(Date.now() - 150000).toISOString(), duration_ms: 50000, error: '' },
     { stage: 'correlate', step: 'dedup', status: 'done', message: 'Deduplicated findings', tool: 'synapse', counts: { raw: 63, deduped: 45 }, started_at: new Date(Date.now() - 150000).toISOString(), finished_at: new Date(Date.now() - 140000).toISOString(), duration_ms: 10000, error: '' },
@@ -299,6 +416,42 @@ const SCAN_RESULT = {
 }
 
 // --- Business Assets ---
+// Technical assets and host rows. The ids are the ones /assets/edges references, so the asset graph
+// draws nodes for its edges instead of an empty canvas.
+const TECHNICAL_ASSETS = [
+  { ID: 'ta-host-web01', Kind: 'host', Key: 'host:web01.prod', Name: 'web01.prod', Attributes: { environment: 'production', region: 'us-east-1', os: 'ubuntu 24.04' } },
+  { ID: 'ta-host-db01', Kind: 'host', Key: 'host:db01.prod', Name: 'db01.prod', Attributes: { environment: 'production', region: 'us-east-1', os: 'ubuntu 24.04' } },
+  { ID: 'ta-wl-checkout', Kind: 'workload', Key: 'k8s:prod/checkout', Name: 'checkout', Attributes: { namespace: 'prod', replicas: '3', cluster: 'prod-use1' } },
+  { ID: 'ta-wl-orders', Kind: 'workload', Key: 'k8s:prod/orders', Name: 'orders', Attributes: { namespace: 'prod', replicas: '2', cluster: 'prod-use1' } },
+  { ID: 'ta-img-checkout', Kind: 'image', Key: 'oci:ghcr.io/acme/checkout@sha256:4f1a', Name: 'checkout:1.8.2', Attributes: { registry: 'ghcr.io', digest: 'sha256:4f1a9c2e' } },
+  { ID: 'ta-img-orders', Kind: 'image', Key: 'oci:ghcr.io/acme/orders@sha256:7b3d', Name: 'orders:2.1.0', Attributes: { registry: 'ghcr.io', digest: 'sha256:7b3d5e81' } },
+  { ID: 'ta-exposure-lb', Kind: 'exposure', Key: 'net:checkout.acme.example:443', Name: 'checkout.acme.example', Attributes: { port: '443', scheme: 'https', reachable: 'internet' } },
+  { ID: 'ta-repo-synapse', Kind: 'repository', Key: 'git:github.com/KKloudTarus/synapse-ce', Name: 'synapse-ce', Attributes: { default_branch: 'main', visibility: 'private' } },
+]
+
+type HostSummaryFixture = { total: number; critical: number; high: number; medium: number; low: number; info: number; fixable: number; kev: number }
+
+const hostRow = (
+  asset: (typeof TECHNICAL_ASSETS)[number],
+  engagement: string,
+  packages: number,
+  summary: HostSummaryFixture,
+  scanStatus: string,
+) => ({
+  asset,
+  engagement_id: engagement,
+  packages,
+  recorded_at: HOUR_AGO,
+  last_scan: { job_id: `scan-${asset.ID}`, status: scanStatus, stage: 'done', error: '', started_at: HOUR_AGO, finished_at: NOW },
+  summary,
+})
+
+const FLEET_HOST_ROWS = [
+  hostRow(TECHNICAL_ASSETS[0], 'eng-001', 412, { total: 31, critical: 2, high: 7, medium: 14, low: 6, info: 2, fixable: 22, kev: 1 }, 'succeeded'),
+  hostRow(TECHNICAL_ASSETS[1], 'eng-001', 388, { total: 18, critical: 1, high: 3, medium: 9, low: 4, info: 1, fixable: 12, kev: 0 }, 'succeeded'),
+  hostRow(TECHNICAL_ASSETS[2], 'eng-002', 204, { total: 9, critical: 0, high: 2, medium: 5, low: 2, info: 0, fixable: 7, kev: 0 }, 'succeeded'),
+]
+
 const BUSINESS_ASSETS = [
   { ID: 'ba-001', Key: 'synapse-platform', Name: 'Synapse Security Platform', Description: 'Core SCA/SAST platform', Lifecycle: 'active', Criticality: 'high', Owner: 'security-engineering', Type: 'application', Metadata: {}, Version: 1, Audit: { CreatedAt: MONTH_AGO, UpdatedAt: NOW }, posture: 'critical', posture_explanation: '' },
   { ID: 'ba-002', Key: 'acme-api', Name: 'Acme Public API', Description: 'Customer-facing REST API', Lifecycle: 'active', Criticality: 'high', Owner: 'platform-team', Type: 'application', Metadata: {}, Version: 1, Audit: { CreatedAt: MONTH_AGO, UpdatedAt: WEEK_AGO }, posture: 'high_risk', posture_explanation: '' },
@@ -471,7 +624,7 @@ const AUDIT_LOG = Array.from({ length: 25 }, (_, i) => ({
   target: ['eng-001', 'scan-042', 'finding-118', 'eng-002', 'user-003', 'scan-043', 'sla-policy-1', 'agent-001', 'review-77', 'proj-synapse'][i % 10],
   metadata: [
     { engagement: 'synapse-ce-audit', status: 'created' },
-    { engine: 'grype', scope: 'repo' },
+    { engine: 'synapse-match', scope: 'repo' },
     { verdict: 'false_positive', confidence: '0.92' },
     { from: 'active', to: 'completed' },
     { email: 'bob@synapse.local', role: 'viewer' },
@@ -677,6 +830,10 @@ export const handlers = [
         run('acc-2', '2026-01-02T02:00:00Z', 10, 1, 0),
         run('acc-1', '2026-01-01T02:00:00Z', 9, 1, 1),
       ],
+      findings: [
+  { id: 'iss-001', kind: 'issue', rule_key: 'go:S1001', rule_name: 'SQL injection', type: 'vulnerability', severity: 'critical', detection_status: 'open', current_status: null, message: 'Potential SQL injection in query builder', location: { file: 'internal/handlers/user.go', start_line: 42, end_line: 42, start_column: 12, end_column: 45 }, new: true },
+      ],
+      capabilities: { source: true, unified_diff: true, split_diff: false, line_coverage: true },
     })
   }),
 
@@ -784,8 +941,49 @@ export const handlers = [
     const eng = ENGAGEMENTS.find(e => e.id === params.id) ?? ENGAGEMENTS[0]
     return HttpResponse.json(eng)
   }),
-  http.get('/api/v1/engagements/:id/source', () => new HttpResponse(null, { status: 404 })),
-  http.post('/api/v1/engagements', () => HttpResponse.json(ENGAGEMENTS[0])),
+  // A real backend answers 404 here when nothing was published, which is the correct contract and a
+  // poor demo: the code viewer then shows "source unavailable" on the screen a visitor most wants to
+  // see. The playground publishes a package so the preview works; dev keeps the 404 so the empty
+  // state stays reachable while it is being worked on.
+  http.get('/api/v1/engagements/:id/source', ({ params }) =>
+    import.meta.env.VITE_PLAYGROUND === '1'
+      ? HttpResponse.json({
+          version_id: 'srcv-2f8a10c4',
+          associated_by: 'ci@synapse',
+          associated_at: HOUR_AGO,
+          filename: 'synapse-ce-9f1c2b7.tar.zst',
+          size: 4_718_592,
+          sha256: '9f1c2b7d4e5a6f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708',
+          target: `engagement:${params.id}`,
+          uploaded_by: 'ci@synapse',
+          uploaded_at: HOUR_AGO,
+        })
+      : new HttpResponse(null, { status: 404 }),
+  ),
+  // Creating used to answer with the first existing engagement, so the list total never moved and
+  // searching for the name just submitted returned nothing. The playground keeps the new record in
+  // memory for the session instead, so the result of the action is visible. Reset clears it.
+  http.post('/api/v1/engagements', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'untitled-engagement'
+    if (import.meta.env.VITE_PLAYGROUND !== '1') return HttpResponse.json(ENGAGEMENTS[0])
+    const now = new Date().toISOString()
+    const created = {
+      ...ENGAGEMENTS[0],
+      id: `eng-${String(ENGAGEMENTS.length + 1).padStart(3, '0')}`,
+      name,
+      client: typeof body.client === 'string' && body.client ? body.client : 'Playground',
+      status: 'active',
+      findings_count: { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+      last_scan_date: null,
+      last_scan_status: '',
+      scope: (body.scope as { in_scope: unknown[]; out_of_scope: unknown[] }) ?? { in_scope: [], out_of_scope: [] },
+      created_at: now,
+      updated_at: now,
+    }
+    ENGAGEMENTS.push(created as unknown as (typeof ENGAGEMENTS)[number])
+    return HttpResponse.json(created, { status: 201 })
+  }),
   http.patch('/api/v1/engagements/:id', ({ params }) => {
     const eng = ENGAGEMENTS.find(e => e.id === params.id) ?? ENGAGEMENTS[0]
     return HttpResponse.json(eng)
@@ -810,10 +1008,44 @@ export const handlers = [
   http.get('/api/v1/engagements/:id/findings', () => HttpResponse.json(FINDINGS)),
 
   // --- Engagement Scan ---
-  http.get('/api/v1/engagements/:id/sbom', () => new HttpResponse(null, { status: 404 })),
+  http.get('/api/v1/engagements/:id/sbom', ({ params }) =>
+    import.meta.env.VITE_PLAYGROUND === '1'
+      ? HttpResponse.json({
+          id: 'sbom-7c21',
+          engagement_id: params.id,
+          filename: 'synapse-ce.cdx.json',
+          format: 'CycloneDX',
+          spec_version: '1.6',
+          target_ref: 'git+https://github.com/KKloudTarus/synapse-ce@9f1c2b7',
+          component_count: 52,
+          dependency_count: 40,
+          sha256: 'abc123def4567890abc123def4567890abc123def4567890abc123def4567890',
+          created_by: 'ci@synapse',
+          created_at: HOUR_AGO,
+        })
+      : new HttpResponse(null, { status: 404 }),
+  ),
   // 404 matches the real backend (ErrNotFound) when no job exists. A 200 with a
   // null body made mapScanJob(null) throw on every poll tick.
-  http.get('/api/v1/engagements/:id/scan-status', () => new HttpResponse(null, { status: 404 })),
+  // The playground answers a terminal job instead, so the screen shows a finished run rather than an
+  // empty state. The status must stay terminal: a running job puts the UI into a poll that never ends.
+  http.get('/api/v1/engagements/:id/scan-status', ({ params }) =>
+    import.meta.env.VITE_PLAYGROUND === '1'
+      ? HttpResponse.json({
+          id: 'scan-9d41',
+          engagement_id: params.id,
+          target: 'git+https://github.com/KKloudTarus/synapse-ce@9f1c2b7',
+          kind: 'git',
+          status: 'succeeded',
+          stage: 'done',
+          progress: 100,
+          started_at: HOUR_AGO,
+          finished_at: NOW,
+          error: '',
+          debug_events: [],
+        })
+      : new HttpResponse(null, { status: 404 }),
+  ),
   http.get('/api/v1/engagements/:id/scan-runs/compare', () =>
     HttpResponse.json({
       run_a: SCAN_RUNS[0],
@@ -822,7 +1054,7 @@ export const handlers = [
       removed: ['pkg:npm/lodash@4.17.20|CVE-2021-23337'],
       unchanged: 2,
       explanation: [
-        'grype-db changed: "v5@2026-02-20" -> "v5@2026-01-20"',
+        'advisory-db changed: "v5@2026-02-20" -> "v5@2026-01-20"',
         'vuln-db snapshot changed: "osv.dev@2026-02-20T00:00:00Z" -> "osv.dev@2026-01-20T00:00:00Z"',
       ],
     }),
@@ -1051,10 +1283,28 @@ export const handlers = [
   http.get('/api/v1/ai-triage/observability', () => HttpResponse.json(OBSERVABILITY)),
 
   // --- Current User ---
-  http.get('/api/v1/me', () => HttpResponse.json({ id: 'user-001', username: 'admin', display_name: 'Admin User', email: 'admin@synapse.local', role: 'owner' })),
+  http.get('/api/v1/me', () => HttpResponse.json({ id: 'user-001', username: 'admin', display_name: 'Admin User', email: 'admin@synapse.local', role: 'admin' })),
 
   // --- Assets ---
-  http.get('/api/v1/assets', () => HttpResponse.json(BUSINESS_ASSETS.map(a => ({ ...a, type: 'host', tags: ['production'], finding_count: 12, last_scanned: HOUR_AGO })))),
+  // /assets is the TECHNICAL asset list (mapTechnicalAsset), which the asset graph, the chain
+  // rehearsal tab and the purple coverage tab all read. The business-asset shape returned here left
+  // the graph with edges pointing at nodes that did not exist, so it drew nothing. These ids are the
+  // ones /assets/edges references.
+  http.get('/api/v1/assets', () => HttpResponse.json(TECHNICAL_ASSETS)),
+  http.get('/api/v1/assets/hosts', () => HttpResponse.json(FLEET_HOST_ROWS)),
+  // Before /assets/:id on purpose: MSW matches handlers in order, and the parameterised route
+  // otherwise answers /assets/edges with a single object, which the client reads as no edges.
+  http.get('/api/v1/assets/edges', () =>
+    HttpResponse.json([
+      { TenantID: 'default', From: 'ta-host-web01', To: 'ta-wl-checkout', Kind: 'runs', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-wl-checkout', To: 'ta-img-checkout', Kind: 'depends_on', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-exposure-lb', To: 'ta-wl-checkout', Kind: 'exposes', Provenance: 'recon-1', Confidence: 'inferred' },
+      { TenantID: 'default', From: 'ta-host-db01', To: 'ta-wl-orders', Kind: 'runs', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-wl-orders', To: 'ta-img-orders', Kind: 'depends_on', Provenance: 'cluster-inventory', Confidence: 'observed' },
+      { TenantID: 'default', From: 'ta-wl-checkout', To: 'ta-repo-synapse', Kind: 'built_from', Provenance: 'ci', Confidence: 'observed' },
+    ]),
+  ),
+  http.post('/api/v1/assets/edges', () => new HttpResponse(null, { status: 204 })),
   http.get('/api/v1/assets/:id', ({ params }) => {
     const a = BUSINESS_ASSETS.find(x => x.ID === params.id) ?? BUSINESS_ASSETS[0]
     return HttpResponse.json({ ...a, type: 'host', tags: ['production'], finding_count: 12, last_scanned: HOUR_AGO, engagements: ENGAGEMENTS.slice(0, 2) })
@@ -1362,6 +1612,13 @@ export const handlers = [
     const incidents = FLEET_INCIDENTS.filter((i) => !state || i.State === state)
     return HttpResponse.json({ incidents, truncated: false })
   }),
+  // The detail read is registered in router.go but absent from api/openapi.yaml, where it sits on
+  // the coverage debt list, so the generated fallback cannot shape it. Written by hand from the
+  // same fixture the list serves, so a row and the screen it opens agree.
+  http.get('/api/v1/fleet/incidents/:id', ({ params }) => {
+    const incident = FLEET_INCIDENTS.find((i) => i.ID === params.id) ?? FLEET_INCIDENTS[0]
+    return HttpResponse.json(incident)
+  }),
 
   // --- Code Quality Projects ---
   http.get('/api/v1/projects', () => HttpResponse.json(PROJECTS)),
@@ -1480,7 +1737,26 @@ export const handlers = [
       },
     })
   }),
-  http.get('/api/v1/projects/:key/analysis-status', () => new HttpResponse(null, { status: 404 })),
+  // 404 means "no analysis running", which the client maps to null and the screen renders as an
+  // empty state. The playground answers a finished run instead, so the panel shows a result. Terminal
+  // status only: a running job leaves the page polling forever.
+  http.get('/api/v1/projects/:key/analysis-status', ({ params }) =>
+    import.meta.env.VITE_PLAYGROUND === '1'
+      ? HttpResponse.json({
+          id: 'an-001',
+          engagement_id: 'eng-001',
+          target: `project:${params.key}`,
+          kind: 'git',
+          status: 'succeeded',
+          stage: 'done',
+          progress: 100,
+          started_at: HOUR_AGO,
+          finished_at: NOW,
+          error: '',
+          debug_events: [],
+        })
+      : new HttpResponse(null, { status: 404 }),
+  ),
   http.get('/api/v1/projects/:key/measures', ({ params, request }) => {
     const p = PROJECTS.find(pr => pr.key === params.key) ?? PROJECTS[0]
     const url = new URL(request.url)
@@ -1642,39 +1918,133 @@ export const handlers = [
     base: null,
     capabilities: { source: true, unified_diff: true, split_diff: false, line_coverage: true },
     files: [
-      { path: 'internal/handlers/user.go', status: 'unchanged', language: 'go', lines: 342 },
-      { path: 'internal/handlers/auth.go', status: 'unchanged', language: 'go', lines: 285 },
-      { path: 'internal/handlers/scan.go', status: 'addition', language: 'go', lines: 156 },
-      { path: 'internal/handlers/report.go', status: 'unchanged', language: 'go', lines: 198 },
-      { path: 'internal/usecase/sca.go', status: 'unchanged', language: 'go', lines: 412 },
-      { path: 'internal/usecase/sast.go', status: 'modification', language: 'go', lines: 523 },
-      { path: 'internal/usecase/reachability.go', status: 'unchanged', language: 'go', lines: 267 },
-      { path: 'internal/adapter/postgres.go', status: 'unchanged', language: 'go', lines: 380 },
-      { path: 'internal/adapter/redis.go', status: 'unchanged', language: 'go', lines: 145 },
-      { path: 'internal/adapter/s3.go', status: 'modification', language: 'go', lines: 92 },
-      { path: 'cmd/synapse-api/main.go', status: 'unchanged', language: 'go', lines: 78 },
+      { path: 'internal/handlers/user.go', status: 'unchanged', language: 'go', lines: 342, source_available: true, source_reason: null },
+      { path: 'internal/handlers/auth.go', status: 'unchanged', language: 'go', lines: 285, source_available: true, source_reason: null },
+      { path: 'internal/handlers/scan.go', status: 'addition', language: 'go', lines: 156, source_available: true, source_reason: null },
+      { path: 'internal/handlers/report.go', status: 'unchanged', language: 'go', lines: 198, source_available: true, source_reason: null },
+      { path: 'internal/usecase/sca.go', status: 'unchanged', language: 'go', lines: 412, source_available: true, source_reason: null },
+      { path: 'internal/usecase/sast.go', status: 'modification', language: 'go', lines: 523, source_available: true, source_reason: null },
+      { path: 'internal/usecase/reachability.go', status: 'unchanged', language: 'go', lines: 267, source_available: true, source_reason: null },
+      { path: 'internal/adapter/postgres.go', status: 'unchanged', language: 'go', lines: 380, source_available: true, source_reason: null },
+      { path: 'internal/adapter/redis.go', status: 'unchanged', language: 'go', lines: 145, source_available: true, source_reason: null },
+      { path: 'internal/adapter/s3.go', status: 'modification', language: 'go', lines: 92, source_available: true, source_reason: null },
+      { path: 'cmd/synapse-api/main.go', status: 'unchanged', language: 'go', lines: 78, source_available: true, source_reason: null },
     ],
   })),
-  http.get('/api/v1/projects/:key/analyses/:analysisId/code/file', () => HttpResponse.json({
-    analysis_id: 'an-001',
-    head: { ref: 'refs/heads/main', commit: 'a1b2c3d', artifact_digest: 'sha256:abc123' },
-    base: null,
-    file: { path: 'internal/handlers/user.go', status: 'unchanged', language: 'go', lines: 342 },
-    from_line: 1,
-    to_line: 50,
-    total_lines: 342,
-    lines: Array.from({ length: 50 }, (_, i) => ({
-      number: i + 1,
-      content: i === 0 ? 'package handlers' : i === 1 ? '' : i === 2 ? 'import (' : i === 3 ? '\t"context"' : i === 4 ? '\t"net/http"' : i === 5 ? ')' : i === 6 ? '' : `// Line ${i + 1}: handler implementation`,
-      change: 'unchanged',
-      duplicated: false,
-      coverage: i > 10 && i < 40 ? 'covered' : i >= 40 ? 'uncovered' : null,
-    })),
-    findings: [
-      { id: 'iss-001', kind: 'issue', rule_key: 'go:S1001', rule_name: 'SQL injection', type: 'vulnerability', severity: 'critical', detection_status: 'open', current_status: null, message: 'Potential SQL injection in query builder', location: { file: 'internal/handlers/user.go', start_line: 42, end_line: 42, start_column: 12, end_column: 45 }, new: true },
-    ],
-    capabilities: { source: true, unified_diff: true, split_diff: false, line_coverage: true },
-  })),
+  http.get('/api/v1/projects/:key/analyses/:analysisId/code/file', ({ request }) => {
+    // Real Go with the defect the findings describe, rather than "// Line 12: handler
+    // implementation" repeated fifty times. A reader can see the concatenated query on line 42 and
+    // match it to the SQL injection finding, which is what makes the demo worth reading.
+    const path = new URL(request.url).searchParams.get('path') || 'internal/handlers/user.go'
+    const SOURCES: Record<string, string> = {
+      'internal/handlers/user.go': `package handlers
+
+import (
+\t"database/sql"
+\t"encoding/json"
+\t"net/http"
+)
+
+type UserHandler struct {
+\tdb *sql.DB
+}
+
+func NewUserHandler(db *sql.DB) *UserHandler {
+\treturn &UserHandler{db: db}
+}
+
+// Get returns one user. The id arrives from the path and is used unchanged.
+func (h *UserHandler) Get(w http.ResponseWriter, r *http.Request) {
+\tid := r.PathValue("id")
+\tif id == "" {
+\t\thttp.Error(w, "missing id", http.StatusBadRequest)
+\t\treturn
+\t}
+
+\tuser, err := h.lookup(r.Context(), id)
+\tif err != nil {
+\t\t// The error is returned verbatim, so the caller sees the driver message.
+\t\thttp.Error(w, err.Error(), http.StatusInternalServerError)
+\t\treturn
+\t}
+\tif user == nil {
+\t\thttp.Error(w, "not found", http.StatusNotFound)
+\t\treturn
+\t}
+
+\tw.Header().Set("content-type", "application/json")
+\t_ = json.NewEncoder(w).Encode(user)
+}
+
+type User struct {
+\tID    string \`json:"id"\`
+\tEmail string \`json:"email"\`
+\tRole  string \`json:"role"\`
+}
+
+func (h *UserHandler) lookup(ctx context.Context, id string) (*User, error) {
+\t// The id is concatenated into the statement instead of being bound as a parameter.
+\tquery := "SELECT id, email, role FROM users WHERE id = '" + id + "'"
+
+\trow := h.db.QueryRowContext(ctx, query)
+
+\tvar u User
+\tif err := row.Scan(&u.ID, &u.Email, &u.Role); err != nil {
+\t\tif errors.Is(err, sql.ErrNoRows) {
+\t\t\treturn nil, nil
+\t\t}
+\t\treturn nil, err
+\t}
+\treturn &u, nil
+}`,
+      'internal/handlers/auth.go': `package handlers
+
+import (
+\t"fmt"
+\t"net/http"
+)
+
+// Login renders the sign-in page. The "next" parameter is echoed into the markup.
+func Login(w http.ResponseWriter, r *http.Request) {
+\tnext := r.URL.Query().Get("next")
+
+\tw.Header().Set("content-type", "text/html")
+\t// The value is written into the document without contextual encoding.
+\tfmt.Fprintf(w, "<form action=\\"/session\\"><input type=hidden name=next value=%s></form>", next)
+}
+
+// Callback sends the browser on after sign-in.
+func Callback(w http.ResponseWriter, r *http.Request) {
+\tnext := r.URL.Query().Get("next")
+\tif next == "" {
+\t\tnext = "/dashboard"
+\t}
+\t// The destination is not checked against an allowlist.
+\thttp.Redirect(w, r, next, http.StatusFound)
+}`,
+    }
+    const content = SOURCES[path] ?? SOURCES['internal/handlers/user.go']
+    const raw = content.split('\n')
+    const from = Number(new URL(request.url).searchParams.get('from') ?? 1)
+    const to = Number(new URL(request.url).searchParams.get('to') ?? raw.length)
+    const slice = raw.slice(from - 1, to)
+    return HttpResponse.json({
+      analysis_id: 'an-001',
+      head: { ref: 'refs/heads/main', commit: 'a1b2c3d', artifact_digest: 'sha256:abc123' },
+      base: null,
+      file: { path, status: 'unchanged', language: 'go', lines: raw.length, source_available: true, source_reason: null },
+      from_line: from,
+      to_line: from + slice.length - 1,
+      total_lines: raw.length,
+      lines: slice.map((content, i) => ({
+        number: from + i,
+        content,
+        change: 'unchanged',
+        duplicated: false,
+        coverage: /^\s*(func|if|return|query|row|user|next)/.test(content) ? 'covered' : content.trim() === '' ? null : 'uncovered',
+      })),
+    })
+  }),
   http.get('/api/v1/projects/:key/analyses/:analysisId/code/diff', () => HttpResponse.json({
     analysis_id: 'an-001',
     head: { ref: 'refs/heads/main', commit: 'a1b2c3d', artifact_digest: 'sha256:abc123' },
@@ -1826,14 +2196,6 @@ export const handlers = [
   ),
 
   // --- Technical asset relationship graph. Edge has no Go json tags: PascalCase wire. ---
-  http.get('/api/v1/assets/edges', () =>
-    HttpResponse.json([
-      { TenantID: 'default', From: 'ta-host-web01', To: 'ta-wl-checkout', Kind: 'runs', Provenance: 'cluster-inventory', Confidence: 'observed' },
-      { TenantID: 'default', From: 'ta-wl-checkout', To: 'ta-img-checkout', Kind: 'depends_on', Provenance: 'cluster-inventory', Confidence: 'observed' },
-      { TenantID: 'default', From: 'ta-exposure-lb', To: 'ta-wl-checkout', Kind: 'exposes', Provenance: 'recon-1', Confidence: 'inferred' },
-    ]),
-  ),
-  http.post('/api/v1/assets/edges', () => new HttpResponse(null, { status: 204 })),
 
   // --- DAST scan + runtime verification. Proposal/Decision/Result have no Go json tags: PascalCase. ---
   http.post('/api/v1/engagements/:id/dast/proposals', () =>
@@ -1982,12 +2344,34 @@ export const handlers = [
   }),
 
   // --- Catch-all fallback ---
+  // Anything the hand-written handlers above do not cover falls through to the fixtures generated
+  // from api/openapi.yaml, so a screen reaches a schema-shaped answer instead of a 404. A route the
+  // spec does not describe either is still a 404 and still warns, which is the signal that the
+  // dashboard calls something undocumented.
   http.get('/api/v1/*', ({ request }) => {
-    console.warn('[MSW] Unhandled GET:', new URL(request.url).pathname)
+    const { pathname } = new URL(request.url)
+    const generated = matchGenerated('GET', pathname)
+    if (generated.found) {
+      return generated.body === null ? new HttpResponse(null, { status: 204 }) : HttpResponse.json(generated.body)
+    }
+    console.warn('[MSW] Unhandled GET:', pathname)
+    // api/testdata/openapi-coverage-debt.txt tracks 156 routes the router serves and the spec does
+    // not describe, so the generated layer cannot shape them. In the playground a 404 on one of
+    // those can leave a screen on its spinner, which reads as a broken site; a collection-shaped
+    // empty answer renders the screen's empty state instead. A normal dev run keeps the 404, so the
+    // signal that a route is unmocked is not softened where it is being worked on.
+    if (import.meta.env.VITE_PLAYGROUND === '1') {
+      const last = pathname.split('/').filter(Boolean).pop() ?? ''
+      const collection = /s$/.test(last) && !/status|address|analysis/.test(last)
+      return HttpResponse.json(collection ? { items: [], total: 0, truncated: false } : {})
+    }
     return HttpResponse.json({ error: 'Not mocked' }, { status: 404 })
   }),
-  http.post('/api/v1/*', () => HttpResponse.json({ ok: true })),
-  http.patch('/api/v1/*', () => HttpResponse.json({ ok: true })),
-  http.delete('/api/v1/*', () => HttpResponse.json({ ok: true })),
-  http.put('/api/v1/*', () => HttpResponse.json({ ok: true })),
+  ...(['post', 'patch', 'delete', 'put'] as const).map((method) =>
+    http[method]('/api/v1/*', ({ request }) => {
+      const generated = matchGenerated(method.toUpperCase(), new URL(request.url).pathname)
+      if (generated.found && generated.body !== null) return HttpResponse.json(generated.body)
+      return HttpResponse.json({ ok: true })
+    }),
+  ),
 ]
