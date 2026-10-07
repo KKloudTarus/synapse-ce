@@ -188,7 +188,7 @@ type DestinationNotice struct {
 
 func NewDestinationEvent(tenant, channel shared.ID, channelType ChannelType, destination, action, actor string, at time.Time) (Event, error) {
 	scheme, host, ok := MaskedEndpoint(destination)
-	if !ok || (channelType != ChannelWebhook && channelType != ChannelSlack) {
+	if !ok || !channelType.HTTPEndpoint() {
 		return Event{}, fmt.Errorf("%w: destination notice requires an HTTP host", shared.ErrValidation)
 	}
 	if action != "created" && action != "host_changed" {

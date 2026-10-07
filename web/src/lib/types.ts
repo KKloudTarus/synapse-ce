@@ -1051,6 +1051,24 @@ export interface Completeness {
   warning: string
 }
 
+export type EngineExecution = 'completed' | 'failed' | 'timed_out' | 'cancelled' | 'not_run'
+export type EngineCoverageStatus = 'complete' | 'partial' | 'unknown' | 'not_applicable'
+
+export interface EngineOutcome {
+  engine: string
+  execution: EngineExecution
+  coverage: EngineCoverageStatus
+  reason: string
+  required: boolean
+  counts: Record<string, number>
+}
+
+export interface EngineCoverage {
+  status: EngineCoverageStatus
+  required: number
+  completed: number
+}
+
 export interface LicenseCoverage {
   total: number
   detected: number
@@ -1167,6 +1185,8 @@ export interface ScanJob {
   startedAt: string | null
   finishedAt: string | null
   debugEvents: ScanDebugEvent[]
+  engineOutcomes?: EngineOutcome[]
+  engineCoverage?: EngineCoverage
 }
 
 export interface ScanDebugEvent {
@@ -1185,6 +1205,10 @@ export interface ScanDebugEvent {
 export interface ScanResult {
   target: string
   scanMode: ScanMode
+  executionMode?: string
+  includesPreviousResults?: boolean
+  engineOutcomes?: EngineOutcome[]
+  engineCoverage?: EngineCoverage
   languages: DetectedLanguage[]
   components: Component[]
   dependencies: Dependency[]

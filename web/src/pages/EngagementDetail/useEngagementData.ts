@@ -85,6 +85,7 @@ export function useEngagementData(id: string): EngagementData {
   useEffect(() => {
     setFindings(null)
     setScan(null)
+    setJob(null)
   }, [id])
 
   useEffect(() => {

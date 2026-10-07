@@ -14,8 +14,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
-	scmwebhookuc "github.com/KKloudTarus/synapse-ce/internal/usecase/scmwebhook"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	scmwebhookuc "github.com/KKloudTarus/synapse-ce/internal/usecase/scmwebhook"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 )
 
@@ -65,6 +65,8 @@ var integrationRoutePermissions = map[string]string{
 	"POST /api/v1/notifications/channels/{nid}/test":               "PermManageIntegrations",
 	"POST /api/v1/notifications/channels/{nid}/resume":             "PermManageIntegrations",
 	"GET /api/v1/notifications/channels/{nid}/health-events":       "PermManageIntegrations",
+	"GET /api/v1/notifications/engagements/{nid}/settings":         "PermManageIntegrations",
+	"PUT /api/v1/notifications/engagements/{nid}/settings":         "PermManageIntegrations",
 	"GET /api/v1/notifications/rules":                              "PermManageIntegrations",
 	"POST /api/v1/notifications/rules":                             "PermManageIntegrations",
 	"GET /api/v1/notifications/rules/{nid}":                        "PermManageIntegrations",

@@ -261,7 +261,7 @@ func closureSnapshot(t *testing.T, tenantID, cycleID, assessmentID, snapshotID s
 		Target:                    target,
 		AuthoritativeFindingKinds: []string{"vulnerability"}, IncludedScope: []string{"src/**"}, ExcludedScope: []string{"vendor/**"},
 		StartedAt: finished.Add(-time.Minute), FinishedAt: &finished, ResultRef: "result:" + runID, EvidenceRef: "evidence:" + runID,
-		ResultSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ManifestSchemaVersion: scanrun.CurrentManifestSchemaVersion, SealedAt: &finished,
+		ResultSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ManifestSchemaVersion: 1, SealedAt: &finished,
 		Versions: []scanrun.LaneVersion{{VersionKind: scanrun.VersionScanner, Name: "sca", Version: "1"}}, Stages: []scanrun.LaneStage{{StageKey: "scan", Status: scanrun.StageSucceeded, StartedAt: finished.Add(-time.Minute), FinishedAt: &finished}},
 	}
 	lane.ManifestHash, err = scanrun.ComputeManifestHash(lane)

@@ -5,7 +5,7 @@ import { Button, EmptyState, Spinner } from '../../components/ui'
 import type { Severity } from '../../lib/types'
 import { OverviewTab } from './OverviewTab'
 import { FindingsTab } from './FindingsTab'
-import { ScanPanel } from './ScanPanel'
+import { jobForEngagement, ScanPanel } from './ScanPanel'
 import { ExportButtons } from './ExportButtons'
 import { packageLocationMap, countVulnerabilityFindings, VulnsTab } from './VulnsTab'
 import { ARCHIVED_REASON, isReadOnly } from './readOnly'
@@ -125,6 +125,7 @@ export function EngagementDetail() {
     licenses: scanError ? undefined : scan?.licenses.length,
   }
   const viFindingCount = findings?.filter((finding) => Boolean(finding.advisoryId)).length ?? 0
+  const currentJob = jobForEngagement(job, id)
 
   return (
     <div className="mx-auto max-w-[1600px] animate-fade-in space-y-5">
@@ -153,6 +154,7 @@ export function EngagementDetail() {
       {/* Keep the Engagement identity first; lifecycle is supporting context below the scan console. */}
       <section aria-label="Engagement summary" className="bg-hero rounded-2xl border border-secondary p-5 sm:p-6 shadow-xs space-y-4">
         <ScanPanel
+          key={eng.id}
           eng={eng}
           importedSBOM={importedSBOM}
           uploadedSource={uploadedSource}
@@ -160,7 +162,7 @@ export function EngagementDetail() {
           onRetryUploadedSource={refetchUploadedSource}
           initialError={scanStartError}
           onImportedSBOMChanged={refreshAll}
-          job={job}
+          job={currentJob}
           setJob={setJob}
           onScanned={(r) => {
             setScan(r)
@@ -181,7 +183,7 @@ export function EngagementDetail() {
       <div role="tabpanel" id="engagement-tabpanel" aria-labelledby={`tab-${activeGroup.id}`} className="mt-5">
         <Suspense fallback={<Spinner label="Loading tab…" />}>
         {tab === 'overview' && (
-          <OverviewTab findings={findings} findingsError={findingsError} scanError={scanError} scan={scan} job={job} onSelectSeverity={selectSeverity} onGoTab={setTab} />
+          <OverviewTab findings={findings} findingsError={findingsError} scanError={scanError} scan={scan} job={currentJob} onSelectSeverity={selectSeverity} onGoTab={setTab} />
         )}
         {tab === 'findings' && (
           <FindingsTab

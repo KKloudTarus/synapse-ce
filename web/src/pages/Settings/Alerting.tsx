@@ -31,6 +31,13 @@ import type { Capability } from '../../lib/types'
 import { useFetch } from '../../hooks'
 import { canManageIntegrations, isAdminRole } from '../../lib/roles'
 import { RuleTargetPicker } from './RuleTargetPicker'
+import {
+  CHANNEL_DESTINATIONS,
+  CHANNEL_TYPE_ORDER,
+  TELEGRAM_CHAT_PATTERN,
+  channelTypeLabel,
+  replaceDestinationHint,
+} from './channelDestinations'
 import { ChannelTemplateFields, RuleTemplatePreview } from './ChannelTemplateBinding'
 
 // A new rule starts on the most common subscription when the catalog offers it.
@@ -307,11 +314,11 @@ function LegacyAlertTest({ canAdmin }: { canAdmin: boolean }) {
   )
 }
 
-const CHANNEL_TYPES: { value: NotificationChannelType; label: string }[] = [
-  { value: 'webhook', label: 'Signed webhook' },
-  { value: 'slack', label: 'Slack incoming webhook' },
-  { value: 'email', label: 'Email (SMTP)' },
-]
+const CHANNEL_TYPES: { value: NotificationChannelType; label: string }[] =
+  CHANNEL_TYPE_ORDER.map((value) => ({
+    value,
+    label: CHANNEL_DESTINATIONS[value].label,
+  }))
 
 const PROVIDERS_DISABLED_SWITCH = 'SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED'
 
@@ -355,6 +362,9 @@ function ChannelCreate({
   const [name, setName] = useState(initial?.name ?? '')
   const [url, setURL] = useState('')
   const [secret, setSecret] = useState('')
+  // Telegram: the bot token is `secret`; the chat and optional forum topic sit beside it.
+  const [chatId, setChatId] = useState('')
+  const [threadId, setThreadId] = useState('')
   const [recipients, setRecipients] = useState(
     initial?.recipients?.join(', ') ?? '',
   )
@@ -367,6 +377,15 @@ function ChannelCreate({
   // Without administer the destination is read-only: the server refuses a new URL, secret or
   // recipient list from an integration_admin with 403, so the form never sends one.
   const destinationLocked = !canAdmin
+  const spec = CHANNEL_DESTINATIONS[type]
+  // A Telegram destination is all or nothing: a new chat or topic needs the token again, and the
+  // server refuses a partial one. A rename of an existing channel sends none of the three.
+  const telegramTouched = !!(secret.trim() || chatId.trim() || threadId.trim())
+  const telegramValid =
+    (!!initial && !telegramTouched) ||
+    (!!secret.trim() &&
+      TELEGRAM_CHAT_PATTERN.test(chatId.trim()) &&
+      (!threadId.trim() || /^\d{1,10}$/.test(threadId.trim())))
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -377,8 +396,27 @@ function ChannelCreate({
         type,
         enabled: initial?.enabled ?? true,
         revision: initial?.revision,
-        url: type === 'email' || destinationLocked ? undefined : url.trim(),
-        secret: type === 'webhook' && !destinationLocked ? secret : undefined,
+        url:
+          spec.kind === 'recipients' ||
+          spec.kind === 'telegram' ||
+          destinationLocked
+            ? undefined
+            : url.trim(),
+        secret:
+          (spec.kind === 'signed_url' || spec.kind === 'telegram') &&
+          !destinationLocked
+            ? spec.kind === 'telegram'
+              ? secret.trim()
+              : secret
+            : undefined,
+        chat_id:
+          spec.kind === 'telegram' && !destinationLocked && chatId.trim()
+            ? chatId.trim()
+            : undefined,
+        thread_id:
+          spec.kind === 'telegram' && !destinationLocked && threadId.trim()
+            ? Number(threadId.trim())
+            : undefined,
         recipients:
           type !== 'email'
             ? undefined
@@ -402,6 +440,8 @@ function ChannelCreate({
       setName('')
       setURL('')
       setSecret('')
+      setChatId('')
+      setThreadId('')
       setRecipients('')
       onCreated()
     } catch (e) {
@@ -441,8 +481,7 @@ function ChannelCreate({
       )}
       {initial && !destinationLocked && (
         <p className="mb-4 text-sm text-tertiary">
-          Leave URL and secret blank to keep them. To replace a webhook
-          destination, supply both a new URL and signing secret.
+          {replaceDestinationHint(initial.type)}
         </p>
       )}
       {initial && destinationLocked && (
@@ -483,10 +522,61 @@ function ChannelCreate({
               placeholder="security@example.com"
             />
           </Field>
+        ) : spec.kind === 'telegram' ? (
+          <>
+            <Field
+              label="Bot token"
+              htmlFor="notification-bot-token"
+              hint={
+                initial
+                  ? 'Write-only. Enter it again to change the bot, chat or topic.'
+                  : 'Write-only after save.'
+              }
+            >
+              <Input
+                id="notification-bot-token"
+                type="password"
+                disabled={destinationLocked}
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                placeholder="123456789:AA…"
+                autoComplete="new-password"
+              />
+            </Field>
+            <Field
+              label="Chat ID"
+              htmlFor="notification-chat-id"
+              hint="A numeric chat ID (groups start with -100) or an @channel username."
+            >
+              <Input
+                id="notification-chat-id"
+                disabled={destinationLocked}
+                value={chatId}
+                onChange={(e) => setChatId(e.target.value)}
+                placeholder={initial ? 'Unchanged' : '-1001234567890'}
+                autoComplete="off"
+              />
+            </Field>
+            <Field
+              label="Topic ID (optional)"
+              htmlFor="notification-thread-id"
+              hint="Posts into one topic of a forum supergroup."
+            >
+              <Input
+                id="notification-thread-id"
+                inputMode="numeric"
+                disabled={destinationLocked}
+                value={threadId}
+                onChange={(e) => setThreadId(e.target.value)}
+                autoComplete="off"
+              />
+            </Field>
+          </>
         ) : (
           <Field
-            label={type === 'slack' ? 'Slack webhook URL' : 'Webhook URL'}
+            label={spec.urlLabel ?? 'Webhook URL'}
             htmlFor="notification-url"
+            hint={spec.hint}
           >
             <Input
               id="notification-url"
@@ -494,10 +584,13 @@ function ChannelCreate({
               disabled={destinationLocked}
               value={url}
               onChange={(e) => setURL(e.target.value)}
-              placeholder="https://…"
+              placeholder={spec.placeholder ?? 'https://…'}
               autoComplete="off"
             />
           </Field>
+        )}
+        {spec.kind === 'telegram' && spec.hint && (
+          <p className="text-sm text-tertiary md:col-span-2">{spec.hint}</p>
         )}
         {type === 'webhook' && (
           <Field
@@ -539,9 +632,11 @@ function ChannelCreate({
             disabled={
               !(initial ? canManage : canAdmin) ||
               !name.trim() ||
-              (type === 'email'
+              (spec.kind === 'recipients'
                 ? !recipients.trim()
-                : !initial && !url.trim()) ||
+                : spec.kind === 'telegram'
+                  ? !telegramValid
+                  : !initial && !url.trim()) ||
               (type === 'webhook' &&
                 (!initial || !!url || !!secret) &&
                 (secret.length < 16 || !url.trim()))
@@ -660,7 +755,7 @@ export function ChannelList({
       <EmptyState
         icon={BellRinging01}
         title="No notification channels"
-        hint="Add a signed webhook, Slack incoming webhook, or email destination."
+        hint="Add a signed webhook, Slack, Microsoft Teams, Telegram, Google Chat, Discord or email destination."
       />
     )
   async function toggle(c: NotificationChannel) {
@@ -704,7 +799,7 @@ export function ChannelList({
                       'unknown reason'}
                   </Pill>
                 )}
-                <Pill>{c.type}</Pill>
+                <Pill>{channelTypeLabel(c.type)}</Pill>
                 {offByOperator && (
                   <Pill className="text-warning-primary">
                     Disabled by operator

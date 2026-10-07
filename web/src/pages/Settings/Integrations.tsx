@@ -208,7 +208,7 @@ export function Integrations() {
         <div>
           <Link to="/settings/integrations" className="text-sm font-semibold text-brand-secondary hover:underline">← All integrations</Link>
           <h2 className="text-lg font-semibold text-primary">CI/CD integrations</h2>
-          <p className="mt-1 text-sm text-tertiary">Connect read-only providers, discover pipelines, and link external runs to Project analyses.</p>
+          <p className="mt-1 text-sm text-tertiary">Receive repository webhooks or discover pipelines and link external runs to Project analyses.</p>
         </div>
         {canAdmin && <Button onClick={() => setCreating(true)}><Plus className="size-4" />Add integration</Button>}
       </div>
@@ -226,7 +226,7 @@ export function Integrations() {
       )}
 
       {integrations.length === 0 && !creating ? (
-        <EmptyState icon={Link01} title="No integrations configured" hint={canAdmin ? 'Add a provider connection to start discovering external pipelines.' : 'A tenant administrator can add a provider connection.'} action={canAdmin ? <Button onClick={() => setCreating(true)}>Add integration</Button> : undefined} />
+        <EmptyState icon={Link01} title="No integrations configured" hint={canAdmin ? 'Add a provider connection to receive webhooks or discover external pipelines.' : 'A tenant administrator can add a provider connection.'} action={canAdmin ? <Button onClick={() => setCreating(true)}>Add integration</Button> : undefined} />
       ) : integrations.length > 0 && (
         <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
           <Card title="Connections" bodyClass="p-2">
@@ -275,6 +275,7 @@ export function Integrations() {
                 onArchive={archiveSelected}
               />
               <BindingsCard canManage={canManage} integration={selected} provider={provider} projects={projects} operations={operations} bindings={bindings} busy={busy} operate={operate} onReload={() => loadDetail(selected.id, true)} />
+              {selected.provider === 'bitbucket' && <BitbucketWebhookCard key={selected.id} canAdmin={canAdmin} integration={selected} bound={bindings.length === 1} />}
               <RunsCard runs={runs} />
               <OperationsCard canManage={canManage} operations={operations} activeOperation={activeOperation} busy={busy} operate={operate} />
             </div>
@@ -367,6 +368,7 @@ function IntegrationForm({ providers, integration, loading, onCancel, onSubmit }
   const [providerSlug, setProviderSlug] = useState(integration?.provider ?? providers[0]?.provider ?? '')
   const descriptor = providers.find((item) => item.provider === providerSlug) ?? providers[0]
   const supportsPoll = descriptor?.capabilities.includes('read_runs') ?? false
+  const inboundOnly = descriptor?.capabilities.length === 0
   const [name, setName] = useState(integration?.name ?? '')
   const [endpoint, setEndpoint] = useState(integration?.endpoint ?? '')
   const [pollInterval, setPollInterval] = useState(String(integration?.pollIntervalSeconds ?? 300))
@@ -403,14 +405,14 @@ function IntegrationForm({ providers, integration, loading, onCancel, onSubmit }
             <Select id="integration-provider" value={descriptor?.provider ?? ''} disabled={!!integration} onValueChange={setProviderSlug} options={providers.map((item) => ({ value: item.provider, label: item.name }))} />
           </Field>
           <Field label="Display name" htmlFor="integration-name"><Input id="integration-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></Field>
-          <Field label="HTTPS endpoint" hint="Example: https://jenkins.example.com" htmlFor="integration-endpoint"><Input id="integration-endpoint" type="url" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://jenkins.example.com" required /></Field>
+          <Field label="HTTPS endpoint" hint={descriptor?.provider === 'bitbucket' ? 'Bitbucket Cloud origin: https://bitbucket.org' : 'Example: https://jenkins.example.com'} htmlFor="integration-endpoint"><Input id="integration-endpoint" type="url" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder={descriptor?.provider === 'bitbucket' ? 'https://bitbucket.org' : 'https://jenkins.example.com'} required /></Field>
           {supportsPoll && <Field label="Poll interval (seconds)" htmlFor="integration-poll"><Input id="integration-poll" type="number" min={30} max={86400} value={pollInterval} onChange={(event) => setPollInterval(event.target.value)} required /></Field>}
           {descriptor?.configFields.map((field) => <DynamicField key={field.name} field={field} value={config[field.name]} onChange={(value) => setConfig((current) => ({ ...current, [field.name]: value }))} />)}
         </div>
-        <label className="flex items-start gap-3 rounded-lg border border-secondary p-3 text-sm text-secondary">
+        {!inboundOnly && <label className="flex items-start gap-3 rounded-lg border border-secondary p-3 text-sm text-secondary">
           <input type="checkbox" className="mt-0.5 size-4 accent-brand" checked={allowPrivate} onChange={(event) => setAllowPrivate(event.target.checked)} />
           <span><strong className="block text-primary">Allow private network</strong>Only enable for explicitly approved self-hosted endpoints; public-network protections remain enforced per request.</span>
-        </label>
+        </label>}
         {!integration && descriptor?.secretFields.length > 0 && (
           <div className="grid gap-4 border-t border-secondary pt-4 md:grid-cols-2">
             {descriptor.secretFields.map((field) => <DynamicField key={field.name} field={field} value={secrets[field.name]} onChange={(value) => setSecrets((current) => ({ ...current, [field.name]: String(value) }))} />)}
@@ -450,7 +452,7 @@ function DynamicField({ field, value, onChange }: { field: IntegrationFieldDescr
 
 function BindingsCard({ canManage, integration, provider, projects, operations, bindings, busy, operate, onReload }: { canManage: boolean; integration: Integration; provider: IntegrationProviderDescriptor; projects: Project[]; operations: IntegrationOperation[]; bindings: IntegrationBinding[]; busy: string; operate: (key: string, action: () => Promise<void>, success: string) => Promise<void>; onReload: () => Promise<void> }) {
   const supportsDiscover = provider.capabilities.includes('discover_pipelines')
-  const bindableProjects = integration.provider === 'gitlab' ? projects.filter((item) => item.sourceBinding.kind === 'git') : projects
+  const bindableProjects = !supportsDiscover ? projects.filter((item) => item.sourceBinding.kind === 'git') : projects
   const pipelines = useMemo(() => operations.find((operation) => operation.type === 'discover' && operation.pipelines.length > 0)?.pipelines ?? [], [operations])
   const available = pipelines.filter((pipeline) => !bindings.some((binding) => binding.externalKey === pipeline.externalKey))
   const [pipelineKey, setPipelineKey] = useState('')
@@ -545,3 +547,47 @@ function formatDate(value?: string | null) { return value ? new Intl.DateTimeFor
 function message(error: unknown) { return error instanceof Error ? error.message : 'An unexpected error occurred.' }
 
 export default Integrations
+
+function BitbucketWebhookCard({ canAdmin, integration, bound }: { canAdmin: boolean; integration: Integration; bound: boolean }) {
+  const [secret, setSecret] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [path, setPath] = useState('')
+  const [error, setError] = useState('')
+  const secretBytes = new Blob([secret]).size
+  const validSecret = secretBytes >= 32 && secretBytes <= 128 && secret.trim() === secret
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    const submitted = secret
+    setSecret('')
+    try {
+      const result = await api.configureInboundWebhook(integration.id, submitted)
+      setPath(result.path)
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <Card title="Bitbucket webhook">
+    <div className="space-y-4">
+      <p className="text-sm text-secondary">In Bitbucket Cloud, configure this webhook for repository pushes and pull request creation or updates. Use the same secret here and in Bitbucket.</p>
+      {!bound && <p className="text-sm text-tertiary">Bind one Git Project before configuring the webhook.</p>}
+      {!canAdmin ? <p className="text-sm text-tertiary">An administrator must configure or rotate the webhook secret.</p> : <form onSubmit={save} className="space-y-3">
+        <Field label="Webhook secret" htmlFor="bitbucket-webhook-secret" hint="Use a random secret of 32–128 bytes. Saving again rotates the secret; the previous secret remains valid for less than 24 hours.">
+          <Input id="bitbucket-webhook-secret" type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} disabled={!bound || saving} required maxLength={128} />
+        </Field>
+        <Button type="submit" disabled={!bound || !validSecret} loading={saving}>Save webhook secret</Button>
+      </form>}
+      {error && <ErrorState message={error} />}
+      {path && <div className="space-y-2">
+        <p className="text-sm text-secondary">Add this path to the public URL of your Synapse instance and copy it into Bitbucket's webhook URL.</p>
+        <code className="block break-all text-sm text-primary">{path}</code>
+        <p className="text-sm text-tertiary">The secret is never returned. Copy the path before leaving this page.</p>
+      </div>}
+    </div>
+  </Card>
+}

@@ -32,7 +32,8 @@ value. Any authenticated role may read it.
 Some entries carry more than a switch:
 
 - `notifications.channel_types` lists, in `values`, the channel types this build can deliver to
-  (`webhook`, `slack`, `email`), read from the notification driver registry, minus any type named in
+  (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`), read from the
+  notification driver registry, minus any type named in
   `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`. The console offers only these types when creating a
   channel. When the operator disables every type, `values` is omitted and no channel can be created.
 - `ticketing` and `docpublish` report `planned: true`. They are not in this build yet, so they are
@@ -41,7 +42,7 @@ Some entries carry more than a switch:
 ```json
 {"key": "notifications.channel_types", "name": "Notification channel types", "enabled": true,
  "switch": "SYNAPSE_NOTIFICATIONS_ENABLED", "requires": ["notifications"],
- "values": ["webhook", "slack", "email"]}
+ "values": ["webhook", "slack", "email", "teams", "telegram", "google_chat", "discord"]}
 {"key": "ticketing", "name": "Ticketing", "enabled": false, "switch": "", "planned": true}
 ```
 
@@ -168,7 +169,7 @@ scrape_configs:
       - targets: ["127.0.0.1:9090"]
 ```
 
-The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp` or `other/other`, never tenant or destination data.
+The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord` or `other/other`, never tenant or destination data.
 
 ## Persistence
 
@@ -407,7 +408,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_NOTIFICATION_SMTP_FROM` | (unset) | Envelope and message sender for notification email. Required before an Email channel can deliver. |
 | `SYNAPSE_NOTIFICATION_SMTP_USERNAME` / `SYNAPSE_NOTIFICATION_SMTP_PASSWORD` | (unset) | Optional SMTP authentication. The password is secret and must not be logged. |
 | `SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS` | `true` | Require STARTTLS with certificate verification. Keep enabled in production. |
-| `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` | (unset) | Operator kill switch: comma-separated channel and provider types no tenant may use, for example `slack,email`. Entries are trimmed, lowercased and deduplicated; empty entries are ignored. Every entry must be a type in this build's notification driver registry (`webhook`, `slack`, `email`), so a typo stops API and worker startup. A disabled type is left out of the `notifications.channel_types` capability, creating or testing a channel of that type answers `400`, an existing channel of that type cannot be switched on or given a new destination (it can still be renamed, switched off or deleted), and the worker cancels its queued deliveries with `provider_disabled`. Set the same value on the API and the worker. Removing a type from the list restores its channels. It does not affect personal inbox mail or contact verification email. |
+| `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` | (unset) | Operator kill switch: comma-separated channel and provider types no tenant may use, for example `slack,email`. Entries are trimmed, lowercased and deduplicated; empty entries are ignored. Every entry must be a type in this build's notification driver registry (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`), so a typo stops API and worker startup. A disabled type is left out of the `notifications.channel_types` capability, creating or testing a channel of that type answers `400`, an existing channel of that type cannot be switched on or given a new destination (it can still be renamed, switched off or deleted), and the worker cancels its queued deliveries with `provider_disabled`. Set the same value on the API and the worker. Removing a type from the list restores its channels. It does not affect personal inbox mail or contact verification email. |
 | `SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD` | `5` | Read by `synapse-worker`. Consecutive permanent delivery failures (for example `destination_blocked` or an HTTP 404) after which a notification channel is paused automatically and tenant administrators get an in-app notice; an administrator resumes it from Settings > Alerting. Retryable failures (408, 429, 5xx, timeouts) never count, and a delivered message resets the count. `0` counts failures but never pauses. Must be between `0` and `100`; other values stop the worker at startup. See [Notifications](notifications.md#channel-health-and-automatic-pause). |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
 | `SYNAPSE_FLEET_MIN_AGENT_VERSION` | empty | Reject agents below this version (empty = no floor). |
@@ -642,7 +643,7 @@ scrape_configs:
       - targets: ["127.0.0.1:9090"]
 ```
 
-The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp` or `other/other`, never tenant or destination data.
+The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord` or `other/other`, never tenant or destination data.
 
 ## Persistence
 
@@ -860,3 +861,24 @@ Read and propose only. It never executes. The token and engagement ID are requir
 | `SYNAPSE_MCP_ADDR` | `:8081` | Listen address. |
 
 Next: [CLI](cli.md)
+
+
+### Bitbucket Cloud inbound webhooks
+
+Enable `SYNAPSE_INBOUND_WEBHOOKS_ENABLED=true` with PostgreSQL, a tenant-isolated runtime role, and `SYNAPSE_VAULT_MASTER_KEY`. Apply migration `0204_bitbucket_inbound_webhooks.sql` and grant runtime privileges using the normal migration/startup flow. The durable scan queue and its worker must be running; webhook requests never run scans inline. Upgrade external `synapse-worker` processes to the same release before enabling Bitbucket inbound webhooks, so they understand deferred scan admission.
+
+In **Settings → Integrations → CI/CD**, create a **Bitbucket Cloud** integration and bind exactly one existing Git Project. As an administrator, enter a randomly generated 32–128-byte secret and save it. The equivalent API is `POST /api/v1/integrations/{id}/inbound-webhook` with `{"secret":"<the same secret configured in Bitbucket>"}`. Synapse seals the secret and returns only the opaque relative hook path, its version and rotation metadata. Combine the path with your public HTTPS origin, configure that URL and the same secret in Bitbucket Cloud's repository webhook settings, then enable the integration. Do not put credentials or tenant IDs in the URL. Bitbucket integrations accept no outbound polling credentials.
+
+Subscribe to `repo:push`, `pullrequest:created` and `pullrequest:updated`. Bitbucket Cloud deliveries must carry exactly one of each header:
+
+- `X-Hub-Signature: sha256=<hex HMAC-SHA256 over the exact raw body>`;
+- `X-Event-Key` identifying the event;
+- `X-Request-UUID`, a delivery UUID, optionally enclosed in braces. `X-Hook-UUID` identifies the webhook configuration and cannot replace the request UUID.
+
+Bodies are capped at 1 MiB. Replays of either a request UUID or the authenticated raw body are acknowledged without a second job. Receipt insertion, frozen scan requests, queue enqueue and admission audit writes share one PostgreSQL transaction. A multi-ref push queues every validated branch. Workers reserve the single running-scan slot only at execution; contention retries without consuming delivery attempts. Scan tracking becomes visible when the worker admits the scan, and scope/authorization are checked again before execution. Failures roll back the receipt so a retry can succeed; integration and endpoint locks prevent disabling or archiving from racing acceptance. Rotating the secret preserves the hook path and accepts the previous key for less than 24 hours. Neither responses nor audit payloads include the secret.
+
+Pushes scan distinct live branch/ref and commit pairs; branch deletion and tags are ignored. A push contains at most 100 changes and all scan targets are validated before enqueue. Open PR creation/update scans use the source commit and destination base branch. Closed PRs and other valid event types are acknowledged without scanning. Commits must be exactly 40 or 64 lowercase hexadecimal characters, and refs must pass Git branch-name restrictions. Payload clone URLs never override the Project repository.
+
+A PR whose source and destination repository UUIDs differ, or whose identities are missing/invalid, uses the restricted fork path: no Git credentials (including ambient credential helpers), no Maven/Gradle/npm or other build execution, and no forge status/comment writes. Acquisition still uses only the stored origin. Consequently, a fork commit must be reachable anonymously from that origin; unavailable fork commits and private origins fail closed. This change does not fetch arbitrary fork URLs or add Bitbucket PR decoration.
+
+Protocol references: [Bitbucket Cloud webhook management](https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/), [event payloads](https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/), and the [Jenkins Bitbucket plugin signature verifier](https://github.com/jenkinsci/bitbucket-push-and-pull-request-plugin/blob/b5b8b6a134d513e80ed62307306168d6c906584f/src/main/java/io/jenkins/plugins/bitbucketpushandpullrequest/receiver/SignatureUtils.java). This implementation targets Bitbucket Cloud, not Server/Data Center payloads.

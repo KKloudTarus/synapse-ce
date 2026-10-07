@@ -30,6 +30,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sla"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
@@ -75,17 +76,20 @@ type Service struct {
 	riskEnricher                     ports.RiskEnricher
 	licScan                          ports.LicenseScanner
 	licEnricher                      ports.LicenseEnricher
-	sbomEnricher                     ports.SBOMEnricher                    // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
-	licCoord                         ports.MavenCoordResolver              // optional: recover real Maven coords from JAR pom.properties before license lookup
-	jarChecksum                      ports.JarChecksumResolver             // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
-	jarHash                          ports.JarHashResolver                 // optional: recover coords of shaded/metadata-less JARs via SHA-1
-	licFile                          ports.LicenseFileResolver             // optional offline license-text fallback from JAR LICENSE files
-	sastAnalyzer                     ports.SASTAnalyzer                    // optional deterministic pattern-SAST over the live workspace
-	secretScanner                    ports.SecretScanner                   // optional deterministic secret scan over the live workspace
-	secretHistory                    bool                                  // also scan git history for committed-then-removed secrets
-	includeTestSecrets               bool                                  // report secrets in test/fixture/docs paths (default false: suppress)
-	secretVerifier                   ports.SecretVerifier                  // optional opt-in active secret verification (D6.3); nil = off
-	misconfig                        ports.MisconfigScanner                // optional deterministic IaC/config misconfig scan over the live workspace
+	sbomEnricher                     ports.SBOMEnricher        // optional manifest enrichment (gem edges, maven/gradle deps, pnpm scope)
+	licCoord                         ports.MavenCoordResolver  // optional: recover real Maven coords from JAR pom.properties before license lookup
+	jarChecksum                      ports.JarChecksumResolver // optional: capture JAR artifact SHA-1 from the workspace (Syft omits it from CycloneDX)
+	jarHash                          ports.JarHashResolver     // optional: recover coords of shaded/metadata-less JARs via SHA-1
+	licFile                          ports.LicenseFileResolver // optional offline license-text fallback from JAR LICENSE files
+	sastAnalyzer                     ports.SASTAnalyzer        // optional deterministic pattern-SAST over the live workspace
+	sastSelected                     bool                      // selected by composition even when the adapter is unavailable
+	secretScanner                    ports.SecretScanner       // optional deterministic secret scan over the live workspace
+	secretSelected                   bool
+	secretHistory                    bool                   // also scan git history for committed-then-removed secrets
+	includeTestSecrets               bool                   // report secrets in test/fixture/docs paths (default false: suppress)
+	secretVerifier                   ports.SecretVerifier   // optional opt-in active secret verification (D6.3); nil = off
+	misconfig                        ports.MisconfigScanner // optional deterministic IaC/config misconfig scan over the live workspace
+	misconfigSelected                bool
 	imageConfig                      ports.ImageConfigChecker              // optional owned image config + build-history hardening checks (D7.10)
 	fpTriager                        ports.FPTriager                       // optional LLM false-positive critique of production-scope source findings
 	fpTriageMaxFindings              int                                   // hard per-scan candidate cap; untriaged findings remain gating
@@ -291,10 +295,19 @@ func (s *Service) SetLicenseFileResolver(r ports.LicenseFileResolver) { s.licFil
 
 // SetSASTAnalyzer configures the optional deterministic pattern-SAST analyzer. nil ⇒ no SAST
 // findings. A setter keeps the existing NewService call sites unchanged.
-func (s *Service) SetSASTAnalyzer(a ports.SASTAnalyzer) { s.sastAnalyzer = a }
+func (s *Service) SetSASTAnalyzer(a ports.SASTAnalyzer) { s.sastAnalyzer, s.sastSelected = a, true }
 
 // SetSecretScanner configures the optional deterministic secret scanner. nil ⇒ no secret scanning.
-func (s *Service) SetSecretScanner(sc ports.SecretScanner) { s.secretScanner = sc }
+func (s *Service) SetSecretScanner(sc ports.SecretScanner) {
+	s.secretScanner, s.secretSelected = sc, true
+}
+
+// SetSourceEngineSelection records operator intent independently from adapter
+// construction. A selected but unavailable adapter is a coverage gap; an
+// unselected one is visible as not applicable.
+func (s *Service) SetSourceEngineSelection(sast, secrets, iac bool) {
+	s.sastSelected, s.secretSelected, s.misconfigSelected = sast, secrets, iac
+}
 
 // SetSecretHistoryEnabled turns on git-history secret scanning: when the workspace is a git repository and the
 // secret scanner supports it, every blob in the repository's history is scanned so a committed-then-removed
@@ -433,7 +446,9 @@ func boolToInt(b bool) int {
 
 // SetMisconfigScanner configures the optional deterministic IaC/config misconfig scanner.
 // nil ⇒ no misconfig scanning. A setter keeps the existing NewService call sites unchanged.
-func (s *Service) SetMisconfigScanner(m ports.MisconfigScanner) { s.misconfig = m }
+func (s *Service) SetMisconfigScanner(m ports.MisconfigScanner) {
+	s.misconfig, s.misconfigSelected = m, true
+}
 
 // SetImageConfigChecker configures the optional owned image config + build-history hardening checker. nil ⇒ off.
 func (s *Service) SetImageConfigChecker(c ports.ImageConfigChecker) { s.imageConfig = c }
@@ -470,10 +485,16 @@ func (s *Service) scanWithSources(ctx context.Context, doc *sbom.SBOM, trace *sc
 	var raws []vulnerability.RawFinding
 	var warnings []string
 	for _, src := range s.sources {
+		if err := ctx.Err(); err != nil {
+			return raws, warnings, err
+		}
 		step := trace.start(stageVulns, src.Name(), src.Name(), "Scan vulnerabilities with "+src.Name(), map[string]int{"components": countComponents(doc)})
 		rfs, err := src.Scan(ctx, doc)
 		if err != nil {
 			trace.fail(step, err)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return raws, warnings, err
+			}
 			if s.strictSources {
 				return nil, nil, fmt.Errorf("scan vulnerabilities (%s): %w", src.Name(), err)
 			}
@@ -484,6 +505,17 @@ func (s *Service) scanWithSources(ctx context.Context, doc *sbom.SBOM, trace *sc
 		trace.succeed(step, "Vulnerability source completed", map[string]int{"components": countComponents(doc), "raw_findings": len(rfs)})
 	}
 	return raws, warnings, nil
+}
+
+// correlatedPartialVulnerabilities preserves positive observations emitted
+// before a later detection source is interrupted. It deliberately does not run
+// enrichment or other later stages after cancellation/deadline.
+func correlatedPartialVulnerabilities(doc *sbom.SBOM, raws []vulnerability.RawFinding) []vulnerability.Vulnerability {
+	vulns := vulnerability.Correlate(raws)
+	vulnerability.SortByRisk(vulns)
+	attachDependencyPaths(doc, vulns)
+	classifyVulns(doc, vulns)
+	return vulns
 }
 
 // detectionReadiness is the owned-engine readiness guard. Called ONCE right after the vulnerability scan, it
@@ -1125,13 +1157,20 @@ type ScanResult struct {
 	// Assigned by the durable worker, never decoded from imported results.
 	WebhookContext *projectanalysis.CIContext `json:"-"`
 	// Fork metadata is used for the baseline but cannot trigger forge writes.
-	WebhookFork  bool                     `json:"-"`
-	Target       string                   `json:"target"`
-	SourceRef    string                   `json:"source_ref,omitempty"`
-	SourceCommit string                   `json:"source_commit,omitempty"`
-	ScanMode     string                   `json:"scan_mode"`
-	Languages    []ports.DetectedLanguage `json:"languages"`
-	SBOM         *sbom.SBOM               `json:"sbom"`
+	WebhookFork  bool   `json:"-"`
+	Target       string `json:"target"`
+	SourceRef    string `json:"source_ref,omitempty"`
+	SourceCommit string `json:"source_commit,omitempty"`
+	ScanMode     string `json:"scan_mode"`
+	// ExecutionMode describes this invocation. ScanMode may become "full" after
+	// cache composition, so it cannot describe what engines actually ran.
+	ExecutionMode           string                  `json:"execution_mode"`
+	IncludesPreviousResults bool                    `json:"includes_previous_results,omitempty"`
+	EngineOutcomes          []scanrun.EngineOutcome `json:"engine_outcomes,omitempty"`
+	EngineCoverage          scanrun.EngineCoverage  `json:"engine_coverage"`
+	plannedEngines          []scanrun.EngineOutcome
+	Languages               []ports.DetectedLanguage `json:"languages"`
+	SBOM                    *sbom.SBOM               `json:"sbom"`
 	// Image carries container-image metadata (manifest digest, platform, ordered layer
 	// stack with base-image classification) for image scans; nil otherwise. Every vuln on
 	// an image is also attributed to its layer (Vulnerability.Layer*) – Epic D.
@@ -2082,7 +2121,8 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 	finished := s.clock.Now()
 	// Synchronous callers persist the same successful terminal boundary as
 	// queued scans. PostgreSQL captures the notification inbox in this write.
-	job := ports.ScanJob{ID: s.ids.NewID().String(), EngagementID: engagementID.String(), Target: req.Value, Kind: kindOrLocal(req.Kind), Status: ports.ScanSucceeded, Stage: "done", Progress: 100, StartedAt: started, FinishedAt: &finished, DebugEvents: []ports.ScanDebugEvent{}}
+	job := ports.ScanJob{ID: s.ids.NewID().String(), EngagementID: engagementID.String(), Target: req.Value, Kind: kindOrLocal(req.Kind), Status: ports.ScanSucceeded, Stage: "done", Progress: 100, StartedAt: started, FinishedAt: &finished, DebugEvents: []ports.ScanDebugEvent{}, EngineOutcomes: scanrun.CloneEngineOutcomes(result.EngineOutcomes)}
+	job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
 	completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err = s.jobs.Save(completionCtx, job); err != nil {
@@ -2103,9 +2143,11 @@ func (s *Service) scanWithOptions(ctx context.Context, actor string, engagementI
 		return nil, err
 	}
 	if s.timeout > 0 {
+		parent := ctx
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.timeout)
 		defer cancel()
+		ctx = context.WithValue(ctx, scanBudgetParentKey{}, parent)
 	}
 	started := s.clock.Now()
 	if imported, doc, ok, err := s.loadImportedSBOMForRequest(ctx, engagementID, req, opts); err != nil {
@@ -2159,6 +2201,10 @@ func (s *Service) StartDurableScanWithOptions(ctx context.Context, actor string,
 }
 
 func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions) (ports.ScanJob, error) {
+	return s.startScanWithOptions(ctx, actor, engagementID, req, opts, false)
+}
+
+func (s *Service) startScanWithOptions(ctx context.Context, actor string, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions, deferredAdmission bool) (ports.ScanJob, error) {
 	if s.jobs == nil || s.ids == nil {
 		return ports.ScanJob{}, fmt.Errorf("async scan is not configured: %w", shared.ErrValidation)
 	}
@@ -2205,17 +2251,19 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 	}
 	admission, _ := inventoryAdmissionFrom(admissionCtx)
 	job := ports.ScanJob{
-		SourcePackage: publicSourcePackage(req.SourcePackage),
-		ID:            s.ids.NewID().String(),
-		EngagementID:  engagementID.String(),
-		Target:        target,
-		Kind:          kind,
-		Status:        ports.ScanRunning,
-		Stage:         "queued",
-		StartedAt:     now,
-		DebugEvents:   []ports.ScanDebugEvent{},
+		SourcePackage:  publicSourcePackage(req.SourcePackage),
+		ID:             s.ids.NewID().String(),
+		EngagementID:   engagementID.String(),
+		Target:         target,
+		Kind:           kind,
+		Status:         ports.ScanRunning,
+		Stage:          "queued",
+		StartedAt:      now,
+		DebugEvents:    []ports.ScanDebugEvent{},
+		EngineOutcomes: s.engineOutcomePlan(opts, useImported, !useImported && req.Kind != ports.TargetImage),
 	}
-	if s.jobs != nil {
+	job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
+	if s.jobs != nil && !deferredAdmission {
 		if err := s.jobs.CreateRunning(ctx, job); err != nil {
 			return ports.ScanJob{}, fmt.Errorf("create scan job: %w", err)
 		}
@@ -2229,7 +2277,7 @@ func (s *Service) StartScanWithOptions(ctx context.Context, actor string, engage
 			return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for scan job", shared.ErrValidation)
 		}
 		tenant := tenantID.String()
-		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, TenantID: &tenant, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job, InventoryAdmission: admission})
+		payload, mErr := json.Marshal(scaJobPayload{Actor: actor, TenantID: &tenant, EngagementID: engagementID.String(), Now: now, Req: req, Options: opts, Job: job, InventoryAdmission: admission, DeferredAdmission: deferredAdmission})
 		if mErr != nil {
 			return ports.ScanJob{}, fmt.Errorf("marshal scan job: %w", mErr)
 		}
@@ -2278,6 +2326,7 @@ const ScanJobKind = "sca"
 
 // scaJobPayload is the durable-queue payload for one SCA scan run.
 type scaJobPayload struct {
+	DeferredAdmission  bool                    `json:"deferred_admission,omitempty"`
 	Actor              string                  `json:"actor"`
 	TenantID           *string                 `json:"tenant_id"`
 	EngagementID       string                  `json:"engagement_id"`
@@ -2372,6 +2421,17 @@ func (s *Service) RunScanJob(ctx context.Context, payload []byte) error {
 		}
 		ctx = context.WithValue(ctx, inventoryAdmissionContextKey{}, p.InventoryAdmission)
 	}
+	if p.DeferredAdmission {
+		terminal, err := s.admitQueuedScanJob(ctx, p)
+		if err != nil || terminal {
+			return err
+		}
+		// A webhook can wait behind another scan. Recheck current scope and
+		// authorization before executing rather than trusting the enqueue time.
+		if _, err := s.gateAndAudit(ctx, p.Actor, shared.ID(p.EngagementID), p.Req, opts); err != nil {
+			return fmt.Errorf("authorize queued scan execution: %w", err)
+		}
+	}
 	return s.runScanJob(ctx, p.Actor, shared.ID(p.EngagementID), p.Now, p.Req, opts, p.Job)
 }
 
@@ -2389,6 +2449,9 @@ func (s *Service) FailStrandedScanJob(ctx context.Context, payload []byte, cause
 	if !ok || p.TenantID == nil || *p.TenantID != tenantID.String() {
 		return fmt.Errorf("%w: scan job tenant context is missing or mismatched", shared.ErrValidation)
 	}
+	if p.DeferredAdmission && !validQueuedScanIdentity(p) {
+		return fmt.Errorf("%w: invalid queued scan identity", shared.ErrValidation)
+	}
 	if s.jobs == nil {
 		return nil
 	}
@@ -2403,14 +2466,20 @@ func (s *Service) FailStrandedScanJob(ctx context.Context, payload []byte, cause
 		defer release()
 	}
 	// Load the SPECIFIC dead-lettered job by its id (parity with recon's load-by-runID), so a
-	// newer scan for the same engagement cannot mislead the terminal-guard. An absent row means
-	// nothing to finalize.
+	// newer scan for the same engagement cannot mislead the terminal-guard. A deferred scan
+	// may not have acquired a running slot yet; it still needs a visible failure record.
 	job, err := s.jobs.GetJob(ctx, p.Job.ID)
 	if err != nil {
-		if errors.Is(err, shared.ErrNotFound) {
+		if errors.Is(err, shared.ErrNotFound) && p.DeferredAdmission {
+			job = p.Job
+		} else if errors.Is(err, shared.ErrNotFound) {
 			return nil
+		} else {
+			return fmt.Errorf("load stranded scan job %s: %w", p.Job.ID, err)
 		}
-		return fmt.Errorf("load stranded scan job %s: %w", p.Job.ID, err)
+	}
+	if p.DeferredAdmission && (job.EngagementID != p.EngagementID || job.Target != p.Job.Target || job.Kind != p.Job.Kind) {
+		return fmt.Errorf("%w: queued scan identity changed", shared.ErrValidation)
 	}
 	if job.Status == ports.ScanSucceeded || job.Status == ports.ScanFailed {
 		return nil // already terminal
@@ -2690,6 +2759,7 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 		var cancel context.CancelFunc
 		executionCtx, cancel = context.WithTimeout(ctx, s.timeout)
 		defer cancel()
+		executionCtx = context.WithValue(executionCtx, scanBudgetParentKey{}, ctx)
 	}
 	report := func(stage string, pct int, events []ports.ScanDebugEvent) {
 		if s.jobs == nil {
@@ -2735,6 +2805,13 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 	}
 
 	job.FinishedAt, job.Progress = &fin, 100
+	if result != nil {
+		job.EngineOutcomes = scanrun.CloneEngineOutcomes(result.EngineOutcomes)
+		job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
+	} else if err != nil {
+		job.EngineOutcomes = s.failedAttemptEngineOutcomes(job.EngineOutcomes, job.Stage, err)
+		job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
+	}
 	if err != nil {
 		job.Status, job.Stage, job.Error = ports.ScanFailed, "failed", truncateErr(err)
 	} else {
@@ -2769,6 +2846,16 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	}
 	stage, pct := stageSBOM, 35
 	trace := newScanDebugTrace(func(events []ports.ScanDebugEvent) { report(stage, pct, events) })
+	inventoryCompleteness := importedCompleteness(doc)
+	attempt := &ScanResult{Target: doc.TargetRef, ExecutionMode: opts.Mode, SBOM: doc, Completeness: inventoryCompleteness}
+	attempt.setEnginePlan(s.engineOutcomePlan(opts, true, false))
+	if inventoryCompleteness.Confident {
+		attempt.completeEngine("inventory")
+		attempt.completeEngine("dependency_resolution")
+	} else {
+		attempt.partialEngine("inventory", scanrun.ReasonAnalysisIncomplete, nil)
+		attempt.partialEngine("dependency_resolution", scanrun.ReasonDependencyUnresolved, nil)
+	}
 	report(stage, pct, trace.snapshot())
 	step := trace.start(stageSBOM, "imported-sbom", "cyclonedx", "Use imported SBOM as scan inventory", map[string]int{"components": countComponents(doc), "dependencies": len(doc.Dependencies)})
 	trace.succeed(step, "Imported SBOM loaded", map[string]int{"components": countComponents(doc), "dependencies": len(doc.Dependencies)})
@@ -2778,14 +2865,23 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	var riskVersions map[string]string
 	var riskMatches map[string]int
 	var detectionSourceWarnings []string
+	var detectionProvenanceIncomplete bool
 	var detectionReadinessWarn string     // snapshotted readiness verdict (captured once, applied at result build)
 	var detectionReadinessIncomplete bool // true ⇒ no detection source had a usable DB for this scan
 	if opts.scansVulnerabilities() {
 		stage, pct = stageVulns, 55
 		report(stage, pct, trace.snapshot())
+		if stopped, cancelErr := attempt.stopCoreForContext("sca", ctx); stopped {
+			attempt.refreshEngineCoverage()
+			return attempt, cancelErr
+		}
 		srcRaws, srcWarnings, srcErr := s.scanWithSources(ctx, doc, trace)
+		detectionProvenanceIncomplete = detectionSourceProvenanceUnavailable(s.sources, doc)
 		if srcErr != nil {
-			return nil, srcErr
+			attempt.Vulnerabilities = correlatedPartialVulnerabilities(doc, srcRaws)
+			attempt.recordEngineError("sca", srcErr)
+			attempt.refreshEngineCoverage()
+			return attempt, srcErr
 		}
 		// Readiness, captured ONCE from the just-finished scan's provenance: under strict sources an empty
 		// detection corpus (no source had a usable DB) aborts rather than return a misleading zero-vulnerability
@@ -2794,7 +2890,9 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		var readyErr error
 		detectionReadinessWarn, detectionReadinessIncomplete, readyErr = s.detectionReadinessAll(ctx, doc)
 		if readyErr != nil {
-			return nil, readyErr
+			attempt.recordEngineError("sca", readyErr)
+			attempt.refreshEngineCoverage()
+			return attempt, readyErr
 		}
 		raws = append(raws, srcRaws...)
 		detectionSourceWarnings = srcWarnings
@@ -2819,6 +2917,12 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		vulnerability.SortByRisk(vulns)
 		attachDependencyPaths(doc, vulns)
 		classifyVulns(doc, vulns)
+		if len(srcWarnings) > 0 || detectionReadinessIncomplete || detectionProvenanceIncomplete {
+			attempt.partialEngine("sca", scanrun.ReasonUnavailable, nil)
+		} else {
+			attempt.completeEngine("sca")
+		}
+		attempt.Vulnerabilities = vulns
 	}
 
 	var lics []ports.LicenseFinding
@@ -2828,6 +2932,10 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	if opts.scansLicenses() {
 		stage, pct = stageLicense, 85
 		report(stage, pct, trace.snapshot())
+		if stopped, cancelErr := attempt.stopCoreForContext("licenses", ctx); stopped {
+			attempt.refreshEngineCoverage()
+			return attempt, cancelErr
+		}
 		if s.licEnricher != nil {
 			step = trace.start(stageLicense, "license-enrichment", "license-enricher", "Enrich component license metadata", map[string]int{"components": countComponents(doc)})
 			doc.Components = s.licEnricher.Enrich(ctx, doc.Components)
@@ -2838,12 +2946,16 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		lics, err = s.licScan.Scan(ctx, doc)
 		if err != nil {
 			trace.fail(step, err)
-			return nil, fmt.Errorf("scan licenses: %w", err)
+			attempt.recordEngineError("licenses", err)
+			attempt.refreshEngineCoverage()
+			return attempt, fmt.Errorf("scan licenses: %w", err)
 		}
 		trace.succeed(step, "License policy scan completed", map[string]int{"components": countComponents(doc), "licenses": len(lics)})
 		licenseCoverage = sbom.ComputeLicenseCoverage(doc.Components)
 		componentLicenses = buildComponentLicenseAudit(doc, lics)
 		licenseCoverageBreakdown = buildLicenseCoverageBreakdown(doc.Components)
+		attempt.completeEngine("licenses")
+		attempt.Licenses = lics
 	}
 
 	stage, pct = stageFindings, 92
@@ -2881,7 +2993,6 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 			sourceWarnings = append(sourceWarnings, fmt.Sprintf("detection source %q did not run (tool/DB missing or errored) – its vulnerabilities are NOT included", src.Name()))
 		}
 	}
-	inventoryCompleteness := importedCompleteness(doc)
 	admission, _ := inventoryAdmissionFrom(ctx)
 	snap := ports.ScanSnapshot{ToolVersions: toolVersions, VulnDBSnapshot: vulnDBSnapshot(s.prov.VulnDBSource, now), GrypeDBVersion: grypeDB,
 		InventoryAdmission: admission, InventoryCompleteness: inventoryCompletenessState(inventoryCompleteness.Confident),
@@ -2893,6 +3004,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	result := &ScanResult{
 		Target:                   doc.TargetRef,
 		ScanMode:                 opts.Mode,
+		ExecutionMode:            opts.Mode,
 		SBOM:                     doc,
 		Vulnerabilities:          vulns,
 		Licenses:                 lics,
@@ -2909,6 +3021,25 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		LineCoverage:             opts.LineCoverage,
 		Gate:                     opts.Gate,
 	}
+	result.setEnginePlan(s.engineOutcomePlan(opts, true, false))
+	if inventoryCompleteness.Confident {
+		result.completeEngine("inventory")
+		result.completeEngine("dependency_resolution")
+	} else {
+		result.partialEngine("inventory", scanrun.ReasonAnalysisIncomplete, nil)
+		result.partialEngine("dependency_resolution", scanrun.ReasonDependencyUnresolved, nil)
+	}
+	if opts.scansVulnerabilities() {
+		if len(detectionSourceWarnings) > 0 || detectionReadinessIncomplete || detectionProvenanceIncomplete {
+			result.partialEngine("sca", scanrun.ReasonUnavailable, nil)
+		} else {
+			result.completeEngine("sca")
+		}
+	}
+	if opts.scansLicenses() {
+		result.completeEngine("licenses")
+	}
+	result.refreshEngineCoverage()
 	applyDetectionReadiness(result, detectionReadinessWarn, detectionReadinessIncomplete) // empty detection corpus ⇒ not-confident + warning (non-strict)
 	result.Findings = buildFindings(engagementID, result, now, s.minSeverity, s.ignoreUnfixed, nil)
 	result.MinSeverity = s.minSeverity
@@ -2927,6 +3058,13 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	}
 	// The UI cache may combine different scan modes. Native comparison evidence
 	// must contain only the detections from this execution, captured beforehand.
+	result.refreshEngineCoverage()
+	publicationCtx, cancelPublication, err := scanPublicationContext(ctx)
+	if err != nil {
+		return result, err
+	}
+	defer cancelPublication()
+	ctx = publicationCtx
 	assessmentResult := s.copyAssessmentScanResult(result)
 	if s.results != nil {
 		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
@@ -2945,29 +3083,29 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	result.ReproDigest = ReproDigest(result)
 	evidenceRef, err := s.sealEvidenceFailClosedWithID(ctx, actor, engagementID, now, result, evidenceID)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	assessmentRunID, err := s.persistAssessmentScanRun(ctx, engagementID, evidenceID, now, ports.AcquireRequest{Kind: ports.TargetUpload, Value: record.TargetRef}, assessmentResult, record.SHA256)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	ctx = s.ownershipFindingContext(ctx, ownershipSource, "", result)
 	var inventoryPublication sbom.InventoryPublication
 	if s.scans != nil {
 		saved, err := s.scans.SaveScan(ctx, engagementID, doc, vulns, snap)
 		if err != nil {
-			return nil, fmt.Errorf("persist scan: %w", err)
+			return result, fmt.Errorf("persist scan: %w", err)
 		}
 		inventoryPublication = saved.Publication
 		if saved.SkippedVulnerabilities > 0 {
 			if err := s.audit.Record(ctx, ports.AuditEntry{Actor: actor, Action: "sca.scan.vulns_unlinked", Target: doc.TargetRef, Metadata: map[string]string{"engagement": engagementID.String(), "count": strconv.Itoa(saved.SkippedVulnerabilities)}, At: s.clock.Now()}); err != nil {
-				return nil, fmt.Errorf("audit unlinked vulns: %w", err)
+				return result, fmt.Errorf("audit unlinked vulns: %w", err)
 			}
 		}
 	}
 	if s.findings != nil {
 		if err := s.findings.Upsert(ctx, result.Findings); err != nil {
-			return nil, fmt.Errorf("persist findings: %w", err)
+			return result, fmt.Errorf("persist findings: %w", err)
 		}
 		if err := s.assessFindingSLAs(ctx, result); err != nil {
 			s.logger().Warn("assess SCA finding SLAs failed (best-effort)", "err", err)
@@ -2983,7 +3121,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	}
 	if s.aiReviews != nil {
 		if err := s.aiReviews.RecordScan(ctx, engagementID, evidenceRef, result.Findings, result.AITriage); err != nil {
-			return nil, fmt.Errorf("record AI-triage reviews: %w", err)
+			return result, fmt.Errorf("record AI-triage reviews: %w", err)
 		}
 	}
 	if s.results != nil {
@@ -2992,10 +3130,10 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 		}
 	}
 	if err := s.ownershipSourceReady(ctx, ownershipSource); err != nil {
-		return nil, err
+		return result, err
 	}
 	if err := s.notifyAssessmentScanRun(ctx, engagementID, assessmentRunID); err != nil {
-		return nil, err
+		return result, err
 	}
 	return result, nil
 }
@@ -3177,7 +3315,7 @@ func applyOSCoverageCompleteness(completeness *ports.Completeness, unsupportedDi
 	return true
 }
 
-func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (*ScanResult, error) {
+func (s *Service) runPipeline(ctx context.Context, actor string, engagementID shared.ID, now time.Time, req ports.AcquireRequest, opts ScanOptions, report func(stage string, pct int, events []ports.ScanDebugEvent), evidenceID shared.ID) (scanResult *ScanResult, scanErr error) {
 	// A manifest resolver reaches a package registry, so it runs sandboxed under an egress policy,
 	// and the sandbox refuses a policy that carries no authoritative execution identity. Without
 	// this the resolvers failed for exactly that reason whenever the sandbox was on, which is the
@@ -3194,7 +3332,38 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	}
 	stage, pct := stageAcquire, 5
 	trace := newScanDebugTrace(func(events []ports.ScanDebugEvent) { report(stage, pct, events) })
+	// Keep attempt facts from the first external operation. Fatal paths must not
+	// make the job reconstruct completion from its progress label.
+	attempt := &ScanResult{Target: req.Value, ExecutionMode: opts.Mode, EngineOutcomes: s.engineOutcomePlan(opts, false, true)}
+	activeEngine := "inventory"
+	defer func() {
+		if scanErr == nil {
+			return
+		}
+		if scanResult == nil {
+			scanResult = attempt
+		}
+		if scanResult == attempt && activeEngine != "" {
+			attempt.recordEngineError(activeEngine, scanErr)
+		}
+		for i := range scanResult.EngineOutcomes {
+			outcome := &scanResult.EngineOutcomes[i]
+			if outcome.Required && outcome.Execution == scanrun.EngineNotRun && outcome.Reason == scanrun.ReasonNone {
+				outcome.Reason = scanrun.ReasonUpstreamFailure
+				if errors.Is(scanErr, context.DeadlineExceeded) {
+					outcome.Reason = scanrun.ReasonBudgetExhausted
+				}
+			}
+		}
+		scanResult.DebugEvents = trace.snapshot()
+		scanResult.refreshEngineCoverage()
+	}()
 	report(stage, pct, trace.snapshot())
+	if stopped, cancelErr := attempt.stopCoreForContext("inventory", ctx); stopped {
+		activeEngine = ""
+		attempt.refreshEngineCoverage()
+		return attempt, cancelErr
+	}
 	step := trace.start(stageAcquire, "acquire", "", "Acquire and prepare target workspace", nil)
 	if opts.CodeQuality && req.Kind == ports.TargetGit {
 		req.RequireCodeQualityHistory = true
@@ -3202,8 +3371,12 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	ws, err := s.acquirer.Acquire(ctx, req)
 	if err != nil {
 		trace.fail(step, err)
-		return nil, fmt.Errorf("acquire target: %w", err)
+		attempt.failEngine("inventory", scanrun.ReasonEngineError)
+		attempt.refreshEngineCoverage()
+		return attempt, fmt.Errorf("acquire target: %w", err)
 	}
+	attempt.EngineOutcomes = s.engineOutcomePlan(opts, false, ws.Image == nil)
+	attempt.completeEngine("inventory")
 	if opts.ProjectAnalysis && len(opts.Gate.Conditions) == 0 {
 		data, readErr := readGateFile(ws.Dir)
 		if readErr != nil {
@@ -3230,15 +3403,28 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 
 	stage, pct = stageDetect, 20
 	report(stage, pct, trace.snapshot())
+	if stopped, cancelErr := attempt.stopCoreForContext("inventory", ctx); stopped {
+		activeEngine = ""
+		attempt.refreshEngineCoverage()
+		return attempt, cancelErr
+	}
 	step = trace.start(stageDetect, "language-detection", "", "Detect source languages", nil)
 	langs, err := s.detector.Detect(ctx, ws.Dir)
 	if err != nil {
 		trace.fail(step, err)
-		return nil, fmt.Errorf("detect languages: %w", err)
+		attempt.failEngine("inventory", scanrun.ReasonEngineError)
+		attempt.refreshEngineCoverage()
+		return attempt, fmt.Errorf("detect languages: %w", err)
 	}
 	trace.succeed(step, "Languages detected", map[string]int{"languages": len(langs)})
+	attempt.Languages = langs
 	stage, pct = stageSBOM, 35
 	report(stage, pct, trace.snapshot())
+	if stopped, cancelErr := attempt.stopCoreForContext("inventory", ctx); stopped {
+		activeEngine = ""
+		attempt.refreshEngineCoverage()
+		return attempt, cancelErr
+	}
 	step = trace.start(stageSBOM, "sbom-generation", "sbom", "Generate SBOM", nil)
 	// Content+version-addressed cache (opt-in): on an unchanged tree scanned with the same producer, reuse
 	// the cataloged SBOM and skip generation; a producer version bump makes the key miss (Trivy's
@@ -3338,6 +3524,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	osUnsupportedDistro := ""
 	osApproximateDistro := ""
 	osCatalogFailed := false
+	inventoryPassIncomplete := false
 	if s.osPkgCataloger != nil && ws.RootFS != "" {
 		before := countComponents(doc)
 		step = trace.start(stageSBOM, "os-package-catalog", "ospkg-cataloger", "Catalog OS packages from image rootfs", map[string]int{"components": before})
@@ -3379,6 +3566,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		step = trace.start(stageSBOM, "installed-package-catalog", "bincat-cataloger", "Catalog installed Go/Python packages from image rootfs", map[string]int{"components": before})
 		if instComps, ierr := s.instCataloger.CatalogInstalled(ctx, ws.RootFS); ierr != nil {
 			trace.fail(step, ierr)
+			inventoryPassIncomplete = true
 		} else {
 			trace.succeed(step, "Installed-package cataloging completed", map[string]int{"packages_added": mergeComponents(doc, instComps)})
 		}
@@ -3395,6 +3583,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		step = trace.start(stageSBOM, "rootfs-manifest-catalog", "ownsbom-rootfs", "Catalog image rootfs manifests", map[string]int{"components": before})
 		if rootDoc, rerr := s.sbomGen.Generate(ctx, ws.RootFS); rerr != nil {
 			trace.fail(step, rerr)
+			inventoryPassIncomplete = true
 		} else if rootDoc != nil {
 			added := mergeComponents(doc, rootDoc.Components)
 			doc.Dependencies = mergeDependencies(doc.Dependencies, rootDoc.Dependencies)
@@ -3587,24 +3776,85 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		n := s.jarHash.Resolve(ctx, doc.Components)
 		trace.succeed(step, "JAR SHA-1 coordinate recovery completed", map[string]int{"recovered": n})
 	}
+	// Maven, once its full tree is resolved (mvn dependency:list), is no longer an under-reporting
+	// unresolved ecosystem – drop it from the completeness signal so the scan reads as complete.
+	unresolvedEco := ws.UnresolvedEcosystems
+	// A successful Maven/Gradle resolution produces the FULL versioned tree – a complete resolving
+	// source, equivalent to a lockfile. Drop the ecosystem from the unresolved set AND record a synthetic
+	// lockfile marker so completeness reads the scan as confident (no "transitive tree unresolved" or
+	// "X of Y pinned" warning) rather than still flagging it incomplete.
+	lockfiles := ws.Lockfiles
+	if mavenResolved {
+		unresolvedEco = removeEcosystem(unresolvedEco, "maven")
+		lockfiles = append(append([]string{}, lockfiles...), "maven-dependency-tree")
+	}
+	if gradleResolved {
+		unresolvedEco = removeEcosystem(unresolvedEco, "gradle")
+		lockfiles = append(append([]string{}, lockfiles...), "gradle-dependency-tree")
+	}
+	// The owned pom.xml parser resolves the full tree out of the LOCAL Maven repository whenever one is
+	// present, needing no toolchain and no network, and it emits dependency EDGES only in that case: a
+	// direct-literal parse yields components and no edges. So an SBOM that carries maven edges already holds
+	// the transitive tree, and leaving maven in the unresolved set would tell an operator to run
+	// `mvn package` for a tree the scan is already reporting on.
+	if sbomHasEcosystemEdges(doc, "pkg:maven/") {
+		unresolvedEco = removeEcosystem(unresolvedEco, "maven")
+		lockfiles = append(append([]string{}, lockfiles...), "maven-local-repository")
+	}
+	// The same marker for the resolvers that pin a lockfile-less manifest. Resolution IS a
+	// resolving source: it runs the ecosystem's own lock tool and the versions it returns are
+	// as pinned as a committed lockfile's. Without this a scan that resolved every component
+	// still reported "Only 1171 of 1171 components have pinned versions; some dependencies are
+	// unresolved", which tells an operator the opposite of what happened.
+	if npmResolved {
+		unresolvedEco = removeEcosystem(unresolvedEco, "npm")
+		lockfiles = append(append([]string{}, lockfiles...), "npm-resolved-tree")
+	}
+	for _, eco := range manifestResolvedEco {
+		unresolvedEco = removeEcosystem(unresolvedEco, eco)
+		lockfiles = append(append([]string{}, lockfiles...), eco+"-resolved-tree")
+	}
+
 	// Mark the project's own modules first-party, so advisories matched
 	// against their unresolvable versions become historical, not actionable.
 	sbom.ClassifyFirstParty(doc.Components, ws.LocalModules)
+	attempt.SBOM = doc
+	attempt.Completeness = computeCompleteness(doc, lockfiles, unresolvedEco)
+	if sbomGenErr != nil {
+		attempt.recordEngineError("inventory", sbomGenErr)
+		attempt.notRunEngine("dependency_resolution", scanrun.ReasonUpstreamFailure)
+	} else {
+		attempt.completeEngine("inventory")
+		if !attempt.Completeness.Confident && len(doc.Components) > 0 || len(unresolvedEco) > 0 {
+			attempt.partialEngine("dependency_resolution", scanrun.ReasonDependencyUnresolved, nil)
+		} else {
+			attempt.completeEngine("dependency_resolution")
+		}
+	}
 	var raws []vulnerability.RawFinding
 	var vulns []vulnerability.Vulnerability
 	var riskVersions map[string]string
 	var riskMatches map[string]int
 	var detectionSourceWarnings []string
+	var detectionProvenanceIncomplete bool
 	var detectionReadinessWarn string     // snapshotted readiness verdict (captured once, applied at result build)
 	var detectionReadinessIncomplete bool // true ⇒ no detection source had a usable DB for this scan
-	if opts.scansVulnerabilities() {
+	if opts.scansVulnerabilities() && sbomGenErr == nil {
 		stage, pct = stageVulns, 55
+		activeEngine = "sca"
 		report(stage, pct, trace.snapshot())
+		if stopped, cancelErr := attempt.stopCoreForContext("sca", ctx); stopped {
+			activeEngine = ""
+			attempt.refreshEngineCoverage()
+			return attempt, cancelErr
+		}
 		// Run every detection source against the SAME SBOM, then correlate: OSV + Grype (+ Trivy,
 		// advisory-store) augment each other. The correlator dedups by advisory id and derives
 		// multi-source confidence. A source that errors is skipped (SourceWarning) unless strict.
 		srcRaws, srcWarnings, srcErr := s.scanWithSources(ctx, doc, trace)
+		detectionProvenanceIncomplete = detectionSourceProvenanceUnavailable(s.sources, doc)
 		if srcErr != nil {
+			attempt.Vulnerabilities = correlatedPartialVulnerabilities(doc, srcRaws)
 			return nil, srcErr
 		}
 		// Readiness, captured ONCE from the just-finished scan's provenance: under strict sources an empty
@@ -3616,6 +3866,12 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		if readyErr != nil {
 			return nil, readyErr
 		}
+		if len(srcWarnings) > 0 || detectionReadinessIncomplete || detectionProvenanceIncomplete {
+			attempt.partialEngine("sca", scanrun.ReasonUnavailable, nil)
+		} else {
+			attempt.completeEngine("sca")
+		}
+		activeEngine = ""
 		raws = append(raws, srcRaws...)
 		detectionSourceWarnings = srcWarnings
 		step = trace.start(stageVulns, "correlate", "", "Correlate and deduplicate vulnerability findings", map[string]int{"raw_findings": len(raws)})
@@ -3648,15 +3904,22 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		vulnerability.SortByRisk(vulns)
 		attachDependencyPaths(doc, vulns)
 		classifyVulns(doc, vulns)
+		attempt.Vulnerabilities = vulns
 	}
 
 	var lics []ports.LicenseFinding
 	var licenseCoverage sbom.LicenseCoverage
 	var componentLicenses []ComponentLicenseAudit
 	var licenseCoverageBreakdown LicenseCoverageBreakdown
-	if opts.scansLicenses() {
+	if opts.scansLicenses() && sbomGenErr == nil {
 		stage, pct = stageLicense, 85
+		activeEngine = "licenses"
 		report(stage, pct, trace.snapshot())
+		if stopped, cancelErr := attempt.stopCoreForContext("licenses", ctx); stopped {
+			activeEngine = ""
+			attempt.refreshEngineCoverage()
+			return attempt, cancelErr
+		}
 		// Recover authoritative Maven coordinates from JAR pom.properties FIRST, so a
 		// mis-derived groupId (Syft inferring it from the class namespace, e.g.
 		// io.grpc.internal vs io.grpc) doesn't make the registry lookup 404 → "unknown"
@@ -3689,6 +3952,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 			return nil, fmt.Errorf("scan licenses: %w", err)
 		}
 		trace.succeed(step, "License policy scan completed", map[string]int{"components": countComponents(doc), "licenses": len(lics)})
+		attempt.completeEngine("licenses")
+		activeEngine = ""
+		attempt.Licenses = lics
 		licenseCoverage = sbom.ComputeLicenseCoverage(doc.Components)
 		componentLicenses = buildComponentLicenseAudit(doc, lics)
 		licenseCoverageBreakdown = buildLicenseCoverageBreakdown(doc.Components)
@@ -3793,50 +4059,12 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	manifest := buildManifest(toolVersions, snap.VulnDBSnapshot, grypeDB, doc)
 	manifest.SourcePackage = publicSourcePackage(req.SourcePackage)
 
-	// Maven, once its full tree is resolved (mvn dependency:list), is no longer an under-reporting
-	// unresolved ecosystem – drop it from the completeness signal so the scan reads as complete.
-	unresolvedEco := ws.UnresolvedEcosystems
-	// A successful Maven/Gradle resolution produces the FULL versioned tree – a complete resolving
-	// source, equivalent to a lockfile. Drop the ecosystem from the unresolved set AND record a synthetic
-	// lockfile marker so completeness reads the scan as confident (no "transitive tree unresolved" or
-	// "X of Y pinned" warning) rather than still flagging it incomplete.
-	lockfiles := ws.Lockfiles
-	if mavenResolved {
-		unresolvedEco = removeEcosystem(unresolvedEco, "maven")
-		lockfiles = append(append([]string{}, lockfiles...), "maven-dependency-tree")
-	}
-	if gradleResolved {
-		unresolvedEco = removeEcosystem(unresolvedEco, "gradle")
-		lockfiles = append(append([]string{}, lockfiles...), "gradle-dependency-tree")
-	}
-	// The owned pom.xml parser resolves the full tree out of the LOCAL Maven repository whenever one is
-	// present, needing no toolchain and no network, and it emits dependency EDGES only in that case: a
-	// direct-literal parse yields components and no edges. So an SBOM that carries maven edges already holds
-	// the transitive tree, and leaving maven in the unresolved set would tell an operator to run
-	// `mvn package` for a tree the scan is already reporting on.
-	if sbomHasEcosystemEdges(doc, "pkg:maven/") {
-		unresolvedEco = removeEcosystem(unresolvedEco, "maven")
-		lockfiles = append(append([]string{}, lockfiles...), "maven-local-repository")
-	}
-	// The same marker for the resolvers that pin a lockfile-less manifest. Resolution IS a
-	// resolving source: it runs the ecosystem's own lock tool and the versions it returns are
-	// as pinned as a committed lockfile's. Without this a scan that resolved every component
-	// still reported "Only 1171 of 1171 components have pinned versions; some dependencies are
-	// unresolved", which tells an operator the opposite of what happened.
-	if npmResolved {
-		unresolvedEco = removeEcosystem(unresolvedEco, "npm")
-		lockfiles = append(append([]string{}, lockfiles...), "npm-resolved-tree")
-	}
-	for _, eco := range manifestResolvedEco {
-		unresolvedEco = removeEcosystem(unresolvedEco, eco)
-		lockfiles = append(append([]string{}, lockfiles...), eco+"-resolved-tree")
-	}
-
 	result := &ScanResult{
 		Target:                   req.Value, // report the original target, not the temp dir
 		SourceRef:                req.Ref,
 		SourceCommit:             ws.Commit,
 		ScanMode:                 opts.Mode,
+		ExecutionMode:            opts.Mode,
 		Languages:                langs,
 		SBOM:                     doc,
 		Vulnerabilities:          vulns,
@@ -3856,8 +4084,46 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		Gate:                     opts.Gate,
 		Comparison:               comparisonFromWorkspace(req, ws),
 	}
+	result.setEnginePlan(s.engineOutcomePlan(opts, false, ws.Image == nil))
+	attempt, activeEngine = result, ""
+	if sbomGenErr != nil {
+		result.recordEngineError("inventory", sbomGenErr)
+		result.notRunEngine("dependency_resolution", scanrun.ReasonUpstreamFailure)
+		if opts.scansVulnerabilities() {
+			result.notRunEngine("sca", scanrun.ReasonUpstreamFailure)
+		}
+		if opts.scansLicenses() {
+			result.notRunEngine("licenses", scanrun.ReasonUpstreamFailure)
+		}
+	} else {
+		result.completeEngine("inventory")
+		if len(unresolvedEco) > 0 || (!result.Completeness.Confident && len(doc.Components) > 0) {
+			result.partialEngine("dependency_resolution", scanrun.ReasonDependencyUnresolved, nil)
+		} else {
+			result.completeEngine("dependency_resolution")
+		}
+		if opts.scansVulnerabilities() {
+			if len(detectionSourceWarnings) > 0 || detectionReadinessIncomplete || detectionProvenanceIncomplete {
+				result.partialEngine("sca", scanrun.ReasonUnavailable, nil)
+			} else {
+				result.completeEngine("sca")
+			}
+		}
+		if opts.scansLicenses() {
+			result.completeEngine("licenses")
+		}
+	}
 	osCoverageIncomplete := applyOSCoverageCompleteness(&result.Completeness, osUnsupportedDistro, osDistroUnresolved)
-	inventoryAuthoritative := !osCoverageIncomplete && (result.Completeness.Confident || (sbomGenErr == nil && len(doc.Components) == 0 && len(unresolvedEco) == 0))
+	if inventoryPassIncomplete {
+		result.Completeness.Confident = false
+		const inventoryGap = "image inventory cataloging was incomplete; package coverage is not exhaustive"
+		if result.Completeness.Warning == "" {
+			result.Completeness.Warning = inventoryGap
+		} else {
+			result.Completeness.Warning = inventoryGap + "; " + result.Completeness.Warning
+		}
+	}
+	inventoryAuthoritative := !osCoverageIncomplete && !inventoryPassIncomplete && (result.Completeness.Confident || (sbomGenErr == nil && len(doc.Components) == 0 && len(unresolvedEco) == 0))
 	admission, _ := inventoryAdmissionFrom(ctx)
 	snap.InventoryAdmission = admission
 	snap.InventoryCompleteness = inventoryCompletenessState(inventoryAuthoritative)
@@ -3870,6 +4136,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		snap.InventoryAuthorityReason = "native_inventory_acquisition_incomplete"
 	}
 	applyDetectionReadiness(result, detectionReadinessWarn, detectionReadinessIncomplete) // empty detection corpus ⇒ not-confident + warning (non-strict)
+	if (osCoverageIncomplete || inventoryPassIncomplete) && sbomGenErr == nil {
+		result.partialEngine("inventory", scanrun.ReasonAnalysisIncomplete, nil)
+	}
 	// SBOM production failed: force the scan INCOMPLETE and surface it, so the empty dependency/vuln/
 	// license coverage reads as a known gap rather than a clean result. The source-only analyzers below
 	// still run and contribute findings.
@@ -3893,137 +4162,266 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Deterministic pattern-SAST over the LIVE workspace: weak crypto / hardcoded secrets /
 	// insecure config in first-party source. In-process, read-only, no LLM; findings publish like SCA.
 	var sastRaws []ports.SASTRawFinding
-	if opts.scansVulnerabilities() && s.sastAnalyzer != nil {
-		// Prefer the reporting form so the completeness of the scan reaches the caller. An
-		// analyzer that does not implement it is treated as "completeness unknown", which is why
-		// the plain form remains the fallback rather than an error.
-		if reporter, ok := s.sastAnalyzer.(ports.SASTSourceReporter); ok {
-			report, rerr := reporter.AnalyzeSourceReport(ctx, ws.Dir)
-			switch {
-			case budgetExpired(rerr):
-				result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("static analysis"))
-			case rerr != nil:
-				return nil, fmt.Errorf("analyze source (sast): %w", rerr)
+	if opts.scansVulnerabilities() && ws.Image == nil && s.sastSelected && s.sastAnalyzer != nil {
+		if skipped, cancelErr := result.skipEngineForContext("sast", ctx); skipped {
+			if cancelErr != nil {
+				return result, cancelErr
 			}
-			sastRaws = report.Findings
-			if report.Truncated {
-				result.SourceWarnings = append(result.SourceWarnings, "static analysis incomplete or truncated; SAST findings are a lower bound")
-			}
-			if report.SkippedFiles > 0 {
-				result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf("static analysis skipped %d vendored, minified or generated file(s)", report.SkippedFiles))
-			}
-			// A file the walk reached but could not hold is a different thing from one it deliberately
-			// skipped, and it is the one that makes a clean-looking report wrong: every rule reports nothing
-			// for source that was never retained. On a 2.1 GB monorepo holding 163 MiB of source against the
-			// 64 MiB budget, most of the tree is in this state, so the count and the budget are both named.
-			if report.UnscannedFiles > 0 {
-				result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
-					"static analysis did not scan %d file(s): the retained-source budget of %d MiB was already full, so no rule ran over them. "+
-						"Raise SYNAPSE_SAST_SOURCE_BUDGET_BYTES to cover the tree (it trades memory for coverage)",
-					report.UnscannedFiles, report.SourceBudget>>20))
-			}
+			result.appendDeadlineWarningForSkippedSourceEngine("sast")
 		} else {
-			sastRaws, err = s.sastAnalyzer.AnalyzeSource(ctx, ws.Dir)
-			switch {
-			case budgetExpired(err):
-				result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("static analysis"))
-			case err != nil:
-				return nil, fmt.Errorf("analyze source (sast): %w", err)
+			// Prefer the reporting form so the completeness of the scan reaches the caller. An
+			// analyzer that does not implement it is treated as "completeness unknown", which is why
+			// the plain form remains the fallback rather than an error.
+			if reporter, ok := s.sastAnalyzer.(ports.SASTSourceReporter); ok {
+				report, rerr := reporter.AnalyzeSourceReport(ctx, ws.Dir)
+				switch {
+				case budgetExpired(rerr):
+					result.timeoutEngine("sast")
+					result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("static analysis"))
+				case errors.Is(rerr, context.Canceled):
+					result.updateEngine("sast", scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled, nil)
+					return result, rerr
+				case rerr != nil:
+					result.failEngine("sast", scanrun.ReasonEngineError)
+					return result, fmt.Errorf("analyze source (sast): %w", rerr)
+				case report.Truncated || report.UnscannedFiles > 0:
+					result.partialEngine("sast", scanrun.ReasonTruncated, map[scanrun.EngineMeasure]int64{
+						scanrun.MeasureFindings: int64(len(report.Findings)), scanrun.MeasureFilesSkipped: int64(report.SkippedFiles),
+						scanrun.MeasureFilesUnscanned: int64(report.UnscannedFiles), scanrun.MeasureSourceBudgetBytes: report.SourceBudget,
+					})
+				default:
+					result.completeEngineWithCounts("sast", map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(report.Findings)), scanrun.MeasureFilesSkipped: int64(report.SkippedFiles)})
+				}
+				sastRaws = report.Findings
+				if report.Truncated {
+					result.SourceWarnings = append(result.SourceWarnings, "static analysis incomplete or truncated; SAST findings are a lower bound")
+				}
+				if report.SkippedFiles > 0 {
+					result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf("static analysis skipped %d vendored, minified or generated file(s)", report.SkippedFiles))
+				}
+				// A file the walk reached but could not hold is a different thing from one it deliberately
+				// skipped, and it is the one that makes a clean-looking report wrong: every rule reports nothing
+				// for source that was never retained. On a 2.1 GB monorepo holding 163 MiB of source against the
+				// 64 MiB budget, most of the tree is in this state, so the count and the budget are both named.
+				if report.UnscannedFiles > 0 {
+					result.SourceWarnings = append(result.SourceWarnings, fmt.Sprintf(
+						"static analysis did not scan %d file(s): the retained-source budget of %d MiB was already full, so no rule ran over them. "+
+							"Raise SYNAPSE_SAST_SOURCE_BUDGET_BYTES to cover the tree (it trades memory for coverage)",
+						report.UnscannedFiles, report.SourceBudget>>20))
+				}
+			} else {
+				sastRaws, err = s.sastAnalyzer.AnalyzeSource(ctx, ws.Dir)
+				switch {
+				case budgetExpired(err):
+					result.timeoutEngine("sast")
+					result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("static analysis"))
+				case errors.Is(err, context.Canceled):
+					result.updateEngine("sast", scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled, nil)
+					return result, err
+				case err != nil:
+					result.failEngine("sast", scanrun.ReasonEngineError)
+					return result, fmt.Errorf("analyze source (sast): %w", err)
+				default:
+					result.unknownEngine("sast", scanrun.ReasonLegacyReporter)
+				}
 			}
 		}
 	}
 	result.Findings = buildFindings(engagementID, result, now, s.minSeverity, s.ignoreUnfixed, sastRaws)
 	// Deterministic secret scan over the LIVE workspace: hardcoded credentials, redacted before they
 	// leave the scanner. Ungated Kind=secret findings, publishable like SCA. Best-effort.
-	if opts.scansVulnerabilities() && s.secretScanner != nil {
-		// Active verification (D6.3) is opt-in: only when a verifier is wired AND the scanner supports the
-		// verifying extension. Otherwise the scan stays deterministic and offline. The raw secret is
-		// confined to the scanner; only the verdict rides back on each finding.
-		secretReport, serr := s.scanSecrets(ctx, ws.Dir)
-		switch {
-		case budgetExpired(serr):
-			result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("secret scan"))
-		case serr != nil:
-			return nil, fmt.Errorf("scan secrets: %w", serr)
-		}
-		if secretReport.Truncated {
-			result.SourceWarnings = append(result.SourceWarnings, "secret scan incomplete or truncated; secret findings are a lower bound")
-		}
-		result.Findings = append(result.Findings, buildSecretFindings(engagementID, secretReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
-		// Git-history secret scan (opt-in): catch a secret committed then removed, which the working-tree scan
-		// above cannot see. Best-effort: a non-git workspace or a git failure is a warning, never a scan
-		// failure, and the secret is redacted like any other finding.
-		if s.secretHistory {
-			if hist, ok := s.secretScanner.(ports.SecretHistoryScanner); ok {
-				historyReport, herr := hist.ScanHistory(ctx, ws.Dir)
-				switch {
-				case herr != nil:
-					result.SourceWarnings = append(result.SourceWarnings, "git-history secret scan skipped: "+herr.Error())
-				default:
-					if historyReport.Truncated {
-						result.SourceWarnings = append(result.SourceWarnings, "git-history secret scan incomplete or truncated; secret findings are a lower bound")
+	if opts.scansVulnerabilities() && s.secretSelected && s.secretScanner != nil {
+		if skipped, cancelErr := result.skipEngineForContext("secrets", ctx); skipped {
+			if cancelErr != nil {
+				return result, cancelErr
+			}
+			result.appendDeadlineWarningForSkippedSourceEngine("secrets")
+			result.skipSelectedSecretHistoryAfterSecretDeadline()
+		} else {
+			// Active verification (D6.3) is opt-in: only when a verifier is wired AND the scanner supports the
+			// verifying extension. Otherwise the scan stays deterministic and offline. The raw secret is
+			// confined to the scanner; only the verdict rides back on each finding.
+			secretReport, serr := s.scanSecrets(ctx, ws.Dir)
+			switch {
+			case budgetExpired(serr):
+				result.timeoutEngine("secrets")
+				result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("secret scan"))
+			case errors.Is(serr, context.Canceled):
+				result.updateEngine("secrets", scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled, nil)
+				return result, serr
+			case serr != nil:
+				result.failEngine("secrets", scanrun.ReasonEngineError)
+				return result, fmt.Errorf("scan secrets: %w", serr)
+			case secretReport.Truncated:
+				result.partialEngine("secrets", scanrun.ReasonTruncated, map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(secretReport.Findings))})
+			default:
+				result.completeEngineWithCounts("secrets", map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(secretReport.Findings))})
+			}
+			if secretReport.Truncated {
+				result.SourceWarnings = append(result.SourceWarnings, "secret scan incomplete or truncated; secret findings are a lower bound")
+			}
+			result.Findings = append(result.Findings, buildSecretFindings(engagementID, secretReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
+			// Git-history secret scan (opt-in): catch a secret committed then removed, which the working-tree scan
+			// above cannot see. Best-effort: a non-git workspace or a git failure is a warning, never a scan
+			// failure, and the secret is redacted like any other finding.
+			if history, eligible := result.engineOutcome("secret_history"); s.secretHistory && eligible && history.Required && history.Execution == scanrun.EngineNotRun && history.Reason == scanrun.ReasonNone {
+				if skipped, cancelErr := result.skipEngineForContext("secret_history", ctx); skipped {
+					if cancelErr != nil {
+						return result, cancelErr
 					}
-					result.Findings = append(result.Findings, buildSecretFindings(engagementID, historyReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
+					result.appendDeadlineWarningForSkippedSourceEngine("secret_history")
+				} else {
+					if hist, ok := s.secretScanner.(ports.SecretHistoryScanner); ok {
+						historyReport, herr := hist.ScanHistory(ctx, ws.Dir)
+						switch {
+						case errors.Is(herr, context.Canceled):
+							result.updateEngine("secret_history", scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled, nil)
+							return result, herr
+						case budgetExpired(herr):
+							result.timeoutEngine("secret_history")
+							result.SourceWarnings = append(result.SourceWarnings, "git-history secret scan skipped: "+herr.Error())
+						case herr != nil:
+							result.failEngine("secret_history", scanrun.ReasonEngineError)
+							result.SourceWarnings = append(result.SourceWarnings, "git-history secret scan skipped: "+herr.Error())
+						default:
+							if historyReport.Truncated {
+								result.partialEngine("secret_history", scanrun.ReasonTruncated, map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(historyReport.Findings))})
+							} else {
+								result.completeEngineWithCounts("secret_history", map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(historyReport.Findings))})
+							}
+							if historyReport.Truncated {
+								result.SourceWarnings = append(result.SourceWarnings, "git-history secret scan incomplete or truncated; secret findings are a lower bound")
+							}
+							result.Findings = append(result.Findings, buildSecretFindings(engagementID, historyReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
+						}
+					}
 				}
 			}
-		}
-		// Image filesystem: scan the materialized rootfs too, so a credential baked into an image layer (a
-		// top container-secret finding class that a source-tree scan cannot see) is caught. Best-effort: a
-		// rootfs scan error is a warning, never a scan failure; the precise prefix detectors + allowlist
-		// bound the base-image noise and every secret is redacted. Only runs for an image target (RootFS
-		// materialized and distinct from the scanned layout).
-		if ws.RootFS != "" && ws.RootFS != ws.Dir {
-			if rootfsReport, rerr := s.secretScanner.ScanFiles(ctx, ws.RootFS); rerr != nil {
-				result.SourceWarnings = append(result.SourceWarnings, "image-filesystem secret scan skipped: "+rerr.Error())
-			} else {
-				if rootfsReport.Truncated {
-					result.SourceWarnings = append(result.SourceWarnings, "image-filesystem secret scan incomplete or truncated; secret findings are a lower bound")
+			// Image filesystem: scan the materialized rootfs too, so a credential baked into an image layer (a
+			// top container-secret finding class that a source-tree scan cannot see) is caught. Best-effort: a
+			// rootfs scan error is a warning, never a scan failure; the precise prefix detectors + allowlist
+			// bound the base-image noise and every secret is redacted. Only runs for an image target (RootFS
+			// materialized and distinct from the scanned layout).
+			if ws.RootFS != "" && ws.RootFS != ws.Dir {
+				if ctx.Err() != nil {
+					result.mergeEnginePass("secrets", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonBudgetExhausted, nil)
+					if errors.Is(ctx.Err(), context.Canceled) {
+						return result, ctx.Err()
+					}
+				} else {
+					rootfsReport, rerr := s.secretScanner.ScanFiles(ctx, ws.RootFS)
+					if rerr != nil {
+						result.mergeEnginePassError("secrets", rerr)
+						result.SourceWarnings = append(result.SourceWarnings, "image-filesystem secret scan skipped: "+rerr.Error())
+						if errors.Is(rerr, context.Canceled) {
+							return result, rerr
+						}
+					} else if rootfsReport.Truncated {
+						result.mergeEnginePass("secrets", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonTruncated, map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(rootfsReport.Findings))})
+					} else {
+						result.mergeEnginePass("secrets", scanrun.EngineCompleted, scanrun.CoverageComplete, scanrun.ReasonNone, map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(rootfsReport.Findings))})
+					}
+					if rootfsReport.Truncated {
+						result.SourceWarnings = append(result.SourceWarnings, "image-filesystem secret scan incomplete or truncated; secret findings are a lower bound")
+					}
+					result.Findings = append(result.Findings, buildSecretFindings(engagementID, rootfsReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
 				}
-				result.Findings = append(result.Findings, buildSecretFindings(engagementID, rootfsReport.Findings, now, s.minSeverity, s.includeTestSecrets)...)
+			}
+			if ws.Image != nil && ws.RootFS == "" {
+				result.mergeEnginePass("secrets", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonUnavailable, nil)
 			}
 		}
 	}
-	if opts.scansVulnerabilities() && s.misconfig != nil {
-		// Prefer the reporting form, so a Helm chart the scan could not RENDER reaches the caller. A chart
-		// that refuses to render contributes no findings, and on one live repository 112 of 126 charts refused
-		// (a declared dependency not vendored, a Chart.yaml with no name) while the report said nothing, so
-		// every one of those applications read as clean.
-		var misRaws []ports.MisconfigRawFinding
-		var merr error
-		if reporter, ok := s.misconfig.(ports.MisconfigReporter); ok {
-			var misReport ports.MisconfigScanReport
-			misReport, merr = reporter.ScanConfigsReport(ctx, ws.Dir)
-			misRaws = misReport.Findings
-			if misReport.Truncated {
-				result.SourceWarnings = append(result.SourceWarnings,
-					"infrastructure-as-code scan hit its file cap, so it did not cover the whole tree and its findings are a lower bound")
+	if opts.scansVulnerabilities() && s.misconfigSelected && s.misconfig != nil {
+		if skipped, cancelErr := result.skipEngineForContext("iac", ctx); skipped {
+			if cancelErr != nil {
+				return result, cancelErr
 			}
-			if misReport.UnrenderedCharts > 0 {
-				warning := fmt.Sprintf("%d Helm chart(s) could not be rendered, so their manifests were NOT evaluated",
-					misReport.UnrenderedCharts)
-				if len(misReport.ChartRenderReasons) > 0 {
-					warning += ": " + strings.Join(misReport.ChartRenderReasons, "; ")
-				}
-				result.SourceWarnings = append(result.SourceWarnings, warning)
-			}
+			result.appendDeadlineWarningForSkippedSourceEngine("iac")
 		} else {
-			misRaws, merr = s.misconfig.ScanConfigs(ctx, ws.Dir)
-		}
-		switch {
-		case budgetExpired(merr):
-			result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("infrastructure-as-code scan"))
-		case merr != nil:
-			return nil, fmt.Errorf("scan misconfig: %w", merr)
-		}
-		result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, misRaws, now, s.minSeverity)...)
-		// Image filesystem: scan the rootfs for misconfigured configs shipped inside the image (a baked-in
-		// Dockerfile, a Kubernetes manifest, a Terraform file). Best-effort; the misconfig rules are precise
-		// attribute matches, so this adds coverage with low false-positive risk. Image targets only.
-		if ws.RootFS != "" && ws.RootFS != ws.Dir {
-			if rootfsRaws, rerr := s.misconfig.ScanConfigs(ctx, ws.RootFS); rerr != nil {
-				result.SourceWarnings = append(result.SourceWarnings, "image-filesystem misconfig scan skipped: "+rerr.Error())
+			// Prefer the reporting form, so a Helm chart the scan could not RENDER reaches the caller. A chart
+			// that refuses to render contributes no findings, and on one live repository 112 of 126 charts refused
+			// (a declared dependency not vendored, a Chart.yaml with no name) while the report said nothing, so
+			// every one of those applications read as clean.
+			var misRaws []ports.MisconfigRawFinding
+			var merr error
+			_, hasMisconfigReport := s.misconfig.(ports.MisconfigReporter)
+			if reporter, ok := s.misconfig.(ports.MisconfigReporter); ok {
+				var misReport ports.MisconfigScanReport
+				misReport, merr = reporter.ScanConfigsReport(ctx, ws.Dir)
+				misRaws = misReport.Findings
+				if misReport.Truncated {
+					result.partialEngine("iac", scanrun.ReasonTruncated, map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(misReport.Findings)), scanrun.MeasureUnrenderedCharts: int64(misReport.UnrenderedCharts)})
+					result.SourceWarnings = append(result.SourceWarnings,
+						"infrastructure-as-code scan hit its file cap, so it did not cover the whole tree and its findings are a lower bound")
+				}
+				if misReport.UnrenderedCharts > 0 {
+					result.partialEngine("iac", scanrun.ReasonUnrenderedCharts, map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(misReport.Findings)), scanrun.MeasureUnrenderedCharts: int64(misReport.UnrenderedCharts)})
+					warning := fmt.Sprintf("%d Helm chart(s) could not be rendered, so their manifests were NOT evaluated",
+						misReport.UnrenderedCharts)
+					if len(misReport.ChartRenderReasons) > 0 {
+						warning += ": " + strings.Join(misReport.ChartRenderReasons, "; ")
+					}
+					result.SourceWarnings = append(result.SourceWarnings, warning)
+				}
 			} else {
-				result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, rootfsRaws, now, s.minSeverity)...)
+				misRaws, merr = s.misconfig.ScanConfigs(ctx, ws.Dir)
+			}
+			switch {
+			case budgetExpired(merr):
+				result.timeoutEngine("iac")
+				result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("infrastructure-as-code scan"))
+			case errors.Is(merr, context.Canceled):
+				result.updateEngine("iac", scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled, nil)
+				return result, merr
+			case merr != nil:
+				result.failEngine("iac", scanrun.ReasonEngineError)
+				return result, fmt.Errorf("scan misconfig: %w", merr)
+			case !hasMisconfigReport:
+				result.unknownEngine("iac", scanrun.ReasonLegacyReporter)
+			default:
+				if outcome, ok := result.engineOutcome("iac"); !ok || outcome.Coverage != scanrun.CoveragePartial {
+					result.completeEngineWithCounts("iac", map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(misRaws))})
+				}
+			}
+			result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, misRaws, now, s.minSeverity)...)
+			// Image filesystem: scan the rootfs for misconfigured configs shipped inside the image (a baked-in
+			// Dockerfile, a Kubernetes manifest, a Terraform file). Best-effort; the misconfig rules are precise
+			// attribute matches, so this adds coverage with low false-positive risk. Image targets only.
+			if ws.RootFS != "" && ws.RootFS != ws.Dir {
+				if ctx.Err() != nil {
+					result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonBudgetExhausted, nil)
+					if errors.Is(ctx.Err(), context.Canceled) {
+						return result, ctx.Err()
+					}
+				} else {
+					var rootfsReport ports.MisconfigScanReport
+					var rerr error
+					if reporter, ok := s.misconfig.(ports.MisconfigReporter); ok {
+						rootfsReport, rerr = reporter.ScanConfigsReport(ctx, ws.RootFS)
+					} else {
+						rootfsReport.Findings, rerr = s.misconfig.ScanConfigs(ctx, ws.RootFS)
+					}
+					counts := map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: int64(len(rootfsReport.Findings)), scanrun.MeasureUnrenderedCharts: int64(rootfsReport.UnrenderedCharts)}
+					switch {
+					case rerr != nil:
+						result.mergeEnginePassError("iac", rerr)
+						result.SourceWarnings = append(result.SourceWarnings, "image-filesystem misconfig scan skipped: "+rerr.Error())
+						if errors.Is(rerr, context.Canceled) {
+							return result, rerr
+						}
+					case rootfsReport.Truncated || rootfsReport.UnrenderedCharts > 0:
+						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonTruncated, counts)
+					case !hasMisconfigReport:
+						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoverageUnknown, scanrun.ReasonLegacyReporter, counts)
+					default:
+						result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoverageComplete, scanrun.ReasonNone, counts)
+					}
+					result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, rootfsReport.Findings, now, s.minSeverity)...)
+				}
+			}
+			if ws.Image != nil && ws.RootFS == "" {
+				result.mergeEnginePass("iac", scanrun.EngineCompleted, scanrun.CoveragePartial, scanrun.ReasonUnavailable, nil)
 			}
 		}
 	}
@@ -4034,24 +4432,40 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	if opts.scansVulnerabilities() && s.imageConfig != nil && result.Image != nil {
 		result.Findings = append(result.Findings, buildMisconfigFindings(engagementID, s.imageConfig.Check(result.Image), now, s.minSeverity)...)
 	}
-	if opts.CodeQuality && s.codeQuality != nil {
-		var report codequality.Report
-		var qerr error
-		if pinned, ok := s.codeQuality.(interface {
-			BuildReportForCommit(context.Context, string, string) (codequality.Report, error)
-		}); ok {
-			report, qerr = pinned.BuildReportForCommit(ctx, ws.Dir, ws.Commit)
+	if opts.CodeQuality && ws.Image == nil && s.codeQuality != nil {
+		if skipped, cancelErr := result.skipEngineForContext("code_quality", ctx); skipped {
+			if cancelErr != nil {
+				return result, cancelErr
+			}
+			result.appendDeadlineWarningForSkippedSourceEngine("code_quality")
 		} else {
-			report, qerr = s.codeQuality.BuildReport(ctx, ws.Dir)
+			var report codequality.Report
+			var qerr error
+			if pinned, ok := s.codeQuality.(interface {
+				BuildReportForCommit(context.Context, string, string) (codequality.Report, error)
+			}); ok {
+				report, qerr = pinned.BuildReportForCommit(ctx, ws.Dir, ws.Commit)
+			} else {
+				report, qerr = s.codeQuality.BuildReport(ctx, ws.Dir)
+			}
+			switch {
+			case budgetExpired(qerr):
+				result.timeoutEngine("code_quality")
+				result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("code-quality analysis"))
+			case errors.Is(qerr, context.Canceled):
+				result.updateEngine("code_quality", scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled, nil)
+				return result, qerr
+			case qerr != nil:
+				result.failEngine("code_quality", scanrun.ReasonEngineError)
+				return result, fmt.Errorf("analyze code quality: %w", qerr)
+			case report.Truncated:
+				result.partialEngine("code_quality", scanrun.ReasonTruncated, nil)
+			default:
+				result.completeEngine("code_quality")
+			}
+			result.CodeQuality = &report
+			result.Findings = append(result.Findings, buildCodeQualityFindings(engagementID, report.Findings, now)...)
 		}
-		switch {
-		case budgetExpired(qerr):
-			result.SourceWarnings = append(result.SourceWarnings, stageBudgetWarning("code-quality analysis"))
-		case qerr != nil:
-			return nil, fmt.Errorf("analyze code quality: %w", qerr)
-		}
-		result.CodeQuality = &report
-		result.Findings = append(result.Findings, buildCodeQualityFindings(engagementID, report.Findings, now)...)
 	}
 	// Apply the repo-committed .synapseignore accepted-risk policy. It ANNOTATES matched findings as
 	// accepted-risk (SuppressedFindings) so a CI --fail-on gate can exempt them, but does NOT remove them:
@@ -4190,11 +4604,30 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// judgments (one per injection path × class) for a distinct verifier to gate. Same best-effort contract
 	// as reachability – a no-coverage/un-buildable target returns an error here that is IGNORED (taint is an
 	// enhancement; the scan is never failed). Runs while ws.Dir still exists.
-	if opts.scansVulnerabilities() && s.taint != nil {
-		if scanner, ok := s.taint.(ports.CorrelatedTaintScanner); ok {
-			_, _ = scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
+	if opts.scansVulnerabilities() && ws.Image == nil && s.taint != nil {
+		if skipped, cancelErr := result.skipEngineForContext("taint_go", ctx); skipped {
+			if cancelErr != nil {
+				return result, cancelErr
+			}
+		} else if scanner, ok := s.taint.(ports.CorrelatedTaintScanner); ok {
+			outcome, terr := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
+			if result.applyTaintOutcome("taint_go", outcome, terr) {
+				return result, terr
+			}
+		} else if scanner, ok := s.taint.(ports.TaintCoverageScanner); ok {
+			outcome, terr := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
+			if result.applyTaintOutcome("taint_go", outcome, terr) {
+				return result, terr
+			}
 		} else {
-			_, _ = s.taint.Scan(ctx, engagementID, ws.Dir)
+			_, terr := s.taint.Scan(ctx, engagementID, ws.Dir)
+			if terr != nil {
+				if result.recordEngineError("taint_go", terr) {
+					return result, terr
+				}
+			} else {
+				result.unknownEngine("taint_go", scanrun.ReasonLegacyReporter)
+			}
 		}
 	}
 
@@ -4217,61 +4650,85 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Python semantic taint is source-only and value-granular. It runs independently of the legacy Go
 	// function-level scanner, but follows the same propose-only lifecycle: positive witnesses become gated
 	// CapSAST proposals, while missing/partial coverage never becomes a clean conclusion.
-	if opts.scansVulnerabilities() && s.pythonTaint != nil {
-		if scanner, ok := s.pythonTaint.(ports.CorrelatedTaintScanner); ok {
-			outcome, _ := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
-			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
-			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
-				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+	if opts.scansVulnerabilities() && ws.Image == nil && s.pythonTaint != nil {
+		if skipped, cancelErr := result.skipEngineForContext("taint_python", ctx); skipped {
+			if cancelErr != nil {
+				return result, cancelErr
+			}
+		} else if scanner, ok := s.pythonTaint.(ports.CorrelatedTaintScanner); ok {
+			outcome, terr := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
+			if result.applyTaintOutcome("taint_python", outcome, terr) {
+				return result, terr
 			}
 		} else if scanner, ok := s.pythonTaint.(ports.TaintCoverageScanner); ok {
-			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
-			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
-			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
-				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			outcome, terr := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
+			if result.applyTaintOutcome("taint_python", outcome, terr) {
+				return result, terr
 			}
 		} else {
-			_, _ = s.pythonTaint.Scan(ctx, engagementID, ws.Dir)
+			if _, err := s.pythonTaint.Scan(ctx, engagementID, ws.Dir); err != nil {
+				if result.recordEngineError("taint_python", err) {
+					return result, err
+				}
+			} else {
+				result.unknownEngine("taint_python", scanrun.ReasonLegacyReporter)
+			}
 		}
 	}
 
 	// JavaScript/TypeScript semantic taint is source-only and value-granular. It runs independently of the
 	// Python and Go scanners on the same propose-only lifecycle: positive witnesses become gated CapSAST
 	// proposals, while missing/partial coverage never becomes a clean conclusion.
-	if opts.scansVulnerabilities() && s.jsTaint != nil {
-		if scanner, ok := s.jsTaint.(ports.CorrelatedTaintScanner); ok {
-			outcome, _ := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
-			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
-			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
-				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+	if opts.scansVulnerabilities() && ws.Image == nil && s.jsTaint != nil {
+		if skipped, cancelErr := result.skipEngineForContext("taint_javascript", ctx); skipped {
+			if cancelErr != nil {
+				return result, cancelErr
+			}
+		} else if scanner, ok := s.jsTaint.(ports.CorrelatedTaintScanner); ok {
+			outcome, terr := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
+			if result.applyTaintOutcome("taint_javascript", outcome, terr) {
+				return result, terr
 			}
 		} else if scanner, ok := s.jsTaint.(ports.TaintCoverageScanner); ok {
-			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
-			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
-			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
-				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			outcome, terr := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
+			if result.applyTaintOutcome("taint_javascript", outcome, terr) {
+				return result, terr
 			}
 		} else {
-			_, _ = s.jsTaint.Scan(ctx, engagementID, ws.Dir)
+			if _, err := s.jsTaint.Scan(ctx, engagementID, ws.Dir); err != nil {
+				if result.recordEngineError("taint_javascript", err) {
+					return result, err
+				}
+			} else {
+				result.unknownEngine("taint_javascript", scanrun.ReasonLegacyReporter)
+			}
 		}
 	}
 
 	// Java semantic value-flow taint, same propose-only lifecycle as the JS/Python/Go scanners.
-	if opts.scansVulnerabilities() && s.javaTaint != nil {
-		if scanner, ok := s.javaTaint.(ports.CorrelatedTaintScanner); ok {
-			outcome, _ := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
-			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
-			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
-				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+	if opts.scansVulnerabilities() && ws.Image == nil && s.javaTaint != nil {
+		if skipped, cancelErr := result.skipEngineForContext("taint_java", ctx); skipped {
+			if cancelErr != nil {
+				return result, cancelErr
+			}
+		} else if scanner, ok := s.javaTaint.(ports.CorrelatedTaintScanner); ok {
+			outcome, terr := scanner.ScanCorrelated(ctx, engagementID, ws.Dir, taintSubjects)
+			if result.applyTaintOutcome("taint_java", outcome, terr) {
+				return result, terr
 			}
 		} else if scanner, ok := s.javaTaint.(ports.TaintCoverageScanner); ok {
-			outcome, _ := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
-			result.AnalysisCoverage = mergeAnalysisCoverage(result.AnalysisCoverage, outcome.Coverage)
-			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
-				result.SourceWarnings = mergeStrings(result.SourceWarnings, []string{warning})
+			outcome, terr := scanner.ScanWithCoverage(ctx, engagementID, ws.Dir)
+			if result.applyTaintOutcome("taint_java", outcome, terr) {
+				return result, terr
 			}
 		} else {
-			_, _ = s.javaTaint.Scan(ctx, engagementID, ws.Dir)
+			if _, err := s.javaTaint.Scan(ctx, engagementID, ws.Dir); err != nil {
+				if result.recordEngineError("taint_java", err) {
+					return result, err
+				}
+			} else {
+				result.unknownEngine("taint_java", scanrun.ReasonLegacyReporter)
+			}
 		}
 	}
 
@@ -4302,6 +4759,14 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 		}
 	}
 
+	result.refreshEngineCoverage()
+	executionCtx := ctx
+	publicationCtx, cancelPublication, err := scanPublicationContext(ctx)
+	if err != nil {
+		return result, err
+	}
+	defer cancelPublication()
+	ctx = publicationCtx
 	assessmentResult := s.copyAssessmentScanResult(result)
 	if s.results != nil {
 		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
@@ -4390,9 +4855,9 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	// Capture only after all source readers have completed, but before deferred
 	// workspace cleanup. Capture failure is explicit metadata, never a scan failure.
 	if opts.ProjectAnalysis {
-		s.captureProjectSource(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, result)
+		s.captureProjectSource(executionCtx, engagementID, opts.ProjectAnalysisID, ws.Dir, result)
 		if result.SourceCapture != nil && result.SourceCapture.Capabilities.Source.Available {
-			s.captureProjectComparison(ctx, engagementID, opts.ProjectAnalysisID, ws.Dir, ws.Commit, result)
+			s.captureProjectComparison(executionCtx, engagementID, opts.ProjectAnalysisID, ws.Dir, ws.Commit, result)
 		}
 	}
 	// Record the image's manifest digest so the fleet cluster agent can correlate a running digest
@@ -4419,6 +4884,10 @@ func (s *Service) reconcileVulnerabilities(ctx context.Context, publication sbom
 
 func (s *Service) captureProjectComparison(ctx context.Context, engagementID shared.ID, analysisID, sourceDir, head string, result *ScanResult) {
 	if result == nil || !result.Comparison.Available || s.sourceArtifacts == nil {
+		return
+	}
+	if ctx.Err() != nil {
+		result.Comparison = projectanalysis.Comparison{Reason: projectanalysis.UnavailableCaptureFailed}
 		return
 	}
 	if s.comparisonSource == nil {
@@ -4468,6 +4937,10 @@ func comparisonFromWorkspace(req ports.AcquireRequest, ws *ports.Workspace) proj
 
 func (s *Service) captureProjectSource(ctx context.Context, engagementID shared.ID, analysisID, sourceDir string, result *ScanResult) {
 	if s.sourceArtifacts == nil || result == nil {
+		return
+	}
+	if ctx.Err() != nil {
+		result.SourceCapture = &projectanalysis.SourceCapture{Capabilities: unavailableSourceCapabilities(projectanalysis.UnavailableCaptureFailed)}
 		return
 	}
 	engagement, err := s.engagements.GetByID(ctx, engagementID)
@@ -4524,8 +4997,421 @@ func mergeCachedScanResult(current *ScanResult, previous ScanResult, opts ScanOp
 	if !preserved {
 		return
 	}
+	// Findings from the other mode are cache material, not evidence that its
+	// engines ran in this invocation. Preserve that distinction for consumers.
+	current.IncludesPreviousResults = true
 	current.ScanMode = ScanModeFull
+	current.refreshEngineCoverage()
 	mergeCachedAnnotations(current, previous, preservedVulnerabilities)
+}
+
+// engineOutcomePlan records the capabilities selected for this execution before
+// their work starts. It is deliberately independent of warning text: a warning is
+// presentation, while this is the server-owned fact used by jobs and scan runs.
+func (s *Service) engineOutcomePlan(opts ScanOptions, imported, sourceApplicable bool) []scanrun.EngineOutcome {
+	plan := make([]scanrun.EngineOutcome, 0, 12)
+	add := func(engine string, required bool, applicable bool) {
+		outcome := scanrun.EngineOutcome{Engine: engine, Required: required, Execution: scanrun.EngineNotRun, Coverage: scanrun.CoverageUnknown}
+		switch {
+		case !applicable:
+			outcome.Coverage, outcome.Reason = scanrun.CoverageNotApplicable, scanrun.ReasonNotApplicable
+		case !required:
+			outcome.Coverage, outcome.Reason = scanrun.CoverageNotApplicable, scanrun.ReasonNotSelected
+		}
+		plan = append(plan, outcome)
+	}
+	addSecuritySource := func(engine string, selected, available, sourceOnly bool) {
+		if imported || (sourceOnly && !sourceApplicable) {
+			add(engine, false, false)
+			return
+		}
+		if !opts.scansVulnerabilities() || !selected {
+			add(engine, false, true)
+			return
+		}
+		if !available {
+			plan = append(plan, scanrun.EngineOutcome{Engine: engine, Required: true, Execution: scanrun.EngineNotRun, Coverage: scanrun.CoverageUnknown, Reason: scanrun.ReasonUnavailable})
+			return
+		}
+		add(engine, true, true)
+	}
+	addRequested := func(engine string, selected bool, configured bool, applicable bool) {
+		if !applicable {
+			add(engine, false, false)
+			return
+		}
+		if !selected {
+			add(engine, false, true)
+			return
+		}
+		if !configured {
+			plan = append(plan, scanrun.EngineOutcome{Engine: engine, Required: true, Execution: scanrun.EngineNotRun, Coverage: scanrun.CoverageUnknown, Reason: scanrun.ReasonUnavailable})
+			return
+		}
+		add(engine, true, true)
+	}
+	add("inventory", true, true)
+	add("dependency_resolution", true, true)
+	add("sca", opts.scansVulnerabilities(), true)
+	add("licenses", opts.scansLicenses(), true)
+	addSecuritySource("sast", s.sastSelected, s.sastAnalyzer != nil, true)
+	// Secret and IaC scanners inspect the materialized image filesystem too;
+	// only SAST requires first-party source and is N/A for image targets.
+	addSecuritySource("secrets", s.secretSelected, s.secretScanner != nil, false)
+	addSecuritySource("iac", s.misconfigSelected, s.misconfig != nil, false)
+	addRequested("code_quality", opts.CodeQuality, s.codeQuality != nil, sourceApplicable)
+	_, historySupported := s.secretScanner.(ports.SecretHistoryScanner)
+	addRequested("secret_history", opts.scansVulnerabilities() && s.secretHistory, historySupported, sourceApplicable)
+	// Semantic engines stay optional until configured, then become selected
+	// security work whose absence or truncation affects coverage.
+	addRequested("taint_go", opts.scansVulnerabilities() && s.taint != nil, s.taint != nil, sourceApplicable)
+	addRequested("taint_python", opts.scansVulnerabilities() && s.pythonTaint != nil, s.pythonTaint != nil, sourceApplicable)
+	addRequested("taint_javascript", opts.scansVulnerabilities() && s.jsTaint != nil, s.jsTaint != nil, sourceApplicable)
+	addRequested("taint_java", opts.scansVulnerabilities() && s.javaTaint != nil, s.javaTaint != nil, sourceApplicable)
+	return plan
+}
+
+// failedAttemptEngineOutcomes keeps a failed job useful without converting its
+// failure into a successful result. The current stage is the worker's structured
+// progress value; it is not inferred from a human-facing warning.
+func (s *Service) failedAttemptEngineOutcomes(outcomes []scanrun.EngineOutcome, stage string, err error) []scanrun.EngineOutcome {
+	result := scanrun.CloneEngineOutcomes(outcomes)
+	current := map[string]string{
+		stageAcquire: "inventory", stageSBOM: "dependency_resolution", stageVulns: "sca", stageLicense: "licenses",
+	}[stage]
+	for i := range result {
+		if !result[i].Required || result[i].Execution != scanrun.EngineNotRun {
+			continue
+		}
+		if result[i].Engine == current {
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
+				result[i].Execution, result[i].Coverage, result[i].Reason = scanrun.EngineTimedOut, scanrun.CoveragePartial, scanrun.ReasonDeadlineExceeded
+			case errors.Is(err, context.Canceled):
+				result[i].Execution, result[i].Coverage, result[i].Reason = scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled
+			default:
+				result[i].Execution, result[i].Coverage, result[i].Reason = scanrun.EngineFailed, scanrun.CoverageUnknown, scanrun.ReasonEngineError
+			}
+			continue
+		}
+		result[i].Reason = scanrun.ReasonUpstreamFailure
+	}
+	return result
+}
+
+func (r *ScanResult) engineOutcome(engine string) (scanrun.EngineOutcome, bool) {
+	for _, outcome := range r.EngineOutcomes {
+		if outcome.Engine == engine {
+			return outcome, true
+		}
+	}
+	return scanrun.EngineOutcome{}, false
+}
+
+func (r *ScanResult) updateEngine(engine string, execution scanrun.EngineExecution, coverage scanrun.CoverageStatus, reason scanrun.EngineReason, counts map[scanrun.EngineMeasure]int64) {
+	for i := range r.EngineOutcomes {
+		if r.EngineOutcomes[i].Engine != engine {
+			continue
+		}
+		r.EngineOutcomes[i].Execution = execution
+		r.EngineOutcomes[i].Coverage = coverage
+		r.EngineOutcomes[i].Reason = reason
+		r.EngineOutcomes[i].Counts = counts
+		return
+	}
+}
+
+func (r *ScanResult) setEnginePlan(plan []scanrun.EngineOutcome) {
+	r.plannedEngines = scanrun.CloneEngineOutcomes(plan)
+	r.EngineOutcomes = scanrun.CloneEngineOutcomes(plan)
+}
+
+// mergeEnginePass combines a workspace pass with a subsequent image filesystem
+// pass. A successful later pass cannot erase an earlier coverage gap.
+func (r *ScanResult) mergeEnginePass(engine string, execution scanrun.EngineExecution, coverage scanrun.CoverageStatus, reason scanrun.EngineReason, counts map[scanrun.EngineMeasure]int64) {
+	old, ok := r.engineOutcome(engine)
+	if !ok {
+		return
+	}
+	combined := make(map[scanrun.EngineMeasure]int64, len(old.Counts)+len(counts))
+	for key, value := range old.Counts {
+		combined[key] = value
+	}
+	for key, value := range counts {
+		combined[key] += value
+	}
+	if execution == scanrun.EngineCompleted && old.Execution != scanrun.EngineCompleted {
+		execution, reason = old.Execution, old.Reason
+	}
+	if old.Coverage == scanrun.CoveragePartial || coverage == scanrun.CoveragePartial {
+		coverage = scanrun.CoveragePartial
+	} else if old.Coverage != scanrun.CoverageComplete || coverage != scanrun.CoverageComplete {
+		coverage = scanrun.CoverageUnknown
+	}
+	if reason == scanrun.ReasonNone && coverage != scanrun.CoverageComplete {
+		reason = old.Reason
+	}
+	r.updateEngine(engine, execution, coverage, reason, combined)
+}
+
+func (r *ScanResult) mergeEnginePassError(engine string, err error) {
+	execution, reason := scanrun.EngineFailed, scanrun.ReasonEngineError
+	switch {
+	case errors.Is(err, context.Canceled):
+		execution, reason = scanrun.EngineCancelled, scanrun.ReasonCancelled
+	case budgetExpired(err):
+		execution, reason = scanrun.EngineTimedOut, scanrun.ReasonDeadlineExceeded
+	}
+	r.mergeEnginePass(engine, execution, scanrun.CoveragePartial, reason, nil)
+}
+
+func (r *ScanResult) completeEngine(engine string) {
+	r.updateEngine(engine, scanrun.EngineCompleted, scanrun.CoverageComplete, scanrun.ReasonNone, nil)
+}
+
+func (r *ScanResult) completeEngineWithCounts(engine string, counts map[scanrun.EngineMeasure]int64) {
+	r.updateEngine(engine, scanrun.EngineCompleted, scanrun.CoverageComplete, scanrun.ReasonNone, counts)
+}
+
+func (r *ScanResult) partialEngine(engine string, reason scanrun.EngineReason, counts map[scanrun.EngineMeasure]int64) {
+	r.updateEngine(engine, scanrun.EngineCompleted, scanrun.CoveragePartial, reason, counts)
+}
+
+func (r *ScanResult) unknownEngine(engine string, reason scanrun.EngineReason) {
+	r.updateEngine(engine, scanrun.EngineCompleted, scanrun.CoverageUnknown, reason, nil)
+}
+
+func (r *ScanResult) applyAnalysisCoverageEngine(engine string, coverage ports.AnalysisCoverage) {
+	counts := map[scanrun.EngineMeasure]int64{
+		scanrun.MeasureFilesSeen:   int64(coverage.FilesSeen),
+		scanrun.MeasureFilesParsed: int64(coverage.FilesParsed),
+		scanrun.MeasureProposals:   int64(coverage.Proposals),
+	}
+	switch {
+	case coverage.Status == ports.AnalysisCoveragePartial || coverage.Truncated:
+		r.partialEngine(engine, scanrun.ReasonAnalysisIncomplete, counts)
+	case coverage.Status == ports.AnalysisCoverageComplete && coverage.Complete:
+		r.completeEngineWithCounts(engine, counts)
+	case coverage.Status == ports.AnalysisCoverageNotApplicable:
+		// The analyzer made a successful applicability decision (for example,
+		// a repository has no matching language). That is distinct from an
+		// unavailable selected analyzer and must not make coverage fail.
+		r.notApplicableEngine(engine)
+	default:
+		r.unknownEngine(engine, scanrun.ReasonUnavailable)
+	}
+}
+
+// recordEngineError classifies the outcome of an invocation that actually
+// began. It deliberately differs from skipEngineForContext: a deadline here
+// is a timed-out engine, whereas a deadline observed before invocation is
+// budget-exhausted work that never started.
+func (r *ScanResult) recordEngineError(engine string, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, context.Canceled):
+		r.updateEngine(engine, scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled, nil)
+		return true
+	case budgetExpired(err):
+		r.timeoutEngine(engine)
+		return false
+	default:
+		r.failEngine(engine, scanrun.ReasonEngineError)
+		return false
+	}
+}
+
+// applyTaintOutcome preserves invocation failures even if an adapter also returns
+// a coverage value. Only successful invocations can establish coverage.
+func (r *ScanResult) applyTaintOutcome(engine string, outcome ports.TaintScanOutcome, err error) bool {
+	if err != nil {
+		// Retain partial parser diagnostics without turning them into proof of
+		// successful execution. A contradictory complete value is not usable.
+		if outcome.Coverage.Status == ports.AnalysisCoveragePartial || outcome.Coverage.Status == ports.AnalysisCoverageUnavailable {
+			r.AnalysisCoverage = mergeAnalysisCoverage(r.AnalysisCoverage, outcome.Coverage)
+			if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
+				r.SourceWarnings = mergeStrings(r.SourceWarnings, []string{warning})
+			}
+		}
+		return r.recordEngineError(engine, err)
+	}
+	r.AnalysisCoverage = mergeAnalysisCoverage(r.AnalysisCoverage, outcome.Coverage)
+	r.applyAnalysisCoverageEngine(engine, outcome.Coverage)
+	if warning := semanticCoverageWarning(outcome.Coverage); warning != "" {
+		r.SourceWarnings = mergeStrings(r.SourceWarnings, []string{warning})
+	}
+	return false
+}
+
+func (r *ScanResult) failEngine(engine string, reason scanrun.EngineReason) {
+	r.updateEngine(engine, scanrun.EngineFailed, scanrun.CoverageUnknown, reason, nil)
+}
+
+func (r *ScanResult) timeoutEngine(engine string) {
+	r.updateEngine(engine, scanrun.EngineTimedOut, scanrun.CoveragePartial, scanrun.ReasonDeadlineExceeded, nil)
+}
+
+func (r *ScanResult) notRunEngine(engine string, reason scanrun.EngineReason) {
+	r.updateEngine(engine, scanrun.EngineNotRun, scanrun.CoverageUnknown, reason, nil)
+}
+
+func (r *ScanResult) notApplicableEngine(engine string) {
+	for i := range r.plannedEngines {
+		if r.plannedEngines[i].Engine == engine {
+			r.plannedEngines[i].Required = false
+		}
+	}
+	for i := range r.EngineOutcomes {
+		if r.EngineOutcomes[i].Engine != engine {
+			continue
+		}
+		r.EngineOutcomes[i].Required = false
+		r.EngineOutcomes[i].Execution = scanrun.EngineNotRun
+		r.EngineOutcomes[i].Coverage = scanrun.CoverageNotApplicable
+		r.EngineOutcomes[i].Reason = scanrun.ReasonNotApplicable
+		r.EngineOutcomes[i].Counts = nil
+		return
+	}
+}
+
+// skipEngineForContext prevents later engines from being invoked after the
+// shared scan budget has expired. A caller cancellation remains an error; a
+// budget exhaustion remains a partial scan with explicit missing work.
+func (r *ScanResult) skipEngineForContext(engine string, ctx context.Context) (bool, error) {
+	err := ctx.Err()
+	switch {
+	case errors.Is(err, context.Canceled):
+		r.updateEngine(engine, scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled, nil)
+		return true, err
+	case errors.Is(err, context.DeadlineExceeded):
+		// This check happens before the adapter invocation. No work began for
+		// this engine, even if an earlier engine timed out, so it is always a
+		// budget-exhausted non-start rather than a timeout.
+		r.notRunEngine(engine, scanrun.ReasonBudgetExhausted)
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// appendDeadlineWarningForSkippedSourceEngine preserves the warning emitted by
+// source stages that used to observe the expired context from inside their
+// adapter. The adapter must no longer be invoked after the shared scan budget
+// expires, but the compatibility warning still explains the missing findings.
+func (r *ScanResult) appendDeadlineWarningForSkippedSourceEngine(engine string) {
+	outcome, ok := r.engineOutcome(engine)
+	if !ok || outcome.Execution != scanrun.EngineNotRun || outcome.Reason != scanrun.ReasonBudgetExhausted {
+		return
+	}
+	if engine == "secret_history" {
+		r.SourceWarnings = append(r.SourceWarnings, "git-history secret scan skipped: "+context.DeadlineExceeded.Error())
+		return
+	}
+	var stage string
+	switch engine {
+	case "sast":
+		stage = "static analysis"
+	case "secrets":
+		stage = "secret scan"
+	case "iac":
+		stage = "infrastructure-as-code scan"
+	case "code_quality":
+		stage = "code-quality analysis"
+	}
+	if stage != "" {
+		r.SourceWarnings = append(r.SourceWarnings, stageBudgetWarning(stage))
+	}
+}
+
+// skipSelectedSecretHistoryAfterSecretDeadline carries the shared deadline to
+// selected, supported history scanning when its enclosing working-tree secret
+// scan was never invoked. Disabled, unavailable, and inapplicable history work
+// keeps its planned reason rather than being presented as budget exhaustion.
+func (r *ScanResult) skipSelectedSecretHistoryAfterSecretDeadline() {
+	history, ok := r.engineOutcome("secret_history")
+	if !ok || !history.Required || history.Execution != scanrun.EngineNotRun || history.Reason != scanrun.ReasonNone {
+		return
+	}
+	r.notRunEngine("secret_history", scanrun.ReasonBudgetExhausted)
+	r.appendDeadlineWarningForSkippedSourceEngine("secret_history")
+}
+
+// stopCoreForContext checks a core phase before its first adapter call. A
+// completed inventory may have several passes; an expired budget before a later
+// pass makes that inventory partial rather than erasing completed work.
+func (r *ScanResult) stopCoreForContext(engine string, ctx context.Context) (bool, error) {
+	err := ctx.Err()
+	if err == nil {
+		return false, nil
+	}
+	if errors.Is(err, context.Canceled) {
+		r.updateEngine(engine, scanrun.EngineCancelled, scanrun.CoverageUnknown, scanrun.ReasonCancelled, nil)
+		return true, err
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		if outcome, ok := r.engineOutcome(engine); ok && outcome.Execution == scanrun.EngineCompleted {
+			r.partialEngine(engine, scanrun.ReasonBudgetExhausted, outcome.Counts)
+		} else {
+			r.notRunEngine(engine, scanrun.ReasonBudgetExhausted)
+		}
+		for i := range r.EngineOutcomes {
+			outcome := &r.EngineOutcomes[i]
+			if outcome.Required && outcome.Execution == scanrun.EngineNotRun && outcome.Reason == scanrun.ReasonNone {
+				outcome.Reason = scanrun.ReasonBudgetExhausted
+			}
+		}
+		return true, err
+	}
+	return false, nil
+}
+
+func detectionSourceProvenanceUnavailable(sources []ports.DetectionSource, doc *sbom.SBOM) bool {
+	if doc == nil || len(doc.Components) == 0 {
+		return false
+	}
+	for _, source := range sources {
+		if provenance, ok := source.(ports.SourceProvenance); ok {
+			version, database := provenance.Provenance()
+			if version == "" && database == "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (r *ScanResult) refreshEngineCoverage() {
+	r.EngineCoverage = scanrun.ComputeEngineCoverage(r.EngineOutcomes)
+}
+
+type scanBudgetParentKey struct{}
+
+// scanPublicationValues keeps admission and execution metadata while cancellation
+// continues to come directly from the caller or worker lease context.
+type scanPublicationValues struct {
+	context.Context
+	values context.Context
+}
+
+func (c scanPublicationValues) Value(key any) any { return c.values.Value(key) }
+
+// scanPublicationContext ends the service-owned execution budget at the persistence
+// boundary. Its bounded publication window cannot revive caller cancellation.
+func scanPublicationContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	noop := func() {}
+	parent, owned := ctx.Value(scanBudgetParentKey{}).(context.Context)
+	if !owned {
+		return ctx, noop, ctx.Err()
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return ctx, noop, ctx.Err()
+	}
+	if err := parent.Err(); err != nil {
+		return ctx, noop, err
+	}
+	publication, cancel := context.WithTimeout(scanPublicationValues{Context: parent, values: ctx}, 10*time.Second)
+	return publication, cancel, nil
 }
 
 func semanticCoverageWarning(coverage ports.AnalysisCoverage) string {
@@ -5175,18 +6061,21 @@ func isPinnedVersion(v string) bool {
 var credInErr = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
 type scanEvidencePayload struct {
-	SBOMSHA256        string                   `json:"sbom_sha256"`
-	Findings          []string                 `json:"findings"`
-	Suppressed        []string                 `json:"suppressed,omitempty"`
-	AITriagePolicy    string                   `json:"ai_triage_policy,omitempty"`
-	AITriage          []ports.AICritique       `json:"ai_triage,omitempty"`
-	AITriageFindings  []scanEvidenceAIFinding  `json:"ai_triage_findings,omitempty"`
-	AITriageBudget    *AITriageBudget          `json:"ai_triage_budget,omitempty"`
-	AITriageTelemetry *ports.FPTriageTelemetry `json:"ai_triage_telemetry,omitempty"`
-	AITriageAlerts    []AITriageAlert          `json:"ai_triage_alerts,omitempty"`
-	Manifest          ports.ScanManifest       `json:"manifest"`
-	SealedAt          string                   `json:"sealed_at"`
-	Actor             string                   `json:"actor"`
+	SBOMSHA256              string                   `json:"sbom_sha256"`
+	Findings                []string                 `json:"findings"`
+	Suppressed              []string                 `json:"suppressed,omitempty"`
+	AITriagePolicy          string                   `json:"ai_triage_policy,omitempty"`
+	AITriage                []ports.AICritique       `json:"ai_triage,omitempty"`
+	AITriageFindings        []scanEvidenceAIFinding  `json:"ai_triage_findings,omitempty"`
+	AITriageBudget          *AITriageBudget          `json:"ai_triage_budget,omitempty"`
+	AITriageTelemetry       *ports.FPTriageTelemetry `json:"ai_triage_telemetry,omitempty"`
+	AITriageAlerts          []AITriageAlert          `json:"ai_triage_alerts,omitempty"`
+	Manifest                ports.ScanManifest       `json:"manifest"`
+	ExecutionMode           string                   `json:"execution_mode,omitempty"`
+	IncludesPreviousResults bool                     `json:"includes_previous_results,omitempty"`
+	EngineOutcomes          []scanrun.EngineOutcome  `json:"engine_outcomes,omitempty"`
+	SealedAt                string                   `json:"sealed_at"`
+	Actor                   string                   `json:"actor"`
 }
 
 // scanEvidenceAIFinding seals every input the gate policy reads. Sealing a dedup key alone would not
@@ -5204,6 +6093,14 @@ type scanEvidenceAIFinding struct {
 // alongside findings, so changing a verdict, verifier identity, policy reason, or gate authorization is
 // detectable even when the finding set itself is unchanged.
 func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byte, error) {
+	var outcomes []scanrun.EngineOutcome
+	if len(result.EngineOutcomes) > 0 {
+		var err error
+		outcomes, err = scanrun.CanonicalEngineOutcomes(result.EngineOutcomes)
+		if err != nil {
+			return nil, fmt.Errorf("canonicalize scan evidence engine outcomes: %w", err)
+		}
+	}
 	keys := make([]string, 0, len(result.Findings))
 	for _, f := range result.Findings {
 		keys = append(keys, f.DedupKey)
@@ -5280,18 +6177,21 @@ func scanEvidenceContent(actor string, now time.Time, result *ScanResult) ([]byt
 		policyVersion = aiTriagePolicyVersion
 	}
 	return json.Marshal(scanEvidencePayload{
-		SBOMSHA256:        result.Manifest.SBOMSHA256,
-		Findings:          keys,
-		Suppressed:        suppressed,
-		AITriagePolicy:    policyVersion,
-		AITriage:          aiTriage,
-		AITriageFindings:  aiFindings,
-		AITriageBudget:    result.AITriageBudget,
-		AITriageTelemetry: result.AITriageTelemetry,
-		AITriageAlerts:    result.AITriageAlerts,
-		Manifest:          result.Manifest,
-		SealedAt:          now.UTC().Format(time.RFC3339),
-		Actor:             actor,
+		SBOMSHA256:              result.Manifest.SBOMSHA256,
+		Findings:                keys,
+		Suppressed:              suppressed,
+		AITriagePolicy:          policyVersion,
+		AITriage:                aiTriage,
+		AITriageFindings:        aiFindings,
+		AITriageBudget:          result.AITriageBudget,
+		AITriageTelemetry:       result.AITriageTelemetry,
+		AITriageAlerts:          result.AITriageAlerts,
+		Manifest:                result.Manifest,
+		ExecutionMode:           result.ExecutionMode,
+		IncludesPreviousResults: result.IncludesPreviousResults,
+		EngineOutcomes:          outcomes,
+		SealedAt:                now.UTC().Format(time.RFC3339),
+		Actor:                   actor,
 	})
 }
 
@@ -5339,20 +6239,27 @@ func (s *Service) ReportInsight(ctx context.Context, engagementID shared.ID) (po
 		if err := json.Unmarshal(data, &res); err != nil {
 			return ports.ReportInsight{}, fmt.Errorf("decode scan result: %w", err)
 		}
+		// The persisted aggregate is redundant. Derive from canonical facts so a
+		// stale or forged aggregate cannot influence report policy.
+		coverage := scanrun.ComputeEngineCoverage(res.EngineOutcomes)
 		ins = ports.ReportInsight{
-			ScanTarget:       res.Target,
-			HasScan:          true,
-			ScanTime:         res.scanTime(),
-			LicenseDetected:  res.LicenseCoverage.Detected,
-			LicenseUnknown:   res.LicenseCoverage.Unknown,
-			LicensePct:       res.LicenseCoverage.Pct,
-			Confident:        res.Completeness.Confident,
-			CompletenessNote: res.Completeness.Warning,
-			ReproScore:       res.Manifest.ReproScore,
-			PinnedInputs:     res.Manifest.PinnedInputs,
-			UnpinnedInputs:   res.Manifest.UnpinnedInputs,
-			VulnDBSnapshot:   res.VulnDBSnapshot,
-			GrypeDBVersion:   res.Manifest.GrypeDBVersion,
+			ScanTarget:              res.Target,
+			HasScan:                 true,
+			ScanTime:                res.scanTime(),
+			LicenseDetected:         res.LicenseCoverage.Detected,
+			LicenseUnknown:          res.LicenseCoverage.Unknown,
+			LicensePct:              res.LicenseCoverage.Pct,
+			Confident:               res.Completeness.Confident,
+			CompletenessNote:        res.Completeness.Warning,
+			EngineOutcomes:          scanrun.CloneEngineOutcomes(res.EngineOutcomes),
+			EngineCoverage:          coverage,
+			ExecutionMode:           res.ExecutionMode,
+			IncludesPreviousResults: res.IncludesPreviousResults,
+			ReproScore:              res.Manifest.ReproScore,
+			PinnedInputs:            res.Manifest.PinnedInputs,
+			UnpinnedInputs:          res.Manifest.UnpinnedInputs,
+			VulnDBSnapshot:          res.VulnDBSnapshot,
+			GrypeDBVersion:          res.Manifest.GrypeDBVersion,
 
 			ThirdPartyFindings:   res.FindingQuality.ThirdParty,
 			FirstPartyHistorical: res.FindingQuality.FirstPartyHistorical,

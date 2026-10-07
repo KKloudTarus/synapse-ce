@@ -233,10 +233,18 @@ func (s *InboundWebhookRepository) ProvisionInboundWebhook(ctx context.Context, 
 		endpoint.CurrentSealed == "" || endpoint.RatePerMinute < 1 || endpoint.RatePerMinute > 600 {
 		return false, nil
 	}
+	function := "synapse_provision_github_inbound_webhook"
+	switch endpoint.Provider {
+	case "", "github":
+	case "bitbucket":
+		function = "synapse_provision_bitbucket_inbound_webhook"
+	default:
+		return false, nil
+	}
 	provisioned := false
 	err := requireTenant(ctx, s.pool, endpoint.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
-			"SELECT synapse_provision_github_inbound_webhook($1,$2,$3,$4,$5)",
+			"SELECT "+function+"($1,$2,$3,$4,$5)",
 			endpoint.TenantID.String(), endpoint.PublicID, endpoint.OwnerID,
 			endpoint.CurrentSealed, endpoint.RatePerMinute,
 		).Scan(&provisioned)
@@ -250,10 +258,22 @@ func (s *InboundWebhookRepository) RotateInboundWebhook(ctx context.Context, ide
 		currentSealed == "" || previousExpiresAt.IsZero() {
 		return false, nil
 	}
+	endpoint, found, err := s.GetInboundWebhookForOwner(ctx, identity.TenantID, identity.OwnerKind, identity.OwnerID)
+	if err != nil || !found {
+		return false, err
+	}
+	function := "synapse_rotate_github_inbound_webhook"
+	switch endpoint.Provider {
+	case "github":
+	case "bitbucket":
+		function = "synapse_rotate_bitbucket_inbound_webhook"
+	default:
+		return false, nil
+	}
 	rotated := false
-	err := requireTenant(ctx, s.pool, identity.TenantID, func(tx pgx.Tx) error {
+	err = requireTenant(ctx, s.pool, identity.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
-			"SELECT synapse_rotate_github_inbound_webhook($1,$2,$3,$4,$5,$6)",
+			"SELECT "+function+"($1,$2,$3,$4,$5,$6)",
 			identity.TenantID.String(), identity.PublicID, identity.OwnerID,
 			expectedVersion, currentSealed, previousExpiresAt.UTC(),
 		).Scan(&rotated)

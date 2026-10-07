@@ -23,6 +23,17 @@ function isUploadedSourceTarget(value: string) {
   return UPLOADED_SOURCE_TARGET.test(value.trim())
 }
 
+export function engineCoverageForDisplay(job: ScanJob | null, summary: ScanResult | null) {
+  // A job is the current attempt. Never infer its coverage from a cached result
+  // produced by an earlier attempt.
+  if (job) return job.engineCoverage ?? { status: 'unknown' as const, required: 0, completed: 0 }
+  return summary?.engineCoverage ?? { status: 'unknown' as const, required: 0, completed: 0 }
+}
+
+export function jobForEngagement(job: ScanJob | null, engagementId: string): ScanJob | null {
+  return job?.engagementId === engagementId ? job : null
+}
+
 export function ScanPanel({
   eng,
   importedSBOM,
@@ -68,7 +79,8 @@ export function ScanPanel({
     { deps: [eng.businessAssetId] },
   )
 
-  const running = job?.status === 'running'
+  const currentJob = jobForEngagement(job, eng.id)
+  const running = currentJob?.status === 'running'
   const archived = isReadOnly(eng)
   const completed = eng.status === 'completed'
   const authorizationWindowConfigured = Boolean(eng.authorizedFrom && eng.authorizedTo)
@@ -81,7 +93,11 @@ export function ScanPanel({
     : completed
       ? 'Completed Assessments keep their finalized Snapshots. Create a Re-test to run another assessment.'
       : 'Configure the Re-test authorization window and allow SCA tools before running a scan.'
-  const debugEvents = job?.debugEvents?.length ? job.debugEvents : (summary?.debugEvents ?? [])
+  const debugEvents = currentJob?.debugEvents?.length ? currentJob.debugEvents : (summary?.debugEvents ?? [])
+  // A current job is newer than the cached result, so its absent metadata stays
+  // unknown instead of inheriting the prior run's coverage.
+  const engineCoverage = engineCoverageForDisplay(currentJob, summary)
+  const engineOutcomes = currentJob ? (currentJob.engineOutcomes ?? []) : (summary?.engineOutcomes ?? [])
   const usingImportedSBOM = Boolean(importedSBOM) && !usingUploadedSource
 
   useEffect(() => {
@@ -108,10 +124,12 @@ export function ScanPanel({
 
   useEffect(() => {
     if (!polledJob) return
+    if (polledJob.engagementId !== eng.id) return
+    let live = true
     setJob(polledJob)
     if (polledJob.status === 'succeeded') {
       api.latestScan(eng.id).then((res) => {
-        if (res) {
+        if (live && res) {
           setSummary(res)
           onScanned(res)
         }
@@ -119,14 +137,15 @@ export function ScanPanel({
     } else if (polledJob.status === 'failed') {
       setError(polledJob.error || 'Scan failed')
     }
-  }, [polledJob])
+    return () => { live = false }
+  }, [polledJob, eng.id])
 
   useEffect(() => {
     let live = true
     api
       .scanStatus(eng.id)
       .then(async (j) => {
-        if (!live || !j) return
+        if (!live || !j || j.engagementId !== eng.id) return
         setJob(j)
         if (j.status === 'failed') setError(j.error || 'Scan failed')
         else if (j.status === 'succeeded') {
@@ -329,20 +348,20 @@ export function ScanPanel({
       {running && (
         <div>
           <div className="mb-1.5 flex items-center justify-between text-xs">
-            <span className="font-semibold capitalize text-primary">{job?.stage || 'starting'}…</span>
-            <span className="font-mono font-bold tabular-nums text-tertiary">{job?.progress ?? 0}%</span>
+            <span className="font-semibold capitalize text-primary">{currentJob?.stage || 'starting'}…</span>
+            <span className="font-mono font-bold tabular-nums text-tertiary">{currentJob?.progress ?? 0}%</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
             <div
               className="h-full rounded-full bg-brand-solid transition-[width] duration-500 ease-out"
-              style={{ width: `${Math.max(3, job?.progress ?? 0)}%` }}
+              style={{ width: `${Math.max(3, currentJob?.progress ?? 0)}%` }}
             />
           </div>
         </div>
       )}
 
       {/* Horizontal Pipeline Journey Track — collapsed by default once a scan has finished. */}
-      <ScanDebugTimeline events={debugEvents} running={running} scanStatus={job?.status} />
+      <ScanDebugTimeline events={debugEvents} running={running} scanStatus={currentJob?.status} />
 
       {error && (
         <div>
@@ -355,6 +374,35 @@ export function ScanPanel({
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-fg-warning-primary" />
           <span>{summary.completeness.warning}</span>
         </div>
+      )}
+
+      {!running && engineCoverage.status !== 'complete' && (
+        <div role="status" className="rounded-lg border border-utility-orange-300 bg-warning-primary p-3 text-xs text-warning-primary">
+          <p className="font-semibold">Required-engine coverage: {engineCoverage.status} ({engineCoverage.completed}/{engineCoverage.required} completed).</p>
+          <p className="mt-1">A successful job means the worker finished. It does not prove that every required scan engine completed.</p>
+        </div>
+      )}
+
+      {!running && summary?.executionMode && (
+        <div role="status" className="rounded-lg border border-secondary bg-secondary p-3 text-xs text-secondary">
+          <p>Current execution mode: <span className="font-semibold text-primary">{summary.executionMode}</span></p>
+          {summary.includesPreviousResults ? <p className="mt-1">This result includes retained findings from a previous result. Current coverage does not establish whole-assessment coverage.</p> : null}
+        </div>
+      )}
+
+      {!running && engineOutcomes.length > 0 && (
+        <details className="rounded-lg border border-secondary px-3 py-2 text-xs">
+          <summary className="cursor-pointer font-semibold text-secondary">Engine coverage details</summary>
+          <ul className="mt-2 space-y-1 text-primary" aria-label="Engine coverage details">
+            {engineOutcomes.map((outcome) => (
+              <li key={outcome.engine}>
+                <span className="font-semibold">{outcome.engine}</span>: {outcome.coverage} coverage; {outcome.execution}
+                {outcome.reason ? ` (${outcome.reason.replaceAll('_', ' ')})` : ''}
+              </li>
+            ))}
+          </ul>
+          {summary?.includesPreviousResults ? <p className="mt-2 text-tertiary">This result includes retained findings from a previous result.</p> : null}
+        </details>
       )}
 
       {/* ModalForm for Scan Configuration */}

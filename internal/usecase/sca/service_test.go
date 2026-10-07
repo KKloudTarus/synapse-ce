@@ -22,6 +22,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerability"
@@ -73,6 +74,7 @@ func (f *fakeAudit) Record(_ context.Context, e ports.AuditEntry) error {
 type fakeAcquirer struct {
 	dir     string
 	rootfs  string
+	image   *sbom.ImageInfo
 	commit  string
 	cleaned int
 	called  bool
@@ -106,7 +108,7 @@ func (s *cancelAfterAppendEvidenceStore) Append(ctx context.Context, items []evi
 
 func (f *fakeAcquirer) Acquire(_ context.Context, _ ports.AcquireRequest) (*ports.Workspace, error) {
 	f.called = true
-	return &ports.Workspace{Dir: f.dir, RootFS: f.rootfs, Commit: f.commit, Cleanup: func() error { f.cleaned++; return nil }}, nil
+	return &ports.Workspace{Dir: f.dir, RootFS: f.rootfs, Image: f.image, Commit: f.commit, Cleanup: func() error { f.cleaned++; return nil }}, nil
 }
 
 type fakeDetector struct{ gotPath string }
@@ -434,6 +436,19 @@ func TestCodeQualityRequiresExplicitScanOption(t *testing.T) {
 	}
 	if quality.calls != 1 || project.CodeQuality == nil {
 		t.Fatalf("opted-in scan code quality: calls=%d report=%v", quality.calls, project.CodeQuality != nil)
+	}
+}
+
+func TestCodeQualityTruncationMakesSelectedEnginePartial(t *testing.T) {
+	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: t.TempDir()}, &fakeAudit{}, &fakeDetector{})
+	svc.SetCodeQuality(&countingCodeQuality{report: codequality.Report{Truncated: true}})
+	result, err := svc.ScanWithOptions(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, CodeQuality: true})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	outcome, ok := result.engineOutcome("code_quality")
+	if !ok || !outcome.Required || outcome.Coverage != scanrun.CoveragePartial || outcome.Reason != scanrun.ReasonTruncated {
+		t.Fatalf("code quality outcome=%+v", outcome)
 	}
 }
 
@@ -2343,6 +2358,13 @@ func TestScanBudgetExpiryKeepsTheCompletedWorkAndWarns(t *testing.T) {
 	if !found {
 		t.Fatalf("the skipped stage must be recorded as a source warning, got %v", result.SourceWarnings)
 	}
+	if result.EngineCoverage.Status != scanrun.CoveragePartial {
+		t.Fatalf("engine coverage = %+v, want partial", result.EngineCoverage)
+	}
+	secret, ok := result.engineOutcome("secrets")
+	if !ok || secret.Execution != scanrun.EngineTimedOut || secret.Reason != scanrun.ReasonDeadlineExceeded {
+		t.Fatalf("secret outcome = %+v, want timed_out/deadline_exceeded", secret)
+	}
 }
 
 // cancelledSecretScanner reports the shape a CALLER cancellation produces.
@@ -2358,7 +2380,53 @@ func (cancelledSecretScanner) ScanFiles(context.Context, string) (ports.SecretSc
 func TestScanCallerCancellationStillFails(t *testing.T) {
 	svc := newSvc(&fakeEngRepo{eng: engagementWithScope(t, "myrepo")}, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: t.TempDir()}, &fakeAudit{}, &fakeDetector{})
 	svc.SetSecretScanner(cancelledSecretScanner{})
-	if _, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"}); err == nil {
+	result, err := svc.Scan(context.Background(), "operator", "e1", ports.AcquireRequest{Kind: "local", Value: "myrepo"})
+	if err == nil {
 		t.Fatal("a cancelled scan must return an error, not a partial result")
+	}
+	if result == nil {
+		t.Fatal("failed source scan discarded its structured attempt facts")
+	}
+	secret, ok := result.engineOutcome("secrets")
+	if !ok || secret.Execution != scanrun.EngineCancelled || scanrun.ComputeEngineCoverage(result.EngineOutcomes).Status != scanrun.CoveragePartial {
+		t.Fatalf("failed secret outcome=%+v coverage=%+v", secret, scanrun.ComputeEngineCoverage(result.EngineOutcomes))
+	}
+}
+
+func TestEngineOutcomePlanDistinguishesDisabledUnavailableAndTargetCapabilities(t *testing.T) {
+	lookup := func(t *testing.T, outcomes []scanrun.EngineOutcome, engine string) scanrun.EngineOutcome {
+		t.Helper()
+		outcome, ok := (&ScanResult{EngineOutcomes: outcomes}).engineOutcome(engine)
+		if !ok {
+			t.Fatalf("missing %s outcome", engine)
+		}
+		return outcome
+	}
+	svc := &Service{}
+	disabled := lookup(t, svc.engineOutcomePlan(ScanOptions{Mode: ScanModeFull}, false, true), "sast")
+	if disabled.Required || disabled.Reason != scanrun.ReasonNotSelected {
+		t.Fatalf("disabled SAST=%+v", disabled)
+	}
+	svc.SetSourceEngineSelection(true, false, false)
+	unavailable := lookup(t, svc.engineOutcomePlan(ScanOptions{Mode: ScanModeFull}, false, true), "sast")
+	if !unavailable.Required || unavailable.Coverage != scanrun.CoverageUnknown || unavailable.Reason != scanrun.ReasonUnavailable {
+		t.Fatalf("selected unavailable SAST=%+v", unavailable)
+	}
+	image := lookup(t, svc.engineOutcomePlan(ScanOptions{Mode: ScanModeFull}, false, false), "sast")
+	if image.Required || image.Coverage != scanrun.CoverageNotApplicable {
+		t.Fatalf("image SAST=%+v", image)
+	}
+	licenses := svc.engineOutcomePlan(ScanOptions{Mode: ScanModeLicenses}, false, true)
+	for _, engine := range []string{"taint_go", "taint_python", "taint_javascript", "taint_java"} {
+		outcome := lookup(t, licenses, engine)
+		if outcome.Required || outcome.Coverage != scanrun.CoverageNotApplicable {
+			t.Fatalf("license-only %s=%+v", engine, outcome)
+		}
+	}
+	svc.SetSecretScanner(cancelledSecretScanner{})
+	svc.SetSecretHistoryEnabled(true)
+	history := lookup(t, svc.engineOutcomePlan(ScanOptions{Mode: ScanModeFull}, false, true), "secret_history")
+	if !history.Required || history.Coverage != scanrun.CoverageUnknown || history.Reason != scanrun.ReasonUnavailable {
+		t.Fatalf("history without scanner capability=%+v", history)
 	}
 }

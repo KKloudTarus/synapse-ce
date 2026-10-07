@@ -380,8 +380,8 @@ func (store *IntegrationStore) CreateIntegrationBinding(ctx context.Context, bin
 			bindingCount++
 		}
 	}
-	if item.Provider == "gitlab" && bindingCount > 0 {
-		return fmt.Errorf("%w: GitLab inbound integration supports one project binding", shared.ErrConflict)
+	if (item.Provider == "gitlab" || item.Provider == "bitbucket") && bindingCount > 0 {
+		return fmt.Errorf("%w: SCM inbound integration supports one project binding", shared.ErrConflict)
 	}
 	if bindingCount >= integration.MaxBindingsPerPoll {
 		return fmt.Errorf("%w: an integration supports at most %d bindings", shared.ErrValidation, integration.MaxBindingsPerPoll)

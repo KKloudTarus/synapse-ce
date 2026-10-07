@@ -93,8 +93,10 @@ nav:
       - Troubleshooting: troubleshooting.md
   - Integrate:
       - CLI: cli.md
+      - Scan coverage: scan-coverage.md
       - MCP integration: mcp-integration.md
       - CI/CD integrations: integrations.md
+      - Bitbucket webhook review evidence: bitbucket-webhook-evidence.md
       - Notification event schemas: schemas/events/README.md
       - Code quality rule authoring: code-quality-rules.md
   - Architecture and security:

@@ -40,6 +40,7 @@ architectural boundaries that keep execution auditable.
 | [Backup, restore, and upgrade recovery](backup-restore-upgrade.md) | Quiesced paired backups, restore verification, active-write characterization, and safe upgrades |
 | [Finding ownership and team routing](finding-ownership.md) | Trusted CODEOWNERS mapping, policy rollout, triage, recovery, and scale limits |
 | [CLI](cli.md) | Scanning, code-quality gates, advisory maintenance, imports, and exit contracts |
+| [Scan engine coverage](scan-coverage.md) | Engine outcomes, coverage semantics, CI gating, compatibility, and rollout |
 | [MCP integration](mcp-integration.md) | Read/propose-only tool access scoped to one engagement |
 | [External CI/CD integrations](integrations.md) | Jenkins onboarding, provider-neutral architecture, polling operations, correlation, and security boundaries |
 | [Fleet agent packaging](fleet-agent-packaging.md) | Package, identity, rollout, upgrade, and uninstall contracts |

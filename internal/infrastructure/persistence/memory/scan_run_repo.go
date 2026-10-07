@@ -318,6 +318,7 @@ func toPortsScanRun(r scanrun.ScanRun) ports.ScanRun {
 
 func cloneLane(l scanrun.Lane) scanrun.Lane {
 	out := l
+	out.EngineOutcomes = scanrun.CloneEngineOutcomes(l.EngineOutcomes)
 	if l.FinishedAt != nil {
 		t := *l.FinishedAt
 		out.FinishedAt = &t

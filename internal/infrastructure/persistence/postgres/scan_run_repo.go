@@ -432,6 +432,13 @@ func (r *ScanRunStore) SealScanRun(ctx context.Context, command ports.SealScanRu
 				}
 			}
 
+			outcomesJSON := []byte("[]")
+			if len(lane.EngineOutcomes) > 0 {
+				outcomesJSON, err = json.Marshal(lane.EngineOutcomes)
+				if err != nil {
+					return fmt.Errorf("marshal engine outcomes: %w", err)
+				}
+			}
 			_, err = tx.Exec(ctx, `
 				INSERT INTO scan_run_lanes (
 					tenant_id, engagement_id, scan_run_id, lane_key, producer,
@@ -440,7 +447,7 @@ func (r *ScanRunStore) SealScanRun(ctx context.Context, command ports.SealScanRu
 					authoritative_finding_kinds, included_scope, excluded_scope,
 					started_at, finished_at, result_ref, evidence_ref,
 					result_sha256, manifest_schema_version, manifest_hash,
-					sealed_at, created_at
+					sealed_at, created_at, engine_outcomes
 				) VALUES (
 					$1, $2, $3, $4, $5,
 					$6, $7, $8,
@@ -448,7 +455,7 @@ func (r *ScanRunStore) SealScanRun(ctx context.Context, command ports.SealScanRu
 					$11, $12, $13,
 					$14, $15, $16, $17,
 					$18, $19, $20,
-					$21, $21
+					$21, $21, $22
 				)
 			`, tenantID.String(), engID, runID, lane.LaneKey, lane.Producer,
 				string(lane.TerminalStatus), string(lane.Target.TargetKind), lane.Target.TargetIdentitySchemaVersion,
@@ -456,7 +463,7 @@ func (r *ScanRunStore) SealScanRun(ctx context.Context, command ports.SealScanRu
 				authoritativeJSON, incScopeJSON, excScopeJSON,
 				truncateScanRunTime(lane.StartedAt), truncateOptionalScanRunTime(lane.FinishedAt), lane.ResultRef, lane.EvidenceRef,
 				lane.ResultSHA256, lane.ManifestSchemaVersion, lane.ManifestHash,
-				sealedAt)
+				sealedAt, outcomesJSON)
 			if err != nil {
 				return mapScanRunSQLError(err)
 			}
@@ -544,7 +551,7 @@ func (r *ScanRunStore) loadLanesForRun(ctx context.Context, tx pgx.Tx, tenantID,
 		       target_identity_canonical, evaluated_revision,
 		       authoritative_finding_kinds, included_scope, excluded_scope,
 		       started_at, finished_at, result_ref, evidence_ref,
-		       result_sha256, manifest_schema_version, manifest_hash, sealed_at
+		       result_sha256, manifest_schema_version, manifest_hash, sealed_at, engine_outcomes
 		FROM scan_run_lanes
 		WHERE tenant_id = $1 AND scan_run_id = $2
 		ORDER BY lane_key ASC
@@ -567,6 +574,7 @@ func (r *ScanRunStore) loadLanesForRun(ctx context.Context, tx pgx.Tx, tenantID,
 			resultRef, evidenceRef, resultSHA256           string
 			manifestSchemaVer                              int
 			manifestHash                                   string
+			outcomesJSON                                   []byte
 		)
 
 		if err := rows.Scan(
@@ -575,7 +583,7 @@ func (r *ScanRunStore) loadLanesForRun(ctx context.Context, tx pgx.Tx, tenantID,
 			&targetCanonical, &evalRev,
 			&authKindsJSON, &incScopeJSON, &excScopeJSON,
 			&startedAt, &finishedAt, &resultRef, &evidenceRef,
-			&resultSHA256, &manifestSchemaVer, &manifestHash, &sealedAt,
+			&resultSHA256, &manifestSchemaVer, &manifestHash, &sealedAt, &outcomesJSON,
 		); err != nil {
 			return nil, err
 		}
@@ -584,6 +592,13 @@ func (r *ScanRunStore) loadLanesForRun(ctx context.Context, tx pgx.Tx, tenantID,
 		_ = json.Unmarshal(authKindsJSON, &authKinds)
 		_ = json.Unmarshal(incScopeJSON, &incScope)
 		_ = json.Unmarshal(excScopeJSON, &excScope)
+		var outcomes []scanrun.EngineOutcome
+		if err := json.Unmarshal(outcomesJSON, &outcomes); err != nil {
+			return nil, fmt.Errorf("decode engine outcomes: %w", err)
+		}
+		if _, err := scanrun.CanonicalEngineOutcomes(outcomes); err != nil {
+			return nil, fmt.Errorf("validate stored engine outcomes: %w", err)
+		}
 
 		lanes = append(lanes, scanrun.Lane{
 			TenantID:       shared.ID(tenantStr),
@@ -609,6 +624,7 @@ func (r *ScanRunStore) loadLanesForRun(ctx context.Context, tx pgx.Tx, tenantID,
 			ManifestSchemaVersion:     manifestSchemaVer,
 			ManifestHash:              manifestHash,
 			SealedAt:                  sealedAt,
+			EngineOutcomes:            outcomes,
 		})
 	}
 	if err := rows.Err(); err != nil {

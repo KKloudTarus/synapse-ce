@@ -23,8 +23,8 @@ import (
 
 func TestPostgresAssessmentRelationshipRepositoryLifecycleConcurrencyAndRLS(t *testing.T) {
 	db, dsn := newAssessmentMigrationDB(t)
-	if err := goose.UpTo(db, ".", 155); err != nil {
-		t.Fatalf("up to 0155: %v", err)
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("migrate relationship repository schema: %v", err)
 	}
 	ctx := context.Background()
 	pool, err := Connect(ctx, dsn)

@@ -81,12 +81,19 @@ paths:
       description: >-
         The public ID identifies an enabled tenant-owned integration. Tenant identity
         never comes from a header, query or body. Provider-neutral endpoints use
-        X-Synapse-Hook-Signature over the raw body. GitLab endpoints prefer Standard
+        X-Synapse-Hook-Signature over the raw body. GitHub uses X-Hub-Signature-256;
+        Bitbucket Cloud uses X-Hub-Signature and requires X-Event-Key and
+        X-Request-UUID. Bitbucket request UUID and authenticated body digest receipts
+        commit atomically with durable scan enqueue. GitLab endpoints prefer Standard
         Webhooks webhook-signature over webhook-id.timestamp.raw-body with a ±5 minute
         timestamp window, and fall back to X-Gitlab-Token only when no signature is
-        present. The signed webhook-id (or legacy event UUID) and authenticated body digest are deduplicated atomically with durable job enqueue. Conflicting event headers and payload object_kind are rejected. No human bearer token is used.
+        present. The signed webhook-id (or legacy event UUID) and authenticated body
+        digest are deduplicated atomically with durable job enqueue. Conflicting event
+        headers and payload object_kind are rejected. No human bearer token is used.
       security:
         - inboundWebhookHMAC: []
+        - githubWebhookHMAC: []
+        - bitbucketWebhookHMAC: []
         - gitlabWebhookSignature: []
         - gitlabWebhookToken: []
       parameters:
@@ -94,6 +101,18 @@ paths:
           in: path
           required: true
           schema: {type: string, minLength: 32, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$'}
+        - name: X-Hub-Signature
+          in: header
+          description: Required for Bitbucket Cloud; HMAC-SHA256 over the exact raw request body.
+          schema: {type: string, pattern: '^sha256=[0-9a-fA-F]{64}$'}
+        - name: X-Event-Key
+          in: header
+          description: Required for Bitbucket Cloud. Scans repo:push and pullrequest:created/updated; other valid event types are acknowledged.
+          schema: {type: string, maxLength: 64}
+        - name: X-Request-UUID
+          in: header
+          description: Required for Bitbucket Cloud; delivery UUID, optionally enclosed in braces. X-Hook-UUID is not a delivery ID.
+          schema: {type: string, minLength: 36, maxLength: 38}
       requestBody:
         required: true
         content:
@@ -102,7 +121,7 @@ paths:
           application/octet-stream:
             schema: {type: string, format: binary, maxLength: 1048576}
       responses:
-        '202': {description: Authenticated event accepted by a provider receiver.}
+        '202': {description: Authenticated event accepted, replay acknowledged, or unsupported event ignored.}
         '400': {description: Invalid request body or provider event metadata.}
         '401': {description: Uniform response for invalid signatures, unknown IDs and disabled or revoked endpoints.}
         '413': {description: Body exceeds 1 MiB.}
@@ -3166,6 +3185,35 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/notifications/engagements/{nid}/settings:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}, description: Engagement ID}]
+    get:
+      tags: [notifications]
+      operationId: getNotificationEngagementSetting
+      summary: Get an engagement's external notification override (#1360)
+      responses:
+        '200': {description: Setting, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationEngagementSetting'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [notifications]
+      operationId: putNotificationEngagementSetting
+      summary: Change an engagement's external notification override
+      description: >-
+        Lowering the override needs manage_integrations; letting more data out (none to signal or
+        inherit, signal to inherit) needs administer. Every change is audited as
+        `notification.engagement_setting.updated`. While the override is none, queued deliveries about
+        the engagement are cancelled with `engagement_suppressed` instead of sent.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationEngagementSettingInput'}}}}
+      responses:
+        '200': {description: Stored setting, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationEngagementSetting'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Stale revision}
+
   /api/v1/notifications/rules:
     get:
       tags: [notifications]
@@ -5518,11 +5566,11 @@ paths:
     post:
       tags: [integrations]
       operationId: configureGitHubInboundWebhook
-      summary: Provision or rotate a GitHub inbound webhook secret
+      summary: Provision or rotate a GitHub or Bitbucket Cloud inbound webhook secret
       description: >
         Requires the administer capability and is registered only when inbound webhooks are enabled.
-        The integration must be an unarchived GitHub integration with exactly one Project binding.
-        The caller supplies the same secret that will be configured in GitHub. Synapse seals it immediately
+        The integration must be an unarchived GitHub or Bitbucket integration with exactly one Git Project binding.
+        The caller supplies the same secret that will be configured in the forge. Synapse seals it immediately
         and never returns plaintext credential material. The first call creates an opaque hook path; later
         calls keep that path and rotate the sealed secret.
       security:
@@ -6807,6 +6855,16 @@ components:
       in: header
       name: X-Gitlab-Token
       description: Legacy GitLab secret token, used only when webhook-signature is absent.
+    githubWebhookHMAC:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature-256
+      description: GitHub HMAC-SHA256 over the exact raw request body; only valid for a GitHub endpoint.
+    bitbucketWebhookHMAC:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature
+      description: Bitbucket Cloud HMAC-SHA256 over the exact raw request body; only valid for a Bitbucket endpoint.
     bearerAuth:
       type: http
       scheme: bearer
@@ -8232,7 +8290,7 @@ components:
           minLength: 32
           maxLength: 128
           writeOnly: true
-          description: Caller-supplied GitHub webhook secret. Synapse seals it and never echoes it.
+          description: Caller-supplied SCM webhook secret (32–128 UTF-8 bytes). Synapse seals it and never echoes it.
 
     GitHubInboundWebhookConfiguration:
       type: object
@@ -9240,7 +9298,7 @@ components:
             operator switched off with `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`. Omitted when the
             capability has no options, including when every channel type is switched off.
           items: {type: string}
-          example: [webhook, slack, email]
+          example: [webhook, slack, email, teams, telegram, google_chat, discord]
         planned:
           type: boolean
           description: >
@@ -11189,11 +11247,27 @@ components:
         debug_events:
           type: array
           items: {type: object}
+        engine_outcomes:
+          type: array
+          maxItems: 64
+          description: Server-computed outcomes for bounded scan engines. Missing on historical jobs means coverage is unknown.
+          items: {$ref: "#/components/schemas/EngineOutcome"}
+        engine_coverage:
+          $ref: "#/components/schemas/EngineCoverage"
 
     ScanResult:
       type: object
       properties:
         target: {type: string}
+        execution_mode: {type: string, enum: [full, vulnerabilities, licenses], description: Mode selected for this invocation; scan_mode may include retained prior results.}
+        includes_previous_results: {type: boolean, description: True when retained prior results contribute to this result.}
+        engine_outcomes:
+          type: array
+          maxItems: 64
+          description: Server-computed outcomes for bounded scan engines. Missing on historical results means coverage is unknown.
+          items: {$ref: "#/components/schemas/EngineOutcome"}
+        engine_coverage:
+          $ref: "#/components/schemas/EngineCoverage"
         languages:
           type: array
           items: {type: object}
@@ -11213,6 +11287,41 @@ components:
           type: object
           additionalProperties: {type: string}
         vuln_db_snapshot: {type: string}
+
+    EngineOutcome:
+      type: object
+      required: [engine, execution, coverage, required]
+      properties:
+        engine: {type: string, minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$"}
+        execution: {type: string, enum: [completed, failed, timed_out, cancelled, not_run]}
+        coverage: {type: string, enum: [complete, partial, unknown, not_applicable]}
+        reason: {type: string, enum: ["", not_selected, disabled, not_applicable, unavailable, legacy_reporter, deadline_exceeded, budget_exhausted, cancelled, engine_error, upstream_failure, truncated, source_budget, unrendered_charts, dependency_unresolved, analysis_incomplete]}
+        required: {type: boolean}
+        counts:
+          type: object
+          additionalProperties: false
+          properties:
+            findings: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_seen: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_parsed: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_skipped: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_unscanned: {$ref: "#/components/schemas/EngineMeasurement"}
+            source_budget_bytes: {$ref: "#/components/schemas/EngineMeasurement"}
+            unrendered_charts: {$ref: "#/components/schemas/EngineMeasurement"}
+            proposals: {$ref: "#/components/schemas/EngineMeasurement"}
+
+    EngineMeasurement:
+      type: integer
+      minimum: 0
+      maximum: 9007199254740991
+
+    EngineCoverage:
+      type: object
+      required: [status, required, completed]
+      properties:
+        status: {type: string, enum: [complete, partial, unknown, not_applicable]}
+        required: {type: integer, minimum: 0, maximum: 64}
+        completed: {type: integer, minimum: 0, maximum: 64}
 
     ProjectDependencyGraph:
       type: object
@@ -11826,6 +11935,10 @@ components:
 
     MeasureUnavailableReason:
       type: string
+      description: >-
+        Why a measure is unavailable. `changed_line_coverage_not_available` is a legacy value: snapshots
+        recorded before new-code coverage named its reason store it, and the API returns a stored reason
+        unchanged, so analyses from that period still report it.
       enum:
         - legacy_analysis
         - function_count_not_available
@@ -11836,6 +11949,7 @@ components:
         - no_coverage_report
         - no_changed_lines
         - changed_lines_not_in_report
+        - changed_line_coverage_not_available
         - duplication_not_available
         - issue_type_incomplete
         - issue_attribution_incomplete
@@ -13202,14 +13316,30 @@ components:
     NotificationChannelInput:
       type: object
       additionalProperties: false
-      description: Creates a channel or replaces its metadata. PATCH requires revision. Channel type is immutable; blank URL and secret retain the encrypted configuration on PATCH. Webhook creation or rotation requires both URL and a secret of at least 16 bytes.
+      description: >-
+        Creates a channel or replaces its metadata. PATCH requires revision. Channel type is immutable;
+        blank URL, secret and chat_id retain the encrypted configuration on PATCH. Webhook creation or
+        rotation requires both URL and a secret of at least 16 bytes. Teams, Google Chat and Discord
+        channels take the full credential-bearing webhook URL, and replacing it requires the whole URL
+        again. A Telegram channel takes the bot token in `secret` and the chat in `chat_id`; replacing
+        either requires both. Credential-bearing URLs and tokens are write-only and never returned.
       required: [name, type, enabled]
       properties:
         name: {type: string, maxLength: 200}
-        type: {type: string, enum: [webhook, slack, email]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord]}
         enabled: {type: boolean}
-        url: {type: string, writeOnly: true, description: HTTPS endpoint for webhook and Slack channels; blank retains the current endpoint on PATCH}
-        secret: {type: string, writeOnly: true, description: At least 16 bytes on creation or rotation; blank retains the current secret on PATCH}
+        url:
+          type: string
+          writeOnly: true
+          description: >-
+            HTTPS endpoint for webhook, Slack, Teams, Google Chat and Discord channels; blank retains the
+            current endpoint on PATCH. Teams accepts a Workflows trigger URL on `*.logic.azure.com`,
+            `*.logic.azure.us` or `*.environment.api.powerplatform.com` with a `sig` parameter; Google
+            Chat an incoming-webhook URL on `chat.googleapis.com` with `key` and `token`; Discord a
+            channel webhook on `discord.com` (optionally with `thread_id`).
+        secret: {type: string, writeOnly: true, description: The webhook signing secret (at least 16 bytes) or the Telegram bot token; blank retains the current secret on PATCH}
+        chat_id: {type: string, writeOnly: true, maxLength: 33, description: 'Telegram only: a numeric chat ID or an @channel username.'}
+        thread_id: {type: integer, format: int64, minimum: 0, maximum: 2147483647, writeOnly: true, description: 'Telegram only: the forum topic (message_thread_id) to post into; 0 or omitted posts to the main chat.'}
         recipients: {type: array, maxItems: 50, items: {type: string, format: email}}
         revision: {type: integer, minimum: 1}
         template_id:
@@ -13230,6 +13360,12 @@ components:
             Webhook channels only (#1376): send the body of the resolved webhook template as a custom
             JSON body instead of the event envelope, with `X-Synapse-Body: custom`; the signature covers
             the body as sent. Needs a bound template whose body still validates; omitted keeps the value.
+        data_class:
+          $ref: '#/components/schemas/NotificationDataClass'
+          description: >-
+            The most sensitive content the channel's messages may carry (#1360). Omitted keeps the
+            current class, or the type's default on creation (signal for chat, summary for email and
+            webhooks). Raising it needs administer and is audited; lowering it needs manage_integrations.
 
     NotificationChannel:
       type: object
@@ -13237,7 +13373,7 @@ components:
       properties:
         id: {type: string}
         name: {type: string}
-        type: {type: string, enum: [webhook, slack, email]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord]}
         enabled: {type: boolean}
         destination: {type: string, description: Redacted destination metadata}
         recipients: {type: array, items: {type: string, format: email}}
@@ -13249,6 +13385,30 @@ components:
         template_id: {type: string, description: The bound template (#1371); absent when none is bound}
         locale: {type: string, enum: [en, vi], description: The channel locale; absent when the tenant default applies}
         custom_body: {type: boolean, description: The webhook channel sends its template body as a custom JSON body (#1376)}
+        data_class: {$ref: '#/components/schemas/NotificationDataClass'}
+
+    NotificationEngagementSetting:
+      type: object
+      required: [engagement_id, external_notifications, revision]
+      properties:
+        engagement_id: {type: string}
+        external_notifications:
+          type: string
+          enum: [inherit, signal, none]
+          description: >-
+            inherit sends at each channel's class, signal caps every channel at signal, none sends
+            nothing external about the engagement; the lower of the channel class and this wins.
+        revision: {type: integer, minimum: 0, description: 0 when the engagement has no stored setting}
+        updated_at: {type: string, format: date-time}
+        updated_by: {type: string}
+
+    NotificationEngagementSettingInput:
+      type: object
+      additionalProperties: false
+      required: [external_notifications, revision]
+      properties:
+        external_notifications: {type: string, enum: [inherit, signal, none]}
+        revision: {type: integer, minimum: 0, description: The revision read; 0 for an engagement without a stored setting}
 
     NotificationTemplatePreviewInput:
       type: object
@@ -13499,7 +13659,7 @@ components:
         id: {type: string}
         event_id: {type: string}
         channel_id: {type: string}
-        channel_type: {type: string, enum: [webhook, slack, email]}
+        channel_type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord]}
         redrive_fence: {type: integer, format: int64, minimum: 0, description: Current durable queue claim fence; submit it as expected_fence to prevent a stale redrive.}
         recipient: {type: string}
         matched_rule_ids: {type: array, items: {type: string}}

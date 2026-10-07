@@ -17,7 +17,8 @@ import (
 )
 
 type isolatedMigrationDB struct {
-	db *sql.DB
+	db  *sql.DB
+	dsn string
 }
 
 // newIsolatedMigrationDB creates a database and non-superuser owner dedicated to one migration test.
@@ -86,7 +87,7 @@ func newIsolatedMigrationDB(t *testing.T, migration int, baseVersion int64) isol
 			t.Fatalf("migrate isolated database to %04d: %v", baseVersion, err)
 		}
 	}
-	return isolatedMigrationDB{db: db}
+	return isolatedMigrationDB{db: db, dsn: isolated.String()}
 }
 
 func withMigrationTenant(t *testing.T, db *sql.DB, tenant string, fn func(*sql.Tx)) {

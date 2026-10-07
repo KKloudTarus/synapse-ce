@@ -15,16 +15,32 @@ import (
 // do sends an HTTP request through the guarded client and classifies the response the same way
 // for every HTTP driver: 2xx is delivered, 408, 429 and 5xx are retried, anything else is final.
 func (s *Sender) do(req *http.Request) ports.NotificationSendResult {
+	result, _ := s.doRead(req)
+	return result
+}
+
+// maxResponseBytes bounds how much of a response body is read: enough for a provider's JSON reply
+// (a message ID, a retry hint), never an unbounded download.
+const maxResponseBytes = 4 << 10
+
+// doRead is do that also returns up to maxResponseBytes of the response body, for drivers that read
+// the provider's reply. Transport errors are reduced to a code here and never returned: the error
+// of a failed request holds the request URL, which for the chat channels is the credential.
+func (s *Sender) doRead(req *http.Request) (ports.NotificationSendResult, []byte) {
 	resp, err := s.http.Do(req)
 	if errors.Is(err, safehttp.ErrBlockedDestination) {
 		// Retrying cannot change the answer; the destination has to be corrected.
-		return ports.NotificationSendResult{ErrorCode: "destination_blocked"}
+		return ports.NotificationSendResult{ErrorCode: "destination_blocked"}, nil
 	}
 	if err != nil {
-		return ports.NotificationSendResult{ErrorCode: "network_error", Retryable: true}
+		return ports.NotificationSendResult{ErrorCode: "network_error", Retryable: true}, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	return s.classify(resp), body
+}
+
+func (s *Sender) classify(resp *http.Response) ports.NotificationSendResult {
 	result := ports.NotificationSendResult{StatusCode: resp.StatusCode}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return result

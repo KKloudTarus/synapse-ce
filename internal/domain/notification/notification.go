@@ -15,19 +15,39 @@ import (
 type ChannelType string
 
 const (
-	ChannelWebhook ChannelType = "webhook"
-	ChannelSlack   ChannelType = "slack"
-	ChannelEmail   ChannelType = "email"
+	ChannelWebhook    ChannelType = "webhook"
+	ChannelSlack      ChannelType = "slack"
+	ChannelEmail      ChannelType = "email"
+	ChannelTeams      ChannelType = "teams"
+	ChannelTelegram   ChannelType = "telegram"
+	ChannelGoogleChat ChannelType = "google_chat"
+	ChannelDiscord    ChannelType = "discord"
 )
 
 func (v ChannelType) Valid() bool {
-	return v == ChannelWebhook || v == ChannelSlack || v == ChannelEmail
+	switch v {
+	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord:
+		return true
+	}
+	return false
+}
+
+// HTTPEndpoint reports whether the channel type delivers to one HTTPS endpoint, so its masked
+// destination is "https://host/…" and a host change is a destination change admins are told about.
+// Email is the only type that delivers to recipients instead.
+func (v ChannelType) HTTPEndpoint() bool {
+	return v.Valid() && v != ChannelEmail
 }
 
 // CodeProviderDisabled is the reason a delivery is cancelled when the operator switched its channel
 // type off with SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED. The operator owns it: it is never a fault
 // of the channel, so channel health must not count it and the channel is not retried for it.
 const CodeProviderDisabled = "provider_disabled"
+
+// CodeEngagementSuppressed is the reason a delivery is cancelled when its engagement allows no
+// external notification (#1360). Like a disabled provider it is an operator decision, never a
+// fault of the channel.
+const CodeEngagementSuppressed = "engagement_suppressed"
 
 type EventType string
 
@@ -81,6 +101,9 @@ type Channel struct {
 	DeletedAt     *time.Time  `json:"deleted_at,omitempty"`
 	// Health is maintained by the delivery worker (#1464); administrators change it only by resuming.
 	Health ChannelHealth `json:"health"`
+	// DataClass is the most sensitive content the channel's messages may carry (#1360). Empty means
+	// the type's default (DefaultDataClass).
+	DataClass DataClass `json:"data_class"`
 	// TemplateBinding is the channel's template and locale (#1371).
 	TemplateBinding
 }
@@ -91,6 +114,9 @@ func (c Channel) Validate() error {
 	}
 	if c.Type == ChannelEmail && len(c.Recipients) == 0 {
 		return fmt.Errorf("%w: email channel requires recipients", shared.ErrValidation)
+	}
+	if c.DataClass != "" && !c.DataClass.Valid() {
+		return invalidDataClass()
 	}
 	return c.TemplateBinding.Validate(c.Type)
 }
@@ -362,4 +388,12 @@ func validActionType(v string) bool {
 		}
 	}
 	return false
+}
+
+// Class is the channel's data class, or its type's default when none was set.
+func (c Channel) Class() DataClass {
+	if c.DataClass.Valid() {
+		return c.DataClass
+	}
+	return DefaultDataClass(c.Type)
 }

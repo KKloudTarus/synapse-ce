@@ -9,11 +9,15 @@ import (
 
 // channelFamilies maps each channel type to the template family it renders (EPIC #1327 D5). A
 // channel has exactly one type, so it binds at most one template: the one of its family. A new
-// channel type adds an entry here; Microsoft Teams and Google Chat will join FamilyChat.
+// channel type adds an entry here.
 var channelFamilies = map[ChannelType]TemplateFamily{
-	ChannelWebhook: FamilyWebhook,
-	ChannelSlack:   FamilyChat,
-	ChannelEmail:   FamilyEmail,
+	ChannelWebhook:    FamilyWebhook,
+	ChannelSlack:      FamilyChat,
+	ChannelEmail:      FamilyEmail,
+	ChannelTeams:      FamilyChat,
+	ChannelTelegram:   FamilyChat,
+	ChannelGoogleChat: FamilyChat,
+	ChannelDiscord:    FamilyChat,
 }
 
 // FamilyForChannelType returns the template family a channel type renders. ok is false for a type

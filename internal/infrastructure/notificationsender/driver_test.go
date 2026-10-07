@@ -84,7 +84,7 @@ func TestSlackWireOutputIsUnchanged(t *testing.T) {
 }
 
 func TestSendRefusesUnknownChannelTypes(t *testing.T) {
-	result := New(SMTPConfig{}, time.Second).Send(context.Background(), testWork("teams"), ports.WebhookChannelConfig{URL: "https://example.com"})
+	result := New(SMTPConfig{}, time.Second).Send(context.Background(), testWork("carrier_pigeon"), ports.WebhookChannelConfig{URL: "https://example.com"})
 	if result.ErrorCode != "unsupported_channel" || result.Retryable {
 		t.Fatalf("result = %+v", result)
 	}

@@ -3,7 +3,7 @@
 [Documentation home](README.md)
 
 Synapse can route tenant events to signed HTTP webhooks, Slack incoming webhooks,
-and email recipients. Delivery runs in `synapse-worker`; API requests and scans do
+Microsoft Teams, Telegram, Google Chat and Discord channels, and email recipients. Delivery runs in `synapse-worker`; API requests and scans do
 not wait for a remote service.
 
 ## Personal email contacts
@@ -238,7 +238,12 @@ When an event is recorded, its builder takes a snapshot of these values and
 stores it with the event. The snapshot keeps only declared variables up to the
 event type's maximum data class, with invisible and direction-changing
 characters removed, line breaks turned into spaces, and each value capped at
-1,000 characters. Times are RFC 3339 in UTC. The snapshot is not part of the
+1,000 characters. Secrets are removed from every value first: keyed assignments
+such as `password=` or `api_key:`, bearer tokens, AWS access key IDs, PEM private
+keys and URL credentials become `[redacted]` (or `***` for URL user info), so a
+secret a scanner put in a finding title never reaches a message. Each value is
+scrubbed both before and after invisible characters are removed, so a key split
+by one (`pass`, a zero-width space, `word=`) is still caught. Times are RFC 3339 in UTC. The snapshot is not part of the
 webhook body, which stays the raw event. Names (engagement, project, finding,
 team, assignee, agent, asset) are read from the source records when the event
 is recorded, so a later rename does not change a message already queued.
@@ -253,9 +258,9 @@ the webhook body has always carried; the trigger keeps writing the data until
 every running worker can compose it. No event declares a list variable yet, so a template
 cannot `range` over one. The `webhook` family's `body` is compiled as text; the
 structured JSON body of a custom webhook is validated separately when that
-feature lands. Channels carry no data class and cannot be bound to a template
-yet, so saving does not yet warn about bound channels whose class is below a
-variable the template uses.
+feature lands. Saving a template does not yet warn about bound channels whose
+data class is below a variable the template uses (see
+[Data classes](#data-classes)); such a variable renders empty on that channel.
 
 ### Template preview
 
@@ -290,6 +295,49 @@ version's checksum, and a diff summary. The summary lists each changed field as
 `field:+added/-removed`, counting lines added and removed (for example
 `body:+2/-1,title:+1/-0`), or `none`. It never quotes template source.
 
+## Data classes
+
+Every channel has a data class, the most sensitive content its messages may carry:
+
+| Class | Carries |
+| --- | --- |
+| `signal` | The event type, severity, counts and a link |
+| `summary` | Adds titles, engagement, project and finding names, and target hosts |
+| `detail` | Adds advisories, assets, file paths and item lists |
+
+A new chat or pager channel is `signal`, and a new email or webhook channel is `summary`;
+channels that existed before data classes got the same defaults. Set `data_class` on
+`POST` or `PATCH /api/v1/notifications/channels`. Each template variable declares its
+class in the event catalog, and a message renders only the variables at or below the
+class that applies.
+
+An engagement can lower that class for every message about it with
+`PUT /api/v1/notifications/engagements/{id}/settings`:
+
+```json
+{"external_notifications": "signal", "revision": 0}
+```
+
+`inherit` (the default) keeps each channel's class, `signal` caps every channel at
+`signal`, and `none` keeps every notification about the engagement inside Synapse. The
+lower of the channel class and the engagement setting wins. Setting an engagement to
+`none` cancels its queued deliveries with `engagement_suppressed` in the same
+transaction; a delivery whose attempt has already started is left to finish. The worker
+also checks the committed setting when it starts each attempt, serialized with setting
+writes, so a delivery it loaded just before the change is not sent either. Personal
+email follows the same setting: no email job is queued for an engagement set to `none`,
+and a queued one is checked again, under the same lock, before it sends. The in-app
+inbox is inside Synapse, so its notices are kept. `GET` on the same path returns the setting, `inherit` at revision 0 when none is
+stored. Every change is audited as `notification.engagement_setting.updated` with the
+previous and new values.
+
+Lowering a class or an override needs `manage_integrations`. Raising either one lets
+more data leave Synapse, so it needs `administer` and answers `403` otherwise.
+
+Classes take effect on message content when messages are rendered from templates
+(#1365). The built-in webhook and Slack bodies are not filtered yet; the engagement
+`none` setting already applies to every delivery.
+
 ## Personal inbox
 
 When notifications are enabled, each human user has an inbox at `/inbox` and a bell in the application header. `GET /api/v1/me/inbox` and `GET /api/v1/me/inbox/unread` are scoped to the signed-in user. Machine roles are denied. The bell polls at most every 30 seconds and pauses while the tab is hidden. A deployment without the inbox returns 404 and the bell stops asking.
@@ -317,13 +365,15 @@ quarantined sources. Actions that point Synapse at a new destination still requi
 | Create, edit or delete a routing rule; read delivery history | yes | yes |
 | Create a channel | no (`403`) | yes |
 | Change a channel's URL, secret or email recipients | no (`403`) | yes |
+| Lower a channel's data class or an engagement's override | yes | yes |
+| Raise a channel's data class or an engagement's override | no (`403`) | yes |
 
 A `PATCH` that sends the channel's current recipients back is not a change. Machine
 roles (`agent`, `mcp`) never hold either permission. Every channel audit entry records
 the actor and the destination masked to `scheme://host` (`mailto://` and the recipient
 domains for email); an update also records `destination_changed` and, when it is
-`true`, the previous masked destination. Channels carry no data class yet, so none is
-recorded.
+`true`, the previous masked destination. Every channel audit entry also records the
+channel's `data_class`, and an update that changes it records `previous_data_class`.
 
 Channel type is immutable. Editing a URL or
 HMAC key creates a new encrypted version; pending deliveries retain their original
@@ -387,6 +437,48 @@ DNS-rebound destinations are blocked by the HTTP transport.
 Slack uses a fixed Block Kit message and observes Slack's `429 Retry-After`.
 Email creates one delivery per normalized recipient and uses a stable Message-ID.
 SMTP acceptance means the relay accepted the message; it does not prove inbox delivery.
+
+## Chat channels: Teams, Telegram, Google Chat and Discord
+
+Four more chat channel types deliver the same events (#1378 to #1381). For each of them the
+URL, or the Telegram bot token, is the credential: it is sealed like a webhook secret, the API
+and the console show only `https://host/…`, and editing a channel never shows it again. To point a
+channel somewhere else, an administrator enters the whole URL (or, for Telegram, the token and chat)
+again; a rename or an enable switch keeps it. Validation pins each type to its vendor's hosts, and
+`safehttp` still vets every address at dial time, so a chat channel cannot reach an internal host.
+A failed request is recorded only as a code (`network_error`, `destination_blocked`, `http_<status>`),
+never with the request URL.
+
+| Type | What to paste | Accepted destination |
+|---|---|---|
+| `teams` | The URL of a Teams **Workflows** "post to a channel when a webhook request is received" flow | `https://*.logic.azure.com/workflows/…`, `https://*.logic.azure.us/workflows/…` or `https://*.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/…`, with its `sig` parameter. Office 365 connector URLs (`*.webhook.office.com`) are retired by Microsoft and refused. |
+| `telegram` | A bot token from @BotFather, the chat ID, and optionally a forum topic ID | Bot API `sendMessage` on `api.telegram.org`. The chat is a numeric ID (groups and channels start with `-100`) or an `@channel` username; the bot must be a member of the chat. |
+| `google_chat` | The space's incoming-webhook URL | `https://chat.googleapis.com/v1/spaces/<space>/messages?key=…&token=…`, with no other parameters. |
+| `discord` | A channel webhook URL | `https://discord.com/api/webhooks/<id>/<token>` (also `discordapp.com`, `ptb.` and `canary.`), optionally with `thread_id`. |
+
+Each message has the event title, the event summary and the event type and ID, rendered by the
+channel's formatter so that no value can become formatting, a link or a mention:
+
+- **Teams** posts an Adaptive Card whose text is all `TextRun`s, which Teams shows literally. The
+  Workflows trigger answers `202 Accepted` and returns no message handle.
+- **Telegram** sends MarkdownV2 text with every special character escaped and link previews off. A
+  `429` carries its wait in the body (`parameters.retry_after`), which the worker honours. A group that
+  was upgraded to a supergroup fails with `telegram_chat_migrated`; re-enter the channel with the new
+  chat ID. The sent `message_id` is kept on the delivery for threading (#1384).
+- **Google Chat** posts a `cardsV2` card whose text is HTML with every value escaped, so
+  `<users/all>` is text. The created message's resource name is kept on the delivery.
+- **Discord** posts one embed with every punctuation character of a value escaped and
+  `allowed_mentions.parse` always empty, so `@everyone` and role mentions never ping. The driver adds
+  `wait=true` so Discord returns the created message, whose ID is kept on the delivery.
+
+Until the send-time renderer (#1365, #1367) lands, these channels use the same built-in title and
+summary as Slack, and a bound chat template does not change their content yet. The formatters are the
+ones the template preview uses, so the switch will not change how a message is escaped. Deep links
+arrive with the renderer.
+
+All four are `2xx` delivered, `408`, `429` and `5xx` retried with the usual budget, and any other
+status final. Each type can be switched off deployment-wide with
+`SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` (for example `telegram,discord`).
 
 ## Retry and cutover behavior
 

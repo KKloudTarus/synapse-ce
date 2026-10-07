@@ -106,6 +106,8 @@ func (rt *Router) updateNotificationChannel(w http.ResponseWriter, r *http.Reque
 	}
 	// The route admits manage_integrations; re-pointing the channel still needs administer (#1358).
 	in.AllowDestinationChange = callerCan(r, userdom.PermAdminister)
+	// So does raising its data class (#1360).
+	in.AllowClassRaise = in.AllowDestinationChange
 	item, err := rt.notifications.UpdateChannel(r.Context(), PrincipalFrom(r.Context()), id, in)
 	if err != nil {
 		writeError(w, rt.log, err)

@@ -449,6 +449,7 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 		svc.SetJVMReachability(jvmreach.New())
 		log.Info("coarse JVM class-reachability ENABLED (deprioritizes findings on unreferenced deps)")
 	}
+	svc.SetSourceEngineSelection(cfg.SASTEnabled, cfg.SecretScanEnabled, cfg.MisconfigEnabled)
 	if cfg.SASTEnabled {
 		// SYNAPSE_SAST_SOURCE_BUDGET_BYTES raises the source retained for cross-file context. The default
 		// never binds on an ordinary repository; on a monorepo the unretained part of the tree is scanned by

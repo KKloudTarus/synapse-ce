@@ -39,8 +39,11 @@ type NotificationSourceFailureFilter struct {
 type NotificationWork struct {
 	Delivery notification.Delivery
 	Event    notification.Event
-	Channel  notification.Channel
-	Sealed   string
+	// Engagement is the event's engagement override (#1360); inherit when the event has no
+	// engagement or the engagement stores none.
+	Engagement notification.EngagementNotifications
+	Channel    notification.Channel
+	Sealed     string
 	// CustomWebhookBody is a rendered custom JSON body for a webhook channel that opted into one
 	// (#1376). The send-time renderer (#1365) sets it with notification.RenderCustomWebhookBody;
 	// nothing sets it yet. When it is not empty the webhook driver sends exactly these bytes instead
@@ -102,6 +105,13 @@ type NotificationRepository interface {
 	ListAttempts(context.Context, shared.ID, shared.ID) ([]notification.Attempt, error)
 	LoadWork(context.Context, shared.ID, shared.ID) (NotificationWork, error)
 	NotificationRelevance
+
+	// GetEngagementNotificationSetting returns an engagement's override, or inherit at revision 0
+	// when none is stored. It reports ErrNotFound for an engagement the tenant does not have.
+	GetEngagementNotificationSetting(ctx context.Context, tenant, engagement shared.ID) (notification.EngagementNotificationSetting, error)
+	// PutEngagementNotificationSetting stores an override whose Revision is the stored one plus one
+	// (1 for the first), and reports ErrConflict when another write got there first.
+	PutEngagementNotificationSetting(ctx context.Context, setting notification.EngagementNotificationSetting) (notification.EngagementNotificationSetting, error)
 	BeginAttempt(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time) (notification.Attempt, error)
 	FinishAttempt(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time, string, int, string, *time.Time) error
 	CancelDelivery(context.Context, shared.ID, shared.ID, string, int64, string) error

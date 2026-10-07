@@ -993,6 +993,10 @@ type ScanJob struct {
 	StartedAt     time.Time              `json:"started_at"`
 	FinishedAt    *time.Time             `json:"finished_at,omitempty"`
 	DebugEvents   []ScanDebugEvent       `json:"debug_events"`
+	// EngineOutcomes and EngineCoverage describe the current attempt. Job success
+	// means the worker completed; it is deliberately distinct from coverage.
+	EngineOutcomes []scanrun.EngineOutcome `json:"engine_outcomes,omitempty"`
+	EngineCoverage scanrun.EngineCoverage  `json:"engine_coverage"`
 }
 
 // ScanJobStore persists scan-job status (upserted as the pipeline progresses).
@@ -1329,22 +1333,26 @@ type AuditReader interface {
 // findings: license coverage, scan completeness, reproducibility, and the
 // evidence-integrity attestation. Assembled from the latest scan + evidence chain.
 type ReportInsight struct {
-	ScanTarget       string
-	HasScan          bool
-	ScanTime         time.Time // pinned scan timestamp – the report uses this (not Now) so it is byte-reproducible
-	LicenseDetected  int
-	LicenseUnknown   int
-	LicensePct       float64
-	Confident        bool
-	CompletenessNote string
-	ReproScore       int
-	PinnedInputs     []string
-	UnpinnedInputs   []string
-	VulnDBSnapshot   string
-	GrypeDBVersion   string
-	EvidenceIntact   bool
-	EvidenceHead     string
-	EvidenceCount    int
+	ScanTarget              string
+	HasScan                 bool
+	ScanTime                time.Time // pinned scan timestamp – the report uses this (not Now) so it is byte-reproducible
+	LicenseDetected         int
+	LicenseUnknown          int
+	LicensePct              float64
+	Confident               bool
+	CompletenessNote        string
+	EngineOutcomes          []scanrun.EngineOutcome
+	EngineCoverage          scanrun.EngineCoverage
+	ExecutionMode           string
+	IncludesPreviousResults bool
+	ReproScore              int
+	PinnedInputs            []string
+	UnpinnedInputs          []string
+	VulnDBSnapshot          string
+	GrypeDBVersion          string
+	EvidenceIntact          bool
+	EvidenceHead            string
+	EvidenceCount           int
 	// EvidenceAttested + EvidenceKeyID describe the chain-head origin attestation
 	// when Attested, the head is signed (ed25519) by the key with this id.
 	EvidenceAttested bool

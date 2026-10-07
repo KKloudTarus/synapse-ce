@@ -35,6 +35,7 @@ type fakeProjectScans struct {
 	calls []capturedWebhookScan
 	err   error
 }
+
 func (f *fakeProjectScans) StartWebhookAnalysis(_ context.Context, _ string, tenant, project shared.ID, in projectuc.WebhookAnalysisInput) (ports.ScanJob, error) {
 	f.calls = append(f.calls, capturedWebhookScan{tenant: tenant, project: project, input: in})
 	return ports.ScanJob{ID: "job"}, f.err
@@ -42,7 +43,7 @@ func (f *fakeProjectScans) StartWebhookAnalysis(_ context.Context, _ string, ten
 
 func webhookFixture() (*Service, *fakeProjectScans, ports.InboundWebhookIdentity) {
 	integrations := &fakeIntegrations{
-		item: integration.Integration{ID: "integration-1", TenantID: "tenant-1", Provider: "github", Enabled: true},
+		item:     integration.Integration{ID: "integration-1", TenantID: "tenant-1", Provider: "github", Enabled: true},
 		bindings: []integration.Binding{{ID: "binding-1", TenantID: "tenant-1", IntegrationID: "integration-1", ProjectID: "project-1"}},
 	}
 	scans := &fakeProjectScans{}
@@ -115,7 +116,7 @@ func TestGitHubWebhookRejectsInvalidSHAAndAmbiguousBinding(t *testing.T) {
 
 func TestGitHubWebhookIgnoresNonScanningEvents(t *testing.T) {
 	svc, scans, identity := webhookFixture()
-	if err := svc.ReceiveInboundWebhook(context.Background(), identity, ports.InboundWebhookEvent{Provider:"github", EventType:"issues", EventID:"d5", Body:[]byte(`{"action":"opened"}`)}); err != nil {
+	if err := svc.ReceiveInboundWebhook(context.Background(), identity, ports.InboundWebhookEvent{Provider: "github", EventType: "issues", EventID: "d5", Body: []byte(`{"action":"opened"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	if len(scans.calls) != 0 {
@@ -156,6 +157,7 @@ type fakeWebhookSealer struct {
 	plaintext []byte
 	aad       []byte
 }
+
 func (f *fakeWebhookSealer) Seal(plaintext, aad []byte) (string, error) {
 	f.plaintext = append([]byte(nil), plaintext...)
 	f.aad = append([]byte(nil), aad...)
@@ -163,15 +165,18 @@ func (f *fakeWebhookSealer) Seal(plaintext, aad []byte) (string, error) {
 }
 
 type fakeWebhookAudit struct{ entries []ports.AuditEntry }
+
 func (f *fakeWebhookAudit) Record(_ context.Context, entry ports.AuditEntry) error {
 	f.entries = append(f.entries, entry)
 	return nil
 }
 
 type fakeWebhookClock struct{ now time.Time }
+
 func (f fakeWebhookClock) Now() time.Time { return f.now }
 
 type fakeWebhookTx struct{}
+
 func (fakeWebhookTx) Run(ctx context.Context, tenant shared.ID, fn func(context.Context) error) error {
 	return fn(shared.WithTenant(ctx, tenant))
 }
@@ -187,7 +192,7 @@ func TestConfigureGitHubWebhookProvisionsThenRotatesCallerSuppliedSecret(t *test
 	}
 
 	firstSecret := "github-webhook-secret-000000000001"
-	first, err := svc.ConfigureGitHubWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", firstSecret)
+	first, err := svc.ConfigureInboundWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", firstSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +216,7 @@ func TestConfigureGitHubWebhookProvisionsThenRotatesCallerSuppliedSecret(t *test
 	}
 
 	secondSecret := "github-webhook-secret-000000000002"
-	second, err := svc.ConfigureGitHubWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", secondSecret)
+	second, err := svc.ConfigureInboundWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", secondSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +239,7 @@ func TestConfigureGitHubWebhookRejectsInvalidSecretWithoutPersisting(t *testing.
 	if err := svc.SetAdmin(admin, &fakeWebhookSealer{}, &fakeWebhookAudit{}, fakeWebhookClock{now: time.Now()}, fakeWebhookTx{}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := svc.ConfigureGitHubWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", "too-short")
+	_, err := svc.ConfigureInboundWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", "too-short")
 	if !errors.Is(err, shared.ErrValidation) || admin.endpoint != nil {
 		t.Fatalf("invalid secret err=%v endpoint=%+v", err, admin.endpoint)
 	}
@@ -248,14 +253,14 @@ func TestConfigureGitHubWebhookRequiresSingleBoundGitHubProject(t *testing.T) {
 	if err := svc.SetAdmin(admin, &fakeWebhookSealer{}, &fakeWebhookAudit{}, fakeWebhookClock{now: time.Now()}, fakeWebhookTx{}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := svc.ConfigureGitHubWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", "github-webhook-secret-000000000001")
+	_, err := svc.ConfigureInboundWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", "github-webhook-secret-000000000001")
 	if !errors.Is(err, shared.ErrConflict) || admin.endpoint != nil {
 		t.Fatalf("unbound configure err=%v endpoint=%+v", err, admin.endpoint)
 	}
 
 	fi.bindings = []integration.Binding{{ProjectID: "project-1"}}
 	fi.item.Provider = "jenkins"
-	_, err = svc.ConfigureGitHubWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", "github-webhook-secret-000000000001")
+	_, err = svc.ConfigureInboundWebhook(context.Background(), "tenant-1", "integration-1", "admin-1", "github-webhook-secret-000000000001")
 	if !errors.Is(err, shared.ErrValidation) || admin.endpoint != nil {
 		t.Fatalf("wrong-provider configure err=%v endpoint=%+v", err, admin.endpoint)
 	}

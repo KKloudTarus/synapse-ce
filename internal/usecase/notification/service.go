@@ -116,7 +116,12 @@ type ChannelInput struct {
 	URL        string             `json:"url,omitempty"`
 	Secret     string             `json:"secret,omitempty"`
 	Recipients []string           `json:"recipients,omitempty"`
-	Revision   int                `json:"revision,omitempty"`
+	// ChatID and ThreadID address a Telegram chat and, optionally, one of its forum topics; the bot
+	// token travels in Secret. Like a URL they are part of the destination: changing either is a
+	// destination change and needs the token re-entered.
+	ChatID   string `json:"chat_id,omitempty"`
+	ThreadID int64  `json:"thread_id,omitempty"`
+	Revision int    `json:"revision,omitempty"`
 	// AllowDestinationChange is set by the caller, never decoded from a request: true only when the
 	// principal holds PermAdminister. Without it an update that changes the URL, the secret or the
 	// email recipients is refused with shared.ErrForbidden (#1358), so an integration_admin can
@@ -131,6 +136,13 @@ type ChannelInput struct {
 	// CustomBody opts a webhook channel into sending its template's body as a custom JSON body
 	// (#1376); it needs a bound template. An absent field keeps the current value.
 	CustomBody *bool `json:"custom_body,omitempty"`
+	// DataClass is the channel's data class (#1360); absent keeps the current one, or the type's
+	// default on create.
+	DataClass *domain.DataClass `json:"data_class,omitempty"`
+	// AllowClassRaise is set by the caller, never decoded: true only when the principal holds
+	// PermAdminister. Without it an update that raises the data class is refused with
+	// shared.ErrForbidden.
+	AllowClassRaise bool `json:"-"`
 }
 
 func (s *Service) createChannel(ctx context.Context, actor string, in ChannelInput) (domain.Channel, error) {
@@ -158,6 +170,9 @@ func (s *Service) createChannel(ctx context.Context, actor string, in ChannelInp
 		return domain.Channel{}, err
 	}
 	c := domain.Channel{TenantID: tenant, ID: id, Name: strings.TrimSpace(in.Name), Type: in.Type, Enabled: in.Enabled, Destination: destination, Recipients: recipients, Revision: 1, SecretVersion: 1, CreatedAt: now, UpdatedAt: now}
+	if c.DataClass, err = channelDataClass(domain.DefaultDataClass(in.Type), in, true); err != nil {
+		return domain.Channel{}, err
+	}
 	c.TemplateBinding = applyBinding(domain.TemplateBinding{}, in)
 	if err := s.validateBinding(ctx, tenant, c, nil); err != nil {
 		return domain.Channel{}, err
@@ -190,7 +205,7 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 	if in.Type != current.Type {
 		return domain.Channel{}, fmt.Errorf("%w: channel type is immutable", shared.ErrValidation)
 	}
-	replace := strings.TrimSpace(in.URL) != "" || strings.TrimSpace(in.Secret) != "" || in.Type != current.Type
+	replace := strings.TrimSpace(in.URL) != "" || strings.TrimSpace(in.Secret) != "" || strings.TrimSpace(in.ChatID) != "" || in.ThreadID != 0 || in.Type != current.Type
 	if replace && !in.AllowDestinationChange {
 		return domain.Channel{}, errDestinationChange
 	}
@@ -237,6 +252,9 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 	if updated.Name == "" {
 		return domain.Channel{}, fmt.Errorf("%w: notification channel name is required", shared.ErrValidation)
 	}
+	if updated.DataClass, err = channelDataClass(current.Class(), in, in.AllowClassRaise); err != nil {
+		return domain.Channel{}, err
+	}
 	updated.TemplateBinding = applyBinding(current.TemplateBinding, in)
 	// An unchanged binding is not revalidated, so a channel whose template was archived can still
 	// be renamed or switched off; resolution already skips that binding.
@@ -254,6 +272,9 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 		return domain.Channel{}, err
 	}
 	extra := bindingAuditMetadata(current.TemplateBinding, updated.TemplateBinding, map[string]string{"destination_changed": "false"})
+	if updated.Class() != current.Class() {
+		extra["previous_data_class"] = string(current.Class())
+	}
 	if previous := auditDestination(current); replace || !sameRecipients(current.Recipients, updated.Recipients) {
 		extra["destination_changed"] = "true"
 		extra["previous_destination"] = previous
@@ -488,7 +509,7 @@ func (s *Service) RedriveDelivery(ctx context.Context, actor string, id shared.I
 			return domain.Delivery{}, err
 		}
 		scheme, host := "", ""
-		if channel.Type == domain.ChannelWebhook || channel.Type == domain.ChannelSlack {
+		if channel.Type.HTTPEndpoint() {
 			scheme, host, _ = domain.MaskedEndpoint(channel.Destination)
 		} else if channel.Type == domain.ChannelEmail {
 			// The public channel summary may contain an email local-part when there is one
@@ -625,6 +646,12 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	if work.Channel.Health.Paused() {
 		// No new sends to a paused channel: its queued work is cancelled like a disabled channel's.
 		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, "channel_paused")
+	}
+	// The engagement keeps its notifications inside Synapse (#1360): nothing about it is sent. This
+	// reads the override LoadWork saw; BeginAttempt checks it again, serialized with setting writes,
+	// so a none committed after the load still stops the send.
+	if _, deliver := domain.EffectiveDataClass(work.Channel.Class(), work.Engagement); !deliver {
+		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, domain.CodeEngagementSuppressed)
 	}
 	relevant, err := s.events.StillRelevant(ctx, s.repo, work)
 	if err != nil {

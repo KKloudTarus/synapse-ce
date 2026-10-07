@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -24,6 +25,10 @@ func NewScanJobStore(pool *pgxpool.Pool) *ScanJobStore { return &ScanJobStore{po
 var _ ports.ScanJobStore = (*ScanJobStore)(nil)
 
 func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error {
+	outcomes, err := encodeScanJobEngineOutcomes(j)
+	if err != nil {
+		return err
+	}
 	sourcePackage, err := encodeScanJobSource(j)
 	if err != nil {
 		return err
@@ -32,9 +37,9 @@ func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error
 	if err != nil {
 		return fmt.Errorf("marshal scan job debug events: %w", err)
 	}
-	_, err = r.execSourceJob(ctx, j, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage)
+	_, err = r.execSourceJob(ctx, j, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -47,6 +52,10 @@ func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error
 
 // Save upserts a scan job (used on create and on every stage/status update).
 func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
+	outcomes, err := encodeScanJobEngineOutcomes(j)
+	if err != nil {
+		return err
+	}
 	sourcePackage, err := encodeScanJobSource(j)
 	if err != nil {
 		return err
@@ -56,12 +65,12 @@ func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 		return fmt.Errorf("marshal scan job debug events: %w", err)
 	}
 	_, err = r.execSourceJob(ctx, j,
-		`INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		`INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		 ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
 		     progress=EXCLUDED.progress, error=EXCLUDED.error, finished_at=EXCLUDED.finished_at,
-		     debug_events=EXCLUDED.debug_events`,
-		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage)
+		     debug_events=EXCLUDED.debug_events, engine_outcomes=EXCLUDED.engine_outcomes`,
+		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes)
 	if err != nil {
 		return fmt.Errorf("save scan job: %w", err)
 	}
@@ -75,7 +84,7 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 		limit = 100
 	}
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package
+		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package, engine_outcomes
 		 FROM scan_jobs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`,
 		olderThan, limit)
 	if err != nil {
@@ -89,12 +98,15 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 			status   string
 			finished *time.Time
 		)
-		var debugEvents, sourcePackage []byte
-		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage); err != nil {
+		var debugEvents, sourcePackage, outcomes []byte
+		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes); err != nil {
 			return nil, fmt.Errorf("scan scan job: %w", err)
 		}
 		j.Status = ports.ScanStatus(status)
 		j.FinishedAt = finished
+		if err := decodeScanJobEngineOutcomes(outcomes, &j); err != nil {
+			return nil, err
+		}
 		if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
 			return nil, err
 		}
@@ -114,11 +126,12 @@ func (r *ScanJobStore) GetJob(ctx context.Context, id string) (ports.ScanJob, er
 		finished      *time.Time
 		debugEvents   []byte
 		sourcePackage []byte
+		outcomes      []byte
 	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package
+		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package, engine_outcomes
 		 FROM scan_jobs WHERE id=$1`, id).
-		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage)
+		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.ScanJob{}, fmt.Errorf("scan job %s: %w", id, shared.ErrNotFound)
 	}
@@ -127,6 +140,9 @@ func (r *ScanJobStore) GetJob(ctx context.Context, id string) (ports.ScanJob, er
 	}
 	j.Status = ports.ScanStatus(status)
 	j.FinishedAt = finished
+	if err := decodeScanJobEngineOutcomes(outcomes, &j); err != nil {
+		return ports.ScanJob{}, err
+	}
 	if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
 		return ports.ScanJob{}, err
 	}
@@ -147,10 +163,10 @@ func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs [
 	}
 	// A LATERAL top-1 per engagement walks idx_scan_jobs_engagement once per id; DISTINCT ON over every
 	// job of every engagement sorted the whole set (an on-disk merge at tens of thousands of jobs).
-	rows, err := r.pool.Query(ctx, `SELECT j.id, j.engagement_id, j.target, j.kind, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.source_package
+	rows, err := r.pool.Query(ctx, `SELECT j.id, j.engagement_id, j.target, j.kind, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.source_package, j.engine_outcomes
 		FROM unnest($1::text[]) AS e(engagement_id)
 		JOIN LATERAL (
-			SELECT id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, source_package
+			SELECT id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, source_package, engine_outcomes
 			FROM scan_jobs WHERE engagement_id = e.engagement_id
 			ORDER BY started_at DESC, id DESC LIMIT 1
 		) j ON true`, ids)
@@ -163,11 +179,14 @@ func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs [
 		var j ports.ScanJob
 		var status string
 		var finished *time.Time
-		var sourcePackage []byte
-		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &sourcePackage); err != nil {
+		var sourcePackage, outcomes []byte
+		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &sourcePackage, &outcomes); err != nil {
 			return nil, fmt.Errorf("scan latest scan job: %w", err)
 		}
 		j.Status, j.FinishedAt, j.DebugEvents = ports.ScanStatus(status), finished, []ports.ScanDebugEvent{}
+		if err := decodeScanJobEngineOutcomes(outcomes, &j); err != nil {
+			return nil, err
+		}
 		if err := decodeScanJobSource(sourcePackage, &j); err != nil {
 			return nil, err
 		}
@@ -183,11 +202,12 @@ func (r *ScanJobStore) LatestForEngagement(ctx context.Context, engagementID sha
 		finished      *time.Time
 		debugEvents   []byte
 		sourcePackage []byte
+		outcomes      []byte
 	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package
+		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package, engine_outcomes
 		 FROM scan_jobs WHERE engagement_id=$1 ORDER BY started_at DESC LIMIT 1`, engagementID.String()).
-		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage)
+		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.ScanJob{}, fmt.Errorf("scan job for %s: %w", engagementID, shared.ErrNotFound)
 	}
@@ -196,6 +216,9 @@ func (r *ScanJobStore) LatestForEngagement(ctx context.Context, engagementID sha
 	}
 	j.Status = ports.ScanStatus(status)
 	j.FinishedAt = finished
+	if err := decodeScanJobEngineOutcomes(outcomes, &j); err != nil {
+		return ports.ScanJob{}, err
+	}
 	if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
 		return ports.ScanJob{}, err
 	}
@@ -257,5 +280,29 @@ func decodeScanDebugEvents(data []byte, j *ports.ScanJob) error {
 	if j.DebugEvents == nil {
 		j.DebugEvents = []ports.ScanDebugEvent{}
 	}
+	return nil
+}
+
+func encodeScanJobEngineOutcomes(job ports.ScanJob) ([]byte, error) {
+	outcomes, err := scanrun.CanonicalEngineOutcomes(job.EngineOutcomes)
+	if err != nil {
+		return nil, err
+	}
+	if len(outcomes) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(outcomes)
+}
+
+func decodeScanJobEngineOutcomes(data []byte, job *ports.ScanJob) error {
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &job.EngineOutcomes); err != nil {
+			return fmt.Errorf("decode job engine outcomes: %w", err)
+		}
+	}
+	if _, err := scanrun.CanonicalEngineOutcomes(job.EngineOutcomes); err != nil {
+		return err
+	}
+	job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
 	return nil
 }

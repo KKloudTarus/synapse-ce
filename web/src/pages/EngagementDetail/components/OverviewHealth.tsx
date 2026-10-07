@@ -41,8 +41,11 @@ export function HealthStat({
 
 export function ScanHealth({ scan, job }: { scan: ScanResult; job: ScanJob | null }) {
   const status = job?.status ?? 'succeeded'
-  const statusLabelText = status === 'running' ? 'Running' : status === 'failed' ? 'Failed' : 'Complete'
+  const statusLabelText = status === 'running' ? 'Running' : status === 'failed' ? 'Failed' : 'Finished'
   const statusTone = status === 'running' ? 'brand' : status === 'failed' ? 'critical' : 'accent'
+  // A current job owns its coverage. A cached result cannot describe a newer job.
+  const coverage = (job ? job.engineCoverage : scan.engineCoverage) ?? { status: 'unknown' as const, required: 0, completed: 0 }
+  const coverageTone = coverage.status === 'complete' ? 'accent' : coverage.status === 'partial' ? 'medium' : 'critical'
   const confident = scan.completeness.confident
   const q = scan.findingQuality
   const m = scan.manifest
@@ -51,8 +54,7 @@ export function ScanHealth({ scan, job }: { scan: ScanResult; job: ScanJob | nul
 
   return (
     <Card bodyClass="p-0" className="overflow-hidden shadow-xs">
-      {/* 6-Cell Stat Strip: Label on top, Value on bottom */}
-      <div className="grid grid-cols-2 divide-y divide-secondary sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-6">
+      <div className="grid grid-cols-2 divide-y divide-secondary sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-7">
         <HealthStat icon={CheckCircle} label="Status" value={statusLabelText} tone={statusTone} />
         <HealthStat
           icon={Clock}
@@ -61,9 +63,17 @@ export function ScanHealth({ scan, job }: { scan: ScanResult; job: ScanJob | nul
         />
         <HealthStat
           icon={BarChart01}
-          label="Confidence"
+          label="Dependencies"
           value={confident ? 'High' : 'Partial'}
           tone={confident ? 'accent' : 'medium'}
+          hint="Dependency resolution confidence; this does not describe required-engine coverage"
+        />
+        <HealthStat
+          icon={ShieldTick}
+          label="Coverage"
+          value={coverage.status}
+          tone={coverageTone}
+          hint={`${coverage.completed}/${coverage.required} required engines completed`}
         />
         <HealthStat
           icon={ShieldZap}
@@ -86,6 +96,10 @@ export function ScanHealth({ scan, job }: { scan: ScanResult; job: ScanJob | nul
           hint={`Reproducibility score: ${m.pinnedInputs.length} pinned, ${m.unpinnedInputs.length} live inputs`}
         />
       </div>
+      {scan.executionMode ? <div className="border-t border-secondary px-4 py-2 text-xs text-secondary">
+        Current execution mode: <span className="font-semibold text-primary">{scan.executionMode}</span>
+        {scan.includesPreviousResults ? <span> · Includes retained findings from a previous result; current coverage does not establish whole-assessment coverage.</span> : null}
+      </div> : null}
     </Card>
   )
 }
