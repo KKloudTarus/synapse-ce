@@ -10,6 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/audit"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/siem"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -253,7 +254,7 @@ func TestIndexerReceiptSurvivesRetryAndRestartWithoutRepost(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		restarted, err := NewService(store, store, store, svc.sealer,
 			map[siem.Provider]ports.SIEMDriver{siem.ProviderSplunk: driver}, auditLog,
-			fakeClock{now: clock.now.Add(time.Duration(i) * time.Minute)}, &seqIDs{n: 10})
+			fakeClock{now: clock.now.Add(time.Duration(i) * time.Minute)}, &seqIDs{n: 10}, testSchema(t))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -304,7 +305,7 @@ func testService(t *testing.T) (*Service, *Memory, *scriptDriver, *memAudit, fak
 	driver := &scriptDriver{fn: func(_ int, req siem.Delivery) (siem.DeliveryResult, error) { return ackAll(req), nil }}
 	auditLog := &memAudit{}
 	clock := fakeClock{now: time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)}
-	svc, err := NewService(store, store, store, vaultSealer{cipher}, map[siem.Provider]ports.SIEMDriver{siem.ProviderSplunk: driver}, auditLog, clock, &seqIDs{})
+	svc, err := NewService(store, store, store, vaultSealer{cipher}, map[siem.Provider]ports.SIEMDriver{siem.ProviderSplunk: driver}, auditLog, clock, &seqIDs{}, testSchema(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +482,7 @@ func TestBrokenChainDoesNotAdvanceAndPartialAckResumes(t *testing.T) {
 		return ackAll(req), nil
 	}
 	cipher, _ := vault.NewCipher(bytesKey())
-	svc, err = NewService(store2, store2, store2, vaultSealer{cipher}, map[siem.Provider]ports.SIEMDriver{siem.ProviderSplunk: driver}, &memAudit{}, clock, &seqIDs{})
+	svc, err = NewService(store2, store2, store2, vaultSealer{cipher}, map[siem.Provider]ports.SIEMDriver{siem.ProviderSplunk: driver}, &memAudit{}, clock, &seqIDs{}, testSchema(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,4 +592,13 @@ func indexOf(s, part string) int {
 		}
 	}
 	return -1
+}
+
+func testSchema(t *testing.T) ports.SIEMOCSFValidator {
+	t.Helper()
+	schema, err := ocsf.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return schema
 }

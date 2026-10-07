@@ -1,10 +1,14 @@
 package siem
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+	"strings"
+)
 
 // ValidateOCSF checks the fields this exporter is allowed to emit for the
-// pinned OCSF 1.5.0 finding classes. It is a local contract check, not an
-// official schema validator; no upstream schema documents are vendored here.
+// pinned OCSF finding classes. This adds mapper-specific semantic constraints
+// to the complete vendored JSON Schema validation in infrastructure/siem/ocsf.
 func ValidateOCSF(doc map[string]any) error {
 	classUID, ok := number(doc["class_uid"])
 	if !ok || (classUID != 2002 && classUID != 2004 && classUID != 2005) {
@@ -37,10 +41,29 @@ func ValidateOCSF(doc map[string]any) error {
 	if product["name"] != "Synapse" || product["vendor_name"] != "Synapse" {
 		return fmt.Errorf("metadata.product is not the pinned producer")
 	}
+	if classUID != 2005 {
+		if profiles, exists := meta["profiles"]; exists {
+			list, ok := profiles.([]any)
+			if !ok || len(list) != 0 {
+				return fmt.Errorf("finding exporter does not emit optional profiles")
+			}
+		}
+	}
 	switch classUID {
 	case 2005:
-		if _, ok := doc["finding_info_list"].([]any); !ok {
+		list, ok := doc["finding_info_list"].([]any)
+		if !ok || len(list) == 0 {
 			return fmt.Errorf("incident finding requires finding_info_list")
+		}
+		for _, item := range list {
+			info, _ := item.(map[string]any)
+			if !nonempty(info["uid"]) {
+				return fmt.Errorf("incident finding requires finding_info_list.uid")
+			}
+		}
+		profiles, ok := meta["profiles"].([]any)
+		if !ok || len(profiles) != 1 || profiles[0] != "incident" {
+			return fmt.Errorf("incident finding requires the incident profile")
 		}
 		status, ok := number(doc["status_id"])
 		if !ok || status < 1 || status > 5 {
@@ -53,12 +76,12 @@ func ValidateOCSF(doc map[string]any) error {
 		}
 	case 2004:
 		info, ok := doc["finding_info"].(map[string]any)
-		if !ok || info["uid"] == "" {
+		if !ok || !nonempty(info["uid"]) {
 			return fmt.Errorf("detection finding requires finding_info.uid")
 		}
 	case 2002:
 		info, ok := doc["finding_info"].(map[string]any)
-		if !ok || info["uid"] == "" {
+		if !ok || !nonempty(info["uid"]) {
 			return fmt.Errorf("vulnerability finding requires finding_info.uid")
 		}
 		vulns, ok := doc["vulnerabilities"].([]any)
@@ -74,8 +97,13 @@ func number(value any) (int, bool) {
 	case int:
 		return typed, true
 	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) || math.Trunc(typed) != typed || typed < -float64(1<<53) || typed > float64(1<<53) {
+			return 0, false
+		}
 		return int(typed), true
 	default:
 		return 0, false
 	}
 }
+
+func nonempty(value any) bool { text, ok := value.(string); return ok && strings.TrimSpace(text) != "" }

@@ -27,11 +27,11 @@ const (
 	BaseRetry         = time.Second
 	MaxRetry          = 5 * time.Minute
 	ManifestRetention = 7 * 24 * time.Hour
-	MappingVersion    = "synapse.siem.v1"
+	MappingVersion    = "synapse.siem.v2"
 	EnvelopeVersion   = "synapse.siem.audit.v1"
 	IncidentEnvelope  = "synapse.siem.incident.v1"
 	OCSFSchemaVersion = "1.5.0"
-	OCSFSchemaTag     = "v1.5.0"
+	OCSFSchemaTag     = "1.5.0"
 	ScrubberVersion   = "privacy.classify.v1"
 )
 

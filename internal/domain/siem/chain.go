@@ -64,7 +64,7 @@ func VerifyAuditContent(cursor Position, rows []AuditFact, metadata []map[string
 		if !cursor.Zero() && row.ID <= cursor.AuditID {
 			return accepted, Problem{Kind: "broken", Message: "audit page moved backwards"}
 		}
-		accepted = append(accepted, row)
+		accepted = append(accepted, AuditWithMetadata(row, metadata[i]))
 		prevHash = row.Hash
 	}
 	return accepted, Problem{}

@@ -78,6 +78,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/scmdecoration"
 	elastic "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/elastic"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
 	siemseal "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/seal"
 	sentinel "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/sentinel"
 	splunk "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/splunk"
@@ -1642,13 +1643,17 @@ func main() {
 	var siemService *siemuc.Service
 	if databasePool != nil {
 		siemRepository := postgres.NewSIEMRepository(databasePool)
-		var siemErr error
+		schema, siemErr := ocsf.New()
+		if siemErr != nil {
+			log.Error("siem schema init failed", "err", siemErr)
+			os.Exit(1)
+		}
 		siemService, siemErr = siemuc.NewService(siemRepository, siemRepository, siemRepository, siemseal.Vault{Cipher: vaultCipher}, map[siem.Provider]ports.SIEMDriver{
 			siem.ProviderSplunk:            splunk.New(5*time.Second, true),
 			siem.ProviderElasticsearch:     elastic.New(5 * time.Second),
 			siem.ProviderMicrosoftSentinel: sentinel.New(5 * time.Second),
 			siem.ProviderSyslogTLS:         syslogtls.New(5 * time.Second),
-		}, auditLog, clock, ids)
+		}, auditLog, clock, ids, schema)
 		if siemErr != nil {
 			log.Error("siem service init failed", "err", siemErr)
 			os.Exit(1)

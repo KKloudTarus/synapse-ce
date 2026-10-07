@@ -481,7 +481,7 @@ func (m *Memory) ReadAudit(ctx context.Context, afterID int64, limit int) ([]sie
 		if row.fact.ID <= afterID || len(facts) >= limit {
 			continue
 		}
-		facts = append(facts, row.fact)
+		facts = append(facts, siem.AuditWithMetadata(row.fact, row.meta))
 		meta = append(meta, cloneMeta(row.meta))
 	}
 	return facts, meta, anchor, nil
