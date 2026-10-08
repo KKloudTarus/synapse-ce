@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
@@ -49,7 +50,7 @@ func TestSIEMRoutesAreAdminOnlyAndHideSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := siemuc.NewMemory()
-	svc, err := siemuc.NewService(store, store, store, vaultSealer{cipher}, nil, nil, siemClock{now: time.Unix(1_700_000_000, 0).UTC()}, &siemIDs{})
+	svc, err := siemuc.NewService(store, store, store, vaultSealer{cipher}, nil, nil, siemClock{now: time.Unix(1_700_000_000, 0).UTC()}, &siemIDs{}, testSIEMSchema(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestSIEMSentinelCreateValidatesTargetAndHidesCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := siemuc.NewMemory()
-	svc, err := siemuc.NewService(store, store, store, vaultSealer{cipher}, nil, nil, siemClock{now: time.Unix(1_700_000_000, 0).UTC()}, &siemIDs{})
+	svc, err := siemuc.NewService(store, store, store, vaultSealer{cipher}, nil, nil, siemClock{now: time.Unix(1_700_000_000, 0).UTC()}, &siemIDs{}, testSIEMSchema(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,11 +122,11 @@ func TestSIEMSentinelCreateValidatesTargetAndHidesCredential(t *testing.T) {
 
 	const credential = `{"tenant_id":"11111111-1111-4111-8111-111111111111","client_id":"22222222-2222-4222-8222-222222222222","client_secret":"sentinel-client-secret"}`
 	validBody, err := json.Marshal(map[string]any{
-		"name": "Sentinel",
+		"name":     "Sentinel",
 		"provider": "microsoft_sentinel",
-		"origin": "https://example.eastus-1.ingest.monitor.azure.com",
-		"target": "dcr-0123456789abcdef0123456789abcdef/Custom-SynapseSIEM",
-		"secret": credential,
+		"origin":   "https://example.eastus-1.ingest.monitor.azure.com",
+		"target":   "dcr-0123456789abcdef0123456789abcdef/Custom-SynapseSIEM",
+		"secret":   credential,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -139,11 +140,11 @@ func TestSIEMSentinelCreateValidatesTargetAndHidesCredential(t *testing.T) {
 	}
 
 	invalidBody, err := json.Marshal(map[string]any{
-		"name": "Bad Sentinel",
+		"name":     "Bad Sentinel",
 		"provider": "microsoft_sentinel",
-		"origin": "https://example.eastus-1.ingest.monitor.azure.com",
-		"target": "dcr-0123456789abcdef0123456789abcdef/SynapseSIEM",
-		"secret": credential,
+		"origin":   "https://example.eastus-1.ingest.monitor.azure.com",
+		"target":   "dcr-0123456789abcdef0123456789abcdef/SynapseSIEM",
+		"secret":   credential,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +168,7 @@ func TestSIEMRoutesHideOtherTenants(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := siemuc.NewMemory()
-	svc, err := siemuc.NewService(store, store, store, vaultSealer{cipher}, nil, nil, siemClock{now: time.Unix(1_700_000_000, 0).UTC()}, &siemIDs{})
+	svc, err := siemuc.NewService(store, store, store, vaultSealer{cipher}, nil, nil, siemClock{now: time.Unix(1_700_000_000, 0).UTC()}, &siemIDs{}, testSIEMSchema(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,3 +258,12 @@ func (s *siemIDs) NewID() shared.ID {
 }
 
 var _ ports.SIEMSealer = vaultSealer{}
+
+func testSIEMSchema(t *testing.T) *ocsf.Validator {
+	t.Helper()
+	schema, err := ocsf.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}

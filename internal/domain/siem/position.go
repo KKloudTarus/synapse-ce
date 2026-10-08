@@ -72,21 +72,22 @@ func (p Position) Validate() error {
 // AuditFact is one committed v2 audit row after metadata allowlisting.
 // Metadata that is not copied here is not available to a mapper.
 type AuditFact struct {
-	ID           int64
-	Actor        string
-	Action       string
-	Target       string
-	AtUnixMicro  int64
-	Hash         string
-	PreviousHash string
-	HashVersion  int
-	Severity     string
-	EngagementID string
-	AdvisoryID   string
-	FindingID    string
-	AssetID      string
-	Host         string
-	Title        string
+	ID            int64
+	Actor         string
+	Action        string
+	Target        string
+	AtUnixMicro   int64
+	Hash          string
+	PreviousHash  string
+	HashVersion   int
+	Severity      string
+	EngagementID  string
+	AdvisoryID    string
+	FindingID     string
+	AssetID       string
+	Host          string
+	Title         string
+	FindingStatus string
 }
 
 // IncidentFact is one captured incident event after the payload allowlist.

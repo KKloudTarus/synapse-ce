@@ -31,6 +31,7 @@ require (
 	github.com/phpdave11/gofpdf v1.4.3
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/prometheus/client_golang v1.24.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	github.com/ulikunitz/xz v0.5.17
 	golang.org/x/mod v0.41.0

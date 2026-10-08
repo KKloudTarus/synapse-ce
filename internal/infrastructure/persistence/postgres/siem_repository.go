@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -608,19 +607,7 @@ func (r *SIEMRepository) ReadAudit(ctx context.Context, afterID int64, limit int
 					return err
 				}
 			}
-			fact.Severity = meta["severity"]
-			fact.EngagementID = meta["engagement_id"]
-			if fact.EngagementID == "" && strings.HasPrefix(fact.Action, "finding.") {
-				fact.EngagementID = meta["engagement"]
-			}
-			fact.AdvisoryID = meta["advisory_id"]
-			fact.FindingID = meta["finding_id"]
-			if fact.FindingID == "" && strings.HasPrefix(fact.Action, "finding.") {
-				fact.FindingID = fact.Target
-			}
-			fact.AssetID = meta["asset_id"]
-			fact.Host = meta["host"]
-			fact.Title = meta["title"]
+			fact = siem.AuditWithMetadata(fact, meta)
 			facts = append(facts, fact)
 			metas = append(metas, meta)
 		}
