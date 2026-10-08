@@ -131,6 +131,37 @@ serialized, so a source field containing the client secret is redacted too.
 The source-chain hash in the payload is a reference to the local chain. It is
 not a digest of the redacted body. The redacted body has its own digest.
 
+## Finding export and schema validation
+
+Finding workflow audit rows now map to OCSF detection findings (2004), or
+vulnerability findings (2002) at Detail when the stored audit metadata includes a
+CVE identifier. Create maps to Create; assignment, writeup and promotion map to
+Update. Status and retest events use their recorded status: remediated or false
+positive maps to Close; open, triage or confirmed maps to Update. Comments,
+unknown verbs or missing/unknown status use the audit envelope with a fixed
+`fallback_reason`. A missing finding identity also uses that envelope. Lower data
+classes use detection findings without exporting advisory details. Incident
+findings (2005) retain the existing owner and event-status requirements; missing
+fields or a Signal ceiling produce an incident envelope with `fallback_reason`.
+
+The source facts come only from the committed, hash-verified audit metadata or
+captured incident event. The exporter never loads the current finding to fill a
+missing title, severity or advisory. Existing Findings-service audit rows commonly
+have no title; status, retest and promotion rows commonly have no severity.
+Titles remain absent and severity is Unknown (0). Replay of the same facts,
+policy, secrets and mapping version preserves the body, digest and record ID.
+Record IDs remain tenant-specific. The mapping version is `synapse.siem.v2`.
+Detection console links use `finding_info.src_url`.
+
+Every newly prepared OCSF record passes the complete offline JSON Schema validator
+before sealing. The vendored OCSF 1.5.0 schemas, upstream commit, checksums, profile
+selection and license are documented in
+`internal/infrastructure/siem/ocsf/schemas/README.md`. The existing `ValidateOCSF`
+function adds producer and mapping constraints; it does not replace JSON Schema
+validation. Invalid OCSF is quarantined with `schema_validation`; no payload or
+source-valued validation error is sent or stored. Existing sealed batches retain
+their prepared bytes across retries, including batches prepared by older versions.
+
 ## Credentials and hosts
 
 Secrets are sealed with the vault key and associated data that includes the
@@ -210,5 +241,4 @@ These shared pieces were still open, so this stream does not replace them:
 
 - dial-time host allowlists
 - engagement data-class overrides beyond the fail-closed signal ceiling
-- offline validation against the official, pinned OCSF schema artifacts
 

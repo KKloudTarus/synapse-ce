@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -50,19 +51,24 @@ func ExportAudit(tenant string, fact AuditFact, class DataClass, known []string,
 		return terminal(id, ItemSuppressed, class, "policy_none")
 	}
 	switch {
+	case strings.HasPrefix(fact.Action, "finding."):
+		return exportFindingAudit(tenant, id, fact, class, known, publicBase)
 	case strings.HasPrefix(fact.Action, "vulnerability."):
-		if class != ClassDetail || !cveID(fact.AdvisoryID) {
-			return finish(id, class, FormatAuditEnvelope, auditEnvelope(tenant, fact, class, known, publicBase))
+		if class != ClassDetail {
+			return auditFallback(tenant, id, fact, class, known, publicBase, "data_class")
+		}
+		if !cveID(fact.AdvisoryID) {
+			return auditFallback(tenant, id, fact, class, known, publicBase, "missing_cve")
 		}
 		body, err := vulnerabilityFinding(fact, class, known)
 		if err != nil {
-			return finish(id, class, FormatAuditEnvelope, auditEnvelope(tenant, fact, class, known, publicBase))
+			return auditFallback(tenant, id, fact, class, known, publicBase, "unsupported_activity")
 		}
 		return finish(id, class, FormatVulnerabilityFinding, body)
 	case strings.HasPrefix(fact.Action, "detection."):
 		body, err := detectionFinding(fact, class, known, publicBase)
 		if err != nil {
-			return finish(id, class, FormatAuditEnvelope, auditEnvelope(tenant, fact, class, known, publicBase))
+			return auditFallback(tenant, id, fact, class, known, publicBase, "unsupported_activity")
 		}
 		return finish(id, class, FormatDetectionFinding, body)
 	default:
@@ -82,7 +88,17 @@ func ExportIncident(tenant string, fact IncidentFact, class DataClass, known []s
 	if body, ok := incidentFinding(fact, class, known, publicBase); ok {
 		return finish(id, class, FormatIncidentFinding, body)
 	}
-	return finish(id, class, FormatIncidentEnvelope, incidentEnvelope(tenant, fact, class, known, publicBase))
+	reason := "missing_incident_fields"
+	if classRank(class) < 2 {
+		reason = "data_class"
+	}
+	doc := incidentEnvelopeDoc(tenant, fact, class, known, publicBase)
+	doc["fallback_reason"] = reason
+	exported := finish(id, class, FormatIncidentEnvelope, mustJSON(doc))
+	if exported.Disposition == ItemPending {
+		exported.Reason = reason
+	}
+	return exported
 }
 
 const (
@@ -106,6 +122,10 @@ func finish(id string, class DataClass, format string, body []byte) Exported {
 }
 
 func auditEnvelope(tenant string, fact AuditFact, class DataClass, known []string, publicBase string) []byte {
+	return mustJSON(auditEnvelopeDoc(tenant, fact, class, known, publicBase))
+}
+
+func auditEnvelopeDoc(tenant string, fact AuditFact, class DataClass, known []string, publicBase string) map[string]any {
 	doc := map[string]any{
 		"schema":     EnvelopeVersion,
 		"data_class": string(class),
@@ -127,23 +147,23 @@ func auditEnvelope(tenant string, fact AuditFact, class DataClass, known []strin
 			doc["title"] = ScrubText(fact.Title, known)
 		}
 		if fact.EngagementID != "" {
-			doc["engagement_id"] = fact.EngagementID
+			doc["engagement_id"] = ScrubText(fact.EngagementID, known)
 		}
 	}
 	if class == ClassDetail {
-		putID(doc, "advisory_id", fact.AdvisoryID)
-		putID(doc, "finding_id", fact.FindingID)
-		putID(doc, "asset_id", fact.AssetID)
+		putID(doc, "advisory_id", ScrubText(fact.AdvisoryID, known))
+		putID(doc, "finding_id", ScrubText(fact.FindingID, known))
+		putID(doc, "asset_id", ScrubText(fact.AssetID, known))
 	}
 	if fact.FindingID != "" {
 		if origin, err := ParseOrigin(publicBase); err == nil {
-			doc["link"] = origin.String() + "/findings/" + fact.FindingID
+			doc["link"] = origin.String() + "/findings/" + url.PathEscape(ScrubText(fact.FindingID, known))
 		}
 	}
-	return mustJSON(doc)
+	return doc
 }
 
-func incidentEnvelope(tenant string, fact IncidentFact, class DataClass, known []string, publicBase string) []byte {
+func incidentEnvelopeDoc(tenant string, fact IncidentFact, class DataClass, known []string, publicBase string) map[string]any {
 	doc := map[string]any{
 		"schema":      IncidentEnvelope,
 		"data_class":  string(class),
@@ -151,7 +171,7 @@ func incidentEnvelope(tenant string, fact IncidentFact, class DataClass, known [
 		"kind":        fact.Kind,
 		"severity":    severityOrUnknown(fact.Severity),
 		"time":        fact.AtUnixMicro / 1000,
-		"incident_id": fact.IncidentID,
+		"incident_id": ScrubText(fact.IncidentID, known),
 		"event_seq":   fact.EventSeq,
 		"source": map[string]any{
 			"kind":       string(fact.Phase),
@@ -164,23 +184,23 @@ func incidentEnvelope(tenant string, fact IncidentFact, class DataClass, known [
 			doc["title"] = ScrubText(fact.Title, known)
 		}
 		if fact.EngagementID != "" {
-			doc["engagement_id"] = fact.EngagementID
+			doc["engagement_id"] = ScrubText(fact.EngagementID, known)
 		}
 	}
 	if class == ClassDetail {
 		if fact.Comment != "" {
 			doc["comment"] = ScrubText(fact.Comment, known)
 		}
-		putID(doc, "asset_id", fact.AssetID)
-		putID(doc, "detection_id", fact.DetectionID)
+		putID(doc, "asset_id", ScrubText(fact.AssetID, known))
+		putID(doc, "detection_id", ScrubText(fact.DetectionID, known))
 		if fact.ToStatus != "" {
-			doc["to_status"] = fact.ToStatus
+			doc["to_status"] = ScrubText(fact.ToStatus, known)
 		}
 	}
-	if link := incidentLink(publicBase, fact.IncidentID); link != "" {
+	if link := incidentLink(publicBase, ScrubText(fact.IncidentID, known)); link != "" {
 		doc["link"] = link
 	}
-	return mustJSON(doc)
+	return doc
 }
 
 func incidentFinding(fact IncidentFact, class DataClass, known []string, publicBase string) ([]byte, bool) {
@@ -197,7 +217,7 @@ func incidentFinding(fact IncidentFact, class DataClass, known []string, publicB
 	if assigneeName == "" {
 		return nil, false
 	}
-	info := map[string]any{"uid": fact.IncidentID + ":" + strconv.Itoa(fact.EventSeq)}
+	info := map[string]any{"uid": ScrubText(fact.IncidentID, known) + ":" + strconv.Itoa(fact.EventSeq)}
 	if fact.Title != "" {
 		info["title"] = ScrubText(fact.Title, known)
 	}
@@ -206,8 +226,8 @@ func incidentFinding(fact IncidentFact, class DataClass, known []string, publicB
 	doc["finding_info_list"] = []any{info}
 	doc["assignee"] = map[string]any{"name": ScrubText(assigneeName, known)}
 	doc["metadata"].(map[string]any)["profiles"] = []any{"incident"}
-	doc["unmapped"] = incidentUnmapped(fact)
-	if link := incidentLink(publicBase, fact.IncidentID); link != "" {
+	doc["unmapped"] = incidentUnmapped(fact, known)
+	if link := incidentLink(publicBase, ScrubText(fact.IncidentID, known)); link != "" {
 		doc["src_url"] = link
 	}
 	if class == ClassDetail && fact.Comment != "" {
@@ -217,7 +237,7 @@ func incidentFinding(fact IncidentFact, class DataClass, known []string, publicB
 }
 
 func detectionFinding(fact AuditFact, class DataClass, known []string, publicBase string) ([]byte, error) {
-	activity, ok := auditActivity(fact.Action)
+	activity, ok := findingActivity(fact)
 	if !ok {
 		return nil, errMissing
 	}
@@ -225,7 +245,7 @@ func detectionFinding(fact AuditFact, class DataClass, known []string, publicBas
 	if uid == "" {
 		uid = "audit:" + strconv.FormatInt(fact.ID, 10)
 	}
-	info := map[string]any{"uid": uid}
+	info := map[string]any{"uid": ScrubText(uid, known)}
 	if classRank(class) >= 2 && fact.Title != "" {
 		info["title"] = ScrubText(fact.Title, known)
 	}
@@ -234,7 +254,7 @@ func detectionFinding(fact AuditFact, class DataClass, known []string, publicBas
 	doc["unmapped"] = auditUnmapped(fact)
 	if link := strings.TrimSpace(publicBase); link != "" && fact.FindingID != "" {
 		if parsed, err := ParseOrigin(link); err == nil {
-			doc["src_url"] = parsed.String() + "/findings/" + fact.FindingID
+			info["src_url"] = parsed.String() + "/findings/" + url.PathEscape(ScrubText(fact.FindingID, known))
 		}
 	}
 	return mustJSON(doc), nil
@@ -261,7 +281,7 @@ func cveID(value string) bool {
 }
 
 func vulnerabilityFinding(fact AuditFact, class DataClass, known []string) ([]byte, error) {
-	activity, ok := auditActivity(fact.Action)
+	activity, ok := findingActivity(fact)
 	if !ok {
 		return nil, errMissing
 	}
@@ -269,7 +289,7 @@ func vulnerabilityFinding(fact AuditFact, class DataClass, known []string) ([]by
 	if uid == "" {
 		uid = "audit:" + strconv.FormatInt(fact.ID, 10)
 	}
-	info := map[string]any{"uid": uid}
+	info := map[string]any{"uid": ScrubText(uid, known)}
 	if fact.Title != "" {
 		info["title"] = ScrubText(fact.Title, known)
 	}
@@ -306,12 +326,12 @@ func auditUnmapped(fact AuditFact) map[string]any {
 	}
 }
 
-func incidentUnmapped(fact IncidentFact) map[string]any {
+func incidentUnmapped(fact IncidentFact, known []string) map[string]any {
 	return map[string]any{
 		"synapse_source_position": map[string]any{
 			"source":      string(fact.Phase),
 			"stream_seq":  fact.StreamSeq,
-			"incident_id": fact.IncidentID,
+			"incident_id": ScrubText(fact.IncidentID, known),
 			"event_seq":   fact.EventSeq,
 		},
 	}
@@ -372,10 +392,10 @@ func severityID(severity string) int {
 }
 
 func severityOrUnknown(severity string) string {
-	if strings.TrimSpace(severity) == "" {
+	if severityID(severity) == 0 {
 		return "unknown"
 	}
-	return strings.ToLower(severity)
+	return strings.ToLower(strings.TrimSpace(severity))
 }
 
 func classRank(class DataClass) int {
@@ -401,7 +421,7 @@ func incidentLink(publicBase, incidentID string) string {
 	if err != nil {
 		return ""
 	}
-	return origin.String() + "/fleet/incidents/" + incidentID
+	return origin.String() + "/fleet/incidents/" + url.PathEscape(incidentID)
 }
 
 func mustJSON(doc map[string]any) []byte {

@@ -15,6 +15,7 @@ import (
 
 // Service manages tenant SIEM sinks and the fenced export tick.
 type Service struct {
+	schema       ports.SIEMOCSFValidator
 	store        ports.SIEMStore
 	sources      ports.SIEMSources
 	directory    ports.SIEMDirectory
@@ -82,15 +83,15 @@ type Status struct {
 
 // NewService wires the export service. Drivers may be empty in tests that
 // only exercise configuration; a tick then blocks that provider.
-func NewService(store ports.SIEMStore, sources ports.SIEMSources, directory ports.SIEMDirectory, sealer ports.SIEMSealer, drivers map[siem.Provider]ports.SIEMDriver, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
-	if store == nil || sources == nil || directory == nil || sealer == nil || clock == nil || ids == nil {
+func NewService(store ports.SIEMStore, sources ports.SIEMSources, directory ports.SIEMDirectory, sealer ports.SIEMSealer, drivers map[siem.Provider]ports.SIEMDriver, audit ports.AuditLogger, clock ports.Clock, ids ports.IDGenerator, schema ports.SIEMOCSFValidator) (*Service, error) {
+	if schema == nil || store == nil || sources == nil || directory == nil || sealer == nil || clock == nil || ids == nil {
 		return nil, invalid("siem service dependencies are required")
 	}
 	if drivers == nil {
 		drivers = map[siem.Provider]ports.SIEMDriver{}
 	}
 	return &Service{
-		store: store, sources: sources, directory: directory, sealer: sealer,
+		schema: schema, store: store, sources: sources, directory: directory, sealer: sealer,
 		drivers: drivers, audit: audit, clock: clock, ids: ids,
 		rng: func() float64 { return 0.5 }, metrics: noopMetrics{},
 	}, nil

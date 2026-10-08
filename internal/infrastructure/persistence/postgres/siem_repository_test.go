@@ -1,7 +1,9 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +19,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/siem"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 )
@@ -383,9 +386,13 @@ func TestSIEMPostgresIndexerAckAndMetrics(t *testing.T) {
 	metrics := observability.NewSIEMMetrics(registry)
 	driver := &siemAckDriver{}
 	clock := &siemMovingClock{now: now}
+	schema, err := ocsf.New()
+	if err != nil {
+		t.Fatal(err)
+	}
 	svc, err := siemuc.NewService(repo, repo, siemOnlyTenant{id: shared.ID(id)}, siemEchoSealer{}, map[siem.Provider]ports.SIEMDriver{
 		siem.ProviderSplunk: driver,
-	}, nil, clock, &siemSeqIDs{})
+	}, nil, clock, &siemSeqIDs{}, schema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +489,7 @@ func TestSIEMMigrationAndTenantIsolation(t *testing.T) {
 	if _, err := admin.Exec(ctx, `GRANT USAGE ON SCHEMA public TO `+role); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admin.Exec(ctx, `GRANT SELECT ON tenants TO `+role); err != nil {
+	if _, err := admin.Exec(ctx, `GRANT SELECT ON tenants, audit_log TO `+role); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := admin.Exec(ctx, `GRANT SELECT, INSERT, UPDATE, DELETE ON siem_sinks, siem_sink_secrets, siem_checkpoints, siem_leases, siem_batches, siem_batch_items, siem_incident_counters, siem_incident_capture, siem_incident_pruned TO `+role); err != nil {
@@ -502,6 +509,96 @@ func TestSIEMMigrationAndTenantIsolation(t *testing.T) {
 	repo := NewSIEMRepository(restricted)
 	if _, err := repo.ListSinks(shared.WithTenant(ctx, "tenant-a")); err != nil {
 		t.Fatal(err)
+	}
+
+	// Exercise the source reader through the same non-bypass RLS connection.
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	tenantA := fmt.Sprintf("siem-source-a-%d", now.UnixNano())
+	tenantB := fmt.Sprintf("siem-source-b-%d", now.UnixNano())
+	for _, tenant := range []string{tenantA, tenantB} {
+		if _, err := admin.Exec(ctx, `INSERT INTO tenants(id,name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, tenant); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		tx, err := admin.Begin(cleanupCtx)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer func() { _ = tx.Rollback(cleanupCtx) }()
+		if _, err := tx.Exec(cleanupCtx, `ALTER TABLE audit_log DISABLE TRIGGER audit_log_append_only`); err != nil {
+			t.Error(err)
+			return
+		}
+		if _, err := tx.Exec(cleanupCtx, `DELETE FROM audit_log WHERE tenant_id IN ($1,$2)`, tenantA, tenantB); err != nil {
+			t.Error(err)
+			return
+		}
+		if _, err := tx.Exec(cleanupCtx, `ALTER TABLE audit_log ENABLE TRIGGER audit_log_append_only`); err != nil {
+			t.Error(err)
+			return
+		}
+		if err := tx.Commit(cleanupCtx); err != nil {
+			t.Error(err)
+		}
+	})
+	entry := ports.AuditEntry{Actor: "ada", Action: "finding.status", Target: "finding-a", At: now, Metadata: map[string]string{"engagement": "eng-a", "status": "remediated", "note": "PRIVATE-NOTE"}}
+	if err := WithTenant(ctx, admin, tenantA, func(tx pgx.Tx) error { return appendTenantAudit(ctx, tx, tenantA, entry) }); err != nil {
+		t.Fatal(err)
+	}
+	entry.Target = "finding-b"
+	if err := WithTenant(ctx, admin, tenantB, func(tx pgx.Tx) error { return appendTenantAudit(ctx, tx, tenantB, entry) }); err != nil {
+		t.Fatal(err)
+	}
+	rows, metadata, anchor, err := repo.ReadAudit(shared.WithTenant(ctx, shared.ID(tenantA)), 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, problem := siem.VerifyAuditContent(siem.Position{}, rows, metadata, anchor)
+	if !problem.None() {
+		t.Fatalf("source verification: %+v", problem)
+	}
+	var exported siem.Exported
+	foundFinding := false
+	for _, row := range verified {
+		if row.Target == "finding-b" {
+			t.Fatal("RLS source exposed another tenant")
+		}
+		if row.Target == "finding-a" {
+			foundFinding = true
+			if row.FindingID != "finding-a" || row.EngagementID != "eng-a" || row.FindingStatus != "remediated" || row.Severity != "" {
+				t.Fatalf("wrong stored source facts: %+v", row)
+			}
+			exported = siem.ExportAudit(tenantA, row, siem.ClassSignal, nil, "")
+			schema, err := ocsf.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := schema.Validate(exported.Body); err != nil {
+				t.Fatal(err)
+			}
+			var doc map[string]any
+			if err := json.Unmarshal(exported.Body, &doc); err != nil {
+				t.Fatal(err)
+			}
+			if doc["activity_id"] != float64(3) || doc["severity_id"] != float64(0) || bytes.Contains(exported.Body, []byte("PRIVATE-NOTE")) {
+				t.Fatalf("unsafe source export: %s", exported.Body)
+			}
+		}
+	}
+	if !foundFinding {
+		t.Fatal("real stored finding audit was not exported")
+	}
+	replay, _, _, err := repo.ReadAudit(shared.WithTenant(ctx, shared.ID(tenantA)), 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range replay {
+		if row.Target == "finding-a" && !bytes.Equal(siem.ExportAudit(tenantA, row, siem.ClassSignal, nil, "").Body, exported.Body) {
+			t.Fatal("source replay changed")
+		}
 	}
 	ids, err := repo.TenantIDs(ctx)
 	if err != nil || len(ids) == 0 {

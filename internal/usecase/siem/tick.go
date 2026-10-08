@@ -455,7 +455,7 @@ func (s *Service) prepareAudit(ctx context.Context, sink siem.Sink, cp siem.Chec
 		if err != nil {
 			return nil, siem.Problem{Kind: "blocked", Message: "data class is invalid"}, nil
 		}
-		exported := siem.ExportAudit(sink.TenantID.String(), row, class, known, s.publicBase)
+		exported := s.validateExport(siem.ExportAudit(sink.TenantID.String(), row, class, known, s.publicBase))
 		item := siem.BatchItem{
 			Ordinal: len(out), RecordID: exported.RecordID, DataClass: class, EngagementID: row.EngagementID,
 			Disposition: exported.Disposition, PayloadDigest: exported.Digest, Mapping: exported.Format,
@@ -503,7 +503,7 @@ func (s *Service) prepareIncident(ctx context.Context, sink siem.Sink, cp siem.C
 		if err != nil {
 			return nil, siem.Problem{Kind: "blocked", Message: "data class is invalid"}, nil
 		}
-		exported := siem.ExportIncident(sink.TenantID.String(), row, class, known, s.publicBase)
+		exported := s.validateExport(siem.ExportIncident(sink.TenantID.String(), row, class, known, s.publicBase))
 		item := siem.BatchItem{
 			Ordinal: len(out), RecordID: exported.RecordID, DataClass: class, EngagementID: row.EngagementID,
 			Disposition: exported.Disposition, PayloadDigest: exported.Digest, Mapping: exported.Format,
@@ -639,4 +639,20 @@ func firstFailure(batch siem.Batch) string {
 		}
 	}
 	return "provider rejected a record"
+}
+
+func (s *Service) validateExport(exported siem.Exported) siem.Exported {
+	if exported.Disposition != siem.ItemPending {
+		return exported
+	}
+	switch exported.Format {
+	case siem.FormatDetectionFinding, siem.FormatVulnerabilityFinding, siem.FormatIncidentFinding:
+		if err := s.schema.Validate(exported.Body); err != nil {
+			exported.Disposition = siem.ItemQuarantined
+			exported.Reason = "schema_validation"
+			exported.Body = nil
+			exported.Digest = ""
+		}
+	}
+	return exported
 }

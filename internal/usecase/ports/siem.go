@@ -85,3 +85,9 @@ type SIEMMetrics interface {
 	Backlog(source string, ageSeconds float64, records int)
 	Blocked(reason string)
 }
+
+// SIEMOCSFValidator validates complete documents against the pinned offline schemas.
+// Errors must not expose record values.
+type SIEMOCSFValidator interface {
+	Validate(body []byte) error
+}
