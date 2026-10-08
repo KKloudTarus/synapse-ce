@@ -220,6 +220,39 @@ func TestFailingTemplateFallsBackAndDelivers(t *testing.T) {
 	}
 }
 
+// TestRenderThatLeavesNothingFallsBack is the #1566 review case: every variable the template uses is
+// summary class, and the engagement caps the channel at signal. The class leaves each variable out
+// as empty text, so the template renders nothing; the message must fall back to the built-in
+// content and record it, rather than send an empty payload a provider refuses.
+func TestRenderThatLeavesNothingFallsBack(t *testing.T) {
+	h := newRenderHarness(t)
+	created, err := h.svc.CreateTemplate(h.ctx, "admin", TemplateInput{Name: "Summary only", EventType: domain.EventScanCompleted, Family: domain.FamilyChat, Locale: "en",
+		Fields: map[string]string{"title": "{{.title}}", "body": "  {{.target}}  "}})
+	if err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+	if _, err := h.svc.ActivateTemplate(h.ctx, "admin", created.ID, TemplateChangeInput{Revision: created.Revision}); err != nil {
+		t.Fatalf("activate template: %v", err)
+	}
+	e := domain.Event{TenantID: "tenant-r", ID: "event-blank", Type: domain.EventScanCompleted, SourceKind: "scan_job", SourceID: "blank", SchemaVersion: 1,
+		OccurredAt: h.clock.at, Data: json.RawMessage(`{"title":"Scan completed","scan_kind":"sast","target":"https://app.example.test"}`)}
+	projected, err := NewEventBuilders().Project(h.ctx, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := h.svc.RenderMessage(h.ctx, RenderInput{Channel: h.channel, Event: projected})
+	if err != nil || full.Fallback || full.Formatted == nil {
+		t.Fatalf("at the channel's own summary class = %+v, %v, want the template rendered", full, err)
+	}
+	capped, err := h.svc.RenderMessage(h.ctx, RenderInput{Channel: h.channel, Event: projected, Engagement: domain.EngagementNotificationsSignal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !capped.Fallback || capped.Formatted != nil || capped.Message.TemplateRef != refFallback {
+		t.Fatalf("capped at signal = %+v, want the built-in content with the fallback recorded", capped)
+	}
+}
+
 // TestRenderMessageAppliesTheDataClass checks that a variable above the channel's class renders
 // empty, and that an engagement set to none suppresses the message.
 func TestRenderMessageAppliesTheDataClass(t *testing.T) {

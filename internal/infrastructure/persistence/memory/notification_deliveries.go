@@ -140,9 +140,10 @@ func (r *NotificationRepository) FleetAgentLastSeen(context.Context, shared.ID, 
 	return true, nil
 }
 
-// BeginAttempt records a started attempt on an open delivery, pinning templateRef on the delivery
-// when it has none, after the same checks as the Postgres repository: the worker holds the job's claim, the channel is enabled, and neither the
-// tenant nor the channel is inside its delivery rate limit.
+// BeginAttempt records a started attempt on an open delivery after the same checks as the Postgres
+// repository: the worker holds the job's claim, the channel is enabled, and neither the tenant nor
+// the channel is inside its delivery rate limit. The attempt keeps templateRef, and the delivery
+// takes it as its pin when it has none (#1365).
 func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, templateRef string) (notification.Attempt, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

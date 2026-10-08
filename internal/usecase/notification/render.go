@@ -101,7 +101,10 @@ func (s *Service) RenderMessage(ctx context.Context, in RenderInput) (RenderResu
 		return s.renderWebhookBody(out, in.Channel, resolution, vars), nil
 	}
 	rendered, err := renderFields(resolution, fields, vars)
-	if err != nil {
+	// A template whose variables are all above the effective class renders nothing: the class
+	// leaves a variable out as empty text, not as an error. An empty message would be refused by
+	// chat providers (and counted against the channel) or sent blank by email, so it falls back.
+	if err != nil || blank(rendered) {
 		return fallback(out), nil
 	}
 	out.Message.Fields = rendered
@@ -289,6 +292,16 @@ func (s *Service) renderWebhookBody(out RenderResult, channel domain.Channel, r 
 	}
 	out.CustomBody = body
 	return out
+}
+
+// blank reports whether every rendered field is empty or whitespace.
+func blank(fields map[string]string) bool {
+	for _, v := range fields {
+		if strings.TrimSpace(v) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func fallback(out RenderResult) RenderResult {

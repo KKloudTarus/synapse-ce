@@ -309,7 +309,10 @@ The worker renders a delivery when it sends it, not when the event is recorded:
 
 If the template no longer renders, for example because it names a variable the
 catalog has since removed, the delivery falls back to the channel's built-in content,
-records `template_ref: fallback`, and is still sent. The worker's built-in content fallback metric (#1465) counts it. A channel with no template that applies sends
+records `template_ref: fallback`, and is still sent. The same happens when the template
+renders nothing at the effective class: an engagement capped at `signal` leaves out every
+`summary` variable, and a template made only of those would otherwise send an empty
+message that chat providers refuse. The worker's built-in content fallback metric (#1465) counts it. A channel with no template that applies sends
 its built-in content as before.
 
 Every create, update, activation, rollback and archive is written to the audit
@@ -495,10 +498,10 @@ channel's formatter so that no value can become formatting, a link or a mention:
   `allowed_mentions.parse` always empty, so `@everyone` and role mentions never ping. The driver adds
   `wait=true` so Discord returns the created message, whose ID is kept on the delivery.
 
-Until the send-time renderer (#1365, #1367) lands, these channels use the same built-in title and
-summary as Slack, and a bound chat template does not change their content yet. The formatters are the
-ones the template preview uses, so the switch will not change how a message is escaped. Deep links
-arrive with the renderer.
+When a tenant chat template applies, these channels send its rendered payload through their
+formatter (#1365); otherwise they use the same built-in title and summary as Slack. The formatters are
+the ones the template preview uses, so a message is escaped the same way in both. Deep links arrive
+with the channel templates (#1367).
 
 All four are `2xx` delivered, `408`, `429` and `5xx` retried with the usual budget, and any other
 status final. Each type can be switched off deployment-wide with
