@@ -253,3 +253,61 @@ func TestListDeliveriesPagesNewestFirst(t *testing.T) {
 		t.Fatalf("event type filter kept %d deliveries", len(filtered.Items))
 	}
 }
+
+func TestBeginAttemptRevalidatesRenderedDataClass(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		rendered   notification.DataClass
+		channel    notification.DataClass
+		engagement notification.EngagementNotifications
+		wantErr    error
+	}{
+		{"engagement lowered", notification.DataClassSummary, notification.DataClassSummary, notification.EngagementNotificationsSignal, ports.ErrRetryable},
+		{"channel lowered", notification.DataClassSummary, notification.DataClassSignal, notification.EngagementNotificationsInherit, ports.ErrRetryable},
+		{"detail lowered to summary", notification.DataClassDetail, notification.DataClassSummary, notification.EngagementNotificationsInherit, ports.ErrRetryable},
+		{"unchanged", notification.DataClassSummary, notification.DataClassSummary, notification.EngagementNotificationsInherit, nil},
+		{"policy raised", notification.DataClassSignal, notification.DataClassSummary, notification.EngagementNotificationsInherit, nil},
+		{"already capped", notification.DataClassSignal, notification.DataClassDetail, notification.EngagementNotificationsSignal, nil},
+		{"legacy empty class", "", notification.DataClassSummary, notification.EngagementNotificationsInherit, nil},
+		{"invalid rendered class", "unknown", notification.DataClassSummary, notification.EngagementNotificationsInherit, shared.ErrValidation},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := newTestNotificationRepository()
+			repo.AddEngagement(notificationTestTenant, "engagement")
+			channel := testChannel("channel", notification.ChannelWebhook)
+			channel.DataClass = notification.DataClassDetail
+			mustCreateChannel(t, repo, channel)
+			event := testEvent("class", notification.EventScanCompleted)
+			event.EngagementID = "engagement"
+			did, err := repo.PublishToChannel(ctx, event, channel.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			channel.DataClass, channel.Revision = tc.channel, 2
+			if _, err := repo.UpdateChannel(ctx, channel, "", false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.PutEngagementNotificationSetting(ctx, notification.EngagementNotificationSetting{TenantID: notificationTestTenant, EngagementID: "engagement", ExternalNotifications: tc.engagement, Revision: 1, UpdatedAt: &notificationTestNow, UpdatedBy: "admin"}); err != nil {
+				t.Fatal(err)
+			}
+			_, err = repo.BeginAttempt(ctx, notificationTestTenant, did, "job", 1, "attempt", notificationTestNow, ports.AttemptAdmission{TemplateRef: "tenant:template@1", DataClass: tc.rendered})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("admission = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr == nil {
+				return
+			}
+			delivery, err := repo.GetDelivery(ctx, notificationTestTenant, did)
+			if err != nil || delivery.Attempts != 0 || delivery.TemplateRef != "" || delivery.State != notification.DeliveryPending {
+				t.Fatalf("refused delivery=%+v, %v", delivery, err)
+			}
+			if attempts, err := repo.ListAttempts(ctx, notificationTestTenant, did); err != nil || len(attempts) != 0 {
+				t.Fatalf("refused attempts=%+v, %v", attempts, err)
+			}
+			if _, err := repo.BeginAttempt(ctx, notificationTestTenant, did, "job", 1, "safe-attempt", notificationTestNow, ports.AttemptAdmission{TemplateRef: "tenant:template@1", DataClass: notification.DataClassSignal}); err != nil {
+				t.Fatalf("safe admission at the same time must preserve both rate budgets: %v", err)
+			}
+		})
+	}
+}

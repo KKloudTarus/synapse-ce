@@ -36,6 +36,8 @@ func TestAdmitRenderedRefusesAStricterPolicy(t *testing.T) {
 		{DataClassSignal, DataClassSummary, EngagementNotificationsNone, RefuseSuppressed},
 		{"", DataClassSignal, EngagementNotificationsInherit, Admit},
 		{"", DataClassSignal, EngagementNotificationsNone, RefuseSuppressed},
+		{"detail ", DataClassSummary, EngagementNotificationsInherit, RefuseInvalidClass},
+		{"unknown", DataClassSignal, EngagementNotificationsNone, RefuseInvalidClass},
 	}
 	for _, c := range cases {
 		if got := AdmitRendered(c.rendered, c.channel, c.engagement); got != c.want {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -199,5 +200,136 @@ func TestNotificationPostgresAdmissionRefusesALoweredClass(t *testing.T) {
 	}
 	if attempts, err := a.repo.ListAttempts(a.ctx, a.tenant, lowered); err != nil || len(attempts) != 0 {
 		t.Fatalf("attempts = %+v, %v, want none", attempts, err)
+	}
+}
+
+func TestNotificationPostgresAdmissionRevalidatesRenderedDataClass(t *testing.T) {
+	a := newEngagementAdmission(t, "admission-class", "admission-class-eng")
+	for i, tc := range []struct {
+		name       string
+		rendered   notification.DataClass
+		channel    notification.DataClass
+		engagement notification.EngagementNotifications
+		wantErr    error
+	}{
+		{"engagement lowered", notification.DataClassSummary, notification.DataClassSummary, notification.EngagementNotificationsSignal, ports.ErrRetryable},
+		{"channel lowered", notification.DataClassSummary, notification.DataClassSignal, notification.EngagementNotificationsInherit, ports.ErrRetryable},
+		{"detail lowered to summary", notification.DataClassDetail, notification.DataClassSummary, notification.EngagementNotificationsInherit, ports.ErrRetryable},
+		{"unchanged", notification.DataClassSummary, notification.DataClassSummary, notification.EngagementNotificationsInherit, nil},
+		{"policy raised", notification.DataClassSignal, notification.DataClassSummary, notification.EngagementNotificationsInherit, nil},
+		{"already capped", notification.DataClassSignal, notification.DataClassDetail, notification.EngagementNotificationsSignal, nil},
+		{"legacy empty class", "", notification.DataClassSummary, notification.EngagementNotificationsInherit, nil},
+		{"invalid rendered class", "unknown", notification.DataClassSummary, notification.EngagementNotificationsInherit, shared.ErrValidation},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Space publications past the targeted-channel test rate limit and admission budgets.
+			a.now = a.now.Add(time.Minute)
+			did, job := a.claimed(t, fmt.Sprintf("class-%d", i), "admission-class-eng")
+			channel, err := a.repo.GetChannel(a.ctx, a.tenant, "channel")
+			if err != nil {
+				t.Fatal(err)
+			}
+			channel.DataClass, channel.Revision = tc.channel, channel.Revision+1
+			if _, err := a.repo.UpdateChannel(a.ctx, channel, "", false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.repo.PutEngagementNotificationSetting(a.ctx, notification.EngagementNotificationSetting{TenantID: a.tenant, EngagementID: "admission-class-eng", ExternalNotifications: tc.engagement, Revision: i + 1, UpdatedAt: &a.now, UpdatedBy: "admin"}); err != nil {
+				t.Fatal(err)
+			}
+			_, err = a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, shared.ID(fmt.Sprintf("attempt-%d", i)), a.now, ports.AttemptAdmission{TemplateRef: "tenant:template@1", DataClass: tc.rendered})
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("admission = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr != nil {
+				delivery, err := a.repo.GetDelivery(a.ctx, a.tenant, did)
+				if err != nil || delivery.Attempts != 0 || delivery.TemplateRef != "" || delivery.State != notification.DeliveryPending {
+					t.Fatalf("refused delivery=%+v, %v", delivery, err)
+				}
+				if attempts, err := a.repo.ListAttempts(a.ctx, a.tenant, did); err != nil || len(attempts) != 0 {
+					t.Fatalf("refused attempts=%+v, %v", attempts, err)
+				}
+				if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, shared.ID(fmt.Sprintf("safe-%d", i)), a.now, ports.AttemptAdmission{TemplateRef: "tenant:template@1", DataClass: notification.DataClassSignal}); err != nil {
+					t.Fatalf("safe admission at the same time must preserve both rate budgets: %v", err)
+				}
+			}
+			if err := a.queue.Complete(a.ctx, job.ID, job.Fence); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestNotificationPostgresPolicyLoweringSerializesAdmission(t *testing.T) {
+	for _, policy := range []string{"engagement", "channel"} {
+		t.Run(policy, func(t *testing.T) {
+			a := newEngagementAdmission(t, shared.ID("admission-cap-"+policy), "admission-cap-eng")
+			did, job := a.claimed(t, "cap", "admission-cap-eng")
+			writer, err := a.pool.Begin(a.ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = writer.Rollback(context.Background()) }()
+			if _, err := writer.Exec(a.ctx, `SELECT set_config('app.current_tenant',$1,true)`, a.tenant); err != nil {
+				t.Fatal(err)
+			}
+			var writerPID int
+			if err := writer.QueryRow(a.ctx, `SELECT pg_backend_pid()`).Scan(&writerPID); err != nil {
+				t.Fatal(err)
+			}
+			if policy == "engagement" {
+				if err := lockEngagementSetting(a.ctx, writer, a.tenant, "admission-cap-eng", true); err != nil {
+					t.Fatal(err)
+				}
+				_, err = writer.Exec(a.ctx, `INSERT INTO notification_engagement_settings(tenant_id,engagement_id,external_notifications,revision,updated_at,updated_by) VALUES($1,'admission-cap-eng','signal',1,now(),'admin')`, a.tenant)
+			} else {
+				_, err = writer.Exec(a.ctx, `UPDATE notification_channels SET data_class='signal',revision=revision+1 WHERE tenant_id=$1 AND id='channel'`, a.tenant)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+			defer cancel()
+			admitted := make(chan error, 1)
+			go func() {
+				_, err := a.repo.BeginAttempt(ctx, a.tenant, did, job.ID, job.Fence, "stale-attempt", a.now, ports.AttemptAdmission{TemplateRef: "tenant:template@1", DataClass: notification.DataClassSummary})
+				admitted <- err
+			}()
+			// Wait for actual database lock contention, rather than assume the goroutine started.
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				var blocked bool
+				if err := a.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))`, writerPID).Scan(&blocked); err != nil {
+					t.Fatal(err)
+				}
+				if blocked {
+					break
+				}
+				select {
+				case err := <-admitted:
+					t.Fatalf("admission did not wait for the policy write: %v", err)
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				case <-ticker.C:
+				}
+			}
+			if err := writer.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-admitted:
+				if !errors.Is(err, ports.ErrRetryable) {
+					t.Fatalf("admission after policy commit = %v, want ErrRetryable", err)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if attempts, err := a.repo.ListAttempts(a.ctx, a.tenant, did); err != nil || len(attempts) != 0 {
+				t.Fatalf("refused attempts=%+v, %v", attempts, err)
+			}
+			if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "safe-attempt", a.now, ports.AttemptAdmission{TemplateRef: "tenant:template@1", DataClass: notification.DataClassSignal}); err != nil {
+				t.Fatalf("safe admission after serialized refusal: %v", err)
+			}
+		})
 	}
 }

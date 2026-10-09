@@ -105,6 +105,8 @@ func admitRendered(ctx context.Context, tx pgx.Tx, tenant, delivery shared.ID, c
 		return err
 	}
 	switch notification.AdmitRendered(rendered, channel, override) {
+	case notification.RefuseInvalidClass:
+		return fmt.Errorf("%w: invalid rendered data class", shared.ErrValidation)
 	case notification.RefuseSuppressed:
 		return fmt.Errorf("%w: engagement suppressed", ports.ErrRetryable)
 	case notification.RefuseClassLowered:

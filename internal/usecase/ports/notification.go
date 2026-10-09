@@ -39,6 +39,7 @@ type NotificationSourceFailureFilter struct {
 // AttemptAdmission is what an attempt was rendered with: the template reference to record and pin,
 // and the effective data class its content was filtered to. An empty DataClass skips the class
 // check, for an attempt whose content was not rendered from the snapshot.
+// A nonempty DataClass must be valid; repositories reject malformed values without admitting an attempt.
 type AttemptAdmission struct {
 	TemplateRef string
 	DataClass   notification.DataClass

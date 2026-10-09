@@ -179,7 +179,7 @@ func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, deliver
 }
 
 // admitRendered applies notification.AdmitRendered to the channel class and engagement override
-// stored now. Either refusal is retryable: the retry reloads the work, which cancels it under none
+// stored now. Policy refusals are retryable: the retry reloads the work, which cancels it under none
 // or renders it again at the lower class.
 func (r *NotificationRepository) admitRendered(tenant shared.ID, d notification.Delivery, rendered notification.DataClass) error {
 	override := notification.EngagementNotificationsInherit
@@ -187,6 +187,8 @@ func (r *NotificationRepository) admitRendered(tenant shared.ID, d notification.
 		override = r.engagementNotifications(tenant, event.event.EngagementID)
 	}
 	switch notification.AdmitRendered(rendered, r.channels[notificationKey{tenant, d.ChannelID}].Class(), override) {
+	case notification.RefuseInvalidClass:
+		return fmt.Errorf("%w: invalid rendered data class", shared.ErrValidation)
 	case notification.RefuseSuppressed:
 		return fmt.Errorf("%w: engagement suppressed", ports.ErrRetryable)
 	case notification.RefuseClassLowered:
