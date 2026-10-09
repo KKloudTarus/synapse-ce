@@ -24,6 +24,23 @@ pins, so prepare dependencies with `go mod download` before an offline local run
 The hosted workflow uploads the scorecard as an artifact when generated and fails
 the gate unless it passes.
 
+## Notification capture administration
+
+`synapse-migrate` applies schema migrations before API and worker startup. It uses
+`SYNAPSE_DB_MIGRATION_DSN` when configured; development can fall back to
+`SYNAPSE_DB_DSN`. Production requires separate migration and runtime credentials.
+The optional
+`--notification-capture-mode identity|legacy` flag switches capture mode after
+migrations succeed; omitting it keeps the current mode. Invalid modes or a failed
+migration or mode switch exit with code 1.
+
+Only the migration credential can change capture policy. Deploy capable
+notification workers before enabling `identity`; to restore older workers, switch
+to `legacy` and drain pending identity records with a capable worker first. The
+command reports the pending identity count and shares a two-minute deadline
+across migration and mode switching. See [Notification content and capture rollout](notification-content.md)
+for the migration maintenance window, cutover checks, and webhook rollback limits.
+
 ## Assessment lifecycle administration
 
 These are separate operator binaries, not `synapse-cli` subcommands. `make build`
