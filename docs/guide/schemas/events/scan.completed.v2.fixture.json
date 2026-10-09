@@ -1,0 +1,25 @@
+{
+  "id": "event-scan-completed",
+  "type": "scan.completed",
+  "source_kind": "scan_job",
+  "source_id": "source-42",
+  "schema_version": 2,
+  "occurred_at": "2026-09-27T08:00:00Z",
+  "data": {
+    "title": "Scan completed",
+    "summary": "A scan completed successfully.",
+    "scan_id": "scan-42",
+    "scan_kind": "sast",
+    "total_count": 3,
+    "critical_count": 1,
+    "high_count": 1,
+    "medium_count": 1,
+    "low_count": 0,
+    "info_count": 0,
+    "new_count": 0,
+    "fixed_count": 0,
+    "unchanged_count": 0,
+    "delta_available": false
+  },
+  "engagement_id": "eng-42"
+}

@@ -27,6 +27,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sbom"
@@ -1154,6 +1155,9 @@ func completionTimeout(timeout time.Duration) time.Duration {
 
 // ScanResult is the aggregate output of an SCA scan.
 type ScanResult struct {
+	// notificationSummary is captured before cache composition. The terminal scan
+	// job must describe this execution, never findings inherited from LatestResult.
+	notificationSummary notification.ScanSummary
 	// Assigned by the durable worker, never decoded from imported results.
 	WebhookContext *projectanalysis.CIContext `json:"-"`
 	// Fork metadata is used for the baseline but cannot trigger forge writes.
@@ -2121,7 +2125,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 	finished := s.clock.Now()
 	// Synchronous callers persist the same successful terminal boundary as
 	// queued scans. PostgreSQL captures the notification inbox in this write.
-	job := ports.ScanJob{ID: s.ids.NewID().String(), EngagementID: engagementID.String(), Target: req.Value, Kind: kindOrLocal(req.Kind), Status: ports.ScanSucceeded, Stage: "done", Progress: 100, StartedAt: started, FinishedAt: &finished, DebugEvents: []ports.ScanDebugEvent{}, EngineOutcomes: scanrun.CloneEngineOutcomes(result.EngineOutcomes)}
+	job := ports.ScanJob{ID: s.ids.NewID().String(), EngagementID: engagementID.String(), Target: req.Value, Kind: kindOrLocal(req.Kind), Status: ports.ScanSucceeded, Stage: "done", Progress: 100, StartedAt: started, FinishedAt: &finished, DebugEvents: []ports.ScanDebugEvent{}, EngineOutcomes: scanrun.CloneEngineOutcomes(result.EngineOutcomes), NotificationSnapshot: result.notificationScanSummary(req.Value, kindOrLocal(req.Kind))}
 	job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
 	completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
@@ -2808,6 +2812,7 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 	if result != nil {
 		job.EngineOutcomes = scanrun.CloneEngineOutcomes(result.EngineOutcomes)
 		job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
+		job.NotificationSnapshot = result.notificationScanSummary(job.Target, job.Kind)
 	} else if err != nil {
 		job.EngineOutcomes = s.failedAttemptEngineOutcomes(job.EngineOutcomes, job.Stage, err)
 		job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
@@ -3066,6 +3071,7 @@ func (s *Service) runImportedSBOMPipeline(ctx context.Context, actor string, eng
 	defer cancelPublication()
 	ctx = publicationCtx
 	assessmentResult := s.copyAssessmentScanResult(result)
+	result.notificationSummary = notification.NewScanSummary(notificationTargetKey(record.TargetRef, ports.TargetUpload), ports.TargetUpload, result.EngineCoverage.Complete(), assessmentResult.Findings)
 	if s.results != nil {
 		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
 			var previous ScanResult
@@ -4768,6 +4774,7 @@ func (s *Service) runPipeline(ctx context.Context, actor string, engagementID sh
 	defer cancelPublication()
 	ctx = publicationCtx
 	assessmentResult := s.copyAssessmentScanResult(result)
+	result.notificationSummary = notification.NewScanSummary(notificationTargetKey(req.Value, kindOrLocal(req.Kind)), kindOrLocal(req.Kind), result.EngineCoverage.Complete(), assessmentResult.Findings)
 	if s.results != nil {
 		if previousData, loadErr := s.results.LatestResult(ctx, engagementID); loadErr == nil {
 			var previous ScanResult
@@ -5609,6 +5616,26 @@ func kindOrLocal(kind string) string {
 		return ports.TargetLocal
 	}
 	return kind
+}
+
+func notificationTargetKey(target, kind string) string {
+	return notification.CanonicalScanTarget(target, kind)
+}
+
+func (r *ScanResult) notificationScanSummary(target, kind string) notification.ScanSummary {
+	if r != nil && r.notificationSummary.TargetKey != "" {
+		return r.notificationSummary.Clone()
+	}
+	if r == nil {
+		return notification.ScanSummary{}
+	}
+	return notification.NewScanSummary(notificationTargetKey(target, kind), kind, r.EngineCoverage.Complete(), r.Findings)
+}
+
+// NotificationScanSummary returns the execution snapshot captured before cache
+// composition. CI import callers use it at their terminal ScanJob transition.
+func (r *ScanResult) NotificationScanSummary(target, kind string) notification.ScanSummary {
+	return r.notificationScanSummary(target, kind)
 }
 
 // attachDependencyPaths annotates each vulnerability with the dependency path from

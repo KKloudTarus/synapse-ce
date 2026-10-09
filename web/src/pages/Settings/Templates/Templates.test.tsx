@@ -150,6 +150,22 @@ describe('template library', () => {
     expect(await screen.findByRole('link', { name: 'Incident chat' })).toBeInTheDocument()
   })
 
+  it('refreshes a transient built-in catalog failure as well as custom templates', async () => {
+    vi.mocked(api.listBuiltinNotificationTemplates)
+      .mockRejectedValueOnce(new ApiError(503, 'catalog unavailable'))
+      .mockResolvedValueOnce([
+        { event_type: 'incident.created', family: 'chat', locale: 'en', fields: { title: 'Incident', body: 'Review it' } },
+      ])
+    renderAt('/settings/templates')
+
+    expect(await screen.findByText(/Could not load the built-in defaults: catalog unavailable/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+
+    expect(await screen.findByRole('button', { name: 'Clone Incident created · Chat · English' })).toBeInTheDocument()
+    expect(screen.queryByText(/Could not load the built-in defaults/)).not.toBeInTheDocument()
+    expect(api.listBuiltinNotificationTemplates).toHaveBeenCalledTimes(2)
+  })
+
   it('clones a built-in into a pre-filled draft', async () => {
     vi.mocked(api.listBuiltinNotificationTemplates).mockResolvedValue([
       { event_type: 'incident.created', family: 'email', locale: 'vi', fields: { subject: 'Sự cố mới', body: 'Mở bảng điều khiển' } },

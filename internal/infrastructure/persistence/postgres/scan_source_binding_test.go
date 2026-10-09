@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
 
@@ -397,17 +398,24 @@ func TestPostgresScanSourceMigrationRollbackGuard(t *testing.T) {
 	if err := goose.UpTo(db, ".", 160); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `ALTER TABLE scan_jobs ADD COLUMN engine_outcomes JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
-		t.Fatalf("add current scan-job fixture column: %v", err)
-	}
 	_, item := scanSourceFixture(t, ctx, pool, "source-tenant", "source-assessment")
 	ctx = shared.WithTenant(ctx, item.TenantID)
 	job := scanSourceJob(item, "source-job")
-	if err := NewScanJobStore(pool).CreateRunning(ctx, job); err != nil {
+	source, err := encodeScanJobSource(job)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `ALTER TABLE scan_jobs DROP COLUMN engine_outcomes`); err != nil {
-		t.Fatalf("restore pre-0219 schema before rollback guard: %v", err)
+	debugEvents, err := json.Marshal(job.DebugEvents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WithTenant(ctx, pool, item.TenantID.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO scan_jobs (id,engagement_id,target,kind,status,stage,progress,error,started_at,finished_at,debug_events,source_package)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			job.ID, job.EngagementID, job.Target, job.Kind, job.Status, job.Stage, job.Progress, job.Error, job.StartedAt, job.FinishedAt, debugEvents, source)
+		return err
+	}); err != nil {
+		t.Fatalf("insert version-160 source-bound scan job: %v", err)
 	}
 	if err := goose.DownTo(db, ".", 159); err == nil || !strings.Contains(err.Error(), "cannot roll back source bindings") {
 		t.Fatalf("rollback discarded queued source binding: %v", err)

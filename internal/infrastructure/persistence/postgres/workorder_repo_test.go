@@ -74,7 +74,7 @@ func TestWorkOrderRepository(t *testing.T) {
 	}
 
 	// Idempotent re-issue: same order id, no conflict.
-	again, err := repo.Issue(ctx, newWO(t, "idem1", 1))
+	again, err := repo.Issue(ctx, wo)
 	if err != nil {
 		t.Fatalf("re-issue: %v", err)
 	}

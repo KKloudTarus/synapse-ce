@@ -25,9 +25,9 @@ type factQuery struct {
 // capturedFactQueries read the subject of each captured source kind by its source ID.
 var capturedFactQueries = map[string]factQuery{
 	"scan_job": {
-		sql: `SELECT j.id,j.kind,j.target,e.name FROM scan_jobs j JOIN engagements e ON e.id=j.engagement_id
+		sql: `SELECT j.id,j.kind,j.target,e.name,j.notification_snapshot::text FROM scan_jobs j JOIN engagements e ON e.id=j.engagement_id
 			WHERE e.tenant_id=$1 AND j.id=$2`,
-		names: []string{"scan_id", "scan_kind", "scan_target", "engagement_name"},
+		names: []string{"scan_id", "scan_kind", "scan_target", "engagement_name", "notification_snapshot"},
 	},
 	"project_analysis_gate": {
 		sql: `SELECT a.id,a.project_id,p.name,
@@ -85,10 +85,86 @@ func withFacts(raw json.RawMessage, facts map[string]string) (json.RawMessage, e
 	if err != nil {
 		return nil, err
 	}
+	mergeFacts(&c, facts)
+	return c.Encode()
+}
+
+func mergeFacts(c *notification.TemplateContext, facts map[string]string) {
 	for name, value := range facts {
+		if name == "notification_snapshot" {
+			// This internal comparison record may contain 10,000 stable keys. It
+			// is consumed below as a typed summary and must never enter template
+			// variables or the event context.
+			continue
+		}
 		if _, set := c.Vars[name]; !set {
 			c.Vars[name] = value
 		}
 	}
-	return c.Encode()
+}
+
+// withScanFacts combines source facts and the terminal summary before encoding.
+// The internal summary can contain 10,000 comparison keys, so an intermediate
+// generic context encoding would exceed the public context budget.
+func withScanFacts(raw json.RawMessage, facts map[string]string) (json.RawMessage, error) {
+	c, err := notification.DecodeTemplateContext(raw)
+	if err != nil {
+		return nil, err
+	}
+	mergeFacts(&c, facts)
+	if _, set := c.Vars["target"]; !set {
+		// scan_target is an internal hydration fact and is not catalogued. Keep a
+		// catalogued equivalent until the event builder turns it into display text.
+		c.Vars["target"] = facts["scan_target"]
+	}
+	return withScanSummaryContext(c, facts["notification_snapshot"])
+}
+
+func scanSummaryPresent(encoded string) (bool, error) {
+	if encoded == "" || encoded == "null" {
+		return false, nil
+	}
+	var summary notification.ScanSummary
+	if err := json.Unmarshal([]byte(encoded), &summary); err != nil {
+		return false, err
+	}
+	return summary.TargetKey != "", nil
+}
+
+func withScanSummaryContext(c notification.TemplateContext, encoded string) (json.RawMessage, error) {
+	if encoded == "" || encoded == "null" {
+		return scanCompletedSnapshot(c)
+	}
+	var summary notification.ScanSummary
+	if err := json.Unmarshal([]byte(encoded), &summary); err != nil {
+		return nil, err
+	}
+	if summary.TargetKey == "" {
+		return scanCompletedSnapshot(c) // legacy scan rows predate the terminal snapshot.
+	}
+	values, lists := summary.TemplateValues()
+	for name, value := range values {
+		// The terminal snapshot is authoritative for the aggregate facts of the
+		// completed scan, including a stale source record that carried old counts.
+		c.Vars[name] = value
+	}
+	if len(lists) != 0 {
+		if c.Lists == nil {
+			c.Lists = map[string][]map[string]string{}
+		}
+		for name, items := range lists {
+			if _, exists := c.Lists[name]; !exists {
+				c.Lists[name] = items
+			}
+		}
+	}
+	return scanCompletedSnapshot(c)
+}
+
+func scanCompletedSnapshot(context notification.TemplateContext) (json.RawMessage, error) {
+	spec, ok := notification.LookupEvent(notification.EventScanCompleted)
+	if !ok {
+		return nil, errors.New("scan.completed event specification is unavailable")
+	}
+	return spec.SnapshotWithLists(context.Vars, context.Lists).Encode()
 }

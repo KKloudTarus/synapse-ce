@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -13,6 +14,12 @@ import (
 )
 
 func main() {
+	captureMode := flag.String("notification-capture-mode", "", "switch notification capture to legacy or identity after migrating")
+	flag.Parse()
+	if *captureMode != "" && *captureMode != "legacy" && *captureMode != "identity" {
+		fmt.Fprintln(os.Stderr, "notification-capture-mode must be legacy or identity")
+		os.Exit(1)
+	}
 	cfg := config.Load()
 	log := logging.New(cfg.LogLevel)
 	if cfg.DBDSN == "" {
@@ -56,4 +63,12 @@ func main() {
 		}
 	}
 	log.Info("db migrations complete", "duration", time.Since(started))
+	if *captureMode != "" {
+		pending, err := postgres.SetNotificationCaptureMode(ctx, migrationDSN, *captureMode)
+		if err != nil {
+			log.Error("notification capture mode change failed", "err", err)
+			os.Exit(1)
+		}
+		log.Info("notification capture mode changed", "mode", *captureMode, "pending_identity_records", pending)
+	}
 }

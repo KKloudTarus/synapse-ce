@@ -30,12 +30,14 @@ import (
 
 	eventschemas "github.com/KKloudTarus/synapse-ce/docs/guide/schemas/events"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
+	"github.com/KKloudTarus/synapse-ce/internal/adapter/notificationbuiltin"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/alerting"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/consolelink"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
@@ -62,6 +64,7 @@ import (
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
 	oidcadapter "github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
@@ -377,12 +380,16 @@ func main() {
 		log.Error("notification kill switch invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateNotificationUnsubscribeURL(); err != nil {
+		log.Error("notification unsubscribe URL invalid", "err", err)
+		os.Exit(1)
+	}
 	// The notification driver registry is the one list of channel types this build delivers to. The
 	// capability catalog advertises it and the operator kill switch is checked against it, so it is
 	// built whether or not tenant notifications are enabled: a typo in the switch always stops startup.
 	notificationSender := notificationsender.New(notificationsender.SMTPConfig{
 		Host: cfg.NotificationSMTPHost, Port: cfg.NotificationSMTPPort, From: cfg.NotificationSMTPFrom,
-		Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS,
+		Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS, UnsubscribeURL: cfg.NotificationUnsubscribeURL,
 	}, 10*time.Second)
 	disabledNotificationTypes, err := notificationSender.ResolveDisabled(cfg.NotificationProvidersDisabled)
 	if err != nil {
@@ -1616,9 +1623,17 @@ func main() {
 		notificationService.SetTransactionRunner(postgres.NewTenantTransactionRunner(databasePool))
 		notificationService.SetDisabledChannelTypes(disabledNotificationTypes)
 		notificationService.SetTemplateStore(postgres.NewNotificationTemplateStore(databasePool))
-		// Template resolution (#1371) reads the tenant default_locale; the built-in tier stays the
-		// empty catalog until #1366 ships built-in templates.
 		notificationService.SetTenantSettings(tenantSettingsStore)
+		notificationService.SetFormatters(messageformat.Formatters())
+		notificationService.SetBuiltinTemplates(notificationbuiltin.New())
+		if base := cfg.EffectivePublicBaseURL(); base != "" {
+			builder, linkErr := consolelink.NewBuilder(base)
+			if linkErr != nil {
+				log.Error("notification console link configuration invalid", "err", linkErr)
+				os.Exit(1)
+			}
+			notificationService.SetConsoleLinkBuilder(builder)
+		}
 		// The template preview (#1372) renders against the published fixtures or the tenant's
 		// recent events.
 		notificationService.SetEventFixtures(eventschemas.Fixtures)

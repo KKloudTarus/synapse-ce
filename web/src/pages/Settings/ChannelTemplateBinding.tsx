@@ -47,6 +47,9 @@ export function ChannelTemplateFields({
   onLocaleChange,
   customBody = false,
   onCustomBodyChange,
+  rawEvent = false,
+  onRawEventChange,
+  canChangeRawEvent = false,
   disabled,
 }: {
   type: NotificationChannelType
@@ -57,6 +60,11 @@ export function ChannelTemplateFields({
   /** Webhook channels: send the bound template's body as a custom JSON body (#1376). */
   customBody?: boolean
   onCustomBodyChange?: (on: boolean) => void
+  /** Webhook-only raw event delivery; the server requires detail class and administer. */
+  rawEvent?: boolean
+  onRawEventChange?: (on: boolean) => void
+  /** Administrators may enable it; an integration manager may only turn an existing mode off. */
+  canChangeRawEvent?: boolean
   disabled?: boolean
 }) {
   const family = CHANNEL_FAMILY[type]
@@ -118,15 +126,29 @@ export function ChannelTemplateFields({
       {type === 'webhook' && onCustomBodyChange && (
         <label className="flex items-start gap-2 text-sm text-secondary md:col-span-2">
           <input
-            type="checkbox"
-            checked={customBody}
-            disabled={disabled || !templateId}
+              type="checkbox"
+              checked={customBody}
+              disabled={disabled || !templateId || rawEvent}
             onChange={(e) => onCustomBodyChange(e.target.checked)}
           />
           <span>
             Send the template body as a custom JSON body instead of the event envelope. The
             request carries <code>X-Synapse-Body: custom</code> and the signature covers the body
             as sent. {!templateId && 'Bind a webhook template first.'}
+          </span>
+        </label>
+      )}
+      {type === 'webhook' && onRawEventChange && (
+        <label className="flex items-start gap-2 text-sm text-secondary md:col-span-2">
+          <input
+            type="checkbox"
+            checked={rawEvent}
+            disabled={disabled || !canChangeRawEvent}
+            onChange={(e) => onRawEventChange(e.target.checked)}
+          />
+          <span>
+            Send the raw event envelope. It can contain detail-class event data, so only tenant
+            administrators can enable it. It cannot be combined with a custom JSON body.
           </span>
         </label>
       )}

@@ -20,6 +20,7 @@ export type NotificationRuleFilter =
   | 'team_ids'
   | 'lead_time_seconds'
 export type NotificationDataClass = 'signal' | 'summary' | 'detail'
+export type EngagementExternalNotifications = 'inherit' | 'signal' | 'none'
 export type NotificationLocale = 'en' | 'vi'
 /** A template a channel can bind: the head fields of the template API (#1370). */
 export interface NotificationTemplateOption {
@@ -126,6 +127,10 @@ export interface NotificationChannel {
   locale?: NotificationLocale
   /** A webhook channel sends its template body as a custom JSON body (#1376). */
   custom_body?: boolean
+  /** A webhook channel may send the raw event envelope when an administrator enables it. */
+  raw_event?: boolean
+  /** The most sensitive template data this destination may receive. */
+  data_class?: NotificationDataClass
 }
 export interface NotificationChannelInput {
   name: string
@@ -145,6 +150,21 @@ export interface NotificationChannelInput {
   locale?: NotificationLocale | ''
   /** Webhook only; needs a bound template. Omitted keeps the current value. */
   custom_body?: boolean
+  /** Webhook only; administrators may opt into a raw event envelope at detail class. */
+  raw_event?: boolean
+  /** Omitted keeps the channel class on update; new channels use their channel-type default. */
+  data_class?: NotificationDataClass
+}
+export interface NotificationEngagementSetting {
+  engagement_id: string
+  external_notifications: EngagementExternalNotifications
+  revision: number
+  updated_at?: string
+  updated_by?: string
+}
+export interface NotificationEngagementSettingInput {
+  external_notifications: EngagementExternalNotifications
+  revision: number
 }
 export interface NotificationRule {
   id: string
@@ -287,6 +307,20 @@ export const notificationsApi = {
     req(
       `/notifications/channels/${encodeURIComponent(channelId)}/template-resolution?event_type=${encodeURIComponent(eventType)}`,
     ),
+  getNotificationEngagementSetting: (
+    engagementId: string,
+  ): Promise<NotificationEngagementSetting> =>
+    req(
+      `/notifications/engagements/${encodeURIComponent(engagementId)}/settings`,
+    ),
+  updateNotificationEngagementSetting: (
+    engagementId: string,
+    input: NotificationEngagementSettingInput,
+  ): Promise<NotificationEngagementSetting> =>
+    req(`/notifications/engagements/${encodeURIComponent(engagementId)}/settings`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
   listNotificationRules: async (): Promise<NotificationRule[]> =>
     ((await req('/notifications/rules')) as { items?: NotificationRule[] })
       .items ?? [],

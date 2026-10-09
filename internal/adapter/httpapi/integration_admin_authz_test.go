@@ -78,6 +78,7 @@ var integrationRoutePermissions = map[string]string{
 	"GET /api/v1/notifications/deliveries/{nid}":                   "PermManageIntegrations",
 	"GET /api/v1/notifications/deliveries/{nid}/attempts":          "PermManageIntegrations",
 	"GET /api/v1/notifications/templates":                          "PermManageIntegrations",
+	"GET /api/v1/notifications/templates/builtins":                 "PermManageIntegrations",
 	"POST /api/v1/notifications/templates":                         "PermManageIntegrations",
 	"GET /api/v1/notifications/templates/{nid}":                    "PermManageIntegrations",
 	"PATCH /api/v1/notifications/templates/{nid}":                  "PermManageIntegrations",

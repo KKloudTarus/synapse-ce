@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -51,6 +52,7 @@ func (s *ScanJobStore) Save(_ context.Context, j ports.ScanJob) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	frozenTerminal := false
 	if stored, existed := s.byID[j.ID]; !existed {
 		s.latest[shared.ID(j.EngagementID)] = j.ID
 	} else {
@@ -59,9 +61,49 @@ func (s *ScanJobStore) Save(_ context.Context, j ports.ScanJob) error {
 		j.EngagementID, j.Target, j.Kind = stored.EngagementID, stored.Target, stored.Kind
 		j.StartedAt = stored.StartedAt
 		j.SourcePackage = stored.SourcePackage
+		if stored.NotificationSnapshot.TargetKey != "" {
+			frozenTerminal = true
+			j.FinishedAt = stored.FinishedAt
+			j.NotificationSnapshot = stored.NotificationSnapshot.Clone()
+		}
+	}
+	if j.Status == ports.ScanSucceeded && !frozenTerminal {
+		j = withMemoryScanBaseline(s.byID, j)
 	}
 	s.byID[j.ID] = cloneScanJobSource(j)
 	return nil
+}
+
+// withMemoryScanBaseline mirrors the PostgreSQL terminal-save comparison. The
+// store lock protects both the predecessor lookup and replacement, so concurrent
+// completions for the same target observe a deterministic predecessor.
+func withMemoryScanBaseline(jobs map[string]ports.ScanJob, current ports.ScanJob) ports.ScanJob {
+	best := ports.ScanJob{}
+	for _, candidate := range jobs {
+		candidateTargetKey := candidate.NotificationSnapshot.TargetKey
+		if candidateTargetKey == "" {
+			candidateTargetKey = notification.CanonicalScanTarget(candidate.Target, candidate.Kind)
+		}
+		if candidate.ID == current.ID || candidate.Status != ports.ScanSucceeded ||
+			candidate.EngagementID != current.EngagementID || candidate.Kind != current.Kind ||
+			candidateTargetKey != current.NotificationSnapshot.TargetKey ||
+			candidate.FinishedAt == nil || current.FinishedAt == nil ||
+			candidate.FinishedAt.After(*current.FinishedAt) ||
+			(candidate.FinishedAt.Equal(*current.FinishedAt) && candidate.ID >= current.ID) {
+			continue
+		}
+		if best.FinishedAt == nil || candidate.FinishedAt.After(*best.FinishedAt) ||
+			(candidate.FinishedAt.Equal(*best.FinishedAt) && candidate.ID > best.ID) {
+			best = candidate
+		}
+	}
+	if best.FinishedAt != nil {
+		if best.NotificationSnapshot.TargetKey == "" {
+			return current
+		}
+		current.NotificationSnapshot = current.NotificationSnapshot.WithBaselineID(best.NotificationSnapshot, best.ID)
+	}
+	return current
 }
 
 // ListStaleRunning returns jobs still 'running' that started before olderThan (≤ limit),
@@ -119,6 +161,7 @@ func (s *ScanJobStore) LatestForEngagements(_ context.Context, engagementIDs []s
 func cloneScanJobSource(job ports.ScanJob) ports.ScanJob {
 	job.EngineOutcomes = scanrun.CloneEngineOutcomes(job.EngineOutcomes)
 	job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
+	job.NotificationSnapshot = job.NotificationSnapshot.Clone()
 	if job.SourcePackage != nil {
 		item := *job.SourcePackage
 		item.Locator, item.ObjectKey = "", ""
