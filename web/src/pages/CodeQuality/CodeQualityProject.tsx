@@ -433,9 +433,11 @@ export function CodeQualityProject() {
 }
 
 function ProjectNavLink({ to, end = false, children }: { to: string; end?: boolean; children: React.ReactNode }) {
+  const [params] = useSearchParams()
+  const branch = import.meta.env.VITE_PLAYGROUND === '1' ? params.get('branch') : null
   return (
     <NavLink
-      to={to}
+      to={branch ? `${to}?${new URLSearchParams({ branch })}` : to}
       end={end}
       className={({ isActive }) => cn(
         'shrink-0 border-b-2 px-1 pb-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60',

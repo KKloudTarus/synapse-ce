@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Download01, Sliders04, XClose } from '@untitledui/icons'
 import { Button, ErrorState, Field, Input, cn } from '../../components/ui'
-import { ReportType, downloadReport, downloadReportDoc } from '../../lib/api'
+import { ApiError, ReportType, downloadReport, downloadReportDoc } from '../../lib/api'
 import { trapTabFocus } from './ScanPanel'
 
 export const REPORT_SECTIONS: { key: string; label: string }[] = [
@@ -59,7 +59,8 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
   }
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const customizable = format !== 'pdf'
+  const demo = import.meta.env.VITE_PLAYGROUND === '1'
+  const customizable = format !== 'pdf' && !demo
   const noSections = customizable && sections.size === 0
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -105,7 +106,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
       }
       onClose()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Report generation failed')
+      setErr(e instanceof ApiError && e.code === 'empty_export' ? `${e.message} Please retry or choose another format.` : e instanceof Error ? e.message : 'Report generation failed')
     } finally {
       setBusy(false)
     }
@@ -120,9 +121,9 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
         role="dialog"
         aria-modal="true"
         aria-labelledby="report-builder-title"
-        className="relative z-10 w-full max-w-lg rounded-xl border border-secondary bg-primary p-5 text-left shadow-xl outline-none"
+        className="relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-secondary bg-primary text-left shadow-xl outline-none"
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="flex shrink-0 items-center justify-between border-b border-secondary px-5 py-4">
           <h2 id="report-builder-title" className="flex items-center gap-2 text-lg font-semibold text-primary">
             <Sliders04 className="size-4 text-brand-secondary" /> Build report
           </h2>
@@ -136,7 +137,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-h-0 space-y-5 overflow-y-auto overscroll-contain p-5">
           <Field label="Format">
             <div role="radiogroup" aria-label="Report format" className="inline-flex rounded-lg border border-secondary bg-secondary p-0.5">
               {(['pdf', 'html', 'docx'] as const).map((f) => (
@@ -159,8 +160,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
 
           {!customizable ? (
             <p className="rounded-lg border border-secondary bg-secondary px-3.5 py-2.5 text-xs text-tertiary">
-              The PDF is the full canonical report (all sections, all findings), sealed with a SHA-256 for chain of custody.
-              Switch to HTML or DOCX to customize sections, finding statuses, and the title.
+              {demo ? 'Playground exports contain a compact summary of this assessment and its recorded findings. PDF, HTML and DOCX are marked as synthetic examples; production sections, exhibits and cryptographic sealing are not simulated.' : 'The PDF is the full canonical report (all sections, all findings), sealed with a SHA-256 for chain of custody. Switch to HTML or DOCX to customize sections, finding statuses, and the title.'}
             </p>
           ) : (
             <>
@@ -207,7 +207,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
           {err && <ErrorState message={err} />}
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="flex shrink-0 justify-end gap-2 border-t border-secondary bg-primary px-5 py-4">
           <Button variant="ghost" onClick={onClose} className="px-3 py-1.5">
             Cancel
           </Button>

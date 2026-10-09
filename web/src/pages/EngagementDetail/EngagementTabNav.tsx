@@ -56,7 +56,7 @@ export function EngagementTabNav({
 
   // Sticky so a tab switch does not leave the reader hunting for the content below a tall hero.
   return (
-    <div className="sticky top-0 z-20 -mx-4 space-y-2.5 bg-secondary px-4 pt-2 sm:-mx-6 sm:px-6 xl:-mx-8 xl:px-8">
+    <div id="engagement-views" className="sticky top-0 z-20 -mx-4 space-y-2.5 bg-secondary px-4 pt-2 sm:-mx-6 sm:px-6 xl:-mx-8 xl:px-8">
     {/* Level 1: Main Tabs */}
     <div
       ref={tablistRef}

@@ -1,7 +1,7 @@
 import * as RSelect from '@radix-ui/react-select'
 import { Check, ChevronDown, HelpCircle, InfoCircle, Loading01 } from '@untitledui/icons'
 import { Tooltip, TooltipTrigger } from './base/tooltip/tooltip'
-import { cloneElement, isValidElement, useId, type ButtonHTMLAttributes, type ComponentType, type InputHTMLAttributes, type ReactElement, type ReactNode } from 'react'
+import { cloneElement, isValidElement, useId, useRef, useState, type ButtonHTMLAttributes, type ComponentType, type InputHTMLAttributes, type ReactElement, type ReactNode } from 'react'
 import { sevSoft, VERDICT_STYLE } from '../lib/severity'
 import type { Severity, Verdict } from '../lib/types'
 
@@ -138,13 +138,13 @@ export function Pill({ children, className }: { children: ReactNode; className?:
 export function InfoNote({ label, children }: { label: string; children: ReactNode }) {
   const id = useId()
   return (
-    <span className="group relative inline-flex">
-      <button type="button" aria-label={label} aria-describedby={id} className="rounded-full text-quaternary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60">
+    <span className="inline-flex">
+    <Tooltip title={label} description={children} placement="top">
+      <TooltipTrigger aria-label={label} aria-describedby={id} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-full text-quaternary hover:text-primary focus-visible:ring-2 focus-visible:ring-brand/60">
         <InfoCircle className="size-3.5" aria-hidden="true" />
-      </button>
-      <span id={id} role="tooltip" className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-72 -translate-x-1/2 rounded-lg border border-secondarystrong bg-secondary px-3 py-2 text-left text-xs font-normal normal-case tracking-normal text-tertiary shadow-lg group-hover:block group-focus-within:block">
-        {children}
-      </span>
+      </TooltipTrigger>
+    </Tooltip>
+    <span id={id} className="sr-only">{children}</span>
     </span>
   )
 }
@@ -256,9 +256,14 @@ export function Select({
   className?: string
   placeholder?: string
 }) {
+  const trigger = useRef<HTMLButtonElement>(null)
+  const [open, setOpen] = useState(false)
+  // Resolve on each open render so content mounts inside the current dialog immediately.
+  const portalContainer = trigger.current?.closest<HTMLElement>('[role="dialog"]') ?? undefined
   return (
-    <RSelect.Root value={value || undefined} onValueChange={onValueChange} disabled={disabled}>
+    <RSelect.Root value={value || undefined} onValueChange={onValueChange} disabled={disabled} open={open} onOpenChange={setOpen}>
       <RSelect.Trigger
+        ref={trigger}
         id={id}
         aria-label={ariaLabel}
         className={cn(
@@ -274,7 +279,7 @@ export function Select({
           <ChevronDown className="size-4 shrink-0 text-tertiary transition-transform duration-150 group-data-[state=open]:rotate-180" />
         </RSelect.Icon>
       </RSelect.Trigger>
-      <RSelect.Portal>
+      <RSelect.Portal container={portalContainer}>
         <RSelect.Content
           position="popper"
           sideOffset={6}

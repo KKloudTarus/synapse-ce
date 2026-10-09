@@ -37,9 +37,10 @@ const FILTERS: Array<{ id: DependencyFilter; label: string }> = [
 ]
 
 export function ProjectDependencyGraphPage() {
-  const { project, projectKey, analysisRevision, isRunning } = useProjectRouteContext()
-  const { data: graph, loading, error, refetch } = useFetch((signal) => api.projectDependencyGraph(projectKey, signal), {
-    deps: [projectKey, analysisRevision],
+  const { project, projectKey, branch, analysisRevision, isRunning } = useProjectRouteContext()
+  const demoBranch = import.meta.env.VITE_PLAYGROUND === '1' ? branch : ''
+  const { data: graph, loading, error, refetch } = useFetch((signal) => demoBranch ? api.projectDependencyGraph(projectKey, signal, demoBranch) : api.projectDependencyGraph(projectKey, signal), {
+    deps: [projectKey, analysisRevision, demoBranch],
   })
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<DependencyFilter>('all')
@@ -101,7 +102,8 @@ export function ProjectDependencyGraphPage() {
     setExporting(true)
     setExportError(null)
     try {
-      await api.downloadProjectDependencySubtree(projectKey, root)
+      if (demoBranch) await api.downloadProjectDependencySubtree(projectKey, root, demoBranch)
+      else await api.downloadProjectDependencySubtree(projectKey, root)
     } catch (reason) {
       setExportError(reason instanceof Error ? reason.message : 'Failed to export dependency SBOM')
     } finally {

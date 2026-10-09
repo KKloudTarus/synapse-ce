@@ -168,6 +168,7 @@ export interface ProjectMeasureResponse {
 }
 
 export interface MeasuresQuery {
+  branch?: string
   path?: string
   domain?: string[]
   limit?: number

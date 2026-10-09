@@ -33,7 +33,8 @@ function getGradePillStyle(grade: string) {
 }
 
 export function SecurityHotspotsPage() {
-  const { projectKey } = useProjectRouteContext()
+  const { projectKey, branch } = useProjectRouteContext()
+  const demoBranch = import.meta.env.VITE_PLAYGROUND === '1' ? branch : undefined
   const [params, setParams] = useSearchParams()
 
   const lens = (params.get('lens') === 'new-code' ? 'new-code' : 'overall') as 'overall' | 'new-code'
@@ -48,7 +49,8 @@ export function SecurityHotspotsPage() {
     severity,
     search,
     limit: 50,
-  }), [status, rule, severity, search])
+    ...(demoBranch ? { branch: demoBranch } : {}),
+  }), [status, rule, severity, search, demoBranch])
 
   const [page, setPage] = useState<HotspotPage | null>(null)
   const [loading, setLoading] = useState(false)
@@ -223,6 +225,7 @@ export function SecurityHotspotsPage() {
           {selectedId ? (
             <HotspotSidePanel
               projectKey={projectKey}
+              demoBranch={demoBranch}
               hotspotId={selectedId}
               onClose={() => {
                 const next = new URLSearchParams(params)

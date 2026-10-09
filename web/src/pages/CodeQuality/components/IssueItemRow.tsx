@@ -21,6 +21,7 @@ export function IssueItemRow({
 
   return (
     <div
+      data-issue-id={issue.id}
       onClick={onClick}
       className={cn(
         'group flex items-start justify-between gap-3 p-3.5 text-left transition-all cursor-pointer',

@@ -38,10 +38,14 @@ describe('AITriageReviews', () => {
     renderPage()
     expect(await screen.findByText('SQL injection')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /SQL injection/i }))
-    expect(screen.getByText(/openai \/ model-a · refuted · 91%/)).toBeInTheDocument()
-    expect(screen.getByText('fp-gate-v4')).toBeInTheDocument()
-    expect(screen.getByText('provider')).toBeInTheDocument()
-    expect(screen.getByText('ev1')).toBeInTheDocument()
+    expect(screen.getByText('AI recommendation')).toBeVisible()
+    for (const value of [
+      'openai / model-a · refuted · 91%',
+      'anthropic / model-b · refuted · 90%',
+      'fp-triage-v2', 'fp-gate-v4', 'provider', 'severity requires human', 'Enforce · held', 'ev1',
+    ]) {
+      expect(screen.getByText(value)).toBeVisible()
+    }
     expect(screen.getAllByText('Suspected FP').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Verified').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Review required').length).toBeGreaterThan(0)
@@ -50,7 +54,7 @@ describe('AITriageReviews', () => {
   it('requires rationale and sends a rejection back to the gate workflow', async () => {
     renderPage(); await screen.findByText('SQL injection')
     fireEvent.click(screen.getByRole('button', { name: /SQL injection/i }))
-    const reject = screen.getByRole('button', { name: /Reject & gate/i })
+    const reject = screen.getByRole('button', { name: /Reject proposal/i })
     expect(reject).toBeDisabled()
     fireEvent.change(screen.getByPlaceholderText(/Why should the AI recommendation/), { target: { value: 'The source reaches the sink' } })
     fireEvent.click(reject)
@@ -62,6 +66,6 @@ describe('AITriageReviews', () => {
     renderPage(); await screen.findByText('SQL injection')
     fireEvent.click(screen.getByRole('button', { name: /SQL injection/i }))
     expect(screen.queryByRole('button', { name: /Claim review/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Accept FP/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Accept false positive/i })).toBeDisabled()
   })
 })

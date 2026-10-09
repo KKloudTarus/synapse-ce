@@ -123,7 +123,7 @@ export function Assets() {
             is the whole estate. Side by side and unlabelled they read as one scope, so a search
             narrowing the list to two rows showed "Total assets 2" beside "Critical 37". */}
         <SummaryCard icon={LayersThree01} label={hasFilters ? 'Matching this filter' : 'Total assets'} value={countValue(result?.total, error)} tone="muted" />
-        <SummaryCard icon={AlertTriangle} label={hasFilters ? 'Critical in all assets' : 'Critical'} value={countValue(assetCounts?.byCriticality.critical, countsError)} tone="critical" />
+        <SummaryCard icon={AlertTriangle} label={hasFilters ? 'Critical business assets · All' : 'Critical business assets'} value={countValue(assetCounts?.byCriticality.critical, countsError)} tone="critical" />
         {/* Lifecycle and posture have no aggregate count endpoint, so these stay page-scoped and say
             so. An unlabelled page count next to an estate-wide total reads as an estate-wide figure. */}
         <SummaryCard icon={Activity} label="Active on this page" value={countValue(result ? visible.filter((asset) => asset.lifecycle === 'active').length : undefined, error)} tone="accent" />

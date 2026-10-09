@@ -139,7 +139,7 @@ export async function req(path: string, init?: RequestInit): Promise<any> {
   return res.json()
 }
 
-/** Fetch a SARIF/OpenVEX export with the bearer token and trigger a browser download. */
+/** Fetch a file with current authentication and download it; 204 has no file. */
 export async function blobDownload(path: string, fallbackName: string): Promise<void> {
   const auth = snapshotAuth()
   const res = await fetch(path, auth.requestInit({}, false))
@@ -148,7 +148,9 @@ export async function blobDownload(path: string, fallbackName: string): Promise<
     auth.notifyUnauthorized(error)
     throw error
   }
+  if (res.status === 204) return
   const blob = await res.blob()
+  if (blob.size === 0) throw new ApiError(res.status, 'The export is empty. No file was downloaded.', { code: 'empty_export' })
   const cd = res.headers.get('content-disposition') ?? ''
   const filename = /filename="([^"]+)"/.exec(cd)?.[1] ?? fallbackName
   const url = URL.createObjectURL(blob)

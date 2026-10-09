@@ -9,6 +9,9 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apiTarget = env.VITE_API_PROXY_TARGET
+  if (env.VITE_PLAYGROUND === '1' && apiTarget) {
+    throw new Error('Playground uses browser-local demo data. Remove VITE_API_PROXY_TARGET before starting it.')
+  }
 
   return {
     plugins: [

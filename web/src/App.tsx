@@ -12,6 +12,10 @@ import { Connect } from './pages/Connect'
 import { NotFound } from './pages/NotFound'
 
 // --- Lazy-loaded page components ---
+const SetupPreview = import.meta.env.VITE_PLAYGROUND === '1' ? lazy(() => import('./playground/setup/SetupPreview').then(m => ({ default: m.SetupPreview }))) : null
+const DemoEntry = import.meta.env.VITE_PLAYGROUND === '1'
+  ? lazy(() => import('./playground/DemoEntry').then(m => ({ default: m.DemoEntry })))
+  : null
 const Dashboard = lazy(() => import('./pages/Dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })))
 const Engagements = lazy(() => import('./pages/Engagements/EngagementsPage').then(m => ({ default: m.EngagementsPage })))
 const AssessmentCycles = lazy(() => import('./pages/AssessmentCycles/AssessmentCyclesPage').then(m => ({ default: m.AssessmentCyclesPage })))
@@ -94,8 +98,10 @@ function Gate() {
   if (phase !== 'ready') return <Connect />
   return (
     <Routes>
+      {DemoEntry && <Route path="demo" element={<Suspense fallback={<LoadingFallback />}><DemoEntry /></Suspense>} />}
       <Route element={<Shell />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        {SetupPreview && <Route path="demo/setup/:kind" element={<Suspense fallback={<LoadingFallback />}><SetupPreview /></Suspense>} />}
+        <Route index element={<Navigate to={import.meta.env.VITE_PLAYGROUND === '1' ? '/demo' : '/dashboard'} replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="engagements" element={<Engagements />} />
         <Route path="assessment-cycles" element={<AssessmentLifecycleRoute><AssessmentCycles /></AssessmentLifecycleRoute>} />

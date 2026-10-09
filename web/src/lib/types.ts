@@ -1964,6 +1964,7 @@ export interface Hotspot {
 }
 
 export interface HotspotListFilter {
+  branch?: string
   lens?: 'overall' | 'new-code'
   status?: HotspotStatus
   rule?: string
@@ -2042,6 +2043,7 @@ export interface ProjectIssue {
 }
 
 export interface IssueListFilter {
+  branch?: string
   lens?: 'overall' | 'new-code'
   status?: IssueStatus
   type?: RuleType

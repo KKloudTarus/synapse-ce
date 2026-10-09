@@ -133,6 +133,7 @@ export function AITriageReviews() {
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">
             AI Triage Reviews
           </h1>
+          <p className="mt-2 text-sm text-tertiary">Review AI false-positive proposals, record your reasoning, and keep the final decision with a human.</p>
         </div>
       </header>
 
@@ -216,6 +217,7 @@ export function AITriageReviews() {
                 >
                   <button
                     type="button"
+                    data-review-id={review.id}
                     onClick={() => setExpandedId(isExpanded ? null : review.id)}
                     aria-expanded={isExpanded}
                     aria-pressed={isExpanded}
@@ -239,13 +241,21 @@ export function AITriageReviews() {
                       </div>
                     </div>
                     <div className="mt-3">
-                      <AITriageBadges triage={review} />
+                      <span className="mr-2 text-xs text-tertiary">AI proposal</span><AITriageBadges triage={{ ...review, reviewRequired: pending && review.reviewRequired }} />
                     </div>
                   </button>
 
                   {isExpanded && (
                     <div className="border-t border-secondary p-4 pt-4 sm:p-5">
-                      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                      <div className="rounded-lg border border-secondary bg-secondary/50 p-4">
+                        <p className="text-xs font-semibold text-brand-secondary">AI recommendation</p>
+                        <h3 className="mt-1 font-semibold text-primary">Review the false-positive proposal</h3>
+                        <p className="mt-2 text-sm text-secondary">Proposer verdict: <span className="font-medium capitalize">{review.verdict.replaceAll('_', ' ')}</span> · {review.confidence}% confidence</p>
+                        <p className="mt-1 text-sm text-secondary">Verifier: {review.verifierModel ? `${review.verifierVerdict || 'No verdict'} · ${review.verifierConfidence}% confidence` : 'Not attached'}</p>
+                        <p className="mt-2 text-xs text-tertiary">{pending ? 'Check the finding context before accepting or rejecting this proposal.' : 'The human decision is recorded below.'}</p>
+                      </div>
+
+                      <dl data-ai-review-evidence className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                         <Meta
                           label="Proposer"
                           value={`${review.proposerProvider || 'unknown provider'} / ${review.proposerModelFamily || review.proposerModel} · ${review.verdict} · ${review.confidence}%`}
@@ -316,6 +326,7 @@ export function AITriageReviews() {
                               rows={3}
                               disabled={Boolean(busy) || !isOwner}
                               placeholder="Why should the AI recommendation be accepted or rejected?"
+                              aria-label="Mandatory rationale"
                               className="w-full rounded-lg border border-secondary bg-primary px-3.5 py-2.5 text-sm text-primary placeholder:text-placeholder focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 disabled:cursor-not-allowed disabled:opacity-60 sm:text-base"
                             />
                           </Field>
@@ -348,7 +359,7 @@ export function AITriageReviews() {
                                 onClick={() => decide(review, 'accept')}
                               >
                                 <Check className="size-4" />
-                                Accept FP
+                                Accept false positive
                               </Button>
                               <Button
                                 variant="danger"
@@ -362,7 +373,7 @@ export function AITriageReviews() {
                                 onClick={() => decide(review, 'reject')}
                               >
                                 <XClose className="size-4" />
-                                Reject & gate
+                                Reject proposal
                               </Button>
                             </div>
                             <p className="text-xs text-quaternary">
@@ -406,7 +417,7 @@ function Meta({ label, value, mono = false }: { label: string; value: string; mo
   return (
     <div className="min-w-0">
       <dt className="text-xs font-medium text-tertiary">{label}</dt>
-      <dd className={cn('mt-0.5 text-sm font-medium text-primary', mono && 'font-mono text-xs')}>
+      <dd className={cn('mt-0.5 break-words text-sm font-medium text-primary', mono && 'font-mono text-xs')}>
         {value || '—'}
       </dd>
     </div>
