@@ -8,6 +8,7 @@ export function restoreSetup(mode: AdvancedMode, s: AdvancedState, doc: Document
   const index = s[mode].step, steps = ADVANCED_STEPS[mode], step = steps[index]
   if (step.auto && step.done(s, doc)) return
   const button = (name: string) => { const el = findGuideTarget({ kind: 'button', name }, doc); if (canClickDemoControl(el)) el!.click() }
+  if (mode === 'ai-setup' && index === 0 && !findGuideTarget(step.target, doc)) { button('Open menu'); return }
   if (mode === 'ci-setup' && step.route === '/settings/integrations/ci' && !['jenkins', 'github'].includes(step.form ?? '') && index !== 6 && index !== 20) {
     const name = index >= 25 ? 'GitHub repository events' : 'Jenkins build evidence'
     const el = [...doc.querySelectorAll<HTMLElement>('button[aria-pressed]')].find(el => el.textContent?.includes(name))

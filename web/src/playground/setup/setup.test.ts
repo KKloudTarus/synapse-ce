@@ -7,7 +7,7 @@ import { handlers } from '@/mocks/handlers'
 import { advancedHandlers } from '../advanced/handlers'
 import { workflowHandlers } from '../workflows/handlers'
 import { scenarioHandlers } from '../scenario/handlers'
-import { resetAdvanced, advancedStore } from '../advanced/store'
+import { resetAdvanced, advancedStore, ADVANCED_KEY, updateAdvanced } from '../advanced/store'
 import { ADVANCED_STEPS } from '../advanced/steps'
 import { demoReport, reportPDF } from '../demo-report'
 import { strFromU8, unzipSync } from 'fflate'
@@ -22,6 +22,28 @@ beforeEach(() => { localStorage.clear(); resetSetup('ci-setup'); resetSetup('ai-
 const call = (path: string, method = 'GET', body?: unknown) => fetch(new URL(`/api/v1${path}`, window.location.origin), { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
 const ok = async (path: string, method = 'GET', body?: unknown) => { const r = await call(path, method, body); const data = r.status === 204 ? null : await r.json(); expect(r.ok, JSON.stringify(data)).toBe(true); return data }
 const connection = () => ok('/integrations', 'POST', { provider: 'jenkins', name: 'Jenkins build evidence', endpoint: 'https://ci.example', poll_interval_seconds: 300 })
+it('starts AI setup with explicit navigation and covers each deployment prerequisite', () => {
+  const steps = ADVANCED_STEPS['ai-setup']
+  expect(steps.slice(0, 4).map(s => [s.route, s.auto])).toEqual([
+    ['/dashboard', true], ['/engagements', true], ['/engagements/eng-001', true], ['/engagements/eng-001/recon', true],
+  ])
+  expect(steps[0].target?.name).toContain('Primary navigation')
+  expect(steps.filter(s => s.target?.name.startsWith('[data-setup-field=')).map(s => s.target?.name)).toHaveLength(6)
+  expect(steps.find(s => s.title === 'Return to the readiness panel')?.auto).toBe(true)
+})
+it('restarts old AI guide checkpoints without erasing other chapter progress or setup data', () => {
+  resetAdvanced('ai-setup')
+  const saved = JSON.parse(JSON.stringify(advancedStore.getSnapshot()))
+  delete saved.aiSetupRevision
+  saved['ai-setup'] = { step: 9, completed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], complete: true, open: false }
+  saved.policy.step = 7
+  localStorage.setItem(ADVANCED_KEY, JSON.stringify(saved))
+  const retainedSetup = JSON.stringify(setupStore.getSnapshot())
+  updateAdvanced(() => undefined)
+  expect(advancedStore.getSnapshot()['ai-setup']).toMatchObject({ step: 0, completed: [], complete: false })
+  expect(advancedStore.getSnapshot().policy.step).toBe(7)
+  expect(JSON.stringify(setupStore.getSnapshot())).toBe(retainedSetup)
+})
 async function operation(id: string, type: string) { const op = await ok(`/integrations/${id}/operations`, 'POST', { type }); return ok(`/integration-operations/${op.id}`) }
 
 describe('Setup scenarios and honest outputs', () => {
@@ -85,7 +107,7 @@ describe('Setup scenarios and honest outputs', () => {
     expect(setupStore.getSnapshot().connections).toEqual([])
     expect(setupStore.getSnapshot().aiReady).toBe(true)
     for (const mode of ['ai-setup', 'ci-setup'] as const) {
-      expect(ADVANCED_STEPS[mode].length).toBe(mode === 'ai-setup' ? 10 : 34)
+      expect(ADVANCED_STEPS[mode].length).toBe(mode === 'ai-setup' ? 22 : 34)
       expect(advancedStore.getSnapshot()[mode].complete).toBe(false)
     }
   })

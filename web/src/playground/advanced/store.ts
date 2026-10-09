@@ -22,7 +22,7 @@ export interface PolicyState extends Progress {
   quality: QualityState; profileCopied: boolean; profileAssigned: boolean; ruleSeverity: string; gate: { key: string; name: string; conditions: QualityGateCondition[] } | null
   decoration: boolean; coverageImported: boolean; ciImportedAt: string | null
 }
-export interface AdvancedState { version: 1; storageWarning: boolean; 'ai-setup': Progress; 'ci-setup': Progress; remediation: RemediationState; intelligence: IntelligenceState; policy: PolicyState }
+export interface AdvancedState { version: 1; aiSetupRevision: 2; storageWarning: boolean; 'ai-setup': Progress; 'ci-setup': Progress; remediation: RemediationState; intelligence: IntelligenceState; policy: PolicyState }
 const progress = (): Progress => ({ step: 0, open: false, complete: false, completed: [] })
 export function seededScenario(): Scenario {
   const s = emptyScenario(), at = new Date().toISOString()
@@ -42,7 +42,7 @@ export function emptyPolicy(): PolicyState {
   quality.analyses = [{ id: 'learn-quality-analysis-main', ref: 'main', startedAt: at, finishedAt: at }]
   return { ...progress(), quality, profileCopied: false, profileAssigned: false, ruleSeverity: 'medium', gate: null, decoration: false, coverageImported: false, ciImportedAt: null }
 }
-const empty = (): AdvancedState => ({ version: 1, storageWarning: false, 'ai-setup': progress(), 'ci-setup': progress(), remediation: emptyRemediation(), intelligence: emptyIntelligence(), policy: emptyPolicy() })
+const empty = (): AdvancedState => ({ version: 1, aiSetupRevision: 2, storageWarning: false, 'ai-setup': progress(), 'ci-setup': progress(), remediation: emptyRemediation(), intelligence: emptyIntelligence(), policy: emptyPolicy() })
 export function isAdvanced(mode: string): mode is AdvancedMode { return ['remediation', 'intelligence', 'policy', 'ai-setup', 'ci-setup'].includes(mode) }
 const bounded = (v: unknown) => typeof v === 'string' && v.length <= 4096
 const date = (v: unknown) => v === null || typeof v === 'string' && Number.isFinite(Date.parse(v))
@@ -50,7 +50,7 @@ function valid(s: AdvancedState): boolean {
   if (!s || s.version !== 1) return false
   for (const mode of ['remediation', 'intelligence', 'policy', 'ai-setup', 'ci-setup'] as const) {
     const p = s[mode]
-    const count = mode === 'remediation' ? 26 : mode === 'intelligence' ? 18 : mode === 'ai-setup' ? 10 : mode === 'ci-setup' ? 34 : 21
+    const count = mode === 'remediation' ? 26 : mode === 'intelligence' ? 18 : mode === 'ai-setup' ? 22 : mode === 'ci-setup' ? 34 : 21
     if (!p || !Number.isInteger(p.step) || p.step < 0 || p.step >= count || typeof p.open !== 'boolean' || typeof p.complete !== 'boolean' || !Array.isArray(p.completed) || p.completed.length > count || !p.completed.every(i => Number.isInteger(i) && i >= 0 && i < count)) return false
   }
   const r = s.remediation, i = s.intelligence, q = s.policy
@@ -60,7 +60,7 @@ function valid(s: AdvancedState): boolean {
     q.quality?.project?.key === PROJECT_KEY && Array.isArray(q.quality.analyses) && q.quality.analyses.length <= 2 && q.quality.analyses.every(a => ['main', 'improved'].includes(a.ref) && date(a.startedAt) && date(a.finishedAt)) && [q.profileCopied, q.profileAssigned, q.decoration, q.coverageImported].every(v => typeof v === 'boolean') && ['critical', 'high', 'medium', 'low', 'info'].includes(q.ruleSeverity) && (!q.gate || q.gate.key === GATE_KEY && bounded(q.gate.name) && Array.isArray(q.gate.conditions) && q.gate.conditions.length === 3 && q.gate.conditions.every(c => bounded(c.metric) && ['<=', '>='].includes(c.op) && Number.isFinite(c.threshold)))
 }
 function load(fallback?: AdvancedState): AdvancedState {
-  try { const raw = localStorage.getItem(ADVANCED_KEY); if (!raw || raw.length > 300000) return empty(); const value = JSON.parse(raw); if (value?.version === 1) { value['ai-setup'] ??= progress(); value['ci-setup'] ??= progress() }; if (value?.policy && value.policy.profileAssigned === undefined) value.policy.profileAssigned = false; return valid(value) ? value : empty() } catch { return fallback ?? empty() }
+  try { const raw = localStorage.getItem(ADVANCED_KEY); if (!raw || raw.length > 300000) return empty(); const value = JSON.parse(raw); if (value?.version === 1) { if (value.aiSetupRevision !== 2) { value['ai-setup'] = progress(); value.aiSetupRevision = 2 }; value['ai-setup'] ??= progress(); value['ci-setup'] ??= progress() }; if (value?.policy && value.policy.profileAssigned === undefined) value.policy.profileAssigned = false; return valid(value) ? value : empty() } catch { return fallback ?? empty() }
 }
 let state = load()
 const listeners = new Set<() => void>()

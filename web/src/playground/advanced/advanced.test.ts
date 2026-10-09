@@ -29,7 +29,7 @@ describe('Isolated advanced walkthroughs', () => {
     expect(advancedStore.getSnapshot().policy.step).toBe(2)
     expect(localStorage.getItem(SCENARIO_KEY)).toBe('foundation scan')
     expect(localStorage.getItem(WORKFLOW_KEY)).toBe('foundation workflows')
-    expect(Object.fromEntries(Object.entries(ADVANCED_STEPS).map(([k, v]) => [k, v.length]))).toEqual({ remediation: 26, intelligence: 18, policy: 21, 'ai-setup': 10, 'ci-setup': 34 })
+    expect(Object.fromEntries(Object.entries(ADVANCED_STEPS).map(([k, v]) => [k, v.length]))).toEqual({ remediation: 26, intelligence: 18, policy: 21, 'ai-setup': 22, 'ci-setup': 34 })
   })
   it('rejects stale ownership versions and retains assignment and transfer decisions', async () => {
     const stale = await ok(ownership)

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle, CpuChip01, List, Play, XClose } from '@untitledui/icons'
 import { Button, Card, EmptyState, ErrorState, Spinner, cn } from '../../components/ui'
 import { FeatureDisabledState } from '../../components/synapse/FeatureDisabledState'
@@ -177,6 +178,7 @@ function ReadinessPanel({ readiness, onUseGoal }: { readiness: AgentReadiness; o
           </button>
         ))}
       </div>
+      {import.meta.env.VITE_PLAYGROUND === '1' && <p className="mb-3 text-xs text-tertiary"><Link to="/demo/setup/ai" className="font-semibold text-brand-secondary hover:underline">Review setup prerequisites</Link><span className="ml-2">Playground reference · Deployment configuration is managed by an administrator.</span></p>}
       <details className="text-xs text-tertiary">
         <summary className="cursor-pointer select-none">Preflight details</summary>
         <ul className="mt-2 space-y-1">

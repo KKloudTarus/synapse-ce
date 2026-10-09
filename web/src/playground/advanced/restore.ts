@@ -7,6 +7,7 @@ import { CLOSURE_REASON, OVERRIDE_REASON, type AdvancedMode, type AdvancedState 
 export function restoreAdvancedControls(mode: AdvancedMode, s: AdvancedState, doc = document) {
   if (mode === 'ai-setup' || mode === 'ci-setup') { restoreSetup(mode, s, doc); return }
   const index = s[mode].step, steps = ADVANCED_STEPS[mode], step = steps[index]
+  if (step.done(s, doc)) return
   const button = (name: string) => { const el = findGuideTarget({ kind: 'button', name }, doc); if (canClickDemoControl(el)) el!.click() }
   const value = (name: string, content: string, checked?: boolean) => fillDemoControl({ title: '', body: '', why: '', done: () => false, target: { kind: 'field', name }, example: checked === undefined ? { value: content } : { checked } }, s, doc)
   if (step.form?.startsWith('ownership')) {

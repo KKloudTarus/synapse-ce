@@ -103,7 +103,7 @@ Acceptance requires: complete Next-only navigation; meaningful spotlight and scr
 
 ## Setup chapters and demo contracts
 
-- **AI Setup & Readiness (10 steps):** distinguish AI Agent, AI Triage and Fleet Agent; review deployment prerequisites; inspect blocked/ready states; save and inspect a synthetic retained-evidence review. The setup preview is explanatory, not a production settings form. The demo accepts only the supplied read-only review goal and calls no provider or external tool.
+- **AI Setup & Readiness (22 steps):** follow Sidebar → Engagements → synapse-ce-audit → Offensive → Agent; expand preflight checks; open the playground setup reference; review provider, model, credential, human review, evidence scope, budget and timeout separately; return to verify readiness; save and inspect a synthetic retained-evidence review. On small screens the guide opens the navigation menu. Upgrading from the original 10-step chapter restarts only its guide checkpoints, retaining setup data and other chapters. The setup preview is explanatory, not a production settings form. The demo accepts only the supplied read-only review goal and calls no provider or external tool.
 - **Repository & CI/CD Setup (34 steps):** source connector metadata → Jenkins connection and write-only demo credential → test → discover → bind → enable → poll → matched/missing/ambiguous cases → GitHub inbound binding → deployment handoff → synthetic PR delivery and gate outcome. Continue to Quality Policies & CI for policy customization. Polling reads existing builds; it does not trigger a pipeline.
 - Setup state is browser-local under `synapse.playground.setup.v1`. Credentials are discarded; only configuration metadata is retained. Progress lives beside the other advanced chapter checkpoints. Restarting one setup chapter preserves the other chapter and the foundation datasets.
 - The browser handler order is setup → advanced → workflow → scan scenario → overview. Tests exercise this complete order. Unknown mutations return an explicit unsupported response rather than a false success.
@@ -113,3 +113,7 @@ Acceptance requires: complete Next-only navigation; meaningful spotlight and scr
 ### Local QA, October 9, 2026
 
 Both setup chapters were completed through their visible Next/Finish controls. Repository setup was repeated from Start over after repairing form restoration following Bind. Reload during the Jenkins form recovered the supplied values. Mobile and desktop screenshots cover setup, guide placement, CI correlation and reporting; light and dark setup presentation were inspected. PDF bytes, cross-reference offsets, HTML escaping and DOCX package contents are tested, and a generated PDF was rendered for visual inspection. The in-app browser's download observer timed out, so its filesystem download handoff remains unverified; this is separate from the populated export payload tests.
+
+### Guide stability
+
+Scroll and resize update spotlight geometry without repeating form restoration. Dropdowns retain the active guide host and target while their options are open. A saved gate is not reopened by the restoration loop. Readiness is associated with the current step, so completion of an automatic action cannot advance a second step without another Next.
