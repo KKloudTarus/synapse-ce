@@ -69,7 +69,8 @@ func TestIdentityBrowserPostgresConformance(t *testing.T) {
 	tenant := shared.ID("browser-conformance")
 	f.tenants(t, tenant.String())
 	f.declare(t, tenant.String())
-	clock := browserClock{at: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)}
+	// Invitation routing checks expiry against the database clock.
+	clock := browserClock{at: time.Now().UTC().Truncate(time.Microsecond)}
 	ids := &browserIDs{}
 	cipher, err := vault.NewCipher(make([]byte, 32))
 	if err != nil {
@@ -302,7 +303,8 @@ func TestIdentityBrowserStepUpRefreshesAgedSessionButLinkRequiresRecentAuthentic
 	tenant := shared.ID("browser-step-up-age")
 	f.tenants(t, tenant.String())
 	f.declare(t, tenant.String())
-	clock := browserClock{at: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)}
+	// Invitation routing checks expiry against the database clock.
+	clock := browserClock{at: time.Now().UTC().Truncate(time.Microsecond)}
 	ids := &browserIDs{}
 	cipher, err := vault.NewCipher(make([]byte, 32))
 	if err != nil {
