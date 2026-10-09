@@ -82,7 +82,7 @@ function load(resetForm = false, fallback?: Scenario): Scenario {
 let state = load(true)
 const listeners = new Set<() => void>()
 function latestState() {
-  const next = load(false, state)
+  const next = state.storageWarning ? state : load(false, state)
   return { ...next, enabled: state.enabled, open: state.open, collapsed: state.collapsed, microStep: next.step === state.step ? state.microStep : 0 }
 }
 window.addEventListener('storage', event => {
@@ -100,7 +100,8 @@ export const scenarioStore = {
 export function updateScenario(change: (draft: Scenario) => void) {
   const next = structuredClone(latestState())
   change(next)
-  try { localStorage.setItem(SCENARIO_KEY, JSON.stringify(next)); next.storageWarning = false }
+  next.storageWarning = false
+  try { localStorage.setItem(SCENARIO_KEY, JSON.stringify(next)) }
   catch { next.storageWarning = true }
   state = next
   for (const listener of listeners) listener()

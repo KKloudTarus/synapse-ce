@@ -4,7 +4,7 @@ import { COMPARISON_ID, INITIAL_ID, RETEST_ID, retest } from '../scenario/store'
 import { analysis, overview, project } from '../workflows/data'
 import { QUALITY_ISSUES, counts } from '../workflows/catalog'
 import { type QualityAnalysis } from '../workflows/store'
-import { GATE_KEY, PROFILE_KEY, type IntelligenceState, type IntelRun, type PolicyState, type RemediationState } from './store'
+import { ADDED_FINDING_INDICES, GATE_KEY, PROFILE_KEY, type IntelligenceState, type IntelRun, type PolicyState, type RemediationState } from './store'
 
 export const VERIFIED_ID = 'learn-checkout-verification'
 export const VERIFIED_COMPARISON = 'learn-checkout-verified-comparison'
@@ -24,7 +24,7 @@ export function remediationItems(r: RemediationState, verified = false) {
     if (i < 14) return { ...row, current_observation_id: `${row.identity_id}-retest`, current_observation: { ...row.baseline_observation, observed_at: verified ? r.verificationAt : retest(r.scenario)!.snapshotAt }, presence: 'still_detected', current_actionable: true, current_risk_milli: row.baseline_risk_milli, verification_state: 'detected', fixed_basis: '' }
     return { ...row, presence: 'not_evaluated', coverage_decision: 'not_comparable', comparable_baseline: false, verification_state: 'unknown', fixed_basis: '', current_risk_milli: row.baseline_risk_milli }
   })
-  const added = [0, 5, 14].map((i, n) => { const source = baseline[i]; return { ...source, id: `learn-new-diff-${n}`, position: baseline.length + n, identity_id: `learn-added-${i + 1}`, baseline_observation_id: '', baseline_observation: null, current_observation_id: `learn-new-observation-${n}`, current_observation: { ...source.baseline_observation!, observed_at: verified ? r.verificationAt : retest(r.scenario)!.snapshotAt }, presence: 'new', baseline_actionable: false, current_actionable: true, baseline_risk_milli: 0, current_risk_milli: SEVERITY_RISK[DEMO_ISSUES[i].severity] * 1000, verification_state: 'detected', fixed_basis: '' } })
+  const added = ADDED_FINDING_INDICES.map((i, n) => { const source = baseline[i]; return { ...source, id: `learn-new-diff-${n}`, position: baseline.length + n, identity_id: `learn-added-${i + 1}`, baseline_observation_id: '', baseline_observation: null, current_observation_id: `learn-new-observation-${n}`, current_observation: { ...source.baseline_observation!, observed_at: verified ? r.verificationAt : retest(r.scenario)!.snapshotAt }, presence: 'new', baseline_actionable: false, current_actionable: true, baseline_risk_milli: 0, current_risk_milli: SEVERITY_RISK[DEMO_ISSUES[i].severity] * 1000, verification_state: 'detected', fixed_basis: '' } })
   return [...baseline, ...added]
 }
 export function remediationSummary(r: RemediationState, verified = false, scope: string | null = 'all') {

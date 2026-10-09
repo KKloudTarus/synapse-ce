@@ -25,8 +25,14 @@ function load(): SetupData {
     const raw = localStorage.getItem(SETUP_KEY)
     if (!raw || raw.length > 200000) return emptySetup()
     const s = JSON.parse(raw) as SetupData
-    if (s.version !== 1 || typeof s.aiReady !== 'boolean' || typeof s.webhookReady !== 'boolean' || ![s.aiRecordedAt, s.eventAt].every(v => v === null || typeof v === 'string' && Number.isFinite(Date.parse(v))) || ![s.connectors, s.connections, s.operations, s.bindings].every(v => Array.isArray(v) && v.length <= 100 && v.every(r => r && typeof r.id === 'string'))) return emptySetup()
-    return s
+    const next = emptySetup()
+    if (s?.version !== 1) return next
+    const date = (v: unknown) => v === null || typeof v === 'string' && Number.isFinite(Date.parse(v))
+    if (typeof s.aiReady === 'boolean' && date(s.aiRecordedAt)) Object.assign(next, { aiReady: s.aiReady, aiRecordedAt: s.aiRecordedAt })
+    if (typeof s.webhookReady === 'boolean' && date(s.eventAt) && [s.connectors, s.connections, s.operations, s.bindings].every(v => Array.isArray(v) && v.length <= 100 && v.every(r => r && typeof r.id === 'string'))) {
+      Object.assign(next, { webhookReady: s.webhookReady, eventAt: s.eventAt, connectors: s.connectors, connections: s.connections, operations: s.operations, bindings: s.bindings })
+    }
+    return next
   } catch { return emptySetup() }
 }
 let state = load()
@@ -34,10 +40,11 @@ const listeners = new Set<() => void>()
 export const setupStore = { getSnapshot: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } } }
 export function updateSetup(change: (s: SetupData) => void) {
   const next = structuredClone(state.storageWarning ? state : load()); change(next)
-  try { localStorage.setItem(SETUP_KEY, JSON.stringify(next)); next.storageWarning = false } catch { next.storageWarning = true }
+  next.storageWarning = false
+  try { localStorage.setItem(SETUP_KEY, JSON.stringify(next)) } catch { next.storageWarning = true }
   state = next; listeners.forEach(fn => fn())
 }
-window.addEventListener('storage', e => { if (e.key === SETUP_KEY || e.key === null) { state = load(); listeners.forEach(fn => fn()) } })
+window.addEventListener('storage', e => { if (e.key === SETUP_KEY || e.key === null) { if (!state.storageWarning) state = load(); listeners.forEach(fn => fn()) } })
 export function resetSetup(mode: 'ai-setup' | 'ci-setup') {
   updateSetup(s => { if (mode === 'ai-setup') { s.aiReady = false; s.aiRecordedAt = null } else { s.connectors = []; s.connections = []; s.operations = []; s.bindings = []; s.webhookReady = false; s.eventAt = null } })
 }

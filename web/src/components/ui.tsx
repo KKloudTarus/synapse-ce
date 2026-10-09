@@ -257,12 +257,11 @@ export function Select({
   placeholder?: string
 }) {
   const trigger = useRef<HTMLButtonElement>(null)
-  const [portalContainer, setPortalContainer] = useState<HTMLElement | undefined>()
+  const [open, setOpen] = useState(false)
+  // Resolve on each open render so content mounts inside the current dialog immediately.
+  const portalContainer = trigger.current?.closest<HTMLElement>('[role="dialog"]') ?? undefined
   return (
-    <RSelect.Root value={value || undefined} onValueChange={onValueChange} disabled={disabled} onOpenChange={open => {
-      // Keep portaled options within a surrounding modal's focus/inert boundary.
-      if (open) setPortalContainer(trigger.current?.closest<HTMLElement>('[role="dialog"]') ?? undefined)
-    }}>
+    <RSelect.Root value={value || undefined} onValueChange={onValueChange} disabled={disabled} open={open} onOpenChange={setOpen}>
       <RSelect.Trigger
         ref={trigger}
         id={id}

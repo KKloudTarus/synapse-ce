@@ -170,6 +170,9 @@ describe('browser-local scan learning scenario', () => {
     await ok('/me/notification-preferences', 'PUT', { event_type: EVENT_TYPE, channel: 'in_app', state: 'enabled', revision: 1 })
     const reportPath = `/assessment-cycles/${CYCLE_ID}/closure-manifests/learn-checkout-closure/report`
     const beforeReport = await (await call(reportPath)).text()
+    const report = JSON.parse(beforeReport)
+    expect(report.manifest.demo).toBe(true)
+    expect(report.manifest.content_hash).toBe('DEMO-NOT-A-CRYPTOGRAPHIC-DIGEST')
     const beforeSnapshot = await ok(`/assessment-snapshots/${RETEST_ID}-snapshot-1`)
     await sync()
     expect((await ok('/me/inbox')).items).toEqual([])

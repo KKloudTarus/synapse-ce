@@ -10,6 +10,7 @@ export type AdvancedMode = 'remediation' | 'intelligence' | 'policy' | 'ai-setup
 export const ADVANCED_KEY = 'synapse.playground.advanced.v1'
 export const GATE_KEY = 'checkout-release'
 export const PROFILE_KEY = 'checkout-typescript'
+export const ADDED_FINDING_INDICES = [0, 5, 9]
 export const CLOSURE_REASON = 'Comparable verification reviewed. Retained findings have an assigned owner and a time-limited release exception.'
 export const OVERRIDE_REASON = 'Platform Security accepts the seven retained findings for this synthetic release. Review in seven days; ownership and remediation due dates remain active.'
 export interface RemediationState extends Progress {
@@ -30,7 +31,7 @@ export function seededScenario(): Scenario {
   s.assessments = [INITIAL_ID, RETEST_ID].map((id, i) => ({ id, name: i ? 'Checkout API · Re-test #1' : 'Checkout API · Initial assessment', client: 'Demo Company', status: 'completed', createdAt: at, scope: [{ kind: 'repo', value: TARGET }], outOfScope: [], authorizedFrom: at, authorizedTo: new Date(Date.now() + 86400000).toISOString(), timezone: 'UTC', tools: ['sca'], scan: { target: TARGET, ref: i ? 'fixed' : 'main', mode: 'full', kind: 'git', startedAt: at, finishedAt: at }, snapshotAt: at, findings: i ? [] : DEMO_ISSUES.map((_, n) => ({ id: `learn-finding-${n + 1}`, status: 'confirmed', assignee: '', version: 1, comments: [] })) }))
   return s
 }
-export function emptyRemediation(): RemediationState { const scenario = seededScenario(); scenario.assessments[1].findings = [...scenario.assessments[0].findings.slice(10, 14), ...[0, 5, 14].map(i => ({ ...scenario.assessments[0].findings[i], id: `learn-added-${i + 1}` }))]; return { ...progress(), scenario, assignment: { team_id: 'team-platform', assignee_id: '', legacy_assignee: '', mode: 'auto', revision: 1, manual_generation: 0 }, findingVersion: 1, history: [], coverageRestored: false, verificationAt: null, overrideIds: [], overrideReason: '' } }
+export function emptyRemediation(): RemediationState { const scenario = seededScenario(); scenario.assessments[1].findings = [...scenario.assessments[0].findings.slice(10, 14), ...ADDED_FINDING_INDICES.map(i => ({ ...scenario.assessments[0].findings[i], id: `learn-added-${i + 1}` }))]; return { ...progress(), scenario, assignment: { team_id: 'team-platform', assignee_id: '', legacy_assignee: '', mode: 'auto', revision: 1, manual_generation: 0 }, findingVersion: 1, history: [], coverageRestored: false, verificationAt: null, overrideIds: [], overrideReason: '' } }
 export function emptyIntelligence(): IntelligenceState {
   const scenario = seededScenario(), at = scenario.asset!.created_at
   scenario.source = { id: 'learn-source', key: 'checkout-osv', name: 'Checkout OSV feed', endpoint: 'https://checkout.example/advisories.json', adapter_type: 'osv', enabled: true, cadence_seconds: 3600, stale_after_seconds: 7200, sync_mode: 'incremental', version: 1, created_at: at }
@@ -60,14 +61,39 @@ function valid(s: AdvancedState): boolean {
     q.quality?.project?.key === PROJECT_KEY && Array.isArray(q.quality.analyses) && q.quality.analyses.length <= 2 && q.quality.analyses.every(a => ['main', 'improved'].includes(a.ref) && date(a.startedAt) && date(a.finishedAt)) && [q.profileCopied, q.profileAssigned, q.decoration, q.coverageImported].every(v => typeof v === 'boolean') && ['critical', 'high', 'medium', 'low', 'info'].includes(q.ruleSeverity) && (!q.gate || q.gate.key === GATE_KEY && bounded(q.gate.name) && Array.isArray(q.gate.conditions) && q.gate.conditions.length === 3 && q.gate.conditions.every(c => bounded(c.metric) && ['<=', '>='].includes(c.op) && Number.isFinite(c.threshold)))
 }
 function load(fallback?: AdvancedState): AdvancedState {
-  try { const raw = localStorage.getItem(ADVANCED_KEY); if (!raw || raw.length > 300000) return empty(); const value = JSON.parse(raw); if (value?.version === 1) { if (value.aiSetupRevision !== 2) { value['ai-setup'] = progress(); value.aiSetupRevision = 2 }; value['ai-setup'] ??= progress(); value['ci-setup'] ??= progress() }; if (value?.policy && value.policy.profileAssigned === undefined) value.policy.profileAssigned = false; return valid(value) ? value : empty() } catch { return fallback ?? empty() }
+  try {
+    const raw = localStorage.getItem(ADVANCED_KEY)
+    const base = empty()
+    if (!raw || raw.length > 300000) return base
+    const value = JSON.parse(raw)
+    if (value?.version !== 1) return base
+    if (value.aiSetupRevision !== 2) value['ai-setup'] = progress()
+    if (value.policy && value.policy.profileAssigned === undefined) value.policy.profileAssigned = false
+    const next = { ...base }
+    for (const mode of ['remediation', 'intelligence', 'policy', 'ai-setup', 'ci-setup'] as const) {
+      try {
+        if (valid({ ...base, [mode]: value[mode] })) Object.assign(next, { [mode]: value[mode] })
+      } catch { /* Malformed nested data resets only this chapter. */ }
+    }
+    // Repair the old added IaC fixture without resetting an existing exercise.
+    for (const assessment of next.remediation.scenario.assessments) {
+      for (const finding of assessment.findings) if (finding.id === 'learn-added-15') finding.id = 'learn-added-10'
+    }
+    return next
+  } catch { return fallback ?? empty() }
 }
+
 let state = load()
 const listeners = new Set<() => void>()
-function latest() { const next = load(state); for (const m of ['remediation', 'intelligence', 'policy', 'ai-setup', 'ci-setup'] as const) next[m].open = state[m].open; return next }
+function latest() { const next = state.storageWarning ? structuredClone(state) : load(state); for (const m of ['remediation', 'intelligence', 'policy', 'ai-setup', 'ci-setup'] as const) next[m].open = state[m].open; return next }
 window.addEventListener('storage', e => { if (e.key !== ADVANCED_KEY && e.key !== null) return; state = latest(); listeners.forEach(fn => fn()) })
 export const advancedStore = { getSnapshot: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } } }
-export function updateAdvanced(change: (s: AdvancedState) => void) { const next = structuredClone(latest()); change(next); try { localStorage.setItem(ADVANCED_KEY, JSON.stringify(next)); next.storageWarning = false } catch { next.storageWarning = true }; state = next; listeners.forEach(fn => fn()) }
+export function updateAdvanced(change: (s: AdvancedState) => void) {
+  const next = structuredClone(latest()); change(next)
+  next.storageWarning = false
+  try { localStorage.setItem(ADVANCED_KEY, JSON.stringify(next)) } catch { next.storageWarning = true }
+  state = next; listeners.forEach(fn => fn())
+}
 export function resetAdvanced(mode: AdvancedMode) { if (mode === 'ai-setup' || mode === 'ci-setup') resetSetup(mode); updateAdvanced(s => { if (mode === 'remediation') s.remediation = emptyRemediation(); if (mode === 'intelligence') s.intelligence = emptyIntelligence(); if (mode === 'policy') s.policy = emptyPolicy(); if (mode === 'ai-setup' || mode === 'ci-setup') s[mode] = progress(); s[mode].open = true }) }
 export function settleAdvanced(now = Date.now()) {
   const mode = readDemoMode('overview')

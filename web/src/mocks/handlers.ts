@@ -1155,7 +1155,38 @@ export const handlers = [
     { id: 'run-003', engagement_id: 'eng-001', tool: 'nuclei', target: 'api.acme.io', status: 'running', started_at: HOUR_AGO, finished_at: null, output_lines: 120, findings_count: 0 },
   ])),
 
-  // AI session contracts are provided by the curated playground setup handlers.
+  // Plain dev retains its fixtures; playground setup handlers take precedence.
+  http.get('/api/v1/engagements/:id/agent-sessions', () => HttpResponse.json([
+    { id: 'sess-001', engagement_id: 'eng-001', status: 'complete', objective: 'Enumerate attack surface for api.acme.io', started_at: DAY_AGO, finished_at: DAY_AGO, steps: 8, findings_generated: 2 },
+    { id: 'sess-002', engagement_id: 'eng-001', status: 'running', objective: 'Exploit identified SSRF vulnerability', started_at: HOUR_AGO, finished_at: null, steps: 3, findings_generated: 0 },
+  ])),
+  http.get('/api/v1/engagements/:id/agent-approvals', () => HttpResponse.json([
+    { id: 'appr-001', session_id: 'sess-002', tool: 'curl', target: 'http://169.254.169.254/latest/meta-data/', rationale: 'Verify SSRF reaches IMDS', status: 'pending', requested_at: HOUR_AGO },
+  ])),
+  http.get('/api/v1/engagements/:id/agent-readiness', () => HttpResponse.json({ ready: true, reason: '', sandbox_healthy: true, tools_available: ['nmap', 'curl', 'nuclei', 'ffuf', 'subfinder'] })),
+  http.get('/api/v1/engagements/:id/agent-sessions/:sid', () => HttpResponse.json({
+    id: 'sess-001', engagement_id: 'eng-001', status: 'complete', objective: 'Enumerate attack surface',
+    transcript: [
+      { role: 'system', content: 'Agent initialized. Objective: enumerate attack surface for api.acme.io', timestamp: DAY_AGO },
+      { role: 'agent', content: 'Running subfinder for subdomain enumeration...', timestamp: DAY_AGO },
+      { role: 'tool', content: 'subfinder found 8 subdomains: api.acme.io, admin.acme.io, staging.acme.io...', timestamp: DAY_AGO },
+      { role: 'agent', content: 'Running nmap port scan on discovered hosts...', timestamp: DAY_AGO },
+      { role: 'tool', content: 'nmap: 3 hosts up, 12 open ports total. Notable: admin.acme.io:8080 (no TLS)', timestamp: DAY_AGO },
+      { role: 'agent', content: 'Finding: admin panel exposed without TLS on port 8080. Generating finding...', timestamp: DAY_AGO },
+    ],
+    started_at: DAY_AGO, finished_at: DAY_AGO, steps: 8, findings_generated: 2,
+  })),
+  http.get('/api/v1/engagements/:id/agent-sessions/:sid/plan', () => HttpResponse.json({
+    steps: [
+      { id: 1, action: 'subdomain_enum', target: 'acme.io', status: 'complete', tool: 'subfinder' },
+      { id: 2, action: 'port_scan', target: 'discovered hosts', status: 'complete', tool: 'nmap' },
+      { id: 3, action: 'service_fingerprint', target: 'open ports', status: 'complete', tool: 'httpx' },
+      { id: 4, action: 'vuln_scan', target: 'web services', status: 'pending', tool: 'nuclei' },
+    ],
+  })),
+  http.get('/api/v1/engagements/:id/agent-sessions/:sid/decisions', () => HttpResponse.json([
+    { id: 'd-1', session_id: 'sess-001', step: 2, decision: 'proceed', rationale: 'Non-intrusive port scan within RoE', tool: 'nmap', target: 'api.acme.io', decided_at: DAY_AGO },
+  ])),
 
   // --- Engagement Code Quality ---
   http.get('/api/v1/engagements/:id/code-quality', () => HttpResponse.json({
@@ -2349,7 +2380,11 @@ func Callback(w http.ResponseWriter, r *http.Request) {
     return HttpResponse.json({ error: 'Not mocked' }, { status: 404 })
   }),
   ...(['post', 'patch', 'delete', 'put'] as const).map((method) =>
-    http[method]('/api/v1/*', () => {
+    http[method]('/api/v1/*', ({ request }) => {
+      if (import.meta.env.VITE_PLAYGROUND !== '1') {
+        const generated = matchGenerated(method.toUpperCase(), new URL(request.url).pathname)
+        return HttpResponse.json(generated.found && generated.body !== null ? generated.body : { ok: true })
+      }
       return HttpResponse.json({ error: 'This action is not simulated in the playground.', message: 'This action is not simulated. Continue with a guided chapter to explore a supported workflow.' }, { status: 422 })
     }),
   ),

@@ -43,28 +43,41 @@ const bounded = (value: unknown) => typeof value === 'string' && value.length <=
 const date = (value: unknown) => value === null || typeof value === 'string' && Number.isFinite(Date.parse(value))
 const validProgress = (p: Progress, count: number) => p && Number.isInteger(p.step) && p.step >= 0 && p.step < count && typeof p.open === 'boolean' && typeof p.complete === 'boolean' && Array.isArray(p.completed) && p.completed.length <= count && p.completed.every(i => Number.isInteger(i) && i >= 0 && i < count)
 
+function validChapters(parsed: Workflows): boolean {
+  if (!validProgress(parsed.runtime, 27) || !validProgress(parsed.ai, 19) || !validProgress(parsed.quality, 24)) return false
+  const r = parsed.runtime, a = parsed.ai, q = parsed.quality
+  if (![r.tokenAt, r.tokenExpiresAt, r.enrolledAt, r.telemetryAt, r.detectedAt, r.incidentAt, r.planAt, r.appliedAt, r.revertedAt, a.proposalsAt, q.improvedAt].every(date) ||
+    ![r.owner, r.comment, a.assignedTo, a.comment, q.issueRationale, q.hotspotRationale].every(bounded) ||
+    !['open', 'investigating', 'resolved'].includes(r.incidentStatus) || !['unknown', 'true_positive'].includes(r.disposition) || !['open', 'confirmed'].includes(a.findingStatus) || !['open', 'accepted'].includes(q.issueStatus) || !['to_review', 'safe'].includes(q.hotspotStatus) ||
+    ![a.findingVersion, q.issueVersion, q.hotspotVersion].every(v => Number.isInteger(v) && v > 0) ||
+    !Array.isArray(a.reviews) || ![2, AI_CASES.length].includes(a.reviews.length) || !a.reviews.every((row, i) => row.id === `learn-review-${i + 1}` && ['pending', 'accepted', 'rejected'].includes(row.state) && Number.isInteger(row.version) && row.version > 0 && bounded(row.owner) && bounded(row.rationale) && date(row.decidedAt)) ||
+    !Array.isArray(q.analyses) || q.analyses.length > 2 || !q.analyses.every(row => ['main', 'improved'].includes(row.ref) && row.id === `learn-quality-analysis-${row.ref}` && date(row.startedAt) && row.startedAt !== null && date(row.finishedAt)) || new Set(q.analyses.map(row => row.ref)).size !== q.analyses.length ||
+    q.project && (q.project.key !== PROJECT_KEY || q.project.source !== PROJECT_TARGET || !bounded(q.project.name) || !['main', 'improved'].includes(q.project.ref) || q.project.gateId !== 'default' || !date(q.project.createdAt))) return false
+  return true
+}
 function load(fallback?: Workflows): Workflows {
   const empty = emptyWorkflows()
   try {
     const raw = localStorage.getItem(WORKFLOW_KEY)
     const parsed = raw && raw.length < 100_000 ? JSON.parse(raw) as Workflows : null
     empty.mode = readDemoMode(empty.mode)
-    if (!parsed || parsed.version !== 1 || parsed.overviewComplete !== undefined && typeof parsed.overviewComplete !== 'boolean' || !validProgress(parsed.runtime, 27) || !validProgress(parsed.ai, 19) || !validProgress(parsed.quality, 24)) return empty
-    const r = parsed.runtime, a = parsed.ai, q = parsed.quality
-    if (![r.tokenAt, r.tokenExpiresAt, r.enrolledAt, r.telemetryAt, r.detectedAt, r.incidentAt, r.planAt, r.appliedAt, r.revertedAt, a.proposalsAt, q.improvedAt].every(date) ||
-      ![r.owner, r.comment, a.assignedTo, a.comment, q.issueRationale, q.hotspotRationale].every(bounded) ||
-      !['open', 'investigating', 'resolved'].includes(r.incidentStatus) || !['unknown', 'true_positive'].includes(r.disposition) || !['open', 'confirmed'].includes(a.findingStatus) || !['open', 'accepted'].includes(q.issueStatus) || !['to_review', 'safe'].includes(q.hotspotStatus) ||
-      ![a.findingVersion, q.issueVersion, q.hotspotVersion].every(v => Number.isInteger(v) && v > 0) ||
-      !Array.isArray(a.reviews) || ![2, AI_CASES.length].includes(a.reviews.length) || !a.reviews.every((row, i) => row.id === `learn-review-${i + 1}` && ['pending', 'accepted', 'rejected'].includes(row.state) && Number.isInteger(row.version) && row.version > 0 && bounded(row.owner) && bounded(row.rationale) && date(row.decidedAt)) ||
-      !Array.isArray(q.analyses) || q.analyses.length > 2 || !q.analyses.every(row => ['main', 'improved'].includes(row.ref) && row.id === `learn-quality-analysis-${row.ref}` && date(row.startedAt) && row.startedAt !== null && date(row.finishedAt)) || new Set(q.analyses.map(row => row.ref)).size !== q.analyses.length ||
-      q.project && (q.project.key !== PROJECT_KEY || q.project.source !== PROJECT_TARGET || !bounded(q.project.name) || !['main', 'improved'].includes(q.project.ref) || q.project.gateId !== 'default' || !date(q.project.createdAt))) return empty
-    return { ...empty, overviewComplete: parsed.overviewComplete ?? false, runtime: { ...empty.runtime, ...parsed.runtime }, ai: { ...empty.ai, ...parsed.ai, reviews: empty.ai.reviews.map((row, i) => parsed.ai.reviews[i] ?? row) }, quality: { ...empty.quality, ...parsed.quality } }
+    if (!parsed || parsed.version !== 1) return empty
+    const next = { ...empty, overviewComplete: parsed.overviewComplete === true }
+    // A stale chapter must not erase valid progress from its siblings.
+    for (const mode of ['runtime', 'ai', 'quality'] as const) {
+      try {
+        if (validChapters({ ...empty, [mode]: parsed[mode] })) Object.assign(next, { [mode]: { ...empty[mode], ...parsed[mode] } })
+      } catch { /* Malformed nested data resets only this chapter. */ }
+    }
+    next.ai.reviews = empty.ai.reviews.map((row, i) => next.ai.reviews[i] ?? row)
+    return next
   } catch { return fallback ?? empty }
 }
+
 let state = load()
 const listeners = new Set<() => void>()
 function latestState() {
-  const next = load(state)
+  const next = state.storageWarning ? structuredClone(state) : load(state)
   next.mode = state.mode
   for (const mode of ['runtime', 'ai', 'quality'] as const) next[mode].open = state[mode].open
   return next
@@ -79,7 +92,8 @@ export function updateWorkflows(change: (draft: Workflows) => void) {
   // Re-read before every edit so an older tab cannot replace another chapter's saved progress.
   const next = structuredClone(latestState()); change(next)
   saveDemoMode(next.mode)
-  try { localStorage.setItem(WORKFLOW_KEY, JSON.stringify(next)); next.storageWarning = false } catch { next.storageWarning = true }
+  next.storageWarning = false
+  try { localStorage.setItem(WORKFLOW_KEY, JSON.stringify(next)) } catch { next.storageWarning = true }
   state = next; listeners.forEach(listener => listener())
 }
 export function chooseMode(mode: DemoMode) {

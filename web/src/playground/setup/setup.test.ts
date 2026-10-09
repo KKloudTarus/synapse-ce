@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setupServer } from 'msw/node'
 import { setupHandlers } from './handlers'
 import { DEMO_SECRET, REVIEW_GOAL, SETUP_KEY, resetSetup, setupStore } from './store'
@@ -18,7 +18,8 @@ import { guidePlacement } from '../guide-placement'
 const server = setupServer(...setupHandlers, ...advancedHandlers, ...workflowHandlers, ...scenarioHandlers, ...handlers)
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterAll(() => server.close())
-beforeEach(() => { localStorage.clear(); resetSetup('ci-setup'); resetSetup('ai-setup'); saveDemoMode('ci-setup') })
+afterEach(() => vi.unstubAllEnvs())
+beforeEach(() => { vi.stubEnv('VITE_PLAYGROUND', '1'); localStorage.clear(); resetSetup('ci-setup'); resetSetup('ai-setup'); saveDemoMode('ci-setup') })
 const call = (path: string, method = 'GET', body?: unknown) => fetch(new URL(`/api/v1${path}`, window.location.origin), { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
 const ok = async (path: string, method = 'GET', body?: unknown) => { const r = await call(path, method, body); const data = r.status === 204 ? null : await r.json(); expect(r.ok, JSON.stringify(data)).toBe(true); return data }
 const connection = () => ok('/integrations', 'POST', { provider: 'jenkins', name: 'Jenkins build evidence', endpoint: 'https://ci.example', poll_interval_seconds: 300 })

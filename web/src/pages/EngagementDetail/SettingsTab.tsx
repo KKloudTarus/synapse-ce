@@ -529,7 +529,6 @@ export function WindowEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdate
           <Input
             type="datetime-local"
             value={from}
-            onInput={(e) => setFrom(e.currentTarget.value)}
             onChange={(e) => setFrom(e.target.value)}
             aria-label="Authorization window start"
           />
@@ -538,7 +537,6 @@ export function WindowEditorCard({ eng, onUpdated }: { eng: Engagement; onUpdate
           <Input
             type="datetime-local"
             value={to}
-            onInput={(e) => setTo(e.currentTarget.value)}
             onChange={(e) => setTo(e.target.value)}
             aria-label="Authorization window end"
           />

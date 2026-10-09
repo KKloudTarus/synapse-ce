@@ -12,6 +12,8 @@ import { gateConditions } from './data'
 import { AdvancedWalkthrough } from './AdvancedWalkthrough'
 import { chooseMode } from '../workflows/store'
 import * as restoration from './restore'
+import { updateSetup } from '../setup/store'
+import { Select } from '@/components/ui'
 
 beforeEach(() => {
   resetAdvanced('policy')
@@ -20,6 +22,42 @@ beforeEach(() => {
 })
 
 describe('Advanced native form automation', () => {
+  it('makes the completed action and Continue control explicit before advancing', async () => {
+    chooseMode('ai-setup')
+    const step = ADVANCED_STEPS['ai-setup'].findIndex(s => s.perform?.path === '/playground/setup/ai-ready')
+    expect(step).toBeGreaterThanOrEqual(0)
+    updateAdvanced(s => { s['ai-setup'].step = step; s['ai-setup'].open = true })
+    updateSetup(s => { s.aiReady = true })
+    render(<MemoryRouter initialEntries={[ADVANCED_STEPS['ai-setup'][step].route]}><main><h1>AI Agent readiness</h1></main><AdvancedWalkthrough /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Continue$/ })).toBeEnabled())
+    expect(screen.getByRole('status')).toHaveTextContent('Action complete.')
+    fireEvent.click(screen.getByRole('button', { name: /^Continue$/ }))
+    expect(advancedStore.getSnapshot()['ai-setup'].step).toBe(step + 1)
+  })
+  it('mounts Select options inside the current dialog on first open and reopen', async () => {
+    const mounts: HTMLElement[] = []
+    const observer = new MutationObserver(records => {
+      for (const record of records) for (const node of record.addedNodes) {
+        if (node instanceof HTMLElement && (node.matches('[role="listbox"]') || node.querySelector('[role="listbox"]'))) mounts.push(record.target as HTMLElement)
+      }
+    })
+    const view = render(<div role="dialog" aria-label="First"><Select ariaLabel="Metric" value="coverage" onValueChange={() => {}} options={[{ value: 'coverage', label: 'Coverage' }]} /></div>)
+    observer.observe(document.body, { subtree: true, childList: true })
+    try {
+      fireEvent.click(screen.getByRole('combobox'))
+      await waitFor(() => expect(screen.getByRole('listbox')).toBeInTheDocument())
+      const first = screen.getByRole('listbox')
+      expect(first.closest('[role="dialog"]')?.getAttribute('aria-label')).toBe('First')
+      fireEvent.keyDown(first, { key: 'Escape' })
+      await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
+      view.rerender(<div role="dialog" aria-label="Second"><Select ariaLabel="Metric" value="coverage" onValueChange={() => {}} options={[{ value: 'coverage', label: 'Coverage' }]} /></div>)
+      fireEvent.click(screen.getByRole('combobox'))
+      await waitFor(() => expect(screen.getByRole('listbox')).toBeInTheDocument())
+      expect(screen.getByRole('listbox').closest('[role="dialog"]')?.getAttribute('aria-label')).toBe('Second')
+      expect(mounts.length).toBeGreaterThan(0)
+      expect(mounts.every(node => node !== document.body)).toBe(true)
+    } finally { observer.disconnect() }
+  })
   it('waits for another Next after opening a form instead of advancing a ready field automatically', async () => {
     chooseMode('policy')
     updateAdvanced(s => { s.policy.step = 9; s.policy.open = true })
@@ -55,6 +93,18 @@ describe('Advanced native form automation', () => {
     restoreAdvancedControls('policy', advancedStore.getSnapshot())
     expect(reopen).not.toHaveBeenCalled()
   })
+  it('prefills datetime-local fields through onChange without duplicate input handlers', () => {
+    const changed = vi.fn()
+    function WindowField() {
+      const [value, setValue] = useState('')
+      return <label>Authorized from<input type="datetime-local" value={value} onChange={e => { setValue(e.target.value); changed(e.target.value) }} /></label>
+    }
+    render(<WindowField />)
+    act(() => { fillDemoControl({ title: '', body: '', why: '', target: { kind: 'field', name: 'Authorized from' }, example: { value: '2026-10-09T09:30' }, done: () => false }, {}) })
+    expect(screen.getByLabelText('Authorized from')).toHaveValue('2026-10-09T09:30')
+    expect(changed).toHaveBeenCalledExactlyOnceWith('2026-10-09T09:30')
+  })
+
   it('selects a native option by its displayed label and submits its stable key', async () => {
     const assigned = vi.fn()
     function GateAssignment() {

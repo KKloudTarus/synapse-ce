@@ -3,7 +3,7 @@ import { COMPARISON_ID, CYCLE_ID, DEMO_ADVISORY, EVENT_TYPE, INITIAL_ID, RETEST_
 import { CORE_PHASES, DEMO_ISSUES, DEMO_PACKAGES, PHASE_DURATION, SCAN_DURATION, SEVERITY_RISK } from './catalog'
 
 export const PACKAGES = DEMO_PACKAGES.map(p => p.name)
-const DEMO_HASH = 'd'.repeat(64)
+const DEMO_HASH = 'DEMO-NOT-A-CRYPTOGRAPHIC-DIGEST'
 export const ACTOR = 'admin@synapse.local'
 export const snapshotId = (a: DemoAssessment) => `${a.id}-snapshot-1`
 export const runId = (a: DemoAssessment) => `${a.id}-run-1`
@@ -84,7 +84,7 @@ export function jobWire(a: DemoAssessment, now = Date.now()) {
     }),
   }
 }
-const manifest = { tool_versions: Object.fromEntries(engines.map(e => [`demo-${e}`, '1'])), vuln_db_snapshot: 'DEMO-FEED-baseline', correlation_version: 1, sbom_sha256: DEMO_HASH, repro_score: 100, pinned_inputs: ['demo-repository', 'demo-feed'], unpinned_inputs: [] }
+const manifest = { demo: true, tool_versions: Object.fromEntries(engines.map(e => [`demo-${e}`, '1'])), vuln_db_snapshot: 'DEMO-FEED-baseline', correlation_version: 1, sbom_sha256: DEMO_HASH, repro_score: 100, pinned_inputs: ['demo-repository', 'demo-feed'], unpinned_inputs: [] }
 export function scanWire(a: DemoAssessment) {
   const comps = components(a)
   const unknown = comps.filter(c => !c.Licenses.length).length
@@ -155,7 +155,7 @@ export function closurePreview(s: Scenario) {
     non_final_branches: [], policy: { policy_version: 'demo-policy-1', blockers: [], warnings: [{ code: 'playground_simulation', message: 'Training data only; hashes and policy evaluation are simulated.' }], coverage_decisions: { initial: [], final: [] }, commit_allowed: true }, references: [], scope_profile_changes: [], renderer_contract_version: 'demo-1', expires_at: s.preview?.expiresAt, preview_token: s.preview?.token }
 }
 export function closureManifest(s: Scenario) {
-  return { ...closurePreview(s), id: MANIFEST_ID, cycle_id: CYCLE_ID, lifecycle: 'active', cycle_version: 3, root_assessment_id: INITIAL_ID, reason: s.closure!.reason, created_at: s.closure!.at, as_of_at: s.closure!.at, sealed_at: s.closure!.at, created_by: ACTOR, sealed_by: ACTOR, content_hash: DEMO_HASH, initial_snapshot_hash: DEMO_HASH, final_snapshot_hash: DEMO_HASH, comparison_hash: DEMO_HASH, canonical_input_hash: DEMO_HASH, policy_version: 'demo-policy-1', algorithm_version: '1', fingerprint_version: '1', risk_version: '1', coverage_decisions: { initial: [], final: [] }, override_blocker_ids: [], override_reason: '', superseded_at: null }
+  return { ...closurePreview(s), demo: true, id: MANIFEST_ID, cycle_id: CYCLE_ID, lifecycle: 'active', cycle_version: 3, root_assessment_id: INITIAL_ID, reason: s.closure!.reason, created_at: s.closure!.at, as_of_at: s.closure!.at, sealed_at: s.closure!.at, created_by: ACTOR, sealed_by: ACTOR, content_hash: DEMO_HASH, initial_snapshot_hash: DEMO_HASH, final_snapshot_hash: DEMO_HASH, comparison_hash: DEMO_HASH, canonical_input_hash: DEMO_HASH, policy_version: 'demo-policy-1', algorithm_version: '1', fingerprint_version: '1', risk_version: '1', coverage_decisions: { initial: [], final: [] }, override_blocker_ids: [], override_reason: '', superseded_at: null }
 }
 export function syncWire(r: Scenario['syncs'][number], s: Scenario) {
   const inserted = Boolean(r.finishedAt && r.feedPublished && r.finishedAt === s.correlatedAt && s.syncs.find(x => x.feedPublished && x.finishedAt)?.id === r.id)

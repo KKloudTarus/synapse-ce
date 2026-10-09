@@ -44,6 +44,11 @@ import {
 } from '../projectMeasures'
 import { ApiError, errorFromResponse } from './errors'
 import { blobDownload, req, snapshotAuth } from './client'
+
+// Branch arguments on measures, issues, hotspots, dependency graphs/subtree exports
+// and latest-analysis reads serve playground fixtures only. Keep those call sites
+// gated until the server supports them; project overview already supports branch.
+
 import type { ProjectWire } from './wire'
 import { mapScanJob, mapCodeQualityReport } from './scan'
 

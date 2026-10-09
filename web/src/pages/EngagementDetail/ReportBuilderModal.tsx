@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Download01, Sliders04, XClose } from '@untitledui/icons'
 import { Button, ErrorState, Field, Input, cn } from '../../components/ui'
-import { ReportType, downloadReport, downloadReportDoc } from '../../lib/api'
+import { ApiError, ReportType, downloadReport, downloadReportDoc } from '../../lib/api'
 import { trapTabFocus } from './ScanPanel'
 
 export const REPORT_SECTIONS: { key: string; label: string }[] = [
@@ -106,7 +106,7 @@ export function ReportBuilderModal({ engagementId, onClose }: { engagementId: st
       }
       onClose()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Report generation failed')
+      setErr(e instanceof ApiError && e.code === 'empty_export' ? `${e.message} Please retry or choose another format.` : e instanceof Error ? e.message : 'Report generation failed')
     } finally {
       setBusy(false)
     }

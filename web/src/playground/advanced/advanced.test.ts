@@ -44,6 +44,14 @@ describe('Isolated advanced walkthroughs', () => {
   it('retains mixed evidence after a separate verification and blocks closure until authoritative exceptions are reviewed', async () => {
     await assign(); await assign(true); await ok('/assessment-comparisons', 'POST', pair)
     const initial = await ok(`/assessment-comparisons/${COMPARISON_ID}/summary?scope=all`)
+    const rows = (await ok(`/assessment-comparisons/${COMPARISON_ID}/items?scope=all`)).items
+    const partialLanes = (await ok(`/engagements/${RETEST_ID}/scan-status`)).engine_outcomes.filter((o: { coverage: string }) => o.coverage === 'partial').map((o: { engine: string }) => o.engine)
+    const added = rows.filter((row: { presence: string }) => row.presence === 'new')
+    expect(added).toHaveLength(3)
+    for (const row of added) {
+      expect(partialLanes).not.toContain(row.producer_kind)
+      expect(advancedStore.getSnapshot().remediation.scenario.assessments[1].findings.some(f => f.id === row.identity_id)).toBe(true)
+    }
     expect(initial).toMatchObject({ baseline_count: 18, fixed_count: 10, still_detected_count: 4, new_count: 3, not_evaluated_count: 4 })
     expect((await ok(`/engagements/${RETEST_ID}/scan-status`)).engine_coverage).toMatchObject({ status: 'partial', completed: 5 })
     expect((await ok(`/engagements/${RETEST_ID}/scan-runs`))[0].complete_coverage).toBe(false)
