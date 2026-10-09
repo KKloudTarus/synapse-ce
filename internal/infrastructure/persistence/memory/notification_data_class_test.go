@@ -173,33 +173,36 @@ func TestEngagementNoneSuppressesDelivery(t *testing.T) {
 	}
 }
 
-// noneAfterLoad commits an engagement's none right after the worker loads its work, the interleaving
-// of the #1360 review: the load still reads inherit, and the attempt is admitted after the write.
-type noneAfterLoad struct {
+// changeAfterLoad runs change right after the worker loads its work, the interleaving of the #1360
+// and #1566 reviews: the load and the render still see the old policy, and the attempt is admitted
+// after the change commits.
+type changeAfterLoad struct {
 	*NotificationRepository
-	engagement shared.ID
-	at         time.Time
+	change func(ctx context.Context) error
 }
 
-func (r noneAfterLoad) LoadWork(ctx context.Context, tenant, delivery shared.ID) (ports.NotificationWork, error) {
+func (r changeAfterLoad) LoadWork(ctx context.Context, tenant, delivery shared.ID) (ports.NotificationWork, error) {
 	work, err := r.NotificationRepository.LoadWork(ctx, tenant, delivery)
 	if err != nil {
 		return work, err
 	}
-	at := r.at
-	if _, err := r.PutEngagementNotificationSetting(ctx, notification.EngagementNotificationSetting{TenantID: tenant, EngagementID: r.engagement,
-		ExternalNotifications: notification.EngagementNotificationsNone, Revision: 1, UpdatedAt: &at, UpdatedBy: "admin"}); err != nil {
-		return work, err
-	}
-	return work, nil
+	return work, r.change(ctx)
 }
 
-// TestEngagementNoneAfterLoadIsNotSent drives the worker through that interleaving: nothing is
-// sent, no attempt is recorded, and the delivery ends cancelled with engagement_suppressed.
-func TestEngagementNoneAfterLoadIsNotSent(t *testing.T) {
-	h := newDataClassHarness(t)
-	h.repo.AddEngagement(notificationTestTenant, "eng-1")
-	channel := h.webhook(t)
+// setOverride commits the engagement override at revision 1.
+func (h *dataClassHarness) setOverride(value notification.EngagementNotifications) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		at := notificationTestNow.Add(3 * time.Minute)
+		_, err := h.repo.PutEngagementNotificationSetting(ctx, notification.EngagementNotificationSetting{TenantID: notificationTestTenant, EngagementID: "eng-1",
+			ExternalNotifications: value, Revision: 1, UpdatedAt: &at, UpdatedBy: "admin"})
+		return err
+	}
+}
+
+// queuedScan routes a scan.completed event about eng-1 to channel and projects it into one
+// delivery, then returns the claimed delivery job.
+func (h *dataClassHarness) queuedScan(t *testing.T, channel notification.Channel) ports.QueuedJob {
+	t.Helper()
 	if _, err := h.service.CreateRule(h.ctx, "admin", notificationuc.RuleInput{Name: "Scans", Enabled: true, EventType: notification.EventScanCompleted, ChannelIDs: []shared.ID{channel.ID}}); err != nil {
 		t.Fatal(err)
 	}
@@ -216,20 +219,35 @@ func TestEngagementNoneAfterLoadIsNotSent(t *testing.T) {
 	if n, err := h.source.Poll(h.ctx, notificationTestNow.Add(2*time.Minute), 0); err != nil || n != 1 {
 		t.Fatalf("poll = %d, %v", n, err)
 	}
-	cipher, err := vault.NewCipher(make([]byte, 32))
-	if err != nil {
-		t.Fatal(err)
-	}
-	worker, err := notificationuc.NewService(noneAfterLoad{NotificationRepository: h.repo, engagement: "eng-1", at: notificationTestNow.Add(3 * time.Minute)},
-		cipher, h.sender, h.audit, fixedClock{notificationTestNow.Add(3 * time.Minute)}, idgen.RandomID{})
-	if err != nil {
-		t.Fatal(err)
-	}
 	job, err := h.jobs.Claim(h.ctx, time.Minute, notificationDeliverJobKey)
 	if err != nil || job == nil {
 		t.Fatalf("claim = %v, %v", job, err)
 	}
-	if err := worker.HandleJob(h.ctx, *job); !errors.Is(err, ports.ErrRetryable) {
+	return *job
+}
+
+// worker is a notification service over repo, as the worker process builds one.
+func (h *dataClassHarness) worker(t *testing.T, repo ports.NotificationRepository) *notificationuc.Service {
+	t.Helper()
+	cipher, err := vault.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err := notificationuc.NewService(repo, cipher, h.sender, h.audit, fixedClock{notificationTestNow.Add(3 * time.Minute)}, idgen.RandomID{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return worker
+}
+
+// TestEngagementNoneAfterLoadIsNotSent drives the worker through that interleaving: nothing is
+// sent, no attempt is recorded, and the delivery ends cancelled with engagement_suppressed.
+func TestEngagementNoneAfterLoadIsNotSent(t *testing.T) {
+	h := newDataClassHarness(t)
+	h.repo.AddEngagement(notificationTestTenant, "eng-1")
+	job := h.queuedScan(t, h.webhook(t))
+	worker := h.worker(t, changeAfterLoad{NotificationRepository: h.repo, change: h.setOverride(notification.EngagementNotificationsNone)})
+	if err := worker.HandleJob(h.ctx, job); !errors.Is(err, ports.ErrRetryable) {
 		t.Fatalf("handle job = %v, want the retryable admission refusal", err)
 	}
 	if len(h.sender.sent) != 0 {
@@ -238,5 +256,67 @@ func TestEngagementNoneAfterLoadIsNotSent(t *testing.T) {
 	page, err := h.service.ListDeliveries(h.ctx, ports.NotificationDeliveryFilter{})
 	if err != nil || len(page.Items) != 1 || page.Items[0].State != notification.DeliveryCancelled || page.Items[0].LastError != notification.CodeEngagementSuppressed || page.Items[0].Attempts != 0 {
 		t.Fatalf("deliveries = %+v, %v", page.Items, err)
+	}
+}
+
+// TestLoweringAfterRenderIsNotSentAtTheOldClass is the #1566 review case: the worker renders at the
+// channel's summary class, then the engagement is capped at signal, or the channel itself lowered,
+// before the attempt starts. The summary-class message must not go out; the attempt is refused
+// retryably and the delivery stays open, so the retry renders at signal.
+func TestLoweringAfterRenderIsNotSentAtTheOldClass(t *testing.T) {
+	for name, lower := range map[string]func(h *dataClassHarness, channel notification.Channel) func(ctx context.Context) error{
+		"engagement capped at signal": func(h *dataClassHarness, _ notification.Channel) func(ctx context.Context) error {
+			return h.setOverride(notification.EngagementNotificationsSignal)
+		},
+		"channel lowered to signal": func(h *dataClassHarness, channel notification.Channel) func(ctx context.Context) error {
+			return func(ctx context.Context) error {
+				_, err := h.service.UpdateChannel(ctx, "admin", channel.ID, notificationuc.ChannelInput{Name: channel.Name, Type: channel.Type, Enabled: true,
+					Revision: channel.Revision, DataClass: classPtr(notification.DataClassSignal)})
+				return err
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newDataClassHarness(t)
+			h.repo.AddEngagement(notificationTestTenant, "eng-1")
+			channel := h.webhook(t)
+			job := h.queuedScan(t, channel)
+			worker := h.worker(t, changeAfterLoad{NotificationRepository: h.repo, change: lower(h, channel)})
+			if err := worker.HandleJob(h.ctx, job); !errors.Is(err, ports.ErrRetryable) {
+				t.Fatalf("handle job = %v, want the retryable admission refusal", err)
+			}
+			if len(h.sender.sent) != 0 {
+				t.Fatalf("sent %d messages rendered at the old class", len(h.sender.sent))
+			}
+			page, err := h.service.ListDeliveries(h.ctx, ports.NotificationDeliveryFilter{})
+			if err != nil || len(page.Items) != 1 || page.Items[0].State != notification.DeliveryPending || page.Items[0].Attempts != 0 {
+				t.Fatalf("deliveries = %+v, %v, want the delivery left open for a render at signal", page.Items, err)
+			}
+		})
+	}
+}
+
+// TestAdmissionComparesTheRenderedClass checks BeginAttempt directly: a message rendered at the
+// class the policy allows now starts, one rendered above it is refused retryably.
+func TestAdmissionComparesTheRenderedClass(t *testing.T) {
+	h := newDataClassHarness(t)
+	h.repo.AddEngagement(notificationTestTenant, "eng-1")
+	job := h.queuedScan(t, h.webhook(t))
+	if err := h.setOverride(notification.EngagementNotificationsSignal)(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	var delivery shared.ID
+	if page, err := h.service.ListDeliveries(h.ctx, ports.NotificationDeliveryFilter{}); err != nil || len(page.Items) != 1 {
+		t.Fatalf("deliveries = %+v, %v", page.Items, err)
+	} else {
+		delivery = page.Items[0].ID
+	}
+	if _, err := h.repo.BeginAttempt(h.ctx, notificationTestTenant, delivery, job.ID, job.Fence, "above", notificationTestNow.Add(3*time.Minute),
+		ports.AttemptAdmission{DataClass: notification.DataClassSummary}); !errors.Is(err, ports.ErrRetryable) {
+		t.Fatalf("summary under a signal cap = %v, want ErrRetryable", err)
+	}
+	if _, err := h.repo.BeginAttempt(h.ctx, notificationTestTenant, delivery, job.ID, job.Fence, "at", notificationTestNow.Add(3*time.Minute),
+		ports.AttemptAdmission{DataClass: notification.DataClassSignal}); err != nil {
+		t.Fatalf("signal under a signal cap = %v, want admitted", err)
 	}
 }

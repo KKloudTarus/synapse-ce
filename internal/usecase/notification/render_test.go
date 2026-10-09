@@ -9,6 +9,7 @@ import (
 
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/tenancy"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
@@ -250,6 +251,48 @@ func TestRenderThatLeavesNothingFallsBack(t *testing.T) {
 	}
 	if !capped.Fallback || capped.Formatted != nil || capped.Message.TemplateRef != refFallback {
 		t.Fatalf("capped at signal = %+v, want the built-in content with the fallback recorded", capped)
+	}
+}
+
+// TestWebhookBodyKeepsRFC3339Times is the #1566 review case: a custom webhook body is read by
+// programs, so a time variable stays the stored RFC 3339 UTC instant whatever the tenant's zone,
+// while a chat message shows it in that zone.
+func TestWebhookBodyKeepsRFC3339Times(t *testing.T) {
+	for _, zone := range []string{"UTC", "Asia/Ho_Chi_Minh"} {
+		t.Run(zone, func(t *testing.T) {
+			h := newRenderHarness(t)
+			settings := memory.NewTenantSettingsStore()
+			if _, err := settings.SaveTenantSettings(h.ctx, tenancy.Settings{TenantID: "tenant-r", DefaultLocale: "en", TimeZone: zone, UpdatedAt: h.clock.at, UpdatedBy: "admin"}, 0); err != nil {
+				t.Fatal(err)
+			}
+			h.svc.SetTenantSettings(settings)
+			hook, err := h.svc.CreateTemplate(h.ctx, "admin", TemplateInput{Name: "Hook", EventType: domain.EventScanCompleted, Family: domain.FamilyWebhook, Locale: "en",
+				Fields: map[string]string{"body": `{"at":"{{.occurred_at}}"}`}})
+			if err != nil {
+				t.Fatalf("create template: %v", err)
+			}
+			if _, err := h.svc.ActivateTemplate(h.ctx, "admin", hook.ID, TemplateChangeInput{Revision: hook.Revision}); err != nil {
+				t.Fatalf("activate template: %v", err)
+			}
+			channel, err := h.svc.CreateChannel(h.ctx, "admin", ChannelInput{Name: "Hook", Type: domain.ChannelWebhook, Enabled: true, URL: "https://hooks.example.com/in",
+				Secret: "0123456789abcdef", TemplateID: idPtr(hook.ID), CustomBody: boolPtr(true)})
+			if err != nil {
+				t.Fatalf("create channel: %v", err)
+			}
+			e := domain.Event{TenantID: "tenant-r", ID: "event-hook", Type: domain.EventScanCompleted, SourceKind: "scan_job", SourceID: "hook", SchemaVersion: 1,
+				OccurredAt: h.clock.at, Data: json.RawMessage(`{"title":"Scan completed","scan_kind":"sast"}`)}
+			projected, err := NewEventBuilders().Project(h.ctx, e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := h.svc.RenderMessage(h.ctx, RenderInput{Channel: channel, Event: projected})
+			if err != nil || out.Fallback {
+				t.Fatalf("render = %+v, %v", out, err)
+			}
+			if want := `{"at":"2026-10-01T08:00:00Z"}`; string(out.CustomBody) != want {
+				t.Fatalf("webhook body = %s, want %s", out.CustomBody, want)
+			}
+		})
 	}
 }
 

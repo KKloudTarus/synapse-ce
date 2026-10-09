@@ -36,6 +36,14 @@ type NotificationSourceFailureFilter struct {
 	Offset    int
 }
 
+// AttemptAdmission is what an attempt was rendered with: the template reference to record and pin,
+// and the effective data class its content was filtered to. An empty DataClass skips the class
+// check, for an attempt whose content was not rendered from the snapshot.
+type AttemptAdmission struct {
+	TemplateRef string
+	DataClass   notification.DataClass
+}
+
 type NotificationWork struct {
 	Delivery notification.Delivery
 	Event    notification.Event
@@ -115,9 +123,11 @@ type NotificationRepository interface {
 	// PutEngagementNotificationSetting stores an override whose Revision is the stored one plus one
 	// (1 for the first), and reports ErrConflict when another write got there first.
 	PutEngagementNotificationSetting(ctx context.Context, setting notification.EngagementNotificationSetting) (notification.EngagementNotificationSetting, error)
-	// BeginAttempt starts an attempt that renders with templateRef (#1365) and pins that ref on
-	// the delivery when it has none yet.
-	BeginAttempt(ctx context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, templateRef string) (notification.Attempt, error)
+	// BeginAttempt starts an attempt for a message rendered as admission says (#1365). It pins the
+	// template ref on the delivery when it has none yet, and refuses with ErrRetryable when the
+	// channel or engagement policy committed now is stricter than the class the message was
+	// rendered at (#1360); the retry reloads the work and renders again.
+	BeginAttempt(ctx context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, admission AttemptAdmission) (notification.Attempt, error)
 	FinishAttempt(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time, string, int, string, *time.Time) error
 	CancelDelivery(context.Context, shared.ID, shared.ID, string, int64, string) error
 	// DeadLetterDelivery reports whether this call durably transitioned a pending

@@ -670,7 +670,8 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	work.Formatted, work.CustomWebhookBody = render.Formatted, render.CustomBody
 	now := s.clock.Now().UTC()
 	aid := s.ids.NewID()
-	if _, err = s.repo.BeginAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, now, render.Message.TemplateRef); err != nil {
+	admission := ports.AttemptAdmission{TemplateRef: render.Message.TemplateRef, DataClass: render.Class}
+	if _, err = s.repo.BeginAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, now, admission); err != nil {
 		return err
 	}
 	attempt := finishedAttempt{job: job, work: work, deliveryID: payload.DeliveryID, attemptID: aid}

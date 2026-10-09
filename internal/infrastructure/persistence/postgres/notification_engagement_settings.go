@@ -90,44 +90,55 @@ func lockEngagementSetting(ctx context.Context, tx pgx.Tx, tenant, engagement sh
 	return err
 }
 
-// admitEngagement refuses an attempt while the delivery's engagement allows no external
-// notification. The refusal is retryable, as for a channel paused after LoadWork: the retry
-// reloads the work and cancels the delivery with engagement_suppressed.
-func admitEngagement(ctx context.Context, tx pgx.Tx, tenant, delivery shared.ID) error {
+// admitRendered refuses an attempt whose message the policy committed now no longer allows: the
+// engagement is none, or the channel class (read under the channel row lock) or the engagement
+// override is below the class the message was rendered at (#1360). Both refusals are retryable,
+// as for a channel paused after LoadWork: the retry reloads the work, which cancels it under none
+// or renders it again at the lower class.
+func admitRendered(ctx context.Context, tx pgx.Tx, tenant, delivery shared.ID, channel, rendered notification.DataClass) error {
 	var engagement *string
 	if err := tx.QueryRow(ctx, `SELECT e.engagement_id FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id WHERE d.tenant_id=$1 AND d.id=$2`, tenant, delivery).Scan(&engagement); err != nil {
 		return err
 	}
-	suppressed, err := engagementSuppressed(ctx, tx, tenant, engagement)
+	override, err := engagementOverride(ctx, tx, tenant, engagement)
 	if err != nil {
 		return err
 	}
-	if suppressed {
+	switch notification.AdmitRendered(rendered, channel, override) {
+	case notification.RefuseSuppressed:
 		return fmt.Errorf("%w: engagement suppressed", ports.ErrRetryable)
+	case notification.RefuseClassLowered:
+		return fmt.Errorf("%w: data class lowered", ports.ErrRetryable)
 	}
 	return nil
 }
 
-// engagementSuppressed reports whether the engagement allows no external notification. It takes
-// the shared side of lockEngagementSetting first, so it reads the setting a concurrent write
-// commits rather than the one before it. An event without an engagement is never suppressed.
-// Channel deliveries and personal email both admit through it.
+// engagementSuppressed reports whether the engagement allows no external notification. Personal
+// email admits through it.
 func engagementSuppressed(ctx context.Context, tx pgx.Tx, tenant shared.ID, engagement *string) (bool, error) {
+	override, err := engagementOverride(ctx, tx, tenant, engagement)
+	return override == notification.EngagementNotificationsNone, err
+}
+
+// engagementOverride reads the engagement's override, inherit when none is stored or the event has
+// no engagement. It takes the shared side of lockEngagementSetting first, so it reads the setting
+// a concurrent write commits rather than the one before it.
+func engagementOverride(ctx context.Context, tx pgx.Tx, tenant shared.ID, engagement *string) (notification.EngagementNotifications, error) {
 	if engagement == nil || *engagement == "" {
-		return false, nil
+		return notification.EngagementNotificationsInherit, nil
 	}
 	if err := lockEngagementSetting(ctx, tx, tenant, shared.ID(*engagement), false); err != nil {
-		return false, err
+		return "", err
 	}
 	var value string
 	err := tx.QueryRow(ctx, `SELECT external_notifications FROM notification_engagement_settings WHERE tenant_id=$1 AND engagement_id=$2`, tenant, *engagement).Scan(&value)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return notification.EngagementNotificationsInherit, nil
 	}
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	return notification.EngagementNotifications(value) == notification.EngagementNotificationsNone, nil
+	return notification.EngagementNotifications(value), nil
 }
 
 // requireEngagement reports ErrNotFound for an engagement the tenant does not have.

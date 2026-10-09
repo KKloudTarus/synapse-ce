@@ -295,7 +295,8 @@ The worker renders a delivery when it sends it, not when the event is recorded:
 1. It takes the snapshot stored with the event and keeps only the variables at or below
    the effective data class (see [Data classes](#data-classes)). Time variables
    (`occurred_at`, `deadline`, `last_seen_at`) are shown in the tenant's time zone, for
-   example `2026-10-01 15:00 +07`.
+   example `2026-10-01 15:00 +07`. A custom webhook body is read by programs, so there
+   they stay the stored RFC 3339 UTC instant, for example `2026-10-01T08:00:00Z`.
 2. On the first attempt it resolves the template (channel binding, tenant template for
    the event, tenant `*` template, built-in, fallback) and pins it on the delivery as
    `template_ref`: `tenant:<template>@<version>`, a built-in's
@@ -306,6 +307,10 @@ The worker renders a delivery when it sends it, not when the event is recorded:
 4. The rendered fields go through the channel's formatter (Slack Block Kit, email text)
    and the driver sends that payload. A webhook channel with `custom_body` sends its
    rendered JSON body; any other webhook sends the event envelope.
+5. The attempt starts only if the channel class and engagement setting committed at
+   that moment still allow the class the message was rendered at. If either was
+   lowered in between, the attempt is refused and retried, and the retry renders again
+   at the lower class; under `none` the delivery is cancelled.
 
 If the template no longer renders, for example because it names a variable the
 catalog has since removed, the delivery falls back to the channel's built-in content,

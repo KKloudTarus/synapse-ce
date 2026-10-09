@@ -720,7 +720,8 @@ func (r *NotificationRepository) LoadWork(ctx context.Context, tenant, did share
 	return w, err
 }
 
-func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did shared.ID, jobID string, fence int64, aid shared.ID, at time.Time, templateRef string) (notification.Attempt, error) {
+func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did shared.ID, jobID string, fence int64, aid shared.ID, at time.Time, admission ports.AttemptAdmission) (notification.Attempt, error) {
+	templateRef := admission.TemplateRef
 	var out notification.Attempt
 	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
 		var ok int
@@ -744,7 +745,9 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 		}
 		var enabled, paused bool
 		var last *time.Time
-		if err := tx.QueryRow(ctx, `SELECT enabled AND deleted_at IS NULL,paused_at IS NOT NULL,last_attempt_at FROM notification_channels WHERE tenant_id=$1 AND id=(SELECT channel_id FROM notification_deliveries WHERE tenant_id=$1 AND id=$2) FOR UPDATE`, tenant, did).Scan(&enabled, &paused, &last); err != nil {
+		var class notification.DataClass
+		// The row lock also orders this read of data_class after any channel update in flight.
+		if err := tx.QueryRow(ctx, `SELECT enabled AND deleted_at IS NULL,paused_at IS NOT NULL,last_attempt_at,data_class FROM notification_channels WHERE tenant_id=$1 AND id=(SELECT channel_id FROM notification_deliveries WHERE tenant_id=$1 AND id=$2) FOR UPDATE`, tenant, did).Scan(&enabled, &paused, &last, &class); err != nil {
 			return err
 		}
 		if !enabled {
@@ -757,7 +760,7 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 		if last != nil && at.Sub(*last) < time.Second {
 			return fmt.Errorf("%w: channel rate limited", ports.ErrRetryable)
 		}
-		if err := admitEngagement(ctx, tx, tenant, did); err != nil {
+		if err := admitRendered(ctx, tx, tenant, did, class, admission.DataClass); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE notification_source_state SET observed_at=$2 WHERE tenant_id=$1 AND source_kind='delivery_rate' AND source_id='tenant'`, tenant, at); err != nil {

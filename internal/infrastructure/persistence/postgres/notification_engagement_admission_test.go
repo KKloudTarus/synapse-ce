@@ -86,7 +86,7 @@ func TestNotificationPostgresEngagementNoneAfterLoadStopsTheAttempt(t *testing.T
 
 	a.setNone(t, "admission-after-load-eng", 1)
 
-	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "after-load-attempt", a.now.Add(2*time.Second), ""); !errors.Is(err, ports.ErrRetryable) {
+	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "after-load-attempt", a.now.Add(2*time.Second), ports.AttemptAdmission{}); !errors.Is(err, ports.ErrRetryable) {
 		t.Fatalf("begin attempt after none = %v, want ErrRetryable", err)
 	}
 	if attempts, err := a.repo.ListAttempts(a.ctx, a.tenant, did); err != nil || len(attempts) != 0 {
@@ -103,7 +103,7 @@ func TestNotificationPostgresEngagementNoneAfterLoadStopsTheAttempt(t *testing.T
 func TestNotificationPostgresEngagementNoneLeavesAStartedAttempt(t *testing.T) {
 	a := newEngagementAdmission(t, "admission-started", "admission-started-eng")
 	did, job := a.claimed(t, "started", "admission-started-eng")
-	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "started-attempt", a.now, ""); err != nil {
+	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "started-attempt", a.now, ports.AttemptAdmission{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -139,7 +139,7 @@ func TestNotificationPostgresEngagementWriteSerializesAdmission(t *testing.T) {
 
 	admitted := make(chan error, 1)
 	go func() {
-		_, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "serialized-attempt", a.now, "")
+		_, err := a.repo.BeginAttempt(a.ctx, a.tenant, did, job.ID, job.Fence, "serialized-attempt", a.now, ports.AttemptAdmission{})
 		admitted <- err
 	}()
 	select {
@@ -159,6 +159,45 @@ func TestNotificationPostgresEngagementWriteSerializesAdmission(t *testing.T) {
 		t.Fatal("admission still blocked after the write committed")
 	}
 	if attempts, err := a.repo.ListAttempts(a.ctx, a.tenant, did); err != nil || len(attempts) != 0 {
+		t.Fatalf("attempts = %+v, %v, want none", attempts, err)
+	}
+}
+
+// TestNotificationPostgresAdmissionRefusesALoweredClass is the #1566 review case in Postgres: a
+// message rendered at summary is refused once the engagement is capped at signal, and once the
+// channel itself is lowered to signal, while a message rendered at signal starts.
+func TestNotificationPostgresAdmissionRefusesALoweredClass(t *testing.T) {
+	a := newEngagementAdmission(t, "admission-class", "admission-class-eng", "admission-class-other")
+	summary := ports.AttemptAdmission{DataClass: notification.DataClassSummary}
+
+	capped, cappedJob := a.claimed(t, "capped", "admission-class-eng")
+	at := a.now.Add(time.Second)
+	if _, err := a.repo.PutEngagementNotificationSetting(a.ctx, notification.EngagementNotificationSetting{TenantID: a.tenant, EngagementID: "admission-class-eng",
+		ExternalNotifications: notification.EngagementNotificationsSignal, Revision: 1, UpdatedAt: &at, UpdatedBy: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, capped, cappedJob.ID, cappedJob.Fence, "capped-attempt", a.now, summary); !errors.Is(err, ports.ErrRetryable) {
+		t.Fatalf("summary under a signal engagement = %v, want ErrRetryable", err)
+	}
+	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, capped, cappedJob.ID, cappedJob.Fence, "capped-signal", a.now,
+		ports.AttemptAdmission{DataClass: notification.DataClassSignal}); err != nil {
+		t.Fatalf("signal under a signal engagement = %v, want admitted", err)
+	}
+
+	// The channel is lowered in the same transaction shape UpdateChannel uses: a row update the
+	// admission's FOR UPDATE read waits for.
+	lowered, loweredJob := a.claimed(t, "lowered", "admission-class-other")
+	if err := WithTenant(a.ctx, a.pool, a.tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(a.ctx, `UPDATE notification_channels SET data_class='signal',revision=revision+1 WHERE tenant_id=$1 AND id='channel'`, a.tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	later := a.now.Add(2 * time.Second)
+	if _, err := a.repo.BeginAttempt(a.ctx, a.tenant, lowered, loweredJob.ID, loweredJob.Fence, "lowered-attempt", later, summary); !errors.Is(err, ports.ErrRetryable) {
+		t.Fatalf("summary on a channel lowered to signal = %v, want ErrRetryable", err)
+	}
+	if attempts, err := a.repo.ListAttempts(a.ctx, a.tenant, lowered); err != nil || len(attempts) != 0 {
 		t.Fatalf("attempts = %+v, %v, want none", attempts, err)
 	}
 }

@@ -46,7 +46,7 @@ func TestNotificationPostgresRecoveryAndAuditOutage(t *testing.T) {
 	if err != nil || old == nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, err = repo.BeginAttempt(ctx, tenant, did, old.ID, old.Fence, "unknown", now, "tenant:tpl@1"); err != nil {
+	if _, err = repo.BeginAttempt(ctx, tenant, did, old.ID, old.Fence, "unknown", now, ports.AttemptAdmission{TemplateRef: "tenant:tpl@1"}); err != nil {
 		t.Fatal(err)
 	}
 	// Simulate process loss after the receiver may have acknowledged the request.
@@ -58,7 +58,7 @@ func TestNotificationPostgresRecoveryAndAuditOutage(t *testing.T) {
 	if err = repo.FinishAttempt(ctx, tenant, did, old.ID, old.Fence, "unknown", now, "delivered", 204, "", nil); !errors.Is(err, ports.ErrStaleLease) {
 		t.Fatalf("stale finish: %v", err)
 	}
-	if _, err = repo.BeginAttempt(ctx, tenant, did, reclaimed.ID, reclaimed.Fence, "known", now.Add(2*time.Second), "tenant:tpl@2"); err != nil {
+	if _, err = repo.BeginAttempt(ctx, tenant, did, reclaimed.ID, reclaimed.Fence, "known", now.Add(2*time.Second), ports.AttemptAdmission{TemplateRef: "tenant:tpl@2"}); err != nil {
 		t.Fatal(err)
 	}
 	if err = repo.FinishAttempt(ctx, tenant, did, reclaimed.ID, reclaimed.Fence, "known", now.Add(2*time.Second), "delivered", 204, "", nil); err != nil {

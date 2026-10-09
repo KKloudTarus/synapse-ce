@@ -91,6 +91,33 @@ func (s EngagementNotificationSetting) Validate() error {
 // EffectiveDataClass combines a channel's class with the engagement's setting; the lower wins.
 // deliver is false when the engagement allows no external notification at all. An event without an
 // engagement passes EngagementNotificationsInherit.
+// Admission is whether an attempt rendered at some class may start under the policy committed now.
+type Admission int
+
+const (
+	// Admit lets the attempt start.
+	Admit Admission = iota
+	// RefuseSuppressed: the engagement now allows no external notification.
+	RefuseSuppressed
+	// RefuseClassLowered: the channel or the engagement was lowered below the class the message
+	// was rendered at, so it may carry variables that must no longer leave Synapse.
+	RefuseClassLowered
+)
+
+// AdmitRendered compares the class a message was rendered at with the effective class of the
+// channel and engagement as they are now. An empty rendered class (nothing rendered) is only
+// checked for suppression.
+func AdmitRendered(rendered, channel DataClass, engagement EngagementNotifications) Admission {
+	class, deliver := EffectiveDataClass(channel, engagement)
+	if !deliver {
+		return RefuseSuppressed
+	}
+	if rendered != "" && class.Rank() < rendered.Rank() {
+		return RefuseClassLowered
+	}
+	return Admit
+}
+
 func EffectiveDataClass(channel DataClass, engagement EngagementNotifications) (class DataClass, deliver bool) {
 	if !channel.Valid() {
 		channel = DataClassSignal

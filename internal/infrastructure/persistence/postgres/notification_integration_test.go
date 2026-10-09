@@ -169,7 +169,7 @@ func TestNotificationPostgresDurability(t *testing.T) {
 	if err != nil || job2 == nil {
 		t.Fatalf("second claim=%v %v", job2, err)
 	}
-	if _, err = repo.BeginAttempt(ctx, tenant, did, job.ID, job.Fence, "stale", clock.at, ""); !errors.Is(err, ports.ErrStaleLease) {
+	if _, err = repo.BeginAttempt(ctx, tenant, did, job.ID, job.Fence, "stale", clock.at, ports.AttemptAdmission{}); !errors.Is(err, ports.ErrStaleLease) {
 		t.Fatalf("stale start=%v", err)
 	}
 	sender.result = ports.NotificationSendResult{StatusCode: 204}
@@ -278,7 +278,7 @@ func TestNotificationPostgresRedriveIsFencedAndPreservesHistory(t *testing.T) {
 	if err != nil || job == nil || job.ID != "notification-"+did.String() {
 		t.Fatalf("first claim=%+v err=%v", job, err)
 	}
-	firstAttempt, err := repo.BeginAttempt(ctx, tenant, did, job.ID, job.Fence, "redrive-attempt-1", now, "tenant:tpl@1")
+	firstAttempt, err := repo.BeginAttempt(ctx, tenant, did, job.ID, job.Fence, "redrive-attempt-1", now, ports.AttemptAdmission{TemplateRef: "tenant:tpl@1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestNotificationPostgresRedriveIsFencedAndPreservesHistory(t *testing.T) {
 	if err != nil || job2 == nil || job2.ID != job.ID || job2.Attempts != 1 || job2.Fence != dead.RedriveFence+2 {
 		t.Fatalf("redrive claim=%+v err=%v", job2, err)
 	}
-	secondAttempt, err := repo.BeginAttempt(ctx, tenant, did, job2.ID, job2.Fence, "redrive-attempt-2", clock.at, "")
+	secondAttempt, err := repo.BeginAttempt(ctx, tenant, did, job2.ID, job2.Fence, "redrive-attempt-2", clock.at, ports.AttemptAdmission{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestNotificationPostgresRedriveIsFencedAndPreservesHistory(t *testing.T) {
 		t.Fatalf("rotating claim=%+v err=%v", job4, err)
 	}
 	clock.at = now.Add(6 * time.Second)
-	thirdAttempt, err := repo.BeginAttempt(ctx, tenant, changedID, job4.ID, job4.Fence, "redrive-attempt-rotating", clock.at, "")
+	thirdAttempt, err := repo.BeginAttempt(ctx, tenant, changedID, job4.ID, job4.Fence, "redrive-attempt-rotating", clock.at, ports.AttemptAdmission{})
 	if err != nil {
 		t.Fatal(err)
 	}

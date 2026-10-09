@@ -62,6 +62,9 @@ type RenderResult struct {
 	// Fallback reports that a template applied but failed to render, so the built-in content is
 	// sent instead (recorded as template_fallback).
 	Fallback bool
+	// Class is the effective data class the content was filtered to. The attempt is admitted only
+	// while the committed policy still allows it (#1360).
+	Class domain.DataClass
 }
 
 // SetFormatters wires the channel formatters (#1364) so RenderMessage returns wire payloads.
@@ -78,6 +81,13 @@ func (s *Service) RenderMessage(ctx context.Context, in RenderInput) (RenderResu
 	if !deliver {
 		return RenderResult{Suppressed: true}, nil
 	}
+	out, err := s.renderAt(ctx, in, class)
+	out.Class = class
+	return out, err
+}
+
+// renderAt renders the message with its variables filtered to class.
+func (s *Service) renderAt(ctx context.Context, in RenderInput, class domain.DataClass) (RenderResult, error) {
 	spec, ok := domain.LookupEvent(in.Event.Type)
 	if !ok {
 		// No catalog entry, so no template schema: the driver's built-in content applies.
@@ -93,7 +103,7 @@ func (s *Service) RenderMessage(ctx context.Context, in RenderInput) (RenderResu
 		out.Message.TemplateRef = refFallback
 		return out, nil
 	}
-	vars, err := s.renderVars(ctx, in, spec, class)
+	vars, err := s.renderVars(ctx, in, spec, class, resolution.Family)
 	if err != nil {
 		return RenderResult{}, err
 	}
@@ -206,12 +216,16 @@ func templateFields(r TemplateResolution) map[string]string {
 
 // renderVars is the snapshot filtered to the effective class, with time variables shown in the
 // tenant's zone.
-func (s *Service) renderVars(ctx context.Context, in RenderInput, spec domain.EventSpec, class domain.DataClass) (map[string]string, error) {
+func (s *Service) renderVars(ctx context.Context, in RenderInput, spec domain.EventSpec, class domain.DataClass, family domain.TemplateFamily) (map[string]string, error) {
 	snapshot, err := domain.DecodeTemplateContext(in.Event.Context)
 	if err != nil {
 		return nil, err
 	}
 	vars := snapshot.Filter(spec, class).Vars
+	// A webhook body is read by programs, so its times stay the stored RFC 3339 UTC instants.
+	if family == domain.FamilyWebhook {
+		return vars, nil
+	}
 	location, err := s.tenantLocation(ctx, in.Channel.TenantID)
 	if err != nil {
 		return nil, err
