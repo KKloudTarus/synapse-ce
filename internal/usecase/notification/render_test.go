@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -319,5 +320,160 @@ func TestRenderMessageAppliesTheDataClass(t *testing.T) {
 	suppressed, err := h.svc.RenderMessage(h.ctx, RenderInput{Channel: h.channel, Event: projected, Engagement: domain.EngagementNotificationsNone})
 	if err != nil || !suppressed.Suppressed {
 		t.Fatalf("engagement none = %+v, %v", suppressed, err)
+	}
+}
+
+type policyBeforeAttempt struct {
+	*memory.NotificationRepository
+	change func() error
+}
+
+func (r *policyBeforeAttempt) BeginAttempt(ctx context.Context, tenant, delivery shared.ID, job string, fence int64, id shared.ID, at time.Time, admission ports.AttemptAdmission) (domain.Attempt, error) {
+	if r.change != nil {
+		change := r.change
+		r.change = nil
+		if err := change(); err != nil {
+			return domain.Attempt{}, err
+		}
+	}
+	return r.NotificationRepository.BeginAttempt(ctx, tenant, delivery, job, fence, id, at, admission)
+}
+
+func TestPolicyLoweringBeforeAttemptReloadsAndRenders(t *testing.T) {
+	for _, policy := range []string{"engagement", "channel"} {
+		for _, pinned := range []bool{false, true} {
+			name := policy + "/fresh"
+			if pinned {
+				name = policy + "/pinned"
+			}
+			t.Run(name, func(t *testing.T) {
+				h := newRenderHarness(t)
+				template := h.template(t, "{{.title}} [{{.scan_kind}}]")
+				h.repo.AddEngagement("tenant-r", "engagement")
+				e := domain.Event{TenantID: "tenant-r", ID: "event-policy", Type: domain.EventScanCompleted, SourceKind: "scan_job", SourceID: "policy", EngagementID: "engagement", SchemaVersion: 1,
+					OccurredAt: h.clock.at, Data: json.RawMessage(`{"title":"Scan completed","summary":"Summary content","scan_kind":"sast"}`)}
+				if _, err := h.repo.Publish(h.ctx, e); err != nil {
+					t.Fatal(err)
+				}
+				job := h.claim(t)
+				if pinned {
+					h.sender.results = []ports.NotificationSendResult{{StatusCode: 503, ErrorCode: "http_503", Retryable: true}}
+					if err := h.svc.HandleJob(h.ctx, job); err == nil {
+						t.Fatal("503 must be retried")
+					}
+					if err := h.jobs.Retry(h.ctx, job.ID, job.Fence, time.Second); err != nil {
+						t.Fatal(err)
+					}
+					h.clock.at = h.clock.at.Add(2 * time.Second)
+					job = h.claim(t)
+				}
+				before, history := h.delivery(t, job)
+				sends := len(h.sender.sent)
+				h.svc.repo = &policyBeforeAttempt{NotificationRepository: h.repo, change: func() error {
+					if policy == "channel" {
+						_, err := h.svc.UpdateChannel(h.ctx, "admin", h.channel.ID, ChannelInput{Name: h.channel.Name, Enabled: true, Revision: h.channel.Revision, DataClass: classOf(domain.DataClassSignal)})
+						return err
+					}
+					_, err := h.svc.SetEngagementNotificationSetting(h.ctx, "admin", "engagement", EngagementSettingInput{ExternalNotifications: domain.EngagementNotificationsSignal})
+					return err
+				}}
+				if err := h.svc.HandleJob(h.ctx, job); !errors.Is(err, ports.ErrRetryable) {
+					t.Fatalf("stale rendering admission = %v, want ErrRetryable", err)
+				}
+				after, attempts := h.delivery(t, job)
+				if len(h.sender.sent) != sends || len(attempts) != len(history) || after.Attempts != before.Attempts || after.TemplateRef != before.TemplateRef || after.State != before.State {
+					t.Fatalf("refused admission changed delivery/history or sent: before=%+v after=%+v attempts=%+v sends=%d", before, after, attempts, len(h.sender.sent))
+				}
+				if err := h.jobs.Retry(h.ctx, job.ID, job.Fence, time.Second); err != nil {
+					t.Fatal(err)
+				}
+				h.clock.at = h.clock.at.Add(time.Second)
+				retry := h.claim(t)
+				if err := h.svc.HandleJob(h.ctx, retry); err != nil {
+					t.Fatalf("rerendered retry: %v", err)
+				}
+				got := sentText(h.sender.sent[sends])
+				if strings.Contains(got, "Scan completed") || !strings.Contains(got, "sast") {
+					t.Fatalf("retry must filter summary content: %s", got)
+				}
+				d, attempts := h.delivery(t, retry)
+				pin := "tenant:" + template.ID.String() + "@1"
+				if d.State != domain.DeliverySucceeded || d.TemplateRef != pin || len(attempts) != len(history)+1 || attempts[len(history)].TemplateRef != pin {
+					t.Fatalf("retry delivery=%+v attempts=%+v", d, attempts)
+				}
+			})
+		}
+	}
+}
+
+func TestRenderMessageWebhookPreservesSnapshotTimes(t *testing.T) {
+	for _, zone := range []string{"UTC", "Asia/Ho_Chi_Minh"} {
+		for _, event := range []domain.EventType{domain.EventScanCompleted, domain.EventSLAApproaching, domain.EventFleetAgentOffline} {
+			t.Run(zone+"/"+string(event), func(t *testing.T) {
+				h := newRenderHarness(t)
+				settings := memory.NewTenantSettingsStore()
+				if _, err := settings.SaveTenantSettings(h.ctx, tenancy.Settings{TenantID: "tenant-r", TimeZone: zone, DefaultLocale: tenancy.LocaleEnglish}, 0); err != nil {
+					t.Fatal(err)
+				}
+				h.svc.SetTenantSettings(settings)
+				channel := h.channel
+				channel.Type, channel.CustomBody = domain.ChannelWebhook, true
+				vars := map[string]string{"occurred_at": "2026-10-01T08:00:00.123456789Z"}
+				fields := map[string]string{"body": `{"occurred_at":"{{.occurred_at}}"}`}
+				switch event {
+				case domain.EventSLAApproaching:
+					vars["deadline"] = "2026-10-02T08:00:01Z"
+					fields["body"] = `{"occurred_at":"{{.occurred_at}}","deadline":"{{.deadline}}"}`
+				case domain.EventFleetAgentOffline:
+					vars["last_seen_at"] = "2026-10-01T07:59:59Z"
+					fields["body"] = `{"occurred_at":"{{.occurred_at}}","last_seen_at":"{{.last_seen_at}}"}`
+				}
+				snapshot, err := json.Marshal(domain.TemplateContext{Vars: vars})
+				if err != nil {
+					t.Fatal(err)
+				}
+				out, err := h.svc.RenderMessage(h.ctx, RenderInput{Channel: channel, Event: domain.Event{Type: event, Context: snapshot}, Draft: &domain.TemplateVersion{TemplateID: "webhook", Version: 1, Fields: fields}})
+				if err != nil || out.Fallback {
+					t.Fatalf("render = %+v, %v", out, err)
+				}
+				var got map[string]string
+				if err := json.Unmarshal(out.CustomBody, &got); err != nil {
+					t.Fatal(err)
+				}
+				for name, want := range vars {
+					if got[name] != want {
+						t.Errorf("%s = %q, want raw RFC3339 UTC %q", name, got[name], want)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestRenderMessageHumanChannelsPresentTenantTime(t *testing.T) {
+	for _, channelType := range []domain.ChannelType{domain.ChannelSlack, domain.ChannelEmail} {
+		for _, tc := range []struct{ zone, want string }{
+			{"UTC", "2026-03-08 07:30 UTC"},
+			{"Asia/Ho_Chi_Minh", "2026-03-08 14:30 +07"},
+			{"America/New_York", "2026-03-08 03:30 EDT"},
+		} {
+			t.Run(string(channelType)+"/"+tc.zone, func(t *testing.T) {
+				h := newRenderHarness(t)
+				settings := memory.NewTenantSettingsStore()
+				if _, err := settings.SaveTenantSettings(h.ctx, tenancy.Settings{TenantID: "tenant-r", TimeZone: tc.zone}, 0); err != nil {
+					t.Fatal(err)
+				}
+				h.svc.SetTenantSettings(settings)
+				channel := h.channel
+				channel.Type = channelType
+				out, err := h.svc.RenderMessage(h.ctx, RenderInput{Channel: channel,
+					Event: domain.Event{Type: domain.EventScanCompleted, Context: json.RawMessage(`{"vars":{"occurred_at":"2026-03-08T07:30:45Z"}}`)},
+					Draft: &domain.TemplateVersion{TemplateID: "human", Version: 1, Fields: map[string]string{"body": "{{.occurred_at}}"}}})
+				// Template fields escape Markdown punctuation; compare the presented timestamp text.
+				if err != nil || strings.ReplaceAll(out.Message.Fields["body"], `\`, "") != tc.want {
+					t.Fatalf("localized render=%+v, %v, want %s", out, err, tc.want)
+				}
+			})
+		}
 	}
 }
