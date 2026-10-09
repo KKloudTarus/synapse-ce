@@ -167,7 +167,8 @@ describe('browser-local scan learning scenario', () => {
   })
   it('publishes → syncs → matches → notifies once, without rewriting historical snapshots or the downloaded report', async () => {
     await closeCycle(); await createSource()
-    await ok('/me/notification-preferences', 'PUT', { event_type: EVENT_TYPE, channel: 'in_app', state: 'enabled', revision: 1 })
+    const preference = await ok('/me/notification-preferences', 'PUT', { event_type: EVENT_TYPE, channel: 'in_app', state: 'enabled', revision: 1 })
+    expect(preference).toMatchObject({ state: 'enabled', revision: 2 })
     const reportPath = `/assessment-cycles/${CYCLE_ID}/closure-manifests/learn-checkout-closure/report`
     const beforeReport = await (await call(reportPath)).text()
     const report = JSON.parse(beforeReport)
@@ -187,7 +188,7 @@ describe('browser-local scan learning scenario', () => {
     await sync()
     expect((await ok('/me/inbox')).items).toHaveLength(1)
     expect((await ok('/vulnerability/sync-runs')).items[0].counts).toMatchObject({ inserted: 0, unchanged: 1 })
-    await ok('/me/notification-preferences', 'PUT', { event_type: EVENT_TYPE, channel: 'in_app', state: 'disabled', revision: 2 })
+    expect(await ok('/me/notification-preferences', 'PUT', { ...preference, state: 'disabled' })).toMatchObject({ state: 'disabled', revision: 3 })
     expect((await ok('/me/inbox')).items).toHaveLength(1)
     expect(await (await call(reportPath)).text()).toBe(beforeReport)
     expect(await ok(`/assessment-snapshots/${RETEST_ID}-snapshot-1`)).toEqual(beforeSnapshot)

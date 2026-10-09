@@ -9,6 +9,8 @@ import { saveDemoMode } from '../demo-mode'
 import { COMPARISON_ID, CYCLE_ID, INITIAL_ID, RETEST_ID, SCENARIO_KEY } from '../scenario/store'
 import { PROJECT_KEY, WORKFLOW_KEY } from '../workflows/store'
 import { mapProjectOverviewResponse } from '@/lib/projectOverview'
+import { vulnerabilityApi } from '@/lib/api/vulnerability'
+import { inboxApi } from '@/lib/api/inbox'
 
 const server = setupServer(...advancedHandlers)
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
@@ -95,10 +97,32 @@ describe('Isolated advanced walkthroughs', () => {
     expect((await ok('/me/inbox')).items[0].read_at).toBeUndefined()
     await ok('/me/inbox/learn-monitor-message/read', 'POST')
     expect((await ok('/me/inbox')).items[0].read_at).toBeTruthy()
-    expect((await ok('/vulnerability/actions')).items).toHaveLength(4)
+    const actions = await vulnerabilityApi.vulnerabilityActions()
+    expect(actions).toHaveLength(4)
+    expect(new Set(actions.map(a => a.id)).size).toBe(4)
+    expect(new Set(actions.map(a => a.occurrenceId)).size).toBe(4)
+    expect(new Set(actions.map(a => a.title)).size).toBe(4)
+    for (const c of INTEL_CASES) {
+      const [occurrence] = await vulnerabilityApi.vulnerabilityOccurrences(c.id)
+      const matching = actions.filter(a => a.occurrenceId === occurrence.id)
+      expect(matching).toHaveLength(1)
+      expect(matching[0]).toMatchObject({ id: `learn-risk-action-${c.packageIndex}`, engagementId: RETEST_ID, title: `DEMO: assess ${occurrence.packageName}@${occurrence.componentVersion} and plan remediation` })
+      expect((await ok(`/vulnerability/actions?advisory_id=${c.id}`)).items.map((a: { id: string }) => a.id)).toEqual([matching[0].id])
+    }
     const state = advancedStore.getSnapshot().intelligence
     expect(intelRunWire(state.runs.at(-1)!, state).affected_revisions).toHaveLength(4)
     expect(state.runs[0].state).toBe('failed')
+  })
+  it('returns the saved notification state and revision for consecutive form saves', async () => {
+    saveDemoMode('intelligence')
+    const { items: [initial] } = await inboxApi.inboxPreferences()
+    const enabled = await inboxApi.saveInboxPreference({ ...initial, state: 'enabled' })
+    expect(enabled).toMatchObject({ state: 'enabled', revision: initial.revision + 1 })
+    const disabled = await inboxApi.saveInboxPreference({ ...enabled, state: 'disabled' })
+    expect(disabled).toMatchObject({ state: 'disabled', revision: enabled.revision + 1 })
+    expect((await inboxApi.inboxPreferences()).items).toEqual([disabled])
+    expect((await call('/me/notification-preferences', 'PUT', { ...initial, state: 'enabled' })).status).toBe(409)
+    expect((await inboxApi.inboxPreferences()).items).toEqual([disabled])
   })
   it('derives gate results from evidence and retains the original policy after a synthetic CI upload', async () => {
     saveDemoMode('policy')

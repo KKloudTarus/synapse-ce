@@ -129,7 +129,10 @@ const advancedRoutes = http.all('/api/v1/*', async ({ request }) => {
     const advisory = path.match(/^\/vulnerability\/advisories\/(DEMO-CHECKOUT-004|DEMO-ECOSYSTEM-[1-3])(?:\/(revisions))?$/)
     if (advisory && method === 'GET') { const result = intelAdvisories(i).find(a => a.canonical.Advisory.ID === advisory[1]); if (!result) return error('Reconcile the advisory batch first.', 404); return json(advisory[2] ? { items: [result], next: 0 } : result) }
     if (path === '/vulnerability/occurrences' && method === 'GET') return json({ items: intelOccurrences(i, url.searchParams.get('advisory_id') ?? '') })
-    if (path === '/vulnerability/actions' && method === 'GET') return json({ items: intelActions(i).filter(a => !url.searchParams.get('advisory_id') || a.AdvisoryID === url.searchParams.get('advisory_id')) })
+    if (path === '/vulnerability/actions' && method === 'GET') {
+      const advisoryId = url.searchParams.get('advisory_id')
+      return json({ items: intelActions(i).filter(a => !advisoryId || intelOccurrences(i, advisoryId).some(o => o.ID === a.occurrence_id)) })
+    }
     const occurrence = path.match(/^\/vulnerability\/occurrences\/(learn-token-occurrence|learn-occurrence-[479])\/(assessments|transitions)$/)
     if (occurrence && method === 'GET') { const c = INTEL_CASES.find(c => intelOccurrences(i, c.id)[0]?.ID === occurrence[1]); if (!c) return error('The retained occurrence does not exist.', 404); if (occurrence[2] === 'assessments') patch(d => { d.intelligence.scenario.monitorInvestigated = true }); return json({ items: occurrence[2] === 'assessments' ? [{ ID: `learn-risk-${c.packageIndex}`, OccurrenceID: occurrence[1], AdvisoryRevision: 1, Severity: c.score >= 9 ? 'critical' : c.score >= 7 ? 'high' : c.score >= 4 ? 'medium' : 'low', CVSSScore: c.score, KEV: false, Scope: 'in_scope', Reachability: 'unknown', FixedVersion: c.fixed, OccurrenceState: 'detected', RiskScore: c.score, Priority: c.score >= 9 ? 1 : c.score >= 7 ? 2 : c.score >= 4 ? 3 : 4, ReasonCodes: ['matching_recorded_inventory'], AssessedAt: i.reconciledAt }] : [] }) }
 

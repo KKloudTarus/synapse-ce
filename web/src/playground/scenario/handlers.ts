@@ -238,6 +238,7 @@ return [http.all('/api/v1/*', async ({ request }) => {
     if (method === 'PUT') {
       if (b.event_type !== EVENT_TYPE || b.channel !== 'in_app' || Number(b.revision) !== s.preferenceRevision || !['inherit', 'enabled', 'disabled'].includes(text(b.state))) return error('Refresh notification preferences and retry.', 409)
       updateScenario(d => { d.notificationPreference = b.state as typeof d.notificationPreference; d.preferenceRevision++ })
+      refresh()
       return json(preference(s))
     }
   }
