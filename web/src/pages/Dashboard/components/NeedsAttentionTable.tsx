@@ -42,17 +42,17 @@ export const NeedsAttentionTable: FC<{ items: AttentionItem[]; loaded: boolean; 
   }
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[56rem] border-collapse text-left text-sm" aria-label="Needs attention">
+      <table className="w-full min-w-[68rem] border-collapse text-left text-sm" aria-label="Needs attention">
         <thead>
           <tr className="border-b border-secondary text-[11px] font-semibold uppercase tracking-wide text-quaternary">
             <th scope="col" className="w-14 px-4 py-2.5">Prio</th>
             <th scope="col" className="w-28 px-3 py-2.5">Type</th>
-            <th scope="col" className="w-[16rem] px-3 py-2.5">Asset / engagement</th>
-            <th scope="col" className="px-3 py-2.5">Issue</th>
+            <th scope="col" className="w-[14rem] px-3 py-2.5">Asset / engagement</th>
+            <th scope="col" className="min-w-[14rem] px-3 py-2.5">Issue</th>
             <th scope="col" className="w-36 px-3 py-2.5">Owner</th>
             <th scope="col" className="w-14 px-3 py-2.5 text-right">Age</th>
             <th scope="col" className="w-24 px-3 py-2.5 text-right">Due</th>
-            <th scope="col" className="w-32 px-4 py-2.5 text-right">Next action</th>
+            <th scope="col" className="sticky right-0 z-10 w-32 bg-primary px-4 py-2.5 text-right">Next action</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-secondary">
@@ -73,7 +73,7 @@ export const NeedsAttentionTable: FC<{ items: AttentionItem[]; loaded: boolean; 
               <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums" title={item.dueAt ?? undefined}>
                 {(() => { const d = dueLabel(item.dueAt); return d.text ? <span className={DUE_TONE[d.tone]}>{d.text}</span> : <span className="text-quaternary">—</span> })()}
               </td>
-              <td className="px-4 py-2.5 text-right">
+              <td className="sticky right-0 bg-primary px-4 py-2.5 text-right">
                 <Link to={item.to} className="whitespace-nowrap text-xs font-semibold text-brand-secondary hover:text-brand-primary">{item.action}</Link>
               </td>
             </tr>

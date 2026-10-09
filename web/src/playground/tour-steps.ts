@@ -21,9 +21,9 @@ export type TourStep = {
 export const TOUR_STEPS: TourStep[] = [
   {
     route: '/dashboard',
-    title: 'What you are looking at',
-    body: 'This is the full console with seeded data. Every number, finding and host here is a fixture: no scan runs, no target is contacted, and nothing you click leaves your browser. Use the left sidebar to move between areas, and come back to this bar at any time to restart the trip or reset the data.',
-    why: 'The playground has no backend at all. Synapse runs real tools against real targets, so a public instance with a live backend would be something people could point at third parties.',
+    title: 'Welcome to Synapse',
+    body: 'Connect assets, scan results and runtime signals in one workspace. Start with the dashboard to see what needs attention, then explore how teams investigate and resolve risk.',
+    why: 'This playground uses simulated data. Follow the overview, then choose a focused walkthrough to try a complete workflow.',
     anchor: 'text:Dashboard',
   },
   {
@@ -170,7 +170,7 @@ export const TOUR_STEPS: TourStep[] = [
     body: 'Follow the thread: open Engagements, filter to Critical, open the lodash finding, read its evidence, then look at who owns it under Settings. Or explore freely, nothing here can break. Or run it for real: the repository README has a docker compose that brings up the same dashboard against a live control plane.',
     why: 'The trip deliberately showed one engagement end to end rather than every screen, because the product is a path from a detection to a decision, not a collection of pages.',
     task: {
-      do: 'Press Reset in the top bar whenever you want a clean slate.',
+      do: 'Press Reset in the top bar to restart the Platform Overview. This resets tour progress only.',
       expect: 'Anything you created or changed is cleared and the trip can start again.',
     },
   },

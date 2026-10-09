@@ -35,6 +35,7 @@ export function jobForEngagement(job: ScanJob | null, engagementId: string): Sca
 }
 
 export function ScanPanel({
+  compact = false,
   eng,
   importedSBOM,
   uploadedSource,
@@ -46,6 +47,7 @@ export function ScanPanel({
   setJob,
   onScanned,
 }: {
+  compact?: boolean
   eng: Engagement
   importedSBOM: ImportedSBOMMetadata | null
   uploadedSource: UploadedSourcePackage | null
@@ -361,7 +363,7 @@ export function ScanPanel({
       )}
 
       {/* Horizontal Pipeline Journey Track — collapsed by default once a scan has finished. */}
-      <ScanDebugTimeline events={debugEvents} running={running} scanStatus={currentJob?.status} />
+      <ScanDebugTimeline key={compact ? 'compact' : 'full'} initiallyCollapsed={compact} events={debugEvents} running={running} scanStatus={currentJob?.status ?? (summary ? 'succeeded' : undefined)} />
 
       {error && (
         <div>

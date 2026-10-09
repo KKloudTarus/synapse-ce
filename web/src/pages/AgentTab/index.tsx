@@ -144,7 +144,7 @@ function ReadinessPanel({ readiness, onUseGoal }: { readiness: AgentReadiness; o
         ? 'border-critical/30 bg-critical/5 text-critical'
         : 'border-medium/30 bg-medium/5 text-medium'
   return (
-    <div className="mb-3 rounded-lg border border-secondary bg-primary p-3">
+    <div data-agent-readiness={readiness.overall} className="mb-3 rounded-lg border border-secondary bg-primary p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-sm font-medium text-primary">
           <List className="size-4" /> Workflow readiness

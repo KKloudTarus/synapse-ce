@@ -10,6 +10,7 @@ import {
   XClose as X,
 } from '@untitledui/icons'
 import { copyText } from '../../lib/clipboard'
+import { projectCodePath } from '../../lib/projectCodeNavigation'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '../../lib/api'
@@ -22,11 +23,13 @@ export { formatHotspotStatus } from './hotspotHelpers'
 
 export function HotspotSidePanel({
   projectKey,
+  demoBranch,
   hotspotId,
   onClose,
   onTransition,
 }: {
   projectKey: string
+  demoBranch?: string
   hotspotId: string
   onClose: () => void
   onTransition?: (hotspot: Hotspot) => void
@@ -70,8 +73,8 @@ export function HotspotSidePanel({
     setLoading(true)
     setError(null)
     Promise.all([
-      api.getProjectHotspot(projectKey, hotspotId),
-      api.getProjectHotspotHistory(projectKey, hotspotId),
+      demoBranch ? api.getProjectHotspot(projectKey, hotspotId, demoBranch) : api.getProjectHotspot(projectKey, hotspotId),
+      demoBranch ? api.getProjectHotspotHistory(projectKey, hotspotId, demoBranch) : api.getProjectHotspotHistory(projectKey, hotspotId),
       api.me(),
     ])
       .then(([hotspotRes, historyRes, meRes]) => {
@@ -88,7 +91,7 @@ export function HotspotSidePanel({
         if (active) setLoading(false)
       })
     return () => { active = false }
-  }, [projectKey, hotspotId])
+  }, [projectKey, hotspotId, demoBranch])
 
   const [transitionStatus, setTransitionStatus] = useState<HotspotStatus>('to_review')
   const [rationale, setRationale] = useState('')
@@ -133,8 +136,8 @@ export function HotspotSidePanel({
       if (err instanceof ApiError && err.status === 409) {
         setSubmitError('Another reviewer has updated this hotspot. Please review their changes and try again.')
         try {
-          const freshHotspot = await api.getProjectHotspot(projectKey, hotspot.id)
-          const freshHistory = await api.getProjectHotspotHistory(projectKey, hotspot.id)
+          const freshHotspot = await api.getProjectHotspot(projectKey, hotspot.id, demoBranch)
+          const freshHistory = await api.getProjectHotspotHistory(projectKey, hotspot.id, demoBranch)
           setHotspot(freshHotspot)
           setHistory(freshHistory)
         } catch {}
@@ -234,7 +237,7 @@ export function HotspotSidePanel({
               <span>{copied ? 'Copied' : 'Copy'}</span>
             </button>
             <Link
-              to={`/code-quality/projects/${encodeURIComponent(projectKey)}/code`}
+              to={import.meta.env.VITE_PLAYGROUND === '1' ? projectCodePath(projectKey, { analysisId: hotspot.lastSeenAnalysisId, path: hotspot.location.replace(/:\d+$/, ''), view: 'source', line: Number(hotspot.location.match(/:(\d+)$/)?.[1]) || null, findingId: hotspot.id }, demoBranch) : `/code-quality/projects/${encodeURIComponent(projectKey)}/code`}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-brand-secondary hover:underline"
             >
               <span>View Code</span>
@@ -352,6 +355,7 @@ export function HotspotSidePanel({
                             <button
                               key={st}
                               type="button"
+                              aria-pressed={isSelected}
                               disabled={!allowed || submitting}
                               onClick={() => setTransitionStatus(st)}
                               className={cn(

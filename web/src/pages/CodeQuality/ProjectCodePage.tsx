@@ -12,7 +12,8 @@ import { ProjectRouteEmpty, useProjectRouteContext } from './CodeQualityProject'
 const windowStart = (line: number | null) => line ? Math.floor((line - 1) / PROJECT_CODE_SOURCE_WINDOW) * PROJECT_CODE_SOURCE_WINDOW + 1 : 1
 
 export function ProjectCodePage() {
-  const { projectKey, analysisRevision, isRunning } = useProjectRouteContext()
+  const { projectKey, branch, analysisRevision, isRunning } = useProjectRouteContext()
+  const demoBranch = import.meta.env.VITE_PLAYGROUND === '1' ? branch : ''
   const [params, setParams] = useSearchParams()
   const selection = normalizeProjectCodeSearch(params)
   const [latestAnalysisId, setLatestAnalysisId] = useState<string | null>(null)
@@ -34,8 +35,8 @@ export function ProjectCodePage() {
   }, [selection.changed, selection.params, setParams])
 
   const { data: latestAnalysisPage } = useFetch(
-    () => api.projectAnalyses(projectKey),
-    { enabled: !selection.analysisId, deps: [analysisRevision, projectKey] },
+    () => demoBranch ? api.projectAnalyses(projectKey, null, demoBranch) : api.projectAnalyses(projectKey),
+    { enabled: !selection.analysisId, deps: [analysisRevision, projectKey, demoBranch] },
   )
 
   useEffect(() => {

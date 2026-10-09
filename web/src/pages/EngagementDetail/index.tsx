@@ -70,6 +70,12 @@ export function EngagementDetail() {
     if (focusedFindingId) setTab('findings')
   }, [focusedFindingId, setTab])
 
+  useEffect(() => {
+    if (!eng || engLoading || !(location.state as { focusEngagementViews?: boolean } | null)?.focusEngagementViews || focusedFindingId) return
+    const frame = requestAnimationFrame(() => document.getElementById('engagement-views')?.scrollIntoView?.({ block: 'start', behavior: 'instant' }))
+    return () => cancelAnimationFrame(frame)
+  }, [eng?.id, engLoading, scan, location.key, focusedFindingId])
+
   const activeGroup = getGroupForTab(tab)
 
   // selectSeverity wires the Overview's distribution + attention cards to the
@@ -152,9 +158,10 @@ export function EngagementDetail() {
       </div>
 
       {/* Keep the Engagement identity first; lifecycle is supporting context below the scan console. */}
-      <section aria-label="Engagement summary" className="bg-hero rounded-2xl border border-secondary p-5 sm:p-6 shadow-xs space-y-4">
+      <section aria-label="Engagement summary" className="bg-hero rounded-2xl border border-secondary p-4 sm:p-5 shadow-xs space-y-3">
         <ScanPanel
           key={eng.id}
+          compact={tab !== 'overview'}
           eng={eng}
           importedSBOM={importedSBOM}
           uploadedSource={uploadedSource}

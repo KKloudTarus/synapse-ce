@@ -374,6 +374,7 @@ function asRuleType(value: unknown): RuleType {
 export const codeQualityApi = {
   projectMeasures: async (projectKey: string, query: MeasuresQuery, signal?: AbortSignal): Promise<ProjectMeasureResponse> => {
     const q = new URLSearchParams()
+    if (query.branch) q.set('branch', query.branch)
     if (query.path) q.set('path', query.path)
     if (query.limit) q.set('limit', query.limit.toString())
     if (query.cursor) q.set('cursor', query.cursor)
@@ -506,11 +507,14 @@ export const codeQualityApi = {
       .filter((b: ProjectBranch | null): b is ProjectBranch => b !== null)
   },
 
-  projectDependencyGraph: async (key: string, signal?: AbortSignal): Promise<ProjectDependencyGraph> =>
-    mapProjectDependencyGraph(await req(`/projects/${encodeURIComponent(key)}/dependency-graph`, { signal })),
+  projectDependencyGraph: async (key: string, signal?: AbortSignal, branch = ''): Promise<ProjectDependencyGraph> =>
+    mapProjectDependencyGraph(await req(`/projects/${encodeURIComponent(key)}/dependency-graph${branch ? `?${new URLSearchParams({ branch })}` : ''}`, { signal })),
 
-  downloadProjectDependencySubtree: async (key: string, root = ''): Promise<void> => {
-    const query = root ? `?${new URLSearchParams({ root })}` : ''
+  downloadProjectDependencySubtree: async (key: string, root = '', branch = ''): Promise<void> => {
+    const params = new URLSearchParams()
+    if (root) params.set('root', root)
+    if (branch) params.set('branch', branch)
+    const query = params.size ? `?${params}` : ''
     await blobDownload(
       `/api/v1/projects/${encodeURIComponent(key)}/dependency-graph/export${query}`,
       `${key}-dependencies${root ? '-subtree' : ''}.cdx.json`,
@@ -532,6 +536,7 @@ export const codeQualityApi = {
 
   listProjectHotspots: async (projectKey: string, lens: 'overall' | 'new-code', filter: HotspotListFilter): Promise<HotspotPage> => {
     const q = new URLSearchParams()
+    if (filter.branch) q.set('branch', filter.branch)
     q.set('lens', lens)
     if (filter.status) q.set('status', filter.status)
     if (filter.rule) q.set('rule', filter.rule)
@@ -559,8 +564,8 @@ export const codeQualityApi = {
     }
   },
 
-  getProjectHotspot: async (projectKey: string, id: string): Promise<Hotspot> =>
-    mapHotspot(await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}`)),
+  getProjectHotspot: async (projectKey: string, id: string, branch = ''): Promise<Hotspot> =>
+    mapHotspot(await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}${branch ? `?${new URLSearchParams({ branch })}` : ''}`)),
 
   transitionProjectHotspot: async (projectKey: string, id: string, status: HotspotStatus, rationale: string, expectedVersion: number): Promise<{ hotspot: Hotspot, event: HotspotReviewEvent }> => {
     const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/transitions`, {
@@ -570,13 +575,14 @@ export const codeQualityApi = {
     return { hotspot: mapHotspot(res.hotspot), event: mapHotspotReviewEvent(res.event) }
   },
 
-  getProjectHotspotHistory: async (projectKey: string, id: string): Promise<HotspotReviewEvent[]> => {
-    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/history`)
+  getProjectHotspotHistory: async (projectKey: string, id: string, branch = ''): Promise<HotspotReviewEvent[]> => {
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/history${branch ? `?${new URLSearchParams({ branch })}` : ''}`)
     return (res ?? []).map(mapHotspotReviewEvent)
   },
 
   listProjectIssues: async (projectKey: string, filter: IssueListFilter): Promise<IssuePage> => {
     const q = new URLSearchParams()
+    if (filter.branch) q.set('branch', filter.branch)
     if (filter.lens) q.set('lens', filter.lens)
     if (filter.status) q.set('status', filter.status)
     if (filter.type) q.set('type', filter.type)
@@ -671,9 +677,9 @@ export const codeQualityApi = {
     }
   },
 
-  latestProjectAnalysis: async (key: string): Promise<LatestProjectAnalysis | null> => {
+  latestProjectAnalysis: async (key: string, branch = ''): Promise<LatestProjectAnalysis | null> => {
     try {
-      const latest = await req(`/projects/${encodeURIComponent(key)}/analysis`)
+      const latest = await req(`/projects/${encodeURIComponent(key)}/analysis${branch ? `?${new URLSearchParams({ branch })}` : ''}`)
       return { analysis: mapProjectAnalysis(latest.analysis), result: mapScanResult(latest.result) }
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) return null

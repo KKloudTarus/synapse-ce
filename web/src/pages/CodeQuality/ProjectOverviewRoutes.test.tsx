@@ -114,6 +114,19 @@ describe('Project Overview routes', () => {
     expect(router.state.location.search).toContain('branch=develop')
   })
 
+  it('keeps the selected playground branch when navigating project result tabs', async () => {
+    vi.stubEnv('VITE_PLAYGROUND', '1')
+    try {
+      vi.mocked(api.projectBranches).mockResolvedValue([{ name: 'main', kind: 'long_lived' }, { name: 'improved', kind: 'short_lived' }])
+      const router = renderProjectRoute('/code-quality/projects/synapse?branch=main')
+      await screen.findByLabelText('Branch')
+      expect(screen.getByRole('link', { name: /^Code$/ })).toHaveAttribute('href', '/code-quality/projects/synapse/code?branch=main')
+      fireEvent.click(screen.getByRole('link', { name: /^Analysis details$/ }))
+      await waitFor(() => expect(api.latestProjectAnalysis).toHaveBeenCalledWith('synapse', 'main'))
+      expect(router.state.location.search).toBe('?branch=main')
+    } finally { vi.unstubAllEnvs() }
+  })
+
   it('loads Overview without fetching the full latest analysis or activity history', async () => {
     renderProjectRoute('/code-quality/projects/synapse')
     expect(await screen.findByText('Quality Gate Failed')).toBeInTheDocument()

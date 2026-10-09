@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
@@ -72,6 +72,25 @@ describe('AssessmentComparisonTab', () => {
     expect(screen.getByText(/completed item is never mutated/i)).toBeInTheDocument()
   })
 
+  it('keeps a deep-linked comparison while the sibling baseline snapshot request changes', async () => {
+    const lifecycle = await api.assessmentLifecycle('assessment-1')
+    const base = lifecycle.members[0]
+    let resolveLifecycle!: (value: typeof lifecycle) => void
+    let resolveBaseline!: (value: Awaited<ReturnType<typeof api.assessmentSnapshots>>) => void
+    vi.mocked(api.assessmentLifecycle).mockImplementation(() => new Promise(resolve => { resolveLifecycle = resolve }))
+    vi.mocked(api.assessmentSnapshots).mockImplementation(id => id === 'assessment-0'
+      ? new Promise(resolve => { resolveBaseline = resolve })
+      : Promise.resolve({ items: [snapshot('snapshot-2', 2)], defaultSnapshotId: 'snapshot-2', defaultVersion: 2, nextCursor: '' }))
+    renderComparison(comparedUrl.replace('comparison_base_assessment=assessment-1', 'comparison_base_assessment=assessment-0'))
+    await waitFor(() => expect(api.assessmentSnapshots).toHaveBeenCalledWith('assessment-1'))
+    await act(async () => resolveLifecycle({ ...lifecycle, members: [{ ...base, assessmentId: 'assessment-0' }, { ...base, assessmentId: 'assessment-1', assessmentType: 'retest', predecessorAssessmentId: 'assessment-0', retestNumber: 1 }] }))
+    await waitFor(() => expect(api.assessmentSnapshots).toHaveBeenCalledWith('assessment-0'))
+    expect(document.querySelector('[data-comparison-result="comparison-1"]')).toBeInTheDocument()
+    await act(async () => resolveBaseline({ items: [{ ...snapshot('snapshot-1', 1), assessmentId: 'assessment-0' }], defaultSnapshotId: 'snapshot-1', defaultVersion: 1, nextCursor: '' }))
+    expect(document.querySelector('[data-comparison-result="comparison-1"]')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Configure comparison' })).not.toBeInTheDocument()
+  })
+
   it.each([
     ['scope', 'partial'], ['advisory_database', 'partial'], ['tool', 'partial'],
     ['profile', 'unknown'], ['rule_pack', 'unknown'], ['target_schema', 'unknown'],
@@ -93,6 +112,22 @@ describe('AssessmentComparisonTab', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Security findings' }))
     await waitFor(() => expect(api.assessmentComparisonSummary).toHaveBeenCalledWith('comparison-1', 'security'))
     await waitFor(() => expect(api.assessmentComparisonItems).toHaveBeenCalledWith('comparison-1', expect.objectContaining({ scope: 'security' })))
+  })
+
+  it('marks a restored comparison ready only after its summary and items load', async () => {
+    const page = await vi.mocked(api.assessmentComparisonItems).getMockImplementation()!('comparison-1', { scope: 'all' })
+    let resolveItems!: (value: typeof page) => void
+    vi.mocked(api.assessmentComparisonItems).mockReturnValueOnce(new Promise(resolve => { resolveItems = resolve }))
+    const { container } = renderComparison(`${comparedUrl}&comparison_scope=all`)
+    expect(await screen.findByRole('region', { name: 'Lifecycle outcome' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Configure comparison' })).not.toBeInTheDocument()
+    const result = container.querySelector('[data-comparison-result="comparison-1"]')!
+    expect(result).toHaveAttribute('data-comparison-ready', 'false')
+    await act(async () => resolveItems(page))
+    await waitFor(() => expect(result).toHaveAttribute('data-comparison-ready', 'true'))
+    expect(result).toHaveAttribute('data-comparison-scope', 'all')
+    expect(result.querySelector('[data-comparison-summary]')).toBe(screen.getByRole('region', { name: 'Lifecycle outcome' }))
+    expect(screen.getByRole('button', { name: 'Toggle comparison details for identity-1' })).toBeInTheDocument()
   })
 
   it('surfaces critical exposure with the shared severity treatment', async () => {

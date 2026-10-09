@@ -63,9 +63,10 @@ export function ComponentsTab({ scan }: { scan: ScanResult | null }) {
   const unknownCount = allComponents.length - licensedCount
 
   return (
+    <div role="region" aria-label="Package inventory" data-package-inventory>
     <Card bodyClass="p-0" className="overflow-hidden shadow-xs">
       {/* Unified Toolbar */}
-      <div className="flex flex-col gap-3 border-b border-secondary p-4 sm:flex-row sm:items-center sm:justify-between bg-primary">
+      <div data-package-summary className="flex flex-col gap-3 border-b border-secondary p-4 sm:flex-row sm:items-center sm:justify-between bg-primary">
         {/* Search input */}
         <div className="relative min-w-[16rem] sm:max-w-xs">
           <SearchLg className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-tertiary" />
@@ -121,7 +122,7 @@ export function ComponentsTab({ scan }: { scan: ScanResult | null }) {
               className: 'flex-1 font-semibold text-primary',
               cell: (c) => (
                 <div className="flex items-center gap-2 truncate" title={c.name}>
-                  <span className="font-semibold text-primary">{c.name}</span>
+                  <span data-package-name={c.name} className="font-semibold text-primary">{c.name}</span>
                 </div>
               ),
             },
@@ -158,5 +159,6 @@ export function ComponentsTab({ scan }: { scan: ScanResult | null }) {
         />
       )}
     </Card>
+    </div>
   )
 }

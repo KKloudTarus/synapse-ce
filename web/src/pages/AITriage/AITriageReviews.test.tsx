@@ -50,7 +50,7 @@ describe('AITriageReviews', () => {
   it('requires rationale and sends a rejection back to the gate workflow', async () => {
     renderPage(); await screen.findByText('SQL injection')
     fireEvent.click(screen.getByRole('button', { name: /SQL injection/i }))
-    const reject = screen.getByRole('button', { name: /Reject & gate/i })
+    const reject = screen.getByRole('button', { name: /Reject proposal/i })
     expect(reject).toBeDisabled()
     fireEvent.change(screen.getByPlaceholderText(/Why should the AI recommendation/), { target: { value: 'The source reaches the sink' } })
     fireEvent.click(reject)
@@ -62,6 +62,6 @@ describe('AITriageReviews', () => {
     renderPage(); await screen.findByText('SQL injection')
     fireEvent.click(screen.getByRole('button', { name: /SQL injection/i }))
     expect(screen.queryByRole('button', { name: /Claim review/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Accept FP/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Accept false positive/i })).toBeDisabled()
   })
 })

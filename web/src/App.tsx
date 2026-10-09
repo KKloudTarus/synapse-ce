@@ -12,6 +12,10 @@ import { Connect } from './pages/Connect'
 import { NotFound } from './pages/NotFound'
 
 // --- Lazy-loaded page components ---
+const SetupPreview = import.meta.env.VITE_PLAYGROUND === '1' ? lazy(() => import('./playground/setup/SetupPreview').then(m => ({ default: m.SetupPreview }))) : null
+const DemoEntry = import.meta.env.VITE_PLAYGROUND === '1'
+  ? lazy(() => import('./playground/DemoEntry').then(m => ({ default: m.DemoEntry })))
+  : null
 const Dashboard = lazy(() => import('./pages/Dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })))
 const Engagements = lazy(() => import('./pages/Engagements/EngagementsPage').then(m => ({ default: m.EngagementsPage })))
 const AssessmentCycles = lazy(() => import('./pages/AssessmentCycles/AssessmentCyclesPage').then(m => ({ default: m.AssessmentCyclesPage })))
@@ -94,8 +98,10 @@ function Gate() {
   if (phase !== 'ready') return <Connect />
   return (
     <Routes>
+      {DemoEntry && <Route path="demo" element={<Suspense fallback={<LoadingFallback />}><DemoEntry /></Suspense>} />}
       <Route element={<Shell />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        {SetupPreview && <Route path="demo/setup/:kind" element={<Suspense fallback={<LoadingFallback />}><SetupPreview /></Suspense>} />}
+        <Route index element={<Navigate to={import.meta.env.VITE_PLAYGROUND === '1' ? '/demo' : '/dashboard'} replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="engagements" element={<Engagements />} />
         <Route path="assessment-cycles" element={<AssessmentLifecycleRoute><AssessmentCycles /></AssessmentLifecycleRoute>} />
@@ -190,7 +196,7 @@ function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
   return (
-    <div className="h-screen overflow-hidden bg-primary md:grid md:grid-cols-[auto_1fr]">
+    <div className="h-screen overflow-hidden bg-primary lg:grid lg:grid-cols-[auto_1fr]">
       <VulnerabilityExposureNotifier />
       <a
         href="#main-content"
@@ -208,14 +214,14 @@ function Shell() {
       </a>
       <Sidebar />
       <MobileSidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div className="flex min-h-0 min-w-0 flex-col bg-primary md:pt-4">
+      <div className="flex h-full min-h-0 min-w-0 flex-col bg-primary">
         {/* Mobile hamburger only */}
-        <div className="flex h-14 shrink-0 items-center justify-between px-4">
+        <div className="flex h-14 shrink-0 items-center justify-between px-4 lg:h-12 lg:justify-end">
           <button
             type="button"
             onClick={() => setMenuOpen(true)}
             aria-label="Open menu"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand md:hidden"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand lg:hidden"
           >
             <Menu01 className="size-5" />
           </button>
@@ -224,7 +230,7 @@ function Shell() {
         <main
           id="main-content"
           tabIndex={-1}
-          className="flex-1 overflow-auto bg-secondary p-4 sm:p-6 xl:p-8 outline-none md:rounded-tl-[40px] md:border-t md:border-l md:border-secondary md:shadow-md"
+          className="flex-1 overflow-auto bg-secondary p-4 sm:p-6 xl:p-8 outline-none lg:rounded-tl-2xl lg:border-t lg:border-l lg:border-secondary"
         >
           <ErrorBoundary key={location.pathname}>
             <Suspense fallback={<LoadingFallback />}>

@@ -1,0 +1,132 @@
+[data-level="Foundation"],
+[data-level="Beginner"] {
+  --journey-accent: var(--color-utility-green-600);
+  --journey-ink: var(--color-utility-green-700);
+  --journey-tint: var(--color-utility-green-50);
+  --journey-border: var(--color-utility-green-200);
+}
+
+[data-level="Intermediate"] {
+  --journey-accent: var(--color-utility-blue-600);
+  --journey-ink: var(--color-utility-blue-700);
+  --journey-tint: var(--color-utility-blue-50);
+  --journey-border: var(--color-utility-blue-200);
+}
+
+[data-level="Advanced"] {
+  --journey-accent: var(--color-utility-brand-600);
+  --journey-ink: var(--color-utility-brand-700);
+  --journey-tint: var(--color-utility-brand-50);
+  --journey-border: var(--color-utility-brand-200);
+}
+
+[data-level="Specialist"] {
+  --journey-accent: var(--color-utility-orange-600);
+  --journey-ink: var(--color-utility-orange-700);
+  --journey-tint: var(--color-utility-orange-50);
+  --journey-border: var(--color-utility-orange-200);
+}
+
+.journey-node {
+  background: color-mix(in srgb, var(--journey-tint) 45%, var(--color-bg-primary));
+  border-color: var(--journey-border);
+  border-top: 3px solid var(--journey-accent);
+  outline-color: var(--journey-accent);
+}
+.journey-node:hover { border-color: var(--journey-accent); }
+.journey-node[aria-pressed="true"] {
+  border-color: var(--journey-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--journey-accent) 18%, transparent);
+}
+.journey-preview { border-color: var(--journey-border); }
+.journey-level-icon, .journey-level-badge {
+  background: var(--journey-tint);
+  color: var(--journey-ink);
+}
+.journey-level-badge {
+  display: inline-block;
+  border: 1px solid var(--journey-border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.journey-level-dot { background: var(--journey-accent); }
+
+.journey-canvas {
+  background-image: radial-gradient(circle, var(--color-border-secondary) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.journey-phases {
+  display: grid;
+  gap: 28px;
+}
+
+.journey-phase-nodes {
+  position: relative;
+  display: grid;
+  gap: 16px;
+  padding-left: 20px;
+  border-left: 1px solid var(--color-border-secondary);
+  margin-left: 13px;
+}
+
+.journey-node { transition: border-color 150ms, box-shadow 150ms; }
+.journey-node::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 21px;
+  border-top: 1px solid var(--color-border-secondary);
+}
+.journey-branch .journey-node::before { display: none; }
+.journey-branch { border-left: 1px dashed var(--color-border-secondary); padding-left: 16px; }
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .journey-phases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .journey-phases { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; }
+  .journey-phase { position: relative; }
+  .journey-phase-label { min-height: 40px; position: relative; }
+  .journey-phase:not(:last-child) .journey-phase-label::after {
+    content: '';
+    position: absolute;
+    width: 20px;
+    left: calc(100% + 6px);
+    top: 50%;
+    border-top: 1px solid var(--color-border-secondary);
+  }
+  .journey-phase:not(:last-child) .journey-phase-label::before {
+    content: '';
+    position: absolute;
+    left: calc(100% + 21px);
+    top: calc(50% - 3px);
+    width: 6px;
+    height: 6px;
+    border-top: 1px solid var(--color-border-secondary);
+    border-right: 1px solid var(--color-border-secondary);
+    transform: rotate(45deg);
+  }
+  .journey-phase-nodes { margin-left: 0; padding-left: 0; border-left: 0; }
+  .journey-phase-nodes::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -20px;
+    bottom: 0;
+    border-left: 1px solid var(--color-border-secondary);
+  }
+  .journey-node { min-height: 144px; }
+  .journey-node::before { display: none; }
+  .journey-phase:first-child .journey-phase-nodes { padding-top: 80px; }
+  .journey-phase:first-child .journey-node { min-height: 160px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-node { transition: none; }
+}

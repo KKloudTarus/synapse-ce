@@ -1,3 +1,5 @@
+import { demoDependencies } from '../playground/dependency-data'
+import { demoReport } from '../playground/demo-report'
 import { http, HttpResponse } from 'msw'
 
 import { matchGenerated } from './generated'
@@ -1153,38 +1155,7 @@ export const handlers = [
     { id: 'run-003', engagement_id: 'eng-001', tool: 'nuclei', target: 'api.acme.io', status: 'running', started_at: HOUR_AGO, finished_at: null, output_lines: 120, findings_count: 0 },
   ])),
 
-  // --- Engagement Agent Sessions ---
-  http.get('/api/v1/engagements/:id/agent-sessions', () => HttpResponse.json([
-    { id: 'sess-001', engagement_id: 'eng-001', status: 'complete', objective: 'Enumerate attack surface for api.acme.io', started_at: DAY_AGO, finished_at: DAY_AGO, steps: 8, findings_generated: 2 },
-    { id: 'sess-002', engagement_id: 'eng-001', status: 'running', objective: 'Exploit identified SSRF vulnerability', started_at: HOUR_AGO, finished_at: null, steps: 3, findings_generated: 0 },
-  ])),
-  http.get('/api/v1/engagements/:id/agent-approvals', () => HttpResponse.json([
-    { id: 'appr-001', session_id: 'sess-002', tool: 'curl', target: 'http://169.254.169.254/latest/meta-data/', rationale: 'Verify SSRF reaches IMDS', status: 'pending', requested_at: HOUR_AGO },
-  ])),
-  http.get('/api/v1/engagements/:id/agent-readiness', () => HttpResponse.json({ ready: true, reason: '', sandbox_healthy: true, tools_available: ['nmap', 'curl', 'nuclei', 'ffuf', 'subfinder'] })),
-  http.get('/api/v1/engagements/:id/agent-sessions/:sid', () => HttpResponse.json({
-    id: 'sess-001', engagement_id: 'eng-001', status: 'complete', objective: 'Enumerate attack surface',
-    transcript: [
-      { role: 'system', content: 'Agent initialized. Objective: enumerate attack surface for api.acme.io', timestamp: DAY_AGO },
-      { role: 'agent', content: 'Running subfinder for subdomain enumeration...', timestamp: DAY_AGO },
-      { role: 'tool', content: 'subfinder found 8 subdomains: api.acme.io, admin.acme.io, staging.acme.io...', timestamp: DAY_AGO },
-      { role: 'agent', content: 'Running nmap port scan on discovered hosts...', timestamp: DAY_AGO },
-      { role: 'tool', content: 'nmap: 3 hosts up, 12 open ports total. Notable: admin.acme.io:8080 (no TLS)', timestamp: DAY_AGO },
-      { role: 'agent', content: 'Finding: admin panel exposed without TLS on port 8080. Generating finding...', timestamp: DAY_AGO },
-    ],
-    started_at: DAY_AGO, finished_at: DAY_AGO, steps: 8, findings_generated: 2,
-  })),
-  http.get('/api/v1/engagements/:id/agent-sessions/:sid/plan', () => HttpResponse.json({
-    steps: [
-      { id: 1, action: 'subdomain_enum', target: 'acme.io', status: 'complete', tool: 'subfinder' },
-      { id: 2, action: 'port_scan', target: 'discovered hosts', status: 'complete', tool: 'nmap' },
-      { id: 3, action: 'service_fingerprint', target: 'open ports', status: 'complete', tool: 'httpx' },
-      { id: 4, action: 'vuln_scan', target: 'web services', status: 'pending', tool: 'nuclei' },
-    ],
-  })),
-  http.get('/api/v1/engagements/:id/agent-sessions/:sid/decisions', () => HttpResponse.json([
-    { id: 'd-1', session_id: 'sess-001', step: 2, decision: 'proceed', rationale: 'Non-intrusive port scan within RoE', tool: 'nmap', target: 'api.acme.io', decided_at: DAY_AGO },
-  ])),
+  // AI session contracts are provided by the curated playground setup handlers.
 
   // --- Engagement Code Quality ---
   http.get('/api/v1/engagements/:id/code-quality', () => HttpResponse.json({
@@ -1726,7 +1697,7 @@ export const handlers = [
         measures: { lines: 48520, ncloc: 38200, coverage: 72.4, duplicated_lines_density: 3.2 },
         coverage: { covered_lines: 27650, total_lines: 38200 },
         duplication: { duplicated_lines: 1550, total_lines: 48520, files: 5 },
-        rating: a.rating,
+        rating: { ...a.rating, lines_of_code: 38200, tech_debt_minutes: 2840 },
       },
       result: {
         target: 'https://github.com/KKloudTarus/synapse-ce.git',
@@ -1740,6 +1711,14 @@ export const handlers = [
   // 404 means "no analysis running", which the client maps to null and the screen renders as an
   // empty state. The playground answers a finished run instead, so the panel shows a result. Terminal
   // status only: a running job leaves the page polling forever.
+  http.get('/api/v1/projects/:key/dependency-graph', ({ params }) => HttpResponse.json(demoDependencies(PROJECTS.find(p => p.key === params.key)?.latest_analysis.id ?? 'an-001'))),
+  http.get('/api/v1/projects/:key/dependency-graph/export', ({ params, request }) => {
+    const graph = demoDependencies(PROJECTS.find(p => p.key === params.key)?.latest_analysis.id ?? 'an-001')
+    const root = new URL(request.url).searchParams.get('root')
+    const ids = root ? new Set([root, ...graph.edges.filter(e => e.from === root).map(e => e.to)]) : null
+    const nodes = graph.nodes.filter(n => !ids || ids.has(n.id))
+    return HttpResponse.json({ bomFormat: 'CycloneDX', specVersion: '1.5', version: 1, metadata: { properties: [{ name: 'synapse:simulation', value: 'true' }] }, components: nodes.map(n => ({ type: 'library', 'bom-ref': n.id, name: n.name, version: n.version, purl: n.purl })), dependencies: nodes.map(n => ({ ref: n.id, dependsOn: graph.edges.filter(e => e.from === n.id).map(e => e.to) })) })
+  }),
   http.get('/api/v1/projects/:key/analysis-status', ({ params }) =>
     import.meta.env.VITE_PLAYGROUND === '1'
       ? HttpResponse.json({
@@ -2343,6 +2322,8 @@ func Callback(w http.ResponseWriter, r *http.Request) {
     return HttpResponse.json({ ...templateDetail(template), archived_template_id: archived })
   }),
 
+  http.get('/api/v1/engagements/:id/report.:format', ({ request, params }) => demoReport(request, String(params.id), ENGAGEMENTS.find(e => e.id === params.id)?.name ?? 'Assessment', FINDINGS)),
+
   // --- Catch-all fallback ---
   // Anything the hand-written handlers above do not cover falls through to the fixtures generated
   // from api/openapi.yaml, so a screen reaches a schema-shaped answer instead of a 404. A route the
@@ -2368,10 +2349,8 @@ func Callback(w http.ResponseWriter, r *http.Request) {
     return HttpResponse.json({ error: 'Not mocked' }, { status: 404 })
   }),
   ...(['post', 'patch', 'delete', 'put'] as const).map((method) =>
-    http[method]('/api/v1/*', ({ request }) => {
-      const generated = matchGenerated(method.toUpperCase(), new URL(request.url).pathname)
-      if (generated.found && generated.body !== null) return HttpResponse.json(generated.body)
-      return HttpResponse.json({ ok: true })
+    http[method]('/api/v1/*', () => {
+      return HttpResponse.json({ error: 'This action is not simulated in the playground.', message: 'This action is not simulated. Continue with a guided chapter to explore a supported workflow.' }, { status: 422 })
     }),
   ),
 ]

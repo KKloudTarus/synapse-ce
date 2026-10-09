@@ -101,7 +101,7 @@ export function InboxPage() {
         <ul className="space-y-3">
           {preferences.map((item) => (
             <li key={`${item.event_type}:${item.channel}`} className="rounded-xl border border-secondary p-4">
-              <p className="font-medium text-primary">{item.event_type} · {item.channel}</p>
+              <p className="font-medium capitalize text-primary">{item.event_type.replaceAll('_', ' ').replaceAll('.', ' · ')} · {item.channel === 'in_app' ? 'In-app' : item.channel}</p>
               {item.reason && <p className="text-sm text-secondary">{item.reason}</p>}
               {item.available && !item.mandatory ? (
                 <label className="mt-2 block text-sm text-secondary">

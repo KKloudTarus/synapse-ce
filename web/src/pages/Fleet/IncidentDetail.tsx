@@ -45,7 +45,7 @@ export function IncidentDetail() {
   if (!incident) return null
 
   return (
-    <div className="mx-auto max-w-[1400px] animate-fade-in space-y-6 pb-12">
+    <div data-incident-id={incident.id} className="mx-auto max-w-[1400px] animate-fade-in space-y-6 pb-12">
       <BackLink />
 
       <header className="space-y-3">
@@ -348,6 +348,7 @@ function AnalystActions({
                   value={owner}
                   onChange={(e) => setOwner(e.target.value)}
                   placeholder={incident.ownerId || 'user id'}
+                  aria-label="Assign owner"
                   disabled={busy}
                 />
                 <Button variant="secondary" disabled={!owner.trim() || busy} loading={assignOwner.loading} onClick={() => assignOwner.mutate(owner.trim())}>
@@ -362,6 +363,7 @@ function AnalystActions({
                 onChange={(e) => setComment(e.target.value)}
                 rows={3}
                 placeholder="Investigation note…"
+                aria-label="Add comment"
                 disabled={busy}
                 className="input-inset w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary placeholder:text-quaternary focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
               />

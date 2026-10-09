@@ -149,6 +149,7 @@ export async function blobDownload(path: string, fallbackName: string): Promise<
     throw error
   }
   const blob = await res.blob()
+  if (blob.size === 0) throw new ApiError(502, 'The export is empty. No file was downloaded. Please retry or choose another format.')
   const cd = res.headers.get('content-disposition') ?? ''
   const filename = /filename="([^"]+)"/.exec(cd)?.[1] ?? fallbackName
   const url = URL.createObjectURL(blob)
