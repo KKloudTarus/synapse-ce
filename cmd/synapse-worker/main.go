@@ -44,6 +44,7 @@ import (
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
@@ -713,6 +714,11 @@ func main() {
 			os.Exit(1)
 		}
 		notificationService.SetTransactionRunner(postgres.NewTenantTransactionRunner(pool))
+		// Send-time rendering (#1365): tenant templates, the tenant's locale and time zone, and the
+		// channel formatters.
+		notificationService.SetTemplateStore(postgres.NewNotificationTemplateStore(pool))
+		notificationService.SetTenantSettings(postgres.NewTenantSettingsStore(pool))
+		notificationService.SetFormatters(messageformat.Formatters())
 		// Delivery metrics are emitted by this worker only: the API exposes
 		// aggregate queue health but never observes worker transport outcomes.
 		if cfg.MetricsEnabled {

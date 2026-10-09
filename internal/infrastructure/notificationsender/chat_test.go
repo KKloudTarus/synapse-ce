@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -390,6 +391,33 @@ func TestChatDriversReportBuiltInContentAsFallback(t *testing.T) {
 			}
 			if result = chatSender(server).Send(context.Background(), testWork(tc.kind), tc.config(server.URL)); result.TemplateFallback {
 				t.Errorf("event with title and summary reported as fallback: %+v", result)
+			}
+		})
+	}
+}
+
+// TestChatDriversSendTheRenderedPayload checks that a message a template rendered (#1365) is sent
+// as its formatter produced it, in place of the built-in content, and that the Telegram driver
+// still adds the chat to it.
+func TestChatDriversSendTheRenderedPayload(t *testing.T) {
+	for _, tc := range chatCases {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			server := newChatServer(t, func(w http.ResponseWriter) { _, _ = io.WriteString(w, tc.success) })
+			work := testWork(tc.kind)
+			formatted, err := messageformat.Formatters()[tc.kind].Format(ports.RenderedMessage{Fields: map[string]string{"title": "Rendered heading", "body": "Rendered text"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			work.Formatted = &formatted
+			result := chatSender(server).Send(context.Background(), work, tc.config(server.URL))
+			if result.ErrorCode != "" || result.TemplateFallback {
+				t.Fatalf("result = %+v", result)
+			}
+			if !strings.Contains(string(server.body), "Rendered heading") || strings.Contains(string(server.body), "vulnerability_action.created") {
+				t.Fatalf("body is not the rendered payload: %s", server.body)
+			}
+			if tc.kind == notification.ChannelTelegram && !strings.Contains(string(server.body), `"chat_id":"-1001234567890"`) {
+				t.Errorf("telegram payload lost its chat: %s", server.body)
 			}
 		})
 	}

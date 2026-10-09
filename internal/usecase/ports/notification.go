@@ -36,6 +36,15 @@ type NotificationSourceFailureFilter struct {
 	Offset    int
 }
 
+// AttemptAdmission is what an attempt was rendered with: the template reference to record and pin,
+// and the effective data class its content was filtered to. An empty DataClass skips the class
+// check, for an attempt whose content was not rendered from the snapshot.
+// A nonempty DataClass must be valid; repositories reject malformed values without admitting an attempt.
+type AttemptAdmission struct {
+	TemplateRef string
+	DataClass   notification.DataClass
+}
+
 type NotificationWork struct {
 	Delivery notification.Delivery
 	Event    notification.Event
@@ -45,10 +54,13 @@ type NotificationWork struct {
 	Channel    notification.Channel
 	Sealed     string
 	// CustomWebhookBody is a rendered custom JSON body for a webhook channel that opted into one
-	// (#1376). The send-time renderer (#1365) sets it with notification.RenderCustomWebhookBody;
-	// nothing sets it yet. When it is not empty the webhook driver sends exactly these bytes instead
+	// (#1376). The send-time renderer (#1365) sets it with notification.RenderCustomWebhookBody.
+	// When it is not empty the webhook driver sends exactly these bytes instead
 	// of the event envelope, signs them and sets X-Synapse-Body: custom.
 	CustomWebhookBody []byte
+	// Formatted is the channel's wire payload rendered from a template (#1365). When it is nil the
+	// driver sends its built-in content.
+	Formatted *FormattedMessage
 }
 
 type NotificationSendResult struct {
@@ -112,7 +124,11 @@ type NotificationRepository interface {
 	// PutEngagementNotificationSetting stores an override whose Revision is the stored one plus one
 	// (1 for the first), and reports ErrConflict when another write got there first.
 	PutEngagementNotificationSetting(ctx context.Context, setting notification.EngagementNotificationSetting) (notification.EngagementNotificationSetting, error)
-	BeginAttempt(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time) (notification.Attempt, error)
+	// BeginAttempt starts an attempt for a message rendered as admission says (#1365). It pins the
+	// template ref on the delivery when it has none yet, and refuses with ErrRetryable when the
+	// channel or engagement policy committed now is stricter than the class the message was
+	// rendered at (#1360); the retry reloads the work and renders again.
+	BeginAttempt(ctx context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, admission AttemptAdmission) (notification.Attempt, error)
 	FinishAttempt(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time, string, int, string, *time.Time) error
 	CancelDelivery(context.Context, shared.ID, shared.ID, string, int64, string) error
 	// DeadLetterDelivery reports whether this call durably transitioned a pending

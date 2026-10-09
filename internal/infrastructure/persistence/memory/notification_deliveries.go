@@ -140,10 +140,12 @@ func (r *NotificationRepository) FleetAgentLastSeen(context.Context, shared.ID, 
 	return true, nil
 }
 
-// BeginAttempt records a started attempt on an open delivery, after the same checks as the
-// Postgres repository: the worker holds the job's claim, the channel is enabled, and neither the
-// tenant nor the channel is inside its delivery rate limit.
-func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time) (notification.Attempt, error) {
+// BeginAttempt records a started attempt on an open delivery after the same checks as the Postgres
+// repository: the worker holds the job's claim, the channel is enabled, and neither the tenant nor
+// the channel is inside its delivery rate limit. The policy committed now must still allow the
+// class the message was rendered at (#1360). The attempt keeps the template ref, and the delivery
+// takes it as its pin when it has none (#1365).
+func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, admission ports.AttemptAdmission) (notification.Attempt, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := notificationKey{tenant, delivery}
@@ -158,10 +160,8 @@ func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, deliver
 	if err := r.checkDeliveryRate(tenant, channel, at); err != nil {
 		return notification.Attempt{}, err
 	}
-	if event, ok := r.events[notificationKey{tenant, stored.delivery.EventID}]; ok &&
-		r.engagementNotifications(tenant, event.event.EngagementID) == notification.EngagementNotificationsNone {
-		// The override was set to none after LoadWork; the retry reloads the work and cancels it.
-		return notification.Attempt{}, fmt.Errorf("%w: engagement suppressed", ports.ErrRetryable)
+	if err := r.admitRendered(tenant, stored.delivery, admission.DataClass); err != nil {
+		return notification.Attempt{}, err
 	}
 	if !openDelivery(stored.delivery.State) {
 		return notification.Attempt{}, fmt.Errorf("notification delivery is terminal: %w", shared.ErrConflict)
@@ -169,10 +169,32 @@ func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, deliver
 	r.tenantAttemptAt[tenant], r.channelAttemptAt[channel] = at, at
 	stored.delivery.Attempts++
 	stored.delivery.UpdatedAt = at
+	if stored.delivery.TemplateRef == "" {
+		stored.delivery.TemplateRef = admission.TemplateRef
+	}
 	r.deliveries[key] = stored
-	started := notification.Attempt{ID: attempt, DeliveryID: delivery, Number: stored.delivery.Attempts, StartedAt: at, Outcome: "started"}
+	started := notification.Attempt{ID: attempt, DeliveryID: delivery, Number: stored.delivery.Attempts, StartedAt: at, Outcome: "started", TemplateRef: admission.TemplateRef}
 	r.attempts[key] = append(r.attempts[key], started)
 	return cloneAttempt(started), nil
+}
+
+// admitRendered applies notification.AdmitRendered to the channel class and engagement override
+// stored now. Policy refusals are retryable: the retry reloads the work, which cancels it under none
+// or renders it again at the lower class.
+func (r *NotificationRepository) admitRendered(tenant shared.ID, d notification.Delivery, rendered notification.DataClass) error {
+	override := notification.EngagementNotificationsInherit
+	if event, ok := r.events[notificationKey{tenant, d.EventID}]; ok {
+		override = r.engagementNotifications(tenant, event.event.EngagementID)
+	}
+	switch notification.AdmitRendered(rendered, r.channels[notificationKey{tenant, d.ChannelID}].Class(), override) {
+	case notification.RefuseInvalidClass:
+		return fmt.Errorf("%w: invalid rendered data class", shared.ErrValidation)
+	case notification.RefuseSuppressed:
+		return fmt.Errorf("%w: engagement suppressed", ports.ErrRetryable)
+	case notification.RefuseClassLowered:
+		return fmt.Errorf("%w: data class lowered", ports.ErrRetryable)
+	}
+	return nil
 }
 
 // checkDeliveryRate applies the Postgres order: tenant budget, then channel enabled and not
@@ -337,7 +359,9 @@ func (r *NotificationRepository) RedriveDelivery(_ context.Context, tenant, id s
 	job.status, job.attempts, job.claimFence, job.availableAt = "queued", 0, job.claimFence+1, r.now().UTC()
 	d := &stored.delivery
 	d.State, d.LastError, d.NextAttemptAt, d.DeliveredAt = notification.DeliveryPending, "", nil, nil
-	d.RedriveFence, d.UpdatedAt = job.claimFence, r.now().UTC()
+	// A redrive renders again from a fresh resolution (#1365), as the Postgres redrive clears
+	// template_ref, so a template fixed since the dead letter is picked up.
+	d.RedriveFence, d.UpdatedAt, d.TemplateRef = job.claimFence, r.now().UTC(), ""
 	r.deliveries[key] = stored
 	return cloneDelivery(*d), cloneChannel(c), nil
 }

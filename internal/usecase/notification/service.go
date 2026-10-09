@@ -45,6 +45,8 @@ type Service struct {
 	templates ports.NotificationTemplateStore
 	// builtins is the built-in template catalog (#1366); NoBuiltinTemplates until it ships.
 	builtins ports.BuiltinTemplates
+	// formatters turn rendered content into each channel's wire payload (#1364, #1365).
+	formatters map[domain.ChannelType]ports.NotificationFormatter
 	// events holds the per-type event builders; the worker asks them whether a delivery is still
 	// relevant (#1344).
 	events *EventBuilders
@@ -660,9 +662,16 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	if !relevant {
 		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, "source_no_longer_relevant")
 	}
+	// Render before the attempt starts: a retry reuses the template the first attempt pinned.
+	render, err := s.RenderMessage(ctx, RenderInput{Channel: work.Channel, Event: work.Event, Engagement: work.Engagement, Pin: work.Delivery.TemplateRef})
+	if err != nil {
+		return err
+	}
+	work.Formatted, work.CustomWebhookBody = render.Formatted, render.CustomBody
 	now := s.clock.Now().UTC()
 	aid := s.ids.NewID()
-	if _, err = s.repo.BeginAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, now); err != nil {
+	admission := ports.AttemptAdmission{TemplateRef: render.Message.TemplateRef, DataClass: render.Class}
+	if _, err = s.repo.BeginAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, now, admission); err != nil {
 		return err
 	}
 	attempt := finishedAttempt{job: job, work: work, deliveryID: payload.DeliveryID, attemptID: aid}
@@ -688,6 +697,7 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 		return &DeliveryError{terminal: true, cause: errors.New(configErr)}
 	}
 	result := s.sender.Send(ctx, work, cfg)
+	result.TemplateFallback = result.TemplateFallback || render.Fallback
 	finished := s.clock.Now().UTC()
 	if result.ErrorCode == "" && result.StatusCode >= 200 && result.StatusCode < 300 {
 		if err = s.finishAttempt(ctx, attempt, finished, "delivered", result.StatusCode, "", nil, domain.AttemptDelivered); err != nil {

@@ -28,6 +28,10 @@ func (d emailDriver) Send(ctx context.Context, w ports.NotificationWork, config 
 	if _, ok := config.(ports.EmailChannelConfig); !ok {
 		return ports.NotificationSendResult{ErrorCode: "channel_config_invalid"}
 	}
+	if w.Formatted != nil {
+		// A template rendered this message (#1365): its subject and text body are sent.
+		return d.s.sendSMTP(ctx, w.Delivery.Recipient, w.Formatted.Subject, string(w.Formatted.Body), w.Delivery.ID)
+	}
 	title, summary, fallback := eventText(w)
 	result := d.s.sendSMTP(ctx, w.Delivery.Recipient, title, summary, w.Delivery.ID)
 	result.TemplateFallback = fallback

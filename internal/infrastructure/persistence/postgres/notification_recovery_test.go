@@ -46,7 +46,7 @@ func TestNotificationPostgresRecoveryAndAuditOutage(t *testing.T) {
 	if err != nil || old == nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, err = repo.BeginAttempt(ctx, tenant, did, old.ID, old.Fence, "unknown", now); err != nil {
+	if _, err = repo.BeginAttempt(ctx, tenant, did, old.ID, old.Fence, "unknown", now, ports.AttemptAdmission{TemplateRef: "tenant:tpl@1"}); err != nil {
 		t.Fatal(err)
 	}
 	// Simulate process loss after the receiver may have acknowledged the request.
@@ -58,7 +58,7 @@ func TestNotificationPostgresRecoveryAndAuditOutage(t *testing.T) {
 	if err = repo.FinishAttempt(ctx, tenant, did, old.ID, old.Fence, "unknown", now, "delivered", 204, "", nil); !errors.Is(err, ports.ErrStaleLease) {
 		t.Fatalf("stale finish: %v", err)
 	}
-	if _, err = repo.BeginAttempt(ctx, tenant, did, reclaimed.ID, reclaimed.Fence, "known", now.Add(2*time.Second)); err != nil {
+	if _, err = repo.BeginAttempt(ctx, tenant, did, reclaimed.ID, reclaimed.Fence, "known", now.Add(2*time.Second), ports.AttemptAdmission{TemplateRef: "tenant:tpl@2"}); err != nil {
 		t.Fatal(err)
 	}
 	if err = repo.FinishAttempt(ctx, tenant, did, reclaimed.ID, reclaimed.Fence, "known", now.Add(2*time.Second), "delivered", 204, "", nil); err != nil {
@@ -70,6 +70,13 @@ func TestNotificationPostgresRecoveryAndAuditOutage(t *testing.T) {
 	attempts, err := repo.ListAttempts(ctx, tenant, did)
 	if err != nil || len(attempts) != 2 || attempts[0].Outcome != "started" || attempts[1].Outcome != "delivered" {
 		t.Fatalf("unknown history: %+v %v", attempts, err)
+	}
+	// Each attempt records the template it rendered with; the first one pins it on the delivery (#1365).
+	if attempts[0].TemplateRef != "tenant:tpl@1" || attempts[1].TemplateRef != "tenant:tpl@2" {
+		t.Fatalf("attempt template refs = %q, %q", attempts[0].TemplateRef, attempts[1].TemplateRef)
+	}
+	if pinned, err := repo.GetDelivery(ctx, tenant, did); err != nil || pinned.TemplateRef != "tenant:tpl@1" {
+		t.Fatalf("pinned template = %q, %v, want the first attempt's", pinned.TemplateRef, err)
 	}
 	// Audit outage does not revert the success or send again. Intent is retried later.
 	exec(`CREATE FUNCTION notification_test_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected audit outage'; END $$`)

@@ -204,9 +204,8 @@ func (s *Service) requestedLocale(ctx context.Context, tenant shared.ID, channel
 // requested locale, "*" then en in each tier. The locale is the channel's, the tenant's default or
 // en.
 //
-// It is the entry point for the send-time renderer (#1365), which runs in the worker and so takes
-// the tenant explicitly. The delivery path does not call it yet: until #1365 wires it into the
-// sender, every delivery keeps the current raw rendering.
+// The send-time renderer (#1365) calls it through RenderMessage on a delivery's first attempt; the
+// worker passes the tenant explicitly.
 func (s *Service) ResolveTemplate(ctx context.Context, tenant, channelID shared.ID, eventType domain.EventType) (TemplateResolution, error) {
 	if tenant.IsZero() {
 		return TemplateResolution{}, fmt.Errorf("%w: tenant is required", shared.ErrValidation)

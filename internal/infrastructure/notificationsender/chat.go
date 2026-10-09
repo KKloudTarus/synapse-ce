@@ -16,8 +16,8 @@ import (
 // (or, for Telegram, its path) is the credential, so a driver never returns, wraps or logs a
 // transport error; it returns only a stable code, which is all the worker stores on the attempt.
 
-// chatMessage is the content every chat driver sends until the send-time renderer (#1365, #1367)
-// hands drivers a rendered template: the event's built-in title and summary, with the summary
+// chatMessage is the content a chat driver sends when no template rendered the message (#1365):
+// the event's built-in title and summary, with the summary
 // escaped so nothing in it is read as Markdown, and the event type and ID as literal code.
 // fallback reports that the event carried no title or summary of its own.
 func chatMessage(w ports.NotificationWork) (ports.RenderedMessage, bool) {
@@ -51,8 +51,12 @@ func (s *Sender) postChat(ctx context.Context, target string, payload []byte) (p
 	return s.doRead(req)
 }
 
-// formatChat runs a channel formatter over the chat message of the work item.
+// formatChat returns the wire payload of the work item: the one a template rendered (#1365), or
+// the channel formatter run over the built-in chat message.
 func formatChat(w ports.NotificationWork, formatter ports.NotificationFormatter) ([]byte, bool, bool) {
+	if w.Formatted != nil && len(w.Formatted.Body) > 0 {
+		return w.Formatted.Body, false, true
+	}
 	message, fallback := chatMessage(w)
 	formatted, err := formatter.Format(message)
 	if err != nil || len(formatted.Body) == 0 {

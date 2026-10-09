@@ -45,7 +45,13 @@ type Variable struct {
 	Description string    `json:"description"`
 	// ListCap bounds the items of a list variable; zero marks a scalar.
 	ListCap int `json:"list_cap"`
+	// Format is "time" for a variable that holds an RFC 3339 instant: the send-time render shows it
+	// in the tenant's time zone (#1365). Empty for plain text.
+	Format string `json:"format,omitempty"`
 }
+
+// VariableFormatTime marks a variable whose value is an RFC 3339 instant.
+const VariableFormatTime = "time"
 
 // EventSpec is the single declaration of an event type. Rule validation and matching read it,
 // and the event-type API, the rule form and the docs derive from it.

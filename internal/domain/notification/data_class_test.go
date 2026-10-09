@@ -23,6 +23,29 @@ func TestDefaultDataClassPerFamily(t *testing.T) {
 	}
 }
 
+func TestAdmitRenderedRefusesAStricterPolicy(t *testing.T) {
+	cases := []struct {
+		rendered, channel DataClass
+		engagement        EngagementNotifications
+		want              Admission
+	}{
+		{DataClassSummary, DataClassSummary, EngagementNotificationsInherit, Admit},
+		{DataClassSignal, DataClassDetail, EngagementNotificationsInherit, Admit},
+		{DataClassSummary, DataClassSummary, EngagementNotificationsSignal, RefuseClassLowered},
+		{DataClassDetail, DataClassSummary, EngagementNotificationsInherit, RefuseClassLowered},
+		{DataClassSignal, DataClassSummary, EngagementNotificationsNone, RefuseSuppressed},
+		{"", DataClassSignal, EngagementNotificationsInherit, Admit},
+		{"", DataClassSignal, EngagementNotificationsNone, RefuseSuppressed},
+		{"detail ", DataClassSummary, EngagementNotificationsInherit, RefuseInvalidClass},
+		{"unknown", DataClassSignal, EngagementNotificationsNone, RefuseInvalidClass},
+	}
+	for _, c := range cases {
+		if got := AdmitRendered(c.rendered, c.channel, c.engagement); got != c.want {
+			t.Errorf("AdmitRendered(%q, %q, %s) = %d, want %d", c.rendered, c.channel, c.engagement, got, c.want)
+		}
+	}
+}
+
 func TestEffectiveDataClassLowerWins(t *testing.T) {
 	cases := []struct {
 		channel    DataClass

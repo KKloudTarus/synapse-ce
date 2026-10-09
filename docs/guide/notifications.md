@@ -288,6 +288,38 @@ differ: until that renderer lands (#1365) the response has `"rendered": false`
 and no message. It will then carry the message at the channel's data class, and
 the suppressed state when the engagement's override is `none`.
 
+### How a message renders
+
+The worker renders a delivery when it sends it, not when the event is recorded:
+
+1. It takes the snapshot stored with the event and keeps only the variables at or below
+   the effective data class (see [Data classes](#data-classes)). Time variables
+   (`occurred_at`, `deadline`, `last_seen_at`) are shown in the tenant's time zone, for
+   example `2026-10-01 15:00 +07`. A custom webhook body is read by programs, so there
+   they stay the stored RFC 3339 UTC instant, for example `2026-10-01T08:00:00Z`.
+2. On the first attempt it resolves the template (channel binding, tenant template for
+   the event, tenant `*` template, built-in, fallback) and pins it on the delivery as
+   `template_ref`: `tenant:<template>@<version>`, a built-in's
+   `builtin:<event>:<family>:<locale>@<build>`, or `fallback`.
+3. A retry renders with the pinned template, so activating a new version does not
+   change a message halfway through its retries. Every attempt records the
+   `template_ref` it rendered with (`GET .../deliveries/{id}/attempts`).
+4. The rendered fields go through the channel's formatter (Slack Block Kit, email text)
+   and the driver sends that payload. A webhook channel with `custom_body` sends its
+   rendered JSON body; any other webhook sends the event envelope.
+5. The attempt starts only if the channel class and engagement setting committed at
+   that moment still allow the class the message was rendered at. If either was
+   lowered in between, the attempt is refused and retried, and the retry renders again
+   at the lower class; under `none` the delivery is cancelled.
+
+If the template no longer renders, for example because it names a variable the
+catalog has since removed, the delivery falls back to the channel's built-in content,
+records `template_ref: fallback`, and is still sent. The same happens when the template
+renders nothing at the effective class: an engagement capped at `signal` leaves out every
+`summary` variable, and a template made only of those would otherwise send an empty
+message that chat providers refuse. The worker's built-in content fallback metric (#1465) counts it. A channel with no template that applies sends
+its built-in content as before.
+
 Every create, update, activation, rollback and archive is written to the audit
 log (`notification.template.created`, `.updated`, `.activated`, `.rolled_back`,
 `.archived`) with the actor, the key, the status, the versions involved, the new
@@ -334,9 +366,9 @@ previous and new values.
 Lowering a class or an override needs `manage_integrations`. Raising either one lets
 more data leave Synapse, so it needs `administer` and answers `403` otherwise.
 
-Classes take effect on message content when messages are rendered from templates
-(#1365). The built-in webhook and Slack bodies are not filtered yet; the engagement
-`none` setting already applies to every delivery.
+Classes apply to every message rendered from a template: a variable above the class
+renders empty. The built-in webhook envelope and the built-in Slack and email content
+are not filtered by class yet; the engagement `none` setting applies to every delivery.
 
 ## Personal inbox
 
@@ -471,10 +503,10 @@ channel's formatter so that no value can become formatting, a link or a mention:
   `allowed_mentions.parse` always empty, so `@everyone` and role mentions never ping. The driver adds
   `wait=true` so Discord returns the created message, whose ID is kept on the delivery.
 
-Until the send-time renderer (#1365, #1367) lands, these channels use the same built-in title and
-summary as Slack, and a bound chat template does not change their content yet. The formatters are the
-ones the template preview uses, so the switch will not change how a message is escaped. Deep links
-arrive with the renderer.
+When a tenant chat template applies, these channels send its rendered payload through their
+formatter (#1365); otherwise they use the same built-in title and summary as Slack. The formatters are
+the ones the template preview uses, so a message is escaped the same way in both. Deep links arrive
+with the channel templates (#1367).
 
 All four are `2xx` delivered, `408`, `429` and `5xx` retried with the usual budget, and any other
 status final. Each type can be switched off deployment-wide with

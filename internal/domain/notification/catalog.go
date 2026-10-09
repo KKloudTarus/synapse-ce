@@ -42,7 +42,7 @@ var catalog = map[EventType]EventSpec{
 		MaxDataClass: DataClassSummary,
 		Variables: variables(
 			signal("tier", "SLA tier of the finding"),
-			signal("deadline", "Remediation deadline, RFC 3339 UTC"),
+			instant("deadline", "Remediation deadline"),
 			signal("lead_time_hours", "Hours before the deadline the rule asked to be told"),
 			summary("engagement_name", "Name of the engagement"),
 			summary("finding_title", "Title of the finding"),
@@ -52,7 +52,7 @@ var catalog = map[EventType]EventSpec{
 		Type: EventFleetAgentOffline, Label: "Fleet agent offline", SchemaVersion: 1, SubjectKind: "fleet_agent",
 		MaxDataClass: DataClassSummary,
 		Variables: variables(
-			signal("last_seen_at", "Last heartbeat of the agent, RFC 3339 UTC"),
+			instant("last_seen_at", "Last heartbeat of the agent"),
 			summary("agent_name", "Name of the agent"),
 		),
 	},
@@ -105,7 +105,7 @@ var catalog = map[EventType]EventSpec{
 var commonVariables = []Variable{
 	signal("event_type", "Event type, such as scan.completed"),
 	signal("event_label", "Readable name of the event type"),
-	signal("occurred_at", "When the event happened, RFC 3339 UTC"),
+	instant("occurred_at", "When the event happened"),
 	summary("title", "Title of the event"),
 	summary("summary", "One-sentence summary of the event"),
 }
@@ -117,6 +117,11 @@ func variables(own ...Variable) []Variable {
 
 func signal(name, description string) Variable {
 	return Variable{Name: name, Class: DataClassSignal, Description: description}
+}
+
+// instant is a signal-class time variable, shown in the tenant's time zone.
+func instant(name, description string) Variable {
+	return Variable{Name: name, Class: DataClassSignal, Description: description, Format: VariableFormatTime}
 }
 
 func summary(name, description string) Variable {

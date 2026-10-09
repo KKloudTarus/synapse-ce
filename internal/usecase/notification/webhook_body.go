@@ -16,9 +16,9 @@ import (
 // activated, and again when a channel opts into it with custom_body, so a body that no longer
 // compiles is never bound.
 //
-// Rendering is not wired into delivery here: the send-time renderer (#1365) resolves the template
-// with ResolveTemplate, renders the body with RenderCustomWebhookBody and passes the bytes to the
-// webhook driver in NotificationWork.CustomWebhookBody. The driver sends exactly those bytes, signs
+// The send-time renderer (RenderMessage, #1365) resolves the template, renders the body with
+// RenderCustomWebhookBody and passes the bytes to the webhook driver in
+// NotificationWork.CustomWebhookBody. The driver sends exactly those bytes, signs
 // them and sets X-Synapse-Body: custom.
 
 // validateWebhookBody checks a webhook template's body: its JSON structure once, then every
