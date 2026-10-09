@@ -255,6 +255,35 @@ export function AITriageReviews() {
                         <p className="mt-2 text-xs text-tertiary">{pending ? 'Check the finding context before accepting or rejecting this proposal.' : 'The human decision is recorded below.'}</p>
                       </div>
 
+                      <dl data-ai-review-evidence className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                        <Meta
+                          label="Proposer"
+                          value={`${review.proposerProvider || 'unknown provider'} / ${review.proposerModelFamily || review.proposerModel} · ${review.verdict} · ${review.confidence}%`}
+                        />
+                        <Meta
+                          label="Verifier"
+                          value={
+                            review.verifierModel
+                              ? `${review.verifierProvider || 'unknown provider'} / ${review.verifierModelFamily || review.verifierModel} · ${review.verifierVerdict || '—'} · ${review.verifierConfidence}%`
+                              : 'Not attached'
+                          }
+                        />
+                        <Meta label="Prompt" value={review.promptVersion} />
+                        <Meta label="Policy" value={review.policyVersion} />
+                        <Meta label="Independence" value={review.independencePolicy.replaceAll('_', ' ')} />
+                        <Meta label="Policy reason" value={review.policyReason.replaceAll('_', ' ')} />
+                        <Meta
+                          label="Rollout mode"
+                          value={
+                            review.shadow
+                              ? review.wouldGateExempt
+                                ? 'Shadow · would exempt'
+                                : 'Shadow · held'
+                              : 'Enforce · held'
+                          }
+                        />
+                        <Meta label="Evidence" value={review.evidenceRef} mono />
+                      </dl>
 
                       <div className="mt-3.5">
                         <Link
@@ -360,38 +389,6 @@ export function AITriageReviews() {
                           <p className="mt-1.5 whitespace-pre-wrap text-secondary">{review.decisionRationale}</p>
                         </div>
                       )}
-                      <details data-ai-review-evidence className="mt-5 border-t border-secondary pt-4">
-                        <summary className="cursor-pointer text-sm font-semibold text-secondary">Model, policy and evidence details</summary>
-                        <div className="mt-4">                      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                        <Meta
-                          label="Proposer"
-                          value={`${review.proposerProvider || 'unknown provider'} / ${review.proposerModelFamily || review.proposerModel} · ${review.verdict} · ${review.confidence}%`}
-                        />
-                        <Meta
-                          label="Verifier"
-                          value={
-                            review.verifierModel
-                              ? `${review.verifierProvider || 'unknown provider'} / ${review.verifierModelFamily || review.verifierModel} · ${review.verifierVerdict || '—'} · ${review.verifierConfidence}%`
-                              : 'Not attached'
-                          }
-                        />
-                        <Meta label="Prompt" value={review.promptVersion} />
-                        <Meta label="Policy" value={review.policyVersion} />
-                        <Meta label="Independence" value={review.independencePolicy.replaceAll('_', ' ')} />
-                        <Meta label="Policy reason" value={review.policyReason.replaceAll('_', ' ')} />
-                        <Meta
-                          label="Rollout mode"
-                          value={
-                            review.shadow
-                              ? review.wouldGateExempt
-                                ? 'Shadow · would exempt'
-                                : 'Shadow · held'
-                              : 'Enforce · held'
-                          }
-                        />
-                        <Meta label="Evidence" value={review.evidenceRef} mono />
-                      </dl></div>
-                      </details>
                     </div>
                   )}
                 </div>

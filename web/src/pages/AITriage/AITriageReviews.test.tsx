@@ -38,10 +38,14 @@ describe('AITriageReviews', () => {
     renderPage()
     expect(await screen.findByText('SQL injection')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /SQL injection/i }))
-    expect(screen.getByText(/openai \/ model-a · refuted · 91%/)).toBeInTheDocument()
-    expect(screen.getByText('fp-gate-v4')).toBeInTheDocument()
-    expect(screen.getByText('provider')).toBeInTheDocument()
-    expect(screen.getByText('ev1')).toBeInTheDocument()
+    expect(screen.getByText('AI recommendation')).toBeVisible()
+    for (const value of [
+      'openai / model-a · refuted · 91%',
+      'anthropic / model-b · refuted · 90%',
+      'fp-triage-v2', 'fp-gate-v4', 'provider', 'severity requires human', 'Enforce · held', 'ev1',
+    ]) {
+      expect(screen.getByText(value)).toBeVisible()
+    }
     expect(screen.getAllByText('Suspected FP').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Verified').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Review required').length).toBeGreaterThan(0)

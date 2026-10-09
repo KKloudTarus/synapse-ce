@@ -58,7 +58,6 @@ export function WorkflowWalkthrough() {
       for (let parent = dialog?.parentElement; parent && parent !== document.body; parent = parent.parentElement) if (getComputedStyle(parent).position === 'fixed') layer = parent
       if (layer !== raised) { raised?.removeAttribute('data-demo-modal-layer'); raised = layer; raised?.setAttribute('data-demo-modal-layer', '') }
       if (onPage && !current[mode].completed.includes(stepIndex)) { restoreWorkflowControls(current); fillDemoControl(step, current) }
-      if (mode === 'ai' && onPage) document.querySelectorAll<HTMLDetailsElement>('[data-ai-review-evidence]').forEach(el => { el.open = true })
       const found = onPage ? findGuideTarget(step.target) : null
       const spotlight = onPage && step.spotlight ? findGuideTarget(step.spotlight) : found
       if (spotlight !== target && !document.querySelector('[role="listbox"]')) {

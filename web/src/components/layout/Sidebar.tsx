@@ -151,7 +151,7 @@ function renderDisabledItem({
           )}
         >
           {Icon && <Icon className="size-5 shrink-0 text-fg-quaternary" aria-hidden="true" />}
-          <span className={cn('min-w-0 whitespace-normal text-[13px] leading-4', collapsed ? 'sr-only' : 'inline')}>{label}</span>
+          <span className={cn('truncate', collapsed ? 'sr-only' : 'inline')}>{label}</span>
           {!collapsed && <SlashCircle01 className="ml-auto size-4 shrink-0 text-fg-quaternary" aria-hidden="true" />}
         </TooltipTrigger>
       </Tooltip>
@@ -215,7 +215,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
           <NavLink
             to={to}
             end={end}
-            title={label}
+            title={collapsed ? label : undefined}
             aria-label={collapsed ? label : undefined}
             onClick={() => {
               if (hasChildren && !isExpanded) {
@@ -227,7 +227,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
               const isActive = navActive && !isSubRouteActive && !shadowed
 
               return cn(
-                'group relative flex min-h-10 items-center rounded-lg text-sm font-semibold select-none transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
+                'group relative flex h-10 items-center rounded-lg text-sm font-semibold select-none transition-colors duration-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand',
                 collapsed ? 'justify-center px-0' : 'gap-3 px-3 py-2',
                 hasChildren && !collapsed && 'pr-10',
                 isActive
@@ -250,7 +250,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                       aria-hidden="true"
                     />
                   )}
-                  <span className={cn('min-w-0 whitespace-normal text-[13px] leading-4', collapsed ? 'sr-only' : 'inline')}>{label}</span>
+                  <span className={cn('truncate', collapsed ? 'sr-only' : 'inline')}>{label}</span>
                   {isActive && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-brand-solid" />}
                 </>
               )
@@ -397,7 +397,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'relative hidden min-h-0 shrink-0 flex-col bg-primary lg:flex',
+        'relative hidden min-h-0 shrink-0 flex-col bg-primary md:flex',
         collapsed ? 'w-18' : 'w-64',
       )}
     >
@@ -464,7 +464,7 @@ export function MobileSidebar({ open, onClose }: { open: boolean; onClose: () =>
     // `inert` while closed keeps the off-screen nav links out of the tab order,
     // so no focusable content lives inside the aria-hidden subtree.
     <div
-      className={cn('fixed inset-0 z-40 lg:hidden', !open && 'pointer-events-none')}
+      className={cn('fixed inset-0 z-40 md:hidden', !open && 'pointer-events-none')}
       aria-hidden={!open}
       inert={!open}
     >

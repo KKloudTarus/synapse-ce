@@ -196,7 +196,7 @@ function Shell() {
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
   return (
-    <div className="h-screen overflow-hidden bg-primary lg:grid lg:grid-cols-[auto_1fr]">
+    <div className="h-screen overflow-hidden bg-primary md:grid md:grid-cols-[auto_1fr]">
       <VulnerabilityExposureNotifier />
       <a
         href="#main-content"
@@ -214,14 +214,14 @@ function Shell() {
       </a>
       <Sidebar />
       <MobileSidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div className="flex h-full min-h-0 min-w-0 flex-col bg-primary">
+      <div className="flex min-h-0 min-w-0 flex-col bg-primary md:pt-4">
         {/* Mobile hamburger only */}
-        <div className="flex h-14 shrink-0 items-center justify-between px-4 lg:h-12 lg:justify-end">
+        <div className="flex h-14 shrink-0 items-center justify-between px-4">
           <button
             type="button"
             onClick={() => setMenuOpen(true)}
             aria-label="Open menu"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand lg:hidden"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand md:hidden"
           >
             <Menu01 className="size-5" />
           </button>
@@ -230,7 +230,7 @@ function Shell() {
         <main
           id="main-content"
           tabIndex={-1}
-          className="flex-1 overflow-auto bg-secondary p-4 sm:p-6 xl:p-8 outline-none lg:rounded-tl-2xl lg:border-t lg:border-l lg:border-secondary"
+          className="flex-1 overflow-auto bg-secondary p-4 sm:p-6 xl:p-8 outline-none md:rounded-tl-[40px] md:border-t md:border-l md:border-secondary md:shadow-md"
         >
           <ErrorBoundary key={location.pathname}>
             <Suspense fallback={<LoadingFallback />}>

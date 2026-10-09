@@ -15,7 +15,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
-- **Console layout and review presentation (#1568).** The persistent sidebar now starts at 1024px; 768–1023px uses the menu drawer. Navigation labels can wrap at 13px, page corners and table spacing are more compact, and Intelligence prioritizes three metrics with a separate feed-health summary. AI triage labels rejection “Reject proposal” (still reopens the finding for gates) and groups model, verifier, policy and evidence metadata in an expandable disclosure. These shared UI changes also apply outside playground mode.
+- **Console review and Intelligence presentation (#1568).** Intelligence prioritizes three metrics with a separate feed-health summary. AI triage adds a recommendation summary and labels rejection “Reject proposal” (still reopens the finding for gates), with the full model, verifier, policy and evidence metadata visible beside the decision. Shared table spacing and tooltip improvements also apply outside playground mode.
 
 ### Fixed
 
