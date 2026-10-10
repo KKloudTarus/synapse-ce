@@ -406,6 +406,8 @@ A person links a Slack account in **My profile → Slack**: they choose a worksp
 
 A personal Slack message is the app's direct message (`conversations.open`, then `chat.postMessage`) with the inbox title, the escaped summary and, when `SYNAPSE_PUBLIC_BASE_URL` is set, an **Open in Synapse** link. It is sent with the bot token of an enabled, unpaused Slack app channel of the same workspace, chosen by channel name; when none remains the job ends with `slack_workspace_unavailable`. Rate limits are retried with Slack's `Retry-After`.
 
+Direct messages need more of the app than channel posts. Besides the channel scopes, add the bot scopes `users:read` (linking) and `im:write` (opening the direct message), reinstall the app, and in the app's **App Home** turn on **Messages Tab**. Without the tab Slack refuses every direct message, so the verification code never arrives and the job ends with `slack_messages_tab_disabled`; a missing scope ends with `slack_missing_scope`. **Send code in Slack** only queues the message: the profile page reports it sent, and the failure is recorded only on the worker's job and in its log.
+
 ### Microsoft Teams personal delivery
 
 Teams Workflows webhooks cannot reach one person, so the operator registers one Azure Bot for the deployment (`SYNAPSE_TEAMS_BOT_APP_ID`, `SYNAPSE_TEAMS_BOT_APP_PASSWORD`, optional `SYNAPSE_TEAMS_BOT_TENANT_ID` for a single-tenant bot; see [Configuration](configuration.md)) with the messaging endpoint `https://<synapse>/api/v1/teams/messages`, and publishes a Teams app for it with the personal scope.
