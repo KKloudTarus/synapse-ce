@@ -369,3 +369,44 @@ func TestListSlackConversationsInputRules(t *testing.T) {
 		t.Fatalf("disabled type: %v", err)
 	}
 }
+
+// A PATCH that leaves out the immutable type still checks the new destination with Slack before
+// the administration transaction opens (the fake panics on a call inside it).
+func TestSlackBotRepointWithoutTypeChecksSlackOutsideTheTransaction(t *testing.T) {
+	f := newSlackFixture(t)
+	created, err := f.create(t, "C0000000001", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := f.workspace.calls
+	moved, err := f.svc.UpdateChannel(f.ctx, "ada", created.ID, ChannelInput{Name: "Security", Enabled: true, Revision: created.Revision,
+		Secret: otherSlackToken, ConversationID: "C0000000005", AllowDestinationChange: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.SecretVersion != created.SecretVersion+1 || f.workspace.calls != calls+2 {
+		t.Fatalf("moved = %+v, slack calls = %d", moved, f.workspace.calls-calls)
+	}
+	if cfg := f.sealedConfig(t, created.ID); cfg.BotToken != otherSlackToken || cfg.ChannelID != "C0000000005" {
+		t.Fatalf("sealed config = %#v", cfg)
+	}
+}
+
+// The transaction never asks Slack: a destination that was not prepared is refused, not checked.
+func TestVerifiedDestinationNeverCallsSlack(t *testing.T) {
+	f := newSlackFixture(t)
+	config := ports.SlackBotChannelConfig{BotToken: slackToken, ChannelID: "C0000000001"}
+	if _, err := f.svc.verifiedDestination(f.ctx, ChannelInput{}, config); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("unprepared destination: %v", err)
+	}
+	prepared := ChannelInput{verified: ports.SlackBotChannelConfig{BotToken: slackToken, ChannelID: "C0000000002"}}
+	if _, err := f.svc.verifiedDestination(f.ctx, prepared, config); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("different prepared destination: %v", err)
+	}
+	if f.workspace.calls != 0 {
+		t.Fatalf("slack calls = %d", f.workspace.calls)
+	}
+	if got, err := f.svc.verifiedDestination(f.ctx, ChannelInput{}, ports.SlackChannelConfig{URL: "https://hooks.slack.com/services/x"}); err != nil || got == nil {
+		t.Fatalf("webhook config: %v", err)
+	}
+}
