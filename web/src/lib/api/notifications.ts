@@ -385,6 +385,8 @@ export const notificationsApi = {
         team_ids: input.team_ids,
         all_teams: input.all_teams,
         channel_ids: input.channel_ids,
+        // Omitted would clear them: a toggle or an edit must keep the rule's people (#1415).
+        recipient_roles: input.recipient_roles ?? [],
         lead_time_seconds: input.lead_time_seconds,
         revision: input.revision,
       }),
