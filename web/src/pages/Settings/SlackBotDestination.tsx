@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../lib/api'
 import type { SlackConversation } from '../../lib/api'
 import { Button, Field, Input, Select } from '../../components/ui'
@@ -40,22 +40,40 @@ export function SlackBotDestinationFields({
   const typedToken = token.trim()
   const canList = !disabled && (SLACK_BOT_TOKEN_PATTERN.test(typedToken) || (!typedToken && !!channelId))
   const selected = conversations?.find((c) => c.id === conversationId.trim())
+  // Each listing belongs to one token (or one stored channel). Changing either starts a new
+  // generation, so a reply for the previous one can no longer fill the picker, show its error or
+  // clear the loading state of the current one.
+  const generation = useRef(0)
+  const invalidate = () => {
+    generation.current++
+    setConversations(null)
+    setWorkspace('')
+    setTruncated(false)
+    setLoading(false)
+    setError(null)
+  }
+  useEffect(() => {
+    generation.current++
+  }, [channelId])
 
   async function load() {
+    const current = ++generation.current
     setLoading(true)
     setError(null)
     try {
       const result = await api.listSlackConversations(
         typedToken ? { bot_token: typedToken } : { channel_id: channelId ?? '' },
       )
+      if (current !== generation.current) return
       setConversations(result.items)
       setWorkspace(result.team_name || result.team_id)
       setTruncated(result.truncated)
     } catch (e) {
+      if (current !== generation.current) return
       setConversations(null)
       setError(e instanceof ApiError ? e.message : 'Could not list Slack conversations')
     } finally {
-      setLoading(false)
+      if (current === generation.current) setLoading(false)
     }
   }
 
@@ -77,8 +95,9 @@ export function SlackBotDestinationFields({
           value={token}
           onChange={(e) => {
             onTokenChange(e.target.value)
-            // A different token is a different workspace; its conversations must be listed again.
-            setConversations(null)
+            // A different token is a different workspace; its conversations must be listed again,
+            // and a listing still on its way for the old token is dropped.
+            invalidate()
           }}
           placeholder="xoxb-…"
           autoComplete="new-password"

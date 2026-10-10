@@ -132,6 +132,32 @@ describe('Slack bot notification channel (#1383)', () => {
     expect(vi.mocked(api.createNotificationChannel).mock.calls[0][0]).toMatchObject({ conversation_id: 'C0000000002', allow_shared_conversation: true })
   })
 
+  it('drops a listing that arrives for a token the administrator already replaced', async () => {
+    let resolveA: (value: unknown) => void = () => {}
+    let rejectStale: (reason: unknown) => void = () => {}
+    vi.mocked(api.listSlackConversations)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveA = resolve }) as never)
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectStale = reject }) as never)
+    render(<Alerting />)
+    await chooseSlackBot()
+    const form = addForm()
+    fireEvent.change(form.getByLabelText('Bot token'), { target: { value: TOKEN } })
+    fireEvent.click(form.getByRole('button', { name: 'Load channels' }))
+    // The administrator switches to another app while A's listing is still on its way.
+    fireEvent.change(form.getByLabelText('Bot token'), { target: { value: TOKEN + 'B' } })
+    resolveA({ team_id: 'T0123', team_name: 'Acme', truncated: false, items: [{ id: 'C0000000001', name: 'security', is_private: false, is_shared: false, is_archived: false, is_member: true }] })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(form.queryByText(/channels? in Acme/)).not.toBeInTheDocument()
+    expect(form.queryByRole('combobox', { name: 'Slack channel' })).not.toBeInTheDocument()
+    // A failed listing for a replaced token shows no error either.
+    fireEvent.click(form.getByRole('button', { name: 'Load channels' }))
+    fireEvent.change(form.getByLabelText('Bot token'), { target: { value: TOKEN } })
+    rejectStale(new ApiError(400, 'invalid_auth'))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(form.queryByRole('alert')).not.toBeInTheDocument()
+    expect(form.getByRole('button', { name: 'Load channels' })).toBeEnabled()
+  })
+
   it('shows a Slack error from the picker', async () => {
     vi.mocked(api.listSlackConversations).mockRejectedValue(new ApiError(400, 'Slack bot channel: the bot token was refused (invalid_auth)'))
     render(<Alerting />)
