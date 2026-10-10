@@ -60,6 +60,8 @@ describe('personal delivery settings (#1415, #1418)', () => {
     render(<PersonalDelivery canManage eventTypes={events} />)
     fireEvent.click(await screen.findByRole('combobox', { name: 'Engagement' }))
     fireEvent.click(await screen.findByRole('option', { name: 'Payments' }))
+    // The picker names what is chosen: a lead, not an assignee.
+    expect(await screen.findByRole('searchbox', { name: 'Lead' })).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'Clear lead' }))
     await waitFor(() => expect(api.saveEngagementNotificationSetting).toHaveBeenCalledWith('eng-1', { external_notifications: 'signal', revision: 2, lead_user_id: '' }))
     expect(await screen.findByText('Engagement lead saved.')).toBeInTheDocument()

@@ -214,8 +214,7 @@ function EngagementLeads({ canManage }: { canManage: boolean }) {
         </Field>
         {engagement && setting && (
           <div className="space-y-2">
-            <span className="block text-sm font-medium text-secondary">Lead</span>
-            <UserPicker team="" allowAll value={lead} onChange={setLead} disabled={!canManage || busy} />
+            <UserPicker label="Lead" team="" allowAll value={lead} onChange={setLead} disabled={!canManage || busy} />
             <div className="flex gap-2">
               <Button type="button" loading={busy} disabled={!canManage || lead === (setting.lead_user_id ?? '')} onClick={() => void save(lead)}>
                 Save lead
