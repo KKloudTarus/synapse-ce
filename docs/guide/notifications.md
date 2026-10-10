@@ -559,6 +559,23 @@ Slack answers most errors with HTTP 200 and `ok: false`; they are recorded as `s
 towards the channel's automatic pause. Switch the type off deployment-wide with
 `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot`.
 
+**Rolling out and rolling back.** Workers deliver; the API only saves channels. A worker from an
+earlier release has no `slack_bot` driver: if it claims a `notification.deliver` job for a Slack
+app channel it ends that delivery with `unsupported_channel` (dead letter), and the message is lost.
+Upgrade in this order:
+
+1. Apply migration `0223`.
+2. Upgrade every `synapse-worker`.
+3. Upgrade the API. Until all workers run this release, keep
+   `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the API so no one can create a Slack app
+   channel early.
+   Do not set it on the older workers: they do not know the type and refuse to start.
+
+To roll back, first set `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the API and the
+workers of this release: queued Slack app deliveries are cancelled with `provider_disabled` instead of
+reaching an older worker. Then downgrade the API, then the workers. Existing Slack app channels stay
+stored; migration `0223` down only restores the template family guard.
+
 ## Retry and cutover behavior
 
 Network errors, HTTP 408/429/5xx, and SMTP 4xx responses retry with exponential

@@ -30,8 +30,9 @@ var (
 const slackBotDestination = "https://slack.com/…"
 
 var (
-	errSlackUnavailable = fmt.Errorf("%w: Slack bot channels are not available in this deployment", shared.ErrValidation)
-	errSlackShared      = fmt.Errorf("%w: the Slack conversation is shared with another workspace or organisation; an administrator must allow shared conversations for this channel", shared.ErrValidation)
+	errSlackUnavailable      = fmt.Errorf("%w: Slack bot channels are not available in this deployment", shared.ErrValidation)
+	errDestinationUnverified = fmt.Errorf("%w: the destination changed while it was being checked; save it again", shared.ErrConflict)
+	errSlackShared           = fmt.Errorf("%w: the Slack conversation is shared with another workspace or organisation; an administrator must allow shared conversations for this channel", shared.ErrValidation)
 )
 
 func validateSlackBotChannel(in ChannelInput, _ bool) (ports.NotificationChannelConfig, string, []string, error) {
@@ -202,13 +203,18 @@ func (s *Service) prepareDestination(ctx context.Context, in ChannelInput) (Chan
 	return in, nil
 }
 
-// verifiedDestination returns the configuration to seal: the one prepareDestination checked when
-// it matches what the transaction validated, or the result of checking it now.
-func (s *Service) verifiedDestination(ctx context.Context, in ChannelInput, config ports.NotificationChannelConfig) (ports.NotificationChannelConfig, error) {
+// verifiedDestination returns the configuration to seal: the one prepareDestination checked before
+// the transaction opened. It runs inside the administration transaction, so it never calls a
+// provider: a provider-checked destination that was not prepared, or that differs from what was
+// prepared, is refused instead of being checked with the transaction held.
+func (s *Service) verifiedDestination(_ context.Context, in ChannelInput, config ports.NotificationChannelConfig) (ports.NotificationChannelConfig, error) {
 	if prepared, ok := in.verified.(ports.SlackBotChannelConfig); ok {
 		if current, same := config.(ports.SlackBotChannelConfig); same && current.BotToken == prepared.BotToken && current.ChannelID == prepared.ChannelID && current.AllowShared == prepared.AllowShared {
 			return prepared, nil
 		}
 	}
-	return s.verifyDestination(ctx, config)
+	if _, provider := config.(ports.SlackBotChannelConfig); provider {
+		return nil, errDestinationUnverified
+	}
+	return config, nil
 }
