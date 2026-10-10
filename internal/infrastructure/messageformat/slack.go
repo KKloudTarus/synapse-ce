@@ -31,7 +31,7 @@ func (Slack) Format(message ports.RenderedMessage) (ports.FormattedMessage, erro
 	if err != nil {
 		return ports.FormattedMessage{}, err
 	}
-	title := truncateRunes(strings.TrimSpace(msgtemplate.Sanitize(message.Fields["title"])), slackHeaderRunes)
+	title := truncateRunes(strings.TrimSpace(headerText(msgmarkdown.Parse(msgtemplate.Sanitize(message.Fields["title"])))), slackHeaderRunes)
 	blocks := []any{}
 	if title != "" {
 		blocks = append(blocks, map[string]any{"type": "header", "text": map[string]any{"type": "plain_text", "text": title, "emoji": false}})
@@ -140,3 +140,22 @@ type SlackBot struct{ Slack }
 var _ ports.NotificationFormatter = SlackBot{}
 
 func (SlackBot) ChannelType() notification.ChannelType { return notification.ChannelSlackBot }
+
+// headerText is the text a reader sees of a title: escapes resolved, emphasis and code markers
+// dropped, blocks joined by a space. A Block Kit header is plain_text, so a title rendered from a
+// template, whose variable values are escaped for the Markdown subset, would otherwise show the
+// backslashes ("<!channel>").
+func headerText(doc msgmarkdown.Document) string {
+	parts := make([]string, 0, len(doc.Blocks))
+	for _, block := range doc.Blocks {
+		switch v := block.(type) {
+		case msgmarkdown.Paragraph:
+			parts = append(parts, plainText(v.Inlines))
+		case msgmarkdown.List:
+			for _, item := range v.Items {
+				parts = append(parts, plainText(item))
+			}
+		}
+	}
+	return strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
+}

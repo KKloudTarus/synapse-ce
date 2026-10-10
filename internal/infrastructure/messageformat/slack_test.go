@@ -77,13 +77,14 @@ func slackTextsOf(t *testing.T, body []byte) (fallback string, header string, te
 func TestSlackInjectionValuesStayLiteral(t *testing.T) {
 	for _, value := range injectionValues {
 		clean := msgtemplate.Sanitize(value)
-		message := ports.RenderedMessage{Fields: map[string]string{"title": clean, "body": "Value: " + msgtemplate.EscapeMarkdown(clean)}}
+		// A template escapes a value in every field, the title included; the header shows it as it was.
+		message := ports.RenderedMessage{Fields: map[string]string{"title": msgtemplate.EscapeMarkdown(clean), "body": "Value: " + msgtemplate.EscapeMarkdown(clean)}}
 		out, err := Slack{}.Format(message)
 		if err != nil {
 			t.Fatalf("%q: %v", value, err)
 		}
 		fallback, header, texts := slackTextsOf(t, out.Body)
-		if header != strings.TrimSpace(clean) {
+		if header != strings.Join(strings.Fields(clean), " ") {
 			t.Errorf("%q: header %q", value, header)
 		}
 		if strings.ContainsAny(fallback, "<>") {
@@ -140,5 +141,19 @@ func TestSlackTitleIsBoundedAndEmptyPartsAreOmitted(t *testing.T) {
 	empty, _ := Slack{}.Format(ports.RenderedMessage{})
 	if string(empty.Body) != `{"blocks":[],"text":""}` {
 		t.Fatalf("empty message = %s", empty.Body)
+	}
+}
+
+// A title rendered from a template carries escaped values; the plain_text header shows the value,
+// not the escape backslashes.
+func TestSlackHeaderShowsTemplateValuesWithoutEscapes(t *testing.T) {
+	value := "Lỗi <!channel> [Reset](https://evil.example) @everyone **bold**"
+	out, err := Slack{}.Format(ports.RenderedMessage{Fields: map[string]string{"title": "Finding: " + msgtemplate.EscapeMarkdown(value), "body": "x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, header, _ := slackTextsOf(t, out.Body)
+	if header != "Finding: "+value || strings.Contains(header, `\`) {
+		t.Fatalf("header = %q", header)
 	}
 }
