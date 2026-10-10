@@ -33,9 +33,20 @@ describe('notification template API', () => {
     expect(options).toMatchObject({ method: 'POST', body: JSON.stringify({ revision: 4, version: 1 }) })
   })
 
-  it('has no built-ins until #1366 ships, without calling the API', async () => {
-    expect(await notificationTemplatesApi.listBuiltinNotificationTemplates()).toEqual([])
-    expect(fetch).not.toHaveBeenCalled()
+  it('lists the shipped built-ins from the read-only catalog endpoint', async () => {
+    respond({ items: [{ event_type: 'scan.completed', family: 'chat', locale: 'vi', fields: { title: 'Quét xong', body: 'Xem Synapse' } }] })
+    await expect(notificationTemplatesApi.listBuiltinNotificationTemplates()).resolves.toEqual([
+      { event_type: 'scan.completed', family: 'chat', locale: 'vi', fields: { title: 'Quét xong', body: 'Xem Synapse' } },
+    ])
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain('/api/v1/notifications/templates/builtins')
+  })
+
+  it('treats only a missing catalog route as an older server with no built-ins', async () => {
+    respond({ error: 'not found' }, 404)
+    await expect(notificationTemplatesApi.listBuiltinNotificationTemplates()).resolves.toEqual([])
+
+    respond({ error: 'unavailable' }, 503)
+    await expect(notificationTemplatesApi.listBuiltinNotificationTemplates()).rejects.toMatchObject({ status: 503 })
   })
 
   it('reads the structured body of an engine rejection', () => {

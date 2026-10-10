@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
 import { AlertTriangle, Plus, Save01, Trash01 } from '@untitledui/icons'
-import { Button, Card, ErrorState, Field, Input, Pill, Select, cn } from '../../components/ui'
+import { Button, Card, ErrorState, Field, Input, Pill, Select, Spinner, cn } from '../../components/ui'
 import { Checkbox } from '../../components/base/checkbox/checkbox'
 import { ConfirmDialog } from '../../components/synapse/ConfirmDialog'
 import { useToast } from '../../components/synapse/Toast'
 import { useFetch } from '../../hooks'
-import { api } from '../../lib/api'
+import { api, ApiError } from '../../lib/api'
+import type { EngagementExternalNotifications } from '../../lib/api'
 import { kindLabel } from '../../lib/format'
+import { canManageIntegrations, isAdminRole } from '../../lib/roles'
 import type { BusinessAsset, Engagement, ScopeTarget } from '../../lib/types'
 import { StatusPill } from '../Engagements'
 import { TARGET_KINDS } from './ReconTab'
@@ -15,6 +17,7 @@ export function SettingsTab({ eng, onUpdated }: { eng: Engagement; onUpdated: (e
   return (
     <div className="space-y-4">
       <LifecycleCard eng={eng} onUpdated={onUpdated} />
+      <ExternalNotificationCard key={eng.id} eng={eng} />
       <AssetAssignmentCard eng={eng} onUpdated={onUpdated} />
       <ScopeEditorCard eng={eng} onUpdated={onUpdated} />
       <WindowEditorCard eng={eng} onUpdated={onUpdated} />
@@ -22,6 +25,127 @@ export function SettingsTab({ eng, onUpdated }: { eng: Engagement; onUpdated: (e
       <OffensiveRoeCard eng={eng} onUpdated={onUpdated} />
       <LiveReconCard eng={eng} onUpdated={onUpdated} />
     </div>
+  )
+}
+
+const EXTERNAL_NOTIFICATION_OPTIONS: {
+  value: EngagementExternalNotifications
+  label: string
+}[] = [
+  { value: 'none', label: 'None — keep this engagement inside Synapse' },
+  { value: 'signal', label: 'Signal — event, severity, counts and link only' },
+  { value: 'inherit', label: 'Inherit — use each destination’s data class' },
+]
+
+function externalNotificationRank(value: EngagementExternalNotifications): number {
+  return EXTERNAL_NOTIFICATION_OPTIONS.findIndex((option) => option.value === value)
+}
+
+/** Controls how much information about this engagement may leave through notification channels. */
+export function ExternalNotificationCard({ eng }: { eng: Engagement }) {
+  const { data: me, loading: permissionsLoading } = useFetch(
+    () => api.me().catch(() => null),
+    { deps: [] },
+  )
+  const canManage = canManageIntegrations(me?.role)
+  const canAdmin = isAdminRole(me?.role)
+  const [refresh, setRefresh] = useState(0)
+  const { data: setting, loading, error, refetch } = useFetch(
+    () => api.getNotificationEngagementSetting(eng.id),
+    { enabled: canManage, deps: [eng.id, refresh] },
+  )
+  const [selection, setSelection] = useState<EngagementExternalNotifications>('inherit')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [hasConflict, setHasConflict] = useState(false)
+
+  useEffect(() => {
+    if (!setting) return
+    setSelection(setting.external_notifications)
+    if (!hasConflict) setSaveError(null)
+  }, [setting, hasConflict])
+
+  async function save() {
+    if (!setting || saving) return
+    setSaving(true)
+    setSaveError(null)
+    setHasConflict(false)
+    try {
+      await api.updateNotificationEngagementSetting(eng.id, {
+        external_notifications: selection,
+        revision: setting.revision,
+      })
+      setRefresh((current) => current + 1)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setHasConflict(true)
+        setSaveError('This setting changed elsewhere. It has been reloaded; review it before saving again.')
+        setRefresh((current) => current + 1)
+      } else {
+        setSaveError(e instanceof Error ? e.message : 'Could not save external notification setting')
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card title="External notifications">
+      {permissionsLoading ? (
+        <Spinner label="Loading notification permissions…" />
+      ) : !canManage ? (
+        <p className="text-sm text-tertiary">
+          Tenant administrators and integration administrators can view and manage external
+          notification limits for this engagement.
+        </p>
+      ) : loading ? (
+        <Spinner label="Loading external notification setting…" />
+      ) : error ? (
+        <div className="space-y-3">
+          <ErrorState message={error} />
+          <Button variant="secondary" onClick={refetch}>
+            Retry
+          </Button>
+        </div>
+      ) : setting ? (
+        <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+          <Field
+            label="External notification limit"
+            htmlFor="engagement-external-notifications"
+            hint={
+              selection === 'none'
+                ? 'No external channel receives events about this engagement.'
+                : canAdmin
+                  ? 'Raising the limit can disclose more event data to an external destination.'
+                  : 'You can lower this limit. Raising it requires a tenant administrator.'
+            }
+          >
+            <Select
+              id="engagement-external-notifications"
+              ariaDescribedBy="engagement-external-notifications-hint"
+              value={selection}
+              onValueChange={(value) =>
+                setSelection(value as EngagementExternalNotifications)
+              }
+              options={EXTERNAL_NOTIFICATION_OPTIONS.filter(
+                (option) =>
+                  canAdmin ||
+                  externalNotificationRank(option.value) <=
+                    externalNotificationRank(setting.external_notifications),
+              )}
+            />
+          </Field>
+          <Button
+            loading={saving}
+            disabled={saving || selection === setting.external_notifications}
+            onClick={() => void save()}
+          >
+            Save notification limit
+          </Button>
+          {saveError && <ErrorState message={saveError} />}
+        </div>
+      ) : null}
+    </Card>
   )
 }
 

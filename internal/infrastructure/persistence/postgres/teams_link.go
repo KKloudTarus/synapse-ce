@@ -13,14 +13,14 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// Microsoft Teams linking (#1420, migration 0224).
+// Microsoft Teams linking (#1420, migration 0229).
 
 // teamsLinkQuota is how many link attempts one person may make per hour, counted in the table email
 // and Slack verification requests use.
 const teamsLinkQuota = 5
 
 // TeamsLinkOffers reaches the global, owner-only link codes through the two SECURITY DEFINER
-// functions of migration 0224. It never opens a tenant session.
+// functions of migration 0229. It never opens a tenant session.
 type TeamsLinkOffers struct{ pool *pgxpool.Pool }
 
 // NewTeamsLinkOffers returns the offer store.

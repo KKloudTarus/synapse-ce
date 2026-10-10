@@ -163,6 +163,14 @@ func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, deliver
 	if err := r.admitRendered(tenant, stored.delivery, admission.DataClass); err != nil {
 		return notification.Attempt{}, err
 	}
+	if admission.RawEvent {
+		if admission.DataClass != notification.DataClassDetail {
+			return notification.Attempt{}, fmt.Errorf("%w: raw event requires detail admission", shared.ErrValidation)
+		}
+		if !r.channels[channel].RawEvent {
+			return notification.Attempt{}, fmt.Errorf("%w: raw event mode disabled", ports.ErrRetryable)
+		}
+	}
 	if !openDelivery(stored.delivery.State) {
 		return notification.Attempt{}, fmt.Errorf("notification delivery is terminal: %w", shared.ErrConflict)
 	}

@@ -39,7 +39,12 @@ func (Slack) Format(message ports.RenderedMessage) (ports.FormattedMessage, erro
 	if elements := slackRichText(msgmarkdown.Parse(message.Fields["body"]), links); len(elements) > 0 {
 		blocks = append(blocks, map[string]any{"type": "rich_text", "elements": elements})
 	}
-	body, err := json.Marshal(map[string]any{"text": escapeSlackControl(title), "blocks": blocks})
+	body, err := json.Marshal(map[string]any{
+		"text":         escapeSlackControl(title),
+		"blocks":       blocks,
+		"unfurl_links": false,
+		"unfurl_media": false,
+	})
 	if err != nil {
 		return ports.FormattedMessage{}, err
 	}

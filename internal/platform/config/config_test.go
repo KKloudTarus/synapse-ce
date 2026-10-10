@@ -1055,6 +1055,31 @@ func TestValidatePublicBaseURLRejectsUnsafeOrigins(t *testing.T) {
 	}
 }
 
+func TestNotificationUnsubscribeURLLoadAndValidation(t *testing.T) {
+	t.Setenv("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL", "https://mail.example/unsubscribe?list=security")
+	if cfg := Load(); cfg.NotificationUnsubscribeURL != "https://mail.example/unsubscribe?list=security" || cfg.ValidateNotificationUnsubscribeURL() != nil {
+		t.Fatalf("valid unsubscribe URL rejected: %+v", cfg)
+	}
+	for _, input := range []string{
+		"http://mail.example/unsubscribe", "/unsubscribe", "https://user:password@mail.example/unsubscribe",
+		"https://mail.example/unsubscribe\r\nBcc: attacker@example.com", " https://mail.example/unsubscribe",
+		"https://mail.example/unsubscribe path", "https://mail.example/<unsubscribe>",
+	} {
+		t.Run(input, func(t *testing.T) {
+			err := (Config{NotificationUnsubscribeURL: input}).ValidateNotificationUnsubscribeURL()
+			if err == nil {
+				t.Fatal("unsafe unsubscribe URL accepted")
+			}
+			if strings.Contains(err.Error(), "password") {
+				t.Fatal("validation leaked credentials")
+			}
+		})
+	}
+	if err := (Config{}).ValidateNotificationUnsubscribeURL(); err != nil {
+		t.Fatalf("unset unsubscribe URL rejected: %v", err)
+	}
+}
+
 func TestProductionOIDCRequiresPostgres(t *testing.T) {
 	cfg := Config{Environment: "production", OIDCEnabled: true, DBAutoMigrate: false}
 	if err := cfg.ValidateMigrationPosture(); err == nil {

@@ -54,7 +54,7 @@ type TeamsActivityVerifier interface {
 	Verify(ctx context.Context, authorization, serviceURL string) error
 }
 
-// TeamsLinkOffers keeps the global, owner-only link codes the bot hands out (migration 0224).
+// TeamsLinkOffers keeps the global, owner-only link codes the bot hands out (migration 0229).
 type TeamsLinkOffers interface {
 	// OfferTeamsLink stores a code digest with its sealed conversation reference. It returns false
 	// when the conversation already holds the most live codes it may.

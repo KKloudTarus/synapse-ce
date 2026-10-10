@@ -25,10 +25,12 @@ import (
 	// database keeps that independent of whether the runtime image ships /usr/share/zoneinfo.
 	_ "time/tzdata"
 
+	"github.com/KKloudTarus/synapse-ce/internal/adapter/notificationbuiltin"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/consolelink"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
@@ -172,11 +174,15 @@ func main() {
 		log.Error("notification kill switch invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateNotificationUnsubscribeURL(); err != nil {
+		log.Error("notification unsubscribe URL invalid", "err", err)
+		os.Exit(1)
+	}
 	// The worker reads the same kill switch as the API and checks it against the same driver
 	// registry, so both refuse a typo and agree on which channel types are off.
 	notificationSender := notificationsender.New(notificationsender.SMTPConfig{
 		Host: cfg.NotificationSMTPHost, Port: cfg.NotificationSMTPPort, From: cfg.NotificationSMTPFrom,
-		Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS,
+		Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS, UnsubscribeURL: cfg.NotificationUnsubscribeURL,
 	}, 10*time.Second)
 	disabledNotificationTypes, err := notificationSender.ResolveDisabled(cfg.NotificationProvidersDisabled)
 	if err != nil {
@@ -727,6 +733,15 @@ func main() {
 		// console.
 		notificationService.SetSlackDirect(sender)
 		notificationService.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
+		notificationService.SetBuiltinTemplates(notificationbuiltin.New())
+		if base := cfg.EffectivePublicBaseURL(); base != "" {
+			builder, linkErr := consolelink.NewBuilder(base)
+			if linkErr != nil {
+				log.Error("notification console link configuration invalid", "err", linkErr)
+				os.Exit(1)
+			}
+			notificationService.SetConsoleLinkBuilder(builder)
+		}
 		// Delivery metrics are emitted by this worker only: the API exposes
 		// aggregate queue health but never observes worker transport outcomes.
 		if cfg.MetricsEnabled {

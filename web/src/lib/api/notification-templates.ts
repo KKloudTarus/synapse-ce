@@ -171,10 +171,13 @@ export const notificationTemplatesApi = {
     req(templatePath(id, '/rollback'), { method: 'POST', body: JSON.stringify(input) }),
   archiveNotificationTemplate: (id: string, input: { revision: number }): Promise<NotificationTemplateDetail> =>
     req(templatePath(id, '/archive'), { method: 'POST', body: JSON.stringify({ revision: input.revision }) }),
-  /**
-   * Built-in default templates. They ship with #1366, which has not defined a route yet, so this
-   * resolves to an empty list without a request. When the route lands, fetch it here and keep
-   * treating a 404 (a server that predates it) as "none".
-   */
-  listBuiltinNotificationTemplates: async (): Promise<BuiltinNotificationTemplate[]> => [],
+  /** Built-in defaults; a 404 means the connected server predates this read-only route. */
+  listBuiltinNotificationTemplates: async (): Promise<BuiltinNotificationTemplate[]> => {
+    try {
+      return ((await req('/notifications/templates/builtins')) as { items?: BuiltinNotificationTemplate[] } | null)?.items ?? []
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return []
+      throw error
+    }
+  },
 }

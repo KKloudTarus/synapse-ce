@@ -261,6 +261,8 @@ func hostileWork(kind notification.ChannelType) ports.NotificationWork {
 	w := testWork(kind)
 	hostile := "[Reset password](https://evil.example) @everyone <!channel> <users/all> **bold** <@U1>"
 	w.Event.Data, _ = json.Marshal(map[string]string{"title": "Finding " + hostile, "summary": "Title: " + hostile})
+	w.Event.Context, _ = json.Marshal(map[string]map[string]string{"vars": {"title": "Finding " + hostile, "summary": "Title: " + hostile}})
+	w.Channel.DataClass = notification.DataClassSummary
 	return w
 }
 
@@ -382,6 +384,7 @@ func TestChatDriversReportBuiltInContentAsFallback(t *testing.T) {
 			server := newChatServer(t, func(w http.ResponseWriter) { _, _ = io.WriteString(w, tc.success) })
 			work := testWork(tc.kind)
 			work.Event.Data = json.RawMessage(`{}`)
+			work.Event.Context = json.RawMessage(`{}`)
 			result := chatSender(server).Send(context.Background(), work, tc.config(server.URL))
 			if !result.TemplateFallback {
 				t.Fatalf("result = %+v", result)
@@ -389,7 +392,9 @@ func TestChatDriversReportBuiltInContentAsFallback(t *testing.T) {
 			if !strings.Contains(string(server.body), "vulnerability_action.created") {
 				t.Errorf("fallback content does not name the event type: %s", server.body)
 			}
-			if result = chatSender(server).Send(context.Background(), testWork(tc.kind), tc.config(server.URL)); result.TemplateFallback {
+			safe := testWork(tc.kind)
+			safe.Channel.DataClass = notification.DataClassSummary
+			if result = chatSender(server).Send(context.Background(), safe, tc.config(server.URL)); result.TemplateFallback {
 				t.Errorf("event with title and summary reported as fallback: %+v", result)
 			}
 		})

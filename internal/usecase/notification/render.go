@@ -59,6 +59,8 @@ type RenderResult struct {
 	Formatted *ports.FormattedMessage
 	// CustomBody is a webhook channel's rendered custom JSON body (#1376).
 	CustomBody []byte
+	// WebhookBody is the default versioned webhook envelope rendered from the filtered context.
+	WebhookBody []byte
 	// Fallback reports that a template applied but failed to render, so the built-in content is
 	// sent instead (recorded as template_fallback).
 	Fallback bool
@@ -103,14 +105,14 @@ func (s *Service) renderAt(ctx context.Context, in RenderInput, class domain.Dat
 		out.Message.TemplateRef = refFallback
 		return out, nil
 	}
-	vars, err := s.renderVars(ctx, in, spec, class, resolution.Family)
+	context, err := s.renderContext(ctx, in, spec, class, resolution.Family)
 	if err != nil {
 		return RenderResult{}, err
 	}
 	if resolution.Family == domain.FamilyWebhook {
-		return s.renderWebhookBody(out, in.Channel, resolution, vars), nil
+		return s.renderWebhookBody(out, in.Channel, in.Event, resolution, context), nil
 	}
-	rendered, err := renderFields(resolution, fields, vars)
+	rendered, err := renderFields(resolution, fields, context.Data())
 	// A template whose variables are all above the effective class renders nothing: the class
 	// leaves a variable out as empty text, not as an error. An empty message would be refused by
 	// chat providers (and counted against the channel) or sent blank by email, so it falls back.
@@ -118,6 +120,7 @@ func (s *Service) renderAt(ctx context.Context, in RenderInput, class domain.Dat
 		return fallback(out), nil
 	}
 	out.Message.Fields = rendered
+	out.Message.Links = s.renderLinks(in.Event)
 	if formatter, ok := s.formatters[in.Channel.Type]; ok {
 		formatted, err := formatter.Format(out.Message)
 		if err != nil {
@@ -214,28 +217,28 @@ func templateFields(r TemplateResolution) map[string]string {
 	return nil
 }
 
-// renderVars is the snapshot filtered to the effective class, with time variables shown in the
-// tenant's zone.
-func (s *Service) renderVars(ctx context.Context, in RenderInput, spec domain.EventSpec, class domain.DataClass, family domain.TemplateFamily) (map[string]string, error) {
+// renderContext is the snapshot filtered to the effective class, with human-facing time variables
+// shown in the tenant's zone. Lists remain bounded and class-filtered with their declared fields.
+func (s *Service) renderContext(ctx context.Context, in RenderInput, spec domain.EventSpec, class domain.DataClass, family domain.TemplateFamily) (domain.TemplateContext, error) {
 	snapshot, err := domain.DecodeTemplateContext(in.Event.Context)
 	if err != nil {
-		return nil, err
+		return domain.TemplateContext{}, err
 	}
-	vars := snapshot.Filter(spec, class).Vars
+	filtered := snapshot.Filter(spec, class)
 	// A webhook body is read by programs, so its times stay the stored RFC 3339 UTC instants.
 	if family == domain.FamilyWebhook {
-		return vars, nil
+		return filtered, nil
 	}
 	location, err := s.tenantLocation(ctx, in.Channel.TenantID)
 	if err != nil {
-		return nil, err
+		return domain.TemplateContext{}, err
 	}
 	for _, v := range spec.Variables {
-		if value, ok := vars[v.Name]; ok && v.Format == domain.VariableFormatTime {
-			vars[v.Name] = presentTime(value, location)
+		if value, ok := filtered.Vars[v.Name]; ok && v.Format == domain.VariableFormatTime {
+			filtered.Vars[v.Name] = presentTime(value, location)
 		}
 	}
-	return vars, nil
+	return filtered, nil
 }
 
 // tenantLocation is the tenant's time zone, UTC when it saved none or the zone no longer loads.
@@ -269,7 +272,7 @@ func presentTime(value string, loc *time.Location) string {
 }
 
 // renderFields renders every content field of the family.
-func renderFields(r TemplateResolution, sources map[string]string, vars map[string]string) (map[string]string, error) {
+func renderFields(r TemplateResolution, sources map[string]string, data msgtemplate.Data) (map[string]string, error) {
 	schemas, err := templateSchemas(r.EventType)
 	if err != nil || len(schemas) != 1 {
 		return nil, fmt.Errorf("%w: no template schema for %s", shared.ErrValidation, r.EventType)
@@ -284,7 +287,7 @@ func renderFields(r TemplateResolution, sources map[string]string, vars map[stri
 		if err != nil {
 			return nil, err
 		}
-		rendered, err := tmpl.Render(msgtemplate.Data{Vars: vars}, maxRenderedRunes)
+		rendered, err := tmpl.Render(data, maxRenderedRunes)
 		if err != nil {
 			return nil, err
 		}
@@ -293,14 +296,18 @@ func renderFields(r TemplateResolution, sources map[string]string, vars map[stri
 	return out, nil
 }
 
-// renderWebhookBody renders a webhook channel's custom body when it opted into one; otherwise the
-// driver sends the event envelope, which is not a fallback.
-func (s *Service) renderWebhookBody(out RenderResult, channel domain.Channel, r TemplateResolution, vars map[string]string) RenderResult {
+// renderWebhookBody renders an opted-in custom body or the versioned envelope from the
+// class-filtered context. Neither path falls back to raw event data.
+func (s *Service) renderWebhookBody(out RenderResult, channel domain.Channel, event domain.Event, r TemplateResolution, context domain.TemplateContext) RenderResult {
 	if !channel.CustomBody {
-		out.Message.TemplateRef = refFallback
+		body, err := domain.RenderWebhookEnvelopeWithLinks(event, context, webhookLinks(s.renderLinks(event)))
+		if err != nil {
+			return fallback(out)
+		}
+		out.WebhookBody = body
 		return out
 	}
-	body, ok, err := RenderCustomWebhookBody(r, vars)
+	body, ok, err := RenderCustomWebhookBody(r, context.Data())
 	if err != nil || !ok {
 		return fallback(out)
 	}
@@ -319,7 +326,7 @@ func blank(fields map[string]string) bool {
 }
 
 func fallback(out RenderResult) RenderResult {
-	out.Message.Fields, out.Formatted, out.CustomBody = nil, nil, nil
+	out.Message.Fields, out.Formatted, out.CustomBody, out.WebhookBody = nil, nil, nil, nil
 	out.Message.TemplateRef = refFallback
 	out.Fallback = true
 	return out

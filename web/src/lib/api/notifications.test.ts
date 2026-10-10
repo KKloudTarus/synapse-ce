@@ -127,6 +127,27 @@ describe('notification API', () => {
     expect(body).not.toHaveProperty('template_id')
     expect(body).not.toHaveProperty('locale')
   })
+  it('reads and updates an engagement external notification limit with its revision', async () => {
+    respond({ engagement_id: 'eng/1', external_notifications: 'signal', revision: 4 })
+    expect(
+      await notificationsApi.getNotificationEngagementSetting('eng/1'),
+    ).toMatchObject({ external_notifications: 'signal', revision: 4 })
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain(
+      '/notifications/engagements/eng%2F1/settings',
+    )
+    respond({ engagement_id: 'eng/1', external_notifications: 'none', revision: 5 })
+    await notificationsApi.updateNotificationEngagementSetting('eng/1', {
+      external_notifications: 'none',
+      revision: 4,
+    })
+    const [url, options] = vi.mocked(fetch).mock.calls[1]
+    expect(String(url)).toContain('/notifications/engagements/eng%2F1/settings')
+    expect(options).toMatchObject({ method: 'PUT' })
+    expect(JSON.parse(String(options?.body))).toEqual({
+      external_notifications: 'none',
+      revision: 4,
+    })
+  })
   it('encodes delivery cursor and filters', async () => {
     respond({ items: [], next: 'next' })
     await notificationsApi.notificationDeliveryPage({

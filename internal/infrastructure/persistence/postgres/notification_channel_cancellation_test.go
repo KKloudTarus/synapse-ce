@@ -65,6 +65,9 @@ func newCancellationFixture(t *testing.T, pool *pgxpool.Pool, tenant shared.ID, 
 func startAttempt(t *testing.T, pool *pgxpool.Pool, tenant, delivery shared.ID, at time.Time) {
 	t.Helper()
 	err := WithTenant(context.Background(), pool, tenant.String(), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(context.Background(), `SELECT set_config('synapse.notification_delivery_capability','current-filter-v1',true)`); err != nil {
+			return err
+		}
 		_, err := tx.Exec(context.Background(), `INSERT INTO notification_delivery_attempts(tenant_id,id,delivery_id,attempt_number,started_at,outcome) VALUES($1,$2,$3,1,$4,'started')`,
 			tenant, "attempt-"+delivery.String(), delivery, at)
 		return err

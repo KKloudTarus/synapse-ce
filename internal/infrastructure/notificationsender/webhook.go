@@ -31,6 +31,10 @@ func (d webhookDriver) Send(ctx context.Context, w ports.NotificationWork, confi
 	if !ok {
 		return ports.NotificationSendResult{ErrorCode: "channel_config_invalid"}
 	}
+	class, deliver := notification.EffectiveDataClass(w.Channel.Class(), w.Engagement)
+	if !deliver {
+		return ports.NotificationSendResult{ErrorCode: notification.CodeEngagementSuppressed}
+	}
 	custom := len(w.CustomWebhookBody) > 0
 	var body []byte
 	if custom {
@@ -38,9 +42,19 @@ func (d webhookDriver) Send(ctx context.Context, w ports.NotificationWork, confi
 			return ports.NotificationSendResult{ErrorCode: "custom_body_invalid"}
 		}
 		body = w.CustomWebhookBody
-	} else {
+	} else if w.Channel.RawEvent && class == notification.DataClassDetail {
 		var err error
 		if body, err = json.Marshal(w.Event); err != nil {
+			return ports.NotificationSendResult{ErrorCode: "encode_failed"}
+		}
+	} else if len(w.WebhookBody) > 0 {
+		if len(w.WebhookBody) > notification.MaxRenderedWebhookBodyBytes || !json.Valid(w.WebhookBody) {
+			return ports.NotificationSendResult{ErrorCode: "webhook_body_invalid"}
+		}
+		body = w.WebhookBody
+	} else {
+		var err error
+		if body, err = filteredWebhookEnvelope(w, class); err != nil {
 			return ports.NotificationSendResult{ErrorCode: "encode_failed"}
 		}
 	}
@@ -59,6 +73,21 @@ func (d webhookDriver) Send(ctx context.Context, w ports.NotificationWork, confi
 		req.Header.Set(notification.CustomWebhookBodyHeader, "custom")
 	}
 	return d.s.do(req)
+}
+
+// filteredWebhookEnvelope protects callers that invoke the sender without the worker's renderer.
+// It never falls back to Event.Data, so a new direct-send path cannot revive the legacy raw body.
+func filteredWebhookEnvelope(w ports.NotificationWork, class notification.DataClass) ([]byte, error) {
+	context, err := notification.DecodeTemplateContext(w.Event.Context)
+	if err != nil {
+		return nil, err
+	}
+	if spec, ok := notification.LookupEvent(w.Event.Type); ok {
+		context = context.Filter(spec, class)
+	} else {
+		context = notification.TemplateContext{Vars: map[string]string{}}
+	}
+	return notification.RenderWebhookEnvelope(w.Event, context)
 }
 
 // webhookSignature is "sha256=" and the hex HMAC-SHA256 of "<timestamp>.<body>" under secret.

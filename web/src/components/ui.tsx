@@ -241,6 +241,7 @@ export function Select({
   onValueChange,
   options,
   ariaLabel,
+  ariaDescribedBy,
   disabled,
   size = 'md',
   className,
@@ -251,6 +252,7 @@ export function Select({
   onValueChange: (value: string) => void
   options: SelectOption[]
   ariaLabel?: string
+  ariaDescribedBy?: string
   disabled?: boolean
   size?: 'sm' | 'md'
   className?: string
@@ -266,6 +268,7 @@ export function Select({
         ref={trigger}
         id={id}
         aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         className={cn(
           'input-inset group inline-flex items-center justify-between gap-2 rounded-lg border border-secondary bg-secondary text-primary transition-colors',
           size === 'sm' ? 'h-8 px-2.5 text-xs' : 'h-10 px-3 text-sm',

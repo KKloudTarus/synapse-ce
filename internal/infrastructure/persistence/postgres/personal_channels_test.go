@@ -15,7 +15,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// WS4 personal channels over PostgreSQL (migration 0224): Slack and Teams jobs from tenant defaults
+// WS4 personal channels over PostgreSQL (migration 0229): Slack and Teams jobs from tenant defaults
 // (#1418, #1419, #1420), rule recipient roles with an engagement lead (#1415), the send-time reload,
 // and the Teams link offers.
 

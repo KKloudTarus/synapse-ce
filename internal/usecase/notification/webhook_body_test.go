@@ -110,7 +110,7 @@ func TestRenderCustomWebhookBodyFromAResolution(t *testing.T) {
 	if err != nil || resolution.Tier != TierChannel {
 		t.Fatalf("resolution = %+v err=%v", resolution, err)
 	}
-	body, ok, err := RenderCustomWebhookBody(resolution, map[string]string{"title": `nightly","ok":false`})
+	body, ok, err := RenderCustomWebhookBody(resolution, msgtemplate.Data{Vars: map[string]string{"title": `nightly","ok":false`}})
 	if err != nil || !ok {
 		t.Fatalf("render ok=%v err=%v", ok, err)
 	}
@@ -123,7 +123,7 @@ func TestRenderCustomWebhookBodyFromAResolution(t *testing.T) {
 		"chat":       {Tier: TierChannel, Family: domain.FamilyChat, EventType: domain.EventScanCompleted, Version: resolution.Version},
 		"no version": {Tier: TierTenantEvent, Family: domain.FamilyWebhook, EventType: domain.EventScanCompleted},
 	} {
-		if body, ok, err := RenderCustomWebhookBody(r, nil); ok || body != nil || err != nil {
+		if body, ok, err := RenderCustomWebhookBody(r, msgtemplate.Data{}); ok || body != nil || err != nil {
 			t.Errorf("%s: body=%s ok=%v err=%v", name, body, ok, err)
 		}
 	}

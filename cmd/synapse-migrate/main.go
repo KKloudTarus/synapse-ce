@@ -3,7 +3,10 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -13,6 +16,15 @@ import (
 )
 
 func main() {
+	captureMode, allowPending, err := parseCaptureModeFlags(os.Args[1:])
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			writeCaptureModeUsage(os.Stderr)
+			return
+		}
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	cfg := config.Load()
 	log := logging.New(cfg.LogLevel)
 	if cfg.DBDSN == "" {
@@ -56,4 +68,39 @@ func main() {
 		}
 	}
 	log.Info("db migrations complete", "duration", time.Since(started))
+	if captureMode != "" {
+		pending, err := postgres.SetNotificationCaptureMode(ctx, migrationDSN, captureMode, allowPending)
+		if err != nil {
+			log.Error("notification capture mode change failed", "err", err)
+			os.Exit(1)
+		}
+		log.Info("notification capture mode changed", "mode", captureMode, "pending_identity_records", pending)
+	}
+}
+
+func parseCaptureModeFlags(args []string) (string, bool, error) {
+	flags, captureMode, allowPending := captureModeFlagSet(io.Discard)
+	if err := flags.Parse(args); err != nil {
+		return "", false, err
+	}
+	if *captureMode != "" && *captureMode != "legacy" && *captureMode != "identity" {
+		return "", false, fmt.Errorf("notification-capture-mode must be legacy or identity")
+	}
+	if *allowPending && *captureMode == "" {
+		return "", false, fmt.Errorf("allow-pending requires notification-capture-mode")
+	}
+	return *captureMode, *allowPending, nil
+}
+
+func writeCaptureModeUsage(output io.Writer) {
+	flags, _, _ := captureModeFlagSet(output)
+	flags.Usage()
+}
+
+func captureModeFlagSet(output io.Writer) (*flag.FlagSet, *string, *bool) {
+	flags := flag.NewFlagSet("synapse-migrate", flag.ContinueOnError)
+	flags.SetOutput(output)
+	captureMode := flags.String("notification-capture-mode", "", "switch notification capture to legacy or identity after migrating")
+	allowPending := flags.Bool("allow-pending", false, "allow a notification capture mode change while identity records remain pending")
+	return flags, captureMode, allowPending
 }

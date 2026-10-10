@@ -28,6 +28,9 @@ type RenderedLink struct {
 type FormattedMessage struct {
 	ContentType string
 	Body        []byte
+	// HTMLBody is the optional HTML alternative of an email message. It is produced from the same
+	// rendered Markdown document as Body and is ignored by non-email drivers.
+	HTMLBody []byte
 	// Subject is the email subject, already safe for a header; empty for other channels.
 	Subject string
 }

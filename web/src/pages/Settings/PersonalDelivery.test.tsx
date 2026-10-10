@@ -9,8 +9,8 @@ vi.mock('../../lib/api', async (original) => ({
     listPersonalDefaults: vi.fn(),
     savePersonalDefault: vi.fn(),
     listEngagements: vi.fn(),
-    getEngagementNotificationSetting: vi.fn(),
-    saveEngagementNotificationSetting: vi.fn(),
+    getNotificationEngagementSetting: vi.fn(),
+    updateNotificationEngagementSetting: vi.fn(),
     userChoices: vi.fn(),
   },
 }))
@@ -55,15 +55,15 @@ describe('personal delivery settings (#1415, #1418)', () => {
   it('clears an engagement lead keeping the external override', async () => {
     vi.mocked(api.listPersonalDefaults).mockResolvedValue([])
     vi.mocked(api.listEngagements).mockResolvedValue([{ id: 'eng-1', name: 'Payments' }] as never)
-    vi.mocked(api.getEngagementNotificationSetting).mockResolvedValue({ engagement_id: 'eng-1', external_notifications: 'signal', revision: 2, lead_user_id: 'ada' })
-    vi.mocked(api.saveEngagementNotificationSetting).mockResolvedValue({ engagement_id: 'eng-1', external_notifications: 'signal', revision: 3 })
+    vi.mocked(api.getNotificationEngagementSetting).mockResolvedValue({ engagement_id: 'eng-1', external_notifications: 'signal', revision: 2, lead_user_id: 'ada' })
+    vi.mocked(api.updateNotificationEngagementSetting).mockResolvedValue({ engagement_id: 'eng-1', external_notifications: 'signal', revision: 3 })
     render(<PersonalDelivery canManage eventTypes={events} />)
     fireEvent.click(await screen.findByRole('combobox', { name: 'Engagement' }))
     fireEvent.click(await screen.findByRole('option', { name: 'Payments' }))
     // The picker names what is chosen: a lead, not an assignee.
     expect(await screen.findByRole('searchbox', { name: 'Lead' })).toBeInTheDocument()
     fireEvent.click(await screen.findByRole('button', { name: 'Clear lead' }))
-    await waitFor(() => expect(api.saveEngagementNotificationSetting).toHaveBeenCalledWith('eng-1', { external_notifications: 'signal', revision: 2, lead_user_id: '' }))
+    await waitFor(() => expect(api.updateNotificationEngagementSetting).toHaveBeenCalledWith('eng-1', { external_notifications: 'signal', revision: 2, lead_user_id: '' }))
     expect(await screen.findByText('Engagement lead saved.')).toBeInTheDocument()
   })
 })
@@ -75,7 +75,7 @@ describe('engagement lead saves stay with their engagement (#1415)', () => {
     vi.mocked(api.listPersonalDefaults).mockResolvedValue([])
     vi.mocked(api.userChoices).mockResolvedValue({ items: [] } as never)
     vi.mocked(api.listEngagements).mockResolvedValue([{ id: 'eng-a', name: 'Alpha' }, { id: 'eng-b', name: 'Bravo' }] as never)
-    vi.mocked(api.getEngagementNotificationSetting).mockImplementation(async (id: string) =>
+    vi.mocked(api.getNotificationEngagementSetting).mockImplementation(async (id: string) =>
       id === 'eng-a'
         ? { engagement_id: 'eng-a', external_notifications: 'none', revision: 4, lead_user_id: 'ada' }
         : { engagement_id: 'eng-b', external_notifications: 'inherit', revision: 1, lead_user_id: 'bob' },
@@ -84,12 +84,12 @@ describe('engagement lead saves stay with their engagement (#1415)', () => {
 
   it('cannot switch engagement while a save is in flight, and saves against the shown one', async () => {
     let finish: (value: unknown) => void = () => {}
-    vi.mocked(api.saveEngagementNotificationSetting).mockImplementation(() => new Promise((resolve) => { finish = resolve }) as never)
+    vi.mocked(api.updateNotificationEngagementSetting).mockImplementation(() => new Promise((resolve) => { finish = resolve }) as never)
     render(<PersonalDelivery canManage eventTypes={events} />)
     fireEvent.click(await screen.findByRole('combobox', { name: 'Engagement' }))
     fireEvent.click(await screen.findByRole('option', { name: 'Alpha' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Clear lead' }))
-    await waitFor(() => expect(api.saveEngagementNotificationSetting).toHaveBeenCalledWith('eng-a', { external_notifications: 'none', revision: 4, lead_user_id: '' }))
+    await waitFor(() => expect(api.updateNotificationEngagementSetting).toHaveBeenCalledWith('eng-a', { external_notifications: 'none', revision: 4, lead_user_id: '' }))
     expect(screen.getByRole('combobox', { name: 'Engagement' })).toBeDisabled()
     finish({ engagement_id: 'eng-a', external_notifications: 'none', revision: 5 })
     expect(await screen.findByText('Engagement lead saved.')).toBeInTheDocument()
@@ -97,8 +97,8 @@ describe('engagement lead saves stay with their engagement (#1415)', () => {
     // Bravo then shows its own settings, and a save goes to Bravo with Bravo's revision and override.
     fireEvent.click(screen.getByRole('combobox', { name: 'Engagement' }))
     fireEvent.click(await screen.findByRole('option', { name: 'Bravo' }))
-    vi.mocked(api.saveEngagementNotificationSetting).mockResolvedValue({ engagement_id: 'eng-b', external_notifications: 'inherit', revision: 2 })
+    vi.mocked(api.updateNotificationEngagementSetting).mockResolvedValue({ engagement_id: 'eng-b', external_notifications: 'inherit', revision: 2 })
     fireEvent.click(await screen.findByRole('button', { name: 'Clear lead' }))
-    await waitFor(() => expect(api.saveEngagementNotificationSetting).toHaveBeenLastCalledWith('eng-b', { external_notifications: 'inherit', revision: 1, lead_user_id: '' }))
+    await waitFor(() => expect(api.updateNotificationEngagementSetting).toHaveBeenLastCalledWith('eng-b', { external_notifications: 'inherit', revision: 1, lead_user_id: '' }))
   })
 })

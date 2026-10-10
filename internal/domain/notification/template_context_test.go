@@ -34,6 +34,36 @@ func TestSnapshotBoundsLongValues(t *testing.T) {
 	}
 }
 
+func TestScanCompletedSnapshotKeepsCountsWithinContextBudget(t *testing.T) {
+	spec, ok := LookupEvent(EventScanCompleted)
+	if !ok {
+		t.Fatal("scan.completed specification is unavailable")
+	}
+	items := make([]map[string]string, 50)
+	for i := range items {
+		items[i] = map[string]string{
+			"id":       strings.Repeat("é", 1000),
+			"severity": "high",
+			"title":    strings.Repeat("🧨", 1000),
+			"status":   "open",
+		}
+	}
+	context := spec.SnapshotWithLists(map[string]string{
+		"total_count": "10000", "critical_count": "0", "high_count": "50", "medium_count": "0", "low_count": "0", "info_count": "9950",
+		"new_count": "0", "fixed_count": "0", "unchanged_count": "0", "delta_available": "false",
+	}, map[string][]map[string]string{"findings": items})
+	raw, err := context.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) > maxScanCompletedContextBytes {
+		t.Fatalf("scan context is %d bytes, want <= %d", len(raw), maxScanCompletedContextBytes)
+	}
+	if context.Vars["total_count"] != "10000" || len(context.Lists["findings"]) == 0 || len(context.Lists["findings"]) >= len(items) {
+		t.Fatalf("bounded context lost counts or did not trim findings: %+v", context)
+	}
+}
+
 func TestTemplateContextRoundTrips(t *testing.T) {
 	raw, err := TemplateContext{Vars: map[string]string{"title": "Scan completed"}}.Encode()
 	if err != nil {

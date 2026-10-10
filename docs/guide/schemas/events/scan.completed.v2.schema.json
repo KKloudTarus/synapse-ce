@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/scan.completed.v2.schema.json",
+  "title": "scan.completed event (v2)",
+  "description": "A persisted scan completion with a bounded result snapshot.",
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "type": {"type": "string", "const": "scan.completed"},
+    "source_kind": {"type": "string", "minLength": 1},
+    "source_id": {"type": "string", "minLength": 1},
+    "schema_version": {"type": "integer", "const": 2},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "data": {
+      "type": "object",
+      "properties": {
+        "title": {"type": "string"},
+        "summary": {"type": "string"},
+        "scan_id": {"type": "string", "minLength": 1},
+        "scan_kind": {"type": "string", "minLength": 1},
+        "total_count": {"type": "integer", "minimum": 0},
+        "critical_count": {"type": "integer", "minimum": 0},
+        "high_count": {"type": "integer", "minimum": 0},
+        "medium_count": {"type": "integer", "minimum": 0},
+        "low_count": {"type": "integer", "minimum": 0},
+        "info_count": {"type": "integer", "minimum": 0},
+        "new_count": {"type": "integer", "minimum": 0},
+        "fixed_count": {"type": "integer", "minimum": 0},
+        "unchanged_count": {"type": "integer", "minimum": 0},
+        "delta_available": {"type": "boolean"}
+      },
+      "required": ["title", "summary", "scan_id", "scan_kind", "total_count", "critical_count", "high_count", "medium_count", "low_count", "info_count", "new_count", "fixed_count", "unchanged_count", "delta_available"],
+      "additionalProperties": true
+    },
+    "engagement_id": {"type": "string"}
+  },
+  "required": ["id", "type", "source_kind", "source_id", "schema_version", "occurred_at", "data"],
+  "additionalProperties": true
+}
