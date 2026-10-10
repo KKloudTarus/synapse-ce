@@ -36,6 +36,7 @@ const (
 	rawIdentityPlatform   = "identity platform-owned person command via synapse_identity_person_command"
 	rawIdentityRecovery   = "identity recovery exact-digest activation routing"
 	rawIdentityInvitation = "identity invitation exact-code routing"
+	rawTeamsLink          = "Teams bot link-code offer and claim via synapse_offer_teams_link / synapse_claim_teams_link (no tenant until claimed)"
 )
 
 // rawPoolExceptions is the complete reviewed inventory. A new raw-pool statement anywhere in this
@@ -73,6 +74,8 @@ var rawPoolExceptions = map[string]rawPoolException{
 	"identity_sessions.go:ReplayEnterpriseSessionSwitch":           {1, "exact source digest/key/payload lookup before revoked-source response recovery"},
 	"identity_sessions.go:switchRetryDestinationTenant":            {1, "exact source digest/key/payload response-loss destination locator"},
 	"inbound_webhook.go:LookupInboundWebhook":                      {1, rawInboundWebhook},
+	"teams_link.go:OfferTeamsLink":                                 {1, rawTeamsLink},
+	"teams_link.go:ClaimTeamsLink":                                 {1, rawTeamsLink},
 	"jobqueue.go:AggregateJobQueueStats":                           {1, rawTenantEnumerate},
 	"jobqueue.go:Claim":                                            {1, rawTenantEnumerate},
 	"leader_store.go:Acquire":                                      {1, rawLegacyGlobal},
@@ -243,11 +246,15 @@ var securityDefinerExceptions = map[string]string{
 	"synapse_lock_bitbucket_inbound_webhook":                  "callable: Bitbucket endpoint liveness lock held across receipt and enqueue",
 	"synapse_provision_bitbucket_inbound_webhook":             "callable: tenant-bound Bitbucket webhook endpoint provisioning",
 	"synapse_rotate_bitbucket_inbound_webhook":                "callable: tenant-bound Bitbucket webhook secret rotation",
+	"synapse_offer_teams_link":                                "callable: Teams bot link-code offer with a per-conversation cap",
+	"synapse_claim_teams_link":                                "callable: Teams link-code exact-digest single-use claim",
 }
 
 // runtimeExecuteGrants is the complete set of function EXECUTE grants GrantRuntimePrivileges gives
 // the runtime role.
 var runtimeExecuteGrants = []string{
+	"synapse_offer_teams_link(TEXT,TEXT,TEXT,TIMESTAMPTZ)",
+	"synapse_claim_teams_link(TEXT)",
 	"synapse_lookup_inbound_webhook(TEXT)",
 	"synapse_admit_inbound_webhook(TEXT,TEXT,TEXT,TEXT,INT,BOOLEAN)",
 	"synapse_lock_inbound_webhook_event(TEXT,TEXT,TEXT,TEXT,TEXT)",

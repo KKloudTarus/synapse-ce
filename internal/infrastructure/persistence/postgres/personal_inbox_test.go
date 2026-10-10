@@ -45,7 +45,9 @@ func TestPersonalInboxProjectsAssigneeAndDoesNotResurrect(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, pref := range prefs {
-		available := notification.PersonalDeliveryAvailable(notification.EventType(pref.EventType)) && pref.Channel != "slack" && pref.Channel != "teams"
+		// The tenant has no Slack bot channel, so Slack cannot be chosen; Teams depends on the operator's
+		// bot, which the inbox service applies on top of the store (#1420).
+		available := notification.PersonalDeliveryAvailable(notification.EventType(pref.EventType)) && pref.Channel != "slack"
 		if pref.Available != available {
 			t.Fatalf("preference %s/%s available=%v, want %v", pref.EventType, pref.Channel, pref.Available, available)
 		}
