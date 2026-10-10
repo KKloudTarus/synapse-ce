@@ -87,6 +87,10 @@ func TestMigration0196NotificationChannelHealthSchema(t *testing.T) {
 	if err := exec(`DELETE FROM notification_channel_health_events WHERE id='h1'`); err == nil {
 		t.Error("health history row was deleted")
 	}
+	// Downgrading the runtime guards requires a disabled, drained webhook.
+	if err := exec(`UPDATE notification_channels SET enabled=false WHERE id='c1'`); err != nil {
+		t.Fatalf("disable fixture webhook before downgrade: %v", err)
+	}
 	if err := goose.DownTo(db, ".", migration0196Base); err != nil {
 		t.Fatalf("migrate down: %v", err)
 	}

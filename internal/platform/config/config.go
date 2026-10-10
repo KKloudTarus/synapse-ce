@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/consolelink"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
@@ -251,6 +252,9 @@ type Config struct {
 	NotificationSMTPUsername   string
 	NotificationSMTPPassword   string
 	NotificationSMTPRequireTLS bool
+	// NotificationUnsubscribeURL is an operator-owned receiver endpoint for tenant-channel email.
+	// It must remove the recipient using receiver-side state; Synapse never interpolates a recipient.
+	NotificationUnsubscribeURL string
 	// NotificationProvidersDisabled is the operator kill switch
 	// (SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED): channel and provider types no tenant may create,
 	// test or deliver to. Parsed trimmed, lowercased and deduplicated; the API and the worker check
@@ -978,6 +982,7 @@ func Load() Config {
 		TeamsBotAppID:              strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_APP_ID", "")),
 		TeamsBotAppPassword:        getenv("SYNAPSE_TEAMS_BOT_APP_PASSWORD", ""),
 		TeamsBotTenantID:           strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_TENANT_ID", "")),
+		NotificationUnsubscribeURL: getenv("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL", ""),
 		ReconViaWorker:             getbool("SYNAPSE_RECON_VIA_WORKER", false),
 		EgressBrokerSocket:         getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
 		EgressGrantAuthorityAddr:   getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR", ""),
@@ -1842,6 +1847,28 @@ func (c Config) ValidatePublicBaseURL() error {
 	}
 	if _, err := consolelink.NewBuilder(base); err != nil {
 		return errors.New("SYNAPSE_PUBLIC_BASE_URL must be an absolute HTTPS console URL without credentials, query, or fragment")
+	}
+	return nil
+}
+
+// ValidateNotificationUnsubscribeURL checks the optional operator-owned List-Unsubscribe target.
+// The destination cannot depend on a channel recipient or on tenant-provided content.
+func (c Config) ValidateNotificationUnsubscribeURL() error {
+	raw := c.NotificationUnsubscribeURL
+	if raw == "" {
+		return nil
+	}
+	if raw != strings.TrimSpace(raw) || strings.ContainsAny(raw, "<>") {
+		return errors.New("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL must be an absolute HTTPS URL without credentials or whitespace")
+	}
+	for _, r := range raw {
+		if unicode.IsControl(r) || unicode.IsSpace(r) {
+			return errors.New("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL must be an absolute HTTPS URL without credentials or whitespace")
+		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.Host == "" || u.Hostname() == "" || u.User != nil {
+		return errors.New("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL must be an absolute HTTPS URL without credentials or whitespace")
 	}
 	return nil
 }

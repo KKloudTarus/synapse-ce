@@ -45,6 +45,9 @@ type Variable struct {
 	Description string    `json:"description"`
 	// ListCap bounds the items of a list variable; zero marks a scalar.
 	ListCap int `json:"list_cap"`
+	// ItemFields declares the only fields each list item may expose to a
+	// template. It is empty for scalar variables.
+	ItemFields []string `json:"item_fields,omitempty"`
 	// Format is "time" for a variable that holds an RFC 3339 instant: the send-time render shows it
 	// in the tenant's time zone (#1365). Empty for plain text.
 	Format string `json:"format,omitempty"`
@@ -90,5 +93,8 @@ func (s EventSpec) Allows(f Filter) bool {
 func (s EventSpec) clone() EventSpec {
 	s.Filters = append(make([]Filter, 0, len(s.Filters)), s.Filters...)
 	s.Variables = append(make([]Variable, 0, len(s.Variables)), s.Variables...)
+	for i := range s.Variables {
+		s.Variables[i].ItemFields = append(make([]string, 0, len(s.Variables[i].ItemFields)), s.Variables[i].ItemFields...)
+	}
 	return s
 }

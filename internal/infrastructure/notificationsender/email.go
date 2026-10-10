@@ -1,13 +1,18 @@
 package notificationsender
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	"net/mail"
 	"net/smtp"
 	"net/textproto"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -29,11 +34,11 @@ func (d emailDriver) Send(ctx context.Context, w ports.NotificationWork, config 
 		return ports.NotificationSendResult{ErrorCode: "channel_config_invalid"}
 	}
 	if w.Formatted != nil {
-		// A template rendered this message (#1365): its subject and text body are sent.
-		return d.s.sendSMTP(ctx, w.Delivery.Recipient, w.Formatted.Subject, string(w.Formatted.Body), w.Delivery.ID)
+		// A template rendered this message: text and HTML originate from one message formatter.
+		return d.s.sendSMTPParts(ctx, w.Delivery.Recipient, w.Formatted.Subject, string(w.Formatted.Body), string(w.Formatted.HTMLBody), d.s.smtp.UnsubscribeURL, w.Delivery.ID)
 	}
 	title, summary, fallback := eventText(w)
-	result := d.s.sendSMTP(ctx, w.Delivery.Recipient, title, summary, w.Delivery.ID)
+	result := d.s.sendSMTPParts(ctx, w.Delivery.Recipient, title, summary, "", d.s.smtp.UnsubscribeURL, w.Delivery.ID)
 	result.TemplateFallback = fallback
 	return result
 }
@@ -57,6 +62,10 @@ func (s *Sender) SendIdentityRecoveryAlert(ctx context.Context, recipient string
 }
 
 func (s *Sender) sendSMTP(ctx context.Context, destination, title, summary string, messageID shared.ID) ports.NotificationSendResult {
+	return s.sendSMTPParts(ctx, destination, title, summary, "", "", messageID)
+}
+
+func (s *Sender) sendSMTPParts(ctx context.Context, destination, title, textBody, htmlBody, unsubscribeURL string, messageID shared.ID) ports.NotificationSendResult {
 	if strings.TrimSpace(s.smtp.Host) == "" || strings.TrimSpace(s.smtp.From) == "" {
 		return ports.NotificationSendResult{ErrorCode: "smtp_not_configured"}
 	}
@@ -69,7 +78,10 @@ func (s *Sender) sendSMTP(ctx context.Context, destination, title, summary strin
 		return ports.NotificationSendResult{ErrorCode: "smtp_recipient_invalid"}
 	}
 	mailID := "<" + messageID.String() + "@synapse.local>"
-	body := "From: " + from.Address + "\r\nTo: " + destination + "\r\nSubject: " + safeHeader(title) + "\r\nMessage-ID: " + mailID + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + limit(summary, 64<<10) + "\r\n"
+	body, err := smtpMessage(from.Address, destination, title, textBody, htmlBody, unsubscribeURL, mailID)
+	if err != nil {
+		return ports.NotificationSendResult{ErrorCode: "smtp_message_invalid"}
+	}
 	address := net.JoinHostPort(s.smtp.Host, strconv.Itoa(s.smtp.Port))
 	conn, err := s.dial(ctx, "tcp", address)
 	if errors.Is(err, safehttp.ErrBlockedDestination) {
@@ -112,7 +124,7 @@ func (s *Sender) sendSMTP(ctx context.Context, destination, title, summary strin
 	if err != nil {
 		return smtpResult(err)
 	}
-	if _, err = writer.Write([]byte(body)); err == nil {
+	if _, err = writer.Write(body); err == nil {
 		err = writer.Close()
 	}
 	if err != nil {
@@ -122,6 +134,95 @@ func (s *Sender) sendSMTP(ctx context.Context, destination, title, summary strin
 	// QUIT must not cause a duplicate of an already accepted message.
 	_ = client.Quit()
 	return ports.NotificationSendResult{StatusCode: 250}
+}
+
+// smtpMessage keeps untrusted content after the header separator and uses multipart/alternative
+// only when the formatter supplied an HTML representation. It deliberately does not advertise a
+// one-click List-Unsubscribe action because Synapse has no such authenticated endpoint.
+func smtpMessage(from, destination, title, textBody, htmlBody, unsubscribeURL, mailID string) ([]byte, error) {
+	var body bytes.Buffer
+	body.WriteString("From: " + from + "\r\n")
+	body.WriteString("To: " + destination + "\r\n")
+	body.WriteString("Subject: " + encodedSubject(title) + "\r\n")
+	body.WriteString("Message-ID: " + mailID + "\r\nMIME-Version: 1.0\r\n")
+	if unsubscribeURL != "" {
+		u, err := url.Parse(unsubscribeURL)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || strings.ContainsAny(unsubscribeURL, " \t\r\n<>") {
+			return nil, errors.New("invalid list unsubscribe URL")
+		}
+		body.WriteString("List-Unsubscribe: <" + u.String() + ">\r\n")
+	}
+	textBody = limit(textBody, 64<<10)
+	if htmlBody == "" {
+		body.WriteString("Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+		encoded := quotedprintable.NewWriter(&body)
+		if _, err := encoded.Write([]byte(textBody)); err != nil {
+			return nil, err
+		}
+		if err := encoded.Close(); err != nil {
+			return nil, err
+		}
+		body.WriteString("\r\n")
+		return body.Bytes(), nil
+	}
+	var multipartBody bytes.Buffer
+	writer := multipart.NewWriter(&multipartBody)
+	body.WriteString("Content-Type: multipart/alternative; boundary=\"")
+	body.WriteString(writer.Boundary())
+	body.WriteString("\"\r\n\r\n")
+	for _, part := range []struct {
+		contentType string
+		body        string
+	}{{"text/plain; charset=UTF-8", textBody}, {"text/html; charset=UTF-8", limit(htmlBody, 64<<10)}} {
+		header := textproto.MIMEHeader{}
+		header.Set("Content-Type", part.contentType)
+		header.Set("Content-Transfer-Encoding", "quoted-printable")
+		p, err := writer.CreatePart(header)
+		if err != nil {
+			return nil, err
+		}
+		encoded := quotedprintable.NewWriter(p)
+		if _, err := encoded.Write([]byte(part.body)); err != nil {
+			return nil, err
+		}
+		if err := encoded.Close(); err != nil {
+			return nil, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	body.Write(multipartBody.Bytes())
+	return body.Bytes(), nil
+}
+
+// encodedSubject folds only between MIME encoded-words. The title has already had line breaks
+// removed, and each continuation starts with one trusted whitespace byte as RFC 5322 requires.
+func encodedSubject(title string) string {
+	value := mime.QEncoding.Encode("UTF-8", safeHeader(title))
+	if !strings.HasPrefix(value, "=?") {
+		return value
+	}
+	const maxLine = 78
+	column := len("Subject: ")
+	var out strings.Builder
+	for _, word := range strings.Fields(value) {
+		if out.Len() == 0 && column+len(word) > maxLine {
+			out.WriteString("\r\n ")
+			column = 1
+		} else if out.Len() > 0 {
+			if column+1+len(word) > maxLine {
+				out.WriteString("\r\n ")
+				column = 1
+			} else {
+				out.WriteByte(' ')
+				column++
+			}
+		}
+		out.WriteString(word)
+		column += len(word)
+	}
+	return out.String()
 }
 
 func smtpResult(err error) ports.NotificationSendResult {

@@ -61,6 +61,37 @@ type TemplateDetail struct {
 	ArchivedTemplateID shared.ID `json:"archived_template_id,omitempty"`
 }
 
+// BuiltinTemplate is a read-only template shipped with the current build. Fields are copied from
+// the catalog so callers cannot mutate the catalog used by notification delivery.
+type BuiltinTemplate struct {
+	EventType domain.EventType      `json:"event_type"`
+	Family    domain.TemplateFamily `json:"family"`
+	Locale    tenancy.Locale        `json:"locale"`
+	Fields    map[string]string     `json:"fields"`
+}
+
+// ListBuiltinTemplates returns the current build's built-in catalog for read-only console use.
+func (s *Service) ListBuiltinTemplates() []BuiltinTemplate {
+	if s == nil || s.builtins == nil {
+		return []BuiltinTemplate{}
+	}
+	items := s.builtins.List()
+	out := make([]BuiltinTemplate, len(items))
+	for i, item := range items {
+		fields := make(map[string]string, len(item.Fields))
+		for field, source := range item.Fields {
+			fields[field] = source
+		}
+		out[i] = BuiltinTemplate{
+			EventType: item.EventType,
+			Family:    item.Family,
+			Locale:    item.Locale,
+			Fields:    fields,
+		}
+	}
+	return out
+}
+
 // TemplateValidationError is a template field the engine rejected. It names the field, the event
 // type it was checked against, the engine code and the line, and never carries the field's source:
 // Detail is the engine's capped identifier or parse message only.
@@ -96,10 +127,9 @@ func (e *TemplateValidationError) Unwrap() error { return shared.ErrValidation }
 // variables the production catalog does not have yet.
 var templateCatalog = domain.EventCatalog
 
-// templateSchema is the variable schema of one event: its EventSpec.Variables. Scalars become schema
-// variables. A list variable needs its item fields, which the catalog does not declare yet, so lists
-// are left out: a template that ranges over one is rejected as an unknown variable until the catalog
-// declares the fields (fail closed).
+// templateSchema is the variable schema of one event. The event catalog declares both scalar
+// variables and the bounded, flat fields a list item may expose, so templates cannot range over
+// undeclared snapshot data.
 type templateSchema struct {
 	eventType domain.EventType
 	schema    *msgtemplate.Schema
@@ -115,12 +145,15 @@ func templateSchemas(eventType domain.EventType) ([]templateSchema, error) {
 			continue
 		}
 		var vars []string
+		lists := make(map[string]msgtemplate.List)
 		for _, variable := range spec.Variables {
 			if variable.ListCap == 0 {
 				vars = append(vars, variable.Name)
+				continue
 			}
+			lists[variable.Name] = msgtemplate.List{Cap: variable.ListCap, Fields: append([]string(nil), variable.ItemFields...)}
 		}
-		schema, err := msgtemplate.NewSchema(msgtemplate.SchemaSpec{Vars: vars})
+		schema, err := msgtemplate.NewSchema(msgtemplate.SchemaSpec{Vars: vars, Lists: lists})
 		if err != nil {
 			return nil, fmt.Errorf("notification catalog schema for %s: %w", spec.Type, err)
 		}

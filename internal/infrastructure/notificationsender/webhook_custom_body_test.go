@@ -115,3 +115,29 @@ func TestWebhookRefusesAnInvalidCustomBody(t *testing.T) {
 		}
 	}
 }
+
+func TestWebhookRawModeUsesFilteredEnvelopeWhenEngagementLowersClass(t *testing.T) {
+	var captured capturedRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured.body = readAll(t, r)
+		captured.header = r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sender := New(SMTPConfig{}, time.Second)
+	sender.http = server.Client()
+	work := goldenWork(notification.ChannelWebhook)
+	work.Channel.DataClass = notification.DataClassDetail
+	work.Channel.RawEvent = true
+	work.Engagement = notification.EngagementNotificationsSignal
+	work.Event.Data = json.RawMessage(`{"title":"RAW-SECRET"}`)
+	work.Event.Context = json.RawMessage(`{"vars":{"scan_kind":"sast","title":"RAW-SECRET"}}`)
+	result := sender.Send(context.Background(), work, ports.WebhookChannelConfig{URL: server.URL, Secret: customBodySecret})
+	if result.ErrorCode != "" {
+		t.Fatalf("send = %+v", result)
+	}
+	if strings.Contains(string(captured.body), "RAW-SECRET") || !strings.Contains(string(captured.body), `"version":"synapse.notification.v1"`) {
+		t.Fatalf("engagement-lowered raw event body = %s", captured.body)
+	}
+	verifySignature(t, captured.header, captured.body)
+}

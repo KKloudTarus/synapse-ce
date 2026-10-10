@@ -21,6 +21,7 @@ export type NotificationRuleFilter =
   | 'team_ids'
   | 'lead_time_seconds'
 export type NotificationDataClass = 'signal' | 'summary' | 'detail'
+export type EngagementExternalNotifications = 'inherit' | 'signal' | 'none'
 export type NotificationLocale = 'en' | 'vi'
 /** A template a channel can bind: the head fields of the template API (#1370). */
 export interface NotificationTemplateOption {
@@ -127,6 +128,10 @@ export interface NotificationChannel {
   locale?: NotificationLocale
   /** A webhook channel sends its template body as a custom JSON body (#1376). */
   custom_body?: boolean
+  /** A webhook channel may send the raw event envelope when an administrator enables it. */
+  raw_event?: boolean
+  /** The most sensitive template data this destination may receive. */
+  data_class?: NotificationDataClass
 }
 export interface NotificationChannelInput {
   name: string
@@ -150,6 +155,26 @@ export interface NotificationChannelInput {
   locale?: NotificationLocale | ''
   /** Webhook only; needs a bound template. Omitted keeps the current value. */
   custom_body?: boolean
+  /** Webhook only; administrators may opt into a raw event envelope at detail class. */
+  raw_event?: boolean
+  /** Omitted keeps the channel class on update; new channels use their channel-type default. */
+  data_class?: NotificationDataClass
+}
+/** An engagement's notification settings (#1360, #1415). */
+export interface NotificationEngagementSetting {
+  engagement_id: string
+  external_notifications: EngagementExternalNotifications
+  revision: number
+  /** The engagement lead rules can notify (#1415). */
+  lead_user_id?: string
+  updated_at?: string
+  updated_by?: string
+}
+export interface NotificationEngagementSettingInput {
+  external_notifications: EngagementExternalNotifications
+  revision: number
+  /** A user ID, '' to clear, omitted to keep the current lead (#1415). */
+  lead_user_id?: string
 }
 /** A Slack conversation a bot token can post to (#1383). */
 export interface SlackConversation {
@@ -201,16 +226,6 @@ export interface NotificationPersonalDefault {
   /** The tenant never changed it; revision is then 0. */
   builtin: boolean
   revision: number
-}
-
-/** An engagement's notification settings (#1360, #1415). */
-export interface NotificationEngagementSetting {
-  engagement_id: string
-  external_notifications: 'inherit' | 'signal' | 'none'
-  revision: number
-  lead_user_id?: string
-  updated_at?: string
-  updated_by?: string
 }
 
 export interface NotificationDelivery {
@@ -302,14 +317,6 @@ export const notificationsApi = {
     input: Pick<NotificationPersonalDefault, 'event_type' | 'channel' | 'enabled' | 'revision'>,
   ): Promise<NotificationPersonalDefault> =>
     req('/notifications/personal-defaults', { method: 'PUT', body: JSON.stringify(input) }),
-  // An engagement's notification settings, including its lead (#1415).
-  getEngagementNotificationSetting: (id: string): Promise<NotificationEngagementSetting> =>
-    req(`/notifications/engagements/${encodeURIComponent(id)}/settings`),
-  saveEngagementNotificationSetting: (
-    id: string,
-    input: { external_notifications: NotificationEngagementSetting['external_notifications']; revision: number; lead_user_id?: string },
-  ): Promise<NotificationEngagementSetting> =>
-    req(`/notifications/engagements/${encodeURIComponent(id)}/settings`, { method: 'PUT', body: JSON.stringify(input) }),
   // The Slack bot channel form's conversation picker (#1383): a token being entered, or an existing
   // channel's sealed token. Administrators only; the token is never returned.
   listSlackConversations: (
@@ -358,6 +365,20 @@ export const notificationsApi = {
     req(
       `/notifications/channels/${encodeURIComponent(channelId)}/template-resolution?event_type=${encodeURIComponent(eventType)}`,
     ),
+  getNotificationEngagementSetting: (
+    engagementId: string,
+  ): Promise<NotificationEngagementSetting> =>
+    req(
+      `/notifications/engagements/${encodeURIComponent(engagementId)}/settings`,
+    ),
+  updateNotificationEngagementSetting: (
+    engagementId: string,
+    input: NotificationEngagementSettingInput,
+  ): Promise<NotificationEngagementSetting> =>
+    req(`/notifications/engagements/${encodeURIComponent(engagementId)}/settings`, {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    }),
   listNotificationRules: async (): Promise<NotificationRule[]> =>
     ((await req('/notifications/rules')) as { items?: NotificationRule[] })
       .items ?? [],

@@ -157,7 +157,7 @@ function EngagementLeads({ canManage }: { canManage: boolean }) {
     setSaved(false)
     setError(null)
     api
-      .getEngagementNotificationSetting(engagement)
+      .getNotificationEngagementSetting(engagement)
       .then((s) => {
         if (!live || current.current !== engagement) return
         setSetting(s)
@@ -175,7 +175,7 @@ function EngagementLeads({ canManage }: { canManage: boolean }) {
     setError(null)
     setSaved(false)
     try {
-      const stored = await api.saveEngagementNotificationSetting(target, {
+      const stored = await api.updateNotificationEngagementSetting(target, {
         external_notifications: setting.external_notifications,
         revision: setting.revision,
         lead_user_id: next,

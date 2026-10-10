@@ -33,6 +33,8 @@ type SMTPConfig struct {
 	Username   string
 	Password   string
 	RequireTLS bool
+	// UnsubscribeURL is an operator-managed recipient removal endpoint for tenant channel email.
+	UnsubscribeURL string
 }
 
 // Sender holds the shared transports and the driver registry. Drivers keep a pointer to it, so

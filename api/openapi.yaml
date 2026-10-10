@@ -3550,6 +3550,19 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
 
+  /api/v1/notifications/templates/builtins:
+    get:
+      tags: [notifications]
+      operationId: listBuiltinNotificationTemplates
+      summary: List the build's read-only default message templates
+      description: >
+        Requires `manage_integrations` (admin and integration_admin). Built-ins are shipped with
+        the running build, not tenant-specific, and may be copied into a draft but never edited.
+      responses:
+        '200': {description: Built-in defaults, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/BuiltinNotificationTemplate'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/notifications/templates/{nid}:
     parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
     get:
@@ -13472,6 +13485,7 @@ components:
         class: {$ref: '#/components/schemas/NotificationDataClass'}
         description: {type: string}
         list_cap: {type: integer, minimum: 0, description: Maximum items of a list variable; 0 marks a scalar}
+        item_fields: {type: array, items: {type: string}, description: Declared fields exposed on each bounded list item; omitted for scalar variables}
         format: {type: string, enum: [time], description: 'time marks an instant, rendered in the tenant time zone (#1365)'}
 
     NotificationDataClass:
@@ -13570,6 +13584,12 @@ components:
             The most sensitive content the channel's messages may carry (#1360). Omitted keeps the
             current class, or the type's default on creation (signal for chat, summary for email and
             webhooks). Raising it needs administer and is audited; lowering it needs manage_integrations.
+        raw_event:
+          type: boolean
+          description: >-
+            Webhook only: audited administrator opt-in to the legacy raw event envelope.
+            Requires detail data class and custom_body=false. Omitted retains the stored value;
+            new channels default to false. Engagement signal/none restrictions still take precedence.
 
     NotificationChannel:
       type: object
@@ -13590,6 +13610,7 @@ components:
         locale: {type: string, enum: [en, vi], description: The channel locale; absent when the tenant default applies}
         custom_body: {type: boolean, description: The webhook channel sends its template body as a custom JSON body (#1376)}
         data_class: {$ref: '#/components/schemas/NotificationDataClass'}
+        raw_event: {type: boolean, description: Explicit legacy raw webhook mode; false by default}
 
     NotificationEngagementSetting:
       type: object
@@ -13750,6 +13771,16 @@ components:
     NotificationTemplateStatus:
       type: string
       enum: [draft, active, archived]
+
+    BuiltinNotificationTemplate:
+      type: object
+      description: A read-only default shipped with the running build. Clone its fields into a tenant draft to customize it.
+      required: [event_type, family, locale, fields]
+      properties:
+        event_type: {type: string, description: A catalog event type or `*`}
+        family: {$ref: '#/components/schemas/NotificationTemplateFamily'}
+        locale: {type: string, enum: [en, vi, '*']}
+        fields: {type: object, additionalProperties: {type: string, maxLength: 16384}}
 
     NotificationTemplate:
       type: object

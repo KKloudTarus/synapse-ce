@@ -32,6 +32,8 @@ type eventBuilder struct {
 	data func(e domain.Event, facts sourceFacts) map[string]any
 	// vars returns the type's own variables; the common ones are added by Project.
 	vars func(e domain.Event, data eventData, facts sourceFacts) map[string]string
+	// lists returns declared list variables seeded by the source projection.
+	lists func(e domain.Event, data eventData, facts sourceFacts, lists map[string][]map[string]string) map[string][]map[string]string
 	// relevant re-checks a queued delivery against the source; nil means always relevant.
 	relevant func(ctx context.Context, facts ports.NotificationRelevance, work ports.NotificationWork, data eventData) (bool, error)
 }
@@ -72,6 +74,11 @@ func (b *EventBuilders) Project(_ context.Context, e domain.Event) (domain.Event
 		}
 	}
 	for name, value := range seed.Vars {
+		// scan.completed derives target from the hydration fact so userinfo,
+		// query, and fragments cannot survive from a source context.
+		if e.Type == domain.EventScanCompleted && name == "target" {
+			continue
+		}
 		if value != "" {
 			vars[name] = value
 		}
@@ -79,7 +86,18 @@ func (b *EventBuilders) Project(_ context.Context, e domain.Event) (domain.Event
 	for name, value := range vars {
 		vars[name] = scrubSecrets(value)
 	}
-	if e.Context, err = spec.Snapshot(vars).Encode(); err != nil {
+	lists := seed.Lists
+	if builder.lists != nil {
+		lists = builder.lists(e, data, facts, lists)
+	}
+	for _, items := range lists {
+		for _, item := range items {
+			for name, value := range item {
+				item[name] = scrubSecrets(value)
+			}
+		}
+	}
+	if e.Context, err = spec.SnapshotWithLists(vars, lists).Encode(); err != nil {
 		return e, err
 	}
 	if e.SubjectKind == "" {

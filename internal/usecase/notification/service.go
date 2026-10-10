@@ -48,6 +48,9 @@ type Service struct {
 	builtins ports.BuiltinTemplates
 	// formatters turn rendered content into each channel's wire payload (#1364, #1365).
 	formatters map[domain.ChannelType]ports.NotificationFormatter
+	// links builds typed, deployment-owned console URLs for rendered messages. A nil builder simply
+	// omits links, which is useful for local deployments without a public console origin.
+	links *consolelink.Builder
 	// events holds the per-type event builders; the worker asks them whether a delivery is still
 	// relevant (#1344).
 	events *EventBuilders
@@ -161,6 +164,8 @@ type ChannelInput struct {
 	// PermAdminister. Without it an update that raises the data class is refused with
 	// shared.ErrForbidden.
 	AllowClassRaise bool `json:"-"`
+	// RawEvent is absent to preserve the stored mode; enabling it requires administer.
+	RawEvent *bool `json:"raw_event,omitempty"`
 }
 
 func (s *Service) createChannel(ctx context.Context, actor string, in ChannelInput) (domain.Channel, error) {
@@ -195,6 +200,9 @@ func (s *Service) createChannel(ctx context.Context, actor string, in ChannelInp
 		return domain.Channel{}, err
 	}
 	c.TemplateBinding = applyBinding(domain.TemplateBinding{}, in)
+	if c.RawEvent, err = channelRawEvent(c, false, in); err != nil {
+		return domain.Channel{}, err
+	}
 	if err := s.validateBinding(ctx, tenant, c, nil); err != nil {
 		return domain.Channel{}, err
 	}
@@ -280,6 +288,9 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 		return domain.Channel{}, err
 	}
 	updated.TemplateBinding = applyBinding(current.TemplateBinding, in)
+	if updated.RawEvent, err = channelRawEvent(updated, current.RawEvent, in); err != nil {
+		return domain.Channel{}, err
+	}
 	// An unchanged binding is not revalidated, so a channel whose template was archived can still
 	// be renamed or switched off; resolution already skips that binding.
 	if updated.TemplateBinding != current.TemplateBinding {
@@ -298,6 +309,9 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 	extra := bindingAuditMetadata(current.TemplateBinding, updated.TemplateBinding, map[string]string{"destination_changed": "false"})
 	if updated.Class() != current.Class() {
 		extra["previous_data_class"] = string(current.Class())
+	}
+	if updated.RawEvent != current.RawEvent {
+		extra["previous_raw_event"] = strconv.FormatBool(current.RawEvent)
 	}
 	if previous := auditDestination(current); replace || !sameRecipients(current.Recipients, updated.Recipients) {
 		extra["destination_changed"] = "true"
@@ -692,10 +706,11 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	if err != nil {
 		return err
 	}
-	work.Formatted, work.CustomWebhookBody = render.Formatted, render.CustomBody
+	work.Formatted, work.CustomWebhookBody, work.WebhookBody = render.Formatted, render.CustomBody, render.WebhookBody
 	now := s.clock.Now().UTC()
 	aid := s.ids.NewID()
-	admission := ports.AttemptAdmission{TemplateRef: render.Message.TemplateRef, DataClass: render.Class}
+	admission := ports.AttemptAdmission{TemplateRef: render.Message.TemplateRef, DataClass: render.Class,
+		RawEvent: work.Channel.RawEvent && render.Class == domain.DataClassDetail}
 	if _, err = s.repo.BeginAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, now, admission); err != nil {
 		return err
 	}

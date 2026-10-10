@@ -7,10 +7,10 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// Migration 0224 (#1415, #1418, #1419, #1420): the new tables have RLS, the Teams link offers are
+// Migration 0229 (#1415, #1418, #1419, #1420): the new tables have RLS, the Teams link offers are
 // owner-only, and the migration rolls back and forward cleanly with Slack data in place.
-func TestMigration0224PersonalChannels(t *testing.T) {
-	isolated := newIsolatedMigrationDB(t, 224, 224)
+func TestMigration0229PersonalChannels(t *testing.T) {
+	isolated := newIsolatedMigrationDB(t, 229, 229)
 	db := isolated.db
 	for _, table := range []string{"notification_personal_defaults", "user_teams_conversations"} {
 		requireMigrationTable(t, db, table, true)
@@ -40,13 +40,13 @@ func TestMigration0224PersonalChannels(t *testing.T) {
 	if err := db.QueryRow(`SELECT synapse_offer_teams_link(repeat('a',64), repeat('c',64), 'sealed', now() + interval '10 minutes')`).Scan(&accepted); err != nil || !accepted {
 		t.Fatalf("offer = %v %v", accepted, err)
 	}
-	if err := goose.DownTo(db, ".", 223); err != nil {
-		t.Fatalf("down to 0223: %v", err)
+	if err := goose.DownTo(db, ".", 228); err != nil {
+		t.Fatalf("down to 0228: %v", err)
 	}
 	requireMigrationTable(t, db, "notification_personal_defaults", false)
 	requireMigrationTable(t, db, "teams_link_offers", false)
-	if err := goose.UpTo(db, ".", 224); err != nil {
-		t.Fatalf("up to 0224 again: %v", err)
+	if err := goose.UpTo(db, ".", 229); err != nil {
+		t.Fatalf("up to 0229 again: %v", err)
 	}
 	requireMigrationTable(t, db, "user_teams_conversations", true)
 }

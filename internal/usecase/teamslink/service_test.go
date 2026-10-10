@@ -48,7 +48,7 @@ type botError struct{ result ports.NotificationSendResult }
 func (e botError) Error() string                             { return "teams bot: " + e.result.ErrorCode }
 func (e botError) TeamsResult() ports.NotificationSendResult { return e.result }
 
-// memoryOffers mirrors the SECURITY DEFINER functions of migration 0224.
+// memoryOffers mirrors the SECURITY DEFINER functions of migration 0229.
 type memoryOffers struct {
 	mu     sync.Mutex
 	now    func() time.Time

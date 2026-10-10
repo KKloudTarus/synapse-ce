@@ -11,13 +11,12 @@ import (
 	"encoding/hex"
 	"regexp"
 	"strings"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 )
 
 // Placeholder is what a redacted secret is replaced with.
 const Placeholder = "[REDACTED]"
-
-// urlCredsRE matches the userinfo of a URL (scheme://user:pass@host or scheme://token@host).
-var urlCredsRE = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@`)
 
 var auditURLRE = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s<>"']+`)
 
@@ -32,7 +31,7 @@ func AuditText(s string, secrets []string) string {
 
 // URLCreds strips credentials embedded in any URL, keeping the scheme + host:
 // https://user:pass@h → https://***@h. (Generalizes acquire.credsRE / sca.credInErr.)
-func URLCreds(s string) string { return urlCredsRE.ReplaceAllString(s, "$1***@") }
+func URLCreds(s string) string { return privacy.ScrubURLCredentials(s) }
 
 // Bytes removes every non-empty secret value from data (exact substring match) and
 // strips URL-embedded creds. Used to scrub a tool's stdout/stderr before it is logged
