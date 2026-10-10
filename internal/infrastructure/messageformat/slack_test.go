@@ -18,6 +18,9 @@ func TestSlackGolden(t *testing.T) {
 	if out.ContentType != "application/json" || !json.Valid(out.Body) {
 		t.Fatalf("content type %q, valid JSON %v", out.ContentType, json.Valid(out.Body))
 	}
+	if !strings.Contains(string(out.Body), `"unfurl_links":false`) || !strings.Contains(string(out.Body), `"unfurl_media":false`) {
+		t.Fatalf("Slack unfurls were not disabled: %s", out.Body)
+	}
 	var pretty strings.Builder
 	var decoded any
 	_ = json.Unmarshal(out.Body, &decoded)
@@ -139,7 +142,7 @@ func TestSlackTitleIsBoundedAndEmptyPartsAreOmitted(t *testing.T) {
 		t.Fatalf("header runes %d, texts %v", len([]rune(header)), texts)
 	}
 	empty, _ := Slack{}.Format(ports.RenderedMessage{})
-	if string(empty.Body) != `{"blocks":[],"text":""}` {
+	if string(empty.Body) != `{"blocks":[],"text":"","unfurl_links":false,"unfurl_media":false}` {
 		t.Fatalf("empty message = %s", empty.Body)
 	}
 }

@@ -19,7 +19,7 @@ import (
 func testWork(kind notification.ChannelType) ports.NotificationWork {
 	at := time.Unix(1700000000, 0).UTC()
 	data, _ := json.Marshal(map[string]string{"title": "Critical <event>", "summary": "needs & review"})
-	return ports.NotificationWork{Delivery: notification.Delivery{TenantID: "tenant", ID: "delivery", EventID: "event", ChannelID: "channel", ChannelType: kind, State: notification.DeliveryPending}, Event: notification.Event{TenantID: "tenant", ID: "event", Type: notification.EventVulnerabilityAction, SourceKind: "test", SourceID: "source", SchemaVersion: 1, OccurredAt: at, Data: data}, Channel: notification.Channel{TenantID: "tenant", ID: "channel", Type: kind, Enabled: true, Name: "test", Revision: 1, SecretVersion: 1, CreatedAt: at, UpdatedAt: at}}
+	return ports.NotificationWork{Delivery: notification.Delivery{TenantID: "tenant", ID: "delivery", EventID: "event", ChannelID: "channel", ChannelType: kind, State: notification.DeliveryPending}, Event: notification.Event{TenantID: "tenant", ID: "event", Type: notification.EventVulnerabilityAction, SourceKind: "test", SourceID: "source", SchemaVersion: 1, OccurredAt: at, Data: data, Context: json.RawMessage(`{"vars":{"title":"Critical <event>","summary":"needs & review"}}`)}, Channel: notification.Channel{TenantID: "tenant", ID: "channel", Type: kind, Enabled: true, Name: "test", Revision: 1, SecretVersion: 1, CreatedAt: at, UpdatedAt: at}}
 }
 
 func TestWebhookSignsExactBody(t *testing.T) {

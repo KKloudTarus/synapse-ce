@@ -176,13 +176,14 @@ also linked from the Messaging group of **Settings → Integrations**) or over t
 API. The console lists custom templates by event type and channel family, and its
 editor offers a variable picker (each variable's description, data class and list
 cap), shows an engine rejection under the field it names with its line, and
-saves, activates, rolls back and archives versions. Built-in defaults will be
-listed there, read-only with "clone to customize", once the default template set
-ships. Every route needs `manage_integrations` (`admin` or `integration_admin`), takes the
+saves, activates, rolls back and archives versions. Built-in defaults are listed
+there read-only; clone one to begin a tenant draft with its exact fields. Every route needs
+`manage_integrations` (`admin` or `integration_admin`), takes the
 tenant from the session, and is registered only when notifications are enabled.
 
 | Route | Purpose |
 | --- | --- |
+| `GET /api/v1/notifications/templates/builtins` | List the running build's read-only defaults; clone one to start a tenant draft |
 | `GET /api/v1/notifications/templates` | List templates; filter by `event_type`, `family`, `locale`, `status`; page with `after` and `limit` |
 | `POST /api/v1/notifications/templates` | Create a draft with version 1 |
 | `GET /api/v1/notifications/templates/{id}` | The template, its newest version (`latest`) and the version that renders (`active`) |
@@ -227,7 +228,7 @@ common to all of them, so a `*` template can use these: `event_type`,
 | Event type | Signal | Summary | Detail |
 |---|---|---|---|
 | `vulnerability_action.created` | `severity`, `action_type` | `engagement_name` | |
-| `scan.completed` | `scan_kind` | `engagement_name`, `target` | |
+| `scan.completed` | `scan_kind`, severity counts, total and delta counts, `delta_available` | `engagement_name`, `target` | `findings` (at most 50 items) |
 | `quality_gate.failed` | `failed_conditions` | `project_name` | |
 | `sla.approaching_deadline` | `tier`, `deadline`, `lead_time_hours` | `engagement_name`, `finding_title` | |
 | `fleet.agent.offline` | `last_seen_at` | `agent_name` | |
@@ -243,22 +244,21 @@ such as `password=` or `api_key:`, bearer tokens, AWS access key IDs, PEM privat
 keys and URL credentials become `[redacted]` (or `***` for URL user info), so a
 secret a scanner put in a finding title never reaches a message. Each value is
 scrubbed both before and after invisible characters are removed, so a key split
-by one (`pass`, a zero-width space, `word=`) is still caught. Times are RFC 3339 in UTC. The snapshot is not part of the
-webhook body, which stays the raw event. Names (engagement, project, finding,
+by one (`pass`, a zero-width space, `word=`) is still caught. Times are RFC 3339 in UTC.
+The default webhook includes the context filtered to its effective class. Names (engagement, project, finding,
 team, assignee, agent, asset) are read from the source records when the event
 is recorded, so a later rename does not change a message already queued.
 `target` is the scan target without its credentials, query or fragment.
 A template reads a variable that has no value, for example the asset of an
 incident without one, as an empty string.
 
-Captured sources (scan jobs, quality gates, incidents) are recorded by a
-database trigger. The worker can also compose an event's data from the source
-rows when a captured record carries only its identity, producing the same object
-the webhook body has always carried; the trigger keeps writing the data until
-every running worker can compose it. No event declares a list variable yet, so a template
-cannot `range` over one. The `webhook` family's `body` is compiled as text; the
-structured JSON body of a custom webhook is validated separately when that
-feature lands. Saving a template does not yet warn about bound channels whose
+Captured sources (scan jobs, quality gates, incidents) are recorded by a database
+trigger. Go builders hydrate identity records and atomically store the scrubbed
+context with events and deliveries. Capture stays legacy until the operator
+completes the [identity rollout](notification-content.md#identity-capture-rollout).
+Templates can range over the bounded `scan.completed` findings list; its fields
+are `id`, `severity`, `title`, and `status`. Custom webhook JSON is validated when
+saved. Saving a template does not yet warn about bound channels whose
 data class is below a variable the template uses (see
 [Data classes](#data-classes)); such a variable renders empty on that channel.
 
@@ -283,10 +283,8 @@ anything:
 
 The response names the channel, the sample and the template; it never carries
 the event's data, its template context or template source, and it is never
-logged. Rendering uses the send-time renderer, so preview and delivery cannot
-differ: until that renderer lands (#1365) the response has `"rendered": false`
-and no message. It will then carry the message at the channel's data class, and
-the suppressed state when the engagement's override is `none`.
+logged. Preview uses the send-time renderer and carries the message at the channel's
+effective class, or the suppressed state when the engagement's override is `none`.
 
 ### How a message renders
 
@@ -304,9 +302,10 @@ The worker renders a delivery when it sends it, not when the event is recorded:
 3. A retry renders with the pinned template, so activating a new version does not
    change a message halfway through its retries. Every attempt records the
    `template_ref` it rendered with (`GET .../deliveries/{id}/attempts`).
-4. The rendered fields go through the channel's formatter (Slack Block Kit, email text)
+4. The rendered fields go through the channel's formatter (Slack Block Kit, email text and HTML)
    and the driver sends that payload. A webhook channel with `custom_body` sends its
-   rendered JSON body; any other webhook sends the event envelope.
+   rendered JSON body; the default webhook sends the versioned, class-filtered
+   envelope. Audited `raw_event` opt-in sends the original event only at effective `detail`.
 5. The attempt starts only if the channel class and engagement setting committed at
    that moment still allow the class the message was rendered at. If either was
    lowered in between, the attempt is refused and retried, and the retry renders again
@@ -366,9 +365,10 @@ previous and new values.
 Lowering a class or an override needs `manage_integrations`. Raising either one lets
 more data leave Synapse, so it needs `administer` and answers `403` otherwise.
 
-Classes apply to every message rendered from a template: a variable above the class
-renders empty. The built-in webhook envelope and the built-in Slack and email content
-are not filtered by class yet; the engagement `none` setting applies to every delivery.
+Classes apply to templates, built-ins, fallback text and the default webhook envelope.
+A variable above the class renders empty and a list above the class is absent.
+See [notification content and rollout](notification-content.md) for scan snapshots,
+the versioned webhook contract, raw mode, and safe capture cutover.
 
 ## Personal inbox
 
@@ -431,11 +431,18 @@ handoff uses the same atomic boundary. Multiple matching rules collapse to one
 delivery per channel (per recipient for email), with matched rule revisions retained.
 No-match events are recorded and are not replayed when a rule is added later.
 
-If a captured source fails event validation, the worker quarantines that source
+If a legacy captured source fails event validation, the worker quarantines that source
 and continues with the next one in the same poll. Delivery history shows its
 event type, source identity and a fixed reason code; captured payloads are never
 returned. An oversized event reports `event_data_too_large`; other validation
 failures report `invalid_event`. Quarantined sources are not retried automatically.
+
+Identity capture sources (`capture_version=2`) stay pending on projection errors
+and roll back that tenant's projection transaction. Inspect pending identity records
+and `notification source poll failed` logs, restore missing source facts or deploy
+a capable projector, and let the worker retry. Do not mark these records processed
+manually. See [notification content rollout](notification-content.md) for cutover
+and recovery.
 
 SLA and fleet relevance is checked again immediately before sending. Resolving an
 SLA, changing its assessment/deadline, entering an exception, passing the deadline,
@@ -451,7 +458,8 @@ Existing in-flight requests cannot be recalled.
 
 The [versioned event schemas and fixtures](schemas/events/README.md) cover every catalog event type, including operator-only channel tests and destination notices. Each schema validates the complete event envelope and event-specific `data` object. Optional additive fields retain v1; removing or renaming a field requires a new version.
 
-Signed webhooks receive JSON using schema version 1 and these headers:
+Signed webhooks receive the `synapse.notification.v1` filtered envelope (or the
+original event schema in explicit raw mode) and these headers:
 
 ```text
 X-Synapse-Timestamp: <unix seconds>
@@ -625,7 +633,7 @@ Worker metric names all start with `synapse_notification_worker_`:
   omitted and `pending_scrape_error` reports 1 (0 on a healthy scrape).
 - `template_fallback_total` counts committed attempts whose email/Slack
   rendering had to use built-in title or summary fallback content. Generic
-  webhooks send the event JSON and do not render that content.
+  default webhooks send the filtered envelope and do not render that content.
 
 Every per-channel metric has only `channel_type` and `provider` labels.
 The fixed combinations are `webhook/generic`, `slack/slack`,

@@ -1741,7 +1741,7 @@ func TestProjectRecorderFailureFailsJob(t *testing.T) {
 	jobs := newFakeJobStore()
 	svc := newAsyncSvc(repo, fakeClock{t: time.Unix(0, 0).UTC()}, &fakeAcquirer{dir: "/tmp/ws"}, &fakeAudit{}, &fakeDetector{}, jobs, fakeIDs{})
 	svc.SetProjectAnalysisRecorder(&contextRecorder{err: errors.New("snapshot unavailable")})
-	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
+	job := ports.ScanJob{ID: "job-1", EngagementID: "e1", Target: "myrepo", Kind: ports.TargetLocal, Status: ports.ScanRunning, StartedAt: time.Unix(0, 0).UTC()}
 
 	svc.runScanJob(shared.WithTenant(context.Background(), shared.DefaultTenant), "operator", "e1", time.Unix(0, 0).UTC(), ports.AcquireRequest{Kind: "local", Value: "myrepo"}, ScanOptions{Mode: ScanModeFull, ProjectAnalysis: true}, job)
 
@@ -1751,6 +1751,9 @@ func TestProjectRecorderFailureFailsJob(t *testing.T) {
 	}
 	if final.Status != ports.ScanFailed || !strings.Contains(final.Error, "snapshot unavailable") {
 		t.Fatalf("status=%q err=%q, want snapshot failure", final.Status, final.Error)
+	}
+	if final.NotificationSnapshot.TargetKey != "" {
+		t.Fatalf("failed project-analysis correction retained a completion snapshot: %+v", final.NotificationSnapshot)
 	}
 }
 

@@ -17,14 +17,25 @@ var catalog = map[EventType]EventSpec{
 		),
 	},
 	EventScanCompleted: {
-		Type: EventScanCompleted, Label: "Scan completed", SchemaVersion: 1, SubjectKind: "scan_job",
+		Type: EventScanCompleted, Label: "Scan completed", SchemaVersion: 2, SubjectKind: "scan_job",
 		HasEngagement: true,
 		Filters:       []Filter{FilterEngagements},
-		MaxDataClass:  DataClassSummary,
+		MaxDataClass:  DataClassDetail,
 		Variables: variables(
 			signal("scan_kind", "Kind of scan, such as sast or dast"),
+			signal("total_count", "Total publishable findings in this scan"),
+			signal("critical_count", "Critical publishable findings in this scan"),
+			signal("high_count", "High severity publishable findings in this scan"),
+			signal("medium_count", "Medium severity publishable findings in this scan"),
+			signal("low_count", "Low severity publishable findings in this scan"),
+			signal("info_count", "Informational publishable findings in this scan"),
+			signal("new_count", "Findings newly observed from a comparable scan"),
+			signal("fixed_count", "Findings no longer observed from a comparable scan"),
+			signal("unchanged_count", "Findings retained from a comparable scan"),
+			signal("delta_available", "Whether new, fixed and unchanged counts compare a compatible prior scan"),
 			summary("engagement_name", "Name of the engagement"),
 			summary("target", "Scan target without credentials, query or fragment"),
+			list("findings", "Bounded publishable findings from this scan", DataClassDetail, 50, "id", "severity", "title", "status"),
 		),
 	},
 	EventQualityGateFailed: {
@@ -130,6 +141,10 @@ func summary(name, description string) Variable {
 
 func detail(name, description string) Variable {
 	return Variable{Name: name, Class: DataClassDetail, Description: description}
+}
+
+func list(name, description string, class DataClass, cap int, fields ...string) Variable {
+	return Variable{Name: name, Class: class, Description: description, ListCap: cap, ItemFields: append([]string(nil), fields...)}
 }
 
 // LookupEvent returns the spec for an event type.

@@ -72,6 +72,8 @@ function Library() {
 
   useEffect(() => {
     let live = true
+    setBuiltins(undefined)
+    setBuiltinsError(null)
     // The catalog only names event types; the list still renders raw types when it fails.
     api.listNotificationEventTypes().then(
       (items) => live && setCatalog(items),
@@ -88,7 +90,7 @@ function Library() {
     return () => {
       live = false
     }
-  }, [])
+  }, [generation])
 
   useEffect(() => {
     let live = true

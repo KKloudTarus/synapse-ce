@@ -16,6 +16,7 @@ import (
 const (
 	teamsURL      = "https://prod-12.westus.logic.azure.com:443/workflows/0a1b2c/triggers/manual/paths/invoke?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=teams-signature-secret"
 	teamsPPURL    = "https://default0a1b.2c.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/abc/triggers/manual/paths/invoke?api-version=1&sig=pp-signature-secret"
+	teamsScaleURL = "https://default0a1b.2c.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/14/workflows/abc/triggers/manual/paths/invoke?api-version=1&sig=scale-signature-secret"
 	googleChatURL = "https://chat.googleapis.com/v1/spaces/AAAA1234/messages?key=gchat-key-secret&token=gchat-token-secret"
 	discordURL    = "https://discord.com/api/webhooks/123456789012345678/discord-token-secret_ABC"
 	tgToken       = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
@@ -29,6 +30,7 @@ func TestChatChannelsAcceptTheVendorEndpoints(t *testing.T) {
 	}{
 		{ChannelInput{Type: domain.ChannelTeams, URL: teamsURL}, "https://prod-12.westus.logic.azure.com/…", ports.TeamsChannelConfig{URL: teamsURL}},
 		{ChannelInput{Type: domain.ChannelTeams, URL: teamsPPURL}, "https://default0a1b.2c.environment.api.powerplatform.com/…", ports.TeamsChannelConfig{URL: teamsPPURL}},
+		{ChannelInput{Type: domain.ChannelTeams, URL: teamsScaleURL}, "https://default0a1b.2c.environment.api.powerplatform.com/…", ports.TeamsChannelConfig{URL: teamsScaleURL}},
 		{ChannelInput{Type: domain.ChannelGoogleChat, URL: googleChatURL}, "https://chat.googleapis.com/…", ports.GoogleChatChannelConfig{URL: googleChatURL}},
 		{ChannelInput{Type: domain.ChannelDiscord, URL: discordURL}, "https://discord.com/…", ports.DiscordChannelConfig{URL: discordURL}},
 		{ChannelInput{Type: domain.ChannelDiscord, URL: "https://discordapp.com/api/v10/webhooks/1/tok?thread_id=42"}, "https://discordapp.com/…", ports.DiscordChannelConfig{URL: "https://discordapp.com/api/v10/webhooks/1/tok?thread_id=42"}},
@@ -62,16 +64,21 @@ func TestChatChannelsAcceptTheVendorEndpoints(t *testing.T) {
 func TestChatChannelsRefuseOtherEndpoints(t *testing.T) {
 	cases := map[domain.ChannelType][]string{
 		domain.ChannelTeams: {
-			"http://prod-12.westus.logic.azure.com/workflows/x?sig=s",            // not https
-			"https://prod-12.westus.logic.azure.com/workflows/x",                 // no signature
-			"https://logic.azure.com/workflows/x?sig=s",                          // bare suffix
-			"https://evil.example/workflows/x?sig=s",                             // foreign host
-			"https://evil.logic.azure.com.attacker.example/workflows/x?sig=s",    // suffix in the middle
-			"https://contoso.webhook.office.com/webhookb2/x/IncomingWebhook/y/z", // retired O365 connector
-			"https://prod-12.westus.logic.azure.com:8443/workflows/x?sig=s",      // other port
-			"https://user:pw@prod-12.westus.logic.azure.com/workflows/x?sig=s",   // userinfo
-			"https://prod-12.westus.logic.azure.com/admin/x?sig=s",               // other path
-			"https://prod-12.westus.logic.azure.com/workflows/x?sig=s#frag",      // fragment
+			"http://prod-12.westus.logic.azure.com/workflows/x?sig=s",                                                               // not https
+			"https://prod-12.westus.logic.azure.com/workflows/x",                                                                    // no signature
+			"https://logic.azure.com/workflows/x?sig=s",                                                                             // bare suffix
+			"https://evil.example/workflows/x?sig=s",                                                                                // foreign host
+			"https://evil.logic.azure.com.attacker.example/workflows/x?sig=s",                                                       // suffix in the middle
+			"https://contoso.webhook.office.com/webhookb2/x/IncomingWebhook/y/z",                                                    // retired O365 connector
+			"https://prod-12.westus.logic.azure.com:8443/workflows/x?sig=s",                                                         // other port
+			"https://user:pw@prod-12.westus.logic.azure.com/workflows/x?sig=s",                                                      // userinfo
+			"https://prod-12.westus.logic.azure.com/admin/x?sig=s",                                                                  // other path
+			"https://prod-12.westus.logic.azure.com/workflows/x?sig=s#frag",                                                         // fragment
+			"https://default0a1b.2c.environment.api.powerplatform.com/powerautomate/automations/direct/cu/14/workflows/abc",         // no signature
+			"https://default0a1b.2c.environment.api.powerplatform.com/powerautomate/automations/direct/cu/west/workflows/abc?sig=s", // non-numeric scale unit
+			"https://default0a1b.2c.environment.api.powerplatform.com/powerautomate/automations/direct/cu//workflows/abc?sig=s",     // missing scale unit
+			"https://default0a1b.2c.environment.api.powerplatform.com/powerautomate/automations/direct/cu/14/admin/abc?sig=s",       // other scale-unit path
+			"https://evil.example/powerautomate/automations/direct/cu/14/workflows/abc?sig=s",                                       // foreign host
 		},
 		domain.ChannelGoogleChat: {
 			"https://chat.googleapis.com/v1/spaces/AAA/messages?key=k",                     // no token

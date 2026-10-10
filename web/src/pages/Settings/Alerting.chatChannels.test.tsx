@@ -176,4 +176,71 @@ describe('chat notification channels (#1378 to #1381)', () => {
     expect(await screen.findByText(/paste the full new URL/)).toBeInTheDocument()
     expect(screen.getByLabelText('Discord webhook URL')).toHaveValue('')
   })
+
+  it('lets an integration administrator lower, but not raise, an existing data class', async () => {
+    vi.mocked(api.me).mockResolvedValue({ role: 'integration_admin' } as never)
+    vi.mocked(api.listNotificationChannels).mockResolvedValue([
+      { ...channel('d', 'Discord SOC', 'discord', 'https://discord.com/…'), data_class: 'detail' },
+    ])
+    render(<Alerting />)
+
+    const item = within((await screen.findByText('Discord SOC')).closest('li') as HTMLElement)
+    fireEvent.click(item.getByRole('button', { name: 'Edit channel' }))
+    const form = within(screen.getByRole('button', { name: 'Save channel' }).closest('form') as HTMLElement)
+    const dataClass = form.getByRole('combobox', { name: 'Data class' })
+    expect(dataClass).toHaveAccessibleDescription('You can lower this destination’s data class. Raising it requires a tenant administrator.')
+    fireEvent.click(dataClass)
+    fireEvent.click(await screen.findByRole('option', { name: /Summary — signal/ }))
+    fireEvent.click(form.getByRole('button', { name: 'Save channel' }))
+
+    await waitFor(() =>
+      expect(api.updateNotificationChannel).toHaveBeenCalledWith(
+        'd',
+        expect.objectContaining({ data_class: 'summary', revision: 3 }),
+      ),
+    )
+  })
+
+  it('requires an administrator’s explicit raw-event opt-in and uses detail class', async () => {
+    render(<Alerting />)
+    await screen.findByRole('button', { name: 'Add channel' })
+    const form = addForm()
+    fireEvent.change(form.getByLabelText('Name'), { target: { value: 'Forensics hook' } })
+    fireEvent.change(form.getByLabelText('Webhook URL'), { target: { value: 'https://hooks.example.test/in' } })
+    fireEvent.change(form.getByLabelText('HMAC secret'), { target: { value: '0123456789abcdef' } })
+    fireEvent.click(form.getByRole('checkbox', { name: /Send the raw event envelope/ }))
+    expect(form.getByRole('checkbox', { name: /Send the template body/ })).toBeDisabled()
+    fireEvent.click(form.getByRole('button', { name: 'Add channel' }))
+
+    await waitFor(() =>
+      expect(api.createNotificationChannel).toHaveBeenCalledWith(
+        expect.objectContaining({ raw_event: true, data_class: 'detail' }),
+      ),
+    )
+  })
+
+  it('clears raw-event state when a new webhook changes type and changes back', async () => {
+    render(<Alerting />)
+    await screen.findByRole('button', { name: 'Add channel' })
+    const form = addForm()
+    fireEvent.change(form.getByLabelText('Name'), { target: { value: 'Switched hook' } })
+    fireEvent.change(form.getByLabelText('Webhook URL'), { target: { value: 'https://hooks.example.test/in' } })
+    fireEvent.change(form.getByLabelText('HMAC secret'), { target: { value: '0123456789abcdef' } })
+    fireEvent.click(form.getByRole('checkbox', { name: /Send the raw event envelope/ }))
+
+    fireEvent.click(form.getByRole('combobox', { name: 'Type' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Email (SMTP)' }))
+    fireEvent.click(form.getByRole('combobox', { name: 'Type' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Signed webhook' }))
+
+    expect(form.getByRole('checkbox', { name: /Send the raw event envelope/ })).not.toBeChecked()
+    expect(form.getByRole('combobox', { name: 'Data class' })).toHaveTextContent(/Summary — signal/)
+    expect(form.getByRole('combobox', { name: 'Data class' })).toBeEnabled()
+    fireEvent.click(form.getByRole('button', { name: 'Add channel' }))
+    await waitFor(() =>
+      expect(api.createNotificationChannel).toHaveBeenCalledWith(
+        expect.objectContaining({ raw_event: undefined, data_class: undefined }),
+      ),
+    )
+  })
 })

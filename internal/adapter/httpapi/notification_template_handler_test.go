@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/KKloudTarus/synapse-ce/internal/adapter/notificationbuiltin"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/tenancy"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -34,9 +37,46 @@ func templateRouter(t *testing.T) (*Router, *templateHandlerAudit) {
 		t.Fatal(err)
 	}
 	svc.SetTemplateStore(memory.NewNotificationTemplateStore())
+	svc.SetBuiltinTemplates(notificationbuiltin.New())
 	rt := &Router{log: discardLog()}
 	rt.SetNotifications(svc)
 	return rt, audit
+}
+
+func TestNotificationBuiltinTemplatesListCopiesTheShippedEnglishAndVietnameseCatalog(t *testing.T) {
+	rt, _ := templateRouter(t)
+	response := templateCall(rt, "integration_admin", "tenant-a", http.MethodGet, "/api/v1/notifications/templates/builtins", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("list builtins = %d: %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Items []struct {
+			EventType string            `json:"event_type"`
+			Family    string            `json:"family"`
+			Locale    string            `json:"locale"`
+			Fields    map[string]string `json:"fields"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	catalog := notificationbuiltin.New()
+	for _, locale := range []tenancy.Locale{tenancy.LocaleEnglish, tenancy.LocaleVietnamese} {
+		want, found := catalog.Builtin("scan.completed", "chat", locale)
+		if !found {
+			t.Fatalf("missing catalog template for %s", locale)
+		}
+		var got map[string]string
+		for _, item := range body.Items {
+			if item.EventType == "scan.completed" && item.Family == "chat" && item.Locale == string(locale) {
+				got = item.Fields
+				break
+			}
+		}
+		if !reflect.DeepEqual(got, want.Fields) {
+			t.Errorf("%s fields = %#v, want %#v", locale, got, want.Fields)
+		}
+	}
 }
 
 func templateCall(rt *Router, role, tenant, method, path, body string) *httptest.ResponseRecorder {
@@ -203,6 +243,7 @@ func TestNotificationTemplateRoutesLifecycle(t *testing.T) {
 func TestNotificationTemplateRoutesRefuseOtherRoles(t *testing.T) {
 	rt, _ := templateRouter(t)
 	routes := []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/notifications/templates/builtins", ""},
 		{http.MethodGet, "/api/v1/notifications/templates", ""},
 		{http.MethodPost, "/api/v1/notifications/templates", `{"name":"x","event_type":"*","family":"chat","locale":"en","fields":{"body":"x"}}`},
 		{http.MethodGet, "/api/v1/notifications/templates/tpl-1", ""},

@@ -71,6 +71,12 @@ func (rt *Router) listNotificationTemplates(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+// listBuiltinNotificationTemplates exposes the build's read-only defaults so an operator can
+// clone their exact source into a tenant draft. Built-ins have no tenant-specific identity.
+func (rt *Router) listBuiltinNotificationTemplates(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"items": rt.notifications.ListBuiltinTemplates()})
+}
+
 func (rt *Router) createNotificationTemplate(w http.ResponseWriter, r *http.Request) {
 	var in notificationuc.TemplateInput
 	if err := decodeNotificationBody(w, r, &in); err != nil {

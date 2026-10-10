@@ -97,3 +97,34 @@ func quote(s string) string {
 	raw, _ := json.Marshal(s)
 	return string(raw)
 }
+
+func TestBuildersScrubScanListBeforeStorage(t *testing.T) {
+	for _, title := range []string{
+		"Default creds password=Hunter2! on admin",
+		"Default creds pass" + zeroWidthSpace + "word=Hunter2! on admin",
+		"Key -----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY----- committed",
+		"Clone from https://ci:s3cr3t@git.example.test/repo failed",
+	} {
+		t.Run(title, func(t *testing.T) {
+			seed, err := (domain.TemplateContext{Lists: map[string][]map[string]string{
+				"findings": {{"id": "f-1", "severity": "high", "title": title, "status": "new"}},
+			}}).Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			event := domain.Event{Type: domain.EventScanCompleted, SchemaVersion: 2, Context: seed}
+			first, err := NewEventBuilders().Project(context.Background(), event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot := scrubbedSnapshot(t, first)
+			if got, want := snapshot.Lists["findings"][0]["title"], scrubSecrets(title); got != want || got == title {
+				t.Fatalf("stored finding title = %q, want redacted %q", got, want)
+			}
+			second, err := NewEventBuilders().Project(context.Background(), first)
+			if err != nil || string(second.Context) != string(first.Context) {
+				t.Fatalf("reprojection changed redacted list: %s, %v", second.Context, err)
+			}
+		})
+	}
+}
