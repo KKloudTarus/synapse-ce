@@ -28,8 +28,21 @@ func (s *Service) CreateChannel(ctx context.Context, actor string, in ChannelInp
 	return mutation(ctx, s, func(ctx context.Context) (domain.Channel, error) { return s.createChannel(ctx, actor, in) })
 }
 func (s *Service) UpdateChannel(ctx context.Context, actor string, id shared.ID, in ChannelInput) (domain.Channel, error) {
-	// Only an administrator may re-point a channel, so only then is a provider asked first.
+	// Only an administrator may re-point a channel, so only then is a provider asked first. The type
+	// is immutable, so a PATCH that leaves it out is resolved from the stored channel here, before
+	// the transaction opens: the provider is never called with the transaction held.
 	if in.AllowDestinationChange {
+		if in.Type == "" {
+			tenant, err := tenantFrom(ctx)
+			if err != nil {
+				return domain.Channel{}, err
+			}
+			current, err := s.repo.GetChannel(ctx, tenant, id)
+			if err != nil {
+				return domain.Channel{}, err
+			}
+			in.Type = current.Type
+		}
 		var err error
 		if in, err = s.prepareDestination(ctx, in); err != nil {
 			return domain.Channel{}, err
