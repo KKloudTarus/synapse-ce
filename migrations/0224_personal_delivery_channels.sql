@@ -104,6 +104,7 @@ BEGIN
 END;
 $teams_offer$;
 -- +goose StatementEnd
+REVOKE ALL ON FUNCTION synapse_offer_teams_link(TEXT, TEXT, TEXT, TIMESTAMPTZ) FROM PUBLIC;
 
 -- Claims one offer: returns its sealed reference and deletes it, so a code works once. An unknown
 -- or expired code returns no row.
@@ -118,6 +119,7 @@ AS $teams_claim$
     RETURNING o.sealed_reference
 $teams_claim$;
 -- +goose StatementEnd
+REVOKE ALL ON FUNCTION synapse_claim_teams_link(TEXT) FROM PUBLIC;
 
 -- +goose Down
 DROP FUNCTION IF EXISTS synapse_claim_teams_link(TEXT);

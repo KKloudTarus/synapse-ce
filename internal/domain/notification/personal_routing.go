@@ -144,6 +144,9 @@ func RuleRoleSupported(event EventType, role string) error {
 // normalizeRecipientRoles dedupes and checks a rule's roles.
 func (r *Rule) normalizeRecipientRoles() error {
 	r.RecipientRoles = uniqueStrings(r.RecipientRoles)
+	if len(r.RecipientRoles) == 0 {
+		r.RecipientRoles = nil
+	}
 	if len(r.RecipientRoles) > len(ruleRecipientRoles) {
 		return fmt.Errorf("%w: too many recipient roles", shared.ErrValidation)
 	}
