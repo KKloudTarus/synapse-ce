@@ -144,14 +144,24 @@ func TestMergeRoleRecipientsDedupesAcrossRoles(t *testing.T) {
 }
 
 func TestGenericPersonalSubject(t *testing.T) {
-	data, _ := json.Marshal(map[string]string{"title": "Scan\ncompleted\tnow", "summary": strings.Repeat("x", 600)})
-	subject := GenericPersonalSubject(Event{Type: EventScanCompleted, EngagementID: "eng/1", Data: data})
+	// The raw data still holds what the scanner wrote; only the scrubbed snapshot may be used.
+	data, _ := json.Marshal(map[string]string{"title": "RAW-ONLY password=hunter2raw", "summary": "RAW-ONLY"})
+	snapshot, _ := json.Marshal(map[string]any{"vars": map[string]string{
+		"title":   "Scan\ncompleted\tnow",
+		"summary": "key AKIAIOSFODNN7EXAMPLE password=hunter2secret " + strings.Repeat("x", 600),
+	}})
+	subject := GenericPersonalSubject(Event{Type: EventScanCompleted, EngagementID: "eng/1", Data: data, Context: snapshot})
 	if subject.Title != "Scan completed now" || len([]rune(subject.Summary)) != 500 || subject.Link != "/engagements/eng%2F1" {
 		t.Fatalf("subject = %+v", subject)
 	}
-	empty := GenericPersonalSubject(Event{Type: EventScanCompleted, Data: json.RawMessage(`{}`)})
-	if empty.Title != "Scan completed" || empty.Link != "/inbox" {
-		t.Fatalf("fallback subject = %+v", empty)
+	for _, leaked := range []string{"RAW-ONLY", "hunter2", "AKIAIOSFODNN7EXAMPLE"} {
+		if strings.Contains(subject.Title+subject.Summary, leaked) {
+			t.Fatalf("subject leaks %q: %+v", leaked, subject)
+		}
+	}
+	empty := GenericPersonalSubject(Event{Type: EventScanCompleted, Data: data})
+	if empty.Title != "Scan completed" || empty.Summary != "" || empty.Link != "/inbox" {
+		t.Fatalf("subject without a snapshot = %+v", empty)
 	}
 }
 

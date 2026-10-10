@@ -176,13 +176,11 @@ func (s *Service) SendVerification(ctx context.Context, tenantID, challengeID sh
 		plain[i] = 0
 	}
 	if result.ErrorCode != "" {
-		if result.Retryable {
-			return fmt.Errorf("verification delivery transient failure: %s", result.ErrorCode)
-		}
+		cause := ErrMailUnavailable
 		if work.Kind == "slack" {
-			return ErrSlackUnavailable
+			cause = ErrSlackUnavailable
 		}
-		return ErrMailUnavailable
+		return &deliveryError{code: result.ErrorCode, cause: cause, terminal: !result.Retryable, after: result.RetryAfter}
 	}
 	return s.store.MarkSent(ctx, tenantID, challengeID, s.clock.Now().UTC())
 }
@@ -236,3 +234,24 @@ func randomCode() (string, error) {
 func challengeAAD(tenantID, challengeID, contactID shared.ID, version int) []byte {
 	return []byte("contact-verification:" + tenantID.String() + ":" + challengeID.String() + ":" + contactID.String() + ":" + fmt.Sprint(version))
 }
+
+// verificationMaxAttempts lets a code survive a provider's rate limit: with Slack's Retry-After
+// between attempts the job keeps trying for most of the code's 10 minutes. A retry after the code
+// expired finds no live challenge and ends without sending.
+const verificationMaxAttempts = 8
+
+// deliveryError is a failed verification send, classified for the worker (worker.RetryDirective):
+// a provider's retryable failure is retried after its Retry-After, a permanent one dead-letters at
+// once. It wraps ErrMailUnavailable or ErrSlackUnavailable, and its text is only the stable code.
+type deliveryError struct {
+	code     string
+	cause    error
+	terminal bool
+	after    time.Duration
+}
+
+func (e *deliveryError) Error() string             { return "verification delivery failed: " + e.code }
+func (e *deliveryError) Unwrap() error             { return e.cause }
+func (e *deliveryError) Terminal() bool            { return e.terminal }
+func (e *deliveryError) RetryAfter() time.Duration { return e.after }
+func (e *deliveryError) MaxAttempts() int          { return verificationMaxAttempts }

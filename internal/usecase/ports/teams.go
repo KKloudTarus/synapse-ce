@@ -59,16 +59,19 @@ type TeamsLinkOffers interface {
 	// OfferTeamsLink stores a code digest with its sealed conversation reference. It returns false
 	// when the conversation already holds the most live codes it may.
 	OfferTeamsLink(ctx context.Context, codeDigest, conversationKey, sealedReference string, expiresAt time.Time) (bool, error)
-	// ClaimTeamsLink returns and deletes the sealed reference of a live code.
-	ClaimTeamsLink(ctx context.Context, codeDigest string) (sealedReference string, ok bool, err error)
 }
+
+// TeamsLinker builds the contact and its tenant-sealed conversation from a claimed offer.
+type TeamsLinker func(sealedOffer string) (contact UserContact, sealedConversation string, err error)
 
 // TeamsContactStore links a Teams account to a user and keeps its conversation.
 type TeamsContactStore interface {
-	// LinkTeamsContact stores a verified Teams contact and its sealed conversation reference in one
-	// transaction, with an audit entry. Linking the same Teams account again replaces its contact
-	// and conversation.
-	LinkTeamsContact(ctx context.Context, contact UserContact, sealedReference string) (UserContact, error)
+	// LinkTeamsContact claims a live link code and stores the contact it links in one transaction:
+	// the code is consumed only if the contact, its sealed conversation and the audit entry commit,
+	// so a failure on the way leaves the code usable. link turns the claimed offer into the contact
+	// and its conversation sealed for the tenant; it must not do I/O. found is false when the code
+	// is unknown, used or expired. Linking the same Teams account again replaces its contact.
+	LinkTeamsContact(ctx context.Context, tenant, user shared.ID, codeDigest string, link TeamsLinker) (contact UserContact, found bool, err error)
 	// CountTeamsLinkAttempt records one code attempt against the person's verification quota (the
 	// table email and Slack verification requests use) and returns shared.ErrConflict when the person
 	// has used it up.

@@ -181,3 +181,25 @@ func TestPersonalDefaultsMatrixAndSave(t *testing.T) {
 		t.Fatalf("saved = %v", defaults.saved)
 	}
 }
+
+// Saving a preference answers with the row as the list shows it, so the effective default and the
+// availability survive a client merging the response.
+func TestSavedPreferenceKeepsTheEffectiveDefault(t *testing.T) {
+	store := &prefInbox{items: []ports.InboxPreference{
+		{EventType: string(notification.EventOwnershipChanged), Channel: notification.PersonalSlack, State: notification.PreferenceInherit, Revision: 2, Default: true, Available: true},
+		{EventType: string(notification.EventOwnershipChanged), Channel: notification.PersonalInApp, State: notification.PreferenceInherit, Revision: 1, Default: true, Available: true},
+		{EventType: string(notification.EventOwnershipChanged), Channel: notification.PersonalTeams, State: notification.PreferenceDisabled, Revision: 1, Available: true},
+	}}
+	svc, _ := NewService(store, fixedClock{})
+	for _, channel := range []string{notification.PersonalSlack, notification.PersonalInApp} {
+		saved, err := svc.SavePreference(context.Background(), "tenant", "user", notification.EventOwnershipChanged, channel, notification.PreferenceInherit, 1)
+		if err != nil || !saved.Default || !saved.Available || saved.Channel != channel {
+			t.Fatalf("%s: saved = %+v %v", channel, saved, err)
+		}
+	}
+	// Teams without the operator's bot comes back unavailable, with the reason.
+	saved, err := svc.SavePreference(context.Background(), "tenant", "user", notification.EventOwnershipChanged, notification.PersonalTeams, notification.PreferenceDisabled, 1)
+	if err != nil || saved.Available || saved.Reason == "" {
+		t.Fatalf("teams: saved = %+v %v", saved, err)
+	}
+}

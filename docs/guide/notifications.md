@@ -380,7 +380,7 @@ Inbox rows are written in the same database transaction as the notification even
 
 Personal recipients come from structured IDs already on the event: the canonical finding assignee and active ownership team members. A legacy assignee label, an email address, or a display name is never resolved into a recipient. A routing rule can add people by role (see [Recipient roles](#recipient-roles-and-engagement-leads)); mentioned users and approvers stay unsupported until a producer records a verified identity. `notification.destination_changed` is mandatory in-app for enabled tenant admins. It is not a routing rule and cannot be muted. One notice is stored per channel revision: repeating that save is a no-op, and changing only the secret or the URL path is not a host change. Changing back to an earlier host writes a new notice. The payload contains the actor, the action, the channel class, and the scheme plus host. It does not contain a URL path, query, port secret, or credential. `notification.channel_paused` is mandatory in-app for enabled tenant admins in the same way, once per automatic pause (see [Channel health and automatic pause](#channel-health-and-automatic-pause)).
 
-`PUT /api/v1/me/notification-preferences` stores `inherit`, `enabled`, or `disabled` per event type and personal channel (`in_app`, `email`, `slack`, `teams`) for the signed-in user. Precedence is mandatory > the person's choice > the tenant default > the built-in default (in-app on, everything else off); `inherit` follows the tenant default, which each preference reports as `default`. Every personal message is sent from its inbox row, so muting in-app also mutes email, Slack and Teams for that event. A personal message leaves Synapse only to the verified contact version captured when the event was projected; when the job runs it is checked again (the person is enabled with a human role, the preference and tenant default still allow it, the engagement still lets messages out, the contact version is unchanged) and a stale job ends without sending. It is never retargeted. Slack can be chosen once the tenant has an enabled Slack app channel, and Teams once the operator configured the Teams bot.
+`PUT /api/v1/me/notification-preferences` stores `inherit`, `enabled`, or `disabled` per event type and personal channel (`in_app`, `email`, `slack`, `teams`) for the signed-in user. Precedence is mandatory > the person's choice > the tenant default > the built-in default (in-app on, everything else off); `inherit` follows the tenant default, which each preference reports as `default`. Every personal message is sent from its inbox row, so muting in-app also mutes email, Slack and Teams for that event. A personal message leaves Synapse only to the verified contact version captured when the event was projected; when the job runs it is checked again (the person is enabled with a human role, the inbox is not muted, the preference and tenant default still allow it, the engagement still lets messages out, the contact version is unchanged) and a stale job ends without sending. It is never retargeted. Slack can be chosen once the tenant has an enabled Slack app channel, and Teams once the operator configured the Teams bot.
 
 ### Tenant defaults
 
@@ -419,6 +419,28 @@ The bot does not know the tenant: the code is stored only as a keyed digest, in 
 The messaging endpoint sits outside the human authentication chain. The only credential is the Bot Framework JWT: its signature against the Bot Framework keys, the issuer `https://api.botframework.com`, the bot's app ID as audience, and a `serviceurl` claim equal to the activity's service URL. Service URLs outside the Teams Bot Connector hosts are never stored or called. Every refusal is the same `401`. Only a message in a 1:1 chat is answered.
 
 A personal Teams message is an Adaptive Card (the same formatter as the `teams` channel) posted into that conversation with a Bot Connector token from `login.microsoftonline.com`. A removed bot or deleted conversation ends the job with `teams_conversation_gone`; the person links again.
+
+### Rolling out personal Slack and Teams delivery
+
+Workers send; an older worker does not know the new channels. It never claims a `personal.slack` or
+`personal.teams` job, but it does claim the `user_contact_verification` job of a Slack contact, and
+its email-only loader then ends that job without sending the code. Upgrade in this order:
+
+1. Apply migration `0224`.
+2. Upgrade every `synapse-worker`, and set `SYNAPSE_TEAMS_BOT_*` on the workers first if Teams is
+   used.
+3. Upgrade the API, and only then set `SYNAPSE_TEAMS_BOT_*` on it, which registers the bot endpoint
+   and the Teams link route.
+
+Until all workers run this release, keep `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the
+API (see [Slack app channels](#slack-app-channels-bot-token)): with the type switched off no
+workspace is offered for linking and no personal Slack message is queued. A Slack code an older
+worker swallowed is not lost for good; the person asks for a new code.
+
+To roll back, first switch `slack_bot` off and unset `SYNAPSE_TEAMS_BOT_*` on the API and on the
+workers of this release, then downgrade the API, then the workers. Personal Slack and Teams jobs still
+queued stay unclaimed by older workers and run, with their send-time checks, after a later upgrade.
+Migration `0224` down deletes Slack and Teams contacts and preferences.
 
 Events created before the framework first
 activates for a tenant are not replayed automatically.

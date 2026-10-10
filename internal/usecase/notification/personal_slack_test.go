@@ -6,10 +6,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -146,5 +148,38 @@ func TestSlackVerificationCodeIsADirectMessage(t *testing.T) {
 	direct.result = ports.NotificationSendResult{ErrorCode: "slack_ratelimited", Retryable: true}
 	if r := f.svc.SendSlackVerification(f.ctx, "tenant-s", "T0123:U0ADA", "12345678"); r.ErrorCode != "slack_ratelimited" || !r.Retryable {
 		t.Fatalf("rate limited: %+v", r)
+	}
+}
+
+// staleListRepo serves the channel list as it was, while the authoritative reload of one channel
+// already sees a later change.
+type staleListRepo struct {
+	*memory.NotificationRepository
+	reload func(domain.Channel) domain.Channel
+}
+
+func (r staleListRepo) GetChannelSealedConfig(ctx context.Context, tenant, id shared.ID) (domain.Channel, string, error) {
+	channel, sealed, err := r.NotificationRepository.GetChannelSealedConfig(ctx, tenant, id)
+	return r.reload(channel), sealed, err
+}
+
+func TestPersonalSlackSkipsABotDisabledOrPausedSinceTheList(t *testing.T) {
+	at := time.Unix(1700000000, 0).UTC()
+	for name, change := range map[string]func(domain.Channel) domain.Channel{
+		"disabled": func(c domain.Channel) domain.Channel { c.Enabled = false; return c },
+		"paused":   func(c domain.Channel) domain.Channel { c.Health.State, c.Health.PausedAt = domain.ChannelPaused, &at; return c },
+		"retyped":  func(c domain.Channel) domain.Channel { c.Type = domain.ChannelSlack; return c },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, direct, _ := newPersonalSlackFixture(t)
+			f.svc.repo = staleListRepo{NotificationRepository: f.repo, reload: change}
+			r := f.svc.PersonalSlack().SendPersonal(f.ctx, ports.PersonalMessage{TenantID: "tenant-s", Recipient: "T0123:U0ADA", Title: "x"})
+			if r.ErrorCode != codeSlackWorkspaceUnavailable || len(direct.sent) != 0 {
+				t.Fatalf("result = %+v sent = %d", r, len(direct.sent))
+			}
+			if workspaces, _ := f.svc.SlackWorkspaces(f.ctx); len(workspaces) != 0 {
+				t.Fatalf("workspaces = %+v", workspaces)
+			}
+		})
 	}
 }

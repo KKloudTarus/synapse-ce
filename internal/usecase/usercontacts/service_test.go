@@ -3,6 +3,7 @@ package usercontacts
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,13 +156,25 @@ func TestSendVerificationRoutesByContactKind(t *testing.T) {
 	if len(slack.codes) != 1 || slack.codes[0] != "T0123:U0ADA=12345678" || mailer.sent != 0 || !store.sent {
 		t.Fatalf("slack codes = %v mail = %d sent = %v", slack.codes, mailer.sent, store.sent)
 	}
-	slack.result = ports.NotificationSendResult{ErrorCode: "slack_ratelimited", Retryable: true}
+	// A rate limit keeps Slack's Retry-After for the worker and the code stays alive for it.
+	slack.result = ports.NotificationSendResult{ErrorCode: "slack_ratelimited", Retryable: true, RetryAfter: 60 * time.Second}
 	store.sent = false
-	if err := svc.SendVerification(context.Background(), "tenant", "ch1"); err == nil || errors.Is(err, ErrSlackUnavailable) || store.sent {
+	err = svc.SendVerification(context.Background(), "tenant", "ch1")
+	var directive interface {
+		Terminal() bool
+		RetryAfter() time.Duration
+		MaxAttempts() int
+	}
+	if !errors.As(err, &directive) || directive.Terminal() || directive.RetryAfter() != 60*time.Second || directive.MaxAttempts() < 8 || store.sent {
 		t.Fatalf("transient Slack failure: %v", err)
 	}
+	if strings.Contains(err.Error(), "12345678") || strings.Contains(err.Error(), "U0ADA") {
+		t.Fatalf("error leaks the code or the contact: %v", err)
+	}
+	// A permanent failure dead-letters at once.
 	slack.result = ports.NotificationSendResult{ErrorCode: "slack_workspace_unavailable"}
-	if err := svc.SendVerification(context.Background(), "tenant", "ch1"); !errors.Is(err, ErrSlackUnavailable) {
+	err = svc.SendVerification(context.Background(), "tenant", "ch1")
+	if !errors.Is(err, ErrSlackUnavailable) || !errors.As(err, &directive) || !directive.Terminal() {
 		t.Fatalf("final Slack failure: %v", err)
 	}
 	store.delivery.Kind, store.delivery.Recipient = "email", "ada@example.com"

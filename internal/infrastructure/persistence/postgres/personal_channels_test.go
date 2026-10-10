@@ -11,6 +11,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -205,22 +206,35 @@ func TestTeamsLinkOffersAndContacts(t *testing.T) {
 	if ok, err := offers.OfferTeamsLink(p.ctx, strings.Repeat("e", 64), conversation, "sealed-e", expires); err != nil || ok {
 		t.Fatalf("fourth live offer of one conversation: %v %v", ok, err)
 	}
-	sealed, ok, err := offers.ClaimTeamsLink(p.ctx, digest)
-	if err != nil || !ok || sealed != "sealed-a" {
-		t.Fatalf("claim = %q %v %v", sealed, ok, err)
-	}
-	if _, ok, _ := offers.ClaimTeamsLink(p.ctx, digest); ok {
-		t.Fatal("a code was claimed twice")
-	}
-	if _, ok, _ := offers.ClaimTeamsLink(p.ctx, strings.Repeat("f", 64)); ok {
-		t.Fatal("an unknown code was claimed")
-	}
-
 	at := p.now
 	contact := ports.UserContact{TenantID: p.tenant, ID: "teams-1", UserID: "member-1", Kind: "teams", Source: "manual", Value: "0a0b0c0d-1111-2222-3333-444455556666", VerifiedAt: &at, Version: 1, CreatedAt: at, UpdatedAt: at}
-	linked, err := contacts.LinkTeamsContact(p.ctx, contact, "sealed-conversation")
-	if err != nil || linked.VerifiedAt == nil || linked.Kind != "teams" {
-		t.Fatalf("link = %+v %v", linked, err)
+	linker := func(conversationSeal string, seen *string) ports.TeamsLinker {
+		return func(sealedOffer string) (ports.UserContact, string, error) {
+			*seen = sealedOffer
+			return contact, conversationSeal, nil
+		}
+	}
+	// A failure after the claim rolls the claim back with the transaction: the code still works.
+	var seen string
+	if _, _, err := contacts.LinkTeamsContact(p.ctx, p.tenant, "member-1", digest, func(sealedOffer string) (ports.UserContact, string, error) {
+		seen = sealedOffer
+		return ports.UserContact{}, "", errors.New("seal failed")
+	}); err == nil || seen != "sealed-a" {
+		t.Fatalf("failing link: seen=%q err=%v", seen, err)
+	}
+	linked, found, err := contacts.LinkTeamsContact(p.ctx, p.tenant, "member-1", digest, linker("sealed-conversation", &seen))
+	if err != nil || !found || seen != "sealed-a" || linked.VerifiedAt == nil || linked.Kind != "teams" {
+		t.Fatalf("link = %+v found=%v err=%v", linked, found, err)
+	}
+	// The code was consumed with the contact, and an unknown code finds nothing.
+	for _, d := range []string{digest, strings.Repeat("f", 64)} {
+		if _, found, err := contacts.LinkTeamsContact(p.ctx, p.tenant, "member-1", d, linker("x", &seen)); err != nil || found {
+			t.Fatalf("code %s: found=%v err=%v", d[:1], found, err)
+		}
+	}
+	// Another person cannot take the contact of a claimed offer.
+	if _, _, err := contacts.LinkTeamsContact(p.ctx, p.tenant, "lead-1", strings.Repeat("b", 64), linker("x", &seen)); err == nil {
+		t.Fatal("a contact for another user was stored")
 	}
 	got, ok, err := contacts.TeamsConversation(p.ctx, p.tenant, "teams-1")
 	if err != nil || !ok || got != "sealed-conversation" {
@@ -228,8 +242,8 @@ func TestTeamsLinkOffersAndContacts(t *testing.T) {
 	}
 	// Linking the same Teams account again replaces the contact and its conversation.
 	contact.ID = "teams-2"
-	if _, err := contacts.LinkTeamsContact(p.ctx, contact, "sealed-again"); err != nil {
-		t.Fatal(err)
+	if _, found, err := contacts.LinkTeamsContact(p.ctx, p.tenant, "member-1", strings.Repeat("d", 64), linker("sealed-again", &seen)); err != nil || !found {
+		t.Fatalf("relink: found=%v err=%v", found, err)
 	}
 	if _, ok, _ := contacts.TeamsConversation(p.ctx, p.tenant, "teams-1"); ok {
 		t.Fatal("the replaced conversation survived")
@@ -248,5 +262,68 @@ func TestTeamsLinkOffersAndContacts(t *testing.T) {
 	}
 	if err := contacts.CountTeamsLinkAttempt(p.ctx, p.tenant, "gone-1", "attempt-gone", time.Now()); !errors.Is(err, shared.ErrForbidden) {
 		t.Fatalf("disabled user: %v", err)
+	}
+}
+
+// Muting the inbox after a personal message was queued stops it: every personal message is sent
+// from its inbox row (#1418).
+func TestQueuedPersonalMessageStopsWhenTheInboxIsMuted(t *testing.T) {
+	p := newPersonalChannels(t, "personal-inapp-mute")
+	if _, err := p.store.SavePersonalDefault(p.ctx, p.tenant, "admin", notification.EventOwnershipChanged, notification.PersonalSlack, true, 0, p.now); err != nil {
+		t.Fatal(err)
+	}
+	event := p.publish(t, "queued")
+	if jobs := personalJobs(t, p, "personal.slack"); len(jobs) != 1 {
+		t.Fatalf("slack jobs = %v", jobs)
+	}
+	if _, ok, err := p.store.LoadPersonalDelivery(p.ctx, p.tenant, "member-1", event, "slack-1", 1, notification.PersonalSlack); err != nil || !ok {
+		t.Fatalf("before the mute ok=%v err=%v", ok, err)
+	}
+	personalExec(t, p.ctx, p.pool, p.tenant, `INSERT INTO user_notification_preferences(tenant_id,user_id,event_type,channel,state,revision,updated_at)
+		VALUES($1,'member-1','finding.ownership_changed','in_app','disabled',1,$2)`, p.tenant, p.now)
+	for _, channel := range []string{notification.PersonalSlack, notification.PersonalEmail} {
+		contact := shared.ID("slack-1")
+		if channel == notification.PersonalEmail {
+			contact = "contact-1"
+		}
+		if _, ok, err := p.store.LoadPersonalDelivery(p.ctx, p.tenant, "member-1", event, contact, 1, channel); err != nil || ok {
+			t.Fatalf("%s after the in-app mute ok=%v err=%v", channel, ok, err)
+		}
+	}
+}
+
+// A credential in an event's own text never reaches an inbox row or a personal message: the
+// generic subject reads the snapshot the event builders scrubbed (#1361), not the raw data.
+func TestPersonalTextComesFromTheScrubbedSnapshot(t *testing.T) {
+	p := newPersonalChannels(t, "personal-scrub")
+	p.repo.SetEventProjector(notificationuc.NewEventBuilders())
+	at := p.now
+	if _, err := p.repo.PutEngagementNotificationSetting(p.ctx, notification.EngagementNotificationSetting{TenantID: p.tenant, EngagementID: p.engagement(),
+		ExternalNotifications: notification.EngagementNotificationsInherit, LeadUserID: "lead-1", Revision: 1, UpdatedAt: &at, UpdatedBy: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	personalExec(t, p.ctx, p.pool, p.tenant, `INSERT INTO user_contacts(tenant_id,id,user_id,kind,source,value,verified_at,version,created_at,updated_at)
+		VALUES($1,'lead-slack','lead-1','slack','manual','T0123:U0LEAD',$2,1,$2,$2)`, p.tenant, p.now)
+	if _, err := p.store.SavePersonalDefault(p.ctx, p.tenant, "admin", notification.EventScanCompleted, notification.PersonalSlack, true, 0, p.now); err != nil {
+		t.Fatal(err)
+	}
+	rule := notification.Rule{TenantID: p.tenant, ID: "rule-scrub", Name: "Leads", Enabled: true, EventType: notification.EventScanCompleted,
+		RecipientRoles: []string{notification.RoleEngagementLead}, Revision: 1, CreatedAt: p.now, UpdatedAt: p.now}
+	if _, err := p.repo.CreateRule(p.ctx, rule); err != nil {
+		t.Fatal(err)
+	}
+	const secret = "hunter2-SYNTHETIC-MARKER"
+	data, _ := json.Marshal(map[string]string{"title": "Scan for password=" + secret, "summary": "token=" + secret + " AKIAIOSFODNN7EXAMPLE", "scan_kind": "sast"})
+	event := notification.Event{TenantID: p.tenant, ID: "event-scrub", Type: notification.EventScanCompleted, SourceKind: "scan_job", SourceID: "scan-scrub",
+		EngagementID: p.engagement(), SchemaVersion: 1, OccurredAt: p.now, Data: data}
+	if _, err := p.repo.Publish(p.ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	message, ok, err := p.store.LoadPersonalDelivery(p.ctx, p.tenant, "lead-1", event.ID, "lead-slack", 1, notification.PersonalSlack)
+	if err != nil || !ok {
+		t.Fatalf("reload ok=%v err=%v", ok, err)
+	}
+	if message.Title == "" || strings.Contains(message.Title+message.Summary, secret) || strings.Contains(message.Title+message.Summary, "AKIAIOSFODNN7EXAMPLE") {
+		t.Fatalf("personal message = %q / %q", message.Title, message.Summary)
 	}
 }
