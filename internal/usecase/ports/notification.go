@@ -43,6 +43,9 @@ type NotificationSourceFailureFilter struct {
 type AttemptAdmission struct {
 	TemplateRef string
 	DataClass   notification.DataClass
+	// RawEvent requires the administrator's opt-in to remain committed when the
+	// attempt begins, even if the channel still permits detail content.
+	RawEvent bool
 }
 
 type NotificationWork struct {
@@ -58,6 +61,9 @@ type NotificationWork struct {
 	// When it is not empty the webhook driver sends exactly these bytes instead
 	// of the event envelope, signs them and sets X-Synapse-Body: custom.
 	CustomWebhookBody []byte
+	// WebhookBody is the versioned, class-filtered default webhook envelope. It is kept separate
+	// from CustomWebhookBody so a driver can preserve custom-body signature semantics.
+	WebhookBody []byte
 	// Formatted is the channel's wire payload rendered from a template (#1365). When it is nil the
 	// driver sends its built-in content.
 	Formatted *FormattedMessage

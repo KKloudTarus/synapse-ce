@@ -25,6 +25,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/issue"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/promotion"
@@ -997,6 +998,9 @@ type ScanJob struct {
 	// means the worker completed; it is deliberately distinct from coverage.
 	EngineOutcomes []scanrun.EngineOutcome `json:"engine_outcomes,omitempty"`
 	EngineCoverage scanrun.EngineCoverage  `json:"engine_coverage"`
+	// NotificationSnapshot is the bounded successful result captured at the
+	// terminal transition. It is internal and is never returned by scan APIs.
+	NotificationSnapshot notification.ScanSummary `json:"-"`
 }
 
 // ScanJobStore persists scan-job status (upserted as the pipeline progresses).

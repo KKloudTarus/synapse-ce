@@ -526,6 +526,16 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 	// lookup and row-locked admission use SECURITY DEFINER; never leave direct
 	// DML or unscoped SELECT granted by the generic runtime grant.
 	var inboundInstalled bool
+	var capturePolicyInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regclass('public.notification_capture_policy') IS NOT NULL").Scan(&capturePolicyInstalled); err != nil {
+		return fmt.Errorf("inspect notification capture policy: %w", err)
+	}
+	if capturePolicyInstalled {
+		statements = append(statements,
+			"REVOKE ALL ON TABLE notification_capture_policy FROM "+quotedRole,
+			"GRANT SELECT ON TABLE notification_capture_policy TO "+quotedRole,
+		)
+	}
 	if err := adminDB.QueryRowContext(ctx, "SELECT to_regclass('public.inbound_webhook_endpoints') IS NOT NULL").Scan(&inboundInstalled); err != nil {
 		return fmt.Errorf("inspect inbound webhook registry: %w", err)
 	}

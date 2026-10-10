@@ -29,7 +29,21 @@ func eventBuilders() map[domain.EventType]eventBuilder {
 			subjectKey: "scan_id",
 			data:       scanCompletedData,
 			vars: func(_ domain.Event, data eventData, facts sourceFacts) map[string]string {
-				return map[string]string{"scan_kind": data.text("scan_kind"), "target": displayTarget(facts.get("scan_target"))}
+				target := facts.get("scan_target")
+				if target == "" {
+					target = facts.get("target")
+				}
+				values := map[string]string{"scan_kind": data.text("scan_kind"), "target": displayTarget(target)}
+				for _, name := range scanSummaryVariableNames {
+					values[name] = facts.get(name)
+					if values[name] == "" {
+						values[name] = data.text(name)
+					}
+				}
+				return values
+			},
+			lists: func(_ domain.Event, _ eventData, _ sourceFacts, lists map[string][]map[string]string) map[string][]map[string]string {
+				return lists
 			},
 			relevant: scanStillSucceeded,
 		},
@@ -74,10 +88,31 @@ func eventBuilders() map[domain.EventType]eventBuilder {
 // still writes the data; it moves to identity-only capture once every running worker composes.
 
 func scanCompletedData(e domain.Event, facts sourceFacts) map[string]any {
-	return map[string]any{
+	data := map[string]any{
 		"title": "Scan completed", "summary": "A scan completed successfully.",
 		"scan_id": factOr(facts, "scan_id", e.SourceID), "scan_kind": facts.get("scan_kind"),
 	}
+	if facts.get("total_count") == "" {
+		return data // legacy source records retain the v1 payload exactly.
+	}
+	for _, name := range scanSummaryVariableNames {
+		if name == "delta_available" {
+			data[name] = facts.get(name) == "true"
+			continue
+		}
+		data[name] = numericFact(facts.get(name))
+	}
+	return data
+}
+
+var scanSummaryVariableNames = []string{"total_count", "critical_count", "high_count", "medium_count", "low_count", "info_count", "new_count", "fixed_count", "unchanged_count", "delta_available"}
+
+func numericFact(value string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 func qualityGateFailedData(e domain.Event, facts sourceFacts) map[string]any {

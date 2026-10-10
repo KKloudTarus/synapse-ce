@@ -3,6 +3,7 @@ package notification
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
@@ -43,10 +44,9 @@ func auditDestination(c domain.Channel) string {
 }
 
 // channelAuditMetadata is the metadata every channel audit entry carries: the channel type and its
-// masked destination. The actor is the entry's Actor. Channels have no data class yet (#1360), so
-// none is recorded; the class joins this map when channels gain one.
+// masked destination, data class and raw-event mode. The actor is the entry's Actor.
 func channelAuditMetadata(c domain.Channel, extra map[string]string) map[string]string {
-	meta := map[string]string{"type": string(c.Type), "destination": auditDestination(c), "data_class": string(c.Class())}
+	meta := map[string]string{"type": string(c.Type), "destination": auditDestination(c), "data_class": string(c.Class()), "raw_event": strconv.FormatBool(c.RawEvent)}
 	for k, v := range extra {
 		meta[k] = v
 	}

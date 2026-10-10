@@ -147,6 +147,25 @@ func (c TemplateContext) Filter(spec EventSpec, class DataClass) TemplateContext
 		if ok && v.ListCap == 0 && v.Class.Rank() <= limit {
 			out.Vars[v.Name] = value
 		}
+		if items, ok := c.Lists[v.Name]; ok && v.ListCap != 0 && v.Class.Rank() <= limit {
+			if out.Lists == nil {
+				out.Lists = map[string][]map[string]string{}
+			}
+			if len(items) > v.ListCap {
+				items = items[:v.ListCap]
+			}
+			for _, item := range items {
+				filtered := make(map[string]string, len(v.ItemFields))
+				for _, field := range v.ItemFields {
+					if value, found := item[field]; found {
+						filtered[field] = value
+					}
+				}
+				if len(filtered) != 0 {
+					out.Lists[v.Name] = append(out.Lists[v.Name], filtered)
+				}
+			}
+		}
 	}
 	return out
 }

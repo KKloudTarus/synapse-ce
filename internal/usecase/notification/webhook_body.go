@@ -48,11 +48,12 @@ func validateWebhookBody(eventType domain.EventType, source string, schemas []te
 // RenderCustomWebhookBody renders the custom body a resolution selected for a webhook channel. ok
 // is false when there is no custom body to send: the resolution is not of the webhook family, did
 // not pick a tenant template with a body, or the fallback applies; the driver then sends the event
-// envelope. vars are the event's scalar variables.
+// versioned filtered envelope. data is the event's already class-filtered scalar and bounded-list
+// context.
 //
 // The template was validated when it was saved and bound, but the catalog may have changed since,
 // so it is parsed and compiled again against the event's schema here.
-func RenderCustomWebhookBody(resolution TemplateResolution, vars map[string]string) (body []byte, ok bool, err error) {
+func RenderCustomWebhookBody(resolution TemplateResolution, data msgtemplate.Data) (body []byte, ok bool, err error) {
 	if resolution.Family != domain.FamilyWebhook {
 		return nil, false, nil
 	}
@@ -73,7 +74,7 @@ func RenderCustomWebhookBody(resolution TemplateResolution, vars map[string]stri
 	if len(schemas) != 1 {
 		return nil, false, fmt.Errorf("%w: a custom body renders for one event type", shared.ErrValidation)
 	}
-	rendered, err := domain.RenderCustomWebhookBody(source, schemas[0].schema, msgtemplate.Data{Vars: vars})
+	rendered, err := domain.RenderCustomWebhookBody(source, schemas[0].schema, data)
 	if err != nil {
 		return nil, false, err
 	}

@@ -578,6 +578,7 @@ func (rt *Router) routes() *http.ServeMux {
 			// Custom message templates (#1370): every route needs manage_integrations. The tenant
 			// comes from the session; every mutation is revision-guarded and audited with a diff
 			// summary that never quotes template source.
+			mux.HandleFunc("GET /api/v1/notifications/templates/builtins", rt.authz(userdom.PermManageIntegrations, rt.listBuiltinNotificationTemplates))
 			mux.HandleFunc("GET /api/v1/notifications/templates", rt.authz(userdom.PermManageIntegrations, rt.listNotificationTemplates))
 			mux.HandleFunc("POST /api/v1/notifications/templates", rt.authz(userdom.PermManageIntegrations, rt.createNotificationTemplate))
 			mux.HandleFunc("GET /api/v1/notifications/templates/{nid}", rt.authz(userdom.PermManageIntegrations, rt.getNotificationTemplate))

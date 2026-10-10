@@ -17,11 +17,12 @@ import (
 // query of every one of these URLs holds the secret.
 
 var (
-	googleChatPath = regexp.MustCompile(`^/v1/spaces/[A-Za-z0-9_-]{1,128}/messages$`)
-	discordPath    = regexp.MustCompile(`^/api(?:/v[0-9]{1,2})?/webhooks/[0-9]{1,20}/[A-Za-z0-9_-]{1,128}$`)
-	telegramToken  = regexp.MustCompile(`^[0-9]{5,16}:[A-Za-z0-9_-]{30,64}$`)
-	telegramChat   = regexp.MustCompile(`^(?:-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$`)
-	decimalID      = regexp.MustCompile(`^[0-9]{1,20}$`)
+	googleChatPath         = regexp.MustCompile(`^/v1/spaces/[A-Za-z0-9_-]{1,128}/messages$`)
+	discordPath            = regexp.MustCompile(`^/api(?:/v[0-9]{1,2})?/webhooks/[0-9]{1,20}/[A-Za-z0-9_-]{1,128}$`)
+	telegramToken          = regexp.MustCompile(`^[0-9]{5,16}:[A-Za-z0-9_-]{30,64}$`)
+	telegramChat           = regexp.MustCompile(`^(?:-?[0-9]{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$`)
+	decimalID              = regexp.MustCompile(`^[0-9]{1,20}$`)
+	teamsPowerPlatformPath = regexp.MustCompile(`^/powerautomate/automations/direct/(?:cu/[0-9]+/)?workflows/`)
 )
 
 // telegramMaxThreadID bounds message_thread_id to the Bot API's 32-bit integer.
@@ -66,7 +67,7 @@ func validateTeamsChannel(in ChannelInput, _ bool) (ports.NotificationChannelCon
 		}
 	}
 	path := u.EscapedPath()
-	pathOK := strings.HasPrefix(path, "/workflows/") || strings.HasPrefix(path, "/powerautomate/automations/direct/workflows/")
+	pathOK := strings.HasPrefix(path, "/workflows/") || teamsPowerPlatformPath.MatchString(path)
 	if !hostOK || !pathOK || u.Query().Get("sig") == "" {
 		return nil, "", nil, invalid
 	}

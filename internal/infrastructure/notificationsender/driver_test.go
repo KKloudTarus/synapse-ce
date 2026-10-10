@@ -16,16 +16,17 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// goldenWork is the event the golden files were captured with. The files were produced by the
-// sender before the driver registry existed, so these tests prove the wire output is unchanged.
+// goldenWork has a mixed-class snapshot so default webhook tests can prove the driver filters
+// direct sends instead of serializing the raw event data.
 func goldenWork(kind notification.ChannelType) ports.NotificationWork {
 	return ports.NotificationWork{
 		Delivery: notification.Delivery{ID: "delivery-1"},
-		Channel:  notification.Channel{Type: kind},
+		Channel:  notification.Channel{Type: kind, DataClass: notification.DataClassSignal},
 		Event: notification.Event{
 			ID: "event-1", Type: notification.EventScanCompleted, SourceKind: "scan_job", SourceID: "scan-1", SchemaVersion: 1,
 			OccurredAt: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
 			Data:       json.RawMessage(`{"title":"Scan <done> & ok","summary":"All *good* <@U1>"}`),
+			Context:    json.RawMessage(`{"vars":{"title":"Scan <done> & ok","summary":"All *good* <@U1>","scan_kind":"sast"}}`),
 		},
 	}
 }
@@ -47,7 +48,11 @@ func captureSend(t *testing.T, kind notification.ChannelType, config func(url st
 	s := New(SMTPConfig{}, time.Second)
 	s.http = server.Client()
 	s.now = func() time.Time { return time.Unix(1700000100, 0) }
-	if result := s.Send(context.Background(), goldenWork(kind), config(server.URL)); result.ErrorCode != "" {
+	work := goldenWork(kind)
+	if kind != notification.ChannelWebhook {
+		work.Channel.DataClass = notification.DataClassSummary
+	}
+	if result := s.Send(context.Background(), work, config(server.URL)); result.ErrorCode != "" {
 		t.Fatalf("%s send: %+v", kind, result)
 	}
 	return captured
@@ -62,24 +67,27 @@ func readGolden(t *testing.T, name string) []byte {
 	return raw
 }
 
-func TestWebhookWireOutputIsUnchanged(t *testing.T) {
+func TestWebhookDefaultEnvelopeIsFilteredAndSigned(t *testing.T) {
 	got := captureSend(t, notification.ChannelWebhook, func(url string) ports.NotificationChannelConfig {
 		return ports.WebhookChannelConfig{URL: url, Secret: "0123456789abcdef"}
 	})
-	if want := readGolden(t, "webhook_body.golden"); !bytes.Equal(got.body, want) {
+	if want := bytes.TrimSpace(readGolden(t, "webhook_body.golden")); !bytes.Equal(got.body, want) {
 		t.Errorf("webhook body changed:\n got %s\nwant %s", got.body, want)
 	}
-	if want := string(readGolden(t, "webhook_signature.golden")); got.header.Get("X-Synapse-Signature") != want {
+	if want := string(bytes.TrimSpace(readGolden(t, "webhook_signature.golden"))); got.header.Get("X-Synapse-Signature") != want {
 		t.Errorf("webhook signature = %q, want %q", got.header.Get("X-Synapse-Signature"), want)
 	}
 }
 
-func TestSlackWireOutputIsUnchanged(t *testing.T) {
+func TestSlackFallbackWireOutputIsLiteral(t *testing.T) {
 	got := captureSend(t, notification.ChannelSlack, func(url string) ports.NotificationChannelConfig {
 		return ports.SlackChannelConfig{URL: url}
 	})
 	if want := readGolden(t, "slack_body.golden"); !bytes.Equal(got.body, want) {
 		t.Errorf("slack body changed:\n got %s\nwant %s", got.body, want)
+	}
+	if bytes.Contains(got.body, []byte(`"mrkdwn"`)) || !bytes.Contains(got.body, []byte(`"unfurl_links":false`)) || !bytes.Contains(got.body, []byte(`"unfurl_media":false`)) {
+		t.Fatalf("unsafe Slack fallback payload: %s", got.body)
 	}
 }
 

@@ -8,6 +8,7 @@ import type {
   NotificationSourceFailure,
   NotificationEventSpec,
   NotificationEventType,
+  NotificationDataClass,
   NotificationLocale,
   NotificationRule,
   NotificationRuleFilter,
@@ -321,6 +322,20 @@ const CHANNEL_TYPES: { value: NotificationChannelType; label: string }[] =
     label: CHANNEL_DESTINATIONS[value].label,
   }))
 
+const DATA_CLASS_OPTIONS: { value: NotificationDataClass; label: string }[] = [
+  { value: 'signal', label: 'Signal — event, severity, counts and link' },
+  { value: 'summary', label: 'Summary — signal plus titles and names' },
+  { value: 'detail', label: 'Detail — full declared event details' },
+]
+
+function defaultDataClass(type: NotificationChannelType): NotificationDataClass {
+  return type === 'email' || type === 'webhook' ? 'summary' : 'signal'
+}
+
+function dataClassRank(value: NotificationDataClass): number {
+  return DATA_CLASS_OPTIONS.findIndex((option) => option.value === value)
+}
+
 const PROVIDERS_DISABLED_SWITCH = 'SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED'
 
 /**
@@ -376,6 +391,9 @@ function ChannelCreate({
   const [templateId, setTemplateId] = useState(initial?.template_id ?? '')
   const [locale, setLocale] = useState<NotificationLocale | ''>(initial?.locale ?? '')
   const [customBody, setCustomBody] = useState(initial?.custom_body ?? false)
+  const [rawEvent, setRawEvent] = useState(initial?.raw_event ?? false)
+  const initialDataClass = initial?.data_class ?? defaultDataClass(type)
+  const [dataClass, setDataClass] = useState<NotificationDataClass>(initialDataClass)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Without administer the destination is read-only: the server refuses a new URL, secret or
@@ -454,6 +472,18 @@ function ChannelCreate({
           type === 'webhook' && customBody !== (initial?.custom_body ?? false)
             ? customBody
             : undefined,
+        // New channels omit the type's default so the server remains the authority for defaults.
+        data_class:
+          dataClass !== (initial?.data_class ?? defaultDataClass(type))
+            ? dataClass
+            : undefined,
+        // A manager can turn an existing raw webhook off, but can never opt it back in.
+        raw_event:
+          type === 'webhook' &&
+          (canAdmin || initial?.raw_event === true) &&
+          rawEvent !== (initial?.raw_event ?? false)
+            ? rawEvent
+            : undefined,
       }
       if (initial) await api.updateNotificationChannel(initial.id, input)
       else await api.createNotificationChannel(input)
@@ -518,7 +548,14 @@ function ChannelCreate({
             id="notification-type"
             disabled={!!initial}
             value={type}
-            onValueChange={(v) => setType(v as NotificationChannelType)}
+            onValueChange={(v) => {
+              const next = v as NotificationChannelType
+              setType(next)
+              if (!initial) {
+                setDataClass(defaultDataClass(next))
+                setRawEvent(false)
+              }
+            }}
             options={typeOptions}
           />
         </Field>
@@ -652,9 +689,44 @@ function ChannelCreate({
           }}
           onLocaleChange={setLocale}
           customBody={customBody}
-          onCustomBodyChange={setCustomBody}
+          onCustomBodyChange={(on) => {
+            setCustomBody(on)
+            if (on) setRawEvent(false)
+          }}
+          rawEvent={rawEvent}
+          onRawEventChange={(on) => {
+            setRawEvent(on)
+            if (on) {
+              setCustomBody(false)
+              setDataClass('detail')
+            }
+          }}
+          canChangeRawEvent={canAdmin || rawEvent}
           disabled={!(initial ? canManage : canAdmin)}
         />
+        <Field
+          label="Data class"
+          htmlFor="notification-data-class"
+          hint={
+            rawEvent
+              ? 'Raw event delivery requires detail class.'
+              : canAdmin
+                ? 'Sets the most sensitive declared event data this destination can receive.'
+                : 'You can lower this destination’s data class. Raising it requires a tenant administrator.'
+          }
+        >
+          <Select
+            id="notification-data-class"
+            ariaDescribedBy="notification-data-class-hint"
+            value={dataClass}
+            disabled={rawEvent || !(initial ? canManage : canAdmin)}
+            onValueChange={(value) => setDataClass(value as NotificationDataClass)}
+            options={DATA_CLASS_OPTIONS.filter(
+              (option) =>
+                canAdmin || dataClassRank(option.value) <= dataClassRank(initialDataClass),
+            )}
+          />
+        </Field>
         <div className="flex items-end md:col-span-2">
           <div className="flex-1">
             {error && <ErrorState message={error} />}
@@ -835,6 +907,8 @@ export function ChannelList({
                   </Pill>
                 )}
                 <Pill>{channelTypeLabel(c.type)}</Pill>
+                <Pill>Data: {c.data_class ?? defaultDataClass(c.type)}</Pill>
+                {c.raw_event && <Pill className="text-warning-primary">Raw event</Pill>}
                 {offByOperator && (
                   <Pill className="text-warning-primary">
                     Disabled by operator

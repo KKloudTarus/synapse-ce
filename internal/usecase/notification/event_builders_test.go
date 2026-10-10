@@ -111,6 +111,18 @@ func TestSourceFactsBecomeVariables(t *testing.T) {
 	}
 }
 
+func TestScanCompletedV2DataSuppliesCountVariables(t *testing.T) {
+	e := identityOnly(t, domain.EventScanCompleted, "scan-1", nil)
+	e.SchemaVersion = 2
+	e.Data = json.RawMessage(`{"title":"Scan completed","summary":"A scan completed successfully.","scan_id":"scan-1","scan_kind":"sast","total_count":2,"critical_count":1,"high_count":1,"medium_count":0,"low_count":0,"info_count":0,"new_count":1,"fixed_count":0,"unchanged_count":1,"delta_available":true}`)
+	_, vars := project(t, e)
+	for name, want := range map[string]string{"total_count": "2", "critical_count": "1", "delta_available": "true"} {
+		if vars[name] != want {
+			t.Errorf("%s = %q, want %q", name, vars[name], want)
+		}
+	}
+}
+
 func TestDisplayTargetDropsCredentials(t *testing.T) {
 	for target, want := range map[string]string{
 		"https://ci:token@git.example.test/org/repo.git?ref=main#readme": "https://git.example.test/org/repo.git",

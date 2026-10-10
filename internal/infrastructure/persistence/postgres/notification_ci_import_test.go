@@ -14,6 +14,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/codequality"
+	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
@@ -36,7 +37,7 @@ func (ciNotificationAudit) Record(context.Context, ports.AuditEntry) error { ret
 
 func ciNotificationResult() *scauc.ScanResult {
 	return &scauc.ScanResult{
-		Target: "/ci/project",
+		Target:    "/ci/project",
 		SourceRef: "main",
 		CodeQuality: &codequality.Report{
 			Inventory: measure.Inventory{Files: []measure.FileInventory{
@@ -58,6 +59,7 @@ func TestNotificationCIImportCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := NewNotificationRepository(pool)
+	repo.SetEventProjector(notificationuc.NewEventBuilders())
 	channel := notification.Channel{
 		TenantID: tenant, ID: "ci-channel", Name: "CI hook", Type: notification.ChannelWebhook,
 		Enabled: true, Revision: 1, SecretVersion: 1, CreatedAt: now, UpdatedAt: now,

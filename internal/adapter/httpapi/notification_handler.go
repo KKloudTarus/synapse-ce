@@ -73,6 +73,7 @@ func (rt *Router) createNotificationChannel(w http.ResponseWriter, r *http.Reque
 		writeError(w, rt.log, err)
 		return
 	}
+	in.AllowClassRaise = callerCan(r, userdom.PermAdminister)
 	item, err := rt.notifications.CreateChannel(r.Context(), PrincipalFrom(r.Context()), in)
 	if err != nil {
 		writeError(w, rt.log, err)
