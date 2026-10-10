@@ -10,6 +10,7 @@ export type NotificationChannelType =
   | 'telegram'
   | 'google_chat'
   | 'discord'
+  | 'slack_bot'
 // The server's event catalog is the source of truth for event types, so the console accepts any
 // type it declares instead of a hard-coded union.
 export type NotificationEventType = string
@@ -138,6 +139,10 @@ export interface NotificationChannelInput {
   chat_id?: string
   /** Telegram only: the forum topic to post into; omitted posts to the main chat. */
   thread_id?: number
+  /** Slack bot only: the conversation (C… or G…) to post into. The bot token goes in `secret`. */
+  conversation_id?: string
+  /** Slack bot only: allow a Slack Connect or organisation-shared conversation. Administrators only. */
+  allow_shared_conversation?: boolean
   revision?: number
   /** Omitted keeps the binding; an empty string unbinds. */
   template_id?: string
@@ -146,6 +151,26 @@ export interface NotificationChannelInput {
   /** Webhook only; needs a bound template. Omitted keeps the current value. */
   custom_body?: boolean
 }
+/** A Slack conversation a bot token can post to (#1383). */
+export interface SlackConversation {
+  id: string
+  name: string
+  is_private: boolean
+  /** Slack Connect, externally shared or organisation-shared. */
+  is_shared: boolean
+  is_archived: boolean
+  /** The app is a member of the conversation. */
+  is_member: boolean
+}
+
+export interface SlackConversations {
+  team_id: string
+  team_name: string
+  items: SlackConversation[]
+  /** The workspace has more conversations than were listed. */
+  truncated: boolean
+}
+
 export interface NotificationRule {
   id: string
   name: string
@@ -248,6 +273,15 @@ export const notificationsApi = {
       `/notifications/channels/${encodeURIComponent(id)}?revision=${revision}`,
       { method: 'DELETE' },
     ),
+  // The Slack bot channel form's conversation picker (#1383): a token being entered, or an existing
+  // channel's sealed token. Administrators only; the token is never returned.
+  listSlackConversations: (
+    input: { bot_token: string } | { channel_id: string },
+  ): Promise<SlackConversations> =>
+    req('/notifications/slack/conversations', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
   testNotificationChannel: (
     id: string,
   ): Promise<{ delivery_id: string; state: 'pending' }> =>

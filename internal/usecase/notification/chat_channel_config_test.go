@@ -140,7 +140,7 @@ func TestChatValidationErrorsNeverEchoTheURL(t *testing.T) {
 }
 
 func TestEveryChatChannelTypeHasASchemaAndAChatFamily(t *testing.T) {
-	for _, kind := range []domain.ChannelType{domain.ChannelTeams, domain.ChannelTelegram, domain.ChannelGoogleChat, domain.ChannelDiscord} {
+	for _, kind := range []domain.ChannelType{domain.ChannelTeams, domain.ChannelTelegram, domain.ChannelGoogleChat, domain.ChannelDiscord, domain.ChannelSlackBot} {
 		if _, ok := channelSchemas[kind]; !ok || !kind.Valid() || !kind.HTTPEndpoint() {
 			t.Errorf("%s has no schema", kind)
 		}

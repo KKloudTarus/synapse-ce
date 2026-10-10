@@ -131,3 +131,12 @@ func slackText(value string, style slackStyle) map[string]any {
 	}
 	return element
 }
+
+// SlackBot formats the messages of a Slack bot channel (#1383). chat.postMessage takes the same
+// Block Kit as an incoming webhook, so it is Slack under the bot channel's type; the driver adds
+// the conversation and switches link unfurling off.
+type SlackBot struct{ Slack }
+
+var _ ports.NotificationFormatter = SlackBot{}
+
+func (SlackBot) ChannelType() notification.ChannelType { return notification.ChannelSlackBot }
