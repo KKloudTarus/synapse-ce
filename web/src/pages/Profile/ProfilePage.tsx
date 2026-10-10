@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { api, ApiError, type UserContact } from '../../lib/api'
 import { useOptionalAuth } from '../../auth/AuthContext'
 import { EnterpriseIdentities } from './EnterpriseIdentities'
+import { PersonalLinks } from './PersonalLinks'
 
 export function ProfilePage() {
   const enterprise = useOptionalAuth()?.currentUser?.features?.enterpriseIdentity === true
@@ -31,13 +32,15 @@ export function ProfilePage() {
     finally { setBusy(null) }
   }
 
+  const emails = (contacts ?? []).filter(contact => contact.kind === 'email')
+
   function add(e: FormEvent) {
     e.preventDefault()
     void run('add', async () => { await api.addMyEmail(email); setEmail('') }, 'Email added. Request a verification code to activate it.')
   }
 
   return <div className="mx-auto max-w-3xl space-y-6">
-    <header><h1 className="text-2xl font-semibold text-primary">My profile</h1><p className="mt-1 text-sm text-secondary">Manage email addresses for personal notifications.</p></header>
+    <header><h1 className="text-2xl font-semibold text-primary">My profile</h1><p className="mt-1 text-sm text-secondary">Manage the email, Slack and Microsoft Teams accounts your personal notifications go to.</p></header>
     {error && <div role="alert" className="rounded-lg border border-error-primary bg-error-primary p-3 text-sm text-error-primary">{error}</div>}
     {message && <div role="status" className="rounded-lg border border-success-primary p-3 text-sm text-success-primary">{message}</div>}
     {contacts === null ? <p role="status" className="text-secondary">Loading contacts…</p> : unavailable ?
@@ -51,7 +54,7 @@ export function ProfilePage() {
       </form>
       <section aria-labelledby="profile-contacts-heading" className="space-y-3">
         <h2 id="profile-contacts-heading" className="text-lg font-semibold text-primary">Email contacts</h2>
-        {contacts.length === 0 ? <p className="rounded-lg border border-secondary p-4 text-secondary">No email addresses yet.</p> : contacts.map(contact =>
+        {emails.length === 0 ? <p className="rounded-lg border border-secondary p-4 text-secondary">No email addresses yet.</p> : emails.map(contact =>
           <article key={contact.id} className="space-y-3 rounded-xl border border-secondary bg-primary p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div><p className="break-all font-medium text-primary">{contact.value}</p><p className="text-sm text-secondary">{contact.verified_at ? 'Verified' : 'Pending verification'}{contact.source === 'oidc' ? ' · Managed by identity provider' : ''}</p></div>
@@ -66,7 +69,8 @@ export function ProfilePage() {
               </form>
             </div>}
           </article>) }
-      </section>{enterprise && <EnterpriseIdentities />}
+      </section>
+      <PersonalLinks contacts={contacts} busy={busy} run={run} />{enterprise && <EnterpriseIdentities />}
     </>}
   </div>
 }
