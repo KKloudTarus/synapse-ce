@@ -62,6 +62,7 @@ import (
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
 	oidcadapter "github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
@@ -88,6 +89,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/slackapi"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/teamsbot"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
 	asttool "github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/ast"
@@ -230,6 +232,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/srcreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/symreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/taintscan"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/teamslink"
 	tenancyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/tenancy"
 	threatmodeluc "github.com/KKloudTarus/synapse-ce/internal/usecase/threatmodeluc"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
@@ -396,6 +399,10 @@ func main() {
 	}
 	if err := cfg.ValidatePublicBaseURL(); err != nil {
 		log.Error("console link configuration invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateTeamsBot(); err != nil {
+		log.Error("Microsoft Teams bot configuration invalid", "err", err)
 		os.Exit(1)
 	}
 	if err := cfg.ValidateOIDCPosture(); err != nil {
@@ -1628,6 +1635,8 @@ func main() {
 		// Slack bot channels (#1383) are checked against the Slack Web API when they are saved, and
 		// the channel form lists a bot's conversations. The client goes through the SSRF guard.
 		notificationService.SetSlackWorkspace(slackapi.Workspace{Client: slackapi.New(safehttp.New(10*time.Second, false))})
+		// Personal Slack and Teams messages link back to the console (#1419, #1420).
+		notificationService.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
 		router.SetNotifications(notificationService)
 		// The API still needs SMTP for contact verification and personal inbox mail.
 		userContactService, notificationErr = usercontacts.NewService(postgres.NewUserContactStore(databasePool), userRepo, vaultCipher, notificationSender, ids, clock, usercontacts.DeriveVerifierKey(cfg.VaultMasterKey), cfg.NotificationSMTPHost != "" && cfg.NotificationSMTPFrom != "")
@@ -1635,14 +1644,36 @@ func main() {
 			log.Error("user contact service init failed", "err", notificationErr)
 			os.Exit(1)
 		}
+		// Slack contacts (#1419) are checked against the tenant's Slack app when they are added.
+		userContactService.SetSlack(notificationService)
 		router.SetUserContacts(userContactService)
-		inboxService, inboxErr := inbox.NewService(postgres.NewInboxStore(databasePool), clock)
+		inboxStore := postgres.NewInboxStore(databasePool)
+		inboxService, inboxErr := inbox.NewService(inboxStore, clock)
 		if inboxErr != nil {
 			log.Error("personal inbox init failed", "err", inboxErr)
 			os.Exit(1)
 		}
 		inboxService.SetMailer(notificationSender)
+		// Tenant defaults for personal channels (#1418); Teams preferences need the operator's bot.
+		inboxService.SetPersonalDefaults(inboxStore)
+		inboxService.SetTeamsAvailable(cfg.TeamsBotEnabled())
 		router.SetInbox(inboxService)
+		if cfg.TeamsBotEnabled() {
+			teamsHTTP := safehttp.New(10*time.Second, false)
+			teamsService, teamsErr := teamslink.NewService(teamslink.Config{
+				Bot:      teamsbot.New(teamsbot.Config{AppID: cfg.TeamsBotAppID, AppPassword: cfg.TeamsBotAppPassword, TenantID: cfg.TeamsBotTenantID}, teamsHTTP),
+				Offers:   postgres.NewTeamsLinkOffers(databasePool),
+				Contacts: postgres.NewUserContactStore(databasePool), Protector: vaultCipher, IDs: ids, Clock: clock,
+				Key: teamslink.DeriveKey(cfg.VaultMasterKey), AcceptsServiceURL: teamsbot.ValidServiceURL,
+				Formatter: messageformat.TeamsFormatter{}, PublicBaseURL: cfg.EffectivePublicBaseURL(),
+			})
+			if teamsErr != nil {
+				log.Error("Microsoft Teams bot init failed", "err", teamsErr)
+				os.Exit(1)
+			}
+			router.SetTeamsLink(teamsService, teamsbot.NewVerifier(cfg.TeamsBotAppID, teamsHTTP))
+			log.Info("Microsoft Teams personal delivery ENABLED")
+		}
 		log.Info("tenant notification management ENABLED")
 	}
 	var siemService *siemuc.Service

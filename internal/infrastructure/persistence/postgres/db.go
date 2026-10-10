@@ -551,6 +551,19 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 			"GRANT EXECUTE ON FUNCTION synapse_rotate_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
 		)
 	}
+	// The Teams link offers (#1420) are global and owner-only like the inbound registry: the runtime
+	// role offers and claims a code only through the SECURITY DEFINER functions of migration 0224.
+	var teamsLinkInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regclass('public.teams_link_offers') IS NOT NULL").Scan(&teamsLinkInstalled); err != nil {
+		return fmt.Errorf("inspect Teams link offers: %w", err)
+	}
+	if teamsLinkInstalled {
+		statements = append(statements,
+			"REVOKE ALL ON TABLE teams_link_offers FROM "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_offer_teams_link(TEXT,TEXT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_claim_teams_link(TEXT) TO "+quotedRole,
+		)
+	}
 	// The identity platform tables are global and owner-only. The runtime role reaches them solely
 	// through the exact-match SECURITY DEFINER functions of migration 0206; tenant-owned identity
 	// tables keep the ordinary grant under FORCE RLS.

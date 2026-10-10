@@ -179,3 +179,24 @@ func escapeID(id shared.ID) (string, error) {
 	}
 	return url.PathEscape(s), nil
 }
+
+// Path joins a console path the server built (for example a personal inbox row's link, #1418) to
+// the configured base. The path must start with one slash and hold no scheme, backslash, control,
+// format or space character, so it can only ever point inside the console. ok is false otherwise.
+func (b Builder) Path(path string) (string, bool) {
+	if b.base == "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.Contains(path, "://") ||
+		strings.ContainsAny(path, "\\") || len(path) > 2048 {
+		return "", false
+	}
+	for _, r := range path {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.IsSpace(r) {
+			return "", false
+		}
+	}
+	for _, segment := range strings.Split(strings.SplitN(strings.SplitN(path, "#", 2)[0], "?", 2)[0], "/") {
+		if segment == "." || segment == ".." {
+			return "", false
+		}
+	}
+	return b.base + path, true
+}

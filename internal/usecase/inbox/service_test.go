@@ -91,18 +91,21 @@ func TestMandatoryInAppCannotBeMuted(t *testing.T) {
 	}
 }
 
-func TestUnavailablePersonalEventCannotBeEnabled(t *testing.T) {
+func TestRuleRoutedEventsAcceptPreferences(t *testing.T) {
 	svc, err := NewService(&fakeInbox{}, fixedClock{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, event := range []notification.EventType{
-		notification.EventVulnerabilityAction, notification.EventScanCompleted,
-		notification.EventQualityGateFailed, notification.EventFleetAgentOffline,
-		notification.EventIncidentCreated,
-	} {
+	// A rule's recipient roles (#1415) can address people for every routable event, so each of them
+	// accepts a personal choice.
+	for _, event := range notification.ConfigurableEvents() {
+		if _, err := svc.SavePreference(context.Background(), "tenant", "user", event, notification.PersonalInApp, notification.PreferenceEnabled, 0); err != nil {
+			t.Fatalf("%s: %v", event, err)
+		}
+	}
+	for _, event := range []notification.EventType{notification.EventTest, "nope.unknown"} {
 		if _, err := svc.SavePreference(context.Background(), "tenant", "user", event, notification.PersonalInApp, notification.PreferenceEnabled, 0); err == nil {
-			t.Fatalf("unsupported personal event %s was enabled", event)
+			t.Fatalf("%s accepted a personal preference", event)
 		}
 	}
 }

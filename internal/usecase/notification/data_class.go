@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -33,7 +34,9 @@ func channelDataClass(current domain.DataClass, in ChannelInput, allowRaise bool
 type EngagementSettingInput struct {
 	ExternalNotifications domain.EngagementNotifications `json:"external_notifications"`
 	// Revision is the revision the caller read; 0 when the engagement had no stored setting.
-	Revision int `json:"revision"`
+	// LeadUserID sets the engagement lead (#1415): a user ID, "" to clear, absent to keep.
+	LeadUserID *shared.ID `json:"lead_user_id,omitempty"`
+	Revision   int        `json:"revision"`
 	// AllowRaise is set by the caller, never decoded: true only when the principal holds
 	// PermAdminister. Letting more data out about an engagement needs it.
 	AllowRaise bool `json:"-"`
@@ -76,12 +79,20 @@ func (s *Service) setEngagementNotificationSetting(ctx context.Context, actor st
 	now := s.clock.Now().UTC()
 	next := domain.EngagementNotificationSetting{TenantID: tenant, EngagementID: engagement, ExternalNotifications: in.ExternalNotifications,
 		Revision: current.Revision + 1, UpdatedAt: &now, UpdatedBy: actor}
+	next.LeadUserID = current.LeadUserID
+	if in.LeadUserID != nil {
+		next.LeadUserID = shared.ID(strings.TrimSpace(in.LeadUserID.String()))
+	}
 	stored, err := s.repo.PutEngagementNotificationSetting(ctx, next)
 	if err != nil {
 		return domain.EngagementNotificationSetting{}, err
 	}
 	meta := map[string]string{"engagement_id": engagement.String(), "external_notifications": string(stored.ExternalNotifications),
 		"previous_external_notifications": string(current.ExternalNotifications)}
+	if stored.LeadUserID != current.LeadUserID {
+		meta["lead_user_id"] = stored.LeadUserID.String()
+		meta["previous_lead_user_id"] = current.LeadUserID.String()
+	}
 	if err := s.record(ctx, actor, "notification.engagement_setting.updated", engagement.String(), meta); err != nil {
 		return domain.EngagementNotificationSetting{}, err
 	}

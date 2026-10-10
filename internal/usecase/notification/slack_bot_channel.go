@@ -78,7 +78,7 @@ func (s *Service) verifyDestination(ctx context.Context, config ports.Notificati
 	case conversation.Shared && !cfg.AllowShared:
 		return nil, errSlackShared
 	}
-	cfg.TeamID = identity.TeamID
+	cfg.TeamID, cfg.TeamName = identity.TeamID, limitRunes(identity.TeamName, 200)
 	return cfg, nil
 }
 

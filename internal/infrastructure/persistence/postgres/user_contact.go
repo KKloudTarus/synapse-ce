@@ -126,7 +126,7 @@ func (s *UserContactStore) RequestVerification(ctx context.Context, c ports.User
 		} else if err != nil {
 			return err
 		}
-		if version != c.ContactVersion || verified != nil || kind != "email" {
+		if version != c.ContactVersion || verified != nil || (kind != "email" && kind != "slack") {
 			return shared.ErrConflict
 		}
 		var recent int
@@ -229,7 +229,7 @@ func (s *UserContactStore) LoadDelivery(ctx context.Context, tenantID, challenge
 	var out ports.UserContactDelivery
 	var found bool
 	err := WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT c.contact_id,c.contact_version,u.value,c.sealed_code FROM user_contact_challenges c JOIN user_contacts u ON u.tenant_id=c.tenant_id AND u.id=c.contact_id AND u.user_id=c.user_id JOIN users p ON p.ownership_tenant_id=c.tenant_id AND p.id=c.user_id WHERE c.tenant_id=$1 AND c.id=$2 AND c.consumed_at IS NULL AND c.sent_at IS NULL AND c.expires_at>now() AND c.attempts<5 AND c.contact_version=u.version AND u.verified_at IS NULL AND NOT p.disabled AND u.kind='email'`, tenantID, challengeID).Scan(&out.ContactID, &out.ContactVersion, &out.Recipient, &out.SealedCode)
+		err := tx.QueryRow(ctx, `SELECT c.contact_id,c.contact_version,u.value,c.sealed_code,u.kind FROM user_contact_challenges c JOIN user_contacts u ON u.tenant_id=c.tenant_id AND u.id=c.contact_id AND u.user_id=c.user_id JOIN users p ON p.ownership_tenant_id=c.tenant_id AND p.id=c.user_id WHERE c.tenant_id=$1 AND c.id=$2 AND c.consumed_at IS NULL AND c.sent_at IS NULL AND c.expires_at>now() AND c.attempts<5 AND c.contact_version=u.version AND u.verified_at IS NULL AND NOT p.disabled AND u.kind IN ('email','slack')`, tenantID, challengeID).Scan(&out.ContactID, &out.ContactVersion, &out.Recipient, &out.SealedCode, &out.Kind)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
