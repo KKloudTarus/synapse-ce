@@ -246,8 +246,13 @@ func insertRule(ctx context.Context, tx pgx.Tx, r notification.Rule, update bool
 	}
 	actions, _ := json.Marshal(r.ActionTypes)
 	engs, _ := json.Marshal(r.EngagementIDs)
+	roles := r.RecipientRoles
+	if roles == nil {
+		roles = []string{}
+	}
+	recipientRoles, _ := json.Marshal(roles)
 	if update {
-		tag, err := tx.Exec(ctx, `UPDATE notification_rules SET name=$3,enabled=$4,event_type=$5,min_severity=$6,action_types=$7,engagement_ids=$8,lead_time_secs=$9,revision=$10,updated_at=$11,all_teams=$13,disabled_reason=$14 WHERE tenant_id=$1 AND id=$2 AND revision=$12`, r.TenantID, r.ID, r.Name, r.Enabled, r.EventType, r.MinSeverity, actions, engs, r.LeadTimeSecs, r.Revision, r.UpdatedAt, r.Revision-1, r.AllTeams, r.DisabledReason)
+		tag, err := tx.Exec(ctx, `UPDATE notification_rules SET name=$3,enabled=$4,event_type=$5,min_severity=$6,action_types=$7,engagement_ids=$8,lead_time_secs=$9,revision=$10,updated_at=$11,all_teams=$13,disabled_reason=$14,recipient_roles=$15 WHERE tenant_id=$1 AND id=$2 AND revision=$12`, r.TenantID, r.ID, r.Name, r.Enabled, r.EventType, r.MinSeverity, actions, engs, r.LeadTimeSecs, r.Revision, r.UpdatedAt, r.Revision-1, r.AllTeams, r.DisabledReason, recipientRoles)
 		if err != nil {
 			return err
 		}
@@ -261,7 +266,7 @@ func insertRule(ctx context.Context, tx pgx.Tx, r notification.Rule, update bool
 			return err
 		}
 	} else {
-		if _, err := tx.Exec(ctx, `INSERT INTO notification_rules(tenant_id,id,name,enabled,event_type,min_severity,action_types,engagement_ids,lead_time_secs,revision,created_at,updated_at,all_teams,disabled_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, r.TenantID, r.ID, r.Name, r.Enabled, r.EventType, r.MinSeverity, actions, engs, r.LeadTimeSecs, r.Revision, r.CreatedAt, r.UpdatedAt, r.AllTeams, r.DisabledReason); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO notification_rules(tenant_id,id,name,enabled,event_type,min_severity,action_types,engagement_ids,lead_time_secs,revision,created_at,updated_at,all_teams,disabled_reason,recipient_roles) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, r.TenantID, r.ID, r.Name, r.Enabled, r.EventType, r.MinSeverity, actions, engs, r.LeadTimeSecs, r.Revision, r.CreatedAt, r.UpdatedAt, r.AllTeams, r.DisabledReason, recipientRoles); err != nil {
 			return err
 		}
 	}
@@ -323,14 +328,14 @@ func (r *NotificationRepository) ListRules(ctx context.Context, tenant shared.ID
 	return out, err
 }
 
-const ruleSelect = `SELECT r.tenant_id,r.id,r.name,r.enabled,r.event_type,r.min_severity,r.action_types,r.engagement_ids,r.lead_time_secs,r.revision,r.created_at,r.updated_at,COALESCE(jsonb_agg(rc.channel_id ORDER BY rc.channel_id) FILTER(WHERE rc.channel_id IS NOT NULL),'[]'),r.all_teams,COALESCE((SELECT jsonb_agg(rt.team_id ORDER BY rt.team_id) FROM notification_rule_teams rt WHERE rt.tenant_id=r.tenant_id AND rt.rule_id=r.id),'[]'),r.disabled_reason FROM notification_rules r LEFT JOIN notification_rule_channels rc ON rc.tenant_id=r.tenant_id AND rc.rule_id=r.id`
+const ruleSelect = `SELECT r.tenant_id,r.id,r.name,r.enabled,r.event_type,r.min_severity,r.action_types,r.engagement_ids,r.lead_time_secs,r.revision,r.created_at,r.updated_at,COALESCE(jsonb_agg(rc.channel_id ORDER BY rc.channel_id) FILTER(WHERE rc.channel_id IS NOT NULL),'[]'),r.all_teams,COALESCE((SELECT jsonb_agg(rt.team_id ORDER BY rt.team_id) FROM notification_rule_teams rt WHERE rt.tenant_id=r.tenant_id AND rt.rule_id=r.id),'[]'),r.disabled_reason,r.recipient_roles FROM notification_rules r LEFT JOIN notification_rule_channels rc ON rc.tenant_id=r.tenant_id AND rc.rule_id=r.id`
 
 type scanner interface{ Scan(...any) error }
 
 func scanRule(row scanner, out *notification.Rule) error {
 	var typ string
-	var actions, engs, channels, teams []byte
-	if err := row.Scan(&out.TenantID, &out.ID, &out.Name, &out.Enabled, &typ, &out.MinSeverity, &actions, &engs, &out.LeadTimeSecs, &out.Revision, &out.CreatedAt, &out.UpdatedAt, &channels, &out.AllTeams, &teams, &out.DisabledReason); err != nil {
+	var actions, engs, channels, teams, roles []byte
+	if err := row.Scan(&out.TenantID, &out.ID, &out.Name, &out.Enabled, &typ, &out.MinSeverity, &actions, &engs, &out.LeadTimeSecs, &out.Revision, &out.CreatedAt, &out.UpdatedAt, &channels, &out.AllTeams, &teams, &out.DisabledReason, &roles); err != nil {
 		return err
 	}
 	out.EventType = notification.EventType(typ)
@@ -343,6 +348,12 @@ func scanRule(row scanner, out *notification.Rule) error {
 	}
 	if err := json.Unmarshal(teams, &out.TeamIDs); err != nil {
 		return err
+	}
+	if err := json.Unmarshal(roles, &out.RecipientRoles); err != nil {
+		return err
+	}
+	if len(out.RecipientRoles) == 0 {
+		out.RecipientRoles = nil
 	}
 	return json.Unmarshal(channels, &out.ChannelIDs)
 }
@@ -438,7 +449,7 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 		// projection. Re-apply it so the tombstone, not the event conflict, decides
 		// whether the row comes back.
 		e.ID = existing
-		if err := r.projectPersonal(ctx, tx, e); err != nil {
+		if err := r.projectPersonal(ctx, tx, e, nil); err != nil {
 			return nil, err
 		}
 		return ids, nil
@@ -450,6 +461,10 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 	}
 	targets := map[shared.ID]*target{}
 	revisions := map[shared.ID]int{}
+	// personalRoles are the recipient roles (#1415) of every matching rule; roleRules the rules that
+	// named them, which count as matched even when they route to no channel.
+	var personalRoles []string
+	var roleRules []shared.ID
 	// A paused channel (#1464) receives no new deliveries, exactly like a disabled one.
 	if !only.IsZero() {
 		var c notification.Channel
@@ -470,6 +485,10 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 			}
 			if rule.Matches(e) {
 				revisions[rule.ID] = rule.Revision
+				if len(rule.RecipientRoles) > 0 {
+					personalRoles = append(personalRoles, rule.RecipientRoles...)
+					roleRules = append(roleRules, rule.ID)
+				}
 				for _, cid := range rule.ChannelIDs {
 					t := targets[cid]
 					if t == nil {
@@ -529,12 +548,17 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 		}
 		allRules = append(allRules, t.rules...)
 	}
+	for _, id := range roleRules {
+		if !containsSharedID(allRules, id) {
+			allRules = append(allRules, id)
+		}
+	}
 	matched, _ := json.Marshal(allRules)
 	revisionJSON, _ := json.Marshal(revisions)
 	if _, err = tx.Exec(ctx, `UPDATE notification_events SET matched_rules=$3,rule_revisions=$4 WHERE tenant_id=$1 AND id=$2`, e.TenantID, e.ID, matched, revisionJSON); err != nil {
 		return nil, err
 	}
-	if err = r.projectPersonal(ctx, tx, e); err != nil {
+	if err = r.projectPersonal(ctx, tx, e, personalRoles); err != nil {
 		return nil, err
 	}
 	return ids, nil
@@ -1013,4 +1037,13 @@ func (r *NotificationRepository) GetChannelSealedConfig(ctx context.Context, ten
 		err = fmt.Errorf("notification channel %s: %w", id, shared.ErrNotFound)
 	}
 	return out, sealed, err
+}
+
+func containsSharedID(ids []shared.ID, id shared.ID) bool {
+	for _, candidate := range ids {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
 }

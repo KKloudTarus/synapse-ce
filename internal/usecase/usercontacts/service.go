@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -32,6 +33,8 @@ type Service struct {
 	clock         ports.Clock
 	key           []byte
 	mailAvailable bool
+	// slack checks and verifies Slack contacts (#1419); nil refuses them.
+	slack ports.UserContactSlack
 }
 
 func NewService(store ports.UserContactStore, users ports.UserRepository, protector ports.NotificationSecretProtector, mailer ports.UserContactMailer, ids ports.IDGenerator, clock ports.Clock, key []byte, mailAvailable bool) (*Service, error) {
@@ -61,14 +64,37 @@ func (s *Service) AddEmail(ctx context.Context, tenantID, userID shared.ID, valu
 	return s.store.Create(ctx, ports.UserContact{TenantID: shared.TenantOrDefault(tenantID), ID: s.ids.NewID(), UserID: userID, Kind: "email", Source: "manual", Value: address, Version: 1, CreatedAt: now, UpdatedAt: now})
 }
 
+// SetSlack wires Slack contacts (#1419).
+func (s *Service) SetSlack(slack ports.UserContactSlack) { s.slack = slack }
+
+// ErrSlackUnavailable reports that this deployment cannot link Slack accounts.
+var ErrSlackUnavailable = errors.New("slack linking is unavailable")
+
+// AddSlack adds an unverified Slack contact for a member of a workspace the tenant has a Slack app
+// in (#1419). The member ID comes from the person; Synapse checks that it names an active person in
+// that workspace and never looks anyone up by email.
+func (s *Service) AddSlack(ctx context.Context, tenantID, userID shared.ID, team, member string) (ports.UserContact, error) {
+	if s.slack == nil {
+		return ports.UserContact{}, ErrSlackUnavailable
+	}
+	value, err := notification.SlackContactValue(team, member)
+	if err != nil {
+		return ports.UserContact{}, err
+	}
+	tenantID = shared.TenantOrDefault(tenantID)
+	team, member, _ = notification.ParseSlackContact(value)
+	if err := s.slack.CheckSlackMember(ctx, tenantID, team, member); err != nil {
+		return ports.UserContact{}, err
+	}
+	now := s.clock.Now().UTC()
+	return s.store.Create(ctx, ports.UserContact{TenantID: tenantID, ID: s.ids.NewID(), UserID: userID, Kind: "slack", Source: "manual", Value: value, Version: 1, CreatedAt: now, UpdatedAt: now})
+}
+
 func (s *Service) Delete(ctx context.Context, tenantID, userID, contactID shared.ID) error {
 	return s.store.Delete(ctx, shared.TenantOrDefault(tenantID), userID, contactID)
 }
 
 func (s *Service) RequestVerification(ctx context.Context, tenantID, userID, contactID shared.ID) error {
-	if !s.mailAvailable || s.mailer == nil {
-		return ErrMailUnavailable
-	}
 	tenantID = shared.TenantOrDefault(tenantID)
 	contacts, err := s.store.List(ctx, tenantID, userID)
 	if err != nil {
@@ -84,8 +110,14 @@ func (s *Service) RequestVerification(ctx context.Context, tenantID, userID, con
 	if contact == nil {
 		return shared.ErrNotFound
 	}
-	if contact.Kind != "email" || contact.VerifiedAt != nil {
+	if contact.VerifiedAt != nil || (contact.Kind != "email" && contact.Kind != "slack") {
 		return fmt.Errorf("%w: contact cannot be verified", shared.ErrConflict)
+	}
+	if contact.Kind == "email" && (!s.mailAvailable || s.mailer == nil) {
+		return ErrMailUnavailable
+	}
+	if contact.Kind == "slack" && s.slack == nil {
+		return ErrSlackUnavailable
 	}
 	code, err := randomCode()
 	if err != nil {
@@ -116,13 +148,17 @@ func (s *Service) digest(id shared.ID, code string) string {
 }
 
 func (s *Service) SendVerification(ctx context.Context, tenantID, challengeID shared.ID) error {
-	if s.mailer == nil {
-		return ErrMailUnavailable
-	}
 	tenantID = shared.TenantOrDefault(tenantID)
 	work, active, err := s.store.LoadDelivery(ctx, tenantID, challengeID)
 	if err != nil || !active {
 		return err
+	}
+	if work.Kind == "slack" {
+		if s.slack == nil {
+			return ErrSlackUnavailable
+		}
+	} else if s.mailer == nil {
+		return ErrMailUnavailable
 	}
 	// The store enforces the destination/version fence immediately before this read.
 	// The transport may still race a later revoke; SMTP cannot recall accepted mail.
@@ -130,13 +166,21 @@ func (s *Service) SendVerification(ctx context.Context, tenantID, challengeID sh
 	if err != nil {
 		return fmt.Errorf("open contact challenge: %w", err)
 	}
-	result := s.mailer.SendContactVerification(ctx, work.Recipient, string(plain), challengeID)
+	var result ports.NotificationSendResult
+	if work.Kind == "slack" {
+		result = s.slack.SendSlackVerification(ctx, tenantID, work.Recipient, string(plain))
+	} else {
+		result = s.mailer.SendContactVerification(ctx, work.Recipient, string(plain), challengeID)
+	}
 	for i := range plain {
 		plain[i] = 0
 	}
 	if result.ErrorCode != "" {
 		if result.Retryable {
-			return fmt.Errorf("verification SMTP transient failure: %s", result.ErrorCode)
+			return fmt.Errorf("verification delivery transient failure: %s", result.ErrorCode)
+		}
+		if work.Kind == "slack" {
+			return ErrSlackUnavailable
 		}
 		return ErrMailUnavailable
 	}

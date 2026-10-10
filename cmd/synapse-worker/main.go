@@ -32,6 +32,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
@@ -49,6 +50,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	elastic "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/elastic"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
@@ -59,6 +61,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/teamsbot"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
@@ -110,6 +113,7 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/teamslink"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitycorrelation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityevaluation"
@@ -719,6 +723,10 @@ func main() {
 		notificationService.SetTemplateStore(postgres.NewNotificationTemplateStore(pool))
 		notificationService.SetTenantSettings(postgres.NewTenantSettingsStore(pool))
 		notificationService.SetFormatters(messageformat.Formatters())
+		// Personal Slack direct messages (#1419) go out as the tenant's Slack app and link back to the
+		// console.
+		notificationService.SetSlackDirect(sender)
+		notificationService.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
 		// Delivery metrics are emitted by this worker only: the API exposes
 		// aggregate queue health but never observes worker transport outcomes.
 		if cfg.MetricsEnabled {
@@ -754,14 +762,41 @@ func main() {
 			log.Error("user contact worker init failed", "err", contactErr)
 			os.Exit(1)
 		}
+		// A Slack contact's code is sent as the Slack app's direct message (#1419).
+		contactService.SetSlack(notificationService)
 		handlers[usercontacts.JobKind] = contactVerificationJobHandler{svc: contactService}
-		personalInbox, inboxErr := inbox.NewService(postgres.NewInboxStore(pool), clock)
+		inboxStore := postgres.NewInboxStore(pool)
+		personalInbox, inboxErr := inbox.NewService(inboxStore, clock)
 		if inboxErr != nil {
 			log.Error("personal inbox worker init failed", "err", inboxErr)
 			os.Exit(1)
 		}
 		personalInbox.SetMailer(sender)
-		handlers[inbox.JobKind] = personalMailJobHandler{svc: personalInbox}
+		// Personal Slack (#1419) and Teams (#1420) messages are reloaded at send time like email.
+		personalInbox.SetPersonalDelivery(inboxStore)
+		personalInbox.SetPersonalSender(notification.PersonalSlack, notificationService.PersonalSlack())
+		if err := cfg.ValidateTeamsBot(); err != nil {
+			log.Error("Microsoft Teams bot configuration invalid", "err", err)
+			os.Exit(1)
+		}
+		if cfg.TeamsBotEnabled() {
+			teamsService, teamsErr := teamslink.NewService(teamslink.Config{
+				Bot:      teamsbot.New(teamsbot.Config{AppID: cfg.TeamsBotAppID, AppPassword: cfg.TeamsBotAppPassword, TenantID: cfg.TeamsBotTenantID}, safehttp.New(10*time.Second, false)),
+				Offers:   postgres.NewTeamsLinkOffers(pool),
+				Contacts: postgres.NewUserContactStore(pool), Protector: vaultCipher, IDs: ids, Clock: clock,
+				Key: teamslink.DeriveKey(cfg.VaultMasterKey), AcceptsServiceURL: teamsbot.ValidServiceURL,
+				Formatter: messageformat.TeamsFormatter{}, PublicBaseURL: cfg.EffectivePublicBaseURL(),
+			})
+			if teamsErr != nil {
+				log.Error("Microsoft Teams bot init failed", "err", teamsErr)
+				os.Exit(1)
+			}
+			personalInbox.SetPersonalSender(notification.PersonalTeams, teamsService)
+			personalInbox.SetTeamsAvailable(true)
+		}
+		for _, kind := range inbox.JobKinds() {
+			handlers[kind] = personalMailJobHandler{svc: personalInbox}
+		}
 		// #1347: incident.created is always projected onto the framework. Before this, a set
 		// SYNAPSE_ALERT_WEBHOOK_URL made the worker mark captured incidents processed without
 		// publishing them, silently discarding every tenant incident.created rule. The legacy webhook

@@ -40,6 +40,8 @@ type UserContactDelivery struct {
 	ContactVersion int
 	Recipient      string
 	SealedCode     string
+	// Kind is the contact kind: email, or slack for a code sent as a Slack direct message (#1419).
+	Kind string
 }
 
 // UserContactStore performs challenge and queue writes in one transaction. The
@@ -61,4 +63,13 @@ type UserContactStore interface {
 // transport. It does not consult tenant notification rules or user preferences.
 type UserContactMailer interface {
 	SendContactVerification(context.Context, string, string, shared.ID) NotificationSendResult
+}
+
+// UserContactSlack checks and verifies Slack contacts (#1419) through the tenant's Slack app.
+type UserContactSlack interface {
+	// CheckSlackMember confirms the member is an active person in a workspace the tenant has a
+	// Slack app in.
+	CheckSlackMember(ctx context.Context, tenant shared.ID, team, member string) error
+	// SendSlackVerification sends the code as the app's direct message to the contact.
+	SendSlackVerification(ctx context.Context, tenant shared.ID, recipient, code string) NotificationSendResult
 }

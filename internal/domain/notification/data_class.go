@@ -73,9 +73,12 @@ type EngagementNotificationSetting struct {
 	TenantID              shared.ID               `json:"-"`
 	EngagementID          shared.ID               `json:"engagement_id"`
 	ExternalNotifications EngagementNotifications `json:"external_notifications"`
-	Revision              int                     `json:"revision"`
-	UpdatedAt             *time.Time              `json:"updated_at,omitempty"`
-	UpdatedBy             string                  `json:"updated_by,omitempty"`
+	// LeadUserID is the engagement lead (#1415): the person a rule's engagement_lead recipient role
+	// addresses. Empty means none.
+	LeadUserID shared.ID  `json:"lead_user_id,omitempty"`
+	Revision   int        `json:"revision"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
+	UpdatedBy  string     `json:"updated_by,omitempty"`
 }
 
 // Validate checks a setting about to be stored.
