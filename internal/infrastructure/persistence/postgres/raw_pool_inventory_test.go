@@ -75,7 +75,6 @@ var rawPoolExceptions = map[string]rawPoolException{
 	"identity_sessions.go:switchRetryDestinationTenant":            {1, "exact source digest/key/payload response-loss destination locator"},
 	"inbound_webhook.go:LookupInboundWebhook":                      {1, rawInboundWebhook},
 	"teams_link.go:OfferTeamsLink":                                 {1, rawTeamsLink},
-	"teams_link.go:ClaimTeamsLink":                                 {1, rawTeamsLink},
 	"jobqueue.go:AggregateJobQueueStats":                           {1, rawTenantEnumerate},
 	"jobqueue.go:Claim":                                            {1, rawTenantEnumerate},
 	"leader_store.go:Acquire":                                      {1, rawLegacyGlobal},

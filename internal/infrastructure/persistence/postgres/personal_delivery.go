@@ -31,13 +31,14 @@ func (s *InboxStore) LoadPersonalDelivery(ctx context.Context, tenant, user, eve
 	out := ports.PersonalMessage{TenantID: tenant, UserID: user, EventID: event, Channel: channel, ContactID: contact}
 	ok := false
 	err := WithTenant(ctx, s.pool, tenant.String(), func(tx pgx.Tx) error {
-		var state *string
+		var state, inApp *string
 		var eventType string
-		scanErr := tx.QueryRow(ctx, `SELECT n.title, n.summary, n.link_path, n.event_type, p.state
+		scanErr := tx.QueryRow(ctx, `SELECT n.title, n.summary, n.link_path, n.event_type, p.state, i.state
 			FROM user_notifications n
 			JOIN users u ON u.ownership_tenant_id=n.tenant_id AND u.id=n.user_id AND NOT u.disabled AND u.role = ANY($4)
 			LEFT JOIN user_notification_preferences p ON p.tenant_id=n.tenant_id AND p.user_id=n.user_id AND p.event_type=n.event_type AND p.channel=$5
-			WHERE n.tenant_id=$1 AND n.user_id=$2 AND n.event_id=$3`, tenant, user, event, humanNotificationRoles, channel).Scan(&out.Title, &out.Summary, &out.LinkPath, &eventType, &state)
+			LEFT JOIN user_notification_preferences i ON i.tenant_id=n.tenant_id AND i.user_id=n.user_id AND i.event_type=n.event_type AND i.channel='in_app'
+			WHERE n.tenant_id=$1 AND n.user_id=$2 AND n.event_id=$3`, tenant, user, event, humanNotificationRoles, channel).Scan(&out.Title, &out.Summary, &out.LinkPath, &eventType, &state, &inApp)
 		if errors.Is(scanErr, pgx.ErrNoRows) {
 			return nil
 		}
@@ -45,6 +46,15 @@ func (s *InboxStore) LoadPersonalDelivery(ctx context.Context, tenant, user, eve
 			return scanErr
 		}
 		out.EventType = notification.EventType(eventType)
+		// Every personal message is sent from its inbox row, so muting the inbox mutes it too, even
+		// after it was queued; a mandatory notice cannot be muted.
+		inAppChoice := notification.PreferenceInherit
+		if inApp != nil {
+			inAppChoice = notification.Preference(*inApp)
+		}
+		if !notification.Deliver(notification.InAppMandatory(out.EventType), inAppChoice, true) {
+			return nil
+		}
 		choice := notification.PreferenceInherit
 		if state != nil {
 			choice = notification.Preference(*state)

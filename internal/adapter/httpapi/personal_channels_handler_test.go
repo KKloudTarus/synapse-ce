@@ -44,14 +44,11 @@ func (o *handlerTeamsOffers) OfferTeamsLink(context.Context, string, string, str
 	o.n++
 	return true, nil
 }
-func (o *handlerTeamsOffers) ClaimTeamsLink(context.Context, string) (string, bool, error) {
-	return "", false, nil
-}
 
 type handlerTeamsContacts struct{ attempts int }
 
-func (c *handlerTeamsContacts) LinkTeamsContact(_ context.Context, contact ports.UserContact, _ string) (ports.UserContact, error) {
-	return contact, nil
+func (c *handlerTeamsContacts) LinkTeamsContact(context.Context, shared.ID, shared.ID, string, ports.TeamsLinker) (ports.UserContact, bool, error) {
+	return ports.UserContact{}, false, nil
 }
 func (c *handlerTeamsContacts) CountTeamsLinkAttempt(context.Context, shared.ID, shared.ID, shared.ID, time.Time) error {
 	c.attempts++

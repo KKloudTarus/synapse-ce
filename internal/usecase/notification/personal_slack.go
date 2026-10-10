@@ -74,6 +74,11 @@ func (s *Service) slackBots(ctx context.Context, tenant shared.ID) ([]slackBot, 
 		if err != nil {
 			return nil, err
 		}
+		// The reload is the authoritative row: a bot switched off, paused or re-typed since the list
+		// was read is not used, and its credential is not even opened.
+		if current.Type != domain.ChannelSlackBot || !current.Enabled || current.Health.Paused() {
+			continue
+		}
 		raw, err := s.protector.Open(sealed, channelAAD(tenant, current.ID, current.SecretVersion))
 		if err != nil {
 			continue

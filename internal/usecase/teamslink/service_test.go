@@ -87,20 +87,50 @@ func (m *memoryOffers) ClaimTeamsLink(_ context.Context, digest string) (string,
 	return o.sealed, true, nil
 }
 
+// memoryContacts mirrors the Postgres store: the claim and the contact commit together, and a
+// failure after the claim puts the offer back, as the rolled-back transaction does.
 type memoryContacts struct {
 	mu            sync.Mutex
+	offers        *memoryOffers
 	attempts      int
 	quota         int
+	failInsert    error
 	linked        []ports.UserContact
 	conversations map[shared.ID]string
 }
 
-func (m *memoryContacts) LinkTeamsContact(_ context.Context, c ports.UserContact, sealed string) (ports.UserContact, error) {
+func (m *memoryContacts) LinkTeamsContact(ctx context.Context, tenant, user shared.ID, digest string, link ports.TeamsLinker) (ports.UserContact, bool, error) {
+	m.offers.mu.Lock()
+	claimed, held := m.offers.offers[digest]
+	m.offers.mu.Unlock()
+	sealed, ok, _ := m.offers.ClaimTeamsLink(ctx, digest)
+	if !ok {
+		return ports.UserContact{}, false, nil
+	}
+	rollback := func() {
+		if held {
+			m.offers.mu.Lock()
+			m.offers.offers[digest] = claimed
+			m.offers.mu.Unlock()
+		}
+	}
+	c, conversation, err := link(sealed)
+	if err == nil {
+		err = m.failInsert
+	}
+	if err != nil {
+		rollback()
+		return ports.UserContact{}, false, err
+	}
+	if c.TenantID != tenant || c.UserID != user {
+		rollback()
+		return ports.UserContact{}, false, shared.ErrValidation
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.linked = append(m.linked, c)
-	m.conversations[c.ID] = sealed
-	return c, nil
+	m.conversations[c.ID] = conversation
+	return c, true, nil
 }
 
 func (m *memoryContacts) CountTeamsLinkAttempt(context.Context, shared.ID, shared.ID, shared.ID, time.Time) error {
@@ -140,6 +170,7 @@ func newFixture(t *testing.T) fixture {
 	}
 	f := fixture{bot: &fakeBot{}, contacts: &memoryContacts{quota: 5, conversations: map[shared.ID]string{}}, clock: &clock{at: time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)}}
 	f.offers = &memoryOffers{now: f.clock.Now, offers: map[string]offer{}}
+	f.contacts.offers = f.offers
 	f.svc, err = NewService(Config{Bot: f.bot, Offers: f.offers, Contacts: f.contacts, Protector: cipher, IDs: idgen.RandomID{}, Clock: f.clock,
 		Key: DeriveKey("master"), AcceptsServiceURL: func(raw string) bool { return raw == serviceURL }, Formatter: messageformat.TeamsFormatter{}, PublicBaseURL: "https://synapse.example"})
 	if err != nil {
@@ -310,5 +341,23 @@ func TestSendPersonalRefusesAMismatchedOrMissingConversation(t *testing.T) {
 func TestNewServiceRequiresItsDependencies(t *testing.T) {
 	if _, err := NewService(Config{}); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A failure after the code is claimed (the contact limit, a database error) rolls the claim back:
+// the person can enter the same code again.
+func TestLinkFailureAfterTheClaimKeepsTheCode(t *testing.T) {
+	f := newFixture(t)
+	code := f.requestCode(t)
+	f.contacts.failInsert = errors.New("contact limit reached")
+	if _, err := f.svc.Link(context.Background(), "tenant-a", "ada", code); err == nil {
+		t.Fatal("the failing link succeeded")
+	}
+	if len(f.offers.offers) != 1 {
+		t.Fatalf("offers after the failure = %d, want the code back", len(f.offers.offers))
+	}
+	f.contacts.failInsert = nil
+	if _, err := f.svc.Link(context.Background(), "tenant-a", "ada", code); err != nil {
+		t.Fatalf("retry with the same code: %v", err)
 	}
 }

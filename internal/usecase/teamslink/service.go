@@ -167,27 +167,33 @@ func (s *Service) Link(ctx context.Context, tenant, user shared.ID, code string)
 		return ports.UserContact{}, ErrInvalidCode
 	}
 	codeDigest := s.digest("code", normalized)
-	sealed, found, err := s.offers.ClaimTeamsLink(ctx, codeDigest)
+	contactID := s.ids.NewID()
+	// The claim, the contact and its conversation commit together: if anything below fails, the
+	// code is still there to be entered again.
+	link := func(sealed string) (ports.UserContact, string, error) {
+		raw, err := s.protector.Open(sealed, offerAAD(codeDigest))
+		if err != nil {
+			return ports.UserContact{}, "", fmt.Errorf("open Teams link offer: %w", err)
+		}
+		var ref ports.TeamsConversationRef
+		if json.Unmarshal(raw, &ref) != nil || !objectID.MatchString(ref.UserObjectID) || !s.accepts(ref.ServiceURL) || ref.ConversationID == "" {
+			return ports.UserContact{}, "", ErrInvalidCode
+		}
+		contact := ports.UserContact{TenantID: tenant, ID: contactID, UserID: user, Kind: notification.PersonalTeams, Source: "manual", Value: ref.UserObjectID, VerifiedAt: &now, Version: 1, CreatedAt: now, UpdatedAt: now}
+		tenantSealed, err := s.protector.Seal(raw, ConversationAAD(tenant, contactID))
+		if err != nil {
+			return ports.UserContact{}, "", fmt.Errorf("seal Teams conversation: %w", err)
+		}
+		return contact, tenantSealed, nil
+	}
+	contact, found, err := s.contacts.LinkTeamsContact(ctx, tenant, user, codeDigest, link)
 	if err != nil {
 		return ports.UserContact{}, err
 	}
 	if !found {
 		return ports.UserContact{}, ErrInvalidCode
 	}
-	raw, err := s.protector.Open(sealed, offerAAD(codeDigest))
-	if err != nil {
-		return ports.UserContact{}, fmt.Errorf("open Teams link offer: %w", err)
-	}
-	var ref ports.TeamsConversationRef
-	if json.Unmarshal(raw, &ref) != nil || !objectID.MatchString(ref.UserObjectID) || !s.accepts(ref.ServiceURL) || ref.ConversationID == "" {
-		return ports.UserContact{}, ErrInvalidCode
-	}
-	contact := ports.UserContact{TenantID: tenant, ID: s.ids.NewID(), UserID: user, Kind: notification.PersonalTeams, Source: "manual", Value: ref.UserObjectID, VerifiedAt: &now, Version: 1, CreatedAt: now, UpdatedAt: now}
-	tenantSealed, err := s.protector.Seal(raw, ConversationAAD(tenant, contact.ID))
-	if err != nil {
-		return ports.UserContact{}, fmt.Errorf("seal Teams conversation: %w", err)
-	}
-	return s.contacts.LinkTeamsContact(ctx, contact, tenantSealed)
+	return contact, nil
 }
 
 // SendPersonal implements ports.PersonalChannelSender for Teams.

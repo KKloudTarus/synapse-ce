@@ -1,13 +1,14 @@
 package notification
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -169,15 +170,18 @@ func HasRole(roles []string, role string) bool {
 }
 
 // GenericPersonalSubject is the personal subject of an event that names no person itself: a rule
-// recipient role addresses the people. Its title and summary come from the event's own built-in
-// text, its link from its engagement.
+// recipient role addresses the people. Its link is its engagement.
+//
+// Its title and summary come from the template context snapshot the event builders took at
+// projection, which they already scrubbed of secrets (#1361), never from the raw event data, which
+// can hold a scanner's text as it was. They are scrubbed once more here, so an event projected
+// without builders cannot carry a credential into an inbox row or a personal message either.
 func GenericPersonalSubject(e Event) PersonalSubject {
-	var data struct {
-		Title   string `json:"title"`
-		Summary string `json:"summary"`
+	vars := map[string]string{}
+	if snapshot, err := DecodeTemplateContext(e.Context); err == nil {
+		vars = snapshot.Vars
 	}
-	_ = json.Unmarshal(e.Data, &data)
-	title := cleanLine(data.Title, 200)
+	title := ScrubPersonalText(vars["title"], 200)
 	if title == "" {
 		if spec, ok := catalog[e.Type]; ok {
 			title = spec.Label
@@ -187,7 +191,17 @@ func GenericPersonalSubject(e Event) PersonalSubject {
 	if safeID(e.EngagementID) {
 		link = "/engagements/" + url.PathEscape(e.EngagementID.String())
 	}
-	return PersonalSubject{EngagementID: e.EngagementID, Title: title, Summary: cleanLine(data.Summary, 500), Link: link}
+	return PersonalSubject{EngagementID: e.EngagementID, Title: title, Summary: ScrubPersonalText(vars["summary"], 500), Link: link}
+}
+
+// ScrubPersonalText is the text of a personal notice as it may be stored and sent: one line,
+// without invisible characters, with keyed secrets, bearer tokens, access keys and private keys
+// removed twice (once before and once after the invisible characters that could split a key are
+// gone), and at most max runes.
+func ScrubPersonalText(value string, max int) string {
+	value = privacy.ScrubSecretPatterns(value)
+	value = privacy.ScrubSecretPatterns(msgtemplate.Sanitize(value))
+	return cleanLine(value, max)
 }
 
 // MergeRoleRecipients merges people found by role into one list with their roles, keeping the

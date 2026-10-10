@@ -38,19 +38,6 @@ func (s *TeamsLinkOffers) OfferTeamsLink(ctx context.Context, codeDigest, conver
 	return accepted, nil
 }
 
-// ClaimTeamsLink implements ports.TeamsLinkOffers.
-func (s *TeamsLinkOffers) ClaimTeamsLink(ctx context.Context, codeDigest string) (string, bool, error) {
-	var sealed string
-	err := s.pool.QueryRow(ctx, `SELECT sealed_reference FROM synapse_claim_teams_link($1)`, codeDigest).Scan(&sealed)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, fmt.Errorf("claim Teams link: %w", err)
-	}
-	return sealed, true, nil
-}
-
 var _ ports.TeamsContactStore = (*UserContactStore)(nil)
 
 // CountTeamsLinkAttempt implements ports.TeamsContactStore.
@@ -75,13 +62,32 @@ func (s *UserContactStore) CountTeamsLinkAttempt(ctx context.Context, tenant, us
 	return nil
 }
 
-// LinkTeamsContact implements ports.TeamsContactStore.
-func (s *UserContactStore) LinkTeamsContact(ctx context.Context, c ports.UserContact, sealed string) (ports.UserContact, error) {
+// LinkTeamsContact implements ports.TeamsContactStore. The code is claimed with
+// synapse_claim_teams_link inside the tenant transaction, so its deletion commits or rolls back
+// with the contact.
+func (s *UserContactStore) LinkTeamsContact(ctx context.Context, tenant, user shared.ID, codeDigest string, link ports.TeamsLinker) (ports.UserContact, bool, error) {
 	var out ports.UserContact
-	err := WithTenant(ctx, s.pool, c.TenantID.String(), func(tx pgx.Tx) error {
-		if err := lockEnabledUser(ctx, tx, c.TenantID, c.UserID); err != nil {
+	found := false
+	err := WithTenant(ctx, s.pool, tenant.String(), func(tx pgx.Tx) error {
+		if err := lockEnabledUser(ctx, tx, tenant, user); err != nil {
 			return err
 		}
+		var offer string
+		err := tx.QueryRow(ctx, `SELECT sealed_reference FROM synapse_claim_teams_link($1)`, codeDigest).Scan(&offer)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		c, sealed, err := link(offer)
+		if err != nil {
+			return err
+		}
+		if c.TenantID != tenant || c.UserID != user {
+			return fmt.Errorf("%w: Teams contact for another user", shared.ErrValidation)
+		}
+		found = true
 		// Linking the same Teams account again replaces it, and with it the stored conversation.
 		if _, err := tx.Exec(ctx, `DELETE FROM user_contacts WHERE tenant_id=$1 AND user_id=$2 AND kind='teams' AND value=$3`, c.TenantID, c.UserID, c.Value); err != nil {
 			return err
@@ -93,7 +99,6 @@ func (s *UserContactStore) LinkTeamsContact(ctx context.Context, c ports.UserCon
 		if count >= 20 {
 			return fmt.Errorf("%w: contact limit reached", shared.ErrConflict)
 		}
-		var err error
 		out, err = scanContact(tx.QueryRow(ctx, `INSERT INTO user_contacts (`+contactColumns+`) VALUES ($1,$2,$3,'teams','manual',$4,$5,1,$5,$5) RETURNING `+contactColumns, c.TenantID, c.ID, c.UserID, c.Value, c.CreatedAt))
 		if err != nil {
 			return err
@@ -104,9 +109,9 @@ func (s *UserContactStore) LinkTeamsContact(ctx context.Context, c ports.UserCon
 		return appendTenantAudit(ctx, tx, c.TenantID.String(), ports.AuditEntry{Actor: c.UserID.String(), Action: "user_contact.teams_linked", Target: c.ID.String(), At: c.CreatedAt, Metadata: map[string]string{"kind": "teams"}})
 	})
 	if err != nil {
-		return ports.UserContact{}, contactError("link Teams contact", err)
+		return ports.UserContact{}, false, contactError("link Teams contact", err)
 	}
-	return out, nil
+	return out, found, nil
 }
 
 // TeamsConversation implements ports.TeamsContactStore.

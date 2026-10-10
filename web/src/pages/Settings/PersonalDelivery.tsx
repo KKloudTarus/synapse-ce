@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../lib/api'
 import type {
   NotificationEngagementSetting,
@@ -135,6 +135,11 @@ function EngagementLeads({ canManage }: { canManage: boolean }) {
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
+  // The engagement shown now. A load or save answers for the engagement it was made for, so a reply
+  // that arrives after the administrator chose another one is dropped instead of being shown, or
+  // saved again, as the new one's settings.
+  const current = useRef('')
+  current.current = engagement
   useEffect(() => {
     let live = true
     Promise.resolve()
@@ -154,7 +159,7 @@ function EngagementLeads({ canManage }: { canManage: boolean }) {
     api
       .getEngagementNotificationSetting(engagement)
       .then((s) => {
-        if (!live) return
+        if (!live || current.current !== engagement) return
         setSetting(s)
         setLead(s.lead_user_id ?? '')
       })
@@ -164,23 +169,26 @@ function EngagementLeads({ canManage }: { canManage: boolean }) {
     }
   }, [engagement])
   async function save(next: string) {
-    if (!setting) return
+    if (!setting || setting.engagement_id !== engagement) return
+    const target = engagement
     setBusy(true)
     setError(null)
     setSaved(false)
     try {
-      const stored = await api.saveEngagementNotificationSetting(engagement, {
+      const stored = await api.saveEngagementNotificationSetting(target, {
         external_notifications: setting.external_notifications,
         revision: setting.revision,
         lead_user_id: next,
       })
+      if (current.current !== target) return
       setSetting(stored)
       setLead(stored.lead_user_id ?? '')
       setSaved(true)
     } catch (e) {
+      if (current.current !== target) return
       setError(e instanceof Error ? e.message : 'Could not save the engagement lead')
     } finally {
-      setBusy(false)
+      if (current.current === target) setBusy(false)
     }
   }
   if (engagements !== null && engagements.length === 0) return null
@@ -195,7 +203,12 @@ function EngagementLeads({ canManage }: { canManage: boolean }) {
             id="engagement-lead-engagement"
             value={engagement}
             placeholder="Choose an engagement"
-            onValueChange={setEngagement}
+            // A save in flight belongs to the engagement shown; switching waits for it.
+            disabled={busy}
+            onValueChange={(id) => {
+              setBusy(false)
+              setEngagement(id)
+            }}
             options={(engagements ?? []).map((e) => ({ value: e.id, label: e.name }))}
           />
         </Field>

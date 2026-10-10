@@ -98,7 +98,22 @@ func (s *Service) SavePreference(ctx context.Context, tenant, user shared.ID, ev
 	if !notification.PersonalDeliveryAvailable(event) {
 		return ports.InboxPreference{}, fmt.Errorf("%w: personal delivery is unavailable for this event", shared.ErrValidation)
 	}
-	return s.store.SaveInboxPreference(ctx, shared.TenantOrDefault(tenant), user, event, channel, state, revision, s.clock.Now().UTC())
+	saved, err := s.store.SaveInboxPreference(ctx, shared.TenantOrDefault(tenant), user, event, channel, state, revision, s.clock.Now().UTC())
+	if err != nil {
+		return ports.InboxPreference{}, err
+	}
+	// The response is the row as the preference list shows it, with the effective default and the
+	// availability, so a client that merges it into its list does not lose them.
+	items, err := s.Preferences(ctx, tenant, user)
+	if err != nil {
+		return saved, nil
+	}
+	for _, item := range items {
+		if item.EventType == string(event) && item.Channel == channel {
+			return item, nil
+		}
+	}
+	return saved, nil
 }
 
 type mailJob struct {
