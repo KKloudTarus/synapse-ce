@@ -771,6 +771,12 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 				return fmt.Errorf("%w: raw event mode disabled", ports.ErrRetryable)
 			}
 		}
+		// The database fence permits a webhook attempt only after this current
+		// transaction rechecks channel, class, and raw-event policy. The marker
+		// is transaction-local and cannot authorize a later pooled transaction.
+		if _, err := tx.Exec(ctx, `SELECT set_config('synapse.notification_delivery_capability','current-filter-v1',true)`); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE notification_source_state SET observed_at=$2 WHERE tenant_id=$1 AND source_kind='delivery_rate' AND source_id='tenant'`, tenant, at); err != nil {
 			return err
 		}

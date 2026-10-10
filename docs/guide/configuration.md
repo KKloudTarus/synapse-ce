@@ -186,8 +186,12 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 
 Notification capture defaults to legacy mode after migration. Once all notification
 workers have capable projectors, use `synapse-migrate --notification-capture-mode identity`
-with the migration credential. For rollback, switch to `legacy` and drain pending
-identity records before replacing workers. See [notification content and rollout](notification-content.md).
+with the migration credential. The command refuses to change mode while identity
+records remain pending and leaves the existing mode intact; `--allow-pending` is an
+explicit controlled-drain exception, not permission to deploy an older worker. For
+rollback, switch to `legacy` and drain pending identity records before replacing
+workers. Detail webhook channels now disclose finding titles, so review their receiver
+access before the rollout. See [notification content and rollout](notification-content.md).
 The mode is an operator command, not an API or runtime environment toggle.
 
 ## Shared artifact store (S3 or MinIO)

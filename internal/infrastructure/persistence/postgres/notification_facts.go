@@ -22,6 +22,11 @@ type factQuery struct {
 	names []string
 }
 
+// errNotificationSourceMissing marks an identity capture whose authoritative
+// source was deleted after trigger capture. It is definitive only for a known
+// source query; an unknown kind or a failed query remains retryable.
+var errNotificationSourceMissing = errors.New("notification source facts are missing")
+
 // capturedFactQueries read the subject of each captured source kind by its source ID.
 var capturedFactQueries = map[string]factQuery{
 	"scan_job": {
@@ -45,14 +50,19 @@ var capturedFactQueries = map[string]factQuery{
 	},
 }
 
-// capturedFacts reads the facts of one captured record. A source row that no longer exists yields
-// no facts: the builder then falls back to the identity it has.
+// capturedFacts reads one supported captured source. A missing supported source returns a typed
+// error so v2 can quarantine it definitively; legacy capture retains its stored event body. An
+// unknown source kind has no query and therefore remains retryable at the caller.
 func capturedFacts(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind, sourceID string) (map[string]string, error) {
 	q, ok := capturedFactQueries[kind]
 	if !ok {
 		return nil, nil
 	}
-	return readFacts(tx.QueryRow(ctx, q.sql, tenant, sourceID), q.names)
+	facts, err := readFacts(tx.QueryRow(ctx, q.sql, tenant, sourceID), q.names)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, errNotificationSourceMissing
+	}
+	return facts, err
 }
 
 func readFacts(row pgx.Row, names []string) (map[string]string, error) {
@@ -62,9 +72,6 @@ func readFacts(row pgx.Row, names []string) (map[string]string, error) {
 		dest[i] = &values[i]
 	}
 	if err := row.Scan(dest...); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, err
 	}
 	facts := make(map[string]string, len(names))

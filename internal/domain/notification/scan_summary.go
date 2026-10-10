@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
@@ -47,7 +48,27 @@ type ScanSummary struct {
 	BaselineJobID  string        `json:"baseline_job_id,omitempty"`
 }
 
-const maxScanSummaryFindings = 10000
+type scanSummaryCandidate struct {
+	identity string
+	id       string
+	severity shared.Severity
+	title    string
+	status   string
+}
+
+const (
+	maxScanSummaryFindings          = 10000
+	maxScanSummaryEncodedBytes      = 768 * 1024
+	maxScanSummaryKeyJSONBytes      = 192 * 1024
+	maxScanSummaryIdentityBytes     = 4096
+	maxScanSummaryPresentationID    = 512
+	maxScanSummaryTargetKeyBytes    = 512
+	maxScanSummaryKindBytes         = 64
+	maxScanSummaryBaselineIDBytes   = 128
+	maxScanSummaryPresentationBytes = 256
+	maxScanSummaryStatusBytes       = 64
+	unavailableComparisonScalar     = "[unavailable]"
+)
 
 // CanonicalScanTarget returns the comparison identity for a scan target. Repository
 // and OCI references have established canonicalizers; local paths and uploaded
@@ -71,35 +92,80 @@ func CanonicalScanTarget(target, kind string) string {
 // deduplicates their stable identities and stores at most 10,000 entries. A
 // truncated snapshot can still report aggregate counts but never fabricates a
 // fixed/new delta.
-// For N observations (benchmarked at 10k and 100k), exact dedup needs O(N) space.
-// Presentation maintains a sorted prefix of k=50: O(N*k) worst-case insertion,
-// with text scrubbing only for those k values. The small ordered slice avoids a
-// heap and a second sort while preserving severity/identity order after each item.
+// For N observations, exact dedup needs O(N) space. Retained comparison keys are
+// capped both by count and a conservative encoded-JSON budget. Presentation keeps
+// a sorted prefix of k=50, so selecting it is O(N*k) and never serializes the
+// whole snapshot per observation.
 func NewScanSummary(targetKey, kind string, coverageComplete bool, input []finding.Finding) ScanSummary {
-	result := ScanSummary{TargetKey: strings.TrimSpace(targetKey), Kind: strings.TrimSpace(kind), CoverageComplete: coverageComplete}
-	seen := make(map[string]struct{}, len(input))
+	result := ScanSummary{CoverageComplete: coverageComplete}
+	if value, ok := boundedComparisonScalar(targetKey, maxScanSummaryTargetKeyBytes); ok {
+		result.TargetKey = value
+	} else {
+		// Keep the successful result snapshot available to notification capture,
+		// while Unstable prevents this placeholder from ever matching another
+		// admission identity.
+		result.TargetKey = unavailableComparisonScalar
+		result.Unstable = true
+	}
+	if value, ok := boundedComparisonScalar(kind, maxScanSummaryKindBytes); ok {
+		result.Kind = value
+	} else {
+		result.Kind = unavailableComparisonScalar
+		result.Unstable = true
+	}
+
+	type dedupKey struct {
+		stable bool
+		value  string
+	}
+	candidates := make(map[dedupKey]scanSummaryCandidate, len(input))
+	stableIdentities := make([]string, 0, min(len(input), maxScanSummaryFindings))
 	for i := range input {
 		item := &input[i]
 		if !item.CanPromote() {
 			continue
 		}
 		identity := strings.TrimSpace(item.DedupKey)
-		if identity == "" {
-			// A per-run row ID is useful to display one item, but is not evidence
-			// that two runs observed the same finding. Never derive a delta from it.
-			identity = strings.TrimSpace(item.ID.String())
+		stableIdentity := false
+		var key dedupKey
+		if value, ok := boundedComparisonScalar(identity, maxScanSummaryIdentityBytes); ok {
+			identity, stableIdentity, key = value, true, dedupKey{stable: true, value: value}
+		} else {
+			// An invalid or oversized key can still be used transiently to avoid
+			// inflating aggregate counts, but must never become a persisted
+			// comparison identity. A missing key uses the row id only for that
+			// transient aggregation; it is never comparable across scans.
 			result.Unstable = true
+			fallback := strings.TrimSpace(item.ID.String())
+			if fallback == "" {
+				fallback = strconv.Itoa(i)
+			}
+			if identity != "" {
+				fallback = identity
+			}
+			key = dedupKey{value: fallback}
 		}
-		if identity == "" {
-			result.Unstable = true
-			identity = "unstable-" + strconv.Itoa(len(seen))
+		candidate := scanSummaryCandidate{id: item.ID.String(), severity: item.Severity, title: item.Title, status: string(item.Status)}
+		if stableIdentity {
+			candidate.identity = identity
 		}
-		if _, exists := seen[identity]; exists {
+		if existing, exists := candidates[key]; exists {
+			if scanSummaryCandidateLess(candidate, existing) {
+				candidates[key] = candidate
+			}
 			continue
 		}
-		seen[identity] = struct{}{}
+		candidates[key] = candidate
 		result.Total++
-		switch item.Severity {
+		if stableIdentity {
+			stableIdentities = append(stableIdentities, identity)
+		}
+	}
+	// Counts describe the same deterministic representative selected for each
+	// deduplicated key. Counting on first observation would make a high/critical
+	// duplicate pair depend on source iteration order.
+	for _, candidate := range candidates {
+		switch candidate.severity {
 		case shared.SeverityCritical:
 			result.Critical++
 		case shared.SeverityHigh:
@@ -111,48 +177,136 @@ func NewScanSummary(targetKey, kind string, coverageComplete bool, input []findi
 		case shared.SeverityInfo:
 			result.Info++
 		}
-		candidate := ScanFinding{
-			Identity: identity, ID: item.ID.String(), Severity: item.Severity,
-			Title: item.Title, Status: string(item.Status),
-		}
-		result.addPresentationFinding(candidate)
-		if len(result.Keys) >= maxScanSummaryFindings {
+	}
+	sort.Strings(stableIdentities)
+	keyBytes := 2 // []
+	for _, identity := range stableIdentities {
+		encoded := encodedJSONStringBytes(identity)
+		if len(result.Keys) >= maxScanSummaryFindings || keyBytes+encoded+len(result.Keys) > maxScanSummaryKeyJSONBytes {
 			result.Truncated = true
 			continue
 		}
 		result.Keys = append(result.Keys, identity)
+		keyBytes += encoded
 	}
-	for i := range result.Findings {
-		result.Findings[i].ID = summaryPresentationString(result.Findings[i].ID)
-		result.Findings[i].Title = summaryPresentationString(result.Findings[i].Title)
+	top := make([]scanSummaryCandidate, 0, 50)
+	for _, candidate := range candidates {
+		top = addScanSummaryCandidate(top, candidate)
 	}
-	sort.Strings(result.Keys)
+	for _, candidate := range top {
+		result.Findings = append(result.Findings, candidate.presentation())
+	}
 	return result
 }
 
 func summaryPresentationString(value string) string {
-	return boundRunes(snapshotString(value), 1000)
+	return boundUTF8Bytes(snapshotString(value), maxScanSummaryPresentationBytes)
 }
 
-func (s *ScanSummary) addPresentationFinding(candidate ScanFinding) {
-	position := sort.Search(len(s.Findings), func(i int) bool {
-		stored := s.Findings[i]
-		if left, right := shared.SeverityRank(candidate.Severity), shared.SeverityRank(stored.Severity); left != right {
-			return left > right
+func summaryPresentationStatus(value string) string {
+	return boundUTF8Bytes(snapshotString(value), maxScanSummaryStatusBytes)
+}
+
+func summaryPresentationSeverity(value shared.Severity) shared.Severity {
+	if value.Valid() {
+		return value
+	}
+	return shared.SeverityUnknown
+}
+
+// boundedComparisonScalar never truncates a comparison identity: retaining a
+// prefix would create a different stable key and could fabricate a delta.
+func boundedComparisonScalar(value string, maxBytes int) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" || !utf8.ValidString(value) || strings.IndexByte(value, 0) >= 0 || len(value) > maxBytes {
+		return "", false
+	}
+	return value, true
+}
+
+func boundUTF8Bytes(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	value = strings.ToValidUTF8(value, "�")
+	if len(value) <= maxBytes {
+		return value
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut]
+}
+
+// encodedJSONStringBytes is the exact byte length encoding/json uses for a
+// valid string. It lets the retained-key cap account for escaping without
+// repeatedly serializing the full snapshot while observations are processed.
+func encodedJSONStringBytes(value string) int {
+	n := 2 // quotes
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '\\', '"', '\n', '\r', '\t', '\b', '\f':
+			n += 2
+		case '<', '>', '&':
+			n += 6
+		default:
+			if value[i] < 0x20 {
+				n += 6
+			} else if i+2 < len(value) && value[i] == 0xe2 && value[i+1] == 0x80 && (value[i+2] == 0xa8 || value[i+2] == 0xa9) {
+				n += 6
+				i += 2
+			} else {
+				n++
+			}
 		}
-		if candidate.Identity != stored.Identity {
-			return candidate.Identity < stored.Identity
-		}
-		return candidate.ID < stored.ID
+	}
+	return n
+}
+
+func (c scanSummaryCandidate) presentation() ScanFinding {
+	identity := ""
+	if value, ok := boundedComparisonScalar(c.identity, maxScanSummaryPresentationID); ok {
+		identity = value
+	}
+	return ScanFinding{
+		Identity: identity,
+		ID:       summaryPresentationString(c.id),
+		Severity: summaryPresentationSeverity(c.severity),
+		Title:    summaryPresentationString(c.title),
+		Status:   summaryPresentationStatus(c.status),
+	}
+}
+
+func scanSummaryCandidateLess(left, right scanSummaryCandidate) bool {
+	if leftRank, rightRank := shared.SeverityRank(left.severity), shared.SeverityRank(right.severity); leftRank != rightRank {
+		return leftRank > rightRank
+	}
+	if left.identity != right.identity {
+		return left.identity < right.identity
+	}
+	if left.id != right.id {
+		return left.id < right.id
+	}
+	if left.title != right.title {
+		return left.title < right.title
+	}
+	return left.status < right.status
+}
+
+func addScanSummaryCandidate(top []scanSummaryCandidate, candidate scanSummaryCandidate) []scanSummaryCandidate {
+	position := sort.Search(len(top), func(i int) bool {
+		return scanSummaryCandidateLess(candidate, top[i])
 	})
 	if position >= 50 {
-		return
+		return top
 	}
-	if len(s.Findings) < 50 {
-		s.Findings = append(s.Findings, ScanFinding{})
+	if len(top) < 50 {
+		top = append(top, scanSummaryCandidate{})
 	}
-	copy(s.Findings[position+1:], s.Findings[position:len(s.Findings)-1])
-	s.Findings[position] = candidate
+	copy(top[position+1:], top[position:len(top)-1])
+	top[position] = candidate
+	return top
 }
 
 // WithBaseline produces the counts for a prior compatible successful scan. An
@@ -188,7 +342,9 @@ func (current ScanSummary) WithBaselineID(previous ScanSummary, baselineJobID st
 		}
 	}
 	current.DeltaAvailable = true
-	current.BaselineJobID = strings.TrimSpace(baselineJobID)
+	if value, ok := boundedComparisonScalar(baselineJobID, maxScanSummaryBaselineIDBytes); ok {
+		current.BaselineJobID = value
+	}
 	return current
 }
 

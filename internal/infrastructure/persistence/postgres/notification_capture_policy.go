@@ -7,9 +7,9 @@ import (
 )
 
 // SetNotificationCaptureMode is an operator-only command using the migration credential.
-// The exclusive advisory lock waits for every capture that observed the previous mode.
-// Runtime roles can read the mode but cannot change it.
-func SetNotificationCaptureMode(ctx context.Context, migrationDSN, mode string) (int64, error) {
+// The exclusive advisory locks wait for every legacy or bridged capture that observed
+// the previous mode. Runtime roles can read the mode but cannot change it.
+func SetNotificationCaptureMode(ctx context.Context, migrationDSN, mode string, allowPending bool) (int64, error) {
 	if mode != "legacy" && mode != "identity" {
 		return 0, fmt.Errorf("notification capture mode must be legacy or identity")
 	}
@@ -18,7 +18,9 @@ func SetNotificationCaptureMode(ctx context.Context, migrationDSN, mode string) 
 		return 0, fmt.Errorf("open notification capture control database: %w", err)
 	}
 	defer func() { _ = db.Close() }()
-	tx, err := db.BeginTx(ctx, nil)
+	// Each drain read must see captures committed while the barrier was waiting,
+	// even when the migration connection defaults to repeatable-read isolation.
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return 0, fmt.Errorf("begin notification capture control: %w", err)
 	}
@@ -26,12 +28,8 @@ func SetNotificationCaptureMode(ctx context.Context, migrationDSN, mode string) 
 	if _, err = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(78146)"); err != nil {
 		return 0, fmt.Errorf("lock notification capture mode: %w", err)
 	}
-	result, err := tx.ExecContext(ctx, "UPDATE notification_capture_policy SET mode=$1,changed_at=now() WHERE singleton", mode)
-	if err != nil {
-		return 0, fmt.Errorf("set notification capture mode: %w", err)
-	}
-	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
-		return 0, fmt.Errorf("notification capture policy row is unavailable")
+	if _, err = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(78146,1)"); err != nil {
+		return 0, fmt.Errorf("lock notification capture mode bridge: %w", err)
 	}
 	// FORCE RLS also applies to a non-bypass migration role. Count within each
 	// explicit tenant context rather than trusting an unscoped zero-row result.
@@ -63,6 +61,16 @@ func SetNotificationCaptureMode(ctx context.Context, migrationDSN, mode string) 
 			return 0, err
 		}
 		pending += count
+	}
+	if pending > 0 && !allowPending {
+		return pending, fmt.Errorf("refuse notification capture mode change with %d pending identity records; drain them or pass --allow-pending", pending)
+	}
+	result, err := tx.ExecContext(ctx, "UPDATE notification_capture_policy SET mode=$1,changed_at=now() WHERE singleton", mode)
+	if err != nil {
+		return 0, fmt.Errorf("set notification capture mode: %w", err)
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		return 0, fmt.Errorf("notification capture policy row is unavailable")
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit notification capture mode: %w", err)

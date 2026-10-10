@@ -2812,19 +2812,26 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 	if result != nil {
 		job.EngineOutcomes = scanrun.CloneEngineOutcomes(result.EngineOutcomes)
 		job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
-		job.NotificationSnapshot = result.notificationScanSummary(job.Target, job.Kind)
 	} else if err != nil {
 		job.EngineOutcomes = s.failedAttemptEngineOutcomes(job.EngineOutcomes, job.Stage, err)
 		job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
 	}
 	if err != nil {
 		job.Status, job.Stage, job.Error = ports.ScanFailed, "failed", truncateErr(err)
+		// A partial result is useful for diagnostics, but a completion snapshot is
+		// evidence of a successful scan only. Keeping one on this correction
+		// would let a failed project-analysis publication notify as completed.
+		job.NotificationSnapshot = notification.ScanSummary{}
 	} else {
 		job.Status, job.Stage = ports.ScanSucceeded, "done"
+		if result != nil {
+			job.NotificationSnapshot = result.notificationScanSummary(job.Target, job.Kind)
+		}
 	}
 	if s.jobs != nil {
-		// Detached from ctx so the record still lands when the completion timeout above has fired.
-		// (ScanJobStore.Save is not tenant-scoped; the tenant matters at the recorder call, not here.)
+		// Detached from cancellation so the record still lands when the completion
+		// timeout above has fired. context.WithoutCancel retains ctx values,
+		// including the tenant required by the PostgreSQL snapshot writer.
 		if saveErr := s.jobs.Save(context.WithoutCancel(ctx), job); saveErr != nil {
 			// Do NOT return saveErr here: the durable queue treats a non-nil error as
 			// redeliverable, but the scan already executed. The job is left stranded at

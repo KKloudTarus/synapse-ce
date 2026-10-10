@@ -1,6 +1,7 @@
 package notification
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"reflect"
@@ -108,5 +109,103 @@ func TestScanSummaryWithoutStableKeysNeverClaimsDelta(t *testing.T) {
 	current := NewScanSummary("target", "sast", true, []finding.Finding{{ID: "new", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})
 	if !previous.Unstable || current.WithBaseline(previous).DeltaAvailable {
 		t.Fatal("per-run finding IDs must not establish a scan delta")
+	}
+}
+
+func TestScanSummaryUsesDeterministicRepresentativeForDuplicateIdentity(t *testing.T) {
+	first := scanFinding("same", shared.SeverityHigh)
+	first.ID, first.Title, first.Status = "z-id", "z title", finding.StatusOpen
+	second := scanFinding("same", shared.SeverityHigh)
+	second.ID, second.Title, second.Status = "a-id", "a title", finding.StatusOpen
+
+	want := NewScanSummary("target", "sast", true, []finding.Finding{second, first})
+	got := NewScanSummary("target", "sast", true, []finding.Finding{first, second})
+	if !reflect.DeepEqual(got, want) || got.Findings[0].ID != "a-id" {
+		t.Fatalf("duplicate representatives changed summary: got=%+v want=%+v", got.Findings, want.Findings)
+	}
+}
+
+func TestScanSummaryCountsChosenDuplicateRepresentativeSeverity(t *testing.T) {
+	high := scanFinding("same", shared.SeverityHigh)
+	critical := scanFinding("same", shared.SeverityCritical)
+
+	want := NewScanSummary("target", "sast", true, []finding.Finding{critical, high})
+	got := NewScanSummary("target", "sast", true, []finding.Finding{high, critical})
+	if !reflect.DeepEqual(got, want) || got.Critical != 1 || got.High != 0 || got.Total != 1 {
+		t.Fatalf("duplicate severity counts changed with input order: got=%+v want=%+v", got, want)
+	}
+}
+
+func TestScanSummaryUnsafeComparisonIdentityDisablesDeltaWithoutPersistingIt(t *testing.T) {
+	invalidUTF8 := string([]byte{'k', 0xff})
+	for _, identity := range []string{invalidUTF8, "key\x00with-nul", strings.Repeat("x", maxScanSummaryIdentityBytes+1)} {
+		summary := NewScanSummary("target", "sast", true, []finding.Finding{scanFinding(identity, shared.SeverityHigh)})
+		if !summary.Unstable || len(summary.Keys) != 0 || summary.WithBaseline(summary).DeltaAvailable {
+			t.Fatalf("unsafe identity=%q produced comparable snapshot: %+v", identity, summary)
+		}
+		if len(summary.Findings) != 1 || len(summary.Findings[0].Identity) != 0 {
+			t.Fatalf("unsafe identity=%q leaked into presentation: %+v", identity, summary.Findings)
+		}
+	}
+}
+
+func TestScanSummaryRetainsLongValidComparisonIdentityWhenItFitsBudget(t *testing.T) {
+	identity := "path:" + strings.Repeat("module/", 59)
+	summary := NewScanSummary("target", "sast", true, []finding.Finding{scanFinding(identity, shared.SeverityHigh)})
+	if summary.Unstable || summary.Truncated || len(summary.Keys) != 1 || summary.Keys[0] != identity || summary.Findings[0].Identity != identity {
+		t.Fatalf("valid long identity was not retained: %+v", summary)
+	}
+}
+
+func TestScanSummaryBoundsEncodedSnapshotWhileKeepingCounts(t *testing.T) {
+	items := make([]finding.Finding, 0, maxScanSummaryFindings)
+	for i := 0; i < maxScanSummaryFindings; i++ {
+		items = append(items, scanFinding(fmt.Sprintf("%090d", i), shared.SeverityLow))
+	}
+	summary := NewScanSummary(strings.Repeat("t", 2048), strings.Repeat("k", 256), true, items)
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Total != len(items) || !summary.Truncated || summary.DeltaAvailable || len(encoded) > maxScanSummaryEncodedBytes {
+		t.Fatalf("bounded snapshot total=%d truncated=%v bytes=%d keys=%d", summary.Total, summary.Truncated, len(encoded), len(summary.Keys))
+	}
+	if summary.TargetKey != unavailableComparisonScalar || summary.Kind != unavailableComparisonScalar || !summary.Unstable {
+		t.Fatalf("oversized admission identity was retained: %+v", summary)
+	}
+}
+
+func TestScanSummaryWorstCaseEscapingFitsEncodedBudget(t *testing.T) {
+	items := make([]finding.Finding, 100)
+	for i := range items {
+		identity := strings.Repeat("<", maxScanSummaryIdentityBytes-8) + fmt.Sprintf("%08d", i)
+		items[i] = scanFinding(identity, shared.SeverityHigh)
+		items[i].ID = shared.ID(strings.Repeat("<", maxScanSummaryPresentationBytes))
+		items[i].Title = strings.Repeat("<", maxScanSummaryPresentationBytes)
+		items[i].Status = finding.StatusOpen
+	}
+	summary := NewScanSummary("target", "sast", true, items)
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !summary.Truncated || len(encoded) > maxScanSummaryEncodedBytes {
+		t.Fatalf("worst-case encoded snapshot truncated=%v bytes=%d", summary.Truncated, len(encoded))
+	}
+}
+
+func BenchmarkNewScanSummary(b *testing.B) {
+	for _, n := range []int{10_000, 100_000} {
+		items := make([]finding.Finding, n)
+		for i := range items {
+			items[i] = scanFinding(fmt.Sprintf("finding-%08d", i), shared.SeverityLow)
+		}
+		b.Run(fmt.Sprintf("observations-%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = NewScanSummary("target", "sast", true, items)
+			}
+		})
 	}
 }

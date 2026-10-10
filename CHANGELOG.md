@@ -7,6 +7,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING CHANGE: default notification webhooks use a class-filtered envelope.** Receivers now get `synapse.notification.v1` with declared, scrubbed variables, lists and trusted console links instead of the raw event. Update receivers before upgrading notification workers. An administrator can explicitly enable `raw_event` on a `detail` webhook without a custom body; engagement disclosure limits still apply. Existing channels configured at `detail` also begin receiving finding titles in the `scan.completed` findings list. Review their recipients before rollout. Scan messages use immutable completion snapshots, bounded comparison keys and explicit unavailable deltas; built-in English and Vietnamese templates cover the routable events. Email includes escaped HTML alongside text. Follow the worker compatibility, capture-mode drain and rollback steps in [Notification content and capture rollout](docs/guide/notification-content.md).
+
 ### Added
 
 - Bitbucket Cloud inbound `repo:push` and open pull-request creation/update webhooks (#1453), with HMAC-SHA256 verification, request UUID and authenticated-body replay protection, and PostgreSQL transactions covering receipts and durable scan enqueue. Multi-ref pushes and deliveries during an active scan remain queued until a running slot is available; workers recheck scope before executing. Administrators can bind one existing Git Project and configure or rotate the sealed webhook secret in the console. Fork PR scans disable Git credentials and build execution and do not decorate the forge; repository acquisition always uses the Project's stored origin.

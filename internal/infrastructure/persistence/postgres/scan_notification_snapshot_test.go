@@ -86,6 +86,22 @@ func TestScanJobTerminalSnapshotUsesEarlierCanonicalBaseline(t *testing.T) {
 	if err != nil || got.Status != ports.ScanSucceeded || got.FinishedAt == nil || !got.FinishedAt.Equal(secondFinished) || got.NotificationSnapshot.BaselineJobID != first.ID || got.NotificationSnapshot.Total != 2 {
 		t.Fatalf("terminal retry replaced captured evidence: %+v, err=%v", got.NotificationSnapshot, err)
 	}
+	// A retry may carry stale, malformed, or oversized worker output. Once the
+	// successful snapshot is frozen it must retain its stored evidence and time.
+	replacement := second
+	replacementFinished := successRetry.Add(time.Hour)
+	replacement.FinishedAt = &replacementFinished
+	replacement.NotificationSnapshot = notification.ScanSummary{
+		TargetKey: "untrusted-target", Kind: "untrusted-kind",
+		Keys: []string{strings.Repeat("x", 4*1024*1024)},
+	}
+	if err := store.Save(ctx, replacement); err != nil {
+		t.Fatalf("frozen retry rejected replacement payload: %v", err)
+	}
+	got, err = store.GetJob(ctx, second.ID)
+	if err != nil || got.FinishedAt == nil || !got.FinishedAt.Equal(secondFinished) || got.NotificationSnapshot.BaselineJobID != first.ID || got.NotificationSnapshot.Total != 2 {
+		t.Fatalf("frozen retry replaced stored snapshot: %+v, err=%v", got.NotificationSnapshot, err)
+	}
 }
 
 func TestScanJobTerminalSnapshotDoesNotSkipLegacyPredecessor(t *testing.T) {
@@ -190,22 +206,40 @@ func TestScanCompletedCaptureBoundsLargePersistedSnapshotContext(t *testing.T) {
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
 
 	const count = 10000
-	title := strings.Repeat("🧨", 1000)
+	const target = "https://user:pass@git.example.test/repo?opaque=secret#fragment"
 	findings := make([]finding.Finding, 0, count)
 	for i := 0; i < count; i++ {
-		key := fmt.Sprintf("finding-%05d", i)
-		findings = append(findings, finding.Finding{ID: shared.ID(key), DedupKey: key, Kind: finding.KindSCA, Severity: shared.SeverityInfo, Title: title, Status: finding.StatusOpen})
+		id := fmt.Sprintf("finding-%05d", i)
+		key := fmt.Sprintf("%05d-%s", i, strings.Repeat("k", 414))
+		findings = append(findings, finding.Finding{ID: shared.ID(id), DedupKey: key, Kind: finding.KindSCA, Severity: shared.SeverityInfo, Title: "scan finding", Status: finding.StatusOpen})
 	}
 	finished := time.Now().UTC().Truncate(time.Microsecond)
-	summary := notification.NewScanSummary("repo", ports.TargetGit, true, findings)
+	summary := notification.NewScanSummary(notification.CanonicalScanTarget(target, ports.TargetGit), ports.TargetGit, true, findings)
 	repo := NewNotificationRepository(pool)
 	repo.SetEventProjector(notificationuc.NewEventBuilders())
 	source := NewNotificationSource(pool, repo, time.Minute)
 	if _, err := source.Poll(ctx, finished, 10); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewScanJobStore(pool).Save(ctx, ports.ScanJob{ID: "scan-summary-context", EngagementID: "scan-summary-context-eng", Target: "https://user:pass@git.example.test/repo?opaque=secret#fragment", Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: finished, FinishedAt: &finished, NotificationSnapshot: summary}); err != nil {
+	store := NewScanJobStore(pool)
+	if err := store.Save(ctx, ports.ScanJob{ID: "scan-summary-context", EngagementID: "scan-summary-context-eng", Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: finished, FinishedAt: &finished, NotificationSnapshot: summary}); err != nil {
 		t.Fatal(err)
+	}
+	stored, err := store.GetJob(ctx, "scan-summary-context")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.NotificationSnapshot.Total != count || !stored.NotificationSnapshot.Truncated || stored.NotificationSnapshot.DeltaAvailable {
+		t.Fatalf("large snapshot did not round-trip its bounded comparison state: %+v", stored.NotificationSnapshot)
+	}
+	var snapshotSize int
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, "SELECT pg_column_size(notification_snapshot) FROM scan_jobs WHERE id=$1", "scan-summary-context").Scan(&snapshotSize)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if snapshotSize >= 4*1024*1024 {
+		t.Fatalf("stored notification snapshot = %d bytes, want < 4MiB", snapshotSize)
 	}
 	if _, err := source.Poll(ctx, finished.Add(time.Second), 10); err != nil {
 		t.Fatal(err)
@@ -494,18 +528,24 @@ func TestTerminalScanSnapshotPredecessorPlanUsesSucceededIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
-	if _, err := pool.Exec(ctx, `INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,progress,started_at,finished_at)
-		SELECT 'scan-summary-plan-' || n, $1, 'repo-' || n, 'git', 'succeeded', 'done', 100, now() - n * interval '1 second', now() - n * interval '1 second'
-		FROM generate_series(1,12000) AS n`, engagementID); err != nil {
+	longTarget := incompressibleScanTarget()
+	if _, err := pool.Exec(ctx, `INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,progress,started_at,finished_at,notification_snapshot)
+		SELECT 'scan-summary-plan-' || n, $1, $2 || n, 'git', 'succeeded', 'done', 100,
+			now() - n * interval '1 second', now() - n * interval '1 second',
+			jsonb_build_object('target_key',$2 || n,'kind','git')
+		FROM generate_series(1,12000) AS n`, engagementID, longTarget); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, "ANALYZE scan_jobs"); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := pool.Query(ctx, `EXPLAIN (COSTS OFF) SELECT id, target, notification_snapshot FROM scan_jobs
-		WHERE engagement_id=$1 AND kind=$2 AND status='succeeded' AND id<>$3
-		AND (finished_at < $4 OR (finished_at = $4 AND id < $5))
-		ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 128`, engagementID, ports.TargetGit, "scan-summary-plan-current", time.Now().UTC().Add(time.Hour), "scan-summary-plan-current")
+	targetKey := longTarget + "1"
+	rows, err := pool.Query(ctx, `EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) SELECT id, notification_snapshot, finished_at FROM scan_jobs
+		WHERE engagement_id COLLATE "C"=$1 COLLATE "C" AND kind COLLATE "C"=$2 COLLATE "C" AND status='succeeded' AND id COLLATE "C"<>$3 COLLATE "C"
+		AND (finished_at,id COLLATE "C") < ($4,$5 COLLATE "C")
+		AND notification_snapshot ? 'target_key' AND jsonb_typeof(notification_snapshot->'target_key')='string' AND notification_snapshot->>'target_key'<>''
+		AND md5(notification_snapshot->>'target_key')=md5($6) AND notification_snapshot->>'target_key' COLLATE "C"=$6 COLLATE "C"
+		ORDER BY finished_at DESC NULLS LAST, id COLLATE "C" DESC LIMIT 1`, engagementID, ports.TargetGit, "scan-summary-plan-current", time.Now().UTC().Add(time.Hour), "scan-summary-plan-current", targetKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +561,409 @@ func TestTerminalScanSnapshotPredecessorPlanUsesSucceededIndex(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.Join(plan, "\n"), "idx_scan_jobs_succeeded_predecessor") {
-		t.Fatalf("predecessor query did not use succeeded index:\n%s", strings.Join(plan, "\n"))
+	if !strings.Contains(strings.Join(plan, "\n"), "idx_scan_jobs_succeeded_notification_modern_predecessor") {
+		t.Fatalf("modern predecessor query did not use hash index:\n%s", strings.Join(plan, "\n"))
 	}
+}
+
+func TestTerminalScanSnapshotLegacyCursorSeeksPastEarlierRows(t *testing.T) {
+	pool := notificationTestPool(t)
+	tenant := shared.ID("scan-legacy-plan-" + randHex(t))
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,'Legacy scan plan')", tenant); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
+	const engagementID = "scan-legacy-plan-eng"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Legacy scan plan')", engagementID, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := pool.Exec(ctx, `INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,progress,started_at,finished_at)
+		SELECT 'legacy-plan-' || lpad(n::text,6,'0'),$1,'https://git.example.test/repo/' || n,'git','succeeded','done',100,
+			$2::timestamptz - n * interval '1 second',$2::timestamptz - n * interval '1 second'
+		FROM generate_series(1,100000) AS n`, engagementID, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "ANALYZE scan_jobs"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pool.Query(ctx, "EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF) "+scanLegacyPredecessorQuery,
+		engagementID, ports.TargetGit, "legacy-plan-current", at.Add(-50048*time.Second), "legacy-plan-050048", scanPredecessorPageSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	var cursorSeek bool
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, line)
+		cursorSeek = cursorSeek || (strings.Contains(line, "Index Cond:") && strings.Contains(line, "ROW(finished_at"))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !cursorSeek || !strings.Contains(strings.Join(plan, "\n"), "idx_scan_jobs_succeeded_notification_legacy_predecessor") {
+		t.Fatalf("legacy cursor must seek past prior pages without filtering their prefix:\n%s", strings.Join(plan, "\n"))
+	}
+	t.Logf("legacy predecessor plan:\n%s", strings.Join(plan, "\n"))
+}
+
+func TestTerminalScanSnapshotFindsModernBaselineBeyondLegacyPages(t *testing.T) {
+	pool := notificationTestPool(t)
+	tenant := shared.ID("scan-summary-pages-" + randHex(t))
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,'Scan summary')", tenant); err != nil {
+		t.Fatal(err)
+	}
+	const engagementID = "scan-summary-pages-eng"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Scan summary')", engagementID, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
+
+	store := NewScanJobStore(pool)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	target := "https://git.example.test/repo.git"
+	targetKey := notification.CanonicalScanTarget(target, ports.TargetGit)
+	summary := func(key string) notification.ScanSummary {
+		return notification.NewScanSummary(targetKey, ports.TargetGit, true, []finding.Finding{{ID: shared.ID(key), DedupKey: key, Kind: finding.KindSCA, Severity: shared.SeverityHigh}})
+	}
+	knownFinished := at.Add(time.Second)
+	known := ports.ScanJob{ID: "scan-summary-pages-known", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &knownFinished, NotificationSnapshot: summary("fixed")}
+	if err := store.Save(ctx, known); err != nil {
+		t.Fatal(err)
+	}
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		for n := 2; n <= 131; n++ {
+			finished := at.Add(time.Duration(n) * time.Second)
+			if _, err := tx.Exec(ctx, `INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,progress,started_at,finished_at)
+				VALUES($1,$2,$3,'git','succeeded','done',100,$4,$4)`, fmt.Sprintf("scan-summary-pages-legacy-%03d", n), engagementID, fmt.Sprintf("unrelated-%03d", n), finished); err != nil {
+				return err
+			}
+		}
+		// A malformed target key on an unrelated target is not decoded and
+		// cannot prevent reaching the canonical predecessor.
+		if _, err := tx.Exec(ctx, `UPDATE scan_jobs SET notification_snapshot='{"target_key":7}'::jsonb WHERE id=$1`, "scan-summary-pages-legacy-131"); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	currentFinished := at.Add(200 * time.Second)
+	current := ports.ScanJob{ID: "scan-summary-pages-current", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &currentFinished, NotificationSnapshot: summary("new")}
+	if err := store.Save(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetJob(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.NotificationSnapshot.DeltaAvailable || got.NotificationSnapshot.BaselineJobID != known.ID || got.NotificationSnapshot.New != 1 || got.NotificationSnapshot.Fixed != 1 {
+		t.Fatalf("baseline after legacy pages = %+v", got.NotificationSnapshot)
+	}
+}
+
+func TestTerminalScanSnapshotDoesNotSkipMatchingLegacyOnLaterPage(t *testing.T) {
+	pool := notificationTestPool(t)
+	tenant := shared.ID("scan-summary-pages-legacy-" + randHex(t))
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,'Scan summary')", tenant); err != nil {
+		t.Fatal(err)
+	}
+	const engagementID = "scan-summary-pages-legacy-eng"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Scan summary')", engagementID, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
+
+	store := NewScanJobStore(pool)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	target := "https://git.example.test/repo.git"
+	targetKey := notification.CanonicalScanTarget(target, ports.TargetGit)
+	summary := notification.NewScanSummary(targetKey, ports.TargetGit, true, []finding.Finding{{ID: "fixed", DedupKey: "fixed", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})
+	knownFinished := at.Add(time.Second)
+	known := ports.ScanJob{ID: "scan-summary-pages-legacy-known", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &knownFinished, NotificationSnapshot: summary}
+	if err := store.Save(ctx, known); err != nil {
+		t.Fatal(err)
+	}
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		for n := 3; n <= 132; n++ {
+			finished := at.Add(time.Duration(n) * time.Second)
+			if _, err := tx.Exec(ctx, `INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,progress,started_at,finished_at)
+				VALUES($1,$2,$3,'git','succeeded','done',100,$4,$4)`, fmt.Sprintf("scan-summary-pages-legacy-unrelated-%03d", n), engagementID, fmt.Sprintf("unrelated-%03d", n), finished); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,progress,started_at,finished_at)
+			VALUES('scan-summary-pages-legacy-matching',$1,$2,'git','succeeded','done',100,$3,$3)`, engagementID, target, at.Add(2*time.Second))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	currentFinished := at.Add(200 * time.Second)
+	current := ports.ScanJob{ID: "scan-summary-pages-legacy-current", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &currentFinished, NotificationSnapshot: notification.NewScanSummary(targetKey, ports.TargetGit, true, []finding.Finding{{ID: "new", DedupKey: "new", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})}
+	if err := store.Save(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetJob(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NotificationSnapshot.DeltaAvailable || got.NotificationSnapshot.BaselineJobID != "" {
+		t.Fatalf("matching legacy predecessor was skipped: %+v", got.NotificationSnapshot)
+	}
+}
+
+func TestTerminalScanSnapshotRejectsStoredIdentityMutationAndFailedSeed(t *testing.T) {
+	pool := notificationTestPool(t)
+	tenant := shared.ID("scan-summary-admission-" + randHex(t))
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,'Scan summary')", tenant); err != nil {
+		t.Fatal(err)
+	}
+	const engagementID = "scan-summary-admission-eng"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Scan summary')", engagementID, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
+
+	store := NewScanJobStore(pool)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	stored := ports.ScanJob{ID: "scan-summary-admission-stored", EngagementID: engagementID, Target: "repo-a", Kind: ports.TargetLocal, Status: ports.ScanRunning, Stage: "queued", StartedAt: at}
+	if err := store.CreateRunning(ctx, stored); err != nil {
+		t.Fatal(err)
+	}
+	finished := at.Add(time.Minute)
+	mutated := stored
+	mutated.Target, mutated.Status, mutated.Stage, mutated.FinishedAt = "repo-b", ports.ScanSucceeded, "done", &finished
+	mutated.NotificationSnapshot = notification.NewScanSummary("repo-b", ports.TargetLocal, true, nil)
+	if err := store.Save(ctx, mutated); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("stored identity mutation error = %v, want validation", err)
+	}
+	failed := ports.ScanJob{ID: "scan-summary-admission-failed", EngagementID: engagementID, Target: "repo-c", Kind: ports.TargetLocal, Status: ports.ScanFailed, Stage: "failed", StartedAt: at, FinishedAt: &finished, NotificationSnapshot: notification.NewScanSummary("repo-c", ports.TargetLocal, true, nil)}
+	if err := store.Save(ctx, failed); err != nil {
+		t.Fatal(err)
+	}
+	var snapshot string
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, "SELECT notification_snapshot::text FROM scan_jobs WHERE id=$1", failed.ID).Scan(&snapshot)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot != "{}" {
+		t.Fatalf("failed first write persisted notification snapshot: %s", snapshot)
+	}
+}
+
+func TestTerminalScanSnapshotUsesStoredKindForPredecessor(t *testing.T) {
+	pool := notificationTestPool(t)
+	tenant := shared.ID("scan-summary-stored-kind-" + randHex(t))
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,'Scan summary')", tenant); err != nil {
+		t.Fatal(err)
+	}
+	const engagementID = "scan-summary-stored-kind-eng"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Scan summary')", engagementID, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
+
+	store := NewScanJobStore(pool)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	target := "https://git.example.test/repo.git"
+	key := notification.CanonicalScanTarget(target, ports.TargetGit)
+	previousFinished := at.Add(time.Minute)
+	previous := ports.ScanJob{ID: "scan-summary-stored-kind-previous", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &previousFinished,
+		NotificationSnapshot: notification.NewScanSummary(key, ports.TargetGit, true, []finding.Finding{{ID: "fixed", DedupKey: "fixed", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})}
+	if err := store.Save(ctx, previous); err != nil {
+		t.Fatal(err)
+	}
+	current := ports.ScanJob{ID: "scan-summary-stored-kind-current", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanRunning, Stage: "queued", StartedAt: at}
+	if err := store.CreateRunning(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	finished := at.Add(2 * time.Minute)
+	current.Target = "caller-replacement-target"
+	current.Kind = ports.TargetLocal
+	current.Status, current.Stage, current.FinishedAt = ports.ScanSucceeded, "done", &finished
+	current.NotificationSnapshot = notification.NewScanSummary(key, ports.TargetGit, true, []finding.Finding{{ID: "new", DedupKey: "new", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})
+	if err := store.Save(ctx, current); err != nil {
+		t.Fatalf("save terminal job with stale caller target/kind: %v", err)
+	}
+	got, err := store.GetJob(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.NotificationSnapshot.DeltaAvailable || got.NotificationSnapshot.BaselineJobID != previous.ID || got.NotificationSnapshot.New != 1 || got.NotificationSnapshot.Fixed != 1 {
+		t.Fatalf("stored-kind predecessor was missed: %+v", got.NotificationSnapshot)
+	}
+}
+
+func TestTerminalScanSnapshotMatchingMalformedLegacyPersistsUnknownDelta(t *testing.T) {
+	pool := notificationTestPool(t)
+	tenant := shared.ID("scan-summary-malformed-" + randHex(t))
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,'Scan summary')", tenant); err != nil {
+		t.Fatal(err)
+	}
+	const engagementID = "scan-summary-malformed-eng"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Scan summary')", engagementID, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
+
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	target := "https://git.example.test/repo.git"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,progress,started_at,finished_at,notification_snapshot)
+			VALUES('scan-summary-malformed-legacy',$1,$2,'git','succeeded','done',100,$3,$3,'{"target_key":7}'::jsonb)`, engagementID, target, at)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	finished := at.Add(time.Minute)
+	current := ports.ScanJob{ID: "scan-summary-malformed-current", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &finished,
+		NotificationSnapshot: notification.NewScanSummary(notification.CanonicalScanTarget(target, ports.TargetGit), ports.TargetGit, true, []finding.Finding{{ID: "present", DedupKey: "present", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})}
+	if err := NewScanJobStore(pool).Save(ctx, current); err != nil {
+		t.Fatalf("save current scan with malformed predecessor: %v", err)
+	}
+	got, err := NewScanJobStore(pool).GetJob(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NotificationSnapshot.DeltaAvailable || got.NotificationSnapshot.BaselineJobID != "" || got.NotificationSnapshot.Total != 1 {
+		t.Fatalf("malformed matching predecessor did not persist unknown delta: %+v", got.NotificationSnapshot)
+	}
+}
+
+func TestTerminalScanSnapshotEqualTimeLegacyBlocksOlderModernBaseline(t *testing.T) {
+	pool := notificationTestPool(t)
+	tenant := shared.ID("scan-summary-equal-time-" + randHex(t))
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,'Scan summary')", tenant); err != nil {
+		t.Fatal(err)
+	}
+	const engagementID = "scan-summary-equal-time-eng"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Scan summary')", engagementID, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
+
+	store := NewScanJobStore(pool)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	target := "https://git.example.test/repo.git"
+	key := notification.CanonicalScanTarget(target, ports.TargetGit)
+	known := ports.ScanJob{ID: "scan-summary-equal-time-a", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &at,
+		NotificationSnapshot: notification.NewScanSummary(key, ports.TargetGit, true, []finding.Finding{{ID: "fixed", DedupKey: "fixed", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})}
+	if err := store.Save(ctx, known); err != nil {
+		t.Fatal(err)
+	}
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,progress,started_at,finished_at)
+			VALUES('scan-summary-equal-time-z',$1,$2,'git','succeeded','done',100,$3,$3)`, engagementID, target, at)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	finished := at.Add(time.Minute)
+	current := ports.ScanJob{ID: "scan-summary-equal-time-current", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &finished,
+		NotificationSnapshot: notification.NewScanSummary(key, ports.TargetGit, true, []finding.Finding{{ID: "new", DedupKey: "new", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})}
+	if err := store.Save(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetJob(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NotificationSnapshot.DeltaAvailable || got.NotificationSnapshot.BaselineJobID != "" {
+		t.Fatalf("equal-time legacy predecessor was skipped: %+v", got.NotificationSnapshot)
+	}
+}
+
+func TestTerminalScanSnapshotPrefersNewerModernOverOlderMatchingLegacy(t *testing.T) {
+	pool := notificationTestPool(t)
+	tenant := shared.ID("scan-summary-modern-wins-" + randHex(t))
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,'Scan summary')", tenant); err != nil {
+		t.Fatal(err)
+	}
+	const engagementID = "scan-summary-modern-wins-eng"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,'Scan summary')", engagementID, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM tenants WHERE id=$1", tenant) })
+
+	store := NewScanJobStore(pool)
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	target := "https://git.example.test/repo.git"
+	key := notification.CanonicalScanTarget(target, ports.TargetGit)
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO scan_jobs(id,engagement_id,target,kind,status,stage,progress,started_at,finished_at)
+			VALUES('scan-summary-modern-wins-legacy',$1,$2,'git','succeeded','done',100,$3,$3)`, engagementID, target, at)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	modernFinished := at.Add(time.Minute)
+	modern := ports.ScanJob{ID: "scan-summary-modern-wins-modern", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &modernFinished,
+		NotificationSnapshot: notification.NewScanSummary(key, ports.TargetGit, true, []finding.Finding{{ID: "fixed", DedupKey: "fixed", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})}
+	if err := store.Save(ctx, modern); err != nil {
+		t.Fatal(err)
+	}
+	currentFinished := modernFinished.Add(time.Minute)
+	current := ports.ScanJob{ID: "scan-summary-modern-wins-current", EngagementID: engagementID, Target: target, Kind: ports.TargetGit, Status: ports.ScanSucceeded, Stage: "done", StartedAt: at, FinishedAt: &currentFinished,
+		NotificationSnapshot: notification.NewScanSummary(key, ports.TargetGit, true, []finding.Finding{{ID: "new", DedupKey: "new", Kind: finding.KindSCA, Severity: shared.SeverityHigh}})}
+	if err := store.Save(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetJob(ctx, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.NotificationSnapshot.DeltaAvailable || got.NotificationSnapshot.BaselineJobID != modern.ID || got.NotificationSnapshot.New != 1 || got.NotificationSnapshot.Fixed != 1 {
+		t.Fatalf("older legacy hid newer modern baseline: %+v", got.NotificationSnapshot)
+	}
+}
+
+func incompressibleScanTarget() string {
+	var b strings.Builder
+	b.Grow(len("https://git.example.test/") + 8192)
+	b.WriteString("https://git.example.test/")
+	state := uint64(0x9e3779b97f4a7c15)
+	const digits = "0123456789abcdef"
+	for range 8192 {
+		state = state*6364136223846793005 + 1442695040888963407
+		b.WriteByte(digits[(state>>60)&0xf])
+	}
+	return b.String()
 }

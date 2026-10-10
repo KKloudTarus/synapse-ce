@@ -49,9 +49,19 @@ func (s *NotificationSource) pollCaptured(ctx context.Context, tx pgx.Tx, tenant
 			if rollbackErr := itemTx.Rollback(ctx); rollbackErr != nil {
 				return 0, rollbackErr
 			}
-			// Identity-only records are never quarantined. A missing source or a
-			// miswired/invalid projector must remain retryable until a capable
-			// worker can hydrate and project the record.
+			// A known v2 source that has been deleted is definitive: no capable
+			// projector can hydrate it on retry. Quarantine it in a separate
+			// savepoint with a capability narrower than publication. All other
+			// identity failures remain retryable.
+			if captured.version >= 2 && errors.Is(err, errNotificationSourceMissing) {
+				if err := s.quarantineMissingIdentitySource(ctx, tx, tenant, kind, e.SourceID, now); err != nil {
+					return 0, err
+				}
+				continue
+			}
+			// Identity-only records are otherwise never quarantined. A miswired or
+			// invalid projector must remain retryable until a capable worker can
+			// hydrate and project the record.
 			if captured.version >= 2 || !errors.Is(err, shared.ErrValidation) {
 				return 0, err
 			}
@@ -74,6 +84,28 @@ func (s *NotificationSource) pollCaptured(ctx context.Context, tx pgx.Tx, tenant
 	return len(events), nil
 }
 
+func (s *NotificationSource) quarantineMissingIdentitySource(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind, sourceID string, now time.Time) error {
+	quarantineTx, err := tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = quarantineTx.Rollback(ctx) }()
+	if _, err := quarantineTx.Exec(ctx, `SELECT set_config('synapse.notification_source_quarantine_capability','source-missing-v1',true)`); err != nil {
+		return err
+	}
+	tag, err := quarantineTx.Exec(ctx, `UPDATE notification_source_records
+		SET processed_at=$4,failed_reason='source_missing'
+		WHERE tenant_id=$1 AND source_kind=$2 AND source_id=$3
+		  AND capture_version=2 AND processed_at IS NULL AND failed_reason=''`, tenant, kind, sourceID, now)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("identity notification source changed before missing-source quarantine: %w", shared.ErrConflict)
+	}
+	return quarantineTx.Commit(ctx)
+}
+
 // publishCaptured reads the record's source facts and publishes it. The event builder fills the
 // variables from them, and composes the data from them when the record carries only its identity.
 func (s *NotificationSource) publishCaptured(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind string, e notification.Event, captureVersion int) error {
@@ -82,7 +114,11 @@ func (s *NotificationSource) publishCaptured(ctx context.Context, tx pgx.Tx, ten
 	}
 	facts, err := capturedFacts(ctx, tx, tenant, kind, e.SourceID)
 	if err != nil {
-		return err
+		if captureVersion < 2 && errors.Is(err, errNotificationSourceMissing) {
+			facts = nil // legacy records retain their captured event body.
+		} else {
+			return err
+		}
 	}
 	if captureVersion >= 2 && len(facts) == 0 {
 		return fmt.Errorf("identity notification source facts are unavailable")

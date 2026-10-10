@@ -20,6 +20,19 @@ import (
 // ScanJobStore persists asynchronous scan-job status.
 type ScanJobStore struct{ pool *pgxpool.Pool }
 
+const (
+	scanPredecessorPageSize    = 128
+	scanSnapshotSaveTimeout    = 30 * time.Second
+	scanLegacyPredecessorQuery = `SELECT id,target,finished_at FROM scan_jobs
+		WHERE engagement_id COLLATE "C"=$1 COLLATE "C" AND kind COLLATE "C"=$2 COLLATE "C"
+			AND status='succeeded' AND id COLLATE "C"<>$3 COLLATE "C"
+			AND (finished_at,id COLLATE "C") < ($4,$5 COLLATE "C")
+			AND (NOT (notification_snapshot ? 'target_key')
+				OR jsonb_typeof(notification_snapshot->'target_key')<>'string'
+				OR notification_snapshot->>'target_key'='')
+		ORDER BY finished_at DESC NULLS LAST,id COLLATE "C" DESC LIMIT $6`
+)
+
 // NewScanJobStore returns a store backed by the given pool.
 func NewScanJobStore(pool *pgxpool.Pool) *ScanJobStore { return &ScanJobStore{pool: pool} }
 
@@ -38,10 +51,9 @@ func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error
 	if err != nil {
 		return fmt.Errorf("marshal scan job debug events: %w", err)
 	}
-	snapshot, err := encodeScanJobNotificationSnapshot(j)
-	if err != nil {
-		return err
-	}
+	// A notification snapshot is admission evidence for a successful terminal
+	// transition only. Never let a caller seed it on a running job.
+	snapshot := []byte("{}")
 	_, err = r.execSourceJob(ctx, j, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes, snapshot)
@@ -69,13 +81,13 @@ func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 	if err != nil {
 		return fmt.Errorf("marshal scan job debug events: %w", err)
 	}
-	snapshot, err := encodeScanJobNotificationSnapshot(j)
-	if err != nil {
-		return err
-	}
 	if j.Status == ports.ScanSucceeded && j.NotificationSnapshot.TargetKey != "" {
 		return r.saveTerminalSnapshot(ctx, j, debugEvents, sourcePackage, outcomes)
 	}
+	// A failure may carry raw worker output, but it is not successful snapshot
+	// evidence. Retain an already-frozen successful snapshot on later status
+	// correction, while refusing to create one for a failed first write.
+	snapshot := []byte("{}")
 	_, err = r.execSourceJob(ctx, j,
 		`INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
@@ -101,6 +113,11 @@ func (r *ScanJobStore) saveTerminalSnapshot(ctx context.Context, j ports.ScanJob
 	if j.FinishedAt == nil {
 		return fmt.Errorf("%w: succeeded scan job must have finished_at", shared.ErrValidation)
 	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, scanSnapshotSaveTimeout)
+		defer cancel()
+	}
 	tenant, hasTenant := shared.TenantFrom(ctx)
 	if !hasTenant {
 		return fmt.Errorf("%w: tenant context is required for scan notification snapshot", shared.ErrValidation)
@@ -118,22 +135,29 @@ func (r *ScanJobStore) saveTerminalSnapshot(ctx context.Context, j ports.ScanJob
 		if !engagementExists {
 			return fmt.Errorf("scan engagement %s: %w", j.EngagementID, shared.ErrNotFound)
 		}
-		// Lock the row being saved before examining a predecessor. A terminal
-		// retry must preserve its stored evidence and must not lock another job
-		// while a concurrent retry holds this one.
+		// Lock the row being saved before examining a predecessor. The stored
+		// target/kind are authoritative for a job created by CreateRunning; a
+		// completion update must not change the comparison identity it carries.
+		var storedEngagement, storedTarget, storedKind string
+		var storedSnapshot []byte
 		var frozen bool
-		err := tx.QueryRow(ctx, `SELECT notification_snapshot <> '{}'::jsonb
-			FROM scan_jobs WHERE id=$1 AND engagement_id=$2 FOR UPDATE`, j.ID, j.EngagementID).Scan(&frozen)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		err := tx.QueryRow(ctx, `SELECT engagement_id,target,kind,notification_snapshot,notification_snapshot <> '{}'::jsonb
+			FROM scan_jobs WHERE id=$1 FOR UPDATE`, j.ID).Scan(&storedEngagement, &storedTarget, &storedKind, &storedSnapshot, &frozen)
+		switch {
+		case err == nil:
+			if storedEngagement != j.EngagementID {
+				return fmt.Errorf("%w: terminal scan job engagement does not match stored job", shared.ErrValidation)
+			}
+		case errors.Is(err, pgx.ErrNoRows):
+			storedEngagement, storedTarget, storedKind = j.EngagementID, j.Target, j.Kind
+		default:
 			return err
 		}
-
-		snapshot, err := encodeScanJobNotificationSnapshot(j)
-		if err != nil {
-			return err
-		}
-		upsert := func() error {
-			_, err := tx.Exec(ctx, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
+		// Completion metadata may be stale, but the created job owns the target
+		// identity used for both predecessor lookup and persistence.
+		j.Target, j.Kind = storedTarget, storedKind
+		upsert := func(snapshot []byte) error {
+			_, err = tx.Exec(ctx, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
 				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 				ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
 				progress=EXCLUDED.progress, error=EXCLUDED.error,
@@ -146,7 +170,14 @@ func (r *ScanJobStore) saveTerminalSnapshot(ctx context.Context, j ports.ScanJob
 			return err
 		}
 		if frozen {
-			return upsert()
+			// A frozen successful snapshot is immutable evidence. Status corrections
+			// may arrive with stale or oversized worker payloads; preserve the stored
+			// bytes and finished time after the tenant and engagement binding check.
+			return upsert(storedSnapshot)
+		}
+		expected := notification.NewScanSummary(notification.CanonicalScanTarget(storedTarget, storedKind), storedKind, false, nil)
+		if j.NotificationSnapshot.TargetKey != expected.TargetKey || j.NotificationSnapshot.Kind != expected.Kind {
+			return fmt.Errorf("%w: scan notification snapshot target or kind does not match stored job", shared.ErrValidation)
 		}
 		lockKey := fmt.Sprintf("%d:%s%d:%s%d:%s",
 			len(j.EngagementID), j.EngagementID,
@@ -155,60 +186,152 @@ func (r *ScanJobStore) saveTerminalSnapshot(ctx context.Context, j ports.ScanJob
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
 			return err
 		}
-		// The target advisory lock serializes new terminal snapshots. Existing
-		// frozen snapshots are immutable, while an empty legacy snapshot is
-		// deliberately treated as an unknown baseline, so locking predecessor
-		// rows cannot improve the decision and can deadlock an in-progress
-		// legacy upgrade that already holds its own row lock.
-		rows, err := tx.Query(ctx, `SELECT id, target, notification_snapshot FROM scan_jobs
-			WHERE engagement_id=$1 AND kind=$2 AND status='succeeded' AND id<>$3
-			AND (finished_at < $4 OR (finished_at = $4 AND id < $5))
-			ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 128`,
-			j.EngagementID, j.Kind, j.ID, *j.FinishedAt, j.ID)
+		baseline, baselineID, found, err := findScanNotificationPredecessor(ctx, tx, j)
 		if err != nil {
 			return err
 		}
-		for rows.Next() {
-			var baselineID, target string
-			var previous []byte
-			if err := rows.Scan(&baselineID, &target, &previous); err != nil {
-				rows.Close()
-				return err
-			}
-			var baseline ports.ScanJob
-			if err := decodeScanJobNotificationSnapshot(previous, &baseline); err != nil {
-				rows.Close()
-				return err
-			}
-			baselineTargetKey := baseline.NotificationSnapshot.TargetKey
-			if baselineTargetKey == "" {
-				baselineTargetKey = notification.CanonicalScanTarget(target, j.Kind)
-			}
-			if baselineTargetKey != j.NotificationSnapshot.TargetKey {
-				continue
-			}
-			// A matching legacy row without a snapshot is the immediate baseline,
-			// but cannot establish a comparison. Never skip it for an older row.
-			if baseline.NotificationSnapshot.TargetKey != "" {
-				j.NotificationSnapshot = j.NotificationSnapshot.WithBaselineID(baseline.NotificationSnapshot, baselineID)
-			}
-			break
+		if found {
+			j.NotificationSnapshot = j.NotificationSnapshot.WithBaselineID(baseline, baselineID)
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
-		snapshot, err = encodeScanJobNotificationSnapshot(j)
+		snapshot, err := encodeScanJobNotificationSnapshot(j)
 		if err != nil {
 			return err
 		}
-		return upsert()
+		return upsert(snapshot)
 	}
 	if err := WithTenant(ctx, r.pool, tenant.String(), save); err != nil {
 		return fmt.Errorf("save terminal scan job: %w", err)
 	}
 	return nil
+}
+
+type scanPredecessorPosition struct {
+	finishedAt time.Time
+	id         string
+}
+
+// findScanNotificationPredecessor first obtains an indexed canonical snapshot.
+// A fixed-size MD5 value narrows the index walk, but equality on target_key is
+// retained as the identity check. Legacy and malformed rows are then read in
+// keyset pages. The scan stops only when a matching legacy baseline is found or
+// every legacy row newer than the modern candidate has been examined.
+func findScanNotificationPredecessor(ctx context.Context, tx pgx.Tx, current ports.ScanJob) (notification.ScanSummary, string, bool, error) {
+	currentPosition := scanPredecessorPosition{finishedAt: *current.FinishedAt, id: current.ID}
+	var modernRaw []byte
+	var modern notification.ScanSummary
+	var modernID string
+	var modernFinished time.Time
+	err := tx.QueryRow(ctx, `SELECT id,notification_snapshot,finished_at FROM scan_jobs
+		WHERE engagement_id COLLATE "C"=$1 COLLATE "C" AND kind COLLATE "C"=$2 COLLATE "C"
+			AND status='succeeded' AND id COLLATE "C"<>$3 COLLATE "C"
+			AND (finished_at,id COLLATE "C") < ($4,$5 COLLATE "C")
+			AND notification_snapshot ? 'target_key'
+			AND jsonb_typeof(notification_snapshot->'target_key')='string'
+			AND notification_snapshot->>'target_key'<>''
+			AND md5(notification_snapshot->>'target_key')=md5($6)
+			AND notification_snapshot->>'target_key' COLLATE "C"=$6 COLLATE "C"
+		ORDER BY finished_at DESC NULLS LAST,id COLLATE "C" DESC LIMIT 1`,
+		current.EngagementID, current.Kind, current.ID, currentPosition.finishedAt, currentPosition.id, current.NotificationSnapshot.TargetKey).Scan(&modernID, &modernRaw, &modernFinished)
+	modernFound := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return notification.ScanSummary{}, "", false, fmt.Errorf("read modern scan notification predecessor: %w", err)
+	}
+	if modernFound {
+		var job ports.ScanJob
+		if err := decodeScanJobNotificationSnapshot(modernRaw, &job); err != nil {
+			// The closest matching predecessor is unusable. Preserve the current
+			// successful scan with an explicitly unavailable delta instead of
+			// searching past stored evidence for an older baseline.
+			return notification.ScanSummary{}, "", false, nil
+		}
+		modern = job.NotificationSnapshot
+	}
+	if modernFound && (modern.TargetKey != current.NotificationSnapshot.TargetKey || modern.Kind != current.NotificationSnapshot.Kind) {
+		return notification.ScanSummary{}, "", false, nil
+	}
+	var cursor *scanPredecessorPosition
+	for {
+		rows, err := tx.Query(ctx, scanLegacyPredecessorQuery,
+			current.EngagementID, current.Kind, current.ID, predecessorCursorTime(cursor, currentPosition), predecessorCursorID(cursor, currentPosition), scanPredecessorPageSize)
+		if err != nil {
+			return notification.ScanSummary{}, "", false, fmt.Errorf("read legacy scan notification predecessors: %w", err)
+		}
+		var pageLast scanPredecessorPosition
+		count := 0
+		for rows.Next() {
+			var id, target string
+			var finished time.Time
+			if err := rows.Scan(&id, &target, &finished); err != nil {
+				rows.Close()
+				return notification.ScanSummary{}, "", false, fmt.Errorf("scan legacy scan notification predecessor: %w", err)
+			}
+			count++
+			pageLast = scanPredecessorPosition{finishedAt: finished, id: id}
+			if modernFound && predecessorAtOrBefore(pageLast, scanPredecessorPosition{finishedAt: modernFinished, id: modernID}) {
+				rows.Close()
+				return modern, modernID, true, nil
+			}
+			if notification.CanonicalScanTarget(target, current.Kind) != current.NotificationSnapshot.TargetKey {
+				continue
+			}
+			// The metadata page stays small. Close it before reading the one
+			// matching payload so pgx does not issue a second statement while the
+			// cursor still owns the connection.
+			rows.Close()
+			var raw []byte
+			if err := tx.QueryRow(ctx, `SELECT notification_snapshot FROM scan_jobs
+				WHERE id=$1 AND engagement_id COLLATE "C"=$2 COLLATE "C"`, id, current.EngagementID).Scan(&raw); err != nil {
+				return notification.ScanSummary{}, "", false, fmt.Errorf("read matching legacy scan notification predecessor: %w", err)
+			}
+			var legacy ports.ScanJob
+			if err := decodeScanJobNotificationSnapshot(raw, &legacy); err != nil {
+				// A matching malformed row is evidence that comparison is unknown;
+				// it must not prevent the terminal scan status from persisting or
+				// allow selection of an older baseline.
+				return notification.ScanSummary{}, "", false, nil
+			}
+			// An empty or inconsistent legacy snapshot is an explicit unknown
+			// baseline and may not be skipped for an older modern candidate.
+			if legacy.NotificationSnapshot.TargetKey == "" {
+				return notification.ScanSummary{}, "", false, nil
+			}
+			return notification.ScanSummary{}, "", false, nil
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return notification.ScanSummary{}, "", false, fmt.Errorf("iterate legacy scan notification predecessors: %w", err)
+		}
+		rows.Close()
+		if count == 0 {
+			break
+		}
+		if modernFound && predecessorAtOrBefore(pageLast, scanPredecessorPosition{finishedAt: modernFinished, id: modernID}) {
+			break
+		}
+		cursor = &pageLast
+	}
+	if modernFound {
+		return modern, modernID, true, nil
+	}
+	return notification.ScanSummary{}, "", false, nil
+}
+
+func predecessorCursorTime(cursor *scanPredecessorPosition, current scanPredecessorPosition) time.Time {
+	if cursor == nil {
+		return current.finishedAt
+	}
+	return cursor.finishedAt
+}
+
+func predecessorCursorID(cursor *scanPredecessorPosition, current scanPredecessorPosition) string {
+	if cursor == nil {
+		return current.id
+	}
+	return cursor.id
+}
+
+func predecessorAtOrBefore(left, right scanPredecessorPosition) bool {
+	return left.finishedAt.Before(right.finishedAt) || (left.finishedAt.Equal(right.finishedAt) && left.id <= right.id)
 }
 
 // ListStaleRunning returns scan jobs still 'running' that started before olderThan (≤ limit),

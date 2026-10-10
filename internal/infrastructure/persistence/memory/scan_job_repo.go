@@ -31,6 +31,9 @@ func (s *ScanJobStore) CreateRunning(_ context.Context, j ports.ScanJob) error {
 	if _, err := scanrun.CanonicalEngineOutcomes(j.EngineOutcomes); err != nil {
 		return err
 	}
+	// A notification snapshot is completion evidence. Admission and progress
+	// updates must never create one before the first successful terminal save.
+	j.NotificationSnapshot = notification.ScanSummary{}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, current := range s.byID {
@@ -53,9 +56,14 @@ func (s *ScanJobStore) Save(_ context.Context, j ports.ScanJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	frozenTerminal := false
-	if stored, existed := s.byID[j.ID]; !existed {
-		s.latest[shared.ID(j.EngagementID)] = j.ID
-	} else {
+	stored, existed := s.byID[j.ID]
+	if existed {
+		// A first terminal snapshot has to belong to the engagement admitted at
+		// CreateRunning. Preserve ordinary status-only corrections, but reject a
+		// supplied completion snapshot before normalizing its caller fields.
+		if stored.NotificationSnapshot.TargetKey == "" && j.NotificationSnapshot.TargetKey != "" && j.EngagementID != stored.EngagementID {
+			return fmt.Errorf("%w: scan notification snapshot does not match admitted engagement", shared.ErrValidation)
+		}
 		// Match the PostgreSQL status-only upsert: admission identity and source
 		// cannot be rewritten by a later progress/status update.
 		j.EngagementID, j.Target, j.Kind = stored.EngagementID, stored.Target, stored.Kind
@@ -67,10 +75,38 @@ func (s *ScanJobStore) Save(_ context.Context, j ports.ScanJob) error {
 			j.NotificationSnapshot = stored.NotificationSnapshot.Clone()
 		}
 	}
+	if j.Status != ports.ScanSucceeded && !frozenTerminal {
+		// A failed attempt may carry a partial result, but it cannot become
+		// notification evidence. A later first success is still allowed to
+		// capture its own snapshot.
+		j.NotificationSnapshot = notification.ScanSummary{}
+	}
 	if j.Status == ports.ScanSucceeded && !frozenTerminal {
+		if err := validateMemoryScanSnapshotAdmission(j); err != nil {
+			return err
+		}
 		j = withMemoryScanBaseline(s.byID, j)
 	}
+	if !existed {
+		s.latest[shared.ID(j.EngagementID)] = j.ID
+	}
 	s.byID[j.ID] = cloneScanJobSource(j)
+	return nil
+}
+
+// validateMemoryScanSnapshotAdmission makes the in-memory adapter enforce the
+// same immutable target/kind binding as the PostgreSQL terminal writer. Empty
+// snapshots remain supported for legacy jobs, but a supplied snapshot must be
+// the one the stored admission can legitimately produce.
+func validateMemoryScanSnapshotAdmission(job ports.ScanJob) error {
+	if job.NotificationSnapshot.TargetKey == "" {
+		return nil
+	}
+	expected := notification.NewScanSummary(notification.CanonicalScanTarget(job.Target, job.Kind), job.Kind, false, nil)
+	if expected.TargetKey == "" || expected.Kind == "" ||
+		job.NotificationSnapshot.TargetKey != expected.TargetKey || job.NotificationSnapshot.Kind != expected.Kind {
+		return fmt.Errorf("%w: scan notification snapshot does not match admitted target", shared.ErrValidation)
+	}
 	return nil
 }
 
