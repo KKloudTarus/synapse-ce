@@ -6,6 +6,9 @@ function safePath(path: string) {
   return path.startsWith('/') && !path.startsWith('//') && !path.includes('://') && !path.includes('\\')
 }
 
+/** Personal channels as people know them (#1418, #1419, #1420). */
+const CHANNEL_LABELS: Record<string, string> = { in_app: 'In-app', email: 'Email', slack: 'Slack DM', teams: 'Microsoft Teams' }
+
 export function InboxPage() {
   const [items, setItems] = useState<InboxItem[] | null>(null)
   const [next, setNext] = useState<string>()
@@ -101,13 +104,13 @@ export function InboxPage() {
         <ul className="space-y-3">
           {preferences.map((item) => (
             <li key={`${item.event_type}:${item.channel}`} className="rounded-xl border border-secondary p-4">
-              <p className="font-medium capitalize text-primary">{item.event_type.replaceAll('_', ' ').replaceAll('.', ' · ')} · {item.channel === 'in_app' ? 'In-app' : item.channel}</p>
+              <p className="font-medium capitalize text-primary">{item.event_type.replaceAll('_', ' ').replaceAll('.', ' · ')} · {CHANNEL_LABELS[item.channel] ?? item.channel}</p>
               {item.reason && <p className="text-sm text-secondary">{item.reason}</p>}
               {item.available && !item.mandatory ? (
                 <label className="mt-2 block text-sm text-secondary">
                   Delivery
                   <select className="mt-1 w-full rounded-lg border border-primary bg-primary px-3 py-2 text-primary" aria-label={`${item.event_type} ${item.channel}`} value={item.state} onChange={(event) => void save(item, event.target.value as InboxPreference['state'])}>
-                    <option value="inherit">Use the default</option>
+                    <option value="inherit">Use the default ({item.default ? 'on' : 'off'})</option>
                     <option value="enabled">Enabled</option>
                     <option value="disabled">Disabled</option>
                   </select>

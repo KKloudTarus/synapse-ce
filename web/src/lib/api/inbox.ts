@@ -19,6 +19,8 @@ export type InboxPreference = {
   state: 'inherit' | 'enabled' | 'disabled'
   revision: number
   mandatory: boolean
+  /** What "Use the default" means for this person: the tenant default (#1418). */
+  default?: boolean
   available: boolean
   reason?: string
 }

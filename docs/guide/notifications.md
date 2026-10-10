@@ -9,7 +9,9 @@ not wait for a remote service.
 ## Personal email contacts
 
 When notifications and SMTP are enabled, every authenticated human user can manage
-their own email destinations at **My profile** (`/profile`). `GET` and `POST
+their own email destinations at **My profile** (`/profile`). Slack and Microsoft Teams
+accounts are linked on the same page; see [Slack direct messages](#slack-direct-messages)
+and [Microsoft Teams personal delivery](#microsoft-teams-personal-delivery). `GET` and `POST
 /api/v1/me/contacts` list/add contacts; `POST
 /api/v1/me/contacts/{id}/verification` queues a verification message; `POST
 /api/v1/me/contacts/{id}/verify` consumes the eight-digit code; `DELETE
@@ -376,9 +378,47 @@ When notifications are enabled, each human user has an inbox at `/inbox` and a b
 
 Inbox rows are written in the same database transaction as the notification event. In-app delivery does not create a channel delivery or a job. Replaying an event after retention does not recreate a deleted row. Mark-all-read uses the server time of that request, so a message that arrives while the request is running stays unread.
 
-Personal recipients come from structured IDs already on the event: the canonical finding assignee and active ownership team members. A legacy assignee label, an email address, or a display name is never resolved into a recipient. Mentioned users, approvers, and engagement leads stay unsupported until a producer records a verified identity. `notification.destination_changed` is mandatory in-app for enabled tenant admins. It is not a routing rule and cannot be muted. One notice is stored per channel revision: repeating that save is a no-op, and changing only the secret or the URL path is not a host change. Changing back to an earlier host writes a new notice. The payload contains the actor, the action, the channel class, and the scheme plus host. It does not contain a URL path, query, port secret, or credential. `notification.channel_paused` is mandatory in-app for enabled tenant admins in the same way, once per automatic pause (see [Channel health and automatic pause](#channel-health-and-automatic-pause)).
+Personal recipients come from structured IDs already on the event: the canonical finding assignee and active ownership team members. A legacy assignee label, an email address, or a display name is never resolved into a recipient. A routing rule can add people by role (see [Recipient roles](#recipient-roles-and-engagement-leads)); mentioned users and approvers stay unsupported until a producer records a verified identity. `notification.destination_changed` is mandatory in-app for enabled tenant admins. It is not a routing rule and cannot be muted. One notice is stored per channel revision: repeating that save is a no-op, and changing only the secret or the URL path is not a host change. Changing back to an earlier host writes a new notice. The payload contains the actor, the action, the channel class, and the scheme plus host. It does not contain a URL path, query, port secret, or credential. `notification.channel_paused` is mandatory in-app for enabled tenant admins in the same way, once per automatic pause (see [Channel health and automatic pause](#channel-health-and-automatic-pause)).
 
-`PUT /api/v1/me/notification-preferences` stores `inherit`, `enabled`, or `disabled` for the signed-in user. Mandatory in-app wins over an explicit mute, and an explicit mute wins over the default for every other choice. Personal email is sent only to the verified contact version captured when the event was projected. A later email change does not retarget a message that is still queued. Personal delivery is currently available for finding ownership changes, approaching SLAs, and destination-change notices. Other framework event types, Slack direct messages, and Teams personal delivery are shown as unavailable until they have a structured personal recipient and subject.
+`PUT /api/v1/me/notification-preferences` stores `inherit`, `enabled`, or `disabled` per event type and personal channel (`in_app`, `email`, `slack`, `teams`) for the signed-in user. Precedence is mandatory > the person's choice > the tenant default > the built-in default (in-app on, everything else off); `inherit` follows the tenant default, which each preference reports as `default`. Every personal message is sent from its inbox row, so muting in-app also mutes email, Slack and Teams for that event. A personal message leaves Synapse only to the verified contact version captured when the event was projected; when the job runs it is checked again (the person is enabled with a human role, the preference and tenant default still allow it, the engagement still lets messages out, the contact version is unchanged) and a stale job ends without sending. It is never retargeted. Slack can be chosen once the tenant has an enabled Slack app channel, and Teams once the operator configured the Teams bot.
+
+### Tenant defaults
+
+`GET /api/v1/notifications/personal-defaults` lists, for every event type a person can configure, whether email, Slack and Teams are on by default; `PUT` changes one (`manage_integrations`, audited as `notification.personal_default.updated`, guarded by `revision`). They are off until changed. The inbox has no tenant default. In the console they are under **Settings → Alerting → Personal delivery defaults**.
+
+### Recipient roles and engagement leads
+
+A routing rule can name `recipient_roles` besides (or instead of) channels:
+
+| Role | Who | Events |
+|---|---|---|
+| `assignee` | The finding's canonical assignee | `finding.ownership_changed`, `sla.approaching_deadline` |
+| `team_member` | Active members of the finding's owning team | `finding.ownership_changed` |
+| `engagement_lead` | The lead set on the event's engagement | Every event with an engagement |
+
+Each role has its own resolver. They keep only enabled users of the tenant whose role can view, and the send-time reload checks that again. A person selected by several roles gets one inbox row. Roles add people to those the event already names; they never remove anyone. For an event that names nobody itself, the inbox row uses the event's own title and summary and links to its engagement. `mentioned_user` and `approver` are refused until a producer records a verified identity.
+
+The engagement lead is part of the engagement's notification settings: `PUT /api/v1/notifications/engagements/{id}/settings` with `lead_user_id` (an enabled user of the tenant whose role can view; `""` clears it). It is audited with the previous lead. The console sets it under **Settings → Alerting → Engagement leads**.
+
+### Slack direct messages
+
+A person links a Slack account in **My profile → Slack**: they choose a workspace in which the tenant has an enabled Slack app channel ([Slack app channels](#slack-app-channels-bot-token)) and paste their own member ID (Slack profile, **More**, **Copy member ID**). The API checks with that workspace's app (`users.info`) that the member is an active person, then stores the contact as `team_id:member_id`, unverified. **Send code in Slack** sends the eight-digit verification code as the app's direct message, with the same expiry, attempt and resend limits as email; entering it verifies the contact. Synapse never looks a person up in Slack by email or name, and the contact holds only the workspace and member IDs.
+
+A personal Slack message is the app's direct message (`conversations.open`, then `chat.postMessage`) with the inbox title, the escaped summary and, when `SYNAPSE_PUBLIC_BASE_URL` is set, an **Open in Synapse** link. It is sent with the bot token of an enabled, unpaused Slack app channel of the same workspace, chosen by channel name; when none remains the job ends with `slack_workspace_unavailable`. Rate limits are retried with Slack's `Retry-After`.
+
+### Microsoft Teams personal delivery
+
+Teams Workflows webhooks cannot reach one person, so the operator registers one Azure Bot for the deployment (`SYNAPSE_TEAMS_BOT_APP_ID`, `SYNAPSE_TEAMS_BOT_APP_PASSWORD`, optional `SYNAPSE_TEAMS_BOT_TENANT_ID` for a single-tenant bot; see [Configuration](configuration.md)) with the messaging endpoint `https://<synapse>/api/v1/teams/messages`, and publishes a Teams app for it with the personal scope.
+
+1. A person opens a chat with the app and sends any message.
+2. The bot answers with a ten-character link code (for example `ABCDE-FGHJK`), valid once for 10 minutes. At most three codes are live per conversation.
+3. In **My profile → Microsoft Teams** they enter the code (`POST /api/v1/me/contacts/teams`). Every attempt counts against the five verification requests per user per hour; a wrong, used or expired code gets one `403`.
+
+The bot does not know the tenant: the code is stored only as a keyed digest, in a global owner-only table reached through two `SECURITY DEFINER` functions, next to the sealed conversation reference. Claiming it creates a verified `teams` contact (the person's Microsoft Entra object ID) and moves the conversation into the tenant, sealed again under the tenant and contact. Linking the same Teams account again replaces it.
+
+The messaging endpoint sits outside the human authentication chain. The only credential is the Bot Framework JWT: its signature against the Bot Framework keys, the issuer `https://api.botframework.com`, the bot's app ID as audience, and a `serviceurl` claim equal to the activity's service URL. Service URLs outside the Teams Bot Connector hosts are never stored or called. Every refusal is the same `401`. Only a message in a 1:1 chat is answered.
+
+A personal Teams message is an Adaptive Card (the same formatter as the `teams` channel) posted into that conversation with a Bot Connector token from `login.microsoftonline.com`. A removed bot or deleted conversation ends the job with `teams_conversation_gone`; the person links again.
 
 Events created before the framework first
 activates for a tenant are not replayed automatically.

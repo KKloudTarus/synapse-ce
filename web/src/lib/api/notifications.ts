@@ -182,6 +182,8 @@ export interface NotificationRule {
   team_ids?: string[]
   all_teams?: boolean
   channel_ids: string[]
+  /** People to notify personally (#1415): assignee, team_member or engagement_lead. */
+  recipient_roles?: string[]
   lead_time_seconds?: number
   revision: number
   created_at: string
@@ -191,6 +193,26 @@ export type NotificationRuleInput = Omit<
   NotificationRule,
   'id' | 'created_at' | 'updated_at'
 >
+/** A tenant default of one external personal channel (#1418). */
+export interface NotificationPersonalDefault {
+  event_type: string
+  channel: 'email' | 'slack' | 'teams'
+  enabled: boolean
+  /** The tenant never changed it; revision is then 0. */
+  builtin: boolean
+  revision: number
+}
+
+/** An engagement's notification settings (#1360, #1415). */
+export interface NotificationEngagementSetting {
+  engagement_id: string
+  external_notifications: 'inherit' | 'signal' | 'none'
+  revision: number
+  lead_user_id?: string
+  updated_at?: string
+  updated_by?: string
+}
+
 export interface NotificationDelivery {
   id: string
   event_id: string
@@ -273,6 +295,21 @@ export const notificationsApi = {
       `/notifications/channels/${encodeURIComponent(id)}?revision=${revision}`,
       { method: 'DELETE' },
     ),
+  // Tenant defaults of personal email, Slack and Teams delivery (#1418).
+  listPersonalDefaults: async (): Promise<NotificationPersonalDefault[]> =>
+    ((await req('/notifications/personal-defaults')) as { items?: NotificationPersonalDefault[] }).items ?? [],
+  savePersonalDefault: (
+    input: Pick<NotificationPersonalDefault, 'event_type' | 'channel' | 'enabled' | 'revision'>,
+  ): Promise<NotificationPersonalDefault> =>
+    req('/notifications/personal-defaults', { method: 'PUT', body: JSON.stringify(input) }),
+  // An engagement's notification settings, including its lead (#1415).
+  getEngagementNotificationSetting: (id: string): Promise<NotificationEngagementSetting> =>
+    req(`/notifications/engagements/${encodeURIComponent(id)}/settings`),
+  saveEngagementNotificationSetting: (
+    id: string,
+    input: { external_notifications: NotificationEngagementSetting['external_notifications']; revision: number; lead_user_id?: string },
+  ): Promise<NotificationEngagementSetting> =>
+    req(`/notifications/engagements/${encodeURIComponent(id)}/settings`, { method: 'PUT', body: JSON.stringify(input) }),
   // The Slack bot channel form's conversation picker (#1383): a token being entered, or an existing
   // channel's sealed token. Administrators only; the token is never returned.
   listSlackConversations: (
