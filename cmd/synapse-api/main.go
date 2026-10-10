@@ -75,6 +75,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/responsekey"
 	responseobserverinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/responseobserver"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/scmdecoration"
 	elastic "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/elastic"
@@ -84,6 +85,7 @@ import (
 	splunk "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/splunk"
 	syslogtls "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/syslog"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/slackapi"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
@@ -1623,6 +1625,9 @@ func main() {
 		// recent events.
 		notificationService.SetEventFixtures(eventschemas.Fixtures)
 		notificationService.SetEventReader(notificationRepository)
+		// Slack bot channels (#1383) are checked against the Slack Web API when they are saved, and
+		// the channel form lists a bot's conversations. The client goes through the SSRF guard.
+		notificationService.SetSlackWorkspace(slackapi.Workspace{Client: slackapi.New(safehttp.New(10*time.Second, false))})
 		router.SetNotifications(notificationService)
 		// The API still needs SMTP for contact verification and personal inbox mail.
 		userContactService, notificationErr = usercontacts.NewService(postgres.NewUserContactStore(databasePool), userRepo, vaultCipher, notificationSender, ids, clock, usercontacts.DeriveVerifierKey(cfg.VaultMasterKey), cfg.NotificationSMTPHost != "" && cfg.NotificationSMTPFrom != "")

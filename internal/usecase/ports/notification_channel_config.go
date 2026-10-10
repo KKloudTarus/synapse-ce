@@ -1,6 +1,11 @@
 package ports
 
-import "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+import (
+	"context"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+)
 
 // NotificationChannelConfig is the decrypted configuration of one notification channel. Each
 // channel type has its own struct, so a driver receives only the fields its type defines and a
@@ -89,4 +94,31 @@ type DiscordChannelConfig struct {
 // NotificationChannelType implements NotificationChannelConfig.
 func (DiscordChannelConfig) NotificationChannelType() notification.ChannelType {
 	return notification.ChannelDiscord
+}
+
+// SlackBotChannelConfig is a Slack app posting to one conversation with chat.postMessage (#1383).
+// BotToken (xoxb-…) is the credential; it is sent only in the Authorization header. TeamID is the
+// workspace the token belongs to, read with auth.test when the channel is saved, so personal
+// Slack delivery (#1419) can find the bot of a linked user's workspace without opening every
+// channel. AllowShared is an administrator's decision to post into a Slack Connect or
+// organisation-shared conversation, which the driver otherwise refuses.
+type SlackBotChannelConfig struct {
+	BotToken    string `json:"bot_token,omitempty"`
+	ChannelID   string `json:"channel_id,omitempty"`
+	TeamID      string `json:"team_id,omitempty"`
+	AllowShared bool   `json:"allow_shared,omitempty"`
+}
+
+// NotificationChannelType implements NotificationChannelConfig.
+func (SlackBotChannelConfig) NotificationChannelType() notification.ChannelType {
+	return notification.ChannelSlackBot
+}
+
+// NotificationChannelSecretReader reads a live channel and the sealed configuration of its current
+// version. The notification repositories implement it beside NotificationRepository; the service
+// uses it where it acts on a channel's credential outside a delivery: listing a Slack bot's
+// conversations for an existing channel (#1383) and finding the bot of a workspace for a personal
+// Slack message (#1419). The sealed value is opened only by the service.
+type NotificationChannelSecretReader interface {
+	GetChannelSealedConfig(ctx context.Context, tenant, id shared.ID) (notification.Channel, string, error)
 }

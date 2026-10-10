@@ -22,11 +22,14 @@ const (
 	ChannelTelegram   ChannelType = "telegram"
 	ChannelGoogleChat ChannelType = "google_chat"
 	ChannelDiscord    ChannelType = "discord"
+	// ChannelSlackBot posts as a Slack app with a bot token through chat.postMessage (#1383),
+	// unlike ChannelSlack, which posts to an incoming webhook.
+	ChannelSlackBot ChannelType = "slack_bot"
 )
 
 func (v ChannelType) Valid() bool {
 	switch v {
-	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord:
+	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord, ChannelSlackBot:
 		return true
 	}
 	return false
@@ -280,11 +283,11 @@ func (r Rule) Matches(e Event) bool {
 }
 
 type Delivery struct {
-	TenantID       shared.ID     `json:"-"`
-	ID             shared.ID     `json:"id"`
-	EventID        shared.ID     `json:"event_id"`
-	ChannelID      shared.ID     `json:"channel_id"`
-	ChannelType    ChannelType   `json:"channel_type"`
+	TenantID    shared.ID   `json:"-"`
+	ID          shared.ID   `json:"id"`
+	EventID     shared.ID   `json:"event_id"`
+	ChannelID   shared.ID   `json:"channel_id"`
+	ChannelType ChannelType `json:"channel_type"`
 	// RedriveFence is the durable queue's claim fence for this delivery's stable job.
 	// It is returned for optimistic redrive requests; every claim and redrive advances it.
 	RedriveFence   int64         `json:"redrive_fence"`

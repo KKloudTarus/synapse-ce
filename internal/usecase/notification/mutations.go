@@ -21,9 +21,20 @@ func mutation[T any](ctx context.Context, s *Service, fn func(context.Context) (
 	return
 }
 func (s *Service) CreateChannel(ctx context.Context, actor string, in ChannelInput) (domain.Channel, error) {
+	in, err := s.prepareDestination(ctx, in)
+	if err != nil {
+		return domain.Channel{}, err
+	}
 	return mutation(ctx, s, func(ctx context.Context) (domain.Channel, error) { return s.createChannel(ctx, actor, in) })
 }
 func (s *Service) UpdateChannel(ctx context.Context, actor string, id shared.ID, in ChannelInput) (domain.Channel, error) {
+	// Only an administrator may re-point a channel, so only then is a provider asked first.
+	if in.AllowDestinationChange {
+		var err error
+		if in, err = s.prepareDestination(ctx, in); err != nil {
+			return domain.Channel{}, err
+		}
+	}
 	return mutation(ctx, s, func(ctx context.Context) (domain.Channel, error) { return s.updateChannel(ctx, actor, id, in) })
 }
 func (s *Service) DeleteChannel(ctx context.Context, actor string, id shared.ID, revision int) error {

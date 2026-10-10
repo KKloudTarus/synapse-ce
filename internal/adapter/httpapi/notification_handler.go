@@ -416,3 +416,23 @@ func (rt *Router) listNotificationAttempts(w http.ResponseWriter, r *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
+
+// listSlackConversations fills the Slack bot channel form's conversation picker (#1383). The body
+// names either the bot token being entered or an existing Slack bot channel whose sealed token is
+// used; the token is never echoed back. Only administrators reach it: a bot token is a destination.
+func (rt *Router) listSlackConversations(w http.ResponseWriter, r *http.Request) {
+	var in notificationuc.SlackConversationsInput
+	if err := decodeNotificationBody(w, r, &in); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	out, err := rt.notifications.ListSlackConversations(r.Context(), in)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	if out.Items == nil {
+		out.Items = []ports.SlackConversation{}
+	}
+	writeJSON(w, http.StatusOK, out)
+}

@@ -33,6 +33,8 @@ var channelSchemas = map[domain.ChannelType]channelSchema{
 	domain.ChannelTelegram:   {validate: validateTelegramChannel, decode: decodeConfig[ports.TelegramChannelConfig]},
 	domain.ChannelGoogleChat: {validate: validateGoogleChatChannel, decode: decodeConfig[ports.GoogleChatChannelConfig]},
 	domain.ChannelDiscord:    {validate: validateDiscordChannel, decode: decodeConfig[ports.DiscordChannelConfig]},
+	// Slack bot mode (#1383), validated in slack_bot_channel.go and checked against Slack on save.
+	domain.ChannelSlackBot: {validate: validateSlackBotChannel, decode: decodeConfig[ports.SlackBotChannelConfig]},
 }
 
 const (

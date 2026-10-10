@@ -22,6 +22,7 @@ export const CHANNEL_FAMILY: Record<NotificationChannelType, NotificationTemplat
   telegram: 'chat',
   google_chat: 'chat',
   discord: 'chat',
+  slack_bot: 'chat',
 }
 
 // Radix Select refuses an empty item value, so the unset choices use sentinels that map to ''.

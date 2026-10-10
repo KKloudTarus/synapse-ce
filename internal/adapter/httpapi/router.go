@@ -561,6 +561,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("DELETE /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermManageIntegrations, rt.deleteNotificationChannel))
 		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/test", rt.authz(userdom.PermManageIntegrations, rt.testNotificationChannel))
 		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/resume", rt.authz(userdom.PermManageIntegrations, rt.resumeNotificationChannel))
+		mux.HandleFunc("POST /api/v1/notifications/slack/conversations", rt.authz(userdom.PermAdminister, rt.listSlackConversations))
 		mux.HandleFunc("GET /api/v1/notifications/channels/{nid}/health-events", rt.authz(userdom.PermManageIntegrations, rt.listNotificationChannelHealthEvents))
 		mux.HandleFunc("GET /api/v1/notifications/engagements/{nid}/settings", rt.authz(userdom.PermManageIntegrations, rt.getNotificationEngagementSetting))
 		mux.HandleFunc("PUT /api/v1/notifications/engagements/{nid}/settings", rt.authz(userdom.PermManageIntegrations, rt.putNotificationEngagementSetting))

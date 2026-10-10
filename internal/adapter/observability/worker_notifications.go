@@ -37,6 +37,7 @@ var notificationMetricFamilies = [...]notificationMetricFamily{
 	{notification.ChannelTelegram, "telegram"},
 	{notification.ChannelGoogleChat, "google_chat"},
 	{notification.ChannelDiscord, "discord"},
+	{notification.ChannelSlackBot, "slack"},
 	{"other", "other"},
 }
 
@@ -44,7 +45,8 @@ func workerNotificationLabels(channel notification.ChannelType) (string, string)
 	switch channel {
 	case notification.ChannelWebhook:
 		return string(channel), "generic"
-	case notification.ChannelSlack:
+	case notification.ChannelSlack, notification.ChannelSlackBot:
+		// An incoming webhook and a bot are two ways to reach the same provider.
 		return string(channel), "slack"
 	case notification.ChannelEmail:
 		return string(channel), "smtp"
