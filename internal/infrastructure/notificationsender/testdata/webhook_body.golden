@@ -1,1 +1,1 @@
-{"id":"event-1","type":"scan.completed","source_kind":"scan_job","source_id":"scan-1","schema_version":1,"occurred_at":"2026-09-01T12:00:00Z","data":{"title":"Scan \u003cdone\u003e \u0026 ok","summary":"All *good* \u003c@U1\u003e"}}
+{"version":"synapse.notification.v1","event":{"id":"event-1","type":"scan.completed","schema_version":1,"occurred_at":"2026-09-01T12:00:00Z"},"data":{"vars":{"scan_kind":"sast"}}}

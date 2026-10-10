@@ -104,6 +104,8 @@ type Channel struct {
 	// DataClass is the most sensitive content the channel's messages may carry (#1360). Empty means
 	// the type's default (DefaultDataClass).
 	DataClass DataClass `json:"data_class"`
+	// RawEvent is an audited opt-in to the legacy webhook envelope at detail class.
+	RawEvent bool `json:"raw_event"`
 	// TemplateBinding is the channel's template and locale (#1371).
 	TemplateBinding
 }
@@ -117,6 +119,9 @@ func (c Channel) Validate() error {
 	}
 	if c.DataClass != "" && !c.DataClass.Valid() {
 		return invalidDataClass()
+	}
+	if c.RawEvent && (c.Type != ChannelWebhook || c.Class() != DataClassDetail || c.CustomBody) {
+		return fmt.Errorf("%w: raw event mode requires a detail webhook without a custom body", shared.ErrValidation)
 	}
 	return c.TemplateBinding.Validate(c.Type)
 }
@@ -280,11 +285,11 @@ func (r Rule) Matches(e Event) bool {
 }
 
 type Delivery struct {
-	TenantID       shared.ID     `json:"-"`
-	ID             shared.ID     `json:"id"`
-	EventID        shared.ID     `json:"event_id"`
-	ChannelID      shared.ID     `json:"channel_id"`
-	ChannelType    ChannelType   `json:"channel_type"`
+	TenantID    shared.ID   `json:"-"`
+	ID          shared.ID   `json:"id"`
+	EventID     shared.ID   `json:"event_id"`
+	ChannelID   shared.ID   `json:"channel_id"`
+	ChannelType ChannelType `json:"channel_type"`
 	// RedriveFence is the durable queue's claim fence for this delivery's stable job.
 	// It is returned for optimistic redrive requests; every claim and redrive advances it.
 	RedriveFence   int64         `json:"redrive_fence"`

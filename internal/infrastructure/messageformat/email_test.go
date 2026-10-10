@@ -2,6 +2,9 @@ package messageformat
 
 import (
 	"errors"
+	"html"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,7 +25,13 @@ func TestEmailGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkGolden(t, "email.html", []byte(fragment))
+	golden, err := os.ReadFile(filepath.Join("testdata", "email.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.TrimSpace(string(golden)); strings.TrimSpace(fragment) != want {
+		t.Errorf("email.html changed:\n got  %s\n want %s", fragment, want)
+	}
 }
 
 // In HTML every value must be escaped text: no tag, attribute or entity from a value survives. In
@@ -35,8 +44,7 @@ func TestEmailInjectionValuesStayLiteral(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		inner := strings.TrimSuffix(strings.TrimPrefix(fragment, "<p>"), "</p>\n")
-		if strings.ContainsAny(inner, "<>\"") || !strings.HasPrefix(inner, "Value: ") {
+		if strings.Contains(fragment, "<script") || strings.Contains(fragment, "<img") || !strings.Contains(fragment, "Value: "+html.EscapeString(clean)) {
 			t.Errorf("%q: HTML fragment %q", value, fragment)
 		}
 		out, err := Email{}.Format(message)

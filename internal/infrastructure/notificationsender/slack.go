@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -26,8 +27,29 @@ func (d slackDriver) Send(ctx context.Context, w ports.NotificationWork, config 
 		return d.post(ctx, cfg.URL, w.Formatted.Body, false)
 	}
 	title, summary, fallback := eventText(w)
-	body, _ := json.Marshal(map[string]any{"text": title, "blocks": []map[string]any{{"type": "header", "text": map[string]string{"type": "plain_text", "text": limit(title, 150)}}, {"type": "section", "text": map[string]string{"type": "mrkdwn", "text": escapeSlack(limit(summary, 2500))}}, {"type": "context", "elements": []map[string]string{{"type": "mrkdwn", "text": "Event `" + string(w.Event.Type) + "` · `" + w.Event.ID.String() + "`"}}}}})
+	body, _ := json.Marshal(slackFallbackPayload(title, summary, w.Event))
 	return d.post(ctx, cfg.URL, body, fallback)
+}
+
+// slackFallbackPayload uses only Slack literal text primitives. A failed renderer must not turn
+// a value from the filtered snapshot into mrkdwn, a mention, or an unfurled link.
+func slackFallbackPayload(title, summary string, event notification.Event) map[string]any {
+	title = safeHeader(title)
+	summary = limit(msgtemplate.Sanitize(summary), 2500)
+	blocks := []any{}
+	if title != "" {
+		blocks = append(blocks, map[string]any{"type": "header", "text": map[string]any{"type": "plain_text", "text": limit(title, 150), "emoji": false}})
+	}
+	if summary != "" {
+		blocks = append(blocks, map[string]any{"type": "rich_text", "elements": []any{map[string]any{"type": "rich_text_section", "elements": []any{map[string]any{"type": "text", "text": summary}}}}})
+	}
+	blocks = append(blocks, map[string]any{"type": "rich_text", "elements": []any{map[string]any{"type": "rich_text_section", "elements": []any{map[string]any{"type": "text", "text": "Event " + string(event.Type) + " · " + event.ID.String()}}}}})
+	return map[string]any{
+		"text":         escapeSlack(title),
+		"blocks":       blocks,
+		"unfurl_links": false,
+		"unfurl_media": false,
+	}
 }
 
 func (d slackDriver) post(ctx context.Context, url string, body []byte, fallback bool) ports.NotificationSendResult {

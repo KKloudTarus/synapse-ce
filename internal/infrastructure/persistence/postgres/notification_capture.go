@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
@@ -11,38 +12,57 @@ import (
 )
 
 func (s *NotificationSource) pollCaptured(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind string, now time.Time, limit int) (int, error) {
-	rows, err := tx.Query(ctx, `SELECT source_id,event_type,engagement_id,severity,occurred_at,data,subject_kind,subject_id,context FROM notification_source_records WHERE tenant_id=$1 AND source_kind=$2 AND processed_at IS NULL ORDER BY occurred_at,source_id LIMIT $3 FOR UPDATE SKIP LOCKED`, tenant, kind, limit)
+	rows, err := tx.Query(ctx, `SELECT source_id,event_type,engagement_id,severity,occurred_at,data,subject_kind,subject_id,context,capture_version FROM notification_source_records WHERE tenant_id=$1 AND source_kind=$2 AND processed_at IS NULL ORDER BY occurred_at,source_id LIMIT $3 FOR UPDATE SKIP LOCKED`, tenant, kind, limit)
 	if err != nil {
 		return 0, err
 	}
-	var events []notification.Event
+	type capturedEvent struct {
+		event   notification.Event
+		version int
+	}
+	var events []capturedEvent
 	for rows.Next() {
 		e := notification.Event{TenantID: tenant, SourceKind: kind, SchemaVersion: 1}
-		if err := rows.Scan(&e.SourceID, &e.Type, &e.EngagementID, &e.Severity, &e.OccurredAt, &e.Data, &e.SubjectKind, &e.SubjectID, &e.Context); err != nil {
+		var version int
+		if err := rows.Scan(&e.SourceID, &e.Type, &e.EngagementID, &e.Severity, &e.OccurredAt, &e.Data, &e.SubjectKind, &e.SubjectID, &e.Context, &version); err != nil {
 			rows.Close()
 			return 0, err
 		}
 		e.ID = stableID(tenant.String(), kind, e.SourceID)
-		events = append(events, e)
+		events = append(events, capturedEvent{event: e, version: version})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		return 0, err
 	}
 	rows.Close()
-	for _, e := range events {
+	for _, captured := range events {
+		e := captured.event
 		// pgx uses a savepoint for a nested transaction. A bad event may have
 		// reached SQL before failing, so roll back that record's work alone.
 		itemTx, err := tx.Begin(ctx)
 		if err != nil {
 			return 0, err
 		}
-		err = s.publishCaptured(ctx, itemTx, tenant, kind, e)
+		err = s.publishCaptured(ctx, itemTx, tenant, kind, e, captured.version)
 		if err != nil {
 			if rollbackErr := itemTx.Rollback(ctx); rollbackErr != nil {
 				return 0, rollbackErr
 			}
-			if !errors.Is(err, shared.ErrValidation) {
+			// A known v2 source that has been deleted is definitive: no capable
+			// projector can hydrate it on retry. Quarantine it in a separate
+			// savepoint with a capability narrower than publication. All other
+			// identity failures remain retryable.
+			if captured.version >= 2 && errors.Is(err, errNotificationSourceMissing) {
+				if err := s.quarantineMissingIdentitySource(ctx, tx, tenant, kind, e.SourceID, now); err != nil {
+					return 0, err
+				}
+				continue
+			}
+			// Identity-only records are otherwise never quarantined. A miswired or
+			// invalid projector must remain retryable until a capable worker can
+			// hydrate and project the record.
+			if captured.version >= 2 || !errors.Is(err, shared.ErrValidation) {
 				return 0, err
 			}
 			reason := "invalid_event"
@@ -64,15 +84,73 @@ func (s *NotificationSource) pollCaptured(ctx context.Context, tx pgx.Tx, tenant
 	return len(events), nil
 }
 
-// publishCaptured reads the record's source facts and publishes it. The event builder fills the
-// variables from them, and composes the data from them when the record carries only its identity.
-func (s *NotificationSource) publishCaptured(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind string, e notification.Event) error {
-	facts, err := capturedFacts(ctx, tx, tenant, kind, e.SourceID)
+func (s *NotificationSource) quarantineMissingIdentitySource(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind, sourceID string, now time.Time) error {
+	quarantineTx, err := tx.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	if e.Context, err = withFacts(e.Context, facts); err != nil {
+	defer func() { _ = quarantineTx.Rollback(ctx) }()
+	if _, err := quarantineTx.Exec(ctx, `SELECT set_config('synapse.notification_source_quarantine_capability','source-missing-v1',true)`); err != nil {
 		return err
+	}
+	tag, err := quarantineTx.Exec(ctx, `UPDATE notification_source_records
+		SET processed_at=$4,failed_reason='source_missing'
+		WHERE tenant_id=$1 AND source_kind=$2 AND source_id=$3
+		  AND capture_version=2 AND processed_at IS NULL AND failed_reason=''`, tenant, kind, sourceID, now)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("identity notification source changed before missing-source quarantine: %w", shared.ErrConflict)
+	}
+	return quarantineTx.Commit(ctx)
+}
+
+// publishCaptured reads the record's source facts and publishes it. The event builder fills the
+// variables from them, and composes the data from them when the record carries only its identity.
+func (s *NotificationSource) publishCaptured(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind string, e notification.Event, captureVersion int) error {
+	if captureVersion >= 2 && s.repo.projector == nil {
+		return fmt.Errorf("identity notification source requires an event projector")
+	}
+	facts, err := capturedFacts(ctx, tx, tenant, kind, e.SourceID)
+	if err != nil {
+		if captureVersion < 2 && errors.Is(err, errNotificationSourceMissing) {
+			facts = nil // legacy records retain their captured event body.
+		} else {
+			return err
+		}
+	}
+	if captureVersion >= 2 && len(facts) == 0 {
+		return fmt.Errorf("identity notification source facts are unavailable")
+	}
+	if kind == "scan_job" {
+		if e.Context, err = withScanFacts(e.Context, facts); err != nil {
+			return err
+		}
+		present, err := scanSummaryPresent(facts["notification_snapshot"])
+		if err != nil {
+			return err
+		}
+		if present {
+			if s.repo.projector == nil {
+				return fmt.Errorf("scan notification snapshot requires an event projector")
+			}
+			// The terminal snapshot, rather than the trigger's legacy data,
+			// defines the scan.completed v2 envelope. An empty object lets the
+			// projector compose the matching aggregate data from the snapshot facts.
+			e.SchemaVersion = 2
+			e.Data = []byte("{}")
+		}
+	} else if e.Context, err = withFacts(e.Context, facts); err != nil {
+		return err
+	}
+	if captureVersion >= 2 {
+		// The trigger refuses identity-only publication unless the capability is
+		// transaction-local. Set it only after source hydration succeeded; failures
+		// above remain retryable and cannot consume the record.
+		if _, err := tx.Exec(ctx, `SELECT set_config('synapse.notification_source_capability','identity-v1',true)`); err != nil {
+			return err
+		}
 	}
 	_, err = s.repo.publishTx(ctx, tx, e, "")
 	return err

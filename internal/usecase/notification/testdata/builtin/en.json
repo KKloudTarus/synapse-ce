@@ -1,0 +1,928 @@
+{
+  "finding.ownership_changed/chat/detail": {
+    "fields": {
+      "body": "Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding\nPrevious team: summary\\-old\\-team\nNew team: summary\\-new\\-team\nPrevious assignee: summary\\-old\\-assignee\nNew assignee: summary\\-new\\-assignee\nChanged by: summary\\-actor\nReason: summary\\-reason",
+      "title": "Finding ownership changed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding ownership changed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Event: finding.ownership_changed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Previous team: summary-old-team\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"New team: summary-new-team\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Previous assignee: summary-old-assignee\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"New assignee: summary-new-assignee\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Changed by: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Reason: summary-reason\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding ownership changed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.ownership_changed/chat/signal": {
+    "fields": {
+      "body": "Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Finding ownership changed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding ownership changed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Event: finding.ownership_changed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding ownership changed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.ownership_changed/chat/summary": {
+    "fields": {
+      "body": "Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding\nPrevious team: summary\\-old\\-team\nNew team: summary\\-new\\-team\nPrevious assignee: summary\\-old\\-assignee\nNew assignee: summary\\-new\\-assignee\nChanged by: summary\\-actor\nReason: summary\\-reason",
+      "title": "Finding ownership changed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding ownership changed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Event: finding.ownership_changed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Previous team: summary-old-team\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"New team: summary-new-team\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Previous assignee: summary-old-assignee\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"New assignee: summary-new-assignee\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Changed by: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Reason: summary-reason\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding ownership changed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.ownership_changed/email/detail": {
+    "fields": {
+      "body": "Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding\nPrevious team: summary\\-old\\-team\nNew team: summary\\-new\\-team\nPrevious assignee: summary\\-old\\-assignee\nNew assignee: summary\\-new\\-assignee\nChanged by: summary\\-actor\nReason: summary\\-reason",
+      "subject": "Finding ownership changed"
+    },
+    "formatted": "Event: finding.ownership_changed\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nFinding: summary-finding\nPrevious team: summary-old-team\nNew team: summary-new-team\nPrevious assignee: summary-old-assignee\nNew assignee: summary-new-assignee\nChanged by: summary-actor\nReason: summary-reason",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eEvent: finding.ownership_changed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003cbr\u003e\nPrevious team: summary-old-team\u003cbr\u003e\nNew team: summary-new-team\u003cbr\u003e\nPrevious assignee: summary-old-assignee\u003cbr\u003e\nNew assignee: summary-new-assignee\u003cbr\u003e\nChanged by: summary-actor\u003cbr\u003e\nReason: summary-reason\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.ownership_changed/email/signal": {
+    "fields": {
+      "body": "Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Finding ownership changed"
+    },
+    "formatted": "Event: finding.ownership_changed\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eEvent: finding.ownership_changed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.ownership_changed/email/summary": {
+    "fields": {
+      "body": "Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding\nPrevious team: summary\\-old\\-team\nNew team: summary\\-new\\-team\nPrevious assignee: summary\\-old\\-assignee\nNew assignee: summary\\-new\\-assignee\nChanged by: summary\\-actor\nReason: summary\\-reason",
+      "subject": "Finding ownership changed"
+    },
+    "formatted": "Event: finding.ownership_changed\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nFinding: summary-finding\nPrevious team: summary-old-team\nNew team: summary-new-team\nPrevious assignee: summary-old-assignee\nNew assignee: summary-new-assignee\nChanged by: summary-actor\nReason: summary-reason",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eEvent: finding.ownership_changed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003cbr\u003e\nPrevious team: summary-old-team\u003cbr\u003e\nNew team: summary-new-team\u003cbr\u003e\nPrevious assignee: summary-old-assignee\u003cbr\u003e\nNew assignee: summary-new-assignee\u003cbr\u003e\nChanged by: summary-actor\u003cbr\u003e\nReason: summary-reason\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.ownership_changed/pager/detail": {
+    "fields": {
+      "summary": "Finding ownership changed: Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding\nPrevious team: summary\\-old\\-team\nNew team: summary\\-new\\-team\nPrevious assignee: summary\\-old\\-assignee\nNew assignee: summary\\-new\\-assignee\nChanged by: summary\\-actor\nReason: summary\\-reason"
+    }
+  },
+  "finding.ownership_changed/pager/signal": {
+    "fields": {
+      "summary": "Finding ownership changed: Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.ownership_changed/pager/summary": {
+    "fields": {
+      "summary": "Finding ownership changed: Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding\nPrevious team: summary\\-old\\-team\nNew team: summary\\-new\\-team\nPrevious assignee: summary\\-old\\-assignee\nNew assignee: summary\\-new\\-assignee\nChanged by: summary\\-actor\nReason: summary\\-reason"
+    }
+  },
+  "finding.ownership_changed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.ownership_changed",
+        "type": "finding.ownership_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.ownership_changed",
+          "finding_title": "summary-finding",
+          "new_assignee": "summary-new-assignee",
+          "new_team": "summary-new-team",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "old_assignee": "summary-old-assignee",
+          "old_team": "summary-old-team",
+          "reason": "summary-reason",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.ownership_changed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.ownership_changed",
+        "type": "finding.ownership_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.ownership_changed",
+          "occurred_at": "2026-10-02T09:00:00Z"
+        }
+      }
+    }
+  },
+  "finding.ownership_changed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.ownership_changed",
+        "type": "finding.ownership_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.ownership_changed",
+          "finding_title": "summary-finding",
+          "new_assignee": "summary-new-assignee",
+          "new_team": "summary-new-team",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "old_assignee": "summary-old-assignee",
+          "old_team": "summary-old-team",
+          "reason": "summary-reason",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "fleet.agent.offline/chat/detail": {
+    "fields": {
+      "body": "Last heartbeat: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent",
+      "title": "Fleet agent offline"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Fleet agent offline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Last heartbeat: 2026-10-02 08:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Agent: summary-agent\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Fleet agent offline\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "fleet.agent.offline/chat/signal": {
+    "fields": {
+      "body": "Last heartbeat: 2026\\-10\\-02 08\\:00 UTC",
+      "title": "Fleet agent offline"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Fleet agent offline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Last heartbeat: 2026-10-02 08:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Fleet agent offline\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "fleet.agent.offline/chat/summary": {
+    "fields": {
+      "body": "Last heartbeat: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent",
+      "title": "Fleet agent offline"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Fleet agent offline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Last heartbeat: 2026-10-02 08:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Agent: summary-agent\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Fleet agent offline\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "fleet.agent.offline/email/detail": {
+    "fields": {
+      "body": "Last heartbeat: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent",
+      "subject": "Fleet agent offline"
+    },
+    "formatted": "Last heartbeat: 2026-10-02 08:00 UTC\nAgent: summary-agent",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLast heartbeat: 2026-10-02 08:00 UTC\u003cbr\u003e\nAgent: summary-agent\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "fleet.agent.offline/email/signal": {
+    "fields": {
+      "body": "Last heartbeat: 2026\\-10\\-02 08\\:00 UTC",
+      "subject": "Fleet agent offline"
+    },
+    "formatted": "Last heartbeat: 2026-10-02 08:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLast heartbeat: 2026-10-02 08:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "fleet.agent.offline/email/summary": {
+    "fields": {
+      "body": "Last heartbeat: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent",
+      "subject": "Fleet agent offline"
+    },
+    "formatted": "Last heartbeat: 2026-10-02 08:00 UTC\nAgent: summary-agent",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLast heartbeat: 2026-10-02 08:00 UTC\u003cbr\u003e\nAgent: summary-agent\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "fleet.agent.offline/pager/detail": {
+    "fields": {
+      "summary": "Fleet agent offline: Last heartbeat: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent"
+    }
+  },
+  "fleet.agent.offline/pager/signal": {
+    "fields": {
+      "summary": "Fleet agent offline: Last heartbeat: 2026\\-10\\-02 08\\:00 UTC"
+    }
+  },
+  "fleet.agent.offline/pager/summary": {
+    "fields": {
+      "summary": "Fleet agent offline: Last heartbeat: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent"
+    }
+  },
+  "fleet.agent.offline/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-fleet.agent.offline",
+        "type": "fleet.agent.offline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "agent_name": "summary-agent",
+          "event_label": "signal-event-label",
+          "event_type": "fleet.agent.offline",
+          "last_seen_at": "2026-10-02T08:00:00Z",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "fleet.agent.offline/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-fleet.agent.offline",
+        "type": "fleet.agent.offline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "fleet.agent.offline",
+          "last_seen_at": "2026-10-02T08:00:00Z",
+          "occurred_at": "2026-10-02T09:00:00Z"
+        }
+      }
+    }
+  },
+  "fleet.agent.offline/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-fleet.agent.offline",
+        "type": "fleet.agent.offline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "agent_name": "summary-agent",
+          "event_label": "signal-event-label",
+          "event_type": "fleet.agent.offline",
+          "last_seen_at": "2026-10-02T08:00:00Z",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "incident.created/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nAsset: detail\\-asset",
+      "title": "Incident created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Incident created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Asset: detail-asset\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Incident created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "incident.created/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Incident created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Incident created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Incident created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "incident.created/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "title": "Incident created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Incident created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Incident created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "incident.created/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nAsset: detail\\-asset",
+      "subject": "Incident created"
+    },
+    "formatted": "Severity: critical\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nAsset: detail-asset",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nAsset: detail-asset\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "incident.created/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Incident created"
+    },
+    "formatted": "Severity: critical\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "incident.created/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "subject": "Incident created"
+    },
+    "formatted": "Severity: critical\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "incident.created/pager/detail": {
+    "fields": {
+      "summary": "Incident created: Severity: critical\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nAsset: detail\\-asset"
+    }
+  },
+  "incident.created/pager/signal": {
+    "fields": {
+      "summary": "Incident created: Severity: critical\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "incident.created/pager/summary": {
+    "fields": {
+      "summary": "Incident created: Severity: critical\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement"
+    }
+  },
+  "incident.created/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-incident.created",
+        "type": "incident.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "asset_name": "detail-asset",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "incident.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "incident.created/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-incident.created",
+        "type": "incident.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "incident.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical"
+        }
+      }
+    }
+  },
+  "incident.created/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-incident.created",
+        "type": "incident.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "incident.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "quality_gate.failed/chat/detail": {
+    "fields": {
+      "body": "Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nProject: summary\\-project",
+      "title": "Quality gate failed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Quality gate failed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Failed conditions: 3\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Project: summary-project\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Quality gate failed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "quality_gate.failed/chat/signal": {
+    "fields": {
+      "body": "Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Quality gate failed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Quality gate failed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Failed conditions: 3\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Quality gate failed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "quality_gate.failed/chat/summary": {
+    "fields": {
+      "body": "Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nProject: summary\\-project",
+      "title": "Quality gate failed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Quality gate failed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Failed conditions: 3\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Project: summary-project\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Quality gate failed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "quality_gate.failed/email/detail": {
+    "fields": {
+      "body": "Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nProject: summary\\-project",
+      "subject": "Quality gate failed"
+    },
+    "formatted": "Failed conditions: 3\nOccurred: 2026-10-02 09:00 UTC\nProject: summary-project",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eFailed conditions: 3\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nProject: summary-project\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "quality_gate.failed/email/signal": {
+    "fields": {
+      "body": "Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Quality gate failed"
+    },
+    "formatted": "Failed conditions: 3\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eFailed conditions: 3\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "quality_gate.failed/email/summary": {
+    "fields": {
+      "body": "Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nProject: summary\\-project",
+      "subject": "Quality gate failed"
+    },
+    "formatted": "Failed conditions: 3\nOccurred: 2026-10-02 09:00 UTC\nProject: summary-project",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eFailed conditions: 3\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nProject: summary-project\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "quality_gate.failed/pager/detail": {
+    "fields": {
+      "summary": "Quality gate failed: Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nProject: summary\\-project"
+    }
+  },
+  "quality_gate.failed/pager/signal": {
+    "fields": {
+      "summary": "Quality gate failed: Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "quality_gate.failed/pager/summary": {
+    "fields": {
+      "summary": "Quality gate failed: Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nProject: summary\\-project"
+    }
+  },
+  "quality_gate.failed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-quality_gate.failed",
+        "type": "quality_gate.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "quality_gate.failed",
+          "failed_conditions": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "project_name": "summary-project",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "quality_gate.failed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-quality_gate.failed",
+        "type": "quality_gate.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "quality_gate.failed",
+          "failed_conditions": "3",
+          "occurred_at": "2026-10-02T09:00:00Z"
+        }
+      }
+    }
+  },
+  "quality_gate.failed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-quality_gate.failed",
+        "type": "quality_gate.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "quality_gate.failed",
+          "failed_conditions": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "project_name": "summary-project",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "scan.completed/chat/detail": {
+    "fields": {
+      "body": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example\n- [detail\\-high] detail\\-finding (detail\\-new)",
+      "title": "Scan completed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan completed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Scan type: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Changes: 2 new, 1 fixed, 9 unchanged\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"}],\"type\":\"rich_text_section\"},{\"elements\":[{\"elements\":[{\"text\":\"[detail-high] detail-finding (detail-new)\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"indent\":0,\"style\":\"bullet\",\"type\":\"rich_text_list\"}],\"type\":\"rich_text\"}],\"text\":\"Scan completed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.completed/chat/signal": {
+    "fields": {
+      "body": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Scan completed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan completed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Scan type: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Changes: 2 new, 1 fixed, 9 unchanged\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan completed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.completed/chat/summary": {
+    "fields": {
+      "body": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "title": "Scan completed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan completed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Scan type: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Changes: 2 new, 1 fixed, 9 unchanged\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan completed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.completed/email/detail": {
+    "fields": {
+      "body": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example\n- [detail\\-high] detail\\-finding (detail\\-new)",
+      "subject": "Scan completed"
+    },
+    "formatted": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example\n\n- [detail-high] detail-finding (detail-new)",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eScan type: sast\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nChanges: 2 new, 1 fixed, 9 unchanged\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003cul\u003e\n\u003cli\u003e[detail-high] detail-finding (detail-new)\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.completed/email/signal": {
+    "fields": {
+      "body": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Scan completed"
+    },
+    "formatted": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eScan type: sast\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nChanges: 2 new, 1 fixed, 9 unchanged\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.completed/email/summary": {
+    "fields": {
+      "body": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "subject": "Scan completed"
+    },
+    "formatted": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eScan type: sast\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nChanges: 2 new, 1 fixed, 9 unchanged\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.completed/pager/detail": {
+    "fields": {
+      "summary": "Scan completed: Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example\n- [detail\\-high] detail\\-finding (detail\\-new)"
+    }
+  },
+  "scan.completed/pager/signal": {
+    "fields": {
+      "summary": "Scan completed: Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "scan.completed/pager/summary": {
+    "fields": {
+      "summary": "Scan completed: Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+    }
+  },
+  "scan.completed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.completed",
+        "type": "scan.completed",
+        "schema_version": 2,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "critical_count": "1",
+          "delta_available": "true",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "scan.completed",
+          "fixed_count": "1",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "new_count": "2",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "scan_kind": "sast",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12",
+          "unchanged_count": "9"
+        },
+        "lists": {
+          "findings": [
+            {
+              "id": "detail-finding-id",
+              "severity": "detail-high",
+              "status": "detail-new",
+              "title": "detail-finding"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "scan.completed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.completed",
+        "type": "scan.completed",
+        "schema_version": 2,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "critical_count": "1",
+          "delta_available": "true",
+          "event_label": "signal-event-label",
+          "event_type": "scan.completed",
+          "fixed_count": "1",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "new_count": "2",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "scan_kind": "sast",
+          "total_count": "12",
+          "unchanged_count": "9"
+        }
+      }
+    }
+  },
+  "scan.completed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.completed",
+        "type": "scan.completed",
+        "schema_version": 2,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "critical_count": "1",
+          "delta_available": "true",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "scan.completed",
+          "fixed_count": "1",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "new_count": "2",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "scan_kind": "sast",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12",
+          "unchanged_count": "9"
+        }
+      }
+    }
+  },
+  "sla.approaching_deadline/chat/detail": {
+    "fields": {
+      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "title": "SLA approaching deadline"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA approaching deadline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"SLA tier: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA approaching deadline\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.approaching_deadline/chat/signal": {
+    "fields": {
+      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours",
+      "title": "SLA approaching deadline"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA approaching deadline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"SLA tier: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA approaching deadline\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.approaching_deadline/chat/summary": {
+    "fields": {
+      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "title": "SLA approaching deadline"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA approaching deadline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"SLA tier: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA approaching deadline\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.approaching_deadline/email/detail": {
+    "fields": {
+      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "subject": "SLA approaching deadline"
+    },
+    "formatted": "SLA tier: critical\nDeadline: 2026-10-03 09:00 UTC\nTime remaining: 24 hours\nEngagement: summary-engagement\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSLA tier: critical\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.approaching_deadline/email/signal": {
+    "fields": {
+      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours",
+      "subject": "SLA approaching deadline"
+    },
+    "formatted": "SLA tier: critical\nDeadline: 2026-10-03 09:00 UTC\nTime remaining: 24 hours",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSLA tier: critical\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.approaching_deadline/email/summary": {
+    "fields": {
+      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "subject": "SLA approaching deadline"
+    },
+    "formatted": "SLA tier: critical\nDeadline: 2026-10-03 09:00 UTC\nTime remaining: 24 hours\nEngagement: summary-engagement\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSLA tier: critical\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.approaching_deadline/pager/detail": {
+    "fields": {
+      "summary": "SLA approaching deadline: SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
+    }
+  },
+  "sla.approaching_deadline/pager/signal": {
+    "fields": {
+      "summary": "SLA approaching deadline: SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours"
+    }
+  },
+  "sla.approaching_deadline/pager/summary": {
+    "fields": {
+      "summary": "SLA approaching deadline: SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
+    }
+  },
+  "sla.approaching_deadline/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.approaching_deadline",
+        "type": "sla.approaching_deadline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "sla.approaching_deadline",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "summary": "summary-description",
+          "tier": "critical",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "sla.approaching_deadline/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.approaching_deadline",
+        "type": "sla.approaching_deadline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "sla.approaching_deadline",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "tier": "critical"
+        }
+      }
+    }
+  },
+  "sla.approaching_deadline/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.approaching_deadline",
+        "type": "sla.approaching_deadline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "sla.approaching_deadline",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "summary": "summary-description",
+          "tier": "critical",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "vulnerability_action.created/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nAction: request\\-review\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "title": "Vulnerability risk action"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Vulnerability risk action\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Action: request-review\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Vulnerability risk action\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "vulnerability_action.created/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nAction: request\\-review\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Vulnerability risk action"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Vulnerability risk action\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Action: request-review\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Vulnerability risk action\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "vulnerability_action.created/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nAction: request\\-review\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "title": "Vulnerability risk action"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Vulnerability risk action\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Action: request-review\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Vulnerability risk action\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "vulnerability_action.created/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nAction: request\\-review\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "subject": "Vulnerability risk action"
+    },
+    "formatted": "Severity: critical\nAction: request-review\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nAction: request-review\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "vulnerability_action.created/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nAction: request\\-review\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Vulnerability risk action"
+    },
+    "formatted": "Severity: critical\nAction: request-review\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nAction: request-review\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "vulnerability_action.created/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nAction: request\\-review\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "subject": "Vulnerability risk action"
+    },
+    "formatted": "Severity: critical\nAction: request-review\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nAction: request-review\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "vulnerability_action.created/pager/detail": {
+    "fields": {
+      "summary": "Vulnerability risk action: Severity: critical\nAction: request\\-review\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement"
+    }
+  },
+  "vulnerability_action.created/pager/signal": {
+    "fields": {
+      "summary": "Vulnerability risk action: Severity: critical\nAction: request\\-review\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "vulnerability_action.created/pager/summary": {
+    "fields": {
+      "summary": "Vulnerability risk action: Severity: critical\nAction: request\\-review\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement"
+    }
+  },
+  "vulnerability_action.created/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-vulnerability_action.created",
+        "type": "vulnerability_action.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "action_type": "request-review",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "vulnerability_action.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "vulnerability_action.created/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-vulnerability_action.created",
+        "type": "vulnerability_action.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "action_type": "request-review",
+          "event_label": "signal-event-label",
+          "event_type": "vulnerability_action.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical"
+        }
+      }
+    }
+  },
+  "vulnerability_action.created/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-vulnerability_action.created",
+        "type": "vulnerability_action.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "action_type": "request-review",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "vulnerability_action.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  }
+}

@@ -115,5 +115,7 @@
       "type": "rich_text"
     }
   ],
-  "text": "Critical finding in payments-api"
+  "text": "Critical finding in payments-api",
+  "unfurl_links": false,
+  "unfurl_media": false
 }

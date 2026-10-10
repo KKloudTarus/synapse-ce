@@ -741,6 +741,7 @@ func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key st
 		finished := s.clock.Now().UTC()
 		job.Status, job.Stage, job.Progress = ports.ScanSucceeded, "imported", 100
 		job.FinishedAt = &finished
+		job.NotificationSnapshot = result.NotificationScanSummary(job.Target, job.Kind)
 		// Once the analysis and audit are accepted, finish the durable job
 		// even if the CI HTTP caller disconnects at this final transition.
 		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.completionTimeout())

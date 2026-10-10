@@ -1,7 +1,9 @@
 package messageformat
 
 import (
+	"bytes"
 	"html"
+	"html/template"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgmarkdown"
@@ -19,6 +21,8 @@ var _ ports.NotificationFormatter = Email{}
 
 const emailSubjectRunes = 180
 
+var emailLayout = template.Must(template.New("email").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><main>{{.Body}}</main></body></html>`))
+
 func (Email) ChannelType() notification.ChannelType { return notification.ChannelEmail }
 
 func (Email) Format(message ports.RenderedMessage) (ports.FormattedMessage, error) {
@@ -27,9 +31,14 @@ func (Email) Format(message ports.RenderedMessage) (ports.FormattedMessage, erro
 		return ports.FormattedMessage{}, err
 	}
 	text := emailText(msgmarkdown.Parse(message.Fields["body"]), links)
+	htmlBody, err := EmailHTML(message)
+	if err != nil {
+		return ports.FormattedMessage{}, err
+	}
 	return ports.FormattedMessage{
 		ContentType: "text/plain; charset=UTF-8",
 		Body:        []byte(text),
+		HTMLBody:    []byte(htmlBody),
 		Subject:     EmailSubject(message.Fields["subject"]),
 	}, nil
 }
@@ -90,9 +99,22 @@ func plainText(inlines []msgmarkdown.Inline) string {
 	return b.String()
 }
 
-// EmailHTML renders the body and links as an HTML fragment. Every text node and attribute is
-// escaped, and a link is an anchor only for a checked https URL.
+// EmailHTML renders a complete code-owned HTML document. Every message text node and attribute is
+// escaped before it becomes the layout's trusted fragment, and a link is an anchor only for a
+// checked https URL. The layout has no remote assets.
 func EmailHTML(message ports.RenderedMessage) (string, error) {
+	fragment, err := emailHTMLFragment(message)
+	if err != nil {
+		return "", err
+	}
+	var output bytes.Buffer
+	if err := emailLayout.Execute(&output, struct{ Body template.HTML }{Body: template.HTML(fragment)}); err != nil {
+		return "", err
+	}
+	return output.String(), nil
+}
+
+func emailHTMLFragment(message ports.RenderedMessage) (string, error) {
 	links, err := checkLinks(message.Links)
 	if err != nil {
 		return "", err

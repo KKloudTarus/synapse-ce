@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/notification-webhook.v1.schema.json",
+  "title": "Filtered notification webhook envelope",
+  "type": "object",
+  "required": ["version", "event", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": "synapse.notification.v1"},
+    "event": {
+      "type": "object",
+      "required": ["id", "type", "schema_version", "occurred_at"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"type": "string"},
+        "schema_version": {"type": "integer", "minimum": 1},
+        "occurred_at": {"type": "string", "format": "date-time"},
+        "severity": {"type": "string"}
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "label": {"type": "string"},
+          "url": {"type": "string", "format": "uri", "pattern": "^https://"}
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "required": ["vars"],
+      "additionalProperties": false,
+      "properties": {
+        "vars": {"type": "object", "additionalProperties": {"type": "string"}},
+        "lists": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array", "maxItems": 50,
+            "items": {"type": "object", "additionalProperties": {"type": "string"}}
+          }
+        }
+      }
+    }
+  }
+}

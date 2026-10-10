@@ -184,6 +184,16 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 | `SYNAPSE_DB_MAX_CONN_LIFETIME` | `1h` | Connection lifetime. |
 | `SYNAPSE_DB_MAX_CONN_IDLE` | `30m` | Idle connection timeout. |
 
+Notification capture defaults to legacy mode after migration. Once all notification
+workers have capable projectors, use `synapse-migrate --notification-capture-mode identity`
+with the migration credential. The command refuses to change mode while identity
+records remain pending and leaves the existing mode intact; `--allow-pending` is an
+explicit controlled-drain exception, not permission to deploy an older worker. For
+rollback, switch to `legacy` and drain pending identity records before replacing
+workers. Detail webhook channels now disclose finding titles, so review their receiver
+access before the rollout. See [notification content and rollout](notification-content.md).
+The mode is an operator command, not an API or runtime environment toggle.
+
 ## Shared artifact store (S3 or MinIO)
 
 When S3/MinIO is configured, the same object store retains evidence artifacts and Engagement source
@@ -408,6 +418,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_NOTIFICATION_SMTP_FROM` | (unset) | Envelope and message sender for notification email. Required before an Email channel can deliver. |
 | `SYNAPSE_NOTIFICATION_SMTP_USERNAME` / `SYNAPSE_NOTIFICATION_SMTP_PASSWORD` | (unset) | Optional SMTP authentication. The password is secret and must not be logged. |
 | `SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS` | `true` | Require STARTTLS with certificate verification. Keep enabled in production. |
+| `SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL` | (unset) | Optional absolute HTTPS URL for the operator's recipient-removal workflow. When set, every tenant Email channel message includes it in `List-Unsubscribe`; the receiver must perform recipient removal using its own state. Synapse never interpolates recipient or tenant data and does not advertise one-click unsubscribe. |
 | `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` | (unset) | Operator kill switch: comma-separated channel and provider types no tenant may use, for example `slack,email`. Entries are trimmed, lowercased and deduplicated; empty entries are ignored. Every entry must be a type in this build's notification driver registry (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`), so a typo stops API and worker startup. A disabled type is left out of the `notifications.channel_types` capability, creating or testing a channel of that type answers `400`, an existing channel of that type cannot be switched on or given a new destination (it can still be renamed, switched off or deleted), and the worker cancels its queued deliveries with `provider_disabled`. Set the same value on the API and the worker. Removing a type from the list restores its channels. It does not affect personal inbox mail or contact verification email. |
 | `SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD` | `5` | Read by `synapse-worker`. Consecutive permanent delivery failures (for example `destination_blocked` or an HTTP 404) after which a notification channel is paused automatically and tenant administrators get an in-app notice; an administrator resumes it from Settings > Alerting. Retryable failures (408, 429, 5xx, timeouts) never count, and a delivered message resets the count. `0` counts failures but never pauses. Must be between `0` and `100`; other values stop the worker at startup. See [Notifications](notifications.md#channel-health-and-automatic-pause). |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |

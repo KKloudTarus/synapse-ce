@@ -1,13 +1,18 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
-import { api } from '../../lib/api'
+import { api, ApiError } from '../../lib/api'
 import { ToastProvider } from '../../components/synapse/Toast'
 import type { Engagement } from '../../lib/types'
-import { LifecycleCard, isTerminalStatus } from './SettingsTab'
+import { ExternalNotificationCard, LifecycleCard, isTerminalStatus } from './SettingsTab'
 
 vi.mock('../../lib/api', () => ({
-  api: { transitionEngagement: vi.fn() },
+  api: {
+    transitionEngagement: vi.fn(),
+    me: vi.fn(),
+    getNotificationEngagementSetting: vi.fn(),
+    updateNotificationEngagementSetting: vi.fn(),
+  },
   ApiError: class ApiError extends Error {
     constructor(
       public status: number,
@@ -110,5 +115,87 @@ describe('LifecycleCard', () => {
 
     expect(await screen.findAllByText('archive refused')).not.toHaveLength(0)
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+})
+
+describe('ExternalNotificationCard', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    })
+    vi.mocked(api.me).mockResolvedValue({ role: 'integration_admin' } as never)
+    vi.mocked(api.getNotificationEngagementSetting).mockResolvedValue({
+      engagement_id: 'eng-1',
+      external_notifications: 'inherit',
+      revision: 3,
+    } as never)
+  })
+
+  it('lets an integration administrator lower an engagement notification limit with its revision', async () => {
+    vi.mocked(api.updateNotificationEngagementSetting).mockResolvedValue({
+      engagement_id: 'eng-1',
+      external_notifications: 'signal',
+      revision: 4,
+    } as never)
+    render(<ExternalNotificationCard eng={engagement('active')} />)
+
+    const limit = await screen.findByRole('combobox', { name: 'External notification limit' })
+    expect(limit).toHaveAccessibleDescription('You can lower this limit. Raising it requires a tenant administrator.')
+    fireEvent.click(limit)
+    fireEvent.click(await screen.findByRole('option', { name: /Signal — event/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save notification limit' }))
+
+    await waitFor(() =>
+      expect(api.updateNotificationEngagementSetting).toHaveBeenCalledWith('eng-1', {
+        external_notifications: 'signal',
+        revision: 3,
+      }),
+    )
+  })
+
+  it('does not offer an integration administrator a way to raise a signal cap', async () => {
+    vi.mocked(api.getNotificationEngagementSetting).mockResolvedValue({
+      engagement_id: 'eng-1',
+      external_notifications: 'signal',
+      revision: 3,
+    } as never)
+    render(<ExternalNotificationCard eng={engagement('active')} />)
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'External notification limit' }))
+    expect(screen.getByRole('option', { name: /Signal — event/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /None — keep/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Inherit — use/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps the conflict explanation after a newer setting reloads', async () => {
+    vi.mocked(api.getNotificationEngagementSetting)
+      .mockResolvedValueOnce({
+        engagement_id: 'eng-1',
+        external_notifications: 'inherit',
+        revision: 3,
+      } as never)
+      .mockResolvedValueOnce({
+        engagement_id: 'eng-1',
+        external_notifications: 'signal',
+        revision: 4,
+      } as never)
+    vi.mocked(api.updateNotificationEngagementSetting).mockRejectedValue(
+      new ApiError(409, 'stale revision'),
+    )
+    render(<ExternalNotificationCard eng={engagement('active')} />)
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'External notification limit' }))
+    fireEvent.click(await screen.findByRole('option', { name: /None — keep/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save notification limit' }))
+
+    await waitFor(() =>
+      expect(api.getNotificationEngagementSetting).toHaveBeenCalledTimes(2),
+    )
+    expect(await screen.findByText(/changed elsewhere/i)).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'External notification limit' })).toHaveTextContent(
+      /Signal — event/,
+    )
   })
 })

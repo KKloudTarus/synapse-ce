@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/tenancy"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -30,6 +32,19 @@ func withTemplateCatalog(t *testing.T) {
 
 type templateIDs struct{ n int }
 
+type builtinTemplateCatalog struct{ items []ports.BuiltinTemplate }
+
+func (c *builtinTemplateCatalog) Builtin(eventType domain.EventType, family domain.TemplateFamily, locale tenancy.Locale) (ports.BuiltinTemplate, bool) {
+	for _, item := range c.items {
+		if item.EventType == eventType && item.Family == family && item.Locale == locale {
+			return item, true
+		}
+	}
+	return ports.BuiltinTemplate{}, false
+}
+
+func (c *builtinTemplateCatalog) List() []ports.BuiltinTemplate { return c.items }
+
 func (g *templateIDs) NewID() shared.ID {
 	g.n++
 	return shared.ID("tpl-" + string(rune('a'+g.n-1)))
@@ -43,6 +58,29 @@ func templateService(t *testing.T, audit ports.AuditLogger) *Service {
 	}
 	svc.SetTemplateStore(memory.NewNotificationTemplateStore())
 	return svc
+}
+
+func TestListBuiltinTemplatesCopiesTheCurrentCatalog(t *testing.T) {
+	svc := templateService(t, &recordingAudit{})
+	catalog := &builtinTemplateCatalog{items: []ports.BuiltinTemplate{{
+		Ref: "builtin:scan.completed:chat:en@test",
+		TemplateKey: domain.TemplateKey{
+			EventType: domain.EventScanCompleted,
+			Family:    domain.FamilyChat,
+			Locale:    tenancy.LocaleEnglish,
+		},
+		Fields: map[string]string{"title": "Scan complete", "body": "{{.title}}"},
+	}}}
+	svc.SetBuiltinTemplates(catalog)
+
+	got := svc.ListBuiltinTemplates()
+	if len(got) != 1 || got[0].EventType != domain.EventScanCompleted || got[0].Family != domain.FamilyChat || got[0].Locale != tenancy.LocaleEnglish || !reflect.DeepEqual(got[0].Fields, catalog.items[0].Fields) {
+		t.Fatalf("builtins = %#v", got)
+	}
+	got[0].Fields["title"] = "mutated"
+	if catalog.items[0].Fields["title"] != "Scan complete" {
+		t.Fatal("returned built-in fields mutated the delivery catalog")
+	}
 }
 
 func assertNoSource(t *testing.T, entry ports.AuditEntry, sources ...string) {
