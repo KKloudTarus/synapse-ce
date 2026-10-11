@@ -60,6 +60,8 @@ type Service struct {
 	// two samples a template preview renders against (#1372).
 	fixtures    fs.FS
 	eventReader ports.NotificationEventReader
+	// slack reads a Slack workspace for Slack bot channels (#1383); nil refuses them.
+	slack ports.SlackWorkspace
 }
 
 // SetDisabledChannelTypes installs the operator kill switch (SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED),
@@ -127,7 +129,17 @@ type ChannelInput struct {
 	// destination change and needs the token re-entered.
 	ChatID   string `json:"chat_id,omitempty"`
 	ThreadID int64  `json:"thread_id,omitempty"`
-	Revision int    `json:"revision,omitempty"`
+	// ConversationID is a Slack bot channel's conversation (C…); the bot token travels in Secret.
+	// Like a Telegram chat it is part of the destination, so changing it needs the token again.
+	ConversationID string `json:"conversation_id,omitempty"`
+	// AllowSharedConversation lets a Slack bot channel post into a Slack Connect or
+	// organisation-shared conversation (#1383). It is part of the destination: only an
+	// administrator sets it, together with the bot token.
+	AllowSharedConversation bool `json:"allow_shared_conversation,omitempty"`
+	// verified is the destination prepareDestination already checked with its provider, before the
+	// transaction opened. It is never decoded from a request.
+	verified ports.NotificationChannelConfig
+	Revision int `json:"revision,omitempty"`
 	// AllowDestinationChange is set by the caller, never decoded from a request: true only when the
 	// principal holds PermAdminister. Without it an update that changes the URL, the secret or the
 	// email recipients is refused with shared.ErrForbidden (#1358), so an integration_admin can
@@ -173,6 +185,9 @@ func (s *Service) createChannel(ctx context.Context, actor string, in ChannelInp
 	if err != nil {
 		return domain.Channel{}, err
 	}
+	if config, err = s.verifiedDestination(ctx, in, config); err != nil {
+		return domain.Channel{}, err
+	}
 	sealed, err := s.seal(tenant, id, 1, config)
 	if err != nil {
 		return domain.Channel{}, err
@@ -216,7 +231,7 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 	if in.Type != current.Type {
 		return domain.Channel{}, fmt.Errorf("%w: channel type is immutable", shared.ErrValidation)
 	}
-	replace := strings.TrimSpace(in.URL) != "" || strings.TrimSpace(in.Secret) != "" || strings.TrimSpace(in.ChatID) != "" || in.ThreadID != 0 || in.Type != current.Type
+	replace := strings.TrimSpace(in.URL) != "" || strings.TrimSpace(in.Secret) != "" || strings.TrimSpace(in.ChatID) != "" || in.ThreadID != 0 || strings.TrimSpace(in.ConversationID) != "" || in.AllowSharedConversation || in.Type != current.Type
 	if replace && !in.AllowDestinationChange {
 		return domain.Channel{}, errDestinationChange
 	}
@@ -233,6 +248,9 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 	if replace {
 		config, dest, recips, e := validateChannel(in, true)
 		if e != nil {
+			return domain.Channel{}, e
+		}
+		if config, e = s.verifiedDestination(ctx, in, config); e != nil {
 			return domain.Channel{}, e
 		}
 		sealed, e = s.seal(tenant, id, current.SecretVersion+1, config)

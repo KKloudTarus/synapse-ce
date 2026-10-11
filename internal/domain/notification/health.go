@@ -81,6 +81,20 @@ var channelFaults = map[string]bool{
 	"smtp_destination_blocked": true, // the guard refused the relay address
 	"channel_config_invalid":   true, // the sealed configuration no longer decodes for its type
 	"smtp_recipient_invalid":   true, // a channel recipient is not a valid address
+	// Slack bot channels (#1383): Slack answers HTTP 200 with ok:false, so these are the Web API
+	// errors that only a new token, scope or conversation fixes.
+	"slack_invalid_auth":           true,
+	"slack_not_authed":             true,
+	"slack_account_inactive":       true,
+	"slack_token_revoked":          true,
+	"slack_token_expired":          true,
+	"slack_missing_scope":          true,
+	"slack_not_allowed_token_type": true,
+	"slack_channel_not_found":      true,
+	"slack_not_in_channel":         true,
+	"slack_is_archived":            true,
+	"slack_restricted_action":      true,
+	"slack_conversation_shared":    true, // the conversation became shared and sharing is not allowed
 }
 
 // PermanentChannelFailure reports whether a final failure code is one the channel owns:

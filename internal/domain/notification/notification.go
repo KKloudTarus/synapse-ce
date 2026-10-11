@@ -22,11 +22,14 @@ const (
 	ChannelTelegram   ChannelType = "telegram"
 	ChannelGoogleChat ChannelType = "google_chat"
 	ChannelDiscord    ChannelType = "discord"
+	// ChannelSlackBot posts as a Slack app with a bot token through chat.postMessage (#1383),
+	// unlike ChannelSlack, which posts to an incoming webhook.
+	ChannelSlackBot ChannelType = "slack_bot"
 )
 
 func (v ChannelType) Valid() bool {
 	switch v {
-	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord:
+	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord, ChannelSlackBot:
 		return true
 	}
 	return false

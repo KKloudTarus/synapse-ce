@@ -15,6 +15,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/slackapi"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -46,7 +47,10 @@ type Sender struct {
 	timeout time.Duration
 	// telegramAPI is the Bot API origin; only tests change it.
 	telegramAPI string
-	drivers     map[notification.ChannelType]Driver
+	// slack calls the Slack Web API for Slack bot channels (#1383) and personal Slack messages
+	// (#1419). It shares the guarded HTTP client; only tests point it at another origin.
+	slack   *slackapi.Client
+	drivers map[notification.ChannelType]Driver
 	// order is the registration order, so the types a deployment offers are listed stably.
 	order []notification.ChannelType
 }
@@ -64,6 +68,7 @@ func New(smtpConfig SMTPConfig, timeout time.Duration) *Sender {
 	// it may be private or loopback; metadata and other special-purpose ranges stay refused.
 	relay := safehttp.NewDialer(safehttp.OperatorPolicy(), timeout)
 	s := &Sender{http: safehttp.New(timeout, false), smtp: smtpConfig, dial: relay.DialContext, now: time.Now, timeout: timeout, telegramAPI: telegramAPIBase}
+	s.slack = slackapi.New(s.http)
 	s.drivers = map[notification.ChannelType]Driver{}
 	for _, driver := range builtinDrivers(s) {
 		s.drivers[driver.ChannelType()] = driver
@@ -75,7 +80,7 @@ func New(smtpConfig SMTPConfig, timeout time.Duration) *Sender {
 // builtinDrivers are the channel types every deployment has. Their types are distinct constants,
 // which TestBuiltinDriversCoverEveryChannelType checks, so New needs no duplicate handling.
 func builtinDrivers(s *Sender) []Driver {
-	return []Driver{webhookDriver{s}, slackDriver{s}, emailDriver{s}, teamsDriver{s}, telegramDriver{s}, googleChatDriver{s}, discordDriver{s}}
+	return []Driver{webhookDriver{s}, slackDriver{s}, emailDriver{s}, teamsDriver{s}, telegramDriver{s}, googleChatDriver{s}, discordDriver{s}, slackBotDriver{s}}
 }
 
 // Register adds a driver. Registering a second driver for a channel type is an error rather than

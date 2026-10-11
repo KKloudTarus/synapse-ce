@@ -334,3 +334,18 @@ func notificationStableID(parts ...string) shared.ID {
 	h := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return shared.ID(hex.EncodeToString(h[:16]))
 }
+
+// GetChannelSealedConfig implements ports.NotificationChannelSecretReader.
+func (r *NotificationRepository) GetChannelSealedConfig(_ context.Context, tenant, id shared.ID) (notification.Channel, string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.channels[notificationKey{tenant, id}]
+	if !ok || c.DeletedAt != nil {
+		return notification.Channel{}, "", fmt.Errorf("notification channel %s: %w", id, shared.ErrNotFound)
+	}
+	sealed, ok := r.versions[channelVersionKey{tenant, id, c.SecretVersion}]
+	if !ok {
+		return notification.Channel{}, "", fmt.Errorf("notification channel %s version: %w", id, shared.ErrNotFound)
+	}
+	return cloneChannel(c), sealed, nil
+}
