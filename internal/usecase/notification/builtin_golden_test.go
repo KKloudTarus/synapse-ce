@@ -17,7 +17,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/tenancy"
 )
 
-const builtinGoldenPath = "testdata/builtin/en.json"
+const (
+	builtinGoldenPath           = "testdata/builtin/en.json"
+	builtinVietnameseGoldenPath = "testdata/builtin/vi.json"
+)
 
 type builtinGoldenOutput struct {
 	Fields    map[string]string `json:"fields,omitempty"`
@@ -43,8 +46,8 @@ func TestBuiltinRendererGoldenMatrix(t *testing.T) {
 			}
 		}
 	}
-	if len(english) != 84 {
-		t.Fatalf("English matrix has %d cases, want 84", len(english))
+	if len(english) != 216 {
+		t.Fatalf("English matrix has %d cases, want 216", len(english))
 	}
 	encoded, err := json.MarshalIndent(english, "", "  ")
 	if err != nil {
@@ -75,6 +78,7 @@ func TestBuiltinRendererVietnameseMatrix(t *testing.T) {
 	h := newRenderHarness(t)
 	h.svc.SetBuiltinTemplates(notificationbuiltin.New())
 	cases := 0
+	vietnamese := map[string]builtinGoldenOutput{}
 	for _, eventType := range builtinMatrixEvents() {
 		for _, family := range builtinMatrixFamilies() {
 			for _, class := range builtinMatrixClasses() {
@@ -84,12 +88,30 @@ func TestBuiltinRendererVietnameseMatrix(t *testing.T) {
 				if family != domain.FamilyWebhook && !containsVietnamese(string(mustJSON(t, output))) {
 					t.Fatalf("%s did not render Vietnamese copy: %#v", key, output)
 				}
+				vietnamese[key] = output
 				cases++
 			}
 		}
 	}
-	if cases != 84 {
-		t.Fatalf("Vietnamese matrix has %d cases, want 84", cases)
+	if cases != 216 {
+		t.Fatalf("Vietnamese matrix has %d cases, want 216", cases)
+	}
+	encoded, err := json.MarshalIndent(vietnamese, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded = append(encoded, '\n')
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.WriteFile(builtinVietnameseGoldenPath, encoded, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(builtinVietnameseGoldenPath)
+	if err != nil {
+		t.Fatalf("read Vietnamese builtin golden (run UPDATE_GOLDEN=1 after a deliberate content change): %v", err)
+	}
+	if !bytes.Equal(bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n")), encoded) {
+		t.Fatalf("Vietnamese builtin matrix differs from golden; rerun with UPDATE_GOLDEN=1 only after review\n%s", diffBuiltinGolden(want, encoded))
 	}
 }
 
@@ -124,6 +146,9 @@ func builtinMatrixEvents() []domain.EventType {
 		domain.EventFleetAgentOffline,
 		domain.EventIncidentCreated,
 		domain.EventOwnershipChanged,
+		domain.EventFindingCreated, domain.EventFindingStatusChanged, domain.EventFindingRetestCompleted,
+		domain.EventScanFailed, domain.EventDASTRunFinished, domain.EventReconRunFinished, domain.EventCSPMRunFinished,
+		domain.EventSLABreached, domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired,
 	}
 }
 
@@ -240,22 +265,24 @@ func builtinMatrixChannel(family domain.TemplateFamily) domain.ChannelType {
 
 func builtinMatrixSnapshot(spec domain.EventSpec) domain.TemplateContext {
 	vars := map[string]string{
-		"event_type":  string(spec.Type),
-		"event_label": "signal-event-label",
-		"occurred_at": "2026-10-02T09:00:00Z",
-		"title":       "summary-title",
-		"summary":     "summary-description",
-		"severity":    "critical",
-		"action_type": "request-review",
-		"scan_kind":   "sast",
-		"total_count": "12", "critical_count": "1", "high_count": "2", "medium_count": "3", "low_count": "4", "info_count": "2",
+		"event_type":       string(spec.Type),
+		"event_label":      "signal-event-label",
+		"occurred_at":      "2026-10-02T09:00:00Z",
+		"title":            "summary-title",
+		"summary":          "summary-description",
+		"severity":         "critical",
+		"action_type":      "request-review",
+		"scan_kind":        "sast",
+		"counts_available": "true", "severity_counts_available": "true", "total_count": "12", "critical_count": "1", "high_count": "2", "medium_count": "3", "low_count": "4", "info_count": "2",
 		"new_count": "2", "fixed_count": "1", "unchanged_count": "9", "delta_available": "true",
 		"engagement_name": "summary-engagement", "target": "summary-target.example",
 		"failed_conditions": "3", "project_name": "summary-project",
-		"tier": "critical", "deadline": "2026-10-03T09:00:00Z", "lead_time_hours": "24", "finding_title": "summary-finding",
+		"tier": "low", "deadline": "2026-10-03T09:00:00Z", "lead_time_hours": "24", "finding_title": "summary-finding",
 		"last_seen_at": "2026-10-02T08:00:00Z", "agent_name": "summary-agent",
 		"asset_name": "detail-asset",
 		"old_team":   "summary-old-team", "new_team": "summary-new-team", "old_assignee": "summary-old-assignee", "new_assignee": "summary-new-assignee", "actor": "summary-actor", "reason": "summary-reason",
+		"finding_kind": "sast", "status": "confirmed", "from_status": "triage", "to_status": "confirmed", "result": "remediated",
+		"outcome": "failed", "provider": "scanner", "error_code": "timeout", "accepted_at": "2026-10-01T09:00:00Z", "expires_at": "2026-11-01T09:00:00Z", "reminder": "expiry_warning",
 	}
 	lists := map[string][]map[string]string{"findings": {{"id": "detail-finding-id", "severity": "detail-high", "title": "detail-finding", "status": "detail-new"}}}
 	return spec.SnapshotWithLists(vars, lists)

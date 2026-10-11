@@ -1,0 +1,16 @@
+{
+  "subject_kind": "dast_run",
+  "subject_id": "dast-42",
+  "vars": {
+    "counts_available": "false",
+    "event_label": "DAST run finished",
+    "event_type": "dast.run_finished",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "outcome": "partial",
+    "provider": "dast",
+    "scan_kind": "dast",
+    "severity_counts_available": "false",
+    "summary": "A DAST run completed.",
+    "title": "DAST run finished"
+  }
+}

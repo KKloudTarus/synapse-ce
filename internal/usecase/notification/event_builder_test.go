@@ -24,6 +24,9 @@ var builderFixtures = []domain.EventType{
 	domain.EventVulnerabilityAction, domain.EventScanCompleted, domain.EventQualityGateFailed, domain.EventSLAApproaching,
 	domain.EventFleetAgentOffline, domain.EventIncidentCreated, domain.EventOwnershipChanged,
 	domain.EventChannelPaused, domain.EventDestinationChanged, domain.EventTest,
+	domain.EventFindingCreated, domain.EventFindingStatusChanged, domain.EventFindingRetestCompleted,
+	domain.EventScanFailed, domain.EventDASTRunFinished, domain.EventReconRunFinished, domain.EventCSPMRunFinished,
+	domain.EventSLABreached, domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired,
 }
 
 func fixtureEvent(t *testing.T, eventType domain.EventType) domain.Event {
@@ -172,6 +175,24 @@ type recordedFacts struct {
 	lastSeen time.Time
 }
 
+type lifecycleFacts struct {
+	recordedFacts
+	slaCurrent  bool
+	riskCurrent bool
+	slaCalls    int
+	riskCalls   int
+}
+
+func (f *lifecycleFacts) SLABreachCurrent(_ context.Context, _ shared.ID, _, _ string, _ time.Time, _ int) (bool, error) {
+	f.slaCalls++
+	return f.slaCurrent, nil
+}
+
+func (f *lifecycleFacts) RiskAcceptanceCurrent(_ context.Context, _ shared.ID, _, _ string, _ int, _ time.Time, _ bool) (bool, error) {
+	f.riskCalls++
+	return f.riskCurrent, nil
+}
+
 func (f *recordedFacts) ScanJobSucceeded(_ context.Context, _ shared.ID, scan string) (bool, error) {
 	f.scan = scan
 	return f.answer, nil
@@ -230,5 +251,39 @@ func TestStillRelevantAsksTheSourceFact(t *testing.T) {
 	broken.Data = json.RawMessage(`{"title":"x"}`)
 	if _, err := builders.StillRelevant(context.Background(), &recordedFacts{}, ports.NotificationWork{Event: broken}); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("an SLA event without a deadline = %v, want ErrValidation", err)
+	}
+}
+
+func TestLifecycleAlertsCancelWhenTheirCurrentStateNoLongerApplies(t *testing.T) {
+	builders := NewEventBuilders()
+	for _, eventType := range []domain.EventType{domain.EventSLABreached, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired} {
+		t.Run(string(eventType), func(t *testing.T) {
+			event := fixtureEvent(t, eventType)
+			facts := &lifecycleFacts{}
+			relevant, err := builders.StillRelevant(context.Background(), facts, ports.NotificationWork{Event: event})
+			if err != nil || relevant {
+				t.Fatalf("relevance = %v, %v; want cancelled", relevant, err)
+			}
+			if eventType == domain.EventSLABreached && facts.slaCalls != 1 {
+				t.Fatalf("SLA relevance calls = %d", facts.slaCalls)
+			}
+			if eventType != domain.EventSLABreached && facts.riskCalls != 1 {
+				t.Fatalf("risk relevance calls = %d", facts.riskCalls)
+			}
+		})
+	}
+}
+
+func TestLifecycleRelevanceFailsClosedWithoutCurrentStateReader(t *testing.T) {
+	_, err := NewEventBuilders().StillRelevant(context.Background(), &recordedFacts{}, ports.NotificationWork{Event: fixtureEvent(t, domain.EventSLABreached)})
+	if !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("missing lifecycle reader = %v, want validation error", err)
+	}
+}
+
+func TestRiskAcceptanceCreatedStaysRelevantAsHistoricalRecord(t *testing.T) {
+	relevant, err := NewEventBuilders().StillRelevant(context.Background(), &recordedFacts{}, ports.NotificationWork{Event: fixtureEvent(t, domain.EventRiskAcceptanceCreated)})
+	if err != nil || !relevant {
+		t.Fatalf("created acceptance relevance = %v, %v", relevant, err)
 	}
 }

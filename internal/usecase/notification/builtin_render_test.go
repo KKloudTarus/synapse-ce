@@ -11,7 +11,30 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/consolelink"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/tenancy"
 )
+
+func TestBuiltinLifecycleCopyDistinguishesActionAndSeverity(t *testing.T) {
+	h := newRenderHarness(t)
+	h.svc.SetBuiltinTemplates(notificationbuiltin.New())
+	for _, locale := range []tenancy.Locale{tenancy.LocaleEnglish, tenancy.LocaleVietnamese} {
+		for _, family := range []domain.TemplateFamily{domain.FamilyChat, domain.FamilyEmail, domain.FamilyPager} {
+			seen := map[string]bool{}
+			for _, event := range []domain.EventType{domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired, domain.EventSLABreached} {
+				out, _ := renderBuiltinMatrix(t, h, event, family, domain.DataClassSignal, locale)
+				text := string(mustJSON(t, out))
+				if !strings.Contains(text, "critical") || !strings.Contains(text, "low") {
+					t.Fatalf("%s/%s/%s omitted distinct severity and SLA tier: %s", event, family, locale, text)
+				}
+				label := out.Fields["title"] + out.Fields["subject"] + out.Fields["summary"]
+				if label == "" || seen[label] {
+					t.Fatalf("%s/%s/%s has indistinguishable lifecycle action", event, family, locale)
+				}
+				seen[label] = true
+			}
+		}
+	}
+}
 
 func TestBuiltinTemplatesCompileAgainstEveryDeclaredSchema(t *testing.T) {
 	for _, template := range notificationbuiltin.New().List() {
@@ -53,6 +76,22 @@ func TestBuiltinScanKeepsOlderSnapshotsUsefulWithoutBlankCounts(t *testing.T) {
 	out, err := h.svc.RenderMessage(context.Background(), RenderInput{Channel: channel, Event: event})
 	if err != nil || !strings.Contains(out.Message.Fields["body"], "Findings: unavailable") || strings.Contains(out.Message.Fields["body"], "critical ") {
 		t.Fatalf("older scan render = %+v, %v", out, err)
+	}
+}
+
+func TestBuiltinRunOmitsUnavailableCounts(t *testing.T) {
+	h := newRenderHarness(t)
+	h.svc.SetBuiltinTemplates(notificationbuiltin.New())
+	channel := h.channel
+	channel.DataClass = domain.DataClassSignal
+	event := domain.Event{
+		TenantID: "tenant-r", ID: "builtin-dast-no-counts", Type: domain.EventDASTRunFinished, SchemaVersion: 1,
+		OccurredAt: time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC),
+		Context:    json.RawMessage(`{"vars":{"event_type":"dast.run_finished","event_label":"DAST run finished","occurred_at":"2026-10-02T09:00:00Z","scan_kind":"dast","outcome":"partial","provider":"dast","counts_available":"false","severity_counts_available":"false"}}`),
+	}
+	out, err := h.svc.RenderMessage(context.Background(), RenderInput{Channel: channel, Event: event})
+	if err != nil || !strings.Contains(out.Message.Fields["body"], "Findings: unavailable") || strings.Contains(out.Message.Fields["body"], "critical 0") {
+		t.Fatalf("run without counts render = %+v, %v", out, err)
 	}
 }
 

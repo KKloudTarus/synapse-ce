@@ -80,6 +80,32 @@ describe('notification API', () => {
     const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))
     expect(body).toMatchObject({ channel_ids: [], recipient_roles: ['assignee', 'engagement_lead'] })
   })
+  it('resends every B03 event filter when replacing a rule', async () => {
+    respond({})
+    await notificationsApi.updateNotificationRule('r', {
+      name: 'Lifecycle',
+      enabled: true,
+      event_type: 'finding.status_changed',
+      channel_ids: ['c'],
+      finding_kinds: ['manual'],
+      from_statuses: ['open'],
+      to_statuses: ['remediated'],
+      retest_results: ['remediated'],
+      scan_kinds: ['dast'],
+      outcomes: ['failed'],
+      providers: ['aws'],
+      revision: 6,
+    })
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))).toMatchObject({
+      finding_kinds: ['manual'],
+      from_statuses: ['open'],
+      to_statuses: ['remediated'],
+      retest_results: ['remediated'],
+      scan_kinds: ['dast'],
+      outcomes: ['failed'],
+      providers: ['aws'],
+    })
+  })
   it('resends the team scope when updating an ownership rule', async () => {
     // The server replaces the rule on PATCH and rejects an ownership rule without a team scope.
     respond({})

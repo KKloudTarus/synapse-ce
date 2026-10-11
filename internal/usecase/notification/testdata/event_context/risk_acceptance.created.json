@@ -1,0 +1,14 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "accepted_at": "2026-10-10T08:00:00Z",
+    "event_label": "Risk acceptance created",
+    "event_type": "risk_acceptance.created",
+    "expires_at": "2026-11-10T08:00:00Z",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "summary": "Risk was accepted for a finding.",
+    "tier": "high",
+    "title": "Risk acceptance created"
+  }
+}

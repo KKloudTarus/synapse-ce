@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -84,6 +85,9 @@ func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 	if j.Status == ports.ScanSucceeded && j.NotificationSnapshot.TargetKey != "" {
 		return r.saveTerminalSnapshot(ctx, j, debugEvents, sourcePackage, outcomes)
 	}
+	if j.Status == ports.ScanFailed {
+		return r.saveFailedNotification(ctx, j, debugEvents, sourcePackage, outcomes)
+	}
 	// A failure may carry raw worker output, but it is not successful snapshot
 	// evidence. Retain an already-frozen successful snapshot on later status
 	// correction, while refusing to create one for a failed first write.
@@ -103,6 +107,65 @@ func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 		return fmt.Errorf("save scan job: %w", err)
 	}
 	return nil
+}
+
+// saveFailedNotification records the first failed terminal transition and its
+// notification source in one tenant transaction. Error strings are retained on
+// the job for operators but are never copied to the notification payload.
+func (r *ScanJobStore) saveFailedNotification(ctx context.Context, j ports.ScanJob, debugEvents, sourcePackage, outcomes []byte) error {
+	if j.FinishedAt == nil {
+		return fmt.Errorf("%w: failed scan job must have finished_at", shared.ErrValidation)
+	}
+	tenant, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("%w: tenant context is required for failed scan notification", shared.ErrValidation)
+	}
+	if j.SourcePackage != nil && j.SourcePackage.TenantID != tenant {
+		return fmt.Errorf("%w: scan source tenant context does not match", shared.ErrValidation)
+	}
+	return WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
+		var previousStatus, storedEngagement, storedTarget, storedKind string
+		err := tx.QueryRow(ctx, `SELECT status,engagement_id,target,kind FROM scan_jobs WHERE id=$1 FOR UPDATE`, j.ID).Scan(&previousStatus, &storedEngagement, &storedTarget, &storedKind)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			if storedEngagement != j.EngagementID {
+				return fmt.Errorf("%w: failed scan job engagement does not match stored job", shared.ErrValidation)
+			}
+			j.Target, j.Kind = storedTarget, storedKind
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM engagements WHERE id=$1 AND tenant_id=$2)`, j.EngagementID, tenant).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("scan engagement %s: %w", j.EngagementID, shared.ErrNotFound)
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'{}'::jsonb)
+			ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage, progress=EXCLUDED.progress,
+			error=EXCLUDED.error, finished_at=CASE WHEN scan_jobs.notification_snapshot <> '{}'::jsonb THEN scan_jobs.finished_at ELSE EXCLUDED.finished_at END,
+			debug_events=EXCLUDED.debug_events, engine_outcomes=EXCLUDED.engine_outcomes`,
+			j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes)
+		if err != nil {
+			return err
+		}
+		if previousStatus == string(ports.ScanFailed) || previousStatus == string(ports.ScanSucceeded) {
+			return nil
+		}
+		return appendRunFinishedNotification(ctx, tx, tenant, shared.ID(j.EngagementID), notification.EventScanFailed, "scan_job", j.ID, j.Kind, "failed", []string{"native"}, j.Target, stableScanErrorCode(j.Stage), -1, *j.FinishedAt)
+	})
+}
+
+// stableScanErrorCode deliberately uses the stage, not j.Error, because worker
+// failures often include raw tool output.
+func stableScanErrorCode(stage string) string {
+	stage = strings.TrimSpace(stage)
+	if stage == "" {
+		return "scan_failed"
+	}
+	return stage
 }
 
 // saveTerminalSnapshot serializes completed jobs for one engagement/target so

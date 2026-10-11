@@ -126,6 +126,13 @@ func (r *NotificationRepository) checkRuleReferences(rule notification.Rule) err
 // and team IDs.
 func cloneRule(rule notification.Rule) notification.Rule {
 	rule.ActionTypes = slices.Clone(rule.ActionTypes)
+	rule.FindingKinds = slices.Clone(rule.FindingKinds)
+	rule.FromStatuses = slices.Clone(rule.FromStatuses)
+	rule.ToStatuses = slices.Clone(rule.ToStatuses)
+	rule.RetestResults = slices.Clone(rule.RetestResults)
+	rule.ScanKinds = slices.Clone(rule.ScanKinds)
+	rule.Outcomes = slices.Clone(rule.Outcomes)
+	rule.Providers = slices.Clone(rule.Providers)
 	rule.EngagementIDs = slices.Clone(rule.EngagementIDs)
 	rule.TeamIDs = sortedIDs(rule.TeamIDs)
 	rule.ChannelIDs = sortedIDs(rule.ChannelIDs)

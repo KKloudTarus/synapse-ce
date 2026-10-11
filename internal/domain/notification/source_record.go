@@ -36,6 +36,10 @@ type SourceRecord struct {
 	SubjectID   string
 	// Context is the template context snapshot taken by the event's builder (EPIC D5).
 	Context json.RawMessage
+	// CaptureVersion identifies how complete the source snapshot is. Version 3 is
+	// a sealed EventSpec context captured with the source transaction; older rows
+	// remain readable while the worker finishes their legacy projection.
+	CaptureVersion int
 }
 
 const (
@@ -54,6 +58,9 @@ func (r *SourceRecord) Normalize() error {
 	r.OccurredAt = r.OccurredAt.UTC()
 	if r.SchemaVersion == 0 {
 		r.SchemaVersion = 1
+	}
+	if r.CaptureVersion == 0 {
+		r.CaptureVersion = 1
 	}
 	if len(bytes.TrimSpace(r.Context)) == 0 {
 		r.Context = json.RawMessage(`{}`)
@@ -78,6 +85,9 @@ func (r SourceRecord) validate() error {
 	if r.SchemaVersion < 1 || r.SchemaVersion > spec.SchemaVersion {
 		return invalidRecord("schema version is not known for this event type")
 	}
+	if r.CaptureVersion < 1 || r.CaptureVersion > 3 {
+		return invalidRecord("capture version is not known")
+	}
 	if r.OccurredAt.IsZero() {
 		return invalidRecord("occurred time is required")
 	}
@@ -94,6 +104,27 @@ func (r SourceRecord) validate() error {
 		return invalidRecord("context must be a JSON object of at most 1 MiB")
 	}
 	return nil
+}
+
+// SnapshotSourceRecord captures only the variables declared by the event spec.
+// Producers call it inside the same transaction as their source change, so
+// delivery never reconstructs historical names, titles, or targets from mutable
+// rows. It does not mutate the caller's record when validation fails.
+func SnapshotSourceRecord(record SourceRecord, vars map[string]string) (SourceRecord, error) {
+	spec, ok := LookupEvent(record.EventType)
+	if !ok {
+		return SourceRecord{}, invalidRecord("event type is not in the catalog")
+	}
+	context, err := spec.Snapshot(vars).Encode()
+	if err != nil {
+		return SourceRecord{}, err
+	}
+	record.CaptureVersion = 3
+	record.Context = context
+	if err := record.Normalize(); err != nil {
+		return SourceRecord{}, err
+	}
+	return record, nil
 }
 
 // isJSONObject reports whether raw is a JSON object of at most maxBytes; zero means unbounded.

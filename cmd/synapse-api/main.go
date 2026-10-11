@@ -388,6 +388,10 @@ func main() {
 		log.Error("notification unsubscribe URL invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateNotificationEvents(); err != nil {
+		log.Error("notification event configuration invalid", "err", err)
+		os.Exit(1)
+	}
 	// The notification driver registry is the one list of channel types this build delivers to. The
 	// capability catalog advertises it and the operator kill switch is checked against it, so it is
 	// built whether or not tenant notifications are enabled: a typo in the switch always stops startup.
@@ -1623,6 +1627,10 @@ func main() {
 		notificationRepository := postgres.NewNotificationRepository(databasePool)
 		notificationRepository.EnableDestinationNotices()
 		notificationRepository.SetEventProjector(notificationuc.NewEventBuilders())
+		if err := findingsService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), postgres.NewNotificationFindingFactsReader(databasePool)); err != nil {
+			log.Error("finding notification producers init failed", "err", err)
+			os.Exit(1)
+		}
 		notificationService, notificationErr := notificationuc.NewService(notificationRepository, vaultCipher, nil, auditLog, clock, ids)
 		if notificationErr != nil {
 			log.Error("notification service init failed", "err", notificationErr)

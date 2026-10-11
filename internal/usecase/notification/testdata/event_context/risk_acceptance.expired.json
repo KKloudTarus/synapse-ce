@@ -1,0 +1,13 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "event_label": "Risk acceptance expired",
+    "event_type": "risk_acceptance.expired",
+    "expires_at": "2026-11-10T08:00:00Z",
+    "occurred_at": "2026-11-10T08:00:00Z",
+    "summary": "A risk acceptance expired.",
+    "tier": "high",
+    "title": "Risk acceptance expired"
+  }
+}

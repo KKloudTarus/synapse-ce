@@ -55,16 +55,27 @@ const CodeEngagementSuppressed = "engagement_suppressed"
 type EventType string
 
 const (
-	EventVulnerabilityAction EventType = "vulnerability_action.created"
-	EventScanCompleted       EventType = "scan.completed"
-	EventQualityGateFailed   EventType = "quality_gate.failed"
-	EventSLAApproaching      EventType = "sla.approaching_deadline"
-	EventFleetAgentOffline   EventType = "fleet.agent.offline"
-	EventIncidentCreated     EventType = "incident.created"
-	EventOwnershipChanged    EventType = "finding.ownership_changed"
-	EventDestinationChanged  EventType = "notification.destination_changed"
-	EventChannelPaused       EventType = "notification.channel_paused"
-	EventTest                EventType = "notification.test"
+	EventVulnerabilityAction    EventType = "vulnerability_action.created"
+	EventScanCompleted          EventType = "scan.completed"
+	EventQualityGateFailed      EventType = "quality_gate.failed"
+	EventSLAApproaching         EventType = "sla.approaching_deadline"
+	EventFleetAgentOffline      EventType = "fleet.agent.offline"
+	EventIncidentCreated        EventType = "incident.created"
+	EventOwnershipChanged       EventType = "finding.ownership_changed"
+	EventDestinationChanged     EventType = "notification.destination_changed"
+	EventChannelPaused          EventType = "notification.channel_paused"
+	EventTest                   EventType = "notification.test"
+	EventFindingCreated         EventType = "finding.created"
+	EventFindingStatusChanged   EventType = "finding.status_changed"
+	EventFindingRetestCompleted EventType = "finding.retest_completed"
+	EventScanFailed             EventType = "scan.failed"
+	EventDASTRunFinished        EventType = "dast.run_finished"
+	EventReconRunFinished       EventType = "recon.run_finished"
+	EventCSPMRunFinished        EventType = "cspm.run_finished"
+	EventSLABreached            EventType = "sla.breached"
+	EventRiskAcceptanceCreated  EventType = "risk_acceptance.created"
+	EventRiskAcceptanceExpiring EventType = "risk_acceptance.expiring"
+	EventRiskAcceptanceExpired  EventType = "risk_acceptance.expired"
 )
 
 // Valid reports whether the event type is declared in the catalog.
@@ -140,7 +151,8 @@ type Rule struct {
 	EngagementIDs []shared.ID     `json:"engagement_ids,omitempty"`
 	TeamIDs       []shared.ID     `json:"team_ids,omitempty"`
 	AllTeams      bool            `json:"all_teams,omitempty"`
-	ChannelIDs    []shared.ID     `json:"channel_ids"`
+	EventFilters
+	ChannelIDs []shared.ID `json:"channel_ids"`
 	// RecipientRoles address people by their relation to the event (#1415), in addition to the
 	// channels. A rule may have roles and no channel.
 	RecipientRoles []string      `json:"recipient_roles,omitempty"`
@@ -200,6 +212,9 @@ func (r *Rule) Normalize() error {
 		return unsupportedFilter(r.EventType, "engagement scope")
 	}
 	if err := r.normalizeTeamScope(spec); err != nil {
+		return err
+	}
+	if err := r.normalizeEventFilters(spec); err != nil {
 		return err
 	}
 	if err := r.normalizeRecipientRoles(); err != nil {
@@ -292,6 +307,9 @@ func (r Rule) Matches(e Event) bool {
 		if json.Unmarshal(e.Data, &data) != nil || data.LeadTimeSeconds != r.LeadTimeSecs {
 			return false
 		}
+	}
+	if !r.matchesEventFilters(e) {
+		return false
 	}
 	return true
 }

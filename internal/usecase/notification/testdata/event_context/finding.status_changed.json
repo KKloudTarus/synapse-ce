@@ -1,0 +1,15 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "event_label": "Finding status changed",
+    "event_type": "finding.status_changed",
+    "finding_kind": "sast",
+    "from_status": "triage",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "severity": "high",
+    "summary": "A finding status was updated.",
+    "title": "Finding status changed",
+    "to_status": "confirmed"
+  }
+}

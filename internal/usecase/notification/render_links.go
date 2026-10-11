@@ -23,15 +23,20 @@ func (s *Service) renderLinks(event domain.Event) []ports.RenderedLink {
 		err   error
 	)
 	switch event.Type {
-	case domain.EventScanCompleted:
+	case domain.EventScanCompleted, domain.EventScanFailed:
 		if !event.EngagementID.IsZero() && event.SubjectID != "" {
 			link, err = s.links.Scan(event.EngagementID, shared.ID(event.SubjectID))
 			label = "Open scan"
 		}
-	case domain.EventSLAApproaching, domain.EventOwnershipChanged:
+	case domain.EventSLAApproaching, domain.EventOwnershipChanged, domain.EventFindingCreated, domain.EventFindingStatusChanged, domain.EventFindingRetestCompleted, domain.EventSLABreached, domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired:
 		if !event.EngagementID.IsZero() && event.SubjectID != "" {
 			link, err = s.links.Finding(event.EngagementID, shared.ID(event.SubjectID))
 			label = "Open finding"
+		}
+	case domain.EventDASTRunFinished, domain.EventReconRunFinished, domain.EventCSPMRunFinished:
+		if !event.EngagementID.IsZero() {
+			link, err = s.links.Engagement(event.EngagementID)
+			label = "Open engagement"
 		}
 	case domain.EventIncidentCreated:
 		if event.SubjectID != "" {

@@ -45,6 +45,12 @@ import { PersonalDelivery } from './PersonalDelivery'
 
 // A new rule starts on the most common subscription when the catalog offers it.
 const DEFAULT_RULE_EVENT = 'vulnerability_action.created'
+function ruleFilterValues(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
 // eventLabel names an event type from the server catalog, falling back to the raw type for one the
 // catalog no longer declares.
 function eventLabel(eventTypes: NotificationEventSpec[], type: string) {
@@ -1074,9 +1080,14 @@ function recipientRolesFor(
   spec: NotificationEventSpec | undefined,
 ): { value: string; label: string }[] {
   const out: { value: string; label: string }[] = []
-  if (event === 'finding.ownership_changed' || event === 'sla.approaching_deadline')
+  const findingSubject = [
+    'finding.created', 'finding.status_changed', 'finding.retest_completed',
+    'sla.breached', 'risk_acceptance.created', 'risk_acceptance.expiring',
+    'risk_acceptance.expired',
+  ].includes(event)
+  if (event === 'finding.ownership_changed' || event === 'sla.approaching_deadline' || findingSubject)
     out.push({ value: 'assignee', label: "The finding's assignee" })
-  if (event === 'finding.ownership_changed')
+  if (event === 'finding.ownership_changed' || findingSubject)
     out.push({ value: 'team_member', label: "Members of the finding's team" })
   if (spec?.has_engagement)
     out.push({ value: 'engagement_lead', label: 'The engagement lead' })
@@ -1163,6 +1174,13 @@ function RuleCreate({
   const [actions, setActions] = useState(
     initial?.action_types?.join(', ') ?? '',
   )
+  const [findingKinds, setFindingKinds] = useState(initial?.finding_kinds?.join(', ') ?? '')
+  const [fromStatuses, setFromStatuses] = useState(initial?.from_statuses?.join(', ') ?? '')
+  const [toStatuses, setToStatuses] = useState(initial?.to_statuses?.join(', ') ?? '')
+  const [retestResults, setRetestResults] = useState(initial?.retest_results?.join(', ') ?? '')
+  const [scanKinds, setScanKinds] = useState(initial?.scan_kinds?.join(', ') ?? '')
+  const [outcomes, setOutcomes] = useState(initial?.outcomes?.join(', ') ?? '')
+  const [providers, setProviders] = useState(initial?.providers?.join(', ') ?? '')
   const [error, setError] = useState<string | null>(null)
   const [severity, setSeverity] = useState(
     initial ? initial.min_severity || 'any' : 'high',
@@ -1203,11 +1221,15 @@ function RuleCreate({
         team_ids: allows('team_ids') && !allTeams ? teams : undefined,
         all_teams: allows('team_ids') ? allTeams : undefined,
         action_types: allows('action_types')
-          ? actions
-              .split(',')
-              .map((x) => x.trim())
-              .filter(Boolean)
+          ? ruleFilterValues(actions)
           : undefined,
+        finding_kinds: allows('finding_kinds') ? ruleFilterValues(findingKinds) : undefined,
+        from_statuses: allows('from_statuses') ? ruleFilterValues(fromStatuses) : undefined,
+        to_statuses: allows('to_statuses') ? ruleFilterValues(toStatuses) : undefined,
+        retest_results: allows('retest_results') ? ruleFilterValues(retestResults) : undefined,
+        scan_kinds: allows('scan_kinds') ? ruleFilterValues(scanKinds) : undefined,
+        outcomes: allows('outcomes') ? ruleFilterValues(outcomes) : undefined,
+        providers: allows('providers') ? ruleFilterValues(providers) : undefined,
         min_severity:
           allows('min_severity') && severity !== 'any' ? severity : undefined,
         lead_time_seconds: allows('lead_time_seconds')
@@ -1243,7 +1265,25 @@ function RuleCreate({
           <Select
             id="notification-event"
             value={event}
-            onValueChange={setEvent}
+            onValueChange={(nextEvent) => {
+              setEvent(nextEvent)
+              const nextFilters = eventTypes.find((item) => item.type === nextEvent)?.filters ?? []
+              if (!nextFilters.includes('engagement_ids')) setEngagements([])
+              if (!nextFilters.includes('team_ids')) {
+                setTeams([])
+                setAllTeams(false)
+              }
+              if (!nextFilters.includes('action_types')) setActions('')
+              if (!nextFilters.includes('min_severity')) setSeverity('any')
+              if (!nextFilters.includes('lead_time_seconds')) setLeadHours('24')
+              if (!nextFilters.includes('finding_kinds')) setFindingKinds('')
+              if (!nextFilters.includes('from_statuses')) setFromStatuses('')
+              if (!nextFilters.includes('to_statuses')) setToStatuses('')
+              if (!nextFilters.includes('retest_results')) setRetestResults('')
+              if (!nextFilters.includes('scan_kinds')) setScanKinds('')
+              if (!nextFilters.includes('outcomes')) setOutcomes('')
+              if (!nextFilters.includes('providers')) setProviders('')
+            }}
             options={[
               ...ruleEvents.map((e) => ({ value: e.type, label: e.label })),
               // Keep a saved rule's type selectable even if the catalog stopped offering it.
@@ -1327,6 +1367,41 @@ function RuleCreate({
               value={actions}
               onChange={(e) => setActions(e.target.value)}
             />
+          </Field>
+        )}
+        {allows('finding_kinds') && (
+          <Field label="Finding kinds (optional)" htmlFor="notification-finding-kinds" hint="Comma-separated finding kinds">
+            <Input id="notification-finding-kinds" aria-describedby="notification-finding-kinds-hint" value={findingKinds} onChange={(e) => setFindingKinds(e.target.value)} />
+          </Field>
+        )}
+        {allows('from_statuses') && (
+          <Field label="From statuses (optional)" htmlFor="notification-from-statuses" hint="Comma-separated statuses before the transition">
+            <Input id="notification-from-statuses" aria-describedby="notification-from-statuses-hint" value={fromStatuses} onChange={(e) => setFromStatuses(e.target.value)} />
+          </Field>
+        )}
+        {allows('to_statuses') && (
+          <Field label="To statuses (optional)" htmlFor="notification-to-statuses" hint="Comma-separated statuses after the transition">
+            <Input id="notification-to-statuses" aria-describedby="notification-to-statuses-hint" value={toStatuses} onChange={(e) => setToStatuses(e.target.value)} />
+          </Field>
+        )}
+        {allows('retest_results') && (
+          <Field label="Retest results (optional)" htmlFor="notification-retest-results" hint="Comma-separated retest results">
+            <Input id="notification-retest-results" aria-describedby="notification-retest-results-hint" value={retestResults} onChange={(e) => setRetestResults(e.target.value)} />
+          </Field>
+        )}
+        {allows('scan_kinds') && (
+          <Field label="Scan kinds (optional)" htmlFor="notification-scan-kinds" hint="Comma-separated scan kinds">
+            <Input id="notification-scan-kinds" aria-describedby="notification-scan-kinds-hint" value={scanKinds} onChange={(e) => setScanKinds(e.target.value)} />
+          </Field>
+        )}
+        {allows('outcomes') && (
+          <Field label="Outcomes (optional)" htmlFor="notification-outcomes" hint="Comma-separated outcomes">
+            <Input id="notification-outcomes" aria-describedby="notification-outcomes-hint" value={outcomes} onChange={(e) => setOutcomes(e.target.value)} />
+          </Field>
+        )}
+        {allows('providers') && (
+          <Field label="Providers (optional)" htmlFor="notification-providers" hint="Comma-separated cloud providers">
+            <Input id="notification-providers" aria-describedby="notification-providers-hint" value={providers} onChange={(e) => setProviders(e.target.value)} />
           </Field>
         )}
         {allows('team_ids') && (

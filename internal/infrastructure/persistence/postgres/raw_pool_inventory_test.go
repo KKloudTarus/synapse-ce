@@ -84,7 +84,6 @@ var rawPoolExceptions = map[string]rawPoolException{
 	"recon_run_repo.go:Get":                                        {1, rawLegacyGlobal},
 	"recon_run_repo.go:ListByEngagement":                           {1, rawLegacyGlobal},
 	"recon_run_repo.go:ListStaleRunning":                           {1, rawLegacyGlobal},
-	"recon_run_repo.go:Save":                                       {1, rawLegacyGlobal},
 	"runlock.go:TryLock":                                           {1, rawProcessControl},
 	"runlock_lease.go:TryLockLeased":                               {2, rawLegacyGlobal},
 	"runlock_lease.go:renew":                                       {1, rawLegacyGlobal},

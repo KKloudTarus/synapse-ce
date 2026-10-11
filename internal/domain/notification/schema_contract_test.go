@@ -73,7 +73,7 @@ func TestEventSchemaCatalogDrift(t *testing.T) {
 			if spec.HasLeadTime && dataProps["lead_time_seconds"] == nil {
 				t.Fatal("EventSpec lead time missing in data schema")
 			}
-			if spec.HasTeam && (dataProps["old_team_id"] == nil || dataProps["new_team_id"] == nil) {
+			if spec.HasTeam && dataProps["team_id"] == nil && (dataProps["old_team_id"] == nil || dataProps["new_team_id"] == nil) {
 				t.Fatal("EventSpec team identifiers missing in data schema")
 			}
 			fixtureRaw, err := os.ReadFile(filepath.Join(root, fixtureFile))

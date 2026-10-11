@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,8 @@ type NotificationSource struct {
 	repo                  *NotificationRepository
 	fleetStaleAfter       time.Duration
 	vulnerabilityDisabled bool
+	slaBreachMaxReminders int
+	tenantCursor          atomic.Uint64
 }
 
 // NewNotificationSource builds the projector. incident.created is projected unconditionally (#1347): the
@@ -31,7 +34,15 @@ func NewNotificationSource(pool *pgxpool.Pool, repo *NotificationRepository, fle
 	if fleetStaleAfter <= 0 {
 		fleetStaleAfter = 10 * time.Minute
 	}
-	return &NotificationSource{pool: pool, repo: repo, fleetStaleAfter: fleetStaleAfter}
+	return &NotificationSource{pool: pool, repo: repo, fleetStaleAfter: fleetStaleAfter, slaBreachMaxReminders: 4}
+}
+
+func (s *NotificationSource) SetSLABreachMaxReminders(count int) error {
+	if count < 0 || count > 8 {
+		return fmt.Errorf("%w: SLA breach reminder count must be between 0 and 8", shared.ErrValidation)
+	}
+	s.slaBreachMaxReminders = count
+	return nil
 }
 
 var _ ports.NotificationSource = (*NotificationSource)(nil)
@@ -67,14 +78,23 @@ func (s *NotificationSource) Poll(ctx context.Context, now time.Time, limit int)
 	rows.Close()
 	total := 0
 	var failures []error
-	for _, tenant := range tenants {
+	// Bound each tenant's share and rotate the starting point so sustained
+	// traffic cannot prevent later tenants from receiving a polling turn.
+	if len(tenants) == 0 {
+		return 0, nil
+	}
+	tenantBudget := min(limit, max(4, limit/len(tenants)))
+	step := uint64(min(len(tenants), max(1, limit/tenantBudget)))
+	start := int((s.tenantCursor.Add(step) - step) % uint64(len(tenants)))
+	for offset := range tenants {
+		tenant := tenants[(start+offset)%len(tenants)]
 		if ctx.Err() != nil {
 			return total, ctx.Err()
 		}
 		if total >= limit {
 			break
 		}
-		n, err := s.pollTenant(ctx, tenant, now.UTC(), limit-total)
+		n, err := s.pollTenant(ctx, tenant, now.UTC(), min(tenantBudget, limit-total))
 		if err != nil {
 			failures = append(failures, fmt.Errorf("poll notification sources for tenant %s: %w", tenant, err))
 			continue
@@ -98,7 +118,10 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 		// Eligibility was persisted atomically with the assignment. Recover eligible
 		// intents even on the first poll; suppressed decisions never become pending
 		// merely because notification delivery is enabled later.
-		n, err := s.pollOwnership(ctx, tx, tenant, limit)
+		// Leave capacity for threshold observations and snapshot recovery even
+		// while ownership changes are arriving continuously.
+		ownershipBudget := max(1, limit/4)
+		n, err := s.pollOwnership(ctx, tx, tenant, ownershipBudget)
 		if err != nil {
 			return err
 		}
@@ -116,6 +139,9 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			if _, err := tx.Exec(ctx, `INSERT INTO notification_source_state(tenant_id,source_kind,source_id,fingerprint,active,observed_at) SELECT tenant_id,'fleet_agent',id,((extract(epoch FROM last_seen_at)*1000000)::bigint*1000)::text,(last_seen_at <= $2::timestamptz-make_interval(secs=>$3)),$2 FROM fleet_agents WHERE tenant_id=$1 AND state IN ('active','stale') AND last_seen_at>created_at ON CONFLICT DO NOTHING`, tenant, now, s.fleetStaleAfter.Seconds()); err != nil {
 				return err
 			}
+			if err := s.baselineLifecycle(ctx, tx, tenant, now); err != nil {
+				return err
+			}
 			return s.repo.reconcileTx(ctx, tx, tenant)
 		}
 		var activated time.Time
@@ -123,11 +149,10 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			return err
 		}
 		remaining := limit - count
-		for _, poll := range []func(context.Context, pgx.Tx, shared.ID, time.Time, time.Time, int) (int, error){s.pollVulnerability, s.pollScans, s.pollQualityGates, s.pollSLA, s.pollIncidents} {
-			if remaining <= 0 {
-				break
-			}
-			n, err := poll(ctx, tx, tenant, activated, now, remaining)
+		if remaining > 0 {
+			// Scheduler facts must be observed before a busy producer can consume
+			// the entire batch. Keep most capacity available for outbox recovery.
+			n, err := s.pollLifecycle(ctx, tx, tenant, activated, now, max(1, remaining/4))
 			if err != nil {
 				return err
 			}
@@ -135,7 +160,15 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			remaining -= n
 		}
 		if remaining > 0 {
-			n, err := s.pollFleet(ctx, tx, tenant, activated, now, remaining)
+			n, err := s.pollLegacy(ctx, tx, tenant, activated, now, max(1, remaining/4))
+			if err != nil {
+				return err
+			}
+			count += n
+			remaining -= n
+		}
+		if remaining > 0 {
+			n, err := s.pollSnapshots(ctx, tx, tenant, now, remaining)
 			if err != nil {
 				return err
 			}
@@ -147,6 +180,56 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 	})
 	if err != nil {
 		return 0, err // the entire tenant projection rolled back
+	}
+	return count, nil
+}
+
+// pollLegacy reserves progress for deployed sources while snapshot producers stay
+// busy. Its durable turn also protects later categories in very small batches.
+func (s *NotificationSource) pollLegacy(ctx context.Context, tx pgx.Tx, tenant shared.ID, activated, now time.Time, limit int) (int, error) {
+	categories := []func(int) (int, error){}
+	for _, poll := range []func(context.Context, pgx.Tx, shared.ID, time.Time, time.Time, int) (int, error){s.pollVulnerability, s.pollScans, s.pollQualityGates, s.pollSLA, s.pollIncidents, s.pollFleet} {
+		categories = append(categories, func(budget int) (int, error) { return poll(ctx, tx, tenant, activated, now, budget) })
+	}
+	return pollNotificationCategories(ctx, tx, tenant, "legacy_poll", now, limit, categories)
+}
+
+// pollSnapshots discovers complete snapshot kinds rather than relying on the
+// legacy hydration registry. A committed producer of a new kind is therefore
+// recoverable after restart without a second, manually maintained drain list.
+func (s *NotificationSource) pollSnapshots(ctx context.Context, tx pgx.Tx, tenant shared.ID, now time.Time, limit int) (int, error) {
+	rows, err := tx.Query(ctx, `SELECT source_kind FROM (
+		SELECT source_kind,occurred_at FROM notification_source_records
+		WHERE tenant_id=$1 AND capture_version=3 AND processed_at IS NULL
+		ORDER BY occurred_at,source_kind,source_id LIMIT $2
+	) pending GROUP BY source_kind ORDER BY min(occurred_at),source_kind`, tenant, limit)
+	if err != nil {
+		return 0, err
+	}
+	var kinds []string
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&kind); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		kinds = append(kinds, kind)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, kind := range kinds {
+		if count >= limit {
+			break
+		}
+		n, err := s.pollCaptured(ctx, tx, tenant, kind, now, limit-count)
+		if err != nil {
+			return 0, err
+		}
+		count += n
 	}
 	return count, nil
 }

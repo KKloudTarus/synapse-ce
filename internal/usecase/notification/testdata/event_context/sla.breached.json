@@ -1,0 +1,16 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "breached_at": "2026-10-10T08:00:00Z",
+    "deadline": "2026-10-10T08:00:00Z",
+    "event_label": "Remediation SLA breached",
+    "event_type": "sla.breached",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "reminder": "0",
+    "severity": "high",
+    "summary": "A finding passed its remediation deadline.",
+    "tier": "high",
+    "title": "Remediation SLA breached"
+  }
+}

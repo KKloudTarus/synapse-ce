@@ -1,4 +1,453 @@
 {
+  "cspm.run_finished/chat/detail": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "cspm.run_finished/chat/signal": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "cspm.run_finished/chat/summary": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "cspm.run_finished/email/detail": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "cspm.run_finished/email/signal": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "cspm.run_finished/email/summary": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "cspm.run_finished/pager/detail": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+    }
+  },
+  "cspm.run_finished/pager/signal": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "cspm.run_finished/pager/summary": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+    }
+  },
+  "cspm.run_finished/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-cspm.run_finished",
+        "type": "cspm.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "cspm.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "cspm.run_finished/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-cspm.run_finished",
+        "type": "cspm.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "cspm.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "cspm.run_finished/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-cspm.run_finished",
+        "type": "cspm.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "cspm.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "dast.run_finished/chat/detail": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "dast.run_finished/chat/signal": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "dast.run_finished/chat/summary": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "dast.run_finished/email/detail": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "dast.run_finished/email/signal": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "dast.run_finished/email/summary": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "dast.run_finished/pager/detail": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+    }
+  },
+  "dast.run_finished/pager/signal": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "dast.run_finished/pager/summary": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+    }
+  },
+  "dast.run_finished/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-dast.run_finished",
+        "type": "dast.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "dast.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "dast.run_finished/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-dast.run_finished",
+        "type": "dast.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "dast.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "dast.run_finished/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-dast.run_finished",
+        "type": "dast.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "dast.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "finding.created/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "title": "Finding created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.created/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Finding created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.created/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "title": "Finding created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.created/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "subject": "Finding created"
+    },
+    "formatted": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nKind: sast\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.created/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Finding created"
+    },
+    "formatted": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nKind: sast\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.created/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "subject": "Finding created"
+    },
+    "formatted": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nKind: sast\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.created/pager/detail": {
+    "fields": {
+      "summary": "Finding created: Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
+    }
+  },
+  "finding.created/pager/signal": {
+    "fields": {
+      "summary": "Finding created: Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.created/pager/summary": {
+    "fields": {
+      "summary": "Finding created: Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
+    }
+  },
+  "finding.created/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.created",
+        "type": "finding.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.created",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.created/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.created",
+        "type": "finding.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.created",
+          "finding_kind": "sast",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.created/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.created",
+        "type": "finding.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.created",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
   "finding.ownership_changed/chat/detail": {
     "fields": {
       "body": "Event: finding\\.ownership\\_changed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding\nPrevious team: summary\\-old\\-team\nNew team: summary\\-new\\-team\nPrevious assignee: summary\\-old\\-assignee\nNew assignee: summary\\-new\\-assignee\nChanged by: summary\\-actor\nReason: summary\\-reason",
@@ -129,6 +578,278 @@
           "reason": "summary-reason",
           "summary": "summary-description",
           "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.retest_completed/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Finding retest completed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding retest completed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Result: remediated\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding retest completed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.retest_completed/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Finding retest completed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding retest completed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Result: remediated\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding retest completed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.retest_completed/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Finding retest completed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding retest completed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Result: remediated\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding retest completed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.retest_completed/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Finding retest completed"
+    },
+    "formatted": "Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nResult: remediated\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.retest_completed/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Finding retest completed"
+    },
+    "formatted": "Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nResult: remediated\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.retest_completed/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Finding retest completed"
+    },
+    "formatted": "Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nResult: remediated\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.retest_completed/pager/detail": {
+    "fields": {
+      "summary": "Finding retest completed: Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "finding.retest_completed/pager/signal": {
+    "fields": {
+      "summary": "Finding retest completed: Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.retest_completed/pager/summary": {
+    "fields": {
+      "summary": "Finding retest completed: Severity: critical\nResult: remediated\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "finding.retest_completed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.retest_completed",
+        "type": "finding.retest_completed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.retest_completed",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "result": "remediated",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.retest_completed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.retest_completed",
+        "type": "finding.retest_completed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.retest_completed",
+          "finding_kind": "sast",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "result": "remediated",
+          "severity": "critical",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.retest_completed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.retest_completed",
+        "type": "finding.retest_completed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.retest_completed",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "result": "remediated",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.status_changed/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\ntriage → confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "title": "Finding status changed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding status changed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"triage → confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding status changed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.status_changed/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\ntriage → confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Finding status changed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding status changed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"triage → confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding status changed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.status_changed/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\ntriage → confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "title": "Finding status changed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding status changed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"triage → confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding status changed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.status_changed/email/detail": {
+    "fields": {
+      "body": "Severity: critical\ntriage → confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "subject": "Finding status changed"
+    },
+    "formatted": "Severity: critical\ntriage → confirmed\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\ntriage → confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.status_changed/email/signal": {
+    "fields": {
+      "body": "Severity: critical\ntriage → confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Finding status changed"
+    },
+    "formatted": "Severity: critical\ntriage → confirmed\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\ntriage → confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.status_changed/email/summary": {
+    "fields": {
+      "body": "Severity: critical\ntriage → confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "subject": "Finding status changed"
+    },
+    "formatted": "Severity: critical\ntriage → confirmed\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\ntriage → confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.status_changed/pager/detail": {
+    "fields": {
+      "summary": "Finding status changed: Severity: critical\ntriage → confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
+    }
+  },
+  "finding.status_changed/pager/signal": {
+    "fields": {
+      "summary": "Finding status changed: Severity: critical\ntriage → confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.status_changed/pager/summary": {
+    "fields": {
+      "summary": "Finding status changed: Severity: critical\ntriage → confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
+    }
+  },
+  "finding.status_changed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.status_changed",
+        "type": "finding.status_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.status_changed",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "from_status": "triage",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.status_changed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.status_changed",
+        "type": "finding.status_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.status_changed",
+          "finding_kind": "sast",
+          "from_status": "triage",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.status_changed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.status_changed",
+        "type": "finding.status_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.status_changed",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "from_status": "triage",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title",
+          "to_status": "confirmed"
         }
       }
     }
@@ -503,6 +1224,599 @@
       }
     }
   },
+  "recon.run_finished/chat/detail": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "recon.run_finished/chat/signal": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "recon.run_finished/chat/summary": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "recon.run_finished/email/detail": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "recon.run_finished/email/signal": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "recon.run_finished/email/summary": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "recon.run_finished/pager/detail": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+    }
+  },
+  "recon.run_finished/pager/signal": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "recon.run_finished/pager/summary": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+    }
+  },
+  "recon.run_finished/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-recon.run_finished",
+        "type": "recon.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "recon.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "recon.run_finished/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-recon.run_finished",
+        "type": "recon.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "recon.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "recon.run_finished/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-recon.run_finished",
+        "type": "recon.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "recon.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "risk_acceptance.created/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Risk acceptance created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Risk acceptance created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Risk acceptance created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.created/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Risk acceptance created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Risk acceptance created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Risk acceptance created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.created/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Risk acceptance created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Risk acceptance created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Risk acceptance created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.created/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Risk acceptance created"
+    },
+    "formatted": "Severity: critical\nTier: low\nExpires: 2026-11-01 09:00 UTC\nTime remaining: 24 hours\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nTier: low\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.created/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Risk acceptance created"
+    },
+    "formatted": "Severity: critical\nTier: low\nExpires: 2026-11-01 09:00 UTC\nTime remaining: 24 hours\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nTier: low\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.created/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Risk acceptance created"
+    },
+    "formatted": "Severity: critical\nTier: low\nExpires: 2026-11-01 09:00 UTC\nTime remaining: 24 hours\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nTier: low\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.created/pager/detail": {
+    "fields": {
+      "summary": "Risk acceptance created: Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "risk_acceptance.created/pager/signal": {
+    "fields": {
+      "summary": "Risk acceptance created: Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "risk_acceptance.created/pager/summary": {
+    "fields": {
+      "summary": "Risk acceptance created: Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "risk_acceptance.created/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.created",
+        "type": "risk_acceptance.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.created",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.created/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.created",
+        "type": "risk_acceptance.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.created",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "tier": "low"
+        }
+      }
+    }
+  },
+  "risk_acceptance.created/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.created",
+        "type": "risk_acceptance.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.created",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expired/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Risk acceptance expired"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Risk acceptance expired\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Risk acceptance expired\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expired/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Risk acceptance expired"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Risk acceptance expired\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Risk acceptance expired\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expired/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Risk acceptance expired"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Risk acceptance expired\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Risk acceptance expired\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expired/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Risk acceptance expired"
+    },
+    "formatted": "Severity: critical\nTier: low\nExpires: 2026-11-01 09:00 UTC\nTime remaining: 24 hours\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nTier: low\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expired/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Risk acceptance expired"
+    },
+    "formatted": "Severity: critical\nTier: low\nExpires: 2026-11-01 09:00 UTC\nTime remaining: 24 hours\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nTier: low\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expired/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Risk acceptance expired"
+    },
+    "formatted": "Severity: critical\nTier: low\nExpires: 2026-11-01 09:00 UTC\nTime remaining: 24 hours\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nTier: low\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expired/pager/detail": {
+    "fields": {
+      "summary": "Risk acceptance expired: Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "risk_acceptance.expired/pager/signal": {
+    "fields": {
+      "summary": "Risk acceptance expired: Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "risk_acceptance.expired/pager/summary": {
+    "fields": {
+      "summary": "Risk acceptance expired: Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "risk_acceptance.expired/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expired",
+        "type": "risk_acceptance.expired",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expired",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expired/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expired",
+        "type": "risk_acceptance.expired",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expired",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "tier": "low"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expired/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expired",
+        "type": "risk_acceptance.expired",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expired",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expiring/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Risk acceptance expiring"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Risk acceptance expiring\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Risk acceptance expiring\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expiring/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Risk acceptance expiring"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Risk acceptance expiring\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Risk acceptance expiring\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expiring/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Risk acceptance expiring"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Risk acceptance expiring\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Risk acceptance expiring\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expiring/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Risk acceptance expiring"
+    },
+    "formatted": "Severity: critical\nTier: low\nExpires: 2026-11-01 09:00 UTC\nTime remaining: 24 hours\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nTier: low\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expiring/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Risk acceptance expiring"
+    },
+    "formatted": "Severity: critical\nTier: low\nExpires: 2026-11-01 09:00 UTC\nTime remaining: 24 hours\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nTier: low\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expiring/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Risk acceptance expiring"
+    },
+    "formatted": "Severity: critical\nTier: low\nExpires: 2026-11-01 09:00 UTC\nTime remaining: 24 hours\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nTier: low\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expiring/pager/detail": {
+    "fields": {
+      "summary": "Risk acceptance expiring: Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "risk_acceptance.expiring/pager/signal": {
+    "fields": {
+      "summary": "Risk acceptance expiring: Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "risk_acceptance.expiring/pager/summary": {
+    "fields": {
+      "summary": "Risk acceptance expiring: Severity: critical\nTier: low\nExpires: 2026\\-11\\-01 09\\:00 UTC\nTime remaining: 24 hours\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "risk_acceptance.expiring/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expiring",
+        "type": "risk_acceptance.expiring",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expiring",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expiring/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expiring",
+        "type": "risk_acceptance.expiring",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expiring",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "tier": "low"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expiring/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expiring",
+        "type": "risk_acceptance.expiring",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expiring",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
   "scan.completed/chat/detail": {
     "fields": {
       "body": "Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example\n- [detail\\-high] detail\\-finding (detail\\-new)",
@@ -668,64 +1982,222 @@
       }
     }
   },
+  "scan.failed/chat/detail": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.failed/chat/signal": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.failed/chat/summary": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "title": "Scan run finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Scan run finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Provider: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Error: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Scan run finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.failed/email/detail": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.failed/email/signal": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.failed/email/summary": {
+    "fields": {
+      "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
+      "subject": "Scan run finished"
+    },
+    "formatted": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTarget: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: sast\u003cbr\u003e\nOutcome: failed\u003cbr\u003e\nProvider: scanner\u003cbr\u003e\nError: timeout\u003cbr\u003e\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTarget: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.failed/pager/detail": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+    }
+  },
+  "scan.failed/pager/signal": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "scan.failed/pager/summary": {
+    "fields": {
+      "summary": "Scan run finished: Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+    }
+  },
+  "scan.failed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.failed",
+        "type": "scan.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "scan.failed",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "scan.failed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.failed",
+        "type": "scan.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "scan.failed",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "scan.failed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.failed",
+        "type": "scan.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "scan.failed",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
   "sla.approaching_deadline/chat/detail": {
     "fields": {
-      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "body": "SLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
       "title": "SLA approaching deadline"
     },
-    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA approaching deadline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"SLA tier: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA approaching deadline\",\"unfurl_links\":false,\"unfurl_media\":false}"
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA approaching deadline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"SLA tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA approaching deadline\",\"unfurl_links\":false,\"unfurl_media\":false}"
   },
   "sla.approaching_deadline/chat/signal": {
     "fields": {
-      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours",
+      "body": "SLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours",
       "title": "SLA approaching deadline"
     },
-    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA approaching deadline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"SLA tier: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA approaching deadline\",\"unfurl_links\":false,\"unfurl_media\":false}"
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA approaching deadline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"SLA tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA approaching deadline\",\"unfurl_links\":false,\"unfurl_media\":false}"
   },
   "sla.approaching_deadline/chat/summary": {
     "fields": {
-      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "body": "SLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
       "title": "SLA approaching deadline"
     },
-    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA approaching deadline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"SLA tier: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA approaching deadline\",\"unfurl_links\":false,\"unfurl_media\":false}"
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA approaching deadline\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"SLA tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA approaching deadline\",\"unfurl_links\":false,\"unfurl_media\":false}"
   },
   "sla.approaching_deadline/email/detail": {
     "fields": {
-      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "body": "SLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
       "subject": "SLA approaching deadline"
     },
-    "formatted": "SLA tier: critical\nDeadline: 2026-10-03 09:00 UTC\nTime remaining: 24 hours\nEngagement: summary-engagement\nFinding: summary-finding",
-    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSLA tier: critical\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+    "formatted": "SLA tier: low\nDeadline: 2026-10-03 09:00 UTC\nTime remaining: 24 hours\nEngagement: summary-engagement\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSLA tier: low\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
   },
   "sla.approaching_deadline/email/signal": {
     "fields": {
-      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours",
+      "body": "SLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours",
       "subject": "SLA approaching deadline"
     },
-    "formatted": "SLA tier: critical\nDeadline: 2026-10-03 09:00 UTC\nTime remaining: 24 hours",
-    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSLA tier: critical\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+    "formatted": "SLA tier: low\nDeadline: 2026-10-03 09:00 UTC\nTime remaining: 24 hours",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSLA tier: low\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
   },
   "sla.approaching_deadline/email/summary": {
     "fields": {
-      "body": "SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
+      "body": "SLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
       "subject": "SLA approaching deadline"
     },
-    "formatted": "SLA tier: critical\nDeadline: 2026-10-03 09:00 UTC\nTime remaining: 24 hours\nEngagement: summary-engagement\nFinding: summary-finding",
-    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSLA tier: critical\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+    "formatted": "SLA tier: low\nDeadline: 2026-10-03 09:00 UTC\nTime remaining: 24 hours\nEngagement: summary-engagement\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSLA tier: low\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
   },
   "sla.approaching_deadline/pager/detail": {
     "fields": {
-      "summary": "SLA approaching deadline: SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
+      "summary": "SLA approaching deadline: SLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
     }
   },
   "sla.approaching_deadline/pager/signal": {
     "fields": {
-      "summary": "SLA approaching deadline: SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours"
+      "summary": "SLA approaching deadline: SLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours"
     }
   },
   "sla.approaching_deadline/pager/summary": {
     "fields": {
-      "summary": "SLA approaching deadline: SLA tier: critical\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
+      "summary": "SLA approaching deadline: SLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nTime remaining: 24 hours\nEngagement: summary\\-engagement\nFinding: summary\\-finding"
     }
   },
   "sla.approaching_deadline/webhook/detail": {
@@ -747,7 +2219,7 @@
           "lead_time_hours": "24",
           "occurred_at": "2026-10-02T09:00:00Z",
           "summary": "summary-description",
-          "tier": "critical",
+          "tier": "low",
           "title": "summary-title"
         }
       }
@@ -769,7 +2241,7 @@
           "event_type": "sla.approaching_deadline",
           "lead_time_hours": "24",
           "occurred_at": "2026-10-02T09:00:00Z",
-          "tier": "critical"
+          "tier": "low"
         }
       }
     }
@@ -793,7 +2265,143 @@
           "lead_time_hours": "24",
           "occurred_at": "2026-10-02T09:00:00Z",
           "summary": "summary-description",
-          "tier": "critical",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "sla.breached/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nSLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Remediation SLA breached"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Remediation SLA breached\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"SLA tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Remediation SLA breached\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.breached/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nSLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Remediation SLA breached"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Remediation SLA breached\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"SLA tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Remediation SLA breached\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.breached/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nSLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "title": "Remediation SLA breached"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Remediation SLA breached\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"SLA tier: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Deadline: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Finding: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Remediation SLA breached\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.breached/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nSLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Remediation SLA breached"
+    },
+    "formatted": "Severity: critical\nSLA tier: low\nDeadline: 2026-10-03 09:00 UTC\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nSLA tier: low\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.breached/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nSLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Remediation SLA breached"
+    },
+    "formatted": "Severity: critical\nSLA tier: low\nDeadline: 2026-10-03 09:00 UTC\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nSLA tier: low\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.breached/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nSLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding",
+      "subject": "Remediation SLA breached"
+    },
+    "formatted": "Severity: critical\nSLA tier: low\nDeadline: 2026-10-03 09:00 UTC\nOccurred: 2026-10-02 09:00 UTC\nFinding: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nSLA tier: low\u003cbr\u003e\nDeadline: 2026-10-03 09:00 UTC\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nFinding: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.breached/pager/detail": {
+    "fields": {
+      "summary": "Remediation SLA breached: Severity: critical\nSLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "sla.breached/pager/signal": {
+    "fields": {
+      "summary": "Remediation SLA breached: Severity: critical\nSLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "sla.breached/pager/summary": {
+    "fields": {
+      "summary": "Remediation SLA breached: Severity: critical\nSLA tier: low\nDeadline: 2026\\-10\\-03 09\\:00 UTC\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nFinding: summary\\-finding"
+    }
+  },
+  "sla.breached/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.breached",
+        "type": "sla.breached",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "sla.breached",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "sla.breached/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.breached",
+        "type": "sla.breached",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "sla.breached",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "tier": "low"
+        }
+      }
+    }
+  },
+  "sla.breached/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.breached",
+        "type": "sla.breached",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "sla.breached",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
           "title": "summary-title"
         }
       }

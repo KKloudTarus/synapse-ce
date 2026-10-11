@@ -1,0 +1,15 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "event_label": "Risk acceptance expiring",
+    "event_type": "risk_acceptance.expiring",
+    "expires_at": "2026-11-10T08:00:00Z",
+    "lead_time_hours": "24",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "reminder": "expiry_warning",
+    "summary": "A risk acceptance will expire soon.",
+    "tier": "high",
+    "title": "Risk acceptance expiring"
+  }
+}

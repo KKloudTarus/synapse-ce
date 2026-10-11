@@ -268,6 +268,8 @@ type Config struct {
 	// NotificationChannelPauseThreshold is how many consecutive permanent delivery failures pause
 	// a notification channel (#1464). Zero keeps counting but never pauses. Read by the worker.
 	NotificationChannelPauseThreshold int
+	// NotificationSLABreachMaxReminders caps reminders after the initial breach.
+	NotificationSLABreachMaxReminders int
 	// ReconViaWorker routes recon runs through the durable queue: the API enqueues
 	// and the non-root synapse-worker claims and executes them. Scoped egress is
 	// configured by a separate root-owned broker. Requires Postgres. Default false
@@ -999,38 +1001,38 @@ func Load() Config {
 		// absent. Set the flag to false to opt out. Capabilities that need external setup or would be
 		// unsafe unsandboxed stay OFF by default (sandbox, agent/LLM, taint, maven/gradle resolvers,
 		// jarhash egress) – see their fields below.
-		JudgmentsEnabled:                            getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
-		SASTEnabled:                                 getbool("SYNAPSE_SAST_ENABLED", true),
-		SecretScanEnabled:                           getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
-		SecretHistoryEnabled:                        getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
-		SecretVerifyEnabled:                         getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
-		SecretVerifyRPS:                             getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
-		SecretVerifyVaultAddr:                       strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
-		MisconfigEnabled:                            getbool("SYNAPSE_MISCONFIG_ENABLED", true),
-		SuppressionEnabled:                          getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
-		VEXEnabled:                                  getbool("SYNAPSE_VEX_ENABLED", true),
-		ComplianceEnabled:                           getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
-		DetectionPriority:                           os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
-		DBMaxAgeDays:                                getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
-		ScanCacheEnabled:                            getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
-		ScanCacheDir:                                os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
-		ImageRootFSEnabled:                          getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
-		OwnedAdvisoryEnabled:                        getbool("SYNAPSE_OWNED_ADVISORY", true),
-		SymbolOverlayDir:                            getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
-		ReachabilityEnabled:                         getbool("SYNAPSE_REACHABILITY_ENABLED", true),
-		PyReachabilityEnabled:                       getbool("SYNAPSE_PYREACH_ENABLED", true),
-		PySemanticReachabilityEnabled:               getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
-		ASTBin:                                      os.Getenv("SYNAPSE_AST_BIN"),
-		PythonTaintEnabled:                          getbool("SYNAPSE_PYTAINT_ENABLED", true),
-		TaintRulesFile:                              strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
-		JsTaintEnabled:                              getbool("SYNAPSE_JSTAINT_ENABLED", false),
-		JavaTaintEnabled:                            getbool("SYNAPSE_JAVATAINT_ENABLED", false),
-		TriScoreReassessEnabled:                     getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
-		FleetCorrelationEnabled:                     getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
-		FleetCorrelationWindow:                      getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
-		FleetCorrelationMaxPerIncident:              getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
-		FleetCorrelationPageSize:                    getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
-		FleetCorrelationMaxActiveSessions:           getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
+		JudgmentsEnabled:                  getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
+		SASTEnabled:                       getbool("SYNAPSE_SAST_ENABLED", true),
+		SecretScanEnabled:                 getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
+		SecretHistoryEnabled:              getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
+		SecretVerifyEnabled:               getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
+		SecretVerifyRPS:                   getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
+		SecretVerifyVaultAddr:             strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
+		MisconfigEnabled:                  getbool("SYNAPSE_MISCONFIG_ENABLED", true),
+		SuppressionEnabled:                getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
+		VEXEnabled:                        getbool("SYNAPSE_VEX_ENABLED", true),
+		ComplianceEnabled:                 getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
+		DetectionPriority:                 os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
+		DBMaxAgeDays:                      getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
+		ScanCacheEnabled:                  getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
+		ScanCacheDir:                      os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
+		ImageRootFSEnabled:                getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
+		OwnedAdvisoryEnabled:              getbool("SYNAPSE_OWNED_ADVISORY", true),
+		SymbolOverlayDir:                  getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
+		ReachabilityEnabled:               getbool("SYNAPSE_REACHABILITY_ENABLED", true),
+		PyReachabilityEnabled:             getbool("SYNAPSE_PYREACH_ENABLED", true),
+		PySemanticReachabilityEnabled:     getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
+		ASTBin:                            os.Getenv("SYNAPSE_AST_BIN"),
+		PythonTaintEnabled:                getbool("SYNAPSE_PYTAINT_ENABLED", true),
+		TaintRulesFile:                    strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
+		JsTaintEnabled:                    getbool("SYNAPSE_JSTAINT_ENABLED", false),
+		JavaTaintEnabled:                  getbool("SYNAPSE_JAVATAINT_ENABLED", false),
+		TriScoreReassessEnabled:           getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
+		FleetCorrelationEnabled:           getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
+		FleetCorrelationWindow:            getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
+		FleetCorrelationMaxPerIncident:    getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
+		FleetCorrelationPageSize:          getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
+		FleetCorrelationMaxActiveSessions: getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
 		FleetCorrelationMaxTimelineRefsPerDetection: getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION", 32),
 		FleetCorrelationMaxTimelineRefsPerPage:      getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE", 500),
 		JSReachabilityEnabled:                       getbool("SYNAPSE_JSREACH_ENABLED", true),
@@ -1225,6 +1227,7 @@ func Load() Config {
 		MCPEngagementID: getenv("SYNAPSE_MCP_ENGAGEMENT_ID", ""),
 
 		NotificationChannelPauseThreshold: getint("SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD", 5),
+		NotificationSLABreachMaxReminders: getint("SYNAPSE_NOTIFICATION_SLA_BREACH_MAX_REMINDERS", 4),
 	}
 }
 
@@ -1645,6 +1648,14 @@ func (c Config) ValidateWorkerConcurrency() error {
 func (c Config) ValidateNotificationChannelHealth() error {
 	if c.NotificationChannelPauseThreshold < 0 || c.NotificationChannelPauseThreshold > 100 {
 		return fmt.Errorf("SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD must be between 0 and 100 (got %d)", c.NotificationChannelPauseThreshold)
+	}
+	return nil
+}
+
+// ValidateNotificationEvents bounds the exponentially spaced SLA reminders.
+func (c Config) ValidateNotificationEvents() error {
+	if c.NotificationSLABreachMaxReminders < 0 || c.NotificationSLABreachMaxReminders > 8 {
+		return fmt.Errorf("SYNAPSE_NOTIFICATION_SLA_BREACH_MAX_REMINDERS must be between 0 and 8 (got %d)", c.NotificationSLABreachMaxReminders)
 	}
 	return nil
 }

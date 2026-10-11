@@ -60,8 +60,19 @@ func (f *fakeRepo) SetAssignee(_ context.Context, _, _ shared.ID, a string, ver 
 	f.called, f.assignee, f.gotVer = true, a, ver
 	return f.ret, f.err
 }
-func (f *fakeRepo) GetByEngagementAndID(_ context.Context, _, _ shared.ID) (finding.Finding, error) {
-	return f.ret, f.err
+func (f *fakeRepo) GetByEngagementAndID(_ context.Context, engagementID, findingID shared.ID) (finding.Finding, error) {
+	if f.listErr != nil {
+		return finding.Finding{}, f.listErr
+	}
+	for _, item := range f.list {
+		if item.ID == findingID && item.EngagementID == engagementID {
+			return item, nil
+		}
+	}
+	if f.ret.ID == findingID && f.ret.EngagementID == engagementID {
+		return f.ret, f.err
+	}
+	return finding.Finding{}, shared.ErrNotFound
 }
 
 type fakeComments struct {
@@ -410,7 +421,7 @@ func TestFindingConfirmationAuthorityGates(t *testing.T) {
 	}
 
 	// Below the bar → blocked before the repo is touched.
-	low := &fakeRepo{list: []finding.Finding{{ID: findID, Kind: finding.KindExploitation, EvidenceScore: 40}}}
+	low := &fakeRepo{list: []finding.Finding{{ID: findID, EngagementID: engID, Kind: finding.KindExploitation, EvidenceScore: 40}}}
 	if err := confirm(low); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("exploitation finding below the bar must not be confirmable, got %v", err)
 	}
@@ -419,7 +430,7 @@ func TestFindingConfirmationAuthorityGates(t *testing.T) {
 	}
 
 	// At/above the bar → allowed.
-	high := &fakeRepo{list: []finding.Finding{{ID: findID, Kind: finding.KindExploitation, EvidenceScore: 80}}, ret: finding.Finding{ID: findID, Status: finding.StatusConfirmed}}
+	high := &fakeRepo{list: []finding.Finding{{ID: findID, EngagementID: engID, Kind: finding.KindExploitation, EvidenceScore: 80}}, ret: finding.Finding{ID: findID, Status: finding.StatusConfirmed}}
 	if err := confirm(high); err != nil {
 		t.Fatalf("exploitation finding above the bar must be confirmable: %v", err)
 	}
@@ -428,7 +439,7 @@ func TestFindingConfirmationAuthorityGates(t *testing.T) {
 	}
 
 	// A native, human-authored finding remains ungated.
-	manual := &fakeRepo{list: []finding.Finding{{ID: findID, Kind: finding.KindManual, EvidenceScore: 0}}, ret: finding.Finding{ID: findID, Status: finding.StatusConfirmed}}
+	manual := &fakeRepo{list: []finding.Finding{{ID: findID, EngagementID: engID, Kind: finding.KindManual, EvidenceScore: 0}}, ret: finding.Finding{ID: findID, Status: finding.StatusConfirmed}}
 	if err := confirm(manual); err != nil {
 		t.Fatalf("a manual finding must not be gated: %v", err)
 	}
@@ -436,7 +447,7 @@ func TestFindingConfirmationAuthorityGates(t *testing.T) {
 	// Reader-only and unknown origins never gain native confirmation authority,
 	// even if a caller fabricates an evidence score above the normal bar.
 	for _, kind := range []finding.Kind{finding.KindExternal, finding.Kind("future-origin")} {
-		repo := &fakeRepo{list: []finding.Finding{{ID: findID, Kind: kind, EvidenceScore: 100}}}
+		repo := &fakeRepo{list: []finding.Finding{{ID: findID, EngagementID: engID, Kind: kind, EvidenceScore: 100}}}
 		if err := confirm(repo); !errors.Is(err, shared.ErrValidation) {
 			t.Fatalf("kind %q must not be confirmable through the native workflow, got %v", kind, err)
 		}

@@ -13452,7 +13452,7 @@ components:
 
     NotificationEventType:
       type: string
-      enum: [vulnerability_action.created, scan.completed, quality_gate.failed, sla.approaching_deadline, fleet.agent.offline, incident.created, finding.ownership_changed]
+      enum: [vulnerability_action.created, scan.completed, quality_gate.failed, sla.approaching_deadline, fleet.agent.offline, incident.created, finding.ownership_changed, finding.created, finding.status_changed, finding.retest_completed, scan.failed, dast.run_finished, recon.run_finished, cspm.run_finished, sla.breached, risk_acceptance.created, risk_acceptance.expiring, risk_acceptance.expired]
 
     NotificationEventSpec:
       type: object
@@ -13470,7 +13470,7 @@ components:
         filters:
           type: array
           description: Rule filters this event type accepts; a rule using any other filter is rejected.
-          items: {type: string, enum: [min_severity, action_types, engagement_ids, team_ids, lead_time_seconds]}
+          items: {type: string, enum: [min_severity, action_types, engagement_ids, team_ids, lead_time_seconds, finding_kinds, from_statuses, to_statuses, retest_results, scan_kinds, outcomes, providers]}
         max_data_class: {$ref: '#/components/schemas/NotificationDataClass'}
         mandatory: {type: boolean, description: Cannot be muted by a rule or a user preference}
         operator_only: {type: boolean, description: Sent on demand to one channel and never matched by rules}
@@ -13875,16 +13875,23 @@ components:
         event_type: {$ref: '#/components/schemas/NotificationEventType'}
         min_severity: {type: string, enum: [critical, high, medium, low, info]}
         action_types: {type: array, items: {type: string}}
+        finding_kinds: {type: array, maxItems: 50, items: {type: string}}
+        from_statuses: {type: array, maxItems: 50, items: {type: string}}
+        to_statuses: {type: array, maxItems: 50, items: {type: string}}
+        retest_results: {type: array, maxItems: 50, items: {type: string}}
+        scan_kinds: {type: array, maxItems: 50, items: {type: string}}
+        outcomes: {type: array, maxItems: 50, items: {type: string}}
+        providers: {type: array, maxItems: 50, items: {type: string}}
         engagement_ids: {type: array, maxItems: 200, items: {type: string}}
         team_ids:
           type: array
           maxItems: 200
           items: {type: string, minLength: 1, maxLength: 200}
-          description: Only for finding.ownership_changed. Matches the old or new team; IDs must belong to this tenant. Requires at least one ID unless all_teams is true.
+          description: For finding.ownership_changed, matches the old or new team. For SLA breach and risk acceptance lifecycle events, matches the captured team. IDs must belong to this tenant; select at least one unless all_teams is true.
         all_teams:
           type: boolean
           default: false
-          description: Explicit administrator subscription to ownership changes across this tenant, including findings without a team. Only for finding.ownership_changed; mutually exclusive with team_ids.
+          description: Explicit administrator subscription across this tenant for ownership changes, SLA breach and risk acceptance lifecycle events, including unassigned lifecycle findings. Mutually exclusive with team_ids.
         channel_ids: {type: array, maxItems: 50, items: {type: string}, description: The channels to deliver to. A rule needs at least one channel or one recipient role.}
         recipient_roles:
           type: array

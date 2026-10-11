@@ -77,10 +77,59 @@ func eventBuilders() map[domain.EventType]eventBuilder {
 				return map[string]string{"actor": data.text("actor"), "reason": data.text("reason")}
 			},
 		},
-		domain.EventChannelPaused:      {subjectKey: "channel_id"},
-		domain.EventDestinationChanged: {},
-		domain.EventTest:               {},
+		domain.EventFindingCreated:         findingEventBuilder("finding_id"),
+		domain.EventFindingStatusChanged:   findingEventBuilder("finding_id"),
+		domain.EventFindingRetestCompleted: findingEventBuilder("finding_id"),
+		domain.EventScanFailed:             runEventBuilder("scan_id"),
+		domain.EventDASTRunFinished:        runEventBuilder("run_id"),
+		domain.EventReconRunFinished:       runEventBuilder("run_id"),
+		domain.EventCSPMRunFinished:        runEventBuilder("run_id"),
+		domain.EventSLABreached:            lifecycleEventBuilder("finding_id", lifecycleStillCurrent),
+		domain.EventRiskAcceptanceCreated:  lifecycleEventBuilder("finding_id", nil),
+		domain.EventRiskAcceptanceExpiring: lifecycleEventBuilder("finding_id", lifecycleStillCurrent),
+		domain.EventRiskAcceptanceExpired:  lifecycleEventBuilder("finding_id", lifecycleStillCurrent),
+		domain.EventChannelPaused:          {subjectKey: "channel_id"},
+		domain.EventDestinationChanged:     {},
+		domain.EventTest:                   {},
 	}
+}
+
+func findingEventBuilder(subjectKey string) eventBuilder {
+	return eventBuilder{subjectKey: subjectKey, vars: func(e domain.Event, data eventData, _ sourceFacts) map[string]string {
+		return map[string]string{
+			"severity": string(e.Severity), "finding_kind": data.text("finding_kind"), "status": data.text("status"),
+			"from_status": data.text("from_status"), "to_status": data.text("to_status"), "result": data.text("result"), "actor": data.text("actor"),
+		}
+	}}
+}
+
+func runEventBuilder(subjectKey string) eventBuilder {
+	return eventBuilder{subjectKey: subjectKey, vars: func(_ domain.Event, data eventData, facts sourceFacts) map[string]string {
+		target := facts.get("target")
+		if target == "" {
+			target = data.text("target")
+		}
+		values := map[string]string{"scan_kind": data.text("scan_kind"), "outcome": data.text("outcome"), "provider": data.text("provider"), "error_code": data.text("error_code"), "target": displayTarget(target), "counts_available": data.text("counts_available"), "severity_counts_available": data.text("severity_counts_available")}
+		for _, name := range []string{"total_count", "critical_count", "high_count", "medium_count", "low_count", "info_count"} {
+			values[name] = data.text(name)
+		}
+		return values
+	}}
+}
+
+func lifecycleEventBuilder(subjectKey string, relevant func(context.Context, ports.NotificationRelevance, ports.NotificationWork, eventData) (bool, error)) eventBuilder {
+	return eventBuilder{subjectKey: subjectKey, relevant: relevant, vars: func(e domain.Event, data eventData, _ sourceFacts) map[string]string {
+		values := map[string]string{"severity": string(e.Severity), "tier": data.text("tier"), "reminder": data.text("reminder"), "actor": data.text("actor")}
+		for _, name := range []string{"accepted_at", "expires_at", "deadline", "breached_at"} {
+			if at, ok := data.time(name); ok {
+				values[name] = formatTime(at)
+			}
+		}
+		if hours, err := strconv.ParseFloat(data.text("lead_time_seconds"), 64); err == nil && hours > 0 {
+			values["lead_time_hours"] = strconv.FormatFloat(hours/3600, 'f', -1, 64)
+		}
+		return values
+	}}
 }
 
 // The data of the captured events is the object the capture trigger of migration 0163 writes, key

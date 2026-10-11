@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -24,21 +25,66 @@ func NewReconRunStore(pool *pgxpool.Pool) *ReconRunStore { return &ReconRunStore
 
 var _ ports.ReconRunStore = (*ReconRunStore)(nil)
 
-// Save upserts a run (used on create and on every stage/status update).
+// Save upserts a run (used on create and on every stage/status update). The
+// recon table predates tenant columns, so the engagement binding is checked in
+// the same tenant transaction before the write. This closes the old raw-pool
+// path that could write a run for an engagement outside the caller's tenant.
 func (r *ReconRunStore) Save(ctx context.Context, run recon.Run) error {
-	_, err := r.pool.Exec(ctx,
-		`INSERT INTO recon_runs (`+reconRunCols+`)
+	if !run.Status.Valid() {
+		return fmt.Errorf("%w: invalid recon run status", shared.ErrValidation)
+	}
+	if run.Status.Terminal() && run.FinishedAt == nil {
+		return fmt.Errorf("%w: terminal recon run requires finished_at", shared.ErrValidation)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("%w: tenant context is required for recon run", shared.ErrValidation)
+	}
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		var engagementName string
+		if err := tx.QueryRow(ctx, `SELECT name FROM engagements WHERE id=$1 AND tenant_id=$2`, run.EngagementID, tenantID).Scan(&engagementName); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("recon engagement %s: %w", run.EngagementID, shared.ErrNotFound)
+			}
+			return err
+		}
+		var prior, priorEngagement string
+		err := tx.QueryRow(ctx, `SELECT status,engagement_id FROM recon_runs WHERE id=$1 FOR UPDATE`, run.ID.String()).Scan(&prior, &priorEngagement)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil && priorEngagement != run.EngagementID.String() {
+			return fmt.Errorf("%w: recon run engagement does not match stored run", shared.ErrValidation)
+		}
+		_, err = tx.Exec(ctx,
+			`INSERT INTO recon_runs (`+reconRunCols+`)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		 ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
 		     error=EXCLUDED.error, result_count=EXCLUDED.result_count,
 		     evidence_id=EXCLUDED.evidence_id, finished_at=EXCLUDED.finished_at,
 		     containment=EXCLUDED.containment`,
-		run.ID.String(), run.EngagementID.String(), run.Tool, run.Target, string(run.Status),
-		run.Stage, run.Error, run.ResultCount, run.EvidenceID.String(), run.StartedAt, run.FinishedAt, run.Containment)
+			run.ID.String(), run.EngagementID.String(), run.Tool, run.Target, string(run.Status),
+			run.Stage, run.Error, run.ResultCount, run.EvidenceID.String(), run.StartedAt, run.FinishedAt, run.Containment)
+		if err != nil {
+			return err
+		}
+		if run.Status.Terminal() && !recon.Status(prior).Terminal() {
+			return appendRunFinishedNotification(ctx, tx, tenantID, run.EngagementID, notification.EventReconRunFinished,
+				"recon_run", run.ID.String(), "recon", string(run.Status), []string{run.Tool}, run.Target, stableReconErrorCode(run.Status, run.Stage), -1, *run.FinishedAt)
+		}
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("save recon run: %w", err)
 	}
 	return nil
+}
+
+func stableReconErrorCode(status recon.Status, stage string) string {
+	if status != recon.StatusFailed {
+		return ""
+	}
+	return "recon_failed"
 }
 
 // Get returns a run by id, or shared.ErrNotFound.

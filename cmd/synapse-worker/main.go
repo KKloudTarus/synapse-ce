@@ -197,6 +197,10 @@ func main() {
 		log.Error("notification channel health configuration invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateNotificationEvents(); err != nil {
+		log.Error("notification event configuration invalid", "err", err)
+		os.Exit(1)
+	}
 	if err := cfg.ValidateSecretVerification(); err != nil {
 		log.Error("active secret verification configuration invalid", "err", err)
 		os.Exit(1)
@@ -820,6 +824,10 @@ func main() {
 		// its own (the framework keys events by a stable id), and the rule form warns about the overlap.
 		alertinguc.WarnLegacyWebhookDeprecated(log, cfg.AlertWebhookURL != "")
 		notificationSource := postgres.NewNotificationSource(pool, newNotificationRepository(pool), cfg.FleetAgentStaleAfter)
+		if err := notificationSource.SetSLABreachMaxReminders(cfg.NotificationSLABreachMaxReminders); err != nil {
+			log.Error("notification SLA reminders invalid", "err", err)
+			os.Exit(1)
+		}
 		notificationSource.SetVulnerabilityEnabled(cfg.VulnerabilityNotificationsEnabled && !cfg.VulnerabilityDryRunEnabled)
 		maintenanceTasks = append(maintenanceTasks, func(taskCtx context.Context) {
 			ticker := time.NewTicker(time.Minute)

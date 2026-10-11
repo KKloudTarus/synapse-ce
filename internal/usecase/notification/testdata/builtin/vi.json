@@ -1,0 +1,2536 @@
+{
+  "cspm.run_finished/chat/detail": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "cspm.run_finished/chat/signal": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "cspm.run_finished/chat/summary": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "cspm.run_finished/email/detail": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "cspm.run_finished/email/signal": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "cspm.run_finished/email/summary": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "cspm.run_finished/pager/detail": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+    }
+  },
+  "cspm.run_finished/pager/signal": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "cspm.run_finished/pager/summary": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+    }
+  },
+  "cspm.run_finished/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-cspm.run_finished",
+        "type": "cspm.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "cspm.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "cspm.run_finished/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-cspm.run_finished",
+        "type": "cspm.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "cspm.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "cspm.run_finished/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-cspm.run_finished",
+        "type": "cspm.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "cspm.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "dast.run_finished/chat/detail": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "dast.run_finished/chat/signal": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "dast.run_finished/chat/summary": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "dast.run_finished/email/detail": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "dast.run_finished/email/signal": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "dast.run_finished/email/summary": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "dast.run_finished/pager/detail": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+    }
+  },
+  "dast.run_finished/pager/signal": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "dast.run_finished/pager/summary": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+    }
+  },
+  "dast.run_finished/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-dast.run_finished",
+        "type": "dast.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "dast.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "dast.run_finished/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-dast.run_finished",
+        "type": "dast.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "dast.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "dast.run_finished/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-dast.run_finished",
+        "type": "dast.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "dast.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "finding.created/chat/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "title": "Phát hiện mới"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Phát hiện mới\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Trạng thái: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Phát hiện mới\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.created/chat/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Phát hiện mới"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Phát hiện mới\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Trạng thái: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Phát hiện mới\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.created/chat/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "title": "Phát hiện mới"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Phát hiện mới\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Trạng thái: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Phát hiện mới\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.created/email/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "subject": "Phát hiện mới"
+    },
+    "formatted": "Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nLoại: sast\u003cbr\u003e\nTrạng thái: confirmed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.created/email/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Phát hiện mới"
+    },
+    "formatted": "Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nLoại: sast\u003cbr\u003e\nTrạng thái: confirmed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.created/email/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "subject": "Phát hiện mới"
+    },
+    "formatted": "Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nLoại: sast\u003cbr\u003e\nTrạng thái: confirmed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.created/pager/detail": {
+    "fields": {
+      "summary": "Phát hiện mới: Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding"
+    }
+  },
+  "finding.created/pager/signal": {
+    "fields": {
+      "summary": "Phát hiện mới: Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.created/pager/summary": {
+    "fields": {
+      "summary": "Phát hiện mới: Mức độ: critical\nLoại: sast\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding"
+    }
+  },
+  "finding.created/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.created",
+        "type": "finding.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.created",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.created/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.created",
+        "type": "finding.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.created",
+          "finding_kind": "sast",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.created/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.created",
+        "type": "finding.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.created",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.ownership_changed/chat/detail": {
+    "fields": {
+      "body": "Sự kiện: finding\\.ownership\\_changed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding\nNhóm cũ: summary\\-old\\-team\nNhóm mới: summary\\-new\\-team\nNgười phụ trách cũ: summary\\-old\\-assignee\nNgười phụ trách mới: summary\\-new\\-assignee\nNgười thay đổi: summary\\-actor\nLý do: summary\\-reason",
+      "title": "Thay đổi người phụ trách phát hiện"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Thay đổi người phụ trách phát hiện\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Sự kiện: finding.ownership_changed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhóm cũ: summary-old-team\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhóm mới: summary-new-team\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Người phụ trách cũ: summary-old-assignee\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Người phụ trách mới: summary-new-assignee\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Người thay đổi: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Lý do: summary-reason\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Thay đổi người phụ trách phát hiện\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.ownership_changed/chat/signal": {
+    "fields": {
+      "body": "Sự kiện: finding\\.ownership\\_changed\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Thay đổi người phụ trách phát hiện"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Thay đổi người phụ trách phát hiện\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Sự kiện: finding.ownership_changed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Thay đổi người phụ trách phát hiện\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.ownership_changed/chat/summary": {
+    "fields": {
+      "body": "Sự kiện: finding\\.ownership\\_changed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding\nNhóm cũ: summary\\-old\\-team\nNhóm mới: summary\\-new\\-team\nNgười phụ trách cũ: summary\\-old\\-assignee\nNgười phụ trách mới: summary\\-new\\-assignee\nNgười thay đổi: summary\\-actor\nLý do: summary\\-reason",
+      "title": "Thay đổi người phụ trách phát hiện"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Thay đổi người phụ trách phát hiện\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Sự kiện: finding.ownership_changed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhóm cũ: summary-old-team\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhóm mới: summary-new-team\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Người phụ trách cũ: summary-old-assignee\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Người phụ trách mới: summary-new-assignee\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Người thay đổi: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Lý do: summary-reason\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Thay đổi người phụ trách phát hiện\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.ownership_changed/email/detail": {
+    "fields": {
+      "body": "Sự kiện: finding\\.ownership\\_changed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding\nNhóm cũ: summary\\-old\\-team\nNhóm mới: summary\\-new\\-team\nNgười phụ trách cũ: summary\\-old\\-assignee\nNgười phụ trách mới: summary\\-new\\-assignee\nNgười thay đổi: summary\\-actor\nLý do: summary\\-reason",
+      "subject": "Thay đổi người phụ trách phát hiện"
+    },
+    "formatted": "Sự kiện: finding.ownership_changed\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nPhát hiện: summary-finding\nNhóm cũ: summary-old-team\nNhóm mới: summary-new-team\nNgười phụ trách cũ: summary-old-assignee\nNgười phụ trách mới: summary-new-assignee\nNgười thay đổi: summary-actor\nLý do: summary-reason",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSự kiện: finding.ownership_changed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nPhát hiện: summary-finding\u003cbr\u003e\nNhóm cũ: summary-old-team\u003cbr\u003e\nNhóm mới: summary-new-team\u003cbr\u003e\nNgười phụ trách cũ: summary-old-assignee\u003cbr\u003e\nNgười phụ trách mới: summary-new-assignee\u003cbr\u003e\nNgười thay đổi: summary-actor\u003cbr\u003e\nLý do: summary-reason\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.ownership_changed/email/signal": {
+    "fields": {
+      "body": "Sự kiện: finding\\.ownership\\_changed\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Thay đổi người phụ trách phát hiện"
+    },
+    "formatted": "Sự kiện: finding.ownership_changed\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSự kiện: finding.ownership_changed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.ownership_changed/email/summary": {
+    "fields": {
+      "body": "Sự kiện: finding\\.ownership\\_changed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding\nNhóm cũ: summary\\-old\\-team\nNhóm mới: summary\\-new\\-team\nNgười phụ trách cũ: summary\\-old\\-assignee\nNgười phụ trách mới: summary\\-new\\-assignee\nNgười thay đổi: summary\\-actor\nLý do: summary\\-reason",
+      "subject": "Thay đổi người phụ trách phát hiện"
+    },
+    "formatted": "Sự kiện: finding.ownership_changed\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nPhát hiện: summary-finding\nNhóm cũ: summary-old-team\nNhóm mới: summary-new-team\nNgười phụ trách cũ: summary-old-assignee\nNgười phụ trách mới: summary-new-assignee\nNgười thay đổi: summary-actor\nLý do: summary-reason",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSự kiện: finding.ownership_changed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nPhát hiện: summary-finding\u003cbr\u003e\nNhóm cũ: summary-old-team\u003cbr\u003e\nNhóm mới: summary-new-team\u003cbr\u003e\nNgười phụ trách cũ: summary-old-assignee\u003cbr\u003e\nNgười phụ trách mới: summary-new-assignee\u003cbr\u003e\nNgười thay đổi: summary-actor\u003cbr\u003e\nLý do: summary-reason\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.ownership_changed/pager/detail": {
+    "fields": {
+      "summary": "Thay đổi người phụ trách phát hiện: Sự kiện: finding\\.ownership\\_changed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding\nNhóm cũ: summary\\-old\\-team\nNhóm mới: summary\\-new\\-team\nNgười phụ trách cũ: summary\\-old\\-assignee\nNgười phụ trách mới: summary\\-new\\-assignee\nNgười thay đổi: summary\\-actor\nLý do: summary\\-reason"
+    }
+  },
+  "finding.ownership_changed/pager/signal": {
+    "fields": {
+      "summary": "Thay đổi người phụ trách phát hiện: Sự kiện: finding\\.ownership\\_changed\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.ownership_changed/pager/summary": {
+    "fields": {
+      "summary": "Thay đổi người phụ trách phát hiện: Sự kiện: finding\\.ownership\\_changed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding\nNhóm cũ: summary\\-old\\-team\nNhóm mới: summary\\-new\\-team\nNgười phụ trách cũ: summary\\-old\\-assignee\nNgười phụ trách mới: summary\\-new\\-assignee\nNgười thay đổi: summary\\-actor\nLý do: summary\\-reason"
+    }
+  },
+  "finding.ownership_changed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.ownership_changed",
+        "type": "finding.ownership_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.ownership_changed",
+          "finding_title": "summary-finding",
+          "new_assignee": "summary-new-assignee",
+          "new_team": "summary-new-team",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "old_assignee": "summary-old-assignee",
+          "old_team": "summary-old-team",
+          "reason": "summary-reason",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.ownership_changed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.ownership_changed",
+        "type": "finding.ownership_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.ownership_changed",
+          "occurred_at": "2026-10-02T09:00:00Z"
+        }
+      }
+    }
+  },
+  "finding.ownership_changed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.ownership_changed",
+        "type": "finding.ownership_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.ownership_changed",
+          "finding_title": "summary-finding",
+          "new_assignee": "summary-new-assignee",
+          "new_team": "summary-new-team",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "old_assignee": "summary-old-assignee",
+          "old_team": "summary-old-team",
+          "reason": "summary-reason",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.retest_completed/chat/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "Kiểm tra lại hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Kiểm tra lại hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: remediated\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Trạng thái: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Kiểm tra lại hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.retest_completed/chat/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Kiểm tra lại hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Kiểm tra lại hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: remediated\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Trạng thái: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Kiểm tra lại hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.retest_completed/chat/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "Kiểm tra lại hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Kiểm tra lại hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: remediated\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Trạng thái: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Kiểm tra lại hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.retest_completed/email/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "Kiểm tra lại hoàn tất"
+    },
+    "formatted": "Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nKết quả: remediated\u003cbr\u003e\nTrạng thái: confirmed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.retest_completed/email/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Kiểm tra lại hoàn tất"
+    },
+    "formatted": "Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nKết quả: remediated\u003cbr\u003e\nTrạng thái: confirmed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.retest_completed/email/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "Kiểm tra lại hoàn tất"
+    },
+    "formatted": "Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nKết quả: remediated\u003cbr\u003e\nTrạng thái: confirmed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.retest_completed/pager/detail": {
+    "fields": {
+      "summary": "Kiểm tra lại hoàn tất: Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "finding.retest_completed/pager/signal": {
+    "fields": {
+      "summary": "Kiểm tra lại hoàn tất: Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.retest_completed/pager/summary": {
+    "fields": {
+      "summary": "Kiểm tra lại hoàn tất: Mức độ: critical\nKết quả: remediated\nTrạng thái: confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "finding.retest_completed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.retest_completed",
+        "type": "finding.retest_completed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.retest_completed",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "result": "remediated",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.retest_completed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.retest_completed",
+        "type": "finding.retest_completed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.retest_completed",
+          "finding_kind": "sast",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "result": "remediated",
+          "severity": "critical",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.retest_completed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.retest_completed",
+        "type": "finding.retest_completed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.retest_completed",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "result": "remediated",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.status_changed/chat/detail": {
+    "fields": {
+      "body": "Mức độ: critical\ntriage → confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "title": "Trạng thái phát hiện đã đổi"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Trạng thái phát hiện đã đổi\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"triage → confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Trạng thái phát hiện đã đổi\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.status_changed/chat/signal": {
+    "fields": {
+      "body": "Mức độ: critical\ntriage → confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Trạng thái phát hiện đã đổi"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Trạng thái phát hiện đã đổi\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"triage → confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Trạng thái phát hiện đã đổi\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.status_changed/chat/summary": {
+    "fields": {
+      "body": "Mức độ: critical\ntriage → confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "title": "Trạng thái phát hiện đã đổi"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Trạng thái phát hiện đã đổi\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"triage → confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Trạng thái phát hiện đã đổi\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.status_changed/email/detail": {
+    "fields": {
+      "body": "Mức độ: critical\ntriage → confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "subject": "Trạng thái phát hiện đã đổi"
+    },
+    "formatted": "Mức độ: critical\ntriage → confirmed\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\ntriage → confirmed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.status_changed/email/signal": {
+    "fields": {
+      "body": "Mức độ: critical\ntriage → confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Trạng thái phát hiện đã đổi"
+    },
+    "formatted": "Mức độ: critical\ntriage → confirmed\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\ntriage → confirmed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.status_changed/email/summary": {
+    "fields": {
+      "body": "Mức độ: critical\ntriage → confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "subject": "Trạng thái phát hiện đã đổi"
+    },
+    "formatted": "Mức độ: critical\ntriage → confirmed\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\ntriage → confirmed\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.status_changed/pager/detail": {
+    "fields": {
+      "summary": "Trạng thái phát hiện đã đổi: Mức độ: critical\ntriage → confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding"
+    }
+  },
+  "finding.status_changed/pager/signal": {
+    "fields": {
+      "summary": "Trạng thái phát hiện đã đổi: Mức độ: critical\ntriage → confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.status_changed/pager/summary": {
+    "fields": {
+      "summary": "Trạng thái phát hiện đã đổi: Mức độ: critical\ntriage → confirmed\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding"
+    }
+  },
+  "finding.status_changed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.status_changed",
+        "type": "finding.status_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.status_changed",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "from_status": "triage",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.status_changed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.status_changed",
+        "type": "finding.status_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.status_changed",
+          "finding_kind": "sast",
+          "from_status": "triage",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.status_changed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.status_changed",
+        "type": "finding.status_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "finding.status_changed",
+          "finding_kind": "sast",
+          "finding_title": "summary-finding",
+          "from_status": "triage",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "fleet.agent.offline/chat/detail": {
+    "fields": {
+      "body": "Lần cuối hoạt động: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent",
+      "title": "Agent không kết nối"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Agent không kết nối\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Lần cuối hoạt động: 2026-10-02 08:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Agent: summary-agent\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Agent không kết nối\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "fleet.agent.offline/chat/signal": {
+    "fields": {
+      "body": "Lần cuối hoạt động: 2026\\-10\\-02 08\\:00 UTC",
+      "title": "Agent không kết nối"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Agent không kết nối\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Lần cuối hoạt động: 2026-10-02 08:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Agent không kết nối\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "fleet.agent.offline/chat/summary": {
+    "fields": {
+      "body": "Lần cuối hoạt động: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent",
+      "title": "Agent không kết nối"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Agent không kết nối\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Lần cuối hoạt động: 2026-10-02 08:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Agent: summary-agent\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Agent không kết nối\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "fleet.agent.offline/email/detail": {
+    "fields": {
+      "body": "Lần cuối hoạt động: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent",
+      "subject": "Agent không kết nối"
+    },
+    "formatted": "Lần cuối hoạt động: 2026-10-02 08:00 UTC\nAgent: summary-agent",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLần cuối hoạt động: 2026-10-02 08:00 UTC\u003cbr\u003e\nAgent: summary-agent\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "fleet.agent.offline/email/signal": {
+    "fields": {
+      "body": "Lần cuối hoạt động: 2026\\-10\\-02 08\\:00 UTC",
+      "subject": "Agent không kết nối"
+    },
+    "formatted": "Lần cuối hoạt động: 2026-10-02 08:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLần cuối hoạt động: 2026-10-02 08:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "fleet.agent.offline/email/summary": {
+    "fields": {
+      "body": "Lần cuối hoạt động: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent",
+      "subject": "Agent không kết nối"
+    },
+    "formatted": "Lần cuối hoạt động: 2026-10-02 08:00 UTC\nAgent: summary-agent",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLần cuối hoạt động: 2026-10-02 08:00 UTC\u003cbr\u003e\nAgent: summary-agent\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "fleet.agent.offline/pager/detail": {
+    "fields": {
+      "summary": "Agent không kết nối: Lần cuối hoạt động: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent"
+    }
+  },
+  "fleet.agent.offline/pager/signal": {
+    "fields": {
+      "summary": "Agent không kết nối: Lần cuối hoạt động: 2026\\-10\\-02 08\\:00 UTC"
+    }
+  },
+  "fleet.agent.offline/pager/summary": {
+    "fields": {
+      "summary": "Agent không kết nối: Lần cuối hoạt động: 2026\\-10\\-02 08\\:00 UTC\nAgent: summary\\-agent"
+    }
+  },
+  "fleet.agent.offline/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-fleet.agent.offline",
+        "type": "fleet.agent.offline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "agent_name": "summary-agent",
+          "event_label": "signal-event-label",
+          "event_type": "fleet.agent.offline",
+          "last_seen_at": "2026-10-02T08:00:00Z",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "fleet.agent.offline/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-fleet.agent.offline",
+        "type": "fleet.agent.offline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "fleet.agent.offline",
+          "last_seen_at": "2026-10-02T08:00:00Z",
+          "occurred_at": "2026-10-02T09:00:00Z"
+        }
+      }
+    }
+  },
+  "fleet.agent.offline/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-fleet.agent.offline",
+        "type": "fleet.agent.offline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "agent_name": "summary-agent",
+          "event_label": "signal-event-label",
+          "event_type": "fleet.agent.offline",
+          "last_seen_at": "2026-10-02T08:00:00Z",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "incident.created/chat/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nTài sản: detail\\-asset",
+      "title": "Sự cố mới"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Sự cố mới\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tài sản: detail-asset\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Sự cố mới\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "incident.created/chat/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Sự cố mới"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Sự cố mới\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Sự cố mới\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "incident.created/chat/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement",
+      "title": "Sự cố mới"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Sự cố mới\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Sự cố mới\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "incident.created/email/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nTài sản: detail\\-asset",
+      "subject": "Sự cố mới"
+    },
+    "formatted": "Mức độ: critical\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nTài sản: detail-asset",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nTài sản: detail-asset\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "incident.created/email/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Sự cố mới"
+    },
+    "formatted": "Mức độ: critical\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "incident.created/email/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement",
+      "subject": "Sự cố mới"
+    },
+    "formatted": "Mức độ: critical\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "incident.created/pager/detail": {
+    "fields": {
+      "summary": "Sự cố mới: Mức độ: critical\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nTài sản: detail\\-asset"
+    }
+  },
+  "incident.created/pager/signal": {
+    "fields": {
+      "summary": "Sự cố mới: Mức độ: critical\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "incident.created/pager/summary": {
+    "fields": {
+      "summary": "Sự cố mới: Mức độ: critical\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement"
+    }
+  },
+  "incident.created/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-incident.created",
+        "type": "incident.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "asset_name": "detail-asset",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "incident.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "incident.created/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-incident.created",
+        "type": "incident.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "incident.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical"
+        }
+      }
+    }
+  },
+  "incident.created/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-incident.created",
+        "type": "incident.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "incident.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "quality_gate.failed/chat/detail": {
+    "fields": {
+      "body": "Điều kiện không đạt: 3\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nDự án: summary\\-project",
+      "title": "Chất lượng không đạt"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chất lượng không đạt\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Điều kiện không đạt: 3\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Dự án: summary-project\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chất lượng không đạt\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "quality_gate.failed/chat/signal": {
+    "fields": {
+      "body": "Điều kiện không đạt: 3\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Chất lượng không đạt"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chất lượng không đạt\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Điều kiện không đạt: 3\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chất lượng không đạt\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "quality_gate.failed/chat/summary": {
+    "fields": {
+      "body": "Điều kiện không đạt: 3\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nDự án: summary\\-project",
+      "title": "Chất lượng không đạt"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chất lượng không đạt\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Điều kiện không đạt: 3\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Dự án: summary-project\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chất lượng không đạt\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "quality_gate.failed/email/detail": {
+    "fields": {
+      "body": "Điều kiện không đạt: 3\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nDự án: summary\\-project",
+      "subject": "Chất lượng không đạt"
+    },
+    "formatted": "Điều kiện không đạt: 3\nThời gian: 2026-10-02 09:00 UTC\nDự án: summary-project",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eĐiều kiện không đạt: 3\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nDự án: summary-project\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "quality_gate.failed/email/signal": {
+    "fields": {
+      "body": "Điều kiện không đạt: 3\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Chất lượng không đạt"
+    },
+    "formatted": "Điều kiện không đạt: 3\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eĐiều kiện không đạt: 3\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "quality_gate.failed/email/summary": {
+    "fields": {
+      "body": "Điều kiện không đạt: 3\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nDự án: summary\\-project",
+      "subject": "Chất lượng không đạt"
+    },
+    "formatted": "Điều kiện không đạt: 3\nThời gian: 2026-10-02 09:00 UTC\nDự án: summary-project",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eĐiều kiện không đạt: 3\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nDự án: summary-project\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "quality_gate.failed/pager/detail": {
+    "fields": {
+      "summary": "Chất lượng không đạt: Điều kiện không đạt: 3\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nDự án: summary\\-project"
+    }
+  },
+  "quality_gate.failed/pager/signal": {
+    "fields": {
+      "summary": "Chất lượng không đạt: Điều kiện không đạt: 3\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "quality_gate.failed/pager/summary": {
+    "fields": {
+      "summary": "Chất lượng không đạt: Điều kiện không đạt: 3\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nDự án: summary\\-project"
+    }
+  },
+  "quality_gate.failed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-quality_gate.failed",
+        "type": "quality_gate.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "quality_gate.failed",
+          "failed_conditions": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "project_name": "summary-project",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "quality_gate.failed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-quality_gate.failed",
+        "type": "quality_gate.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "quality_gate.failed",
+          "failed_conditions": "3",
+          "occurred_at": "2026-10-02T09:00:00Z"
+        }
+      }
+    }
+  },
+  "quality_gate.failed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-quality_gate.failed",
+        "type": "quality_gate.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "quality_gate.failed",
+          "failed_conditions": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "project_name": "summary-project",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "recon.run_finished/chat/detail": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "recon.run_finished/chat/signal": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "recon.run_finished/chat/summary": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "recon.run_finished/email/detail": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "recon.run_finished/email/signal": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "recon.run_finished/email/summary": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "recon.run_finished/pager/detail": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+    }
+  },
+  "recon.run_finished/pager/signal": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "recon.run_finished/pager/summary": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+    }
+  },
+  "recon.run_finished/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-recon.run_finished",
+        "type": "recon.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "recon.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "recon.run_finished/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-recon.run_finished",
+        "type": "recon.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "recon.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "recon.run_finished/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-recon.run_finished",
+        "type": "recon.run_finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "recon.run_finished",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "risk_acceptance.created/chat/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "Chấp nhận rủi ro mới"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chấp nhận rủi ro mới\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hết hạn: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chấp nhận rủi ro mới\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.created/chat/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Chấp nhận rủi ro mới"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chấp nhận rủi ro mới\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hết hạn: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chấp nhận rủi ro mới\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.created/chat/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "Chấp nhận rủi ro mới"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chấp nhận rủi ro mới\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hết hạn: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chấp nhận rủi ro mới\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.created/email/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "Chấp nhận rủi ro mới"
+    },
+    "formatted": "Mức độ: critical\nMức: low\nHết hạn: 2026-11-01 09:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức: low\u003cbr\u003e\nHết hạn: 2026-11-01 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.created/email/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Chấp nhận rủi ro mới"
+    },
+    "formatted": "Mức độ: critical\nMức: low\nHết hạn: 2026-11-01 09:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức: low\u003cbr\u003e\nHết hạn: 2026-11-01 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.created/email/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "Chấp nhận rủi ro mới"
+    },
+    "formatted": "Mức độ: critical\nMức: low\nHết hạn: 2026-11-01 09:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức: low\u003cbr\u003e\nHết hạn: 2026-11-01 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.created/pager/detail": {
+    "fields": {
+      "summary": "Chấp nhận rủi ro mới: Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "risk_acceptance.created/pager/signal": {
+    "fields": {
+      "summary": "Chấp nhận rủi ro mới: Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "risk_acceptance.created/pager/summary": {
+    "fields": {
+      "summary": "Chấp nhận rủi ro mới: Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "risk_acceptance.created/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.created",
+        "type": "risk_acceptance.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.created",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.created/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.created",
+        "type": "risk_acceptance.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.created",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "tier": "low"
+        }
+      }
+    }
+  },
+  "risk_acceptance.created/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.created",
+        "type": "risk_acceptance.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.created",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expired/chat/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "Chấp nhận rủi ro đã hết hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chấp nhận rủi ro đã hết hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hết hạn: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chấp nhận rủi ro đã hết hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expired/chat/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Chấp nhận rủi ro đã hết hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chấp nhận rủi ro đã hết hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hết hạn: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chấp nhận rủi ro đã hết hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expired/chat/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "Chấp nhận rủi ro đã hết hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chấp nhận rủi ro đã hết hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hết hạn: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chấp nhận rủi ro đã hết hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expired/email/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "Chấp nhận rủi ro đã hết hạn"
+    },
+    "formatted": "Mức độ: critical\nMức: low\nHết hạn: 2026-11-01 09:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức: low\u003cbr\u003e\nHết hạn: 2026-11-01 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expired/email/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Chấp nhận rủi ro đã hết hạn"
+    },
+    "formatted": "Mức độ: critical\nMức: low\nHết hạn: 2026-11-01 09:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức: low\u003cbr\u003e\nHết hạn: 2026-11-01 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expired/email/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "Chấp nhận rủi ro đã hết hạn"
+    },
+    "formatted": "Mức độ: critical\nMức: low\nHết hạn: 2026-11-01 09:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức: low\u003cbr\u003e\nHết hạn: 2026-11-01 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expired/pager/detail": {
+    "fields": {
+      "summary": "Chấp nhận rủi ro đã hết hạn: Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "risk_acceptance.expired/pager/signal": {
+    "fields": {
+      "summary": "Chấp nhận rủi ro đã hết hạn: Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "risk_acceptance.expired/pager/summary": {
+    "fields": {
+      "summary": "Chấp nhận rủi ro đã hết hạn: Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "risk_acceptance.expired/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expired",
+        "type": "risk_acceptance.expired",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expired",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expired/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expired",
+        "type": "risk_acceptance.expired",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expired",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "tier": "low"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expired/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expired",
+        "type": "risk_acceptance.expired",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expired",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expiring/chat/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "Chấp nhận rủi ro sắp hết hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chấp nhận rủi ro sắp hết hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hết hạn: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chấp nhận rủi ro sắp hết hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expiring/chat/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Chấp nhận rủi ro sắp hết hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chấp nhận rủi ro sắp hết hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hết hạn: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chấp nhận rủi ro sắp hết hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expiring/chat/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "Chấp nhận rủi ro sắp hết hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Chấp nhận rủi ro sắp hết hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hết hạn: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Chấp nhận rủi ro sắp hết hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "risk_acceptance.expiring/email/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "Chấp nhận rủi ro sắp hết hạn"
+    },
+    "formatted": "Mức độ: critical\nMức: low\nHết hạn: 2026-11-01 09:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức: low\u003cbr\u003e\nHết hạn: 2026-11-01 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expiring/email/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Chấp nhận rủi ro sắp hết hạn"
+    },
+    "formatted": "Mức độ: critical\nMức: low\nHết hạn: 2026-11-01 09:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức: low\u003cbr\u003e\nHết hạn: 2026-11-01 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expiring/email/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "Chấp nhận rủi ro sắp hết hạn"
+    },
+    "formatted": "Mức độ: critical\nMức: low\nHết hạn: 2026-11-01 09:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức: low\u003cbr\u003e\nHết hạn: 2026-11-01 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "risk_acceptance.expiring/pager/detail": {
+    "fields": {
+      "summary": "Chấp nhận rủi ro sắp hết hạn: Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "risk_acceptance.expiring/pager/signal": {
+    "fields": {
+      "summary": "Chấp nhận rủi ro sắp hết hạn: Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "risk_acceptance.expiring/pager/summary": {
+    "fields": {
+      "summary": "Chấp nhận rủi ro sắp hết hạn: Mức độ: critical\nMức: low\nHết hạn: 2026\\-11\\-01 09\\:00 UTC\nCòn lại: 24 giờ\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "risk_acceptance.expiring/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expiring",
+        "type": "risk_acceptance.expiring",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expiring",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expiring/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expiring",
+        "type": "risk_acceptance.expiring",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expiring",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "tier": "low"
+        }
+      }
+    }
+  },
+  "risk_acceptance.expiring/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-risk_acceptance.expiring",
+        "type": "risk_acceptance.expiring",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "accepted_at": "2026-10-01T09:00:00Z",
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "risk_acceptance.expiring",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "scan.completed/chat/detail": {
+    "fields": {
+      "body": "Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example\n- [detail\\-high] detail\\-finding (detail\\-new)",
+      "title": "Quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại quét: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thay đổi: 2 mới, 1 đã xử lý, 9 không đổi\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"}],\"type\":\"rich_text_section\"},{\"elements\":[{\"elements\":[{\"text\":\"[detail-high] detail-finding (detail-new)\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"indent\":0,\"style\":\"bullet\",\"type\":\"rich_text_list\"}],\"type\":\"rich_text\"}],\"text\":\"Quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.completed/chat/signal": {
+    "fields": {
+      "body": "Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại quét: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thay đổi: 2 mới, 1 đã xử lý, 9 không đổi\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.completed/chat/summary": {
+    "fields": {
+      "body": "Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "title": "Quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại quét: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thay đổi: 2 mới, 1 đã xử lý, 9 không đổi\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.completed/email/detail": {
+    "fields": {
+      "body": "Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example\n- [detail\\-high] detail\\-finding (detail\\-new)",
+      "subject": "Quét đã hoàn tất"
+    },
+    "formatted": "Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example\n\n- [detail-high] detail-finding (detail-new)",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại quét: sast\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003cul\u003e\n\u003cli\u003e[detail-high] detail-finding (detail-new)\u003c/li\u003e\n\u003c/ul\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.completed/email/signal": {
+    "fields": {
+      "body": "Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Quét đã hoàn tất"
+    },
+    "formatted": "Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại quét: sast\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.completed/email/summary": {
+    "fields": {
+      "body": "Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "subject": "Quét đã hoàn tất"
+    },
+    "formatted": "Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại quét: sast\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.completed/pager/detail": {
+    "fields": {
+      "summary": "Quét đã hoàn tất: Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example\n- [detail\\-high] detail\\-finding (detail\\-new)"
+    }
+  },
+  "scan.completed/pager/signal": {
+    "fields": {
+      "summary": "Quét đã hoàn tất: Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "scan.completed/pager/summary": {
+    "fields": {
+      "summary": "Quét đã hoàn tất: Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+    }
+  },
+  "scan.completed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.completed",
+        "type": "scan.completed",
+        "schema_version": 2,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "critical_count": "1",
+          "delta_available": "true",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "scan.completed",
+          "fixed_count": "1",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "new_count": "2",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "scan_kind": "sast",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12",
+          "unchanged_count": "9"
+        },
+        "lists": {
+          "findings": [
+            {
+              "id": "detail-finding-id",
+              "severity": "detail-high",
+              "status": "detail-new",
+              "title": "detail-finding"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "scan.completed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.completed",
+        "type": "scan.completed",
+        "schema_version": 2,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "critical_count": "1",
+          "delta_available": "true",
+          "event_label": "signal-event-label",
+          "event_type": "scan.completed",
+          "fixed_count": "1",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "new_count": "2",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "scan_kind": "sast",
+          "total_count": "12",
+          "unchanged_count": "9"
+        }
+      }
+    }
+  },
+  "scan.completed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.completed",
+        "type": "scan.completed",
+        "schema_version": 2,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "critical_count": "1",
+          "delta_available": "true",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "scan.completed",
+          "fixed_count": "1",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "new_count": "2",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "scan_kind": "sast",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12",
+          "unchanged_count": "9"
+        }
+      }
+    }
+  },
+  "scan.failed/chat/detail": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.failed/chat/signal": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.failed/chat/summary": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "title": "Lần quét đã hoàn tất"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Lần quét đã hoàn tất\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Loại: sast\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Kết quả: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Nhà cung cấp: scanner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mã lỗi: timeout\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Tổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mục tiêu: summary-target.example\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Lần quét đã hoàn tất\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "scan.failed/email/detail": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.failed/email/signal": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.failed/email/summary": {
+    "fields": {
+      "body": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example",
+      "subject": "Lần quét đã hoàn tất"
+    },
+    "formatted": "Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement\nMục tiêu: summary-target.example",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eLoại: sast\u003cbr\u003e\nKết quả: failed\u003cbr\u003e\nNhà cung cấp: scanner\u003cbr\u003e\nMã lỗi: timeout\u003cbr\u003e\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nMục tiêu: summary-target.example\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "scan.failed/pager/detail": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+    }
+  },
+  "scan.failed/pager/signal": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "scan.failed/pager/summary": {
+    "fields": {
+      "summary": "Lần quét đã hoàn tất: Loại: sast\nKết quả: failed\nNhà cung cấp: scanner\nMã lỗi: timeout\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+    }
+  },
+  "scan.failed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.failed",
+        "type": "scan.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "scan.failed",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "scan.failed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.failed",
+        "type": "scan.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "scan.failed",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "scan.failed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-scan.failed",
+        "type": "scan.failed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "counts_available": "true",
+          "critical_count": "1",
+          "engagement_name": "summary-engagement",
+          "error_code": "timeout",
+          "event_label": "signal-event-label",
+          "event_type": "scan.failed",
+          "high_count": "2",
+          "info_count": "2",
+          "low_count": "4",
+          "medium_count": "3",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "provider": "scanner",
+          "scan_kind": "sast",
+          "severity_counts_available": "true",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title",
+          "total_count": "12"
+        }
+      }
+    }
+  },
+  "sla.approaching_deadline/chat/detail": {
+    "fields": {
+      "body": "Mức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nCòn lại: 24 giờ\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "title": "SLA sắp đến hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA sắp đến hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức SLA: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hạn xử lý: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA sắp đến hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.approaching_deadline/chat/signal": {
+    "fields": {
+      "body": "Mức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nCòn lại: 24 giờ",
+      "title": "SLA sắp đến hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA sắp đến hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức SLA: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hạn xử lý: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA sắp đến hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.approaching_deadline/chat/summary": {
+    "fields": {
+      "body": "Mức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nCòn lại: 24 giờ\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "title": "SLA sắp đến hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA sắp đến hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức SLA: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hạn xử lý: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Còn lại: 24 giờ\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA sắp đến hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.approaching_deadline/email/detail": {
+    "fields": {
+      "body": "Mức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nCòn lại: 24 giờ\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "subject": "SLA sắp đến hạn"
+    },
+    "formatted": "Mức SLA: low\nHạn xử lý: 2026-10-03 09:00 UTC\nCòn lại: 24 giờ\nĐợt đánh giá: summary-engagement\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức SLA: low\u003cbr\u003e\nHạn xử lý: 2026-10-03 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.approaching_deadline/email/signal": {
+    "fields": {
+      "body": "Mức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nCòn lại: 24 giờ",
+      "subject": "SLA sắp đến hạn"
+    },
+    "formatted": "Mức SLA: low\nHạn xử lý: 2026-10-03 09:00 UTC\nCòn lại: 24 giờ",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức SLA: low\u003cbr\u003e\nHạn xử lý: 2026-10-03 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.approaching_deadline/email/summary": {
+    "fields": {
+      "body": "Mức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nCòn lại: 24 giờ\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding",
+      "subject": "SLA sắp đến hạn"
+    },
+    "formatted": "Mức SLA: low\nHạn xử lý: 2026-10-03 09:00 UTC\nCòn lại: 24 giờ\nĐợt đánh giá: summary-engagement\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức SLA: low\u003cbr\u003e\nHạn xử lý: 2026-10-03 09:00 UTC\u003cbr\u003e\nCòn lại: 24 giờ\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.approaching_deadline/pager/detail": {
+    "fields": {
+      "summary": "SLA sắp đến hạn: Mức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nCòn lại: 24 giờ\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding"
+    }
+  },
+  "sla.approaching_deadline/pager/signal": {
+    "fields": {
+      "summary": "SLA sắp đến hạn: Mức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nCòn lại: 24 giờ"
+    }
+  },
+  "sla.approaching_deadline/pager/summary": {
+    "fields": {
+      "summary": "SLA sắp đến hạn: Mức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nCòn lại: 24 giờ\nĐợt đánh giá: summary\\-engagement\nPhát hiện: summary\\-finding"
+    }
+  },
+  "sla.approaching_deadline/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.approaching_deadline",
+        "type": "sla.approaching_deadline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "sla.approaching_deadline",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "sla.approaching_deadline/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.approaching_deadline",
+        "type": "sla.approaching_deadline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "sla.approaching_deadline",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "tier": "low"
+        }
+      }
+    }
+  },
+  "sla.approaching_deadline/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.approaching_deadline",
+        "type": "sla.approaching_deadline",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "sla.approaching_deadline",
+          "finding_title": "summary-finding",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "sla.breached/chat/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "SLA đã quá hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA đã quá hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức SLA: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hạn xử lý: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA đã quá hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.breached/chat/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "SLA đã quá hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA đã quá hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức SLA: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hạn xử lý: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA đã quá hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.breached/chat/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "title": "SLA đã quá hạn"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"SLA đã quá hạn\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Mức SLA: low\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hạn xử lý: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Phát hiện: summary-finding\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"SLA đã quá hạn\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "sla.breached/email/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "SLA đã quá hạn"
+    },
+    "formatted": "Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026-10-03 09:00 UTC\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức SLA: low\u003cbr\u003e\nHạn xử lý: 2026-10-03 09:00 UTC\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.breached/email/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "SLA đã quá hạn"
+    },
+    "formatted": "Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026-10-03 09:00 UTC\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức SLA: low\u003cbr\u003e\nHạn xử lý: 2026-10-03 09:00 UTC\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.breached/email/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding",
+      "subject": "SLA đã quá hạn"
+    },
+    "formatted": "Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026-10-03 09:00 UTC\nThời gian: 2026-10-02 09:00 UTC\nPhát hiện: summary-finding",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nMức SLA: low\u003cbr\u003e\nHạn xử lý: 2026-10-03 09:00 UTC\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nPhát hiện: summary-finding\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "sla.breached/pager/detail": {
+    "fields": {
+      "summary": "SLA đã quá hạn: Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "sla.breached/pager/signal": {
+    "fields": {
+      "summary": "SLA đã quá hạn: Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "sla.breached/pager/summary": {
+    "fields": {
+      "summary": "SLA đã quá hạn: Mức độ: critical\nMức SLA: low\nHạn xử lý: 2026\\-10\\-03 09\\:00 UTC\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nPhát hiện: summary\\-finding"
+    }
+  },
+  "sla.breached/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.breached",
+        "type": "sla.breached",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "sla.breached",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "sla.breached/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.breached",
+        "type": "sla.breached",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "deadline": "2026-10-03T09:00:00Z",
+          "event_label": "signal-event-label",
+          "event_type": "sla.breached",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "tier": "low"
+        }
+      }
+    }
+  },
+  "sla.breached/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-sla.breached",
+        "type": "sla.breached",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "deadline": "2026-10-03T09:00:00Z",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "sla.breached",
+          "finding_title": "summary-finding",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reminder": "expiry_warning",
+          "severity": "critical",
+          "summary": "summary-description",
+          "tier": "low",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "vulnerability_action.created/chat/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nHành động: request\\-review\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement",
+      "title": "Hành động rủi ro lỗ hổng"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Hành động rủi ro lỗ hổng\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hành động: request-review\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Hành động rủi ro lỗ hổng\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "vulnerability_action.created/chat/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nHành động: request\\-review\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Hành động rủi ro lỗ hổng"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Hành động rủi ro lỗ hổng\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hành động: request-review\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Hành động rủi ro lỗ hổng\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "vulnerability_action.created/chat/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nHành động: request\\-review\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement",
+      "title": "Hành động rủi ro lỗ hổng"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Hành động rủi ro lỗ hổng\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Mức độ: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Hành động: request-review\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Thời gian: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Đợt đánh giá: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Hành động rủi ro lỗ hổng\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "vulnerability_action.created/email/detail": {
+    "fields": {
+      "body": "Mức độ: critical\nHành động: request\\-review\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement",
+      "subject": "Hành động rủi ro lỗ hổng"
+    },
+    "formatted": "Mức độ: critical\nHành động: request-review\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nHành động: request-review\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "vulnerability_action.created/email/signal": {
+    "fields": {
+      "body": "Mức độ: critical\nHành động: request\\-review\nThời gian: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Hành động rủi ro lỗ hổng"
+    },
+    "formatted": "Mức độ: critical\nHành động: request-review\nThời gian: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nHành động: request-review\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "vulnerability_action.created/email/summary": {
+    "fields": {
+      "body": "Mức độ: critical\nHành động: request\\-review\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement",
+      "subject": "Hành động rủi ro lỗ hổng"
+    },
+    "formatted": "Mức độ: critical\nHành động: request-review\nThời gian: 2026-10-02 09:00 UTC\nĐợt đánh giá: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eMức độ: critical\u003cbr\u003e\nHành động: request-review\u003cbr\u003e\nThời gian: 2026-10-02 09:00 UTC\u003cbr\u003e\nĐợt đánh giá: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "vulnerability_action.created/pager/detail": {
+    "fields": {
+      "summary": "Hành động rủi ro lỗ hổng: Mức độ: critical\nHành động: request\\-review\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement"
+    }
+  },
+  "vulnerability_action.created/pager/signal": {
+    "fields": {
+      "summary": "Hành động rủi ro lỗ hổng: Mức độ: critical\nHành động: request\\-review\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "vulnerability_action.created/pager/summary": {
+    "fields": {
+      "summary": "Hành động rủi ro lỗ hổng: Mức độ: critical\nHành động: request\\-review\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement"
+    }
+  },
+  "vulnerability_action.created/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-vulnerability_action.created",
+        "type": "vulnerability_action.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "action_type": "request-review",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "vulnerability_action.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "vulnerability_action.created/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-vulnerability_action.created",
+        "type": "vulnerability_action.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "action_type": "request-review",
+          "event_label": "signal-event-label",
+          "event_type": "vulnerability_action.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical"
+        }
+      }
+    }
+  },
+  "vulnerability_action.created/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-vulnerability_action.created",
+        "type": "vulnerability_action.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "action_type": "request-review",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "vulnerability_action.created",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  }
+}
