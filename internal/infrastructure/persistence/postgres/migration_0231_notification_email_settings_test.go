@@ -7,8 +7,8 @@ import (
 	"github.com/KKloudTarus/synapse-ce/migrations"
 )
 
-func TestMigration0230NotificationEmailSettingsUsesTenantRLSAndSealedRelay(t *testing.T) {
-	raw, err := migrations.FS.ReadFile("0230_notification_email_settings.sql")
+func TestMigration0231NotificationEmailSettingsUsesTenantRLSAndSealedRelay(t *testing.T) {
+	raw, err := migrations.FS.ReadFile("0231_notification_email_settings.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

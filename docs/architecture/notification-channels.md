@@ -21,8 +21,8 @@ Only successful, fenced delivery completion can publish a remote reference.
 Concurrent first sends may both post at top level; follow-ups select the earliest
 successful acknowledgement, ordered by delivery time and ID. No database lock spans a provider call. Missing or
 deleted anchors allow a top-level post. Google Chat uses a deterministic scoped
-thread key. Slack bot delivery remains owned by the separate Slack bot change;
-its adapter must consume this shared anchor contract during integration.
+thread key. The Slack bot adapter consumes the same anchor contract and retries once
+at top level only when Slack explicitly reports a missing parent thread.
 
 Pager identities use an HMAC-derived tenant key and the trusted subject identity.
 Resolve requests require a prior successful trigger to the same destination.

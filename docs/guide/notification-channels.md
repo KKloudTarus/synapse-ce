@@ -7,9 +7,9 @@ This guide covers operator controls and tenant-managed delivery settings. Enable
 `synapse-worker`, and provide the same stable `SYNAPSE_VAULT_MASTER_KEY` to both
 processes before enabling a tenant channel.
 
-The provider-client acceptance matrix is still pending. This guide describes the
-implemented contracts and configuration checks; it does not claim a live delivery
-test against any provider.
+The provider-client acceptance matrix is still pending. The acceptance ledger below
+distinguishes local contracts, real client captures and the remaining end-to-end
+checks.
 
 ## Operator controls
 
@@ -159,8 +159,9 @@ event data never causes closure or resolution to be inferred.
 Telegram replies to the selected message ID and permits a missing parent to fall
 back to a new message. Google Chat derives a stable thread key from the tenant,
 channel, secret version, and subject, and asks Google Chat to fall back to a new
-thread when necessary. Slack bot threading depends on PR #1570; deploy that change
-with this implementation before expecting Slack replies to use the shared anchor.
+thread when necessary. Slack app delivery uses the bot adapter merged in PR #1570;
+the reconciled adapter passes the shared subject anchor as `thread_ts` and retries
+without that anchor when Slack reports that its parent no longer exists.
 
 A tenant administrator may request at most five channel tests per channel in a
 rolling one-hour window. The limit counts test requests, not recipients, so a test
@@ -193,17 +194,12 @@ special-purpose addresses remain blocked. TLS verifies the approved hostname;
 operators must approve only relay hosts they trust. Self-hosted chat uses the
 public-only tenant HTTP policy even when its hostname is allowlisted.
 
-The Slack bot change reserves migration 0228. Include it before applying this
-branch's migrations 0229–0232: Goose rejects an older missing migration after
-the database has advanced past it. If these migrations are deployed first,
-coordinate a new append-only migration number for the Slack change and verify
-the combined order before rollout. This draft does not authorize that rollout.
-
-During Slack integration, its `slackbotDriver.postSlack` payload must set
-`thread_ts` from `NotificationWork.SubjectAnchor` when it is nonempty and retain
-a top-level post otherwise. Keep the acknowledged Slack timestamp as `RemoteRef`
-and add retry, deleted-parent, tenant/channel/version isolation and concurrent
-follow-up contract tests on the combined branch.
+Main already includes migration `0228` for Slack bot channels and `0229` for
+personal delivery. This branch's unshipped migrations use `0230–0233` for subject
+threads, email settings, channel families and pending provider requests, respectively.
+Apply the complete sequence in order; the two migrations already on main remain
+unchanged. Databases used for earlier branch rehearsals need an isolated rebuild
+because their unpublished migration numbers differ from this sequence.
 
 Use `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` to stop a provider globally and pause
 an individual channel in tenant settings when investigating delivery. Clearing a
@@ -222,12 +218,13 @@ flow passed.
 | Surface | Evidence obtained | Remaining acceptance |
 | --- | --- | --- |
 | Mattermost and Rocket.Chat | Real Docker clients received ten formatter/Sender fixtures each: critical finding, scan completed with three new/two fixed findings, SLA deadline, incident creation and hostile title, in English and Vietnamese. Browser captures check visible formatting and hostile links. | Execute the same matrix through the built-in event/template pipeline, verify severity presentation from event metadata, and follow links into the configured console. Fixture links use `https://synapse.invalid`. |
-| Slack | A scratch combination with the separate Slack bot change authenticated the test bot and posted one root plus four replies. Provider contract tests cover the shared anchor and missing-parent fallback. | Integrate the adapter change with its owner; complete the event/locale/theme/device matrix and live retry/deleted-parent scenarios. The Slack bot implementation is outside this branch. |
+| Slack | A prior scratch combination authenticated the test bot and posted one root plus four replies. The adapter from merged PR #1570 is now integrated with subject threading in this branch. | Run the reconciled commit against the real Slack client and complete the event/locale/theme/device matrix and live retry/deleted-parent scenarios. Prior scratch captures are historical evidence. |
 | SMTP | Real STARTTLS 587 and implicit TLS 465 relays accepted and stored English/Vietnamese multipart messages with verified certificates. A missing Date header found by the content filter was fixed and retested. | Complete the five-event client matrix and representative relay rollout. Mailpit's phone preview is an HTML preview, not an email application's mobile client. |
 | Gmail | A temporary Desktop OAuth client in a project with billing disabled completed PKCE/state-validated consent. Two fresh Sender instances refreshed independently and delivered English/Vietnamese multipart mail through verified STARTTLS/XOAUTH2 on port 587 (SMTP 250). Gmail displayed both HTML bodies; public captures show only cropped synthetic content. Revocation returned HTTP 200 and the next refresh returned 400 `invalid_grant`. The project is shut down with deletion pending under Google's 30-day recovery window; local credential files and the callback listener were removed. | Execute the built-in five-event/template pipeline and full theme/device/client matrix. Body-detail crops establish content display, not the complete client layout matrix. |
-| Microsoft | Local client-credentials and SMTP XOAUTH2 contract tests pass. | Deferred at the operator's request. Use an isolated test tenant/mailbox with Entra and Exchange authorization before external acceptance. |
+| Microsoft SMTP | Local client-credentials and SMTP XOAUTH2 contract tests pass. | Deferred at the operator's request. Use an isolated test tenant/mailbox with Entra and Exchange authorization before external acceptance. |
+| Teams personal delivery | Bot, one-time link-code/contact flow and personal delivery are present from merged PR #1571. Local contracts do not establish a real Teams delivery. | A dedicated Microsoft 365 test tenant/Azure Bot is not available yet. Capture the real 1:1 link flow, verified Synapse contact, personal notification and correlated delivery history, then follow Open in Synapse to its expected console destination. Record the tested commit/environment and have the reviewer inspect the evidence before closing #1420. Mobile and an exhaustive theme/locale matrix are not required by the updated reviewer criterion. |
 | PagerDuty and JSM | Local trigger/paired-close contracts pass. JSM accepted request IDs persist atomically with fenced attempts, survive exhaustion and restoration of the existing pinned credential/vault, and resume GET status reads without another POST. | Dedicated test services/integrations and live trigger, deduplication, delayed confirmation and close evidence. Replacing a channel key increments its secret version; redrive of an older version remains rejected. Recovery after key replacement is deferred. Automatic close also requires a trusted catalog closure producer. |
-| Migrations | Populated isolated rehearsal passed 153 assertions for the original migrations. A combined Slack ordering rehearsal passed 55 assertions through `227 -> 228 -> 229 -> 230 -> 231 -> 232 -> 227 -> 232`. The current full PostgreSQL package passed in 994.096 seconds with serial tests. | Representative lock/latency budgets and production rollout/rollback rehearsal. Hosted CI currently has a shorter default timeout than the local PostgreSQL run. |
+| Migrations | The reconciled PostgreSQL 17 rehearsal passed 68 assertions through `227→228→229→230→231→232→233→229→233→227→233`, preserving the Teams contact, conversation and personal preference on B02 rollback. The complete PostgreSQL run took 1279.158 seconds; seven old migration tests exceeded their database-cleanup deadlines on Docker disk. Those seven tests passed unchanged on an isolated tmpfs PostgreSQL instance in 24.390 seconds, with default fsync settings. | Representative lock/latency budgets and production rollout/rollback rehearsal remain pending. Hosted CI currently has a shorter default timeout than the local PostgreSQL run. Local transaction tests and tmpfs cleanup do not establish crash durability or production timing. |
 | Recipient policy | Same-tenant active verified contacts, exact DNS-proven domains, send-time revocation and five tests/channel/hour have memory and PostgreSQL coverage. | Live operator DNS/domain workflow and representative production history/RLS latency. |
 
 Prepare disposable Telegram and Google Chat destinations, dedicated PagerDuty/JSM

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -261,6 +262,11 @@ type Config struct {
 	// test or deliver to. Parsed trimmed, lowercased and deduplicated; the API and the worker check
 	// each name against the notification driver registry at startup.
 	NotificationProvidersDisabled []string
+	// TeamsBotAppID, TeamsBotAppPassword and TeamsBotTenantID register the operator's Microsoft Teams
+	// bot for personal delivery (#1420). The password is secret. All empty leaves Teams off.
+	TeamsBotAppID       string
+	TeamsBotAppPassword string
+	TeamsBotTenantID    string
 	// NotificationChannelPauseThreshold is how many consecutive permanent delivery failures pause
 	// a notification channel (#1464). Zero keeps counting but never pauses. Read by the worker.
 	NotificationChannelPauseThreshold int
@@ -977,6 +983,9 @@ func Load() Config {
 		NotificationSMTPRequireTLS:   getbool("SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS", true),
 		NotificationSMTPAllowedHosts: parseLowerSet(getenv("SYNAPSE_NOTIFICATION_SMTP_ALLOWED_HOSTS", "")),
 		NotificationChatAllowedHosts: parseLowerSet(getenv("SYNAPSE_NOTIFICATION_CHAT_ALLOWED_HOSTS", "")),
+		TeamsBotAppID:                strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_APP_ID", "")),
+		TeamsBotAppPassword:          getenv("SYNAPSE_TEAMS_BOT_APP_PASSWORD", ""),
+		TeamsBotTenantID:             strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_TENANT_ID", "")),
 		NotificationUnsubscribeURL:   getenv("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL", ""),
 		ReconViaWorker:               getbool("SYNAPSE_RECON_VIA_WORKER", false),
 		EgressBrokerSocket:           getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
@@ -2039,4 +2048,30 @@ func getint64(key string, def int64) int64 {
 		}
 	}
 	return def
+}
+
+var teamsBotGUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// TeamsBotEnabled reports whether the operator registered a Microsoft Teams bot (#1420).
+func (c Config) TeamsBotEnabled() bool { return c.TeamsBotAppID != "" }
+
+// ValidateTeamsBot checks the Teams bot registration: the app ID is a GUID, the password is set
+// with it, and the tenant, when given, is a GUID. Errors never echo the password.
+func (c Config) ValidateTeamsBot() error {
+	if c.TeamsBotAppID == "" {
+		if c.TeamsBotAppPassword != "" || c.TeamsBotTenantID != "" {
+			return fmt.Errorf("SYNAPSE_TEAMS_BOT_APP_ID is required when the Teams bot password or tenant is set")
+		}
+		return nil
+	}
+	if !teamsBotGUID.MatchString(c.TeamsBotAppID) {
+		return fmt.Errorf("SYNAPSE_TEAMS_BOT_APP_ID must be the bot's Microsoft app ID (a GUID)")
+	}
+	if c.TeamsBotAppPassword == "" {
+		return fmt.Errorf("SYNAPSE_TEAMS_BOT_APP_PASSWORD is required with SYNAPSE_TEAMS_BOT_APP_ID")
+	}
+	if c.TeamsBotTenantID != "" && !teamsBotGUID.MatchString(c.TeamsBotTenantID) {
+		return fmt.Errorf("SYNAPSE_TEAMS_BOT_TENANT_ID must be a Microsoft Entra tenant ID (a GUID)")
+	}
+	return nil
 }

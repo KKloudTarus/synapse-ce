@@ -37,6 +37,8 @@ var channelSchemas = map[domain.ChannelType]channelSchema{
 	domain.ChannelRocketChat: {validate: validateRocketChatChannel, decode: decodeConfig[ports.RocketChatChannelConfig]},
 	domain.ChannelPagerDuty:  {validate: validatePagerDutyChannel, decode: decodeConfig[ports.PagerDutyChannelConfig]},
 	domain.ChannelJSM:        {validate: validateJSMChannel, decode: decodeConfig[ports.JSMChannelConfig]},
+	// Slack bot mode (#1383), validated in slack_bot_channel.go and checked against Slack on save.
+	domain.ChannelSlackBot: {validate: validateSlackBotChannel, decode: decodeConfig[ports.SlackBotChannelConfig]},
 }
 
 const (

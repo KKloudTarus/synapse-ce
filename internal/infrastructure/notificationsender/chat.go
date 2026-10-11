@@ -72,4 +72,5 @@ var (
 	discordFormatter    ports.NotificationFormatter = messageformat.DiscordFormatter{}
 	mattermostFormatter ports.NotificationFormatter = messageformat.MattermostFormatter{}
 	rocketChatFormatter ports.NotificationFormatter = messageformat.RocketChatFormatter{}
+	slackBotFormatter   ports.NotificationFormatter = messageformat.SlackBot{}
 )

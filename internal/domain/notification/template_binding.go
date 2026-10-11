@@ -22,6 +22,7 @@ var channelFamilies = map[ChannelType]TemplateFamily{
 	ChannelRocketChat: FamilyChat,
 	ChannelPagerDuty:  FamilyPager,
 	ChannelJSM:        FamilyPager,
+	ChannelSlackBot:   FamilyChat,
 }
 
 // FamilyForChannelType returns the template family a channel type renders. ok is false for a type

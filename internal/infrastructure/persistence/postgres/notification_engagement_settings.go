@@ -21,8 +21,12 @@ func (r *NotificationRepository) GetEngagementNotificationSetting(ctx context.Co
 			return err
 		}
 		var value string
-		err := tx.QueryRow(ctx, `SELECT external_notifications,revision,updated_at,updated_by FROM notification_engagement_settings WHERE tenant_id=$1 AND engagement_id=$2`, tenant, engagement).
-			Scan(&value, &out.Revision, &out.UpdatedAt, &out.UpdatedBy)
+		var lead *string
+		err := tx.QueryRow(ctx, `SELECT external_notifications,revision,updated_at,updated_by,lead_user_id FROM notification_engagement_settings WHERE tenant_id=$1 AND engagement_id=$2`, tenant, engagement).
+			Scan(&value, &out.Revision, &out.UpdatedAt, &out.UpdatedBy, &lead)
+		if lead != nil {
+			out.LeadUserID = shared.ID(*lead)
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -43,15 +47,28 @@ func (r *NotificationRepository) PutEngagementNotificationSetting(ctx context.Co
 		if err := requireEngagement(ctx, tx, s.TenantID, s.EngagementID); err != nil {
 			return err
 		}
+		var lead *string
+		if !s.LeadUserID.IsZero() {
+			// The lead must be an enabled person of this tenant whose role can view (#1415).
+			var eligible bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE ownership_tenant_id=$1 AND id=$2 AND NOT disabled AND role = ANY($3))`, s.TenantID, s.LeadUserID, humanNotificationRoles).Scan(&eligible); err != nil {
+				return err
+			}
+			if !eligible {
+				return fmt.Errorf("%w: the engagement lead must be an enabled user of this tenant", shared.ErrValidation)
+			}
+			value := s.LeadUserID.String()
+			lead = &value
+		}
 		// Revision 1 creates the row; any later revision replaces exactly the one before it. Either
 		// way a concurrent writer that got there first leaves this statement without a row.
-		query := `UPDATE notification_engagement_settings SET external_notifications=$3,revision=$4,updated_at=$5,updated_by=$6
+		query := `UPDATE notification_engagement_settings SET external_notifications=$3,revision=$4,updated_at=$5,updated_by=$6,lead_user_id=$7
 			WHERE tenant_id=$1 AND engagement_id=$2 AND revision=$4-1`
 		if s.Revision == 1 {
-			query = `INSERT INTO notification_engagement_settings(tenant_id,engagement_id,external_notifications,revision,updated_at,updated_by)
-				VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,engagement_id) DO NOTHING`
+			query = `INSERT INTO notification_engagement_settings(tenant_id,engagement_id,external_notifications,revision,updated_at,updated_by,lead_user_id)
+				VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(tenant_id,engagement_id) DO NOTHING`
 		}
-		tag, err := tx.Exec(ctx, query, s.TenantID, s.EngagementID, s.ExternalNotifications, s.Revision, s.UpdatedAt, s.UpdatedBy)
+		tag, err := tx.Exec(ctx, query, s.TenantID, s.EngagementID, s.ExternalNotifications, s.Revision, s.UpdatedAt, s.UpdatedBy, lead)
 		if err != nil {
 			return err
 		}
