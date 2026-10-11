@@ -89,7 +89,7 @@ func (s *Sender) sendSMTPPartsWithConfig(ctx context.Context, relay SMTPConfig, 
 		return ports.NotificationSendResult{ErrorCode: "smtp_recipient_invalid"}
 	}
 	mailID := "<" + messageID.String() + "@synapse.local>"
-	body, err := smtpMessage(from.Address, destination, title, textBody, htmlBody, unsubscribeURL, mailID)
+	body, err := smtpMessage(from.Address, destination, title, textBody, htmlBody, unsubscribeURL, mailID, s.now())
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "smtp_message_invalid"}
 	}
@@ -179,11 +179,12 @@ func smtpConfigFromRelay(relay ports.SMTPRelayConfig, fallback SMTPConfig) SMTPC
 // smtpMessage keeps untrusted content after the header separator and uses multipart/alternative
 // only when the formatter supplied an HTML representation. It deliberately does not advertise a
 // one-click List-Unsubscribe action because Synapse has no such authenticated endpoint.
-func smtpMessage(from, destination, title, textBody, htmlBody, unsubscribeURL, mailID string) ([]byte, error) {
+func smtpMessage(from, destination, title, textBody, htmlBody, unsubscribeURL, mailID string, sentAt time.Time) ([]byte, error) {
 	var body bytes.Buffer
 	body.WriteString("From: " + from + "\r\n")
 	body.WriteString("To: " + destination + "\r\n")
 	body.WriteString("Subject: " + encodedSubject(title) + "\r\n")
+	body.WriteString("Date: " + sentAt.UTC().Format(time.RFC1123Z) + "\r\n")
 	body.WriteString("Message-ID: " + mailID + "\r\nMIME-Version: 1.0\r\n")
 	if unsubscribeURL != "" {
 		u, err := url.Parse(unsubscribeURL)

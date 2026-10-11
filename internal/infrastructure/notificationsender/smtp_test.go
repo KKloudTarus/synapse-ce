@@ -386,6 +386,8 @@ func TestSMTPControlledRelay(t *testing.T) {
 			host, port, _ := net.SplitHostPort(listener.Addr().String())
 			number, _ := strconv.Atoi(port)
 			sender := New(SMTPConfig{Host: host, Port: number, From: "synapse@example.com", UnsubscribeURL: "https://mail.example/unsubscribe"}, time.Second)
+			sentAt := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+			sender.now = func() time.Time { return sentAt }
 			work := testWork(notification.ChannelEmail)
 			work.Delivery.Recipient = "recipient@example.com"
 			if tc.formatted {
@@ -397,7 +399,7 @@ func TestSMTPControlledRelay(t *testing.T) {
 					t.Fatalf("%+v", result)
 				}
 				body := <-messages
-				if !strings.Contains(body, "Message-ID: <delivery@synapse.local>") || !strings.Contains(body, "To: recipient@example.com") || !strings.Contains(body, "List-Unsubscribe: <https://mail.example/unsubscribe>") {
+				if !strings.Contains(body, "Message-ID: <delivery@synapse.local>") || !strings.Contains(body, "To: recipient@example.com") || !strings.Contains(body, "Date: "+sentAt.Format(time.RFC1123Z)) || !strings.Contains(body, "List-Unsubscribe: <https://mail.example/unsubscribe>") {
 					t.Fatalf("missing headers: %s", body)
 				}
 			} else if result.Retryable != (tc.code == 450) || result.StatusCode != tc.code {
@@ -408,7 +410,8 @@ func TestSMTPControlledRelay(t *testing.T) {
 }
 
 func TestSMTPMultipartAlternativeUsesSafeHeaders(t *testing.T) {
-	raw, err := smtpMessage("sender@example.com", "recipient@example.com", "Cảnh báo\r\nBcc: attacker@example.com", "plain <text>", "<p>safe &amp; escaped</p>", "https://mail.example/unsubscribe", "<delivery@synapse.local>")
+	sentAt := time.Date(2026, 10, 11, 7, 0, 0, 0, time.FixedZone("UTC+7", 7*60*60))
+	raw, err := smtpMessage("sender@example.com", "recipient@example.com", "Cảnh báo\r\nBcc: attacker@example.com", "plain <text>", "<p>safe &amp; escaped</p>", "https://mail.example/unsubscribe", "<delivery@synapse.local>", sentAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,6 +427,9 @@ func TestSMTPMultipartAlternativeUsesSafeHeaders(t *testing.T) {
 	}
 	if !strings.HasPrefix(message.Header.Get("Subject"), "=?UTF-8?q?") {
 		t.Fatalf("subject was not encoded: %q", message.Header.Get("Subject"))
+	}
+	if got, err := message.Header.Date(); err != nil || !got.Equal(sentAt) {
+		t.Fatalf("Date = %v, %v", got, err)
 	}
 	mediaType, params, err := mime.ParseMediaType(message.Header.Get("Content-Type"))
 	if err != nil || mediaType != "multipart/alternative" || params["boundary"] == "" {
@@ -451,7 +457,7 @@ func TestSMTPMultipartAlternativeUsesSafeHeaders(t *testing.T) {
 }
 
 func TestSMTPPlainTextUsesQuotedPrintableUTF8(t *testing.T) {
-	raw, err := smtpMessage("sender@example.com", "recipient@example.com", "Thông báo", "Cảnh báo: đã hoàn tất", "", "", "<delivery@synapse.local>")
+	raw, err := smtpMessage("sender@example.com", "recipient@example.com", "Thông báo", "Cảnh báo: đã hoàn tất", "", "", "<delivery@synapse.local>", time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +479,7 @@ func TestSMTPPlainTextUsesQuotedPrintableUTF8(t *testing.T) {
 
 func TestSMTPFoldsLongUnicodeSubject(t *testing.T) {
 	title := strings.Repeat("🚨 cảnh báo bảo mật ", 20)
-	raw, err := smtpMessage("sender@example.com", "recipient@example.com", title, "body", "", "", "<delivery@synapse.local>")
+	raw, err := smtpMessage("sender@example.com", "recipient@example.com", title, "body", "", "", "<delivery@synapse.local>", time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}

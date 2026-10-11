@@ -21,6 +21,7 @@ const (
 	pagerDutyEventsUS = "https://events.pagerduty.com/v2/enqueue"
 	pagerDutyEventsEU = "https://events.eu.pagerduty.com/v2/enqueue"
 	jsmAlertsURL      = "https://api.atlassian.com/jsm/ops/integration/v2/alerts"
+	maxJSMRequestID   = 128
 )
 
 type pagerDutyDriver struct{ s *Sender }
@@ -77,17 +78,26 @@ type jsmDriver struct{ s *Sender }
 
 func (jsmDriver) ChannelType() notification.ChannelType { return notification.ChannelJSM }
 func (d jsmDriver) Send(ctx context.Context, w ports.NotificationWork, config ports.NotificationChannelConfig) ports.NotificationSendResult {
+	requestID := w.Delivery.ProviderRequestRef
+	if requestID != "" && !validJSMRequestID(requestID) {
+		return ports.NotificationSendResult{ErrorCode: "jsm_request_ref_invalid"}
+	}
 	cfg, ok := config.(ports.JSMChannelConfig)
 	if !ok || strings.TrimSpace(cfg.APIKey) == "" {
-		return ports.NotificationSendResult{ErrorCode: "channel_config_invalid"}
+		return jsmWithRequestRef(ports.NotificationSendResult{ErrorCode: "channel_config_invalid"}, requestID)
+	}
+	alias, ok := d.s.pagerDedupKey(w)
+	if !ok {
+		return jsmWithRequestRef(ports.NotificationSendResult{ErrorCode: "pager_key_unavailable"}, requestID)
+	}
+	if requestID != "" {
+		// An accepted request is resumed before rendering or closure checks. Those checks govern
+		// new provider mutations; they cannot invalidate the provider's existing request handle.
+		return d.confirmJSMRequest(ctx, cfg.APIKey, requestID, alias, false)
 	}
 	summary, links, fallback, ok := pagerContent(w, messageformat.JSMMessageRunes)
 	if !ok {
 		return ports.NotificationSendResult{ErrorCode: "format_failed", TemplateFallback: fallback}
-	}
-	alias, ok := d.s.pagerDedupKey(w)
-	if !ok {
-		return ports.NotificationSendResult{ErrorCode: "pager_key_unavailable", TemplateFallback: fallback}
 	}
 	if w.SubjectResolved && strings.TrimSpace(w.SubjectAnchor) == "" {
 		return ports.NotificationSendResult{ErrorCode: "pager_resolve_unpaired", TemplateFallback: fallback}
@@ -122,19 +132,45 @@ func (d jsmDriver) Send(ctx context.Context, w ports.NotificationWork, config po
 	var accepted struct {
 		RequestID string `json:"requestId"`
 	}
-	if json.Unmarshal(response, &accepted) != nil || accepted.RequestID == "" {
-		return ports.NotificationSendResult{StatusCode: http.StatusAccepted, ErrorCode: "jsm_request_unconfirmed", Retryable: true, TemplateFallback: fallback}
+	if json.Unmarshal(response, &accepted) != nil || !validJSMRequestID(accepted.RequestID) {
+		// The mutation was accepted but the returned request reference cannot safely be resumed.
+		// Retrying the create would add a duplicate occurrence to the provider's alert alias.
+		return ports.NotificationSendResult{StatusCode: http.StatusAccepted, ErrorCode: "jsm_request_ref_invalid", TemplateFallback: fallback}
 	}
-	statusRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, jsmAlertsURL+"/requests/"+url.PathEscape(accepted.RequestID), nil)
+	// Persist the accepted request before reading its status. If the worker exits after the
+	// provider accepts this create, its next claimed attempt resumes this handle instead of
+	// submitting another alert with the same alias.
+	return jsmUnconfirmed(http.StatusAccepted, fallback, accepted.RequestID)
+}
+
+// confirmJSMRequest reads the asynchronous request status once. The worker owns delayed retries,
+// so this adapter must not wait or poll while it holds an attempt lease. A 404 or response without
+// a terminal outcome remains retryable because JSM may not have published an accepted request yet.
+func (d jsmDriver) confirmJSMRequest(ctx context.Context, apiKey, requestID, alias string, fallback bool) ports.NotificationSendResult {
+	if ctx.Err() != nil {
+		return jsmUnconfirmed(http.StatusAccepted, fallback, requestID)
+	}
+	statusRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, jsmAlertsURL+"/requests/"+url.PathEscape(requestID), nil)
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "request_invalid", TemplateFallback: fallback}
 	}
 	statusRequest.Header.Set("Accept", "application/json")
-	statusRequest.Header.Set("Authorization", "GenieKey "+cfg.APIKey)
+	statusRequest.Header.Set("Authorization", "GenieKey "+apiKey)
 	statusRequest.Header.Set("User-Agent", "synapse-notifications/1")
 	status, statusBody := d.s.doRead(statusRequest)
 	status.TemplateFallback = fallback
+	// Do not acknowledge a provider result observed after the caller's deadline or cancellation.
+	if ctx.Err() != nil {
+		return jsmUnconfirmed(status.StatusCode, fallback, requestID)
+	}
 	if status.ErrorCode != "" {
+		if status.StatusCode == http.StatusNotFound {
+			return jsmUnconfirmed(status.StatusCode, fallback, requestID)
+		}
+		// A status-read error does not prove that the accepted request failed. Retain its
+		// handle even for terminal HTTP classifications so an operator can redrive after
+		// repairing credentials without recreating the provider alert.
+		status.ProviderRequestRef = requestID
 		return status
 	}
 	var finished struct {
@@ -142,16 +178,36 @@ func (d jsmDriver) Send(ctx context.Context, w ports.NotificationWork, config po
 			IsSuccess *bool `json:"isSuccess"`
 		} `json:"data"`
 	}
-	if json.Unmarshal(statusBody, &finished) != nil {
-		return ports.NotificationSendResult{StatusCode: status.StatusCode, ErrorCode: "jsm_request_unconfirmed", Retryable: true, TemplateFallback: fallback}
-	}
-	if finished.Data.IsSuccess == nil {
-		return ports.NotificationSendResult{StatusCode: status.StatusCode, ErrorCode: "jsm_request_unconfirmed", Retryable: true, TemplateFallback: fallback}
+	if json.Unmarshal(statusBody, &finished) != nil || finished.Data.IsSuccess == nil {
+		return jsmUnconfirmed(status.StatusCode, fallback, requestID)
 	}
 	if !*finished.Data.IsSuccess {
 		return ports.NotificationSendResult{StatusCode: status.StatusCode, ErrorCode: "jsm_request_failed", TemplateFallback: fallback}
 	}
 	return ports.NotificationSendResult{StatusCode: http.StatusAccepted, TemplateFallback: fallback, RemoteRef: alias}
+}
+
+func jsmUnconfirmed(statusCode int, fallback bool, requestID string) ports.NotificationSendResult {
+	return ports.NotificationSendResult{StatusCode: statusCode, ErrorCode: "jsm_request_unconfirmed", Retryable: true, TemplateFallback: fallback, ProviderRequestRef: requestID}
+}
+
+func jsmWithRequestRef(result ports.NotificationSendResult, requestID string) ports.NotificationSendResult {
+	if requestID != "" {
+		result.ProviderRequestRef = requestID
+	}
+	return result
+}
+
+func validJSMRequestID(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > maxJSMRequestID {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if (value[i] < 'a' || value[i] > 'z') && (value[i] < 'A' || value[i] > 'Z') && (value[i] < '0' || value[i] > '9') && value[i] != '-' && value[i] != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func pagerContent(w ports.NotificationWork, summaryRunes int) (string, []map[string]string, bool, bool) {

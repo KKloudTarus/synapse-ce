@@ -263,7 +263,7 @@ func (r *NotificationRepository) holdsClaim(stored storedDelivery, tenant shared
 
 // FinishAttempt finalizes a started attempt and moves the delivery to the matching state.
 func (r *NotificationRepository) FinishAttempt(_ context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time) error {
-	return r.finishAttempt(tenant, delivery, jobID, fence, attempt, at, outcome, status, errorCode, next, "")
+	return r.finishAttempt(tenant, delivery, jobID, fence, attempt, at, outcome, status, errorCode, next, "", "")
 }
 
 // FinishAttemptWithRemoteRef keeps an acknowledged provider reference in the same locked state
@@ -272,10 +272,17 @@ func (r *NotificationRepository) FinishAttemptWithRemoteRef(_ context.Context, t
 	if len(remoteRef) > 512 {
 		return fmt.Errorf("%w: notification remote reference is too long", shared.ErrValidation)
 	}
-	return r.finishAttempt(tenant, delivery, jobID, fence, attempt, at, outcome, status, errorCode, next, remoteRef)
+	return r.finishAttempt(tenant, delivery, jobID, fence, attempt, at, outcome, status, errorCode, next, remoteRef, "")
 }
 
-func (r *NotificationRepository) finishAttempt(tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time, remoteRef string) error {
+func (r *NotificationRepository) FinishAttemptWithProviderRefs(_ context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time, remoteRef, providerRequestRef string) error {
+	return r.finishAttempt(tenant, delivery, jobID, fence, attempt, at, outcome, status, errorCode, next, remoteRef, providerRequestRef)
+}
+
+func (r *NotificationRepository) finishAttempt(tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time, remoteRef, providerRequestRef string) error {
+	if len(remoteRef) > 512 || len(providerRequestRef) > 512 || outcome == "delivered" && providerRequestRef != "" {
+		return fmt.Errorf("%w: invalid notification provider references", shared.ErrValidation)
+	}
 	state, ok := attemptOutcomeState(outcome)
 	if !ok {
 		return fmt.Errorf("%w: invalid notification attempt outcome", shared.ErrValidation)
@@ -299,6 +306,7 @@ func (r *NotificationRepository) finishAttempt(tenant, delivery shared.ID, jobID
 	a.FinishedAt, a.Outcome, a.ResponseCode, a.ErrorCode = &finished, outcome, status, errorCode
 	d := &stored.delivery
 	d.State, d.LastError, d.NextAttemptAt, d.UpdatedAt = state, errorCode, cloneTime(next), at
+	d.ProviderRequestRef = providerRequestRef
 	if outcome == "delivered" {
 		d.LastError, d.DeliveredAt, d.RemoteRef = "", &finished, remoteRef
 	}

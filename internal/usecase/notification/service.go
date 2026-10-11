@@ -718,7 +718,7 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	if err != nil {
 		finished := s.clock.Now().UTC()
 		// The vault key is the operator's, not the channel's, so this never counts towards a pause.
-		if finishErr := s.finishAttempt(ctx, attempt, finished, "failed", 0, "channel_secret_unavailable", nil, "", domain.AttemptIgnored); finishErr != nil {
+		if finishErr := s.finishAttempt(ctx, attempt, finished, "failed", 0, "channel_secret_unavailable", nil, "", work.Delivery.ProviderRequestRef, domain.AttemptIgnored); finishErr != nil {
 			return finishErr
 		}
 		s.observeAttempt(work.Delivery.ChannelType, now, finished, false, false)
@@ -728,7 +728,7 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	cfg, configErr := decodeChannelConfig(work.Channel.Type, raw)
 	if configErr != "" {
 		finished := s.clock.Now().UTC()
-		if finishErr := s.finishAttempt(ctx, attempt, finished, "failed", 0, configErr, nil, "", domain.ClassifyAttempt(false, configErr, false)); finishErr != nil {
+		if finishErr := s.finishAttempt(ctx, attempt, finished, "failed", 0, configErr, nil, "", work.Delivery.ProviderRequestRef, domain.ClassifyAttempt(false, configErr, false)); finishErr != nil {
 			return finishErr
 		}
 		s.observeAttempt(work.Delivery.ChannelType, now, finished, false, false)
@@ -736,14 +736,19 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 		return &DeliveryError{terminal: true, cause: errors.New(configErr)}
 	}
 	cfg, emailCode := s.EmailChannelConfig(ctx, work, cfg)
-	result := ports.NotificationSendResult{ErrorCode: emailCode, Retryable: emailCode == "email_settings_unavailable"}
+	if work.Channel.Type == domain.ChannelJSM {
+		if _, ok := s.repo.(ports.NotificationProviderRequestFinisher); !ok {
+			emailCode = "provider_resume_unavailable"
+		}
+	}
+	result := ports.NotificationSendResult{ErrorCode: emailCode, Retryable: emailCode == "email_settings_unavailable", ProviderRequestRef: work.Delivery.ProviderRequestRef}
 	if emailCode == "" {
 		result = s.sender.Send(ctx, work, cfg)
 	}
 	result.TemplateFallback = result.TemplateFallback || render.Fallback
 	finished := s.clock.Now().UTC()
 	if result.ErrorCode == "" && result.StatusCode >= 200 && result.StatusCode < 300 {
-		if err = s.finishAttempt(ctx, attempt, finished, "delivered", result.StatusCode, "", nil, result.RemoteRef, domain.AttemptDelivered); err != nil {
+		if err = s.finishAttempt(ctx, attempt, finished, "delivered", result.StatusCode, "", nil, result.RemoteRef, "", domain.AttemptDelivered); err != nil {
 			return err
 		}
 		s.observeAttempt(work.Delivery.ChannelType, now, finished, true, result.TemplateFallback)
@@ -770,7 +775,7 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	}
 	// The health class reads the sender's own Retryable flag, so a retry that finally exhausts
 	// its attempts (a 5xx eight times) still never counts towards a pause.
-	if err = s.finishAttempt(ctx, attempt, finished, outcome, result.StatusCode, code, nextPtr, "", domain.ClassifyAttempt(false, code, result.Retryable)); err != nil {
+	if err = s.finishAttempt(ctx, attempt, finished, outcome, result.StatusCode, code, nextPtr, "", result.ProviderRequestRef, domain.ClassifyAttempt(false, code, result.Retryable)); err != nil {
 		return err
 	}
 	s.observeAttempt(work.Delivery.ChannelType, now, finished, false, result.TemplateFallback)

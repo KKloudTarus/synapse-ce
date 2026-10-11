@@ -28,6 +28,14 @@ Pager identities use an HMAC-derived tenant key and the trusted subject identity
 Resolve requests require a prior successful trigger to the same destination.
 Custom details are restricted to signal data regardless of channel configuration.
 JSM uses the current integration events API with an integration API key.
+An accepted asynchronous request is recorded separately from an acknowledged
+alert reference. The worker commits its request ID with the fenced retry
+transition before checking completion on a later attempt. Restarts resume the
+status read; a missing or pending status never becomes a subject anchor. The
+request ID stays internal and is cleared when delivery is acknowledged.
+There remains an unavoidable crash window between provider acceptance and the
+local commit: alias deduplication prevents another open alert, but the provider
+may increment its occurrence count if the accepted response was lost.
 
 Apply additive migrations before API and worker deployment. Disable affected
 provider types to stop outbound delivery during rollback; preserve delivery

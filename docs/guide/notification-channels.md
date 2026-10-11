@@ -34,6 +34,13 @@ The operator relay is independent of the tenant relay allowlist. It remains the
 fallback while the tenant has no configured relay, which gives operators a rollback
 path: clear a tenant relay and keep the operator relay configured.
 
+JSM acknowledges creates and closes asynchronously. A successful HTTP acceptance
+stores an internal request handle with the retry transition; subsequent worker
+attempts check that request rather than creating another alert. A status that is
+not yet visible (`404`) or remains pending is retryable. Only a confirmed success
+records the acknowledged alert reference. Quiesce JSM workers before reverting
+the provider-request migration: its rollback drops pending request handles.
+
 ## Tenant SMTP relay
 
 An administrator manages a tenant relay through `GET` and `PUT
@@ -167,7 +174,11 @@ use ordinary indexes inside Goose transactions and may block writers while the
 indexes build. Keep outbound notification processing paused during deployment:
 apply the coordinated migrations, upgrade every notification worker, then upgrade
 the API/UI and enable the providers. Older workers cannot decode the new channel
-types and do not enforce the new send-time recipient policy.
+types and do not enforce the new send-time recipient policy. Workers predating
+pending JSM request persistence also ignore stored request IDs and can repeat a
+POST instead of resuming its status GET. Keep JSM disabled across the entire pool
+until all workers support the new persistence contract. Drain pending JSM requests
+before downgrading workers; preserve their request IDs and schema during rollback.
 
 For an immediate rollback, keep the current binaries and disable the affected
 providers. If reverting binaries, quiesce deliveries and coordinate both API and
@@ -183,7 +194,7 @@ operators must approve only relay hosts they trust. Self-hosted chat uses the
 public-only tenant HTTP policy even when its hostname is allowlisted.
 
 The Slack bot change reserves migration 0228. Include it before applying this
-branch's migrations 0229–0231: Goose rejects an older missing migration after
+branch's migrations 0229–0232: Goose rejects an older missing migration after
 the database has advanced past it. If these migrations are deployed first,
 coordinate a new append-only migration number for the Slack change and verify
 the combined order before rollout. This draft does not authorize that rollout.
@@ -200,3 +211,31 @@ tenant relay returns delivery to the configured operator SMTP fallback. Remove a
 approved email domain to revoke future domain-based recipients; validated domains
 remain cached until explicitly removed. Rotate channel credentials by updating the
 channel, which pins new deliveries to the resulting secret version.
+
+## Acceptance evidence
+
+The local acceptance environment contains synthetic data only. Provider credentials
+stay in private local files outside the tracked tree. A successful provider response
+does not establish that the full event producer, recipient policy and console link
+flow passed.
+
+| Surface | Evidence obtained | Remaining acceptance |
+| --- | --- | --- |
+| Mattermost and Rocket.Chat | Real Docker clients received ten formatter/Sender fixtures each: critical finding, scan completed with three new/two fixed findings, SLA deadline, incident creation and hostile title, in English and Vietnamese. Browser captures check visible formatting and hostile links. | Execute the same matrix through the built-in event/template pipeline, verify severity presentation from event metadata, and follow links into the configured console. Fixture links use `https://synapse.invalid`. |
+| Slack | A scratch combination with the separate Slack bot change authenticated the test bot and posted one root plus four replies. Provider contract tests cover the shared anchor and missing-parent fallback. | Integrate the adapter change with its owner; complete the event/locale/theme/device matrix and live retry/deleted-parent scenarios. The Slack bot implementation is outside this branch. |
+| SMTP | Real STARTTLS 587 and implicit TLS 465 relays accepted and stored English/Vietnamese multipart messages with verified certificates. A missing Date header found by the content filter was fixed and retested. | Complete the five-event client matrix and representative relay rollout. Mailpit's phone preview is an HTML preview, not an email application's mobile client. |
+| Gmail | A temporary Desktop OAuth client and Testing consent were prepared in a project with billing disabled. Loopback callback uses PKCE and state validation. | Grant the SMTP mailbox scope, perform real refresh/XOAUTH2 delivery, inspect Gmail clients, revoke the grant and remove the temporary project/client. |
+| Microsoft | Local client-credentials and SMTP XOAUTH2 contract tests pass. | Deferred at the operator's request. Use an isolated test tenant/mailbox with Entra and Exchange authorization before external acceptance. |
+| PagerDuty and JSM | Local trigger/paired-close contracts pass. JSM accepted request IDs persist atomically with fenced attempts, survive exhaustion and restoration of the existing pinned credential/vault, and resume GET status reads without another POST. | Dedicated test services/integrations and live trigger, deduplication, delayed confirmation and close evidence. Replacing a channel key increments its secret version; redrive of an older version remains rejected. Recovery after key replacement is deferred. Automatic close also requires a trusted catalog closure producer. |
+| Migrations | Populated isolated rehearsal passed 153 assertions for the original migrations. A combined Slack ordering rehearsal passed 55 assertions through `227 -> 228 -> 229 -> 230 -> 231 -> 232 -> 227 -> 232`. The current full PostgreSQL package passed in 994.096 seconds with serial tests. | Representative lock/latency budgets and production rollout/rollback rehearsal. Hosted CI currently has a shorter default timeout than the local PostgreSQL run. |
+| Recipient policy | Same-tenant active verified contacts, exact DNS-proven domains, send-time revocation and five tests/channel/hour have memory and PostgreSQL coverage. | Live operator DNS/domain workflow and representative production history/RLS latency. |
+
+Prepare disposable Telegram and Google Chat destinations, dedicated PagerDuty/JSM
+test integrations, and a configured HTTPS console containing the synthetic subjects
+before completing the remaining external matrix. Store credentials through private
+local configuration or the vault; do not put them in issue comments or PR bodies.
+
+The provider screenshots under `assets/ui/notification-channels/live/` supplement
+the console state captures. The PR table identifies the client, locale, theme and
+device actually shown. Fixture color glyphs are test inputs and do not prove automatic
+severity-to-color mapping in the production event flow.

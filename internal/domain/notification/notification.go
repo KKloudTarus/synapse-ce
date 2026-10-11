@@ -311,6 +311,9 @@ type Delivery struct {
 	// RemoteRef is the acknowledged provider message handle. It is used only to
 	// anchor later deliveries of the same subject to this channel configuration.
 	RemoteRef string `json:"remote_ref,omitempty"`
+	// ProviderRequestRef resumes an accepted asynchronous operation. It is not an
+	// acknowledgement or subject anchor and is never exposed through delivery APIs.
+	ProviderRequestRef string `json:"-"`
 }
 
 type Attempt struct {

@@ -88,6 +88,9 @@ type NotificationSendResult struct {
 	// on the delivery so a later event about the same subject can reply to it. Empty when the
 	// provider returns none.
 	RemoteRef string
+	// ProviderRequestRef is an accepted asynchronous request to resume on retry.
+	// It must be committed with the fenced attempt, separately from RemoteRef.
+	ProviderRequestRef string
 }
 
 // NotificationDeliveryObserver is optional worker-only instrumentation. Every
@@ -119,6 +122,12 @@ type NotificationSubjectAnchorReader interface {
 // the base completion contract; production notification repositories implement it.
 type NotificationRemoteRefFinisher interface {
 	FinishAttemptWithRemoteRef(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time, string, int, string, *time.Time, string) error
+}
+
+// NotificationProviderRequestFinisher persists accepted async operations with
+// their attempt transition. Repositories supporting async providers implement it.
+type NotificationProviderRequestFinisher interface {
+	FinishAttemptWithProviderRefs(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time, string, int, string, *time.Time, string, string) error
 }
 
 // NotificationRepository owns notification administration and delivery work.

@@ -67,6 +67,7 @@ type NotificationRepository struct {
 var _ ports.NotificationRepository = (*NotificationRepository)(nil)
 var _ ports.NotificationSubjectAnchorReader = (*NotificationRepository)(nil)
 var _ ports.NotificationRemoteRefFinisher = (*NotificationRepository)(nil)
+var _ ports.NotificationProviderRequestFinisher = (*NotificationRepository)(nil)
 
 // Admission caps match postgres.notificationAdmission.
 const (
