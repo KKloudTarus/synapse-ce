@@ -40,6 +40,7 @@ import {
   replaceDestinationHint,
 } from './channelDestinations'
 import { ChannelTemplateFields, RuleTemplatePreview } from './ChannelTemplateBinding'
+import { SlackBotDestinationFields, slackBotDestinationValid } from './SlackBotDestination'
 
 // A new rule starts on the most common subscription when the catalog offers it.
 const DEFAULT_RULE_EVENT = 'vulnerability_action.created'
@@ -380,6 +381,9 @@ function ChannelCreate({
   // Telegram: the bot token is `secret`; the chat and optional forum topic sit beside it.
   const [chatId, setChatId] = useState('')
   const [threadId, setThreadId] = useState('')
+  // Slack bot: the bot token is `secret`; the conversation and the shared switch sit beside it.
+  const [conversationId, setConversationId] = useState('')
+  const [allowShared, setAllowShared] = useState(false)
   const [recipients, setRecipients] = useState(
     initial?.recipients?.join(', ') ?? '',
   )
@@ -404,6 +408,9 @@ function ChannelCreate({
     (!!secret.trim() &&
       TELEGRAM_CHAT_PATTERN.test(chatId.trim()) &&
       (!threadId.trim() || /^\d{1,10}$/.test(threadId.trim())))
+  const slackBotValid = slackBotDestinationValid(!!initial, secret, conversationId, allowShared)
+  // A Slack bot destination is sent only when the administrator entered one; a rename sends none.
+  const slackBotTouched = !!(secret.trim() || conversationId.trim() || allowShared)
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -417,15 +424,28 @@ function ChannelCreate({
         url:
           spec.kind === 'recipients' ||
           spec.kind === 'telegram' ||
+          spec.kind === 'slack_bot' ||
           destinationLocked
             ? undefined
             : url.trim(),
         secret:
-          (spec.kind === 'signed_url' || spec.kind === 'telegram') &&
-          !destinationLocked
-            ? spec.kind === 'telegram'
+          spec.kind === 'slack_bot'
+            ? !destinationLocked && slackBotTouched
               ? secret.trim()
-              : secret
+              : undefined
+            : (spec.kind === 'signed_url' || spec.kind === 'telegram') &&
+                !destinationLocked
+              ? spec.kind === 'telegram'
+                ? secret.trim()
+                : secret
+              : undefined,
+        conversation_id:
+          spec.kind === 'slack_bot' && !destinationLocked && slackBotTouched
+            ? conversationId.trim()
+            : undefined,
+        allow_shared_conversation:
+          spec.kind === 'slack_bot' && !destinationLocked && slackBotTouched && allowShared
+            ? true
             : undefined,
         chat_id:
           spec.kind === 'telegram' && !destinationLocked && chatId.trim()
@@ -472,6 +492,8 @@ function ChannelCreate({
       setSecret('')
       setChatId('')
       setThreadId('')
+      setConversationId('')
+      setAllowShared(false)
       setRecipients('')
       onCreated()
     } catch (e) {
@@ -609,6 +631,17 @@ function ChannelCreate({
               />
             </Field>
           </>
+        ) : spec.kind === 'slack_bot' ? (
+          <SlackBotDestinationFields
+            channelId={initial?.id}
+            token={secret}
+            onTokenChange={setSecret}
+            conversationId={conversationId}
+            onConversationChange={setConversationId}
+            allowShared={allowShared}
+            onAllowSharedChange={setAllowShared}
+            disabled={destinationLocked}
+          />
         ) : (
           <Field
             label={spec.urlLabel ?? 'Webhook URL'}
@@ -626,7 +659,7 @@ function ChannelCreate({
             />
           </Field>
         )}
-        {spec.kind === 'telegram' && spec.hint && (
+        {(spec.kind === 'telegram' || spec.kind === 'slack_bot') && spec.hint && (
           <p className="text-sm text-tertiary md:col-span-2">{spec.hint}</p>
         )}
         {type === 'webhook' && (
@@ -708,7 +741,9 @@ function ChannelCreate({
                 ? !recipients.trim()
                 : spec.kind === 'telegram'
                   ? !telegramValid
-                  : !initial && !url.trim()) ||
+                  : spec.kind === 'slack_bot'
+                    ? !slackBotValid
+                    : !initial && !url.trim()) ||
               (type === 'webhook' &&
                 (!initial || !!url || !!secret) &&
                 (secret.length < 16 || !url.trim()))

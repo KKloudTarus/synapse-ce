@@ -1011,3 +1011,20 @@ func contextJSON(raw json.RawMessage) []byte {
 	}
 	return raw
 }
+
+// GetChannelSealedConfig implements ports.NotificationChannelSecretReader: a live channel and the
+// sealed configuration of its current version, read in one tenant transaction.
+func (r *NotificationRepository) GetChannelSealedConfig(ctx context.Context, tenant, id shared.ID) (notification.Channel, string, error) {
+	var out notification.Channel
+	var sealed string
+	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
+		if err := scanChannel(tx.QueryRow(ctx, channelSelect+` WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, tenant, id), &out); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT sealed_config FROM notification_channel_versions WHERE tenant_id=$1 AND channel_id=$2 AND version=$3`, tenant, id, out.SecretVersion).Scan(&sealed)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = fmt.Errorf("notification channel %s: %w", id, shared.ErrNotFound)
+	}
+	return out, sealed, err
+}

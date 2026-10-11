@@ -2,7 +2,7 @@
 
 [Documentation home](README.md)
 
-Synapse can route tenant events to signed HTTP webhooks, Slack incoming webhooks,
+Synapse can route tenant events to signed HTTP webhooks, Slack incoming webhooks, a Slack app,
 Microsoft Teams, Telegram, Google Chat and Discord channels, and email recipients. Delivery runs in `synapse-worker`; API requests and scans do
 not wait for a remote service.
 
@@ -519,6 +519,70 @@ with the channel templates (#1367).
 All four are `2xx` delivered, `408`, `429` and `5xx` retried with the usual budget, and any other
 status final. Each type can be switched off deployment-wide with
 `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` (for example `telegram,discord`).
+
+## Slack app channels (bot token)
+
+A `slack_bot` channel posts as a Slack app with
+[`chat.postMessage`](https://api.slack.com/methods/chat.postMessage) instead of an incoming webhook
+(#1383). It sends the same Block Kit message as the `slack` type, plus `unfurl_links: false` and
+`unfurl_media: false` so a link in a finding title never expands into a preview. The message `ts` is
+kept on the delivery as its remote reference, so follow-ups about the same subject can thread under it
+(#1384).
+
+Set up the app once per workspace:
+
+1. Create a Slack app, add the bot scopes `chat:write`, `channels:read` and `groups:read`, and install
+   it to the workspace. Copy the **Bot User OAuth Token** (`xoxb-…`). User tokens (`xoxp-`) and
+   app-level tokens (`xapp-`) are refused.
+2. Invite the app to each private channel it should post to (`/invite @your-app`).
+3. In **Settings → Alerting**, add a channel of type **Slack app (bot token)**, enter the token, and
+   either press **Load channels** and pick one, or type the channel ID (`C…`) from the channel's
+   details in Slack.
+
+The token is the credential: it is sealed like a webhook secret, sent only in the `Authorization`
+header to `slack.com`, never returned by the API, and a failed call is recorded only as a code. When
+the channel is saved, the API calls `auth.test` and `conversations.info` before the administration
+transaction opens: the token must be a bot token, and the conversation must exist, not be archived
+and, if private, have the app as a member. The workspace ID is sealed with the token. Re-pointing the
+channel (a new token, conversation or shared setting) needs `administer` and both the token and the
+conversation again; a rename keeps them.
+
+**Shared conversations.** A Slack Connect, externally shared or organisation-shared conversation can
+be read by people outside the workspace, so it is refused unless an administrator ticks **Allow Slack
+Connect and organisation-shared conversations** (`allow_shared_conversation`). Before every send the
+worker reads the conversation again; one that became shared after the channel was saved is refused
+with `slack_conversation_shared` and nothing is posted. The data class still defaults to `signal`.
+
+The conversation picker is `POST /api/v1/notifications/slack/conversations` with either the
+`bot_token` being entered or the `channel_id` of an existing Slack app channel. It needs
+`administer`, lists public channels and the private channels the app is in (up to 2,000, without
+archived ones), marks shared ones, and never echoes the token.
+
+Slack answers most errors with HTTP 200 and `ok: false`; they are recorded as `slack_<error>`.
+`slack_ratelimited` (with its `Retry-After`) and Slack's `internal_error`, `fatal_error`,
+`service_unavailable` and `request_timeout` are retried. `slack_invalid_auth`, `slack_not_authed`,
+`slack_token_revoked`, `slack_token_expired`, `slack_account_inactive`, `slack_missing_scope`,
+`slack_not_allowed_token_type`, `slack_channel_not_found`, `slack_not_in_channel`,
+`slack_is_archived`, `slack_restricted_action` and `slack_conversation_shared` are final and count
+towards the channel's automatic pause. Switch the type off deployment-wide with
+`SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot`.
+
+**Rolling out and rolling back.** Workers deliver; the API only saves channels. A worker from an
+earlier release has no `slack_bot` driver: if it claims a `notification.deliver` job for a Slack
+app channel it ends that delivery with `unsupported_channel` (dead letter), and the message is lost.
+Upgrade in this order:
+
+1. Apply migration `0228`.
+2. Upgrade every `synapse-worker`.
+3. Upgrade the API. Until all workers run this release, keep
+   `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the API so no one can create a Slack app
+   channel early.
+   Do not set it on the older workers: they do not know the type and refuse to start.
+
+To roll back, first set `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the API and the
+workers of this release: queued Slack app deliveries are cancelled with `provider_disabled` instead of
+reaching an older worker. Then downgrade the API, then the workers. Existing Slack app channels stay
+stored; migration `0228` down only restores the template family guard.
 
 ## Retry and cutover behavior
 
