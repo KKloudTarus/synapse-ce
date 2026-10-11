@@ -32,7 +32,7 @@ value. Any authenticated role may read it.
 Some entries carry more than a switch:
 
 - `notifications.channel_types` lists, in `values`, the channel types this build can deliver to
-  (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`), read from the
+  (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`, `slack_bot`), read from the
   notification driver registry, minus any type named in
   `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`. The console offers only these types when creating a
   channel. When the operator disables every type, `values` is omitted and no channel can be created.
@@ -42,7 +42,7 @@ Some entries carry more than a switch:
 ```json
 {"key": "notifications.channel_types", "name": "Notification channel types", "enabled": true,
  "switch": "SYNAPSE_NOTIFICATIONS_ENABLED", "requires": ["notifications"],
- "values": ["webhook", "slack", "email", "teams", "telegram", "google_chat", "discord"]}
+ "values": ["webhook", "slack", "email", "teams", "telegram", "google_chat", "discord", "slack_bot"]}
 {"key": "ticketing", "name": "Ticketing", "enabled": false, "switch": "", "planned": true}
 ```
 
@@ -169,7 +169,7 @@ scrape_configs:
       - targets: ["127.0.0.1:9090"]
 ```
 
-The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord` or `other/other`, never tenant or destination data.
+The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord`, `slack_bot/slack` or `other/other`, never tenant or destination data.
 
 ## Persistence
 
@@ -419,8 +419,11 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_NOTIFICATION_SMTP_USERNAME` / `SYNAPSE_NOTIFICATION_SMTP_PASSWORD` | (unset) | Optional SMTP authentication. The password is secret and must not be logged. |
 | `SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS` | `true` | Require STARTTLS with certificate verification. Keep enabled in production. |
 | `SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL` | (unset) | Optional absolute HTTPS URL for the operator's recipient-removal workflow. When set, every tenant Email channel message includes it in `List-Unsubscribe`; the receiver must perform recipient removal using its own state. Synapse never interpolates recipient or tenant data and does not advertise one-click unsubscribe. |
-| `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` | (unset) | Operator kill switch: comma-separated channel and provider types no tenant may use, for example `slack,email`. Entries are trimmed, lowercased and deduplicated; empty entries are ignored. Every entry must be a type in this build's notification driver registry (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`), so a typo stops API and worker startup. A disabled type is left out of the `notifications.channel_types` capability, creating or testing a channel of that type answers `400`, an existing channel of that type cannot be switched on or given a new destination (it can still be renamed, switched off or deleted), and the worker cancels its queued deliveries with `provider_disabled`. Set the same value on the API and the worker. Removing a type from the list restores its channels. It does not affect personal inbox mail or contact verification email. |
+| `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` | (unset) | Operator kill switch: comma-separated channel and provider types no tenant may use, for example `slack,email`. Entries are trimmed, lowercased and deduplicated; empty entries are ignored. Every entry must be a type in this build's notification driver registry (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`, `slack_bot`), so a typo stops API and worker startup. A disabled type is left out of the `notifications.channel_types` capability, creating or testing a channel of that type answers `400`, an existing channel of that type cannot be switched on or given a new destination (it can still be renamed, switched off or deleted), and the worker cancels its queued deliveries with `provider_disabled`. Set the same value on the API and the worker. Removing a type from the list restores its channels. It does not affect personal inbox mail or contact verification email. |
 | `SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD` | `5` | Read by `synapse-worker`. Consecutive permanent delivery failures (for example `destination_blocked` or an HTTP 404) after which a notification channel is paused automatically and tenant administrators get an in-app notice; an administrator resumes it from Settings > Alerting. Retryable failures (408, 429, 5xx, timeouts) never count, and a delivered message resets the count. `0` counts failures but never pauses. Must be between `0` and `100`; other values stop the worker at startup. See [Notifications](notifications.md#channel-health-and-automatic-pause). |
+| `SYNAPSE_TEAMS_BOT_APP_ID` | (unset) | Microsoft app ID (a GUID) of the operator's Azure Bot for Microsoft Teams personal delivery (#1420). Set on the API (link codes and the `/api/v1/teams/messages` messaging endpoint) and the worker (sending). Unset leaves Teams personal delivery off and its preferences unavailable. See [Notifications](notifications.md#microsoft-teams-personal-delivery). |
+| `SYNAPSE_TEAMS_BOT_APP_PASSWORD` | (unset) | The bot's client secret; required with `SYNAPSE_TEAMS_BOT_APP_ID`. Secret: sent only in the token request body to `login.microsoftonline.com`, never logged. |
+| `SYNAPSE_TEAMS_BOT_TENANT_ID` | (unset) | Microsoft Entra tenant ID (a GUID) of a single-tenant bot. Unset requests tokens from `botframework.com`, for a multi-tenant bot. An invalid value, or a password or tenant without an app ID, stops API and worker startup. |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
 | `SYNAPSE_FLEET_MIN_AGENT_VERSION` | empty | Reject agents below this version (empty = no floor). |
 | `SYNAPSE_FLEET_ENROL_URL` | `SYNAPSE_FLEET_URL` | One-time enrollment API base URL for `synapse-agent`; after enrollment, the agent uses `SYNAPSE_FLEET_URL`. HTTPS is required except for a loopback host. |
@@ -654,7 +657,7 @@ scrape_configs:
       - targets: ["127.0.0.1:9090"]
 ```
 
-The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord` or `other/other`, never tenant or destination data.
+The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord`, `slack_bot/slack` or `other/other`, never tenant or destination data.
 
 ## Persistence
 

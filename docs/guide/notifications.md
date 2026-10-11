@@ -2,14 +2,16 @@
 
 [Documentation home](README.md)
 
-Synapse can route tenant events to signed HTTP webhooks, Slack incoming webhooks,
+Synapse can route tenant events to signed HTTP webhooks, Slack incoming webhooks, a Slack app,
 Microsoft Teams, Telegram, Google Chat and Discord channels, and email recipients. Delivery runs in `synapse-worker`; API requests and scans do
 not wait for a remote service.
 
 ## Personal email contacts
 
 When notifications and SMTP are enabled, every authenticated human user can manage
-their own email destinations at **My profile** (`/profile`). `GET` and `POST
+their own email destinations at **My profile** (`/profile`). Slack and Microsoft Teams
+accounts are linked on the same page; see [Slack direct messages](#slack-direct-messages)
+and [Microsoft Teams personal delivery](#microsoft-teams-personal-delivery). `GET` and `POST
 /api/v1/me/contacts` list/add contacts; `POST
 /api/v1/me/contacts/{id}/verification` queues a verification message; `POST
 /api/v1/me/contacts/{id}/verify` consumes the eight-digit code; `DELETE
@@ -376,9 +378,71 @@ When notifications are enabled, each human user has an inbox at `/inbox` and a b
 
 Inbox rows are written in the same database transaction as the notification event. In-app delivery does not create a channel delivery or a job. Replaying an event after retention does not recreate a deleted row. Mark-all-read uses the server time of that request, so a message that arrives while the request is running stays unread.
 
-Personal recipients come from structured IDs already on the event: the canonical finding assignee and active ownership team members. A legacy assignee label, an email address, or a display name is never resolved into a recipient. Mentioned users, approvers, and engagement leads stay unsupported until a producer records a verified identity. `notification.destination_changed` is mandatory in-app for enabled tenant admins. It is not a routing rule and cannot be muted. One notice is stored per channel revision: repeating that save is a no-op, and changing only the secret or the URL path is not a host change. Changing back to an earlier host writes a new notice. The payload contains the actor, the action, the channel class, and the scheme plus host. It does not contain a URL path, query, port secret, or credential. `notification.channel_paused` is mandatory in-app for enabled tenant admins in the same way, once per automatic pause (see [Channel health and automatic pause](#channel-health-and-automatic-pause)).
+Personal recipients come from structured IDs already on the event: the canonical finding assignee and active ownership team members. A legacy assignee label, an email address, or a display name is never resolved into a recipient. A routing rule can add people by role (see [Recipient roles](#recipient-roles-and-engagement-leads)); mentioned users and approvers stay unsupported until a producer records a verified identity. `notification.destination_changed` is mandatory in-app for enabled tenant admins. It is not a routing rule and cannot be muted. One notice is stored per channel revision: repeating that save is a no-op, and changing only the secret or the URL path is not a host change. Changing back to an earlier host writes a new notice. The payload contains the actor, the action, the channel class, and the scheme plus host. It does not contain a URL path, query, port secret, or credential. `notification.channel_paused` is mandatory in-app for enabled tenant admins in the same way, once per automatic pause (see [Channel health and automatic pause](#channel-health-and-automatic-pause)).
 
-`PUT /api/v1/me/notification-preferences` stores `inherit`, `enabled`, or `disabled` for the signed-in user. Mandatory in-app wins over an explicit mute, and an explicit mute wins over the default for every other choice. Personal email is sent only to the verified contact version captured when the event was projected. A later email change does not retarget a message that is still queued. Personal delivery is currently available for finding ownership changes, approaching SLAs, and destination-change notices. Other framework event types, Slack direct messages, and Teams personal delivery are shown as unavailable until they have a structured personal recipient and subject.
+`PUT /api/v1/me/notification-preferences` stores `inherit`, `enabled`, or `disabled` per event type and personal channel (`in_app`, `email`, `slack`, `teams`) for the signed-in user. Precedence is mandatory > the person's choice > the tenant default > the built-in default (in-app on, everything else off); `inherit` follows the tenant default, which each preference reports as `default`. Every personal message is sent from its inbox row, so muting in-app also mutes email, Slack and Teams for that event. A personal message leaves Synapse only to the verified contact version captured when the event was projected; when the job runs it is checked again (the person is enabled with a human role, the inbox is not muted, the preference and tenant default still allow it, the engagement still lets messages out, the contact version is unchanged) and a stale job ends without sending. It is never retargeted. Slack can be chosen once the tenant has an enabled Slack app channel, and Teams once the operator configured the Teams bot.
+
+### Tenant defaults
+
+`GET /api/v1/notifications/personal-defaults` lists, for every event type a person can configure, whether email, Slack and Teams are on by default; `PUT` changes one (`manage_integrations`, audited as `notification.personal_default.updated`, guarded by `revision`). They are off until changed. The inbox has no tenant default. In the console they are under **Settings → Alerting → Personal delivery defaults**.
+
+### Recipient roles and engagement leads
+
+A routing rule can name `recipient_roles` besides (or instead of) channels:
+
+| Role | Who | Events |
+|---|---|---|
+| `assignee` | The finding's canonical assignee | `finding.ownership_changed`, `sla.approaching_deadline` |
+| `team_member` | Active members of the finding's owning team | `finding.ownership_changed` |
+| `engagement_lead` | The lead set on the event's engagement | Every event with an engagement |
+
+Each role has its own resolver. They keep only enabled users of the tenant whose role can view, and the send-time reload checks that again. A person selected by several roles gets one inbox row. Roles add people to those the event already names; they never remove anyone. For an event that names nobody itself, the inbox row uses the event's own title and summary and links to its engagement. `mentioned_user` and `approver` are refused until a producer records a verified identity.
+
+The engagement lead is part of the engagement's notification settings: `PUT /api/v1/notifications/engagements/{id}/settings` with `lead_user_id` (an enabled user of the tenant whose role can view; `""` clears it). It is audited with the previous lead. The console sets it under **Settings → Alerting → Engagement leads**.
+
+### Slack direct messages
+
+A person links a Slack account in **My profile → Slack**: they choose a workspace in which the tenant has an enabled Slack app channel ([Slack app channels](#slack-app-channels-bot-token)) and paste their own member ID (Slack profile, **More**, **Copy member ID**). The API checks with that workspace's app (`users.info`) that the member is an active person, then stores the contact as `team_id:member_id`, unverified. **Send code in Slack** sends the eight-digit verification code as the app's direct message, with the same expiry, attempt and resend limits as email; entering it verifies the contact. Synapse never looks a person up in Slack by email or name, and the contact holds only the workspace and member IDs.
+
+A personal Slack message is the app's direct message (`conversations.open`, then `chat.postMessage`) with the inbox title, the escaped summary and, when `SYNAPSE_PUBLIC_BASE_URL` is set, an **Open in Synapse** link. It is sent with the bot token of an enabled, unpaused Slack app channel of the same workspace, chosen by channel name; when none remains the job ends with `slack_workspace_unavailable`. Rate limits are retried with Slack's `Retry-After`.
+
+Direct messages need more of the app than channel posts. Besides the channel scopes, add the bot scopes `users:read` (linking) and `im:write` (opening the direct message), reinstall the app, and in the app's **App Home** turn on **Messages Tab**. Without the tab Slack refuses every direct message, so the verification code never arrives and the job ends with `slack_messages_tab_disabled`; a missing scope ends with `slack_missing_scope`. **Send code in Slack** only queues the message: the profile page reports it sent, and the failure is recorded only on the worker's job and in its log.
+
+### Microsoft Teams personal delivery
+
+Teams Workflows webhooks cannot reach one person, so the operator registers one Azure Bot for the deployment (`SYNAPSE_TEAMS_BOT_APP_ID`, `SYNAPSE_TEAMS_BOT_APP_PASSWORD`, optional `SYNAPSE_TEAMS_BOT_TENANT_ID` for a single-tenant bot; see [Configuration](configuration.md)) with the messaging endpoint `https://<synapse>/api/v1/teams/messages`, and publishes a Teams app for it with the personal scope.
+
+1. A person opens a chat with the app and sends any message.
+2. The bot answers with a ten-character link code (for example `ABCDE-FGHJK`), valid once for 10 minutes. At most three codes are live per conversation.
+3. In **My profile → Microsoft Teams** they enter the code (`POST /api/v1/me/contacts/teams`). Every attempt counts against the five verification requests per user per hour; a wrong, used or expired code gets one `403`.
+
+The bot does not know the tenant: the code is stored only as a keyed digest, in a global owner-only table reached through two `SECURITY DEFINER` functions, next to the sealed conversation reference. Claiming it creates a verified `teams` contact (the person's Microsoft Entra object ID) and moves the conversation into the tenant, sealed again under the tenant and contact. Linking the same Teams account again replaces it.
+
+The messaging endpoint sits outside the human authentication chain. The only credential is the Bot Framework JWT: its signature against the Bot Framework keys, the issuer `https://api.botframework.com`, the bot's app ID as audience, and a `serviceurl` claim equal to the activity's service URL. Service URLs outside the Teams Bot Connector hosts are never stored or called. Every refusal is the same `401`. Only a message in a 1:1 chat is answered.
+
+A personal Teams message is an Adaptive Card (the same formatter as the `teams` channel) posted into that conversation with a Bot Connector token from `login.microsoftonline.com`. A removed bot or deleted conversation ends the job with `teams_conversation_gone`; the person links again.
+
+### Rolling out personal Slack and Teams delivery
+
+Workers send; an older worker does not know the new channels. It never claims a `personal.slack` or
+`personal.teams` job, but it does claim the `user_contact_verification` job of a Slack contact, and
+its email-only loader then ends that job without sending the code. Upgrade in this order:
+
+1. Apply migration `0229`.
+2. Upgrade every `synapse-worker`, and set `SYNAPSE_TEAMS_BOT_*` on the workers first if Teams is
+   used.
+3. Upgrade the API, and only then set `SYNAPSE_TEAMS_BOT_*` on it, which registers the bot endpoint
+   and the Teams link route.
+
+Until all workers run this release, keep `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the
+API (see [Slack app channels](#slack-app-channels-bot-token)): with the type switched off no
+workspace is offered for linking and no personal Slack message is queued. A Slack code an older
+worker swallowed is not lost for good; the person asks for a new code.
+
+To roll back, first switch `slack_bot` off and unset `SYNAPSE_TEAMS_BOT_*` on the API and on the
+workers of this release, then downgrade the API, then the workers. Personal Slack and Teams jobs still
+queued stay unclaimed by older workers and run, with their send-time checks, after a later upgrade.
+Migration `0229` down deletes Slack and Teams contacts and preferences.
 
 Events created before the framework first
 activates for a tenant are not replayed automatically.
@@ -519,6 +583,70 @@ with the channel templates (#1367).
 All four are `2xx` delivered, `408`, `429` and `5xx` retried with the usual budget, and any other
 status final. Each type can be switched off deployment-wide with
 `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` (for example `telegram,discord`).
+
+## Slack app channels (bot token)
+
+A `slack_bot` channel posts as a Slack app with
+[`chat.postMessage`](https://api.slack.com/methods/chat.postMessage) instead of an incoming webhook
+(#1383). It sends the same Block Kit message as the `slack` type, plus `unfurl_links: false` and
+`unfurl_media: false` so a link in a finding title never expands into a preview. The message `ts` is
+kept on the delivery as its remote reference, so follow-ups about the same subject can thread under it
+(#1384).
+
+Set up the app once per workspace:
+
+1. Create a Slack app, add the bot scopes `chat:write`, `channels:read` and `groups:read`, and install
+   it to the workspace. Copy the **Bot User OAuth Token** (`xoxb-…`). User tokens (`xoxp-`) and
+   app-level tokens (`xapp-`) are refused.
+2. Invite the app to each private channel it should post to (`/invite @your-app`).
+3. In **Settings → Alerting**, add a channel of type **Slack app (bot token)**, enter the token, and
+   either press **Load channels** and pick one, or type the channel ID (`C…`) from the channel's
+   details in Slack.
+
+The token is the credential: it is sealed like a webhook secret, sent only in the `Authorization`
+header to `slack.com`, never returned by the API, and a failed call is recorded only as a code. When
+the channel is saved, the API calls `auth.test` and `conversations.info` before the administration
+transaction opens: the token must be a bot token, and the conversation must exist, not be archived
+and, if private, have the app as a member. The workspace ID is sealed with the token. Re-pointing the
+channel (a new token, conversation or shared setting) needs `administer` and both the token and the
+conversation again; a rename keeps them.
+
+**Shared conversations.** A Slack Connect, externally shared or organisation-shared conversation can
+be read by people outside the workspace, so it is refused unless an administrator ticks **Allow Slack
+Connect and organisation-shared conversations** (`allow_shared_conversation`). Before every send the
+worker reads the conversation again; one that became shared after the channel was saved is refused
+with `slack_conversation_shared` and nothing is posted. The data class still defaults to `signal`.
+
+The conversation picker is `POST /api/v1/notifications/slack/conversations` with either the
+`bot_token` being entered or the `channel_id` of an existing Slack app channel. It needs
+`administer`, lists public channels and the private channels the app is in (up to 2,000, without
+archived ones), marks shared ones, and never echoes the token.
+
+Slack answers most errors with HTTP 200 and `ok: false`; they are recorded as `slack_<error>`.
+`slack_ratelimited` (with its `Retry-After`) and Slack's `internal_error`, `fatal_error`,
+`service_unavailable` and `request_timeout` are retried. `slack_invalid_auth`, `slack_not_authed`,
+`slack_token_revoked`, `slack_token_expired`, `slack_account_inactive`, `slack_missing_scope`,
+`slack_not_allowed_token_type`, `slack_channel_not_found`, `slack_not_in_channel`,
+`slack_is_archived`, `slack_restricted_action` and `slack_conversation_shared` are final and count
+towards the channel's automatic pause. Switch the type off deployment-wide with
+`SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot`.
+
+**Rolling out and rolling back.** Workers deliver; the API only saves channels. A worker from an
+earlier release has no `slack_bot` driver: if it claims a `notification.deliver` job for a Slack
+app channel it ends that delivery with `unsupported_channel` (dead letter), and the message is lost.
+Upgrade in this order:
+
+1. Apply migration `0228`.
+2. Upgrade every `synapse-worker`.
+3. Upgrade the API. Until all workers run this release, keep
+   `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the API so no one can create a Slack app
+   channel early.
+   Do not set it on the older workers: they do not know the type and refuse to start.
+
+To roll back, first set `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the API and the
+workers of this release: queued Slack app deliveries are cancelled with `provider_disabled` instead of
+reaching an older worker. Then downgrade the API, then the workers. Existing Slack app channels stay
+stored; migration `0228` down only restores the template family guard.
 
 ## Retry and cutover behavior
 

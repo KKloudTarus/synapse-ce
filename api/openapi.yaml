@@ -2871,13 +2871,97 @@ paths:
     post:
       tags: [personal-contacts]
       operationId: addMyEmailContact
-      summary: Add an unverified email destination
-      description: The server derives tenant and user from the principal; caller-supplied identity fields are ignored. Maximum 20 contacts per user.
-      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [kind, value], properties: {kind: {type: string, enum: [email]}, value: {type: string, format: email, maxLength: 320}}}}}}
+      summary: Add an unverified email or Slack destination
+      description: >-
+        The server derives tenant and user from the principal; caller-supplied identity fields are
+        ignored. Maximum 20 contacts per user. An email contact takes `value`. A Slack contact (#1419)
+        takes `team_id`, a workspace listed by `GET /api/v1/me/personal-channels`, and the person's own
+        `member_id` (Slack profile, then More, then Copy member ID); the server checks with the
+        workspace's Slack app that the member is an active person and never looks anyone up by email.
+        The contact's value is `team_id:member_id`. Either kind is verified with a code: email by mail,
+        Slack as the app's direct message.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: {type: string, enum: [email, slack]}
+                value: {type: string, format: email, maxLength: 320, description: 'email only'}
+                team_id: {type: string, pattern: '^T[A-Z0-9]{2,30}$', description: 'slack only'}
+                member_id: {type: string, pattern: '^[UW][A-Z0-9]{2,30}$', description: 'slack only'}
       responses:
         '201': {description: Created but not yet verified, content: {application/json: {schema: {$ref: '#/components/schemas/UserContact'}}}}
         '400': {$ref: '#/components/responses/BadRequest'}
         '409': {description: Duplicate address or contact limit reached}
+        '503': {description: No Slack app is set up for this deployment}
+
+  /api/v1/me/personal-channels:
+    get:
+      tags: [personal-contacts]
+      operationId: getMyPersonalChannels
+      summary: List the personal channels this deployment can link
+      description: >-
+        The Slack workspaces the tenant has an enabled Slack bot channel in (#1419), by team ID and
+        name, and whether the operator set up the Microsoft Teams bot (#1420). It names no channel,
+        token or bot credential.
+      responses:
+        '200':
+          description: Linkable channels
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slack, teams]
+                properties:
+                  slack:
+                    type: object
+                    required: [available, workspaces]
+                    properties:
+                      available: {type: boolean}
+                      workspaces:
+                        type: array
+                        items:
+                          type: object
+                          required: [team_id, team_name]
+                          properties:
+                            team_id: {type: string}
+                            team_name: {type: string}
+                  teams:
+                    type: object
+                    required: [available]
+                    properties:
+                      available: {type: boolean}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/me/contacts/teams:
+    post:
+      tags: [personal-contacts]
+      operationId: linkMyTeamsContact
+      summary: Link a Microsoft Teams account with the code the Synapse bot sent
+      description: >-
+        Registered only when the operator configured the Teams bot (#1420). The person messages the
+        bot in a 1:1 Teams chat; it answers with a ten-character code valid for 10 minutes. Entering it
+        here stores a verified Teams contact (the person's Microsoft Entra object ID) and the bot's
+        conversation with them, sealed. Every attempt counts against the five verification requests
+        per user per hour; a wrong, used or expired code is one 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: {type: string, maxLength: 64, description: 'The code as shown, for example ABCDE-FGHJK; case, spaces and hyphens are ignored.'}
+      responses:
+        '201': {description: Linked and verified, content: {application/json: {schema: {$ref: '#/components/schemas/UserContact'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {description: The code is not valid or has expired}
+        '409': {description: Rate limited or contact limit reached}
 
   /api/v1/me/contacts/{id}:
     parameters: [{name: id, in: path, required: true, schema: {type: string}}]
@@ -2894,13 +2978,13 @@ paths:
     post:
       tags: [personal-contacts]
       operationId: requestMyContactVerification
-      summary: Queue a security verification email
-      description: Code expires after 10 minutes. Resend requires 60 seconds; at most five requests per user per hour. No code appears in this response or job payload. SMTP must be configured.
+      summary: Queue a security verification code
+      description: Code expires after 10 minutes. Resend requires 60 seconds; at most five requests per user per hour. No code appears in this response or job payload. An email contact needs SMTP; a Slack contact gets the code as the Slack app's direct message.
       responses:
         '202': {description: Durably queued, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [queued]}}}}}}
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Already verified, stale, or rate limited}
-        '503': {description: SMTP is unavailable}
+        '503': {description: SMTP, or the Slack app, is unavailable}
 
   /api/v1/me/contacts/{id}/verify:
     parameters: [{name: id, in: path, required: true, schema: {type: string}}]
@@ -2961,10 +3045,10 @@ paths:
     put:
       tags: [personal-inbox]
       operationId: saveMyNotificationPreference
-      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [event_type, channel, state, revision], properties: {event_type: {type: string}, channel: {type: string, enum: [in_app, email]}, state: {type: string, enum: [inherit, enabled, disabled]}, revision: {type: integer, minimum: 0}}}}}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [event_type, channel, state, revision], properties: {event_type: {type: string}, channel: {type: string, enum: [in_app, email, slack, teams]}, state: {type: string, enum: [inherit, enabled, disabled]}, revision: {type: integer, minimum: 0}}}}}}
       responses:
         '200': {description: Saved choice, content: {application/json: {schema: {$ref: '#/components/schemas/InboxPreference'}}}}
-        '400': {description: Unsupported channel, mandatory mute, or caller-supplied identity}
+        '400': {description: Unsupported channel, mandatory mute, a channel this deployment cannot deliver, or caller-supplied identity}
         '409': {description: Stale revision}
 
   /api/v1/tenant/settings:
@@ -3154,6 +3238,32 @@ paths:
         '404': {$ref: '#/components/responses/NotFound'}
         '409': {description: Stale revision, or the channel is not paused}
 
+  /api/v1/notifications/slack/conversations:
+    post:
+      tags: [notifications]
+      operationId: listSlackConversations
+      summary: List the conversations a Slack bot token can post to
+      description: >-
+        Fills the Slack bot channel form's conversation picker (#1383). Give either the `bot_token`
+        being entered or the `channel_id` of an existing `slack_bot` channel, whose sealed token is
+        used. Lists public channels and the private channels the app is in, without archived ones,
+        sorted by name; shared conversations are listed with `is_shared` so the console can explain
+        why one needs `allow_shared_conversation`. At most 2,000 conversations are read; `truncated`
+        reports more. Requires `administer`, because a bot token is a destination. The token is never
+        returned, and a Slack error is reported as a 400 naming Slack's error code (for example
+        `invalid_auth` or `missing_scope`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SlackConversationsInput'}
+      responses:
+        '200': {description: Conversations, content: {application/json: {schema: {$ref: '#/components/schemas/SlackConversations'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
   /api/v1/notifications/channels/{nid}/template-resolution:
     parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
     get:
@@ -3184,6 +3294,63 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/notifications/personal-defaults:
+    get:
+      tags: [notifications]
+      operationId: listNotificationPersonalDefaults
+      summary: List the tenant defaults of personal email, Slack and Teams delivery
+      description: >-
+        One entry per configurable event type and external personal channel (#1418). A person's
+        choice wins over the tenant default, and a mandatory notice wins over both. An entry the
+        tenant never changed has `builtin: true` and revision 0: email, Slack and Teams are off by
+        default. The in-app inbox has no tenant default; every personal message is sent from its
+        inbox row, so muting in-app mutes the others too. Requires manage_integrations.
+      responses:
+        '200': {description: Defaults, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationPersonalDefault'}}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    put:
+      tags: [notifications]
+      operationId: saveNotificationPersonalDefault
+      summary: Change one tenant default
+      description: Requires manage_integrations and is audited as notification.personal_default.updated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [event_type, channel, enabled, revision]
+              properties:
+                event_type: {type: string}
+                channel: {type: string, enum: [email, slack, teams]}
+                enabled: {type: boolean}
+                revision: {type: integer, minimum: 0, description: The revision read; 0 for a built-in default}
+      responses:
+        '200': {description: Stored default, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationPersonalDefault'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: Stale revision}
+
+  /api/v1/teams/messages:
+    post:
+      tags: [notifications]
+      operationId: receiveTeamsBotActivity
+      summary: Microsoft Teams bot messaging endpoint
+      security: []
+      description: >-
+        Registered only when the operator configured the Teams bot (#1420); set it as the bot's
+        messaging endpoint in Azure. It sits outside the human authentication chain: the Bot
+        Framework JWT in `Authorization` is the only credential, checked for the Bot Framework issuer
+        and signing keys, the bot's app ID as audience, and a `serviceurl` claim equal to the
+        activity's service URL. A message in a 1:1 chat is answered with a link code; every other
+        activity is ignored. Body cap 256 KiB.
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: Accepted}
+        '401': {description: Missing or invalid Bot Framework token}
+        '413': {description: Activity too large}
 
   /api/v1/notifications/engagements/{nid}/settings:
     parameters: [{name: nid, in: path, required: true, schema: {type: string}, description: Engagement ID}]
@@ -9311,7 +9478,7 @@ components:
             operator switched off with `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`. Omitted when the
             capability has no options, including when every channel type is switched off.
           items: {type: string}
-          example: [webhook, slack, email, teams, telegram, google_chat, discord]
+          example: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]
         planned:
           type: boolean
           description: >
@@ -9375,9 +9542,9 @@ components:
       required: [id, kind, source, value, version, created_at, updated_at]
       properties:
         id: {type: string}
-        kind: {type: string, enum: [email]}
+        kind: {type: string, enum: [email, slack, teams]}
         source: {type: string, enum: [manual, oidc]}
-        value: {type: string, format: email}
+        value: {type: string, description: 'An email address, a Slack team_id:member_id pair, or a Microsoft Entra object ID'}
         verified_at: {type: string, format: date-time}
         version: {type: integer, minimum: 1}
         created_at: {type: string, format: date-time}
@@ -13275,10 +13442,11 @@ components:
       required: [event_type, channel, state, revision, mandatory, available]
       properties:
         event_type: {type: string}
-        channel: {type: string}
+        channel: {type: string, enum: [in_app, email, slack, teams]}
         state: {type: string, enum: [inherit, enabled, disabled]}
         revision: {type: integer}
         mandatory: {type: boolean}
+        default: {type: boolean, description: What inherit means for this person - the tenant default (#1418)}
         available: {type: boolean}
         reason: {type: string}
 
@@ -13328,6 +13496,34 @@ components:
       type: string
       enum: [pending, retrying, delivered, dead_letter, cancelled]
 
+    SlackConversationsInput:
+      type: object
+      additionalProperties: false
+      description: Exactly one of bot_token and channel_id.
+      properties:
+        bot_token: {type: string, writeOnly: true, description: A Slack bot token (xoxb-…) being entered in the channel form}
+        channel_id: {type: string, description: An existing slack_bot channel whose sealed token is used}
+
+    SlackConversations:
+      type: object
+      required: [team_id, team_name, items, truncated]
+      properties:
+        team_id: {type: string, description: The Slack workspace (team) the token belongs to}
+        team_name: {type: string}
+        truncated: {type: boolean, description: The workspace has more conversations than were read}
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, name, is_private, is_shared, is_archived, is_member]
+            properties:
+              id: {type: string}
+              name: {type: string}
+              is_private: {type: boolean}
+              is_shared: {type: boolean, description: Slack Connect, externally shared or organisation-shared}
+              is_archived: {type: boolean}
+              is_member: {type: boolean, description: The app is a member of the conversation}
+
     NotificationChannelInput:
       type: object
       additionalProperties: false
@@ -13337,11 +13533,16 @@ components:
         rotation requires both URL and a secret of at least 16 bytes. Teams, Google Chat and Discord
         channels take the full credential-bearing webhook URL, and replacing it requires the whole URL
         again. A Telegram channel takes the bot token in `secret` and the chat in `chat_id`; replacing
-        either requires both. Credential-bearing URLs and tokens are write-only and never returned.
+        either requires both. A Slack bot channel (`slack_bot`) takes the bot token (`xoxb-…`) in `secret` and the
+        conversation in `conversation_id`; the server checks both with Slack (`auth.test`,
+        `conversations.info`) before saving and refuses an archived conversation, a private one the app
+        is not in, and a shared one unless `allow_shared_conversation` is set. Replacing any of the three
+        requires all of them, and `administer`. Credential-bearing URLs and tokens are write-only and
+        never returned.
       required: [name, type, enabled]
       properties:
         name: {type: string, maxLength: 200}
-        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]}
         enabled: {type: boolean}
         url:
           type: string
@@ -13352,9 +13553,11 @@ components:
             `*.logic.azure.us` or `*.environment.api.powerplatform.com` with a `sig` parameter; Google
             Chat an incoming-webhook URL on `chat.googleapis.com` with `key` and `token`; Discord a
             channel webhook on `discord.com` (optionally with `thread_id`).
-        secret: {type: string, writeOnly: true, description: The webhook signing secret (at least 16 bytes) or the Telegram bot token; blank retains the current secret on PATCH}
+        secret: {type: string, writeOnly: true, description: The webhook signing secret (at least 16 bytes), the Telegram bot token or the Slack bot token; blank retains the current secret on PATCH}
         chat_id: {type: string, writeOnly: true, maxLength: 33, description: 'Telegram only: a numeric chat ID or an @channel username.'}
         thread_id: {type: integer, format: int64, minimum: 0, maximum: 2147483647, writeOnly: true, description: 'Telegram only: the forum topic (message_thread_id) to post into; 0 or omitted posts to the main chat.'}
+        conversation_id: {type: string, writeOnly: true, pattern: '^[CG][A-Z0-9]{8,20}$', description: 'Slack bot only: the channel ID (C… or G…) to post into.'}
+        allow_shared_conversation: {type: boolean, writeOnly: true, description: 'Slack bot only: allow posting into a Slack Connect, externally shared or organisation-shared conversation. Off by default; the driver refuses a conversation that became shared later with slack_conversation_shared.'}
         recipients: {type: array, maxItems: 50, items: {type: string, format: email}}
         revision: {type: integer, minimum: 1}
         template_id:
@@ -13394,7 +13597,7 @@ components:
       properties:
         id: {type: string}
         name: {type: string}
-        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]}
         enabled: {type: boolean}
         destination: {type: string, description: Redacted destination metadata}
         recipients: {type: array, items: {type: string, format: email}}
@@ -13423,6 +13626,17 @@ components:
         revision: {type: integer, minimum: 0, description: 0 when the engagement has no stored setting}
         updated_at: {type: string, format: date-time}
         updated_by: {type: string}
+        lead_user_id: {type: string, description: 'The engagement lead (#1415), whom a rule''s engagement_lead recipient role addresses'}
+
+    NotificationPersonalDefault:
+      type: object
+      required: [event_type, channel, enabled, builtin, revision]
+      properties:
+        event_type: {type: string}
+        channel: {type: string, enum: [email, slack, teams]}
+        enabled: {type: boolean}
+        builtin: {type: boolean, description: The tenant never changed this default}
+        revision: {type: integer, minimum: 0}
 
     NotificationEngagementSettingInput:
       type: object
@@ -13431,6 +13645,12 @@ components:
       properties:
         external_notifications: {type: string, enum: [inherit, signal, none]}
         revision: {type: integer, minimum: 0, description: The revision read; 0 for an engagement without a stored setting}
+        lead_user_id:
+          type: string
+          maxLength: 200
+          description: >-
+            Sets the engagement lead (#1415): an enabled user of this tenant whose role can view. An
+            empty string clears it; omitted keeps the current lead.
 
     NotificationTemplatePreviewInput:
       type: object
@@ -13648,7 +13868,7 @@ components:
 
     NotificationRuleInput:
       type: object
-      required: [name, enabled, event_type, channel_ids]
+      required: [name, enabled, event_type]
       properties:
         name: {type: string, maxLength: 200}
         enabled: {type: boolean}
@@ -13665,7 +13885,19 @@ components:
           type: boolean
           default: false
           description: Explicit administrator subscription to ownership changes across this tenant, including findings without a team. Only for finding.ownership_changed; mutually exclusive with team_ids.
-        channel_ids: {type: array, minItems: 1, maxItems: 50, items: {type: string}}
+        channel_ids: {type: array, maxItems: 50, items: {type: string}, description: The channels to deliver to. A rule needs at least one channel or one recipient role.}
+        recipient_roles:
+          type: array
+          maxItems: 3
+          items: {type: string, enum: [assignee, team_member, engagement_lead]}
+          description: >-
+            People to notify personally (#1415), in addition to the channels: the finding's assignee
+            (finding.ownership_changed, sla.approaching_deadline), its owning team's members
+            (finding.ownership_changed) or the engagement lead (any event with an engagement). Each
+            role is resolved to enabled users of this tenant whose role can view, and checked again
+            when a message is sent; they get an inbox notice and the channels their preferences and
+            the tenant defaults allow. mentioned_user and approver are refused until a producer records
+            a verified identity.
         lead_time_seconds: {type: integer, minimum: 0, maximum: 2592000}
         revision: {type: integer, minimum: 1}
 
@@ -13691,7 +13923,7 @@ components:
         id: {type: string}
         event_id: {type: string}
         channel_id: {type: string}
-        channel_type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord]}
+        channel_type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]}
         redrive_fence: {type: integer, format: int64, minimum: 0, description: Current durable queue claim fence; submit it as expected_fence to prevent a stale redrive.}
         recipient: {type: string}
         matched_rule_ids: {type: array, items: {type: string}}

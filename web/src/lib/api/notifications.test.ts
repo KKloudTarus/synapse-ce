@@ -65,6 +65,21 @@ describe('notification API', () => {
     expect(body).not.toHaveProperty('id')
     expect(body).not.toHaveProperty('created_at')
   })
+  it('resends recipient roles so a toggle keeps the rule people', async () => {
+    // PATCH replaces the rule; omitting recipient_roles would drop them (#1415).
+    respond({})
+    await notificationsApi.updateNotificationRule('r', {
+      name: 'People',
+      enabled: false,
+      event_type: 'finding.ownership_changed',
+      all_teams: true,
+      channel_ids: [],
+      recipient_roles: ['assignee', 'engagement_lead'],
+      revision: 3,
+    })
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))
+    expect(body).toMatchObject({ channel_ids: [], recipient_roles: ['assignee', 'engagement_lead'] })
+  })
   it('resends the team scope when updating an ownership rule', async () => {
     // The server replaces the rule on PATCH and rejects an ownership rule without a team scope.
     respond({})

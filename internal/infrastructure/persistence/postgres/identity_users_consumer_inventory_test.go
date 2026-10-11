@@ -25,26 +25,28 @@ const (
 // usersConsumers is every foreign key into users, keyed "table(columns)". The test fails when a
 // migration adds, drops or retargets one without updating this table.
 var usersConsumers = map[string]usersConsumer{
-	"ownership_memberships(tenant_id,user_id)":              {"ownership_tenant_id,id", decisionLegacyUserID},
-	"ownership_mappings(tenant_id,suggested_user_id)":       {"ownership_tenant_id,id", decisionLegacyUserID},
-	"ownership_assignments(tenant_id,assignee_id)":          {"ownership_tenant_id,id", decisionLegacyUserID},
-	"ownership_bulk_requests(tenant_id,actor_id)":           {"ownership_tenant_id,id", decisionLegacyUserID},
-	"ownership_run_requests(tenant_id,actor_id)":            {"ownership_tenant_id,id", decisionLegacyUserID},
-	"user_contacts(tenant_id,user_id)":                      {"ownership_tenant_id,id", decisionLegacyUserID + "; contact source/source_key provenance is not rewritten"},
-	"user_contact_verification_requests(tenant_id,user_id)": {"ownership_tenant_id,id", decisionLegacyUserID},
-	"findings(tenant_id,assignee_user_id)":                  {"ownership_tenant_id,id", decisionLegacyUserID + "; the assignee bridge trigger resolves the tenant-local id"},
-	"user_notifications(tenant_id,user_id)":                 {"ownership_tenant_id,id", decisionLegacyUserID},
-	"user_notification_preferences(tenant_id,user_id)":      {"ownership_tenant_id,id", decisionLegacyUserID},
-	"oidc_external_identities(tenant_id,user_id)":           {"tenant_id,id", decisionOIDC},
-	"oidc_sessions(tenant_id,user_id)":                      {"tenant_id,id", decisionOIDC},
-	"identity_memberships(tenant_id,legacy_user_id)":        {"ownership_tenant_id,id", decisionIdentity},
-	"identity_credentials(tenant_id,legacy_user_id)":        {"ownership_tenant_id,id", decisionIdentity},
-	"identity_backfill_items(tenant_id,id)":                 {"ownership_tenant_id,id", decisionIdentity},
+	"ownership_memberships(tenant_id,user_id)":                 {"ownership_tenant_id,id", decisionLegacyUserID},
+	"ownership_mappings(tenant_id,suggested_user_id)":          {"ownership_tenant_id,id", decisionLegacyUserID},
+	"ownership_assignments(tenant_id,assignee_id)":             {"ownership_tenant_id,id", decisionLegacyUserID},
+	"ownership_bulk_requests(tenant_id,actor_id)":              {"ownership_tenant_id,id", decisionLegacyUserID},
+	"ownership_run_requests(tenant_id,actor_id)":               {"ownership_tenant_id,id", decisionLegacyUserID},
+	"user_contacts(tenant_id,user_id)":                         {"ownership_tenant_id,id", decisionLegacyUserID + "; contact source/source_key provenance is not rewritten"},
+	"user_contact_verification_requests(tenant_id,user_id)":    {"ownership_tenant_id,id", decisionLegacyUserID},
+	"findings(tenant_id,assignee_user_id)":                     {"ownership_tenant_id,id", decisionLegacyUserID + "; the assignee bridge trigger resolves the tenant-local id"},
+	"user_notifications(tenant_id,user_id)":                    {"ownership_tenant_id,id", decisionLegacyUserID},
+	"user_notification_preferences(tenant_id,user_id)":         {"ownership_tenant_id,id", decisionLegacyUserID},
+	"notification_engagement_settings(tenant_id,lead_user_id)": {"ownership_tenant_id,id", decisionLegacyUserID + "; the engagement lead (#1415) is a tenant-local user and is cleared when the user row goes"},
+	"oidc_external_identities(tenant_id,user_id)":              {"tenant_id,id", decisionOIDC},
+	"oidc_sessions(tenant_id,user_id)":                         {"tenant_id,id", decisionOIDC},
+	"identity_memberships(tenant_id,legacy_user_id)":           {"ownership_tenant_id,id", decisionIdentity},
+	"identity_credentials(tenant_id,legacy_user_id)":           {"ownership_tenant_id,id", decisionIdentity},
+	"identity_backfill_items(tenant_id,id)":                    {"ownership_tenant_id,id", decisionIdentity},
 }
 
 // Non-FK users consumers, reviewed by hand. They are listed so a reader sees the whole surface.
 //
 //	user_contact_challenges              composite FK through user_contacts(tenant_id,user_id,id); unchanged
+//	user_teams_conversations             composite FK through user_contacts(tenant_id,user_id,id); unchanged (#1420)
 //	user_notification_tombstones         (tenant_id,user_id) without FK; unchanged
 //	users_consume_contact_challenges     AFTER UPDATE OF disabled trigger on users; fires for projected rows too
 //	synapse_bridge_finding_assignee      reads users by ownership tenant and id; B members resolve by tenant-local id

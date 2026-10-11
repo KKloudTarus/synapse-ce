@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import type { UserChoice } from '../../lib/api/ownership'
 
-export function UserPicker({team,value,onChange,disabled=false,allowAll=false}:{team:string;value:string;onChange:(id:string)=>void;disabled?:boolean;allowAll?:boolean}) {
+export function UserPicker({team,value,onChange,disabled=false,allowAll=false,label='Assignee'}:{team:string;value:string;onChange:(id:string)=>void;disabled?:boolean;allowAll?:boolean;label?:string}) {
   const [query,setQuery]=useState('')
   const [items,setItems]=useState<UserChoice[]>([])
   const [next,setNext]=useState<string>()
@@ -44,7 +44,7 @@ export function UserPicker({team,value,onChange,disabled=false,allowAll=false}:{
     finally{if(current===generation.current)setLoading(false)}
   }
   return <div className="space-y-2">
-    <label htmlFor={searchID} className="text-sm font-medium text-primary">Assignee</label>
+    <label htmlFor={searchID} className="text-sm font-medium text-primary">{label}</label>
     {value&&<div className="flex items-center justify-between gap-2 rounded-lg border border-secondary p-2 text-sm text-secondary"><span className="truncate">Selected: {selected?.id===value?`${selected.name} (${value})`:value}</span><button type="button" disabled={disabled} onClick={()=>{setSelected(null);onChange('')}} className="text-primary underline">Clear</button></div>}
     <input id={searchID} type="search" value={query} disabled={disabled||(!team&&!allowAll)} onChange={e=>setQuery(e.target.value)} placeholder={team?'Search team members':allowAll?'Search users':'Choose a team first'} className="w-full rounded-lg border border-primary bg-primary px-3 py-2 text-primary disabled:opacity-50" />
     {error&&<p role="alert" className="text-sm text-error-primary">{error}</p>}

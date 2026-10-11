@@ -20,6 +20,12 @@ type Service struct {
 	store  ports.InboxStore
 	mailer ports.PersonalNoticeMailer
 	clock  ports.Clock
+	// delivery reloads queued Slack and Teams messages; senders send them (#1419, #1420).
+	delivery ports.PersonalDeliveryStore
+	senders  map[string]ports.PersonalChannelSender
+	// defaults stores the tenant defaults (#1418).
+	defaults       ports.PersonalDefaultsStore
+	teamsAvailable bool
 }
 
 func NewService(store ports.InboxStore, clock ports.Clock) (*Service, error) {
@@ -64,29 +70,50 @@ func (s *Service) MarkAllRead(ctx context.Context, tenant, user shared.ID) error
 }
 
 func (s *Service) Preferences(ctx context.Context, tenant, user shared.ID) ([]ports.InboxPreference, error) {
-	return s.store.ListInboxPreferences(ctx, shared.TenantOrDefault(tenant), user)
+	items, err := s.store.ListInboxPreferences(ctx, shared.TenantOrDefault(tenant), user)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if ok, reason := s.channelAvailable(items[i].Channel); !ok {
+			items[i].Available, items[i].Reason = false, reason
+		}
+	}
+	return items, nil
 }
 
 func (s *Service) SavePreference(ctx context.Context, tenant, user shared.ID, event notification.EventType, channel string, state notification.Preference, revision int) (ports.InboxPreference, error) {
-	if !state.Valid() || (channel != notification.PersonalInApp && channel != notification.PersonalEmail) {
+	if !state.Valid() || !notification.PersonalChannelValid(channel) {
 		return ports.InboxPreference{}, fmt.Errorf("%w: preference channel or state is invalid", shared.ErrValidation)
 	}
 	if notification.InAppMandatory(event) && channel == notification.PersonalInApp && state == notification.PreferenceDisabled {
 		return ports.InboxPreference{}, fmt.Errorf("%w: in-app administrator notices are mandatory", shared.ErrValidation)
 	}
-	known := notification.InAppMandatory(event) && channel == notification.PersonalEmail
-	for _, candidate := range notification.ConfigurableEvents() {
-		if candidate == event {
-			known = true
-		}
+	if ok, reason := s.channelAvailable(channel); !ok && state == notification.PreferenceEnabled {
+		return ports.InboxPreference{}, fmt.Errorf("%w: %s", shared.ErrValidation, reason)
 	}
-	if !known || !event.Valid() || event == notification.EventTest {
+	if !notification.PersonalEventConfigurable(event) || !event.Valid() || event == notification.EventTest {
 		return ports.InboxPreference{}, fmt.Errorf("%w: unsupported notification preference", shared.ErrValidation)
 	}
 	if !notification.PersonalDeliveryAvailable(event) {
 		return ports.InboxPreference{}, fmt.Errorf("%w: personal delivery is unavailable for this event", shared.ErrValidation)
 	}
-	return s.store.SaveInboxPreference(ctx, shared.TenantOrDefault(tenant), user, event, channel, state, revision, s.clock.Now().UTC())
+	saved, err := s.store.SaveInboxPreference(ctx, shared.TenantOrDefault(tenant), user, event, channel, state, revision, s.clock.Now().UTC())
+	if err != nil {
+		return ports.InboxPreference{}, err
+	}
+	// The response is the row as the preference list shows it, with the effective default and the
+	// availability, so a client that merges it into its list does not lose them.
+	items, err := s.Preferences(ctx, tenant, user)
+	if err != nil {
+		return saved, nil
+	}
+	for _, item := range items {
+		if item.EventType == string(event) && item.Channel == channel {
+			return item, nil
+		}
+	}
+	return saved, nil
 }
 
 type mailJob struct {
@@ -97,8 +124,12 @@ type mailJob struct {
 }
 
 func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
-	if job.Kind != JobKind {
+	channel, known := jobChannels[job.Kind]
+	if !known {
 		return &mailError{code: "invalid personal mail job", terminal: true}
+	}
+	if channel != notification.PersonalEmail {
+		return s.handleChannelJob(ctx, job, channel)
 	}
 	var payload mailJob
 	if len(job.Payload) > 512 || json.Unmarshal(job.Payload, &payload) != nil || payload.EventID.IsZero() || payload.UserID.IsZero() || payload.ContactID.IsZero() || payload.ContactVersion < 1 {
@@ -121,11 +152,13 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 type mailError struct {
 	code     string
 	terminal bool
+	// after is the provider's wait for a rate-limited message.
+	after time.Duration
 }
 
 func (e *mailError) Error() string             { return e.code }
 func (e *mailError) Terminal() bool            { return e.terminal }
-func (e *mailError) RetryAfter() time.Duration { return 0 }
+func (e *mailError) RetryAfter() time.Duration { return e.after }
 func (e *mailError) MaxAttempts() int          { return 8 }
 
 func encodeCursor(unread bool, at time.Time, id shared.ID) string {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 )
 
@@ -29,15 +30,25 @@ func (rt *Router) addMyContact(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Kind  string `json:"kind"`
 		Value string `json:"value"`
+		// TeamID and MemberID add a Slack contact (#1419): a workspace the tenant has a Slack app in
+		// and the person's own member ID.
+		TeamID   string `json:"team_id"`
+		MemberID string `json:"member_id"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048)).Decode(&body); err != nil || body.Kind != "email" {
-		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid email contact"})
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048)).Decode(&body); err != nil || (body.Kind != "email" && body.Kind != "slack") {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid contact"})
 		return
 	}
 	tenantID, userID := myContactScope(r)
-	contact, err := rt.userContacts.AddEmail(r.Context(), tenantID, userID, body.Value)
+	var contact ports.UserContact
+	var err error
+	if body.Kind == "slack" {
+		contact, err = rt.userContacts.AddSlack(r.Context(), tenantID, userID, body.TeamID, body.MemberID)
+	} else {
+		contact, err = rt.userContacts.AddEmail(r.Context(), tenantID, userID, body.Value)
+	}
 	if err != nil {
-		writeError(w, rt.log, err)
+		rt.writeContactError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, contact)
@@ -81,6 +92,10 @@ func (rt *Router) verifyMyContact(w http.ResponseWriter, r *http.Request) {
 func (rt *Router) writeContactError(w http.ResponseWriter, err error) {
 	if errors.Is(err, usercontacts.ErrMailUnavailable) {
 		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "email verification is unavailable"})
+		return
+	}
+	if errors.Is(err, usercontacts.ErrSlackUnavailable) {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "slack linking is unavailable"})
 		return
 	}
 	writeError(w, rt.log, err)

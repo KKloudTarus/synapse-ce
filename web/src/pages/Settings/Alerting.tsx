@@ -40,6 +40,8 @@ import {
   replaceDestinationHint,
 } from './channelDestinations'
 import { ChannelTemplateFields, RuleTemplatePreview } from './ChannelTemplateBinding'
+import { SlackBotDestinationFields, slackBotDestinationValid } from './SlackBotDestination'
+import { PersonalDelivery } from './PersonalDelivery'
 
 // A new rule starts on the most common subscription when the catalog offers it.
 const DEFAULT_RULE_EVENT = 'vulnerability_action.created'
@@ -223,6 +225,9 @@ export function Alerting() {
             refresh={load}
           />
           {canManage && channels !== undefined && (
+            <PersonalDelivery canManage={canManage} eventTypes={eventTypes ?? []} />
+          )}
+          {canManage && channels !== undefined && (
             <DeliveryHistory
               key={historyVersion}
               canAdmin={canAdmin}
@@ -380,6 +385,9 @@ function ChannelCreate({
   // Telegram: the bot token is `secret`; the chat and optional forum topic sit beside it.
   const [chatId, setChatId] = useState('')
   const [threadId, setThreadId] = useState('')
+  // Slack bot: the bot token is `secret`; the conversation and the shared switch sit beside it.
+  const [conversationId, setConversationId] = useState('')
+  const [allowShared, setAllowShared] = useState(false)
   const [recipients, setRecipients] = useState(
     initial?.recipients?.join(', ') ?? '',
   )
@@ -404,6 +412,9 @@ function ChannelCreate({
     (!!secret.trim() &&
       TELEGRAM_CHAT_PATTERN.test(chatId.trim()) &&
       (!threadId.trim() || /^\d{1,10}$/.test(threadId.trim())))
+  const slackBotValid = slackBotDestinationValid(!!initial, secret, conversationId, allowShared)
+  // A Slack bot destination is sent only when the administrator entered one; a rename sends none.
+  const slackBotTouched = !!(secret.trim() || conversationId.trim() || allowShared)
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -417,15 +428,28 @@ function ChannelCreate({
         url:
           spec.kind === 'recipients' ||
           spec.kind === 'telegram' ||
+          spec.kind === 'slack_bot' ||
           destinationLocked
             ? undefined
             : url.trim(),
         secret:
-          (spec.kind === 'signed_url' || spec.kind === 'telegram') &&
-          !destinationLocked
-            ? spec.kind === 'telegram'
+          spec.kind === 'slack_bot'
+            ? !destinationLocked && slackBotTouched
               ? secret.trim()
-              : secret
+              : undefined
+            : (spec.kind === 'signed_url' || spec.kind === 'telegram') &&
+                !destinationLocked
+              ? spec.kind === 'telegram'
+                ? secret.trim()
+                : secret
+              : undefined,
+        conversation_id:
+          spec.kind === 'slack_bot' && !destinationLocked && slackBotTouched
+            ? conversationId.trim()
+            : undefined,
+        allow_shared_conversation:
+          spec.kind === 'slack_bot' && !destinationLocked && slackBotTouched && allowShared
+            ? true
             : undefined,
         chat_id:
           spec.kind === 'telegram' && !destinationLocked && chatId.trim()
@@ -472,6 +496,8 @@ function ChannelCreate({
       setSecret('')
       setChatId('')
       setThreadId('')
+      setConversationId('')
+      setAllowShared(false)
       setRecipients('')
       onCreated()
     } catch (e) {
@@ -609,6 +635,17 @@ function ChannelCreate({
               />
             </Field>
           </>
+        ) : spec.kind === 'slack_bot' ? (
+          <SlackBotDestinationFields
+            channelId={initial?.id}
+            token={secret}
+            onTokenChange={setSecret}
+            conversationId={conversationId}
+            onConversationChange={setConversationId}
+            allowShared={allowShared}
+            onAllowSharedChange={setAllowShared}
+            disabled={destinationLocked}
+          />
         ) : (
           <Field
             label={spec.urlLabel ?? 'Webhook URL'}
@@ -626,7 +663,7 @@ function ChannelCreate({
             />
           </Field>
         )}
-        {spec.kind === 'telegram' && spec.hint && (
+        {(spec.kind === 'telegram' || spec.kind === 'slack_bot') && spec.hint && (
           <p className="text-sm text-tertiary md:col-span-2">{spec.hint}</p>
         )}
         {type === 'webhook' && (
@@ -708,7 +745,9 @@ function ChannelCreate({
                 ? !recipients.trim()
                 : spec.kind === 'telegram'
                   ? !telegramValid
-                  : !initial && !url.trim()) ||
+                  : spec.kind === 'slack_bot'
+                    ? !slackBotValid
+                    : !initial && !url.trim()) ||
               (type === 'webhook' &&
                 (!initial || !!url || !!secret) &&
                 (secret.length < 16 || !url.trim()))
@@ -1025,6 +1064,25 @@ function LegacyIncidentWebhookWarning({
   )
 }
 
+/**
+ * The recipient roles (#1415) a rule for this event may name. It mirrors
+ * notification.RuleRoleSupported: assignee and team come from a finding the event is about, the
+ * engagement lead from the event's engagement.
+ */
+function recipientRolesFor(
+  event: string,
+  spec: NotificationEventSpec | undefined,
+): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = []
+  if (event === 'finding.ownership_changed' || event === 'sla.approaching_deadline')
+    out.push({ value: 'assignee', label: "The finding's assignee" })
+  if (event === 'finding.ownership_changed')
+    out.push({ value: 'team_member', label: "Members of the finding's team" })
+  if (spec?.has_engagement)
+    out.push({ value: 'engagement_lead', label: 'The engagement lead' })
+  return out
+}
+
 function RuleCreate({
   initial,
   channels,
@@ -1058,6 +1116,10 @@ function RuleCreate({
   const [engagements, setEngagements] = useState<string[]>(initial?.engagement_ids ?? [])
   const [teams, setTeams] = useState<string[]>(initial?.team_ids ?? [])
   const [allTeams, setAllTeams] = useState(initial?.all_teams ?? false)
+  // Recipient roles (#1415) address people by their relation to the event, besides the channels.
+  const [roles, setRoles] = useState<string[]>(initial?.recipient_roles ?? [])
+  const availableRoles = recipientRolesFor(event, spec)
+  const chosenRoles = roles.filter((role) => availableRoles.some((r) => r.value === role))
   const engagementCache = useRef<Promise<Array<{ id: string; name: string; client: string }>> | null>(null)
   const searchEngagements = useCallback(async (query: string, cursor: string | undefined, signal: AbortSignal) => {
     if (!engagementCache.current) {
@@ -1135,6 +1197,7 @@ function RuleCreate({
         enabled: initial?.enabled ?? true,
         event_type: event,
         channel_ids: selected,
+        recipient_roles: chosenRoles,
         // A saved engagement scope on an event without engagements is cleared rather than resent.
         engagement_ids: allows('engagement_ids') ? engagements : [],
         team_ids: allows('team_ids') && !allTeams ? teams : undefined,
@@ -1215,6 +1278,34 @@ function RuleCreate({
           channels={channels.filter((c) => selected.includes(c.id))}
           eventType={event}
         />
+        {availableRoles.length > 0 && (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-secondary">
+              Also notify people
+            </legend>
+            <p className="text-xs text-tertiary">
+              They get an inbox notice, plus email, Slack or Teams as their own
+              preferences and the tenant defaults allow.
+            </p>
+            {availableRoles.map((role) => (
+              <label key={role.value} className="flex gap-2 text-sm text-secondary">
+                <input
+                  type="checkbox"
+                  checked={chosenRoles.includes(role.value)}
+                  disabled={!canAdmin}
+                  onChange={(e) =>
+                    setRoles(
+                      e.target.checked
+                        ? [...roles, role.value]
+                        : roles.filter((r) => r !== role.value),
+                    )
+                  }
+                />
+                {role.label}
+              </label>
+            ))}
+          </fieldset>
+        )}
         {allows('engagement_ids') && (
           <RuleTargetPicker
             label="Engagements (optional)"
@@ -1303,7 +1394,7 @@ function RuleCreate({
               !canAdmin ||
               !name.trim() ||
               !event ||
-              selected.length === 0 ||
+              (selected.length === 0 && chosenRoles.length === 0) ||
               (legacyAckRequired && !legacyAck) ||
               (allows('lead_time_seconds') &&
                 (!Number.isFinite(Number(leadHours)) ||
@@ -1373,6 +1464,8 @@ function RuleList({
               <p className="text-sm text-tertiary">
                 {eventLabel(eventTypes, r.event_type)} →{' '}
                 {r.channel_ids.map(channelName).join(', ')}
+                {r.recipient_roles && r.recipient_roles.length > 0 &&
+                  `${r.channel_ids.length > 0 ? ' · ' : ''}People: ${r.recipient_roles.map((role) => role.replaceAll('_', ' ')).join(', ')}`}
               </p>
               {r.engagement_ids && r.engagement_ids.length > 0 && (
                 <p className="text-sm text-tertiary">Engagements: {r.engagement_ids.join(', ')}</p>

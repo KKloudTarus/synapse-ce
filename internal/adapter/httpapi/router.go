@@ -44,6 +44,7 @@ import (
 	scmwebhookuc "github.com/KKloudTarus/synapse-ce/internal/usecase/scmwebhook"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/teamslink"
 	tenancyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/tenancy"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
@@ -169,8 +170,12 @@ type Router struct {
 	responseObservers        responseObserverAdmin       // optional; nil ⇒ response-observer assignment route is not registered
 	notifications            *notificationuc.Service     // optional; nil ⇒ tenant notification management routes are not registered
 	inbox                    *inboxuc.Service
-	siem                     *siemuc.Service
-	tenantSettings           *tenancyuc.Service // optional; nil ⇒ the tenant settings routes are not registered
+	// teamsLink and teamsVerifier run Microsoft Teams personal delivery (#1420); nil leaves the bot
+	// endpoint and the Teams link route unregistered.
+	teamsLink      *teamslink.Service
+	teamsVerifier  ports.TeamsActivityVerifier
+	siem           *siemuc.Service
+	tenantSettings *tenancyuc.Service // optional; nil ⇒ the tenant settings routes are not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -561,6 +566,10 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("DELETE /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermManageIntegrations, rt.deleteNotificationChannel))
 		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/test", rt.authz(userdom.PermManageIntegrations, rt.testNotificationChannel))
 		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/resume", rt.authz(userdom.PermManageIntegrations, rt.resumeNotificationChannel))
+		mux.HandleFunc("POST /api/v1/notifications/slack/conversations", rt.authz(userdom.PermAdminister, rt.listSlackConversations))
+		// Tenant defaults of personal delivery (#1418); they answer 404 until the inbox is configured.
+		mux.HandleFunc("GET /api/v1/notifications/personal-defaults", rt.authz(userdom.PermManageIntegrations, rt.listPersonalDefaults))
+		mux.HandleFunc("PUT /api/v1/notifications/personal-defaults", rt.authz(userdom.PermManageIntegrations, rt.savePersonalDefault))
 		mux.HandleFunc("GET /api/v1/notifications/channels/{nid}/health-events", rt.authz(userdom.PermManageIntegrations, rt.listNotificationChannelHealthEvents))
 		mux.HandleFunc("GET /api/v1/notifications/engagements/{nid}/settings", rt.authz(userdom.PermManageIntegrations, rt.getNotificationEngagementSetting))
 		mux.HandleFunc("PUT /api/v1/notifications/engagements/{nid}/settings", rt.authz(userdom.PermManageIntegrations, rt.putNotificationEngagementSetting))
@@ -1015,6 +1024,10 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("DELETE /api/v1/me/contacts/{id}", rt.authz(userdom.PermView, rt.deleteMyContact))
 		mux.HandleFunc("POST /api/v1/me/contacts/{id}/verification", rt.authz(userdom.PermView, rt.requestMyContactVerification))
 		mux.HandleFunc("POST /api/v1/me/contacts/{id}/verify", rt.authz(userdom.PermView, rt.verifyMyContact))
+		mux.HandleFunc("GET /api/v1/me/personal-channels", rt.authz(userdom.PermView, rt.getMyPersonalChannels))
+		if rt.teamsLink != nil {
+			mux.HandleFunc("POST /api/v1/me/contacts/teams", rt.authz(userdom.PermView, rt.linkMyTeams))
+		}
 	}
 	// User management is administer-only and confined to the caller's own tenant. Deleting a user is
 	// deliberately absent: an identity owns its audit, evidence, and finding attribution, so access is
@@ -1155,7 +1168,7 @@ func (rt *Router) Handler() http.Handler {
 	// Mount exact hook route before the human chain. Never create a prefix-wide
 	// publicPaths exemption: methods and siblings stay on human auth.
 	var complete http.Handler
-	if rt.fleet == nil && rt.inboundWebhooks == nil {
+	if rt.fleet == nil && rt.inboundWebhooks == nil && rt.teamsLink == nil {
 		complete = normalizePath(human)
 	} else {
 		top := http.NewServeMux()
@@ -1167,6 +1180,10 @@ func (rt *Router) Handler() http.Handler {
 		}
 		if rt.inboundWebhooks != nil {
 			top.HandleFunc("POST /api/v1/hooks/{public_id}", rt.inboundWebhooks.handle)
+		}
+		if rt.teamsLink != nil && rt.teamsVerifier != nil {
+			// The Teams bot endpoint (#1420) authenticates with the Bot Framework JWT only.
+			top.HandleFunc("POST /api/v1/teams/messages", rt.handleTeamsActivity)
 		}
 		top.Handle("/", human)
 		complete = normalizePath(top)

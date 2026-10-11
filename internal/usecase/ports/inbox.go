@@ -30,8 +30,10 @@ type InboxPreference struct {
 	State     notification.Preference `json:"state"`
 	Revision  int                     `json:"revision"`
 	Mandatory bool                    `json:"mandatory"`
-	Available bool                    `json:"available"`
-	Reason    string                  `json:"reason,omitempty"`
+	// Default is what the person gets while State is inherit: the tenant default (#1418).
+	Default   bool   `json:"default"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 type InboxStore interface {

@@ -22,7 +22,7 @@ func TestPersonalDeliveryPrecedence(t *testing.T) {
 }
 
 func TestUnsupportedRecipientRolesStayUnavailable(t *testing.T) {
-	for _, role := range []string{RoleMentionedUser, RoleApprover, RoleEngagementLead} {
+	for _, role := range []string{RoleMentionedUser, RoleApprover} {
 		if err := PersonalRoleSupported(EventOwnershipChanged, role); err == nil || !errors.Is(err, shared.ErrValidation) {
 			t.Fatalf("role %s: %v", role, err)
 		}
@@ -32,6 +32,12 @@ func TestUnsupportedRecipientRolesStayUnavailable(t *testing.T) {
 	}
 	if err := PersonalRoleSupported(EventOwnershipChanged, RoleAssignee); err != nil {
 		t.Fatal(err)
+	}
+	if err := PersonalRoleSupported(EventOwnershipChanged, RoleEngagementLead); err != nil {
+		t.Fatalf("an ownership change has an engagement, so its lead can be addressed: %v", err)
+	}
+	if err := PersonalRoleSupported(EventFleetAgentOffline, RoleEngagementLead); err == nil {
+		t.Fatal("an agent going offline has no engagement lead")
 	}
 }
 
