@@ -5,6 +5,13 @@ image:
   repository: registry.example.invalid/synapse
   digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 api:
+  # The supported multi-replica posture: /var/lib/synapse on a shared filesystem claim, so the Code
+  # view serves source captured by any replica and project uploads survive a restart.
+  persistence:
+    enabled: true
+    storageClass: efs-sc
+    accessModes: [ReadWriteMany]
+    size: 50Gi
   nodeSelector:
     synapse.example/runtime: control-plane
     topology.kubernetes.io/region: us-east-1

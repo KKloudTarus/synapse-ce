@@ -23,10 +23,15 @@ servers:
 
 security:
 - bearerAuth: []
+- cookieAuth: []
 
 tags:
   - name: users
     description: Operator identities, roles, and API-key lifecycle
+  - name: tenant-settings
+    description: Tenant-wide language and time zone used by message templates and digests
+  - name: personal-contacts
+    description: Self-service verified email destinations scoped to the authenticated human user
   - name: platform
     description: Deployment-wide configuration a client needs before it renders navigation
   - name: health
@@ -61,8 +66,67 @@ tags:
     description: Tenant-managed channels, routing rules, and durable delivery history
   - name: ownership
     description: Finding teams, immutable routing policies, assignment and ownership history
+  - name: enterprise-identity
+    description: Organization identity connections, native membership administration, invitations, and break-glass recovery operations
+
+  - name: inbound-webhooks
+    description: Separate HMAC-authenticated ingress, never human/OIDC authorization
 
 paths:
+  /api/v1/hooks/{public_id}:
+    post:
+      tags: [inbound-webhooks]
+      operationId: receiveInboundWebhook
+      summary: Receive a separately authenticated provider webhook
+      description: >-
+        The public ID identifies an enabled tenant-owned integration. Tenant identity
+        never comes from a header, query or body. Provider-neutral endpoints use
+        X-Synapse-Hook-Signature over the raw body. GitHub uses X-Hub-Signature-256;
+        Bitbucket Cloud uses X-Hub-Signature and requires X-Event-Key and
+        X-Request-UUID. Bitbucket request UUID and authenticated body digest receipts
+        commit atomically with durable scan enqueue. GitLab endpoints prefer Standard
+        Webhooks webhook-signature over webhook-id.timestamp.raw-body with a ±5 minute
+        timestamp window, and fall back to X-Gitlab-Token only when no signature is
+        present. The signed webhook-id (or legacy event UUID) and authenticated body
+        digest are deduplicated atomically with durable job enqueue. Conflicting event
+        headers and payload object_kind are rejected. No human bearer token is used.
+      security:
+        - inboundWebhookHMAC: []
+        - githubWebhookHMAC: []
+        - bitbucketWebhookHMAC: []
+        - gitlabWebhookSignature: []
+        - gitlabWebhookToken: []
+      parameters:
+        - name: public_id
+          in: path
+          required: true
+          schema: {type: string, minLength: 32, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$'}
+        - name: X-Hub-Signature
+          in: header
+          description: Required for Bitbucket Cloud; HMAC-SHA256 over the exact raw request body.
+          schema: {type: string, pattern: '^sha256=[0-9a-fA-F]{64}$'}
+        - name: X-Event-Key
+          in: header
+          description: Required for Bitbucket Cloud. Scans repo:push and pullrequest:created/updated; other valid event types are acknowledged.
+          schema: {type: string, maxLength: 64}
+        - name: X-Request-UUID
+          in: header
+          description: Required for Bitbucket Cloud; delivery UUID, optionally enclosed in braces. X-Hook-UUID is not a delivery ID.
+          schema: {type: string, minLength: 36, maxLength: 38}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+          application/octet-stream:
+            schema: {type: string, format: binary, maxLength: 1048576}
+      responses:
+        '202': {description: Authenticated event accepted, replay acknowledged, or unsupported event ignored.}
+        '400': {description: Invalid request body or provider event metadata.}
+        '401': {description: Uniform response for invalid signatures, unknown IDs and disabled or revoked endpoints.}
+        '413': {description: Body exceeds 1 MiB.}
+        '429': {description: Per-endpoint admission limit; includes Retry-After.}
+        '503': {description: Lookup or provider-specific receiver unavailable.}
   /api/v1/ownership/capabilities:
     get:
       tags: ["ownership"]
@@ -1037,6 +1101,9 @@ paths:
         stable key, a human name, whether it is enabled, and the environment variable that controls
         it, so a client can render "disabled" rather than a dead link. It returns configuration
         booleans and variable NAMES only, never a configured value, and is gated at the view floor.
+        The `legacy_alert_webhook` entry is enabled while the deprecated SYNAPSE_ALERT_WEBHOOK_URL is
+        set; the console uses it to warn that incident.created rules and the legacy webhook both
+        deliver. The URL itself is never returned.
       responses:
         "200":
           description: The deployment's capability catalog
@@ -2044,7 +2111,8 @@ paths:
         is for a pull request. Decoration is off for every Project by default, so
         no Project performs an outward forge write until this is enabled. Requires
         the operate permission. Decoration remains fail-soft: an enabled Project
-        whose forge credential is not configured is simply not decorated.
+        whose forge credential is not configured is simply not decorated. The
+        console sets it from the PR decoration switch in the project header.
       requestBody:
         required: true
         content:
@@ -2778,21 +2846,210 @@ paths:
       tags: [fleet]
       operationId: testAlert
       summary: Deliver a test alert to every configured alert sink
+      deprecated: true
       description: >
         Sends a synthetic `alert.test` alert through the configured sinks (the webhook set by
         SYNAPSE_ALERT_WEBHOOK_URL) so an operator can prove the alert path works before relying on it.
         The test alert bypasses the severity floor. Registered only when alerting is configured.
+        Deprecated with SYNAPSE_ALERT_WEBHOOK_URL and removed in 0.4.0; incident.created notification
+        rules replace the legacy webhook. Requires the manage_integrations permission.
       responses:
         '200': {description: At least one sink acknowledged, content: {application/json: {schema: {$ref: '#/components/schemas/AlertTestResult'}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '502': {description: No sink acknowledged the alert, content: {application/json: {schema: {$ref: '#/components/schemas/AlertTestResult'}}}}
 
+  /api/v1/me/contacts:
+    get:
+      tags: [personal-contacts]
+      operationId: listMyContacts
+      summary: List only the authenticated user's private contacts
+      responses:
+        '200': {description: Contacts, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/UserContact'}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [personal-contacts]
+      operationId: addMyEmailContact
+      summary: Add an unverified email destination
+      description: The server derives tenant and user from the principal; caller-supplied identity fields are ignored. Maximum 20 contacts per user.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [kind, value], properties: {kind: {type: string, enum: [email]}, value: {type: string, format: email, maxLength: 320}}}}}}
+      responses:
+        '201': {description: Created but not yet verified, content: {application/json: {schema: {$ref: '#/components/schemas/UserContact'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '409': {description: Duplicate address or contact limit reached}
+
+  /api/v1/me/contacts/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    delete:
+      tags: [personal-contacts]
+      operationId: deleteMyContact
+      summary: Remove a self-managed contact and invalidate its pending challenge
+      responses:
+        '204': {description: Removed}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/me/contacts/{id}/verification:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [personal-contacts]
+      operationId: requestMyContactVerification
+      summary: Queue a security verification email
+      description: Code expires after 10 minutes. Resend requires 60 seconds; at most five requests per user per hour. No code appears in this response or job payload. SMTP must be configured.
+      responses:
+        '202': {description: Durably queued, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [queued]}}}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Already verified, stale, or rate limited}
+        '503': {description: SMTP is unavailable}
+
+  /api/v1/me/contacts/{id}/verify:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [personal-contacts]
+      operationId: verifyMyContact
+      summary: Consume a single-use eight-digit code
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [code], properties: {code: {type: string, pattern: '^[0-9]{8}$'}}}}}}
+      responses:
+        '200': {description: Verified contact, content: {application/json: {schema: {$ref: '#/components/schemas/UserContact'}}}}
+        '403': {description: Incorrect code}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Expired or exhausted challenge}
+
+  /api/v1/me/inbox:
+    get:
+      tags: [personal-inbox]
+      operationId: listMyInbox
+      summary: List the signed-in user's inbox
+      parameters:
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: unread, in: query, schema: {type: boolean}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 25}}
+      responses:
+        '200': {description: Inbox page, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/InboxItem'}}, next: {type: string}}}}}}
+        '400': {description: Caller-supplied user or tenant identity, or a tampered cursor}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/me/inbox/unread:
+    get:
+      tags: [personal-inbox]
+      operationId: countMyUnreadInbox
+      summary: Count unread inbox rows, capped at 100
+      responses:
+        '200': {description: Capped count, content: {application/json: {schema: {type: object, properties: {unread: {type: integer, maximum: 100}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/me/inbox/read:
+    post:
+      tags: [personal-inbox]
+      operationId: markAllMyInboxRead
+      summary: Mark inbox rows read up to the server time of this request
+      responses:
+        '204': {description: Updated}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /api/v1/me/inbox/{id}/read:
+    post:
+      tags: [personal-inbox]
+      operationId: markMyInboxRead
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '204': {description: Updated or already read}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/me/notification-preferences:
+    get:
+      tags: [personal-inbox]
+      operationId: listMyNotificationPreferences
+      responses:
+        '200': {description: Effective choices, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/InboxPreference'}}}}}}}
+    put:
+      tags: [personal-inbox]
+      operationId: saveMyNotificationPreference
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [event_type, channel, state, revision], properties: {event_type: {type: string}, channel: {type: string, enum: [in_app, email]}, state: {type: string, enum: [inherit, enabled, disabled]}, revision: {type: integer, minimum: 0}}}}}}
+      responses:
+        '200': {description: Saved choice, content: {application/json: {schema: {$ref: '#/components/schemas/InboxPreference'}}}}
+        '400': {description: Unsupported channel, mandatory mute, or caller-supplied identity}
+        '409': {description: Stale revision}
+
+  /api/v1/tenant/settings:
+    get:
+      tags: [tenant-settings]
+      operationId: getTenantSettings
+      summary: Read the tenant's default language and time zone
+      description: >
+        Any authenticated role may read it. A tenant that never saved settings gets the defaults
+        (`en`, `UTC`) at revision 0. The tenant comes from the session.
+      responses:
+        '200': {description: Current settings, content: {application/json: {schema: {$ref: '#/components/schemas/TenantSettings'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    put:
+      tags: [tenant-settings]
+      operationId: saveTenantSettings
+      summary: Save the tenant's default language and time zone
+      description: >
+        Requires the administer permission, and the change is audited. `revision` is the revision the
+        caller read (0 for a tenant's first save). The time zone must be an IANA name that
+        `time.LoadLocation` accepts; `Local` and offsets such as `+07:00` are refused. The body names no
+        tenant: the tenant comes from the session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TenantSettingsInput'}
+      responses:
+        '200': {description: Saved settings, content: {application/json: {schema: {$ref: '#/components/schemas/TenantSettings'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: Stale revision; read the settings again and retry}
+
+  /api/v1/users/picker:
+    get:
+      tags: [users]
+      operationId: searchEligibleUsers
+      summary: Search active same-tenant users for an ownership assignee
+      description: Requires the triage permission. Results contain only stable ID, display name and role; no contact data. Team filter uses active membership.
+      parameters:
+        - {name: team_id, in: query, schema: {type: string}}
+        - {name: q, in: query, schema: {type: string, maxLength: 100}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 25}}
+      responses:
+        '200': {description: Bounded choices, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/UserChoice'}}, next: {type: string}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/findings/assignee-review:
+    get:
+      tags: [findings]
+      operationId: listUnresolvedAssigneeBackfill
+      summary: Review ambiguous or unmatched legacy assignee labels
+      description: Admin-only. Rows already resolved to a canonical user ID are omitted. Both cursor fields are required together.
+      parameters:
+        - {name: cursor_engagement_id, in: query, schema: {type: string}}
+        - {name: cursor_finding_id, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Bounded review page, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/AssigneeReviewItem'}}, next: {type: object, nullable: true, properties: {engagement_id: {type: string}, finding_id: {type: string}}}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/notifications/event-types:
+    get:
+      tags: [notifications]
+      operationId: listNotificationEventTypes
+      summary: List the notification event catalog
+      description: >
+        Every declared event type with its console label, the rule filters it accepts, its maximum data
+        class and its template variables, ordered by type. Operator-only types are included and flagged;
+        rules never match them. The response is derived only from the built-in catalog and carries no
+        tenant data.
+      responses:
+        '200': {description: Event catalog, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationEventSpec'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/notifications/channels:
     get:
       tags: [notifications]
       operationId: listNotificationChannels
       summary: List tenant notification channels without secrets
+      description: >
+        Requires the `manage_integrations` permission (admin and integration_admin). Every channel,
+        rule and delivery route below needs it unless it says otherwise.
       responses:
         '200': {description: Channels, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationChannel'}}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -2801,7 +3058,13 @@ paths:
       tags: [notifications]
       operationId: createNotificationChannel
       summary: Create a signed webhook, Slack, or email channel
-      description: URL and credentials are write-only and encrypted at rest. Email uses the operator-managed SMTP relay.
+      description: >
+        Requires the `administer` permission: creating a destination is an administrator action, so an
+        integration_admin gets `403`. The audit entry records the actor and the destination masked to
+        `scheme://host`.
+        URL and credentials are write-only and encrypted at rest. Email uses the operator-managed SMTP relay.
+        A type the operator switched off with `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` answers `400`
+        naming the type; such types are absent from the `notifications.channel_types` capability.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannelInput'}}}}
       responses:
         '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannel'}}}}
@@ -2822,9 +3085,23 @@ paths:
       tags: [notifications]
       operationId: updateNotificationChannel
       summary: Update a channel with optimistic revision checking
+      description: >
+        Requires `manage_integrations` to rename, enable or disable a channel. Changing its
+        destination (a new URL or secret, or a different email recipient set) also requires
+        `administer`; an integration_admin gets `403` for it. Sending the current recipients back is
+        not a change. The audit entry records the actor, the masked destination, `destination_changed`
+        and, on a change, the previous masked destination.
+        A channel whose type the operator switched off with `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`
+        can be renamed or switched off, but switching it on or giving it a new URL or secret answers `400`.
+        Binding a template (`template_id`) or setting `locale` is not a destination change and needs
+        `manage_integrations` only; a changed binding is validated (template of the channel family,
+        active, locale compatible, covers every event routed to the channel) and the audit entry records
+        `binding_changed`, `template_id` and `locale` with their previous values.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannelInput'}}}}
       responses:
         '200': {description: Updated channel, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannel'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {description: Missing manage_integrations, or a destination change without administer}
         '409': {description: Stale revision}
     delete:
       tags: [notifications]
@@ -2841,9 +3118,127 @@ paths:
       tags: [notifications]
       operationId: testNotificationChannel
       summary: Queue a synthetic test through the durable delivery path
+      description: A channel whose type the operator switched off with `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` answers `400`.
       responses:
         '202': {description: Queued, content: {application/json: {schema: {type: object, required: [delivery_id, state], properties: {delivery_id: {type: string}, state: {type: string, enum: [pending]}}}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
         '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: The channel is paused; resume it before sending a test}
+
+  /api/v1/notifications/channels/{nid}/resume:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [notifications]
+      operationId: resumeNotificationChannel
+      summary: Resume a channel the worker paused after consecutive permanent failures
+      description: >-
+        Requires `manage_integrations` (admin and integration_admin). Clears the pause and the failure count, bumps the channel
+        revision, appends a `resumed` row to the channel's health history and writes a
+        `notification.channel.resumed` audit entry. Deliveries cancelled while the channel was paused are not
+        re-sent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [revision]
+              properties:
+                revision: {type: integer, minimum: 1, description: The channel revision the administrator saw}
+      responses:
+        '200': {description: Resumed channel, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationChannel'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Stale revision, or the channel is not paused}
+
+  /api/v1/notifications/slack/conversations:
+    post:
+      tags: [notifications]
+      operationId: listSlackConversations
+      summary: List the conversations a Slack bot token can post to
+      description: >-
+        Fills the Slack bot channel form's conversation picker (#1383). Give either the `bot_token`
+        being entered or the `channel_id` of an existing `slack_bot` channel, whose sealed token is
+        used. Lists public channels and the private channels the app is in, without archived ones,
+        sorted by name; shared conversations are listed with `is_shared` so the console can explain
+        why one needs `allow_shared_conversation`. At most 2,000 conversations are read; `truncated`
+        reports more. Requires `administer`, because a bot token is a destination. The token is never
+        returned, and a Slack error is reported as a 400 naming Slack's error code (for example
+        `invalid_auth` or `missing_scope`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SlackConversationsInput'}
+      responses:
+        '200': {description: Conversations, content: {application/json: {schema: {$ref: '#/components/schemas/SlackConversations'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/notifications/channels/{nid}/template-resolution:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [notifications]
+      operationId: previewNotificationTemplateResolution
+      summary: Show which template a channel renders an event type with
+      description: >
+        Resolves on the server with the same resolver the send-time renderer uses, so the rule form
+        can show the template each selected channel will use. Registered only when templates are
+        configured. Requires manage_integrations.
+      parameters:
+        - {name: event_type, in: query, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateResolution'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/notifications/channels/{nid}/health-events:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [notifications]
+      operationId: listNotificationChannelHealthEvents
+      summary: List a channel's pause and resume history, newest first (at most 50)
+      responses:
+        '200': {description: Health history, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationChannelHealthEvent'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/notifications/engagements/{nid}/settings:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}, description: Engagement ID}]
+    get:
+      tags: [notifications]
+      operationId: getNotificationEngagementSetting
+      summary: Get an engagement's external notification override (#1360)
+      responses:
+        '200': {description: Setting, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationEngagementSetting'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    put:
+      tags: [notifications]
+      operationId: putNotificationEngagementSetting
+      summary: Change an engagement's external notification override
+      description: >-
+        Lowering the override needs manage_integrations; letting more data out (none to signal or
+        inherit, signal to inherit) needs administer. Every change is audited as
+        `notification.engagement_setting.updated`. While the override is none, queued deliveries about
+        the engagement are cancelled with `engagement_suppressed` instead of sent.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationEngagementSettingInput'}}}}
+      responses:
+        '200': {description: Stored setting, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationEngagementSetting'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Stale revision}
 
   /api/v1/notifications/rules:
     get:
@@ -2856,6 +3251,10 @@ paths:
       tags: [notifications]
       operationId: createNotificationRule
       summary: Create a routing rule
+      description: >
+        A rule that routes its event type to a channel whose bound template covers only another event
+        type answers `400` naming the channel and template (#1371); bind a `*` template or unbind first.
+        Updates are checked the same way.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationRuleInput'}}}}
       responses:
         '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationRule'}}}}
@@ -2903,6 +3302,23 @@ paths:
       responses:
         '200': {description: Delivery page, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationDeliveryPage'}}}}
 
+  /api/v1/notifications/quarantined-sources:
+    get:
+      tags: [notifications]
+      operationId: listNotificationSourceFailures
+      summary: List captured notification sources that failed projection
+      description: Requires the manage_integrations permission. Returns fixed failure codes and source identity, never captured payloads.
+      parameters:
+        - {name: from, in: query, schema: {type: string, format: date-time}, description: Inclusive quarantine time in RFC3339}
+        - {name: to, in: query, schema: {type: string, format: date-time}, description: Inclusive upper quarantine time in RFC3339}
+        - {name: event_type, in: query, schema: {$ref: '#/components/schemas/NotificationEventType'}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200': {description: Quarantined source page, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationSourceFailurePage'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/notifications/deliveries/{nid}:
     parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
     get:
@@ -2922,6 +3338,234 @@ paths:
       responses:
         '200': {description: Attempts, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationAttempt'}}}}}}}
 
+  /api/v1/notifications/deliveries/{nid}/redrive:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [notifications]
+      operationId: redriveNotificationDelivery
+      summary: Redrive one dead-lettered notification delivery
+      description: >
+        Requires administer permission. Requeues the existing delivery and preserves
+        its attempt history. The destination configuration and queue fence must still
+        match the values returned for the delivery. Delivery is asynchronous and can
+        duplicate a message if a previous receiver accepted it before its acknowledgement
+        was lost.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason, expected_fence]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 500, description: Required operator reason after trimming.}
+                expected_fence: {type: integer, format: int64, minimum: 1, description: Current redrive_fence from the delivery being confirmed.}
+      responses:
+        '202': {description: Accepted for asynchronous delivery, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationDelivery'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Delivery state, queue fence or channel configuration changed}
+
+  /api/v1/notifications/templates:
+    get:
+      tags: [notifications]
+      operationId: listNotificationTemplates
+      summary: List the tenant's custom message templates
+      description: >
+        Requires `manage_integrations` (admin and integration_admin), like every template route.
+        Registered only when notifications are enabled. The tenant comes from the session. Results
+        are ordered by ID; pass the last ID as `after` for the next page.
+      parameters:
+        - {name: event_type, in: query, schema: {type: string}, description: A catalog event type or `*`}
+        - {name: family, in: query, schema: {$ref: '#/components/schemas/NotificationTemplateFamily'}}
+        - {name: locale, in: query, schema: {type: string, enum: [en, vi, '*']}}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/NotificationTemplateStatus'}}
+        - {name: after, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 0, maximum: 500, default: 100}}
+      responses:
+        '200': {description: Templates, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationTemplate'}}}}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    post:
+      tags: [notifications]
+      operationId: createNotificationTemplate
+      summary: Create a draft template with version 1
+      description: >
+        Every non-empty field is compiled by the template engine against the variables of the
+        event type; a `*` template is compiled against every catalog event type, so it may only use
+        variables all of them declare. Unknown variables, disallowed functions and cost bounds are
+        rejected with `400` and a body naming the field, the event type, the engine code and the line;
+        the body never repeats the template source. The key (event type, family, locale) never
+        changes. The draft does not render until it is activated. Audited as
+        `notification.template.created` with a diff summary.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateInput'}}}}
+      responses:
+        '201': {description: Created draft, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateDetail'}}}}
+        '400': {description: Invalid key or fields, or a field the engine rejected, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateValidationError'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/notifications/templates/builtins:
+    get:
+      tags: [notifications]
+      operationId: listBuiltinNotificationTemplates
+      summary: List the build's read-only default message templates
+      description: >
+        Requires `manage_integrations` (admin and integration_admin). Built-ins are shipped with
+        the running build, not tenant-specific, and may be copied into a draft but never edited.
+      responses:
+        '200': {description: Built-in defaults, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/BuiltinNotificationTemplate'}}}}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
+  /api/v1/notifications/templates/{nid}:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [notifications]
+      operationId: getNotificationTemplate
+      summary: Get a template with its newest version and the version that renders
+      responses:
+        '200': {description: Template, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateDetail'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [notifications]
+      operationId: updateNotificationTemplate
+      summary: Save a new version of a template
+      description: >
+        Appends a version with the given fields, validated like a create, and optionally renames the
+        template. What renders does not change until a version is activated. `revision` is the head
+        revision the caller read; a stale one answers `409`. Audited as
+        `notification.template.updated` with a diff summary against the previous newest version.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateUpdateInput'}}}}
+      responses:
+        '200': {description: Template with the new version, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateDetail'}}}}
+        '400': {description: Invalid fields, or a field the engine rejected, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateValidationError'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Stale revision}
+
+  /api/v1/notifications/templates/{nid}/versions:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [notifications]
+      operationId: listNotificationTemplateVersions
+      summary: List a template's versions, newest first
+      parameters:
+        - {name: before, in: query, schema: {type: integer, minimum: 0}, description: Only versions below this one}
+        - {name: limit, in: query, schema: {type: integer, minimum: 0, maximum: 200, default: 50}}
+      responses:
+        '200': {description: Versions, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/NotificationTemplateVersion'}}}}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
+  /api/v1/notifications/templates/{nid}/activate:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [notifications]
+      operationId: activateNotificationTemplate
+      summary: Make a version render
+      description: >
+        Activates `version`, or the newest version when it is omitted or `0`. The version is compiled
+        again first, since the catalog may have changed since it was saved. Any other active template
+        with the same key is archived in the same transaction and returned as
+        `archived_template_id`. Audited as `notification.template.activated` with the archived
+        template and a diff summary against the version that rendered before.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateChangeInput'}}}}
+      responses:
+        '200': {description: Activated template, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateDetail'}}}}
+        '400': {description: Missing revision, or the version no longer compiles, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateValidationError'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: No such template or version}
+        '409': {description: Stale revision, or a concurrent activation of the same key}
+
+  /api/v1/notifications/templates/{nid}/rollback:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [notifications]
+      operationId: rollbackNotificationTemplate
+      summary: Activate an earlier version
+      description: >
+        Activates the given `version`, which is required. Versions are append-only, so a rollback
+        never rewrites one. Rolling back to the version that already renders answers `409`. Audited
+        as `notification.template.rolled_back` with the from and to versions and a diff summary.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateChangeInput'}}}}
+      responses:
+        '200': {description: Template rendering the chosen version, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateDetail'}}}}
+        '400': {description: Missing version or revision, or the version no longer compiles, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateValidationError'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: No such template or version}
+        '409': {description: Stale revision, or the version already renders}
+
+  /api/v1/notifications/templates/{nid}/archive:
+    parameters: [{name: nid, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [notifications]
+      operationId: archiveNotificationTemplate
+      summary: Retire a template
+      description: >
+        An archived template no longer renders; its key falls back to the next tier (the `*`
+        template, then the built-in default). It keeps its versions and can be activated again.
+        Audited as `notification.template.archived`.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateChangeInput'}}}}
+      responses:
+        '200': {description: Archived template, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateDetail'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {description: Stale revision, or the template is already archived}
+
+  /api/v1/notifications/templates/preview:
+    post:
+      tags: [notifications]
+      operationId: previewNotificationTemplate
+      summary: Prepare a template preview for a channel and an event type, without sending
+      description: >
+        Picks the sample event (the event type's published fixture, or one of the tenant's stored
+        events when `event_id` is set) and the template text: what resolution would choose for the
+        channel, a saved version of `template_id`, or unsaved `fields` (alone for a new template,
+        with `template_id` for an unsaved edit). Unsaved text is checked exactly as a save checks
+        it, so an engine rejection is a 400 with its field and line. Nothing is sent or stored, and
+        the response is never logged. The response names the sample and the template; it never
+        carries the event's data, its template context or template source. `rendered` stays false
+        until send-time rendering (#1365) is available; the response then also carries the
+        suppressed state and the rendered message. Registered only when templates are configured.
+        Requires manage_integrations; a stored event also requires view.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplatePreviewInput'}}}}
+      responses:
+        '200': {description: Prepared preview, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplatePreview'}}}}
+        '400': {description: Invalid input, a template the channel cannot use, an event of another type, or unsaved text the engine rejected, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateValidationError'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: The channel, the template, its version or the stored event does not exist in the caller's tenant}
+
+  /api/v1/notifications/templates/preview/events:
+    get:
+      tags: [notifications]
+      operationId: listNotificationPreviewEvents
+      summary: List the tenant's newest events of one type a preview can render against (at most 20)
+      description: >
+        Newest first. Each item names the event and never carries its data or template context.
+        Registered only when templates are configured. Requires manage_integrations and view.
+      parameters:
+        - {name: event_type, in: query, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Recent events, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/NotificationPreviewEvent'}}}}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+
   /api/v1/connectors:
     get:
       tags: [settings]
@@ -2930,6 +3574,7 @@ paths:
       description: >
         Every source-control connector configured for the caller's tenant, as metadata only. The
         personal access token is never returned. Registered only when a connector store is wired.
+        Requires the manage_integrations permission; creating and deleting a connector require administer.
       responses:
         '200': {description: Connectors, content: {application/json: {schema: {type: object, properties: {connectors: {type: array, items: {$ref: '#/components/schemas/SCMConnector'}}}}}}}
         '401': {$ref: '#/components/responses/Unauthorized'}
@@ -2942,7 +3587,9 @@ paths:
         Stores a tenant-scoped git-host + username + personal access token. The token is sealed at
         rest (AES-256-GCM) and is write-only: it is accepted here and never returned. A server-initiated
         scan of a Project whose git source host matches this connector authenticates the clone with it.
-        One connector per host per tenant. Requires the administer permission.
+        One connector per host per tenant. Requires the administer permission. An optional `api_base`
+        lets pull request decoration reach GitHub Enterprise Server or self-managed GitLab on that
+        host; it must be on the operator's host allowlist.
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/SCMConnectorCreate'}}}
@@ -4281,6 +4928,12 @@ paths:
       tags: [integrations]
       operationId: listIntegrations
       summary: List tenant integrations
+      description: >
+        Any human role may read integrations. Enabling, disabling, archiving, starting and cancelling
+        operations and editing bindings require `manage_integrations` (admin and integration_admin).
+        Creating an integration, updating its endpoint or private-network setting, and replacing or
+        deleting its credential require `administer`. Every audit entry records the actor and the
+        endpoint masked to `scheme://host`.
       parameters:
       - name: include_archived
         in: query
@@ -4947,6 +5600,38 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
 
+  /api/v1/integrations/{id}/inbound-webhook:
+    parameters: [{$ref: '#/components/parameters/IntegrationId'}]
+    post:
+      tags: [integrations]
+      operationId: configureGitHubInboundWebhook
+      summary: Provision or rotate a GitHub or Bitbucket Cloud inbound webhook secret
+      description: >
+        Requires the administer capability and is registered only when inbound webhooks are enabled.
+        The integration must be an unarchived GitHub or Bitbucket integration with exactly one Git Project binding.
+        The caller supplies the same secret that will be configured in the forge. Synapse seals it immediately
+        and never returns plaintext credential material. The first call creates an opaque hook path; later
+        calls keep that path and rotate the sealed secret.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GitHubInboundWebhookSecretRequest'}
+      responses:
+        '200':
+          description: Webhook endpoint provisioned or rotated; no credential material is returned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GitHubInboundWebhookConfiguration'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalServerError'}
+
   /api/v1/integrations/{id}/external-runs:
     parameters: [{$ref: '#/components/parameters/IntegrationId'}]
     get:
@@ -5045,9 +5730,11 @@ paths:
       tags: [users]
       summary: Disable an operator's credentials
       description: >
-        Requires the `administer` capability. The identity and its attribution are preserved; only
-        authentication stops, immediately, for the operator's API key. Disabling the tenant's last
-        enabled admin is refused with `409`.
+        Requires the `administer` capability. The identity and its attribution are preserved;
+        authentication stops immediately. In the same transaction as the audit record, the API key
+        is replaced with an unusable digest and every browser session of the operator is revoked,
+        so re-enabling restores neither. Disabling the tenant's last enabled admin is refused with
+        `409`.
       responses:
         "200":
           description: The disabled operator
@@ -5068,7 +5755,9 @@ paths:
     post:
       tags: [users]
       summary: Re-enable a disabled operator
-      description: Requires the `administer` capability. The operator keeps the API key it had.
+      description: >
+        Requires the `administer` capability. Keys and browser sessions revoked by disable stay
+        revoked: rotate the key to issue a new one, and the operator signs in again through OIDC.
       responses:
         "200":
           description: The re-enabled operator
@@ -5097,6 +5786,93 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/UserWithAPIKey"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/users/{id}/oidc-links:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [users]
+      summary: List an operator's approved OIDC subject links
+      description: Requires the `administer` capability. Confined to the caller's tenant.
+      responses:
+        "200":
+          description: The approved links
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: "#/components/schemas/OIDCLink"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [users]
+      summary: Approve an exact OIDC (issuer, subject) for an existing operator
+      description: >
+        Requires the `administer` capability. Available only when OIDC is enabled, and confined to
+        the configured fixed OIDC tenant. `issuer` must equal the configured issuer exactly and
+        `subject` is compared exactly; there is no email or group lookup and no provisioning. The
+        bootstrap operator and disabled operators are refused. The link and its audit record commit
+        together. The approved subject's next successful callback signs in as this operator with
+        the operator's Synapse role; identity-provider groups never change it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [issuer, subject]
+              properties:
+                issuer: {type: string}
+                subject: {type: string, minLength: 1, maxLength: 255}
+      responses:
+        "201":
+          description: The approved link
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OIDCLink"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The subject is already linked, or the operator is disabled}
+  /api/v1/users/{id}/oidc-links/{linkId}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema: {type: string}
+    - name: linkId
+      in: path
+      required: true
+      schema: {type: string}
+    delete:
+      tags: [users]
+      summary: Remove an approved OIDC subject link from an operator
+      description: >
+        Requires the `administer` capability. Available only when OIDC is enabled, and confined to
+        the configured fixed OIDC tenant; the bootstrap operator is refused. Removes exactly this
+        link of this operator, revokes all of the operator's browser sessions, and records
+        `user.oidc_identity_unlinked` in one transaction; an audit failure leaves the link and the
+        sessions in place. The removed subject's next callback is denied as unapproved. The
+        operator's bearer API key is unaffected.
+      responses:
+        "200":
+          description: The removed link
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OIDCLink"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -5860,12 +6636,296 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/siem/sinks:
+    get:
+      tags: [siem]
+      operationId: listSIEMSinks
+      summary: List tenant SIEM sinks without secrets
+      description: >
+        Reading sinks, their status, and pausing, resuming and testing one require `manage_integrations`
+        (admin and integration_admin). Creating a sink, updating it (data class, allowed hosts),
+        rotating its secret and changing its host require `administer`.
+      responses:
+        "200": {description: Sinks, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/SIEMSink"}}}}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [siem]
+      operationId: createSIEMSink
+      summary: Create a Splunk, Elasticsearch, or Microsoft Sentinel sink
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/SIEMSinkInput"}}}}
+      responses:
+        "201": {description: Created sink, content: {application/json: {schema: {$ref: "#/components/schemas/SIEMSink"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /api/v1/siem/sinks/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [siem]
+      operationId: getSIEMSink
+      summary: Get one SIEM sink without its secret
+      responses:
+        "200": {description: Sink, content: {application/json: {schema: {$ref: "#/components/schemas/SIEMSink"}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [siem]
+      operationId: updateSIEMSink
+      summary: Update a sink without changing its host
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/SIEMSinkInput"}}}}
+      responses:
+        "200": {description: Updated sink, content: {application/json: {schema: {$ref: "#/components/schemas/SIEMSink"}}}}
+        "409": {description: Stale version}
+  /api/v1/siem/sinks/{id}/secret:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [siem]
+      operationId: rotateSIEMSecret
+      summary: Replace a sink secret without moving the cursor
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [secret, version], properties: {secret: {type: string, writeOnly: true}, version: {type: integer}}}}}}
+      responses:
+        "200": {description: Updated sink, content: {application/json: {schema: {$ref: "#/components/schemas/SIEMSink"}}}}
+  /api/v1/siem/sinks/{id}/origin:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [siem]
+      operationId: changeSIEMOrigin
+      summary: Change a sink host and choose cursor or head replay
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [origin, secret, replay, version], properties: {origin: {type: string}, secret: {type: string, writeOnly: true}, replay: {type: string, enum: [cursor, head]}, version: {type: integer}}}}}}
+      responses:
+        "200": {description: Paused sink on a new generation}
+  /api/v1/siem/sinks/{id}/pause:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [siem]
+      operationId: pauseSIEMSink
+      summary: Pause export without moving cursors
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [version], properties: {version: {type: integer}}}}}}
+      responses:
+        "200": {description: Paused sink}
+  /api/v1/siem/sinks/{id}/resume:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [siem]
+      operationId: resumeSIEMSink
+      summary: Resume export and clear a blocked reason
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [version], properties: {version: {type: integer}}}}}}
+      responses:
+        "200": {description: Resumed sink}
+  /api/v1/siem/sinks/{id}/test:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [siem]
+      operationId: testSIEMSink
+      summary: Send one synthetic record without moving a cursor
+      responses:
+        "200": {description: Accepted test, content: {application/json: {schema: {type: object, required: [guarantee, result], properties: {guarantee: {type: string}, result: {type: string, enum: [accepted]}}}}}}
+  /api/v1/siem/sinks/{id}/status:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [siem]
+      operationId: siemSinkStatus
+      summary: Show cursors, lag, and coverage limits
+      responses:
+        "200": {description: Sink status, content: {application/json: {schema: {$ref: "#/components/schemas/SIEMStatus"}}}}
+
+  /api/v1/identity/memberships:
+    get:
+      tags: [enterprise-identity]
+      operationId: listEnterpriseMemberships
+      summary: List the authenticated person's active organization memberships
+      responses:
+        '200': {description: Membership choices, each scoped by the authenticated session}
+        '401': {description: Authentication required}
+  /api/v1/identity/connections:
+    get:
+      tags: [enterprise-identity]
+      operationId: listIdentityConnections
+      summary: List organization identity connection drafts and active connections
+      responses:
+        '200': {description: Connection list}
+        '403': {description: Administrator or permitted break-glass recovery action required}
+  /api/v1/identity/connections/draft:
+    post:
+      tags: [enterprise-identity]
+      operationId: saveIdentityConnectionDraft
+      summary: Save an OIDC connection draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name, issuer, client_id]
+              additionalProperties: false
+              properties:
+                id: {type: string, description: Existing connection ID for a routine draft revision}
+                version: {type: integer, minimum: 0, description: Current connection version; zero for a new connection}
+                display_name: {type: string}
+                issuer: {type: string, format: uri}
+                client_id: {type: string}
+                client_secret: {type: string, writeOnly: true}
+                bootstrap_eligibility: {type: string, writeOnly: true}
+      responses: {'200': {description: Draft saved}, '403': {description: Administrator or recovery repair permission required}}
+  /api/v1/identity/connections/activate:
+    post:
+      tags: [enterprise-identity]
+      operationId: activateIdentityConnection
+      summary: Activate a tested identity connection revision
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id, revision, version], properties: {id: {type: string}, revision: {type: integer}, version: {type: integer}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Connection activated}, '409': {description: Stale version or untested revision}}
+  /api/v1/identity/connections/disable:
+    post:
+      tags: [enterprise-identity]
+      operationId: disableIdentityConnection
+      summary: Disable an identity connection
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id, version], properties: {id: {type: string}, version: {type: integer}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Connection disabled}, '409': {description: Stale version or unsafe last connection change}}
+  /api/v1/identity/connections/test:
+    post:
+      tags: [enterprise-identity]
+      operationId: testIdentityConnection
+      summary: Begin a proof-bound identity connection test
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id], properties: {id: {type: string}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Authorization URL for the test}, '403': {description: Administrator or recovery repair permission required}}
+  /api/v1/identity/bootstrap:
+    post:
+      tags: [enterprise-identity]
+      operationId: beginIdentityBootstrap
+      summary: Begin explicit bootstrap administrator verification
+      responses: {'200': {description: Short-lived bootstrap eligibility proof}, '403': {description: Administrator permission required}}
+  /api/v1/identity/policy:
+    get:
+      tags: [enterprise-identity]
+      operationId: getIdentityPolicy
+      summary: Read organization SSO and recovery readiness policy
+      responses: {'200': {description: Policy with requirement, version, readiness and grace cutoff}}
+    put:
+      tags: [enterprise-identity]
+      operationId: updateIdentityPolicy
+      summary: Update SSO requirement using server-held recovery evidence
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [requirement, version], properties: {requirement: {type: string, enum: [optional, required]}, version: {type: integer, minimum: 1}, legacy_grace_enabled: {type: boolean}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Policy saved}, '409': {description: Stale policy or missing current recovery evidence}}
+  /api/v1/identity/policy/rehearse:
+    post:
+      tags: [enterprise-identity]
+      operationId: rehearseIdentityRecovery
+      summary: Record a server-verified recovery rehearsal
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Rehearsal timestamp}, '403': {description: Fresh administrator proof required}}
+  /api/v1/identity/policy/recovery-code:
+    post:
+      tags: [enterprise-identity]
+      operationId: createIdentityRecoveryCode
+      summary: Rotate and return a one-time recovery activation code
+      requestBody: {required: true, content: {application/json: {schema: {type: object, properties: {membership_id: {type: string}, person_id: {type: string}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: One-time recovery code; clients must not persist it}, '403': {description: Fresh administrator proof required}}
+  /api/v1/identity/policy/test-alert:
+    post:
+      tags: [enterprise-identity]
+      operationId: testIdentityRecoveryAlert
+      summary: Send and record a recovery alert test to an authoritative verified contact
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Alert test succeeded}, '409': {description: No verified contact or delivery failed}}
+  /api/v1/identity/recovery/alerts:
+    get:
+      tags: [enterprise-identity]
+      operationId: listIdentityRecoveryAlerts
+      summary: List retained recovery alert delivery states
+      responses: {'200': {description: Pending, delivered, or exhausted alert obligations}}
+  /api/v1/identity/invitations:
+    get:
+      tags: [enterprise-identity]
+      operationId: listIdentityInvitations
+      summary: List pending organization invitations
+      responses: {'200': {description: Invitation list}}
+    post:
+      tags: [enterprise-identity]
+      operationId: createIdentityInvitation
+      summary: Create a single-use organization invitation
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [recipient, role], properties: {recipient: {type: string, format: email}, role: {type: string}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'201': {description: Invitation and one-time code}, '403': {description: Administrator permission required}}
+  /api/v1/identity/invitations/revoke:
+    post:
+      tags: [enterprise-identity]
+      operationId: revokeIdentityInvitation
+      summary: Revoke an invitation using optimistic versioning
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id, version], properties: {id: {type: string}, version: {type: integer}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'204': {description: Invitation revoked}, '409': {description: Stale invitation version}}
+  /api/v1/identity/roster:
+    get:
+      tags: [enterprise-identity]
+      operationId: listEnterpriseRoster
+      summary: List native organization membership roster
+      responses: {'200': {description: Members with id, person_id, role, state, and version}}
+  /api/v1/identity/memberships/change:
+    post:
+      tags: [enterprise-identity]
+      operationId: changeEnterpriseMembership
+      summary: Change a native membership role or active state
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [id, kind, version], properties: {id: {type: string}, kind: {type: string, enum: [change_role, suspend, reactivate]}, role: {type: string}, version: {type: integer, minimum: 1}, bootstrap_eligibility: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Updated member}, '403': {description: Administrator or closed recovery action required}, '409': {description: Stale version or last usable administrator guard}}
+  /api/v1/identity/authenticators:
+    get:
+      tags: [enterprise-identity]
+      operationId: listOwnIdentityAuthenticators
+      summary: List identity authenticators belonging to the active browser-session person
+      responses: {'200': {description: Own connection names and states}, '403': {description: Browser session proof required}}
+  /api/v1/identity/link-connections:
+    get:
+      tags: [enterprise-identity]
+      operationId: listOwnLinkableIdentityConnections
+      summary: List approved connections available to the active browser-session person
+      responses: {'200': {description: Approved connection choices}, '403': {description: Browser session proof required}}
+
 components:
   securitySchemes:
+    inboundWebhookHMAC:
+      type: apiKey
+      in: header
+      name: X-Synapse-Hook-Signature
+      description: Provider-neutral HMAC-SHA256 over the exact raw request body.
+    gitlabWebhookSignature:
+      type: apiKey
+      in: header
+      name: webhook-signature
+      description: GitLab Standard Webhooks v1 signature; webhook-id and webhook-timestamp are also required.
+    gitlabWebhookToken:
+      type: apiKey
+      in: header
+      name: X-Gitlab-Token
+      description: Legacy GitLab secret token, used only when webhook-signature is absent.
+    githubWebhookHMAC:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature-256
+      description: GitHub HMAC-SHA256 over the exact raw request body; only valid for a GitHub endpoint.
+    bitbucketWebhookHMAC:
+      type: apiKey
+      in: header
+      name: X-Hub-Signature
+      description: Bitbucket Cloud HMAC-SHA256 over the exact raw request body; only valid for a Bitbucket endpoint.
     bearerAuth:
       type: http
       scheme: bearer
-      description: Human/operator API token.
+      description: >
+        Human/operator API token: a per-user key, or SYNAPSE_API_TOKEN for the bootstrap operator,
+        which alone carries platform-only authority. No CSRF header is required.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __Host-synapse_session
+      description: >
+        Opaque OIDC browser session issued by the callback. Unsafe methods also require the
+        `X-CSRF-Token` header returned by `GET /api/auth/session`. The session lineage is capped at
+        12 hours from sign-in on every request; disabling the user revokes it permanently.
+        `GET /api/auth/session` (served outside /api/v1) answers `{"authenticated": false}` and
+        clears the cookie only when no cookie is sent or the session is definitively invalid; a
+        storage or provider failure answers 503 `authentication_unavailable` and keeps the cookie.
+        When a concurrent discovery of the same session (another tab) rotated it first, the loser
+        answers 409 `conflict` with `retryable: true` and `Retry-After`, and does not touch the
+        cookie; the client retries discovery once.
+        An OIDC callback for a subject without an approved link answers 403 `access_denied` and
+        creates no user or session.
     fleetAgentAuth:
       type: http
       scheme: bearer
@@ -6054,12 +7114,28 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Unauthorized:
-      description: Missing or invalid bearer token
+      description: >
+        No credential (`authentication_required`) or a definitively invalid one
+        (`authentication_invalid`). A request without an authenticated principal is always refused;
+        it is never attributed to the operator.
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
     Forbidden:
-      description: AUP not accepted, or target outside scope / authorization window
+      description: >
+        Authorization denied (`permission_denied`), AUP not accepted (`aup_required`), CSRF proof
+        missing on a cookie session (`csrf_invalid`), or target outside scope / authorization window.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    AuthenticationUnavailable:
+      description: >
+        A storage or provider dependency failed while authenticating (`authentication_unavailable`,
+        retryable) or the service is saturated (`saturated`). The presented credential may still be
+        valid and must not be discarded. Carries `Retry-After`.
+      headers:
+        Retry-After:
+          schema: {type: integer}
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
@@ -6080,6 +7156,62 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    SIEMSink:
+      type: object
+      required: [id, tenant_id, name, provider, origin, target, data_class, ack_mode, version, generation, secret_version]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        name: {type: string}
+        provider: {type: string, enum: [splunk_hec, elasticsearch, syslog_tls, microsoft_sentinel]}
+        origin: {type: string, description: "HTTPS sink origin. Microsoft Sentinel requires an Azure public-cloud Logs Ingestion endpoint under *.ingest.monitor.azure.com on port 443."}
+        target: {type: string, description: "Provider-specific destination. Microsoft Sentinel uses dcr-<immutable-id>/Custom-<stream>."}
+        data_class: {type: string, enum: [signal, summary, detail]}
+        ack_mode: {type: string, enum: [hec_acceptance, indexer_ack, bulk_item, transport_write, ingestion_acceptance], description: "Microsoft Sentinel uses ingestion_acceptance and advances only after HTTP 204."}
+        indexer_ack_supported: {type: boolean}
+        paused: {type: boolean}
+        enabled: {type: boolean}
+        generation: {type: integer}
+        secret_version: {type: integer}
+        version: {type: integer}
+        channel: {type: string}
+        blocked_reason: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    SIEMSinkInput:
+      type: object
+      required: [name, provider, origin, secret]
+      properties:
+        name: {type: string}
+        provider: {type: string, enum: [splunk_hec, elasticsearch, syslog_tls, microsoft_sentinel]}
+        origin: {type: string, description: "HTTPS sink origin. Microsoft Sentinel requires an Azure public-cloud Logs Ingestion endpoint under *.ingest.monitor.azure.com on port 443."}
+        target: {type: string, description: "Provider-specific destination. Microsoft Sentinel uses dcr-<immutable-id>/Custom-<stream>."}
+        data_class: {type: string, enum: [signal, summary, detail]}
+        ack_mode: {type: string, enum: [hec_acceptance, indexer_ack, bulk_item, ingestion_acceptance], description: "Microsoft Sentinel defaults to ingestion_acceptance."}
+        indexer_ack_supported: {type: boolean}
+        allow_hosts: {type: array, items: {type: string}}
+        secret: {type: string, writeOnly: true, description: "Write-only provider credential. Microsoft Sentinel expects one-line JSON with tenant_id, client_id, and client_secret."}
+        version: {type: integer}
+    SIEMStatus:
+      type: object
+      required: [sink, partitions]
+      properties:
+        sink: {$ref: "#/components/schemas/SIEMSink"}
+        partitions:
+          type: array
+          items:
+            type: object
+            required: [source, caught_up, lag_records, guarantee, coverage_note]
+            properties:
+              source: {type: string}
+              caught_up: {type: boolean}
+              lag_records: {type: integer}
+              backlog_age_seconds: {type: number}
+              cursor: {type: string}
+              blocked: {type: string}
+              guarantee: {type: string}
+              legacy_v1: {type: boolean}
+              coverage_note: {type: string}
     AccuracyMetrics:
       type: object
       additionalProperties: false
@@ -7187,6 +8319,34 @@ components:
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 
+    GitHubInboundWebhookSecretRequest:
+      type: object
+      additionalProperties: false
+      required: [secret]
+      properties:
+        secret:
+          type: string
+          minLength: 32
+          maxLength: 128
+          writeOnly: true
+          description: Caller-supplied SCM webhook secret (32–128 UTF-8 bytes). Synapse seals it and never echoes it.
+
+    GitHubInboundWebhookConfiguration:
+      type: object
+      additionalProperties: false
+      required: [path, version, rotated]
+      properties:
+        path:
+          type: string
+          pattern: '^/api/v1/hooks/[A-Za-z0-9_-]{32,64}$'
+          description: Opaque relative webhook path; combine with the deployment's public HTTPS origin.
+        version: {type: integer, minimum: 1}
+        rotated: {type: boolean}
+        previous_secret_expires_at:
+          type: string
+          format: date-time
+          description: Present after rotation; previous signatures are accepted only until this time.
+
     IntegrationExternalRun:
       type: object
       additionalProperties: false
@@ -8146,7 +9306,9 @@ components:
       properties:
         key:
           type: string
-          description: Stable subsystem identifier a client keys its navigation off.
+          description: >
+            Stable subsystem identifier a client keys its navigation off. Includes `notifications`,
+            `notifications.channel_types`, `ticketing` and `docpublish`.
           example: fleet
         name:
           type: string
@@ -8157,7 +9319,9 @@ components:
           description: Whether this deployment serves the subsystem's routes.
         switch:
           type: string
-          description: The SYNAPSE_* environment variable an operator sets to change `enabled`.
+          description: >
+            The SYNAPSE_* environment variable an operator sets to change `enabled`. Empty when
+            `planned` is true.
           example: SYNAPSE_FLEET_ENABLED
         requires:
           type: array
@@ -8165,6 +9329,85 @@ components:
             Keys of the capabilities this one depends on. Present only when the subsystem needs more
             than its own switch, so a client can explain an enabled switch that is still disabled.
           items: {type: string}
+        values:
+          type: array
+          description: >
+            Options the capability offers. `notifications.channel_types` lists the channel types this
+            build can deliver to, read from the notification driver registry, minus the types the
+            operator switched off with `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`. Omitted when the
+            capability has no options, including when every channel type is switched off.
+          items: {type: string}
+          example: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]
+        planned:
+          type: boolean
+          description: >
+            True for a subsystem this build does not ship yet, such as `ticketing` and `docpublish`.
+            It is always disabled and names no switch. Omitted when false.
+
+    TenantLocale:
+      type: string
+      enum: [en, vi]
+      description: A language this build renders messages in.
+
+    TenantSettings:
+      type: object
+      required: [default_locale, time_zone, revision, locales]
+      properties:
+        default_locale: {$ref: '#/components/schemas/TenantLocale'}
+        time_zone:
+          type: string
+          description: IANA time zone name. Stored as a name so daylight saving is resolved at render time.
+          example: Asia/Ho_Chi_Minh
+        revision:
+          type: integer
+          minimum: 0
+          description: 0 when the tenant has never saved settings and the defaults apply.
+        updated_at:
+          type: string
+          format: date-time
+          description: Omitted at revision 0.
+        locales:
+          type: array
+          description: Every language this build supports, in display order.
+          items: {$ref: '#/components/schemas/TenantLocale'}
+
+    TenantSettingsInput:
+      type: object
+      additionalProperties: false
+      required: [default_locale, time_zone, revision]
+      properties:
+        default_locale: {$ref: '#/components/schemas/TenantLocale'}
+        time_zone: {type: string, maxLength: 64, example: Asia/Ho_Chi_Minh}
+        revision: {type: integer, minimum: 0}
+
+    UserChoice:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string}
+        name: {type: string}
+
+    AssigneeReviewItem:
+      type: object
+      required: [engagement_id, finding_id, legacy_assignee, reason]
+      properties:
+        engagement_id: {type: string}
+        finding_id: {type: string}
+        legacy_assignee: {type: string}
+        reason: {type: string, enum: [ambiguous, unmatched, legacy_label]}
+
+    UserContact:
+      type: object
+      required: [id, kind, source, value, version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [email]}
+        source: {type: string, enum: [manual, oidc]}
+        value: {type: string, format: email}
+        verified_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
 
     User:
       type: object
@@ -8172,10 +9415,20 @@ components:
       properties:
         id: {type: string}
         name: {type: string}
-        role: {type: string, enum: [admin, consultant, reviewer, readonly, member]}
+        role: {type: string, enum: [admin, consultant, reviewer, readonly, member, integration_admin]}
         disabled:
           type: boolean
           description: A disabled operator keeps its identity and history; its API key stops authenticating.
+        createdAt: {type: string, format: date-time}
+
+    OIDCLink:
+      type: object
+      required: [id, userId, issuer, subject, createdAt]
+      properties:
+        id: {type: string}
+        userId: {type: string}
+        issuer: {type: string}
+        subject: {type: string}
         createdAt: {type: string, format: date-time}
 
     UserWithAPIKey:
@@ -8195,7 +9448,7 @@ components:
         name: {type: string}
         role:
           type: string
-          enum: [admin, consultant, reviewer, readonly, member]
+          enum: [admin, consultant, reviewer, readonly, member, integration_admin]
           default: member
         tenant_id:
           type: string
@@ -8211,7 +9464,7 @@ components:
           description: Empty leaves the current name unchanged.
         role:
           type: string
-          enum: [admin, consultant, reviewer, readonly, member]
+          enum: [admin, consultant, reviewer, readonly, member, integration_admin]
           description: Empty leaves the current role unchanged.
 
     Readiness:
@@ -8803,8 +10056,31 @@ components:
 
     Error:
       type: object
+      required: [error, code, request_id, retryable]
       properties:
-        error: {type: string}
+        error:
+          type: string
+          description: Human-readable message. Unchanged from earlier releases; do not parse it.
+        code:
+          type: string
+          description: >
+            Stable machine-readable error class. Clients must tolerate codes they do not know and
+            fall back on the HTTP status. Current values: `authentication_required` (401, no
+            credential presented), `authentication_invalid` (401, the credential is invalid, revoked,
+            expired, over its lineage cap, or its user is disabled; the only code on which a client
+            clears a stored credential), `authentication_unavailable` (503, retryable, a storage or
+            provider dependency failed while authenticating; keep the credential), `csrf_invalid`
+            (403, cookie session valid but the CSRF header is missing or wrong), `aup_required`
+            (403), `permission_denied` (403, never changes the caller's role or session),
+            `access_denied` (403, OIDC subject has no approved link or its user is unavailable),
+            `validation_failed` (400), `not_found` (404), `conflict` (409), `saturated` (503,
+            retryable), `internal` (500, retryable).
+        request_id:
+          type: string
+          description: The request correlation id, equal to the `X-Request-ID` response header.
+        retryable:
+          type: boolean
+          description: Whether retrying the same request later may succeed.
 
     AITriageReview:
       type: object
@@ -9165,10 +10441,11 @@ components:
       properties:
         id: {type: string}
         name: {type: string}
-        provider: {type: string, enum: [github, gitlab, bitbucket, generic]}
+        provider: {type: string, enum: [github, gitlab, bitbucket, azure-devops, generic]}
         host: {type: string, description: Normalized git host, e.g. github.com.}
         username: {type: string, description: The git username the token authenticates as.}
         auth_kind: {type: string, enum: [pat]}
+        api_base: {type: string, description: 'Self-hosted forge REST API base used for pull request decoration (GitHub Enterprise Server or self-managed GitLab). Empty means the provider''s public SaaS API.'}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     SCMConnectorCreate:
@@ -9176,10 +10453,21 @@ components:
       required: [name, provider, host, token]
       properties:
         name: {type: string, description: A label for the connector.}
-        provider: {type: string, enum: [github, gitlab, bitbucket, generic]}
+        provider: {type: string, enum: [github, gitlab, bitbucket, azure-devops, generic]}
         host: {type: string, description: The git host, bare or as an https URL; only the host is kept.}
-        username: {type: string, description: Optional git username; defaults per provider (x-access-token for GitHub, oauth2 for GitLab).}
+        username: {type: string, description: Optional git username; defaults per provider (x-access-token for GitHub, oauth2 for GitLab, pat for Azure DevOps).}
         token: {type: string, description: Personal access token. Write-only; sealed at rest and never returned.}
+        api_base:
+          type: string
+          description: >
+            Optional REST API base of a self-hosted forge, for pull request decoration:
+            https://<host>/api/v3 for GitHub Enterprise Server, https://<host>[/<root>]/api/v4 for
+            self-managed GitLab. Leave empty for github.com, gitlab.com and every other provider.
+            Must be https, without credentials, query or fragment, on the same host (and port) as
+            `host`, and that host must be on the operator's SYNAPSE_INTEGRATION_HOST_ALLOWLIST;
+            otherwise the request is refused with 400. Bitbucket Data Center is not supported yet.
+            The token is bound to this base: pointing a connector at another API means deleting it
+            and adding it again with the token.
     FleetAsset:
       type: object
       description: Serialized from the fleet asset domain struct (PascalCase keys).
@@ -9914,6 +11202,7 @@ components:
               StartLine: {type: integer}
               EndLine: {type: integer}
           Assignee: {type: string}
+          assignee_user_id: {type: string, description: Canonical same-tenant user ID for personal routing; omitted for unresolved legacy labels.}
           Version: {type: integer}
           Sources: {type: array, items: {type: string}}
           Confidence: {type: string}
@@ -9997,11 +11286,27 @@ components:
         debug_events:
           type: array
           items: {type: object}
+        engine_outcomes:
+          type: array
+          maxItems: 64
+          description: Server-computed outcomes for bounded scan engines. Missing on historical jobs means coverage is unknown.
+          items: {$ref: "#/components/schemas/EngineOutcome"}
+        engine_coverage:
+          $ref: "#/components/schemas/EngineCoverage"
 
     ScanResult:
       type: object
       properties:
         target: {type: string}
+        execution_mode: {type: string, enum: [full, vulnerabilities, licenses], description: Mode selected for this invocation; scan_mode may include retained prior results.}
+        includes_previous_results: {type: boolean, description: True when retained prior results contribute to this result.}
+        engine_outcomes:
+          type: array
+          maxItems: 64
+          description: Server-computed outcomes for bounded scan engines. Missing on historical results means coverage is unknown.
+          items: {$ref: "#/components/schemas/EngineOutcome"}
+        engine_coverage:
+          $ref: "#/components/schemas/EngineCoverage"
         languages:
           type: array
           items: {type: object}
@@ -10021,6 +11326,41 @@ components:
           type: object
           additionalProperties: {type: string}
         vuln_db_snapshot: {type: string}
+
+    EngineOutcome:
+      type: object
+      required: [engine, execution, coverage, required]
+      properties:
+        engine: {type: string, minLength: 1, maxLength: 64, pattern: "^[a-z][a-z0-9_-]*$"}
+        execution: {type: string, enum: [completed, failed, timed_out, cancelled, not_run]}
+        coverage: {type: string, enum: [complete, partial, unknown, not_applicable]}
+        reason: {type: string, enum: ["", not_selected, disabled, not_applicable, unavailable, legacy_reporter, deadline_exceeded, budget_exhausted, cancelled, engine_error, upstream_failure, truncated, source_budget, unrendered_charts, dependency_unresolved, analysis_incomplete]}
+        required: {type: boolean}
+        counts:
+          type: object
+          additionalProperties: false
+          properties:
+            findings: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_seen: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_parsed: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_skipped: {$ref: "#/components/schemas/EngineMeasurement"}
+            files_unscanned: {$ref: "#/components/schemas/EngineMeasurement"}
+            source_budget_bytes: {$ref: "#/components/schemas/EngineMeasurement"}
+            unrendered_charts: {$ref: "#/components/schemas/EngineMeasurement"}
+            proposals: {$ref: "#/components/schemas/EngineMeasurement"}
+
+    EngineMeasurement:
+      type: integer
+      minimum: 0
+      maximum: 9007199254740991
+
+    EngineCoverage:
+      type: object
+      required: [status, required, completed]
+      properties:
+        status: {type: string, enum: [complete, partial, unknown, not_applicable]}
+        required: {type: integer, minimum: 0, maximum: 64}
+        completed: {type: integer, minimum: 0, maximum: 64}
 
     ProjectDependencyGraph:
       type: object
@@ -10634,6 +11974,10 @@ components:
 
     MeasureUnavailableReason:
       type: string
+      description: >-
+        Why a measure is unavailable. `changed_line_coverage_not_available` is a legacy value: snapshots
+        recorded before new-code coverage named its reason store it, and the API returns a stored reason
+        unchanged, so analyses from that period still report it.
       enum:
         - legacy_analysis
         - function_count_not_available
@@ -10644,6 +11988,7 @@ components:
         - no_coverage_report
         - no_changed_lines
         - changed_lines_not_in_report
+        - changed_line_coverage_not_available
         - duplication_not_available
         - issue_type_incomplete
         - issue_attribution_incomplete
@@ -11939,35 +13284,178 @@ components:
         lane_count: {type: integer}
         complete_coverage: {type: boolean}
 
+    InboxItem:
+      type: object
+      required: [id, event_id, event_type, title, summary, link_path, created_at]
+      properties:
+        id: {type: string}
+        event_id: {type: string}
+        event_type: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        link_path: {type: string, description: Relative application path. Clients must not redirect to an absolute URL.}
+        created_at: {type: string, format: date-time}
+        read_at: {type: string, format: date-time, nullable: true}
+    InboxPreference:
+      type: object
+      required: [event_type, channel, state, revision, mandatory, available]
+      properties:
+        event_type: {type: string}
+        channel: {type: string}
+        state: {type: string, enum: [inherit, enabled, disabled]}
+        revision: {type: integer}
+        mandatory: {type: boolean}
+        available: {type: boolean}
+        reason: {type: string}
+
     NotificationEventType:
       type: string
       enum: [vulnerability_action.created, scan.completed, quality_gate.failed, sla.approaching_deadline, fleet.agent.offline, incident.created, finding.ownership_changed]
+
+    NotificationEventSpec:
+      type: object
+      additionalProperties: false
+      required: [type, label, schema_version, subject_kind, has_engagement, has_severity, has_team, has_lead_time, filters, max_data_class, mandatory, operator_only, variables]
+      properties:
+        type: {type: string, description: Event type; the catalog may declare types newer than the NotificationEventType enum}
+        label: {type: string}
+        schema_version: {type: integer, minimum: 1}
+        subject_kind: {type: string, description: Entity the event is about}
+        has_engagement: {type: boolean}
+        has_severity: {type: boolean}
+        has_team: {type: boolean}
+        has_lead_time: {type: boolean}
+        filters:
+          type: array
+          description: Rule filters this event type accepts; a rule using any other filter is rejected.
+          items: {type: string, enum: [min_severity, action_types, engagement_ids, team_ids, lead_time_seconds]}
+        max_data_class: {$ref: '#/components/schemas/NotificationDataClass'}
+        mandatory: {type: boolean, description: Cannot be muted by a rule or a user preference}
+        operator_only: {type: boolean, description: Sent on demand to one channel and never matched by rules}
+        variables: {type: array, items: {$ref: '#/components/schemas/NotificationEventVariable'}}
+
+    NotificationEventVariable:
+      type: object
+      additionalProperties: false
+      required: [name, class, description, list_cap]
+      properties:
+        name: {type: string}
+        class: {$ref: '#/components/schemas/NotificationDataClass'}
+        description: {type: string}
+        list_cap: {type: integer, minimum: 0, description: Maximum items of a list variable; 0 marks a scalar}
+        item_fields: {type: array, items: {type: string}, description: Declared fields exposed on each bounded list item; omitted for scalar variables}
+        format: {type: string, enum: [time], description: 'time marks an instant, rendered in the tenant time zone (#1365)'}
+
+    NotificationDataClass:
+      type: string
+      enum: [signal, summary, detail]
 
     NotificationDeliveryState:
       type: string
       enum: [pending, retrying, delivered, dead_letter, cancelled]
 
+    SlackConversationsInput:
+      type: object
+      additionalProperties: false
+      description: Exactly one of bot_token and channel_id.
+      properties:
+        bot_token: {type: string, writeOnly: true, description: A Slack bot token (xoxb-…) being entered in the channel form}
+        channel_id: {type: string, description: An existing slack_bot channel whose sealed token is used}
+
+    SlackConversations:
+      type: object
+      required: [team_id, team_name, items, truncated]
+      properties:
+        team_id: {type: string, description: The Slack workspace (team) the token belongs to}
+        team_name: {type: string}
+        truncated: {type: boolean, description: The workspace has more conversations than were read}
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, name, is_private, is_shared, is_archived, is_member]
+            properties:
+              id: {type: string}
+              name: {type: string}
+              is_private: {type: boolean}
+              is_shared: {type: boolean, description: Slack Connect, externally shared or organisation-shared}
+              is_archived: {type: boolean}
+              is_member: {type: boolean, description: The app is a member of the conversation}
+
     NotificationChannelInput:
       type: object
       additionalProperties: false
-      description: Creates a channel or replaces its metadata. PATCH requires revision. Channel type is immutable; blank URL and secret retain the encrypted configuration on PATCH. Webhook creation or rotation requires both URL and a secret of at least 16 bytes.
+      description: >-
+        Creates a channel or replaces its metadata. PATCH requires revision. Channel type is immutable;
+        blank URL, secret and chat_id retain the encrypted configuration on PATCH. Webhook creation or
+        rotation requires both URL and a secret of at least 16 bytes. Teams, Google Chat and Discord
+        channels take the full credential-bearing webhook URL, and replacing it requires the whole URL
+        again. A Telegram channel takes the bot token in `secret` and the chat in `chat_id`; replacing
+        either requires both. A Slack bot channel (`slack_bot`) takes the bot token (`xoxb-…`) in `secret` and the
+        conversation in `conversation_id`; the server checks both with Slack (`auth.test`,
+        `conversations.info`) before saving and refuses an archived conversation, a private one the app
+        is not in, and a shared one unless `allow_shared_conversation` is set. Replacing any of the three
+        requires all of them, and `administer`. Credential-bearing URLs and tokens are write-only and
+        never returned.
       required: [name, type, enabled]
       properties:
         name: {type: string, maxLength: 200}
-        type: {type: string, enum: [webhook, slack, email]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]}
         enabled: {type: boolean}
-        url: {type: string, writeOnly: true, description: HTTPS endpoint for webhook and Slack channels; blank retains the current endpoint on PATCH}
-        secret: {type: string, writeOnly: true, description: At least 16 bytes on creation or rotation; blank retains the current secret on PATCH}
+        url:
+          type: string
+          writeOnly: true
+          description: >-
+            HTTPS endpoint for webhook, Slack, Teams, Google Chat and Discord channels; blank retains the
+            current endpoint on PATCH. Teams accepts a Workflows trigger URL on `*.logic.azure.com`,
+            `*.logic.azure.us` or `*.environment.api.powerplatform.com` with a `sig` parameter; Google
+            Chat an incoming-webhook URL on `chat.googleapis.com` with `key` and `token`; Discord a
+            channel webhook on `discord.com` (optionally with `thread_id`).
+        secret: {type: string, writeOnly: true, description: The webhook signing secret (at least 16 bytes), the Telegram bot token or the Slack bot token; blank retains the current secret on PATCH}
+        chat_id: {type: string, writeOnly: true, maxLength: 33, description: 'Telegram only: a numeric chat ID or an @channel username.'}
+        thread_id: {type: integer, format: int64, minimum: 0, maximum: 2147483647, writeOnly: true, description: 'Telegram only: the forum topic (message_thread_id) to post into; 0 or omitted posts to the main chat.'}
+        conversation_id: {type: string, writeOnly: true, pattern: '^[CG][A-Z0-9]{8,20}$', description: 'Slack bot only: the channel ID (C… or G…) to post into.'}
+        allow_shared_conversation: {type: boolean, writeOnly: true, description: 'Slack bot only: allow posting into a Slack Connect, externally shared or organisation-shared conversation. Off by default; the driver refuses a conversation that became shared later with slack_conversation_shared.'}
         recipients: {type: array, maxItems: 50, items: {type: string, format: email}}
         revision: {type: integer, minimum: 1}
+        template_id:
+          type: string
+          maxLength: 128
+          description: >-
+            Binds an active template of the channel family (webhook, chat for Slack, email) that
+            renders before the tenant templates. Empty unbinds; omitted keeps the current binding.
+            A template for one event type can only be bound while every rule routing to the channel
+            is for that event type. Binding needs manage_integrations only and is audited.
+        locale:
+          type: string
+          enum: ['', en, vi]
+          description: The channel locale; empty uses the tenant default_locale, omitted keeps the current value.
+        custom_body:
+          type: boolean
+          description: >-
+            Webhook channels only (#1376): send the body of the resolved webhook template as a custom
+            JSON body instead of the event envelope, with `X-Synapse-Body: custom`; the signature covers
+            the body as sent. Needs a bound template whose body still validates; omitted keeps the value.
+        data_class:
+          $ref: '#/components/schemas/NotificationDataClass'
+          description: >-
+            The most sensitive content the channel's messages may carry (#1360). Omitted keeps the
+            current class, or the type's default on creation (signal for chat, summary for email and
+            webhooks). Raising it needs administer and is audited; lowering it needs manage_integrations.
+        raw_event:
+          type: boolean
+          description: >-
+            Webhook only: audited administrator opt-in to the legacy raw event envelope.
+            Requires detail data class and custom_body=false. Omitted retains the stored value;
+            new channels default to false. Engagement signal/none restrictions still take precedence.
 
     NotificationChannel:
       type: object
-      required: [id, name, type, enabled, destination, revision, secret_version, created_at, updated_at]
+      required: [id, name, type, enabled, destination, revision, secret_version, created_at, updated_at, health]
       properties:
         id: {type: string}
         name: {type: string}
-        type: {type: string, enum: [webhook, slack, email]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]}
         enabled: {type: boolean}
         destination: {type: string, description: Redacted destination metadata}
         recipients: {type: array, items: {type: string, format: email}}
@@ -11975,6 +13463,249 @@ components:
         secret_version: {type: integer}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        health: {$ref: '#/components/schemas/NotificationChannelHealth'}
+        template_id: {type: string, description: The bound template (#1371); absent when none is bound}
+        locale: {type: string, enum: [en, vi], description: The channel locale; absent when the tenant default applies}
+        custom_body: {type: boolean, description: The webhook channel sends its template body as a custom JSON body (#1376)}
+        data_class: {$ref: '#/components/schemas/NotificationDataClass'}
+        raw_event: {type: boolean, description: Explicit legacy raw webhook mode; false by default}
+
+    NotificationEngagementSetting:
+      type: object
+      required: [engagement_id, external_notifications, revision]
+      properties:
+        engagement_id: {type: string}
+        external_notifications:
+          type: string
+          enum: [inherit, signal, none]
+          description: >-
+            inherit sends at each channel's class, signal caps every channel at signal, none sends
+            nothing external about the engagement; the lower of the channel class and this wins.
+        revision: {type: integer, minimum: 0, description: 0 when the engagement has no stored setting}
+        updated_at: {type: string, format: date-time}
+        updated_by: {type: string}
+
+    NotificationEngagementSettingInput:
+      type: object
+      additionalProperties: false
+      required: [external_notifications, revision]
+      properties:
+        external_notifications: {type: string, enum: [inherit, signal, none]}
+        revision: {type: integer, minimum: 0, description: The revision read; 0 for an engagement without a stored setting}
+
+    NotificationTemplatePreviewInput:
+      type: object
+      required: [channel_id, event_type]
+      additionalProperties: false
+      properties:
+        channel_id: {type: string}
+        event_type: {type: string, description: A catalog event type; not `*`.}
+        event_id: {type: string, description: A stored event of `event_type` in the caller's tenant. Omitted renders against the fixture.}
+        template_id: {type: string, description: Preview this template instead of the resolved one. It must be of the channel's family and cover `event_type`.}
+        version: {type: integer, minimum: 0, description: A version of `template_id`; 0 or omitted is the latest. Not combined with `fields`.}
+        fields: {type: object, additionalProperties: {type: string}, description: Unsaved text to preview, checked like a save.}
+    NotificationPreviewEvent:
+      type: object
+      required: [id, event_type, occurred_at]
+      properties:
+        id: {type: string}
+        event_type: {type: string}
+        occurred_at: {type: string, format: date-time}
+        engagement_id: {type: string}
+        severity: {type: string}
+        subject_kind: {type: string}
+    NotificationTemplatePreview:
+      type: object
+      required: [channel, sample, rendered]
+      description: Exactly one of `resolution` and `draft` is present.
+      properties:
+        channel:
+          type: object
+          required: [id, name, type, family]
+          properties:
+            id: {type: string}
+            name: {type: string}
+            type: {type: string}
+            family: {type: string, enum: [chat, email, pager, ticket, webhook]}
+        sample:
+          allOf:
+            - $ref: '#/components/schemas/NotificationPreviewEvent'
+            - type: object
+              required: [source]
+              properties:
+                source: {type: string, enum: [fixture, event]}
+        resolution: {$ref: '#/components/schemas/NotificationTemplateResolution'}
+        draft:
+          type: object
+          properties:
+            template_id: {type: string}
+            version: {type: integer, description: The saved version previewed; absent for unsaved text.}
+            unsaved: {type: boolean}
+        rendered: {type: boolean, description: False until send-time rendering (#1365) is available.}
+    NotificationTemplateResolution:
+      type: object
+      description: >-
+        Which template a channel renders an event type with. Tiers are tried in order: the channel
+        binding, the tenant template for the event type, the tenant `*` template, the built-in, then
+        the fallback (raw rendering). Within each tier the locale is tried exactly, then `*`, then en.
+        The locale is the channel locale, else the tenant default_locale, else en. Never carries
+        template source.
+      required: [tier, event_type, locale, locale_source]
+      properties:
+        tier: {type: string, enum: [channel, tenant_event, tenant_wildcard, builtin, fallback]}
+        event_type: {type: string}
+        family: {type: string, enum: [chat, email, pager, ticket, webhook]}
+        locale: {type: string, enum: [en, vi], description: The language to render in}
+        locale_source: {type: string, enum: [channel, tenant, default]}
+        matched_locale: {type: string, enum: [en, vi, '*'], description: The locale key of the matched template}
+        template: {$ref: '#/components/schemas/NotificationTemplate'}
+        version: {type: integer, description: The active version that renders}
+        builtin_ref: {type: string}
+        binding_skipped:
+          type: string
+          enum: [template_not_active, event_not_covered, locale_not_covered, family_mismatch, template_missing]
+          description: Why the channel's bound template did not apply
+
+    NotificationChannelHealth:
+      type: object
+      description: >-
+        Delivery health kept by the worker. A channel pauses after SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD
+        consecutive permanent failures it owns (for example destination_blocked, channel_config_invalid, an HTTP
+        4xx other than 408 and 429, or an SMTP 5xx). Retryable failures never count; a delivered message resets
+        the count. A pause is not a configuration change and does not bump the channel revision. Codes are
+        bounded identifiers and never contain a destination, response body or error text.
+      required: [state, consecutive_failures]
+      properties:
+        state: {type: string, enum: [active, paused]}
+        paused_at: {type: string, format: date-time}
+        paused_reason: {type: string, enum: [consecutive_permanent_failures]}
+        consecutive_failures: {type: integer, minimum: 0}
+        last_failure_code: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}
+        last_failure_at: {type: string, format: date-time}
+
+    NotificationChannelHealthEvent:
+      type: object
+      required: [id, channel_id, action, failures, actor, occurred_at]
+      properties:
+        id: {type: string}
+        channel_id: {type: string}
+        action: {type: string, enum: [paused, resumed]}
+        reason: {type: string, description: Pause reason code; on a resume, the reason of the pause it cleared}
+        failure_code: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}
+        failures: {type: integer, minimum: 0}
+        delivery_id: {type: string, description: The delivery whose failure paused the channel (pause only)}
+        attempt_id: {type: string, description: The attempt that paused the channel (pause only)}
+        actor: {type: string, description: '`system` for an automatic pause; the administrator for a resume'}
+        occurred_at: {type: string, format: date-time}
+
+    NotificationTemplateFamily:
+      type: string
+      enum: [chat, email, pager, ticket, webhook]
+      description: >
+        Channel family a template renders for. Fields per family: chat `title`, `body`; email
+        `subject`, `body`; pager `summary`; ticket `summary`, `description`; webhook `body`.
+        A webhook `body` is a custom JSON body (#1376): one JSON object of at most 16 KiB, at most 8
+        levels deep and 256 values, without duplicate keys, with template expressions only inside
+        string values (never in a key or as a bare value). Each string value renders on its own and
+        the tree is re-encoded as JSON, so a value can never change the body's structure or types.
+
+    NotificationTemplateStatus:
+      type: string
+      enum: [draft, active, archived]
+
+    BuiltinNotificationTemplate:
+      type: object
+      description: A read-only default shipped with the running build. Clone its fields into a tenant draft to customize it.
+      required: [event_type, family, locale, fields]
+      properties:
+        event_type: {type: string, description: A catalog event type or `*`}
+        family: {$ref: '#/components/schemas/NotificationTemplateFamily'}
+        locale: {type: string, enum: [en, vi, '*']}
+        fields: {type: object, additionalProperties: {type: string, maxLength: 16384}}
+
+    NotificationTemplate:
+      type: object
+      required: [tenant_id, id, name, event_type, family, locale, status, latest_version, active_version, revision, created_at, created_by, updated_at, updated_by]
+      properties:
+        tenant_id: {type: string}
+        id: {type: string}
+        name: {type: string, maxLength: 200}
+        event_type: {type: string, description: A catalog event type or `*`}
+        family: {$ref: '#/components/schemas/NotificationTemplateFamily'}
+        locale: {type: string, enum: [en, vi, '*']}
+        status: {$ref: '#/components/schemas/NotificationTemplateStatus'}
+        latest_version: {type: integer, minimum: 1}
+        active_version: {type: integer, minimum: 0, description: The version that renders while active; 0 when never activated}
+        revision: {type: integer, minimum: 1, description: Head revision; every mutation must send the one it read}
+        created_at: {type: string, format: date-time}
+        created_by: {type: string}
+        updated_at: {type: string, format: date-time}
+        updated_by: {type: string}
+
+    NotificationTemplateVersion:
+      type: object
+      required: [tenant_id, template_id, version, fields, checksum, created_at, created_by]
+      properties:
+        tenant_id: {type: string}
+        template_id: {type: string}
+        version: {type: integer, minimum: 1}
+        fields: {type: object, additionalProperties: {type: string, maxLength: 16384}}
+        checksum: {type: string, description: Hex SHA-256 of the fields encoded as JSON with sorted keys}
+        created_at: {type: string, format: date-time}
+        created_by: {type: string}
+
+    NotificationTemplateDetail:
+      allOf:
+        - $ref: '#/components/schemas/NotificationTemplate'
+        - type: object
+          properties:
+            latest: {$ref: '#/components/schemas/NotificationTemplateVersion'}
+            active: {$ref: '#/components/schemas/NotificationTemplateVersion'}
+            archived_template_id: {type: string, description: The template an activation or rollback archived because it held the same key}
+
+    NotificationTemplateInput:
+      type: object
+      additionalProperties: false
+      required: [name, event_type, family, locale, fields]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        event_type: {type: string, description: A catalog event type or `*`}
+        family: {$ref: '#/components/schemas/NotificationTemplateFamily'}
+        locale: {type: string, enum: [en, vi, '*']}
+        fields:
+          type: object
+          description: Source of each content field of the family, at most 16 KiB each; at least one must be non-blank.
+          additionalProperties: {type: string, maxLength: 16384}
+
+    NotificationTemplateUpdateInput:
+      type: object
+      additionalProperties: false
+      required: [fields, revision]
+      properties:
+        name: {type: string, maxLength: 200, description: Empty keeps the current name}
+        fields: {type: object, additionalProperties: {type: string, maxLength: 16384}}
+        revision: {type: integer, minimum: 1}
+
+    NotificationTemplateChangeInput:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        version: {type: integer, minimum: 0, description: Version to activate; 0 or absent means the newest. Required for a rollback; ignored by archive.}
+        revision: {type: integer, minimum: 1}
+
+    NotificationTemplateValidationError:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}
+        field: {type: string, description: The content field the engine rejected}
+        event_type: {type: string, description: The event type the field was compiled against}
+        code:
+          type: string
+          description: Stable engine code, for example `unknown_variable`, `forbidden_function`, `parse_error`, `iteration_bound_exceeded`.
+        line: {type: integer, minimum: 1}
+        path: {type: string, description: 'For a webhook body, the value that was refused, for example $.alert.title'}
 
     NotificationRuleInput:
       type: object
@@ -12007,17 +13738,22 @@ components:
           properties:
             id: {type: string}
             revision: {type: integer}
+            disabled_reason:
+              type: string
+              enum: [engagement_filter_unsupported]
+              description: Set when the system disabled the rule. engagement_filter_unsupported means the event type carries no engagement, so the stored engagement scope could never match. Any save clears it.
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
 
     NotificationDelivery:
       type: object
-      required: [id, event_id, channel_id, channel_type, matched_rule_ids, state, attempts, created_at, updated_at]
+      required: [id, event_id, channel_id, channel_type, redrive_fence, matched_rule_ids, state, attempts, created_at, updated_at]
       properties:
         id: {type: string}
         event_id: {type: string}
         channel_id: {type: string}
-        channel_type: {type: string, enum: [webhook, slack, email]}
+        channel_type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]}
+        redrive_fence: {type: integer, format: int64, minimum: 0, description: Current durable queue claim fence; submit it as expected_fence to prevent a stale redrive.}
         recipient: {type: string}
         matched_rule_ids: {type: array, items: {type: string}}
         state: {$ref: '#/components/schemas/NotificationDeliveryState'}
@@ -12027,6 +13763,7 @@ components:
         delivered_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+        template_ref: {type: string, description: 'The template a message renders with (#1365): tenant:<template>@<version>, builtin:<event>:<family>:<locale>@<build>, or fallback for the channel built-in content'}
 
     NotificationDeliveryPage:
       type: object
@@ -12034,6 +13771,24 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/NotificationDelivery'}}
         next: {type: string}
+
+    NotificationSourceFailure:
+      type: object
+      required: [source_kind, source_id, event_type, occurred_at, processed_at, failed_reason]
+      properties:
+        source_kind: {type: string}
+        source_id: {type: string}
+        event_type: {type: string}
+        occurred_at: {type: string, format: date-time}
+        processed_at: {type: string, format: date-time}
+        failed_reason: {type: string, enum: [invalid_event, event_data_too_large]}
+
+    NotificationSourceFailurePage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/NotificationSourceFailure'}}
+        next_offset: {type: integer, minimum: 0}
 
     NotificationAttempt:
       type: object
@@ -12047,3 +13802,4 @@ components:
         outcome: {type: string, enum: [started, delivered, retrying, failed, cancelled]}
         response_code: {type: integer}
         error_code: {type: string}
+        template_ref: {type: string, description: 'The template a message renders with (#1365): tenant:<template>@<version>, builtin:<event>:<family>:<locale>@<build>, or fallback for the channel built-in content'}

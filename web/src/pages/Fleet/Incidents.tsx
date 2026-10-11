@@ -28,10 +28,10 @@ function riskCell(inc: Incident) {
 const COLUMNS: Column<Incident>[] = [
   {
     header: 'Title',
-    className: 'flex-1 min-w-0',
+    className: 'min-w-[20rem]',
     cell: (r) => (
       <div className="min-w-0">
-        <div className="truncate text-primary" title={r.title}>{r.title || r.id}</div>
+        <div className="line-clamp-2 font-medium text-primary" title={r.title}>{r.title || r.id}</div>
         <div className="truncate font-mono text-[11px] text-quaternary" title={r.id}>{r.id}</div>
       </div>
     ),
@@ -159,7 +159,7 @@ export function Incidents() {
             onRowClick={(r) => navigate(`/fleet/incidents/${encodeURIComponent(r.id)}`)}
             rowAriaLabel={(r) => `Open incident ${r.title || r.id}`}
             maxHeightClass="max-h-[70vh]"
-            tableMinWidthClass="min-w-[64rem]"
+            tableMinWidthClass="min-w-[78rem]"
           />
         ) : filter === 'all' ? (
           <OperationalState

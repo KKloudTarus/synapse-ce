@@ -7,10 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/identity"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -157,7 +159,7 @@ func (s *Service) RotateSession(ctx context.Context, previous identity.Session, 
 	// lineage past MaxSessionAge measured from the original login. Past it, the browser is forced back
 	// through OIDC. A zero OriginAt fails closed (BeyondMaxAge).
 	if previous.BeyondMaxAge(now) {
-		return CreatedSession{}, fmt.Errorf("%w: session exceeded its maximum lifetime; re-authentication required", shared.ErrForbidden)
+		return CreatedSession{}, fmt.Errorf("session exceeded its maximum lifetime; re-authentication required: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
 	}
 	replacement, err := identity.NewSession(s.ids.NewID(), previous.TenantID, previous.UserID, stateHash(token), stateHash(csrfToken), metadata, now.Add(ttl), now)
 	if err != nil {
@@ -166,22 +168,49 @@ func (s *Service) RotateSession(ctx context.Context, previous identity.Session, 
 	// Carry the immutable origin so the cap is measured from first authentication, not this rotation.
 	replacement.OriginAt = previous.OriginAt
 	if err := s.store.RotateSession(ctx, previous.ID, replacement, now); err != nil {
-		return CreatedSession{}, fmt.Errorf("rotate opaque session: %w", err)
+		// A conflict means another request rotated or revoked the previous session first, most often
+		// a second tab discovering the same session at the same time. The loser's credential is
+		// spent, but the browser may already hold the winner's replacement cookie, so this is not
+		// an invalid credential: classifying it as one would clear the cookie and sign every tab
+		// out. It wraps shared.ErrConflict only, so the caller can ask the browser to retry, and a
+		// retry after a genuine revocation then resolves as an inactive session. Anything else is a
+		// storage failure that says nothing about the credential.
+		if errors.Is(err, shared.ErrConflict) {
+			return CreatedSession{}, fmt.Errorf("rotate opaque session: %w", err)
+		}
+		return CreatedSession{}, fmt.Errorf("rotate opaque session: %w: %w", authz.ErrAuthenticationUnavailable, err)
 	}
 	return CreatedSession{Session: replacement, Token: token, CSRFToken: csrfToken}, nil
 }
 
-// AuthenticateSession resolves a tenant-bound opaque token only while the stored session remains active.
+// AuthenticateSession resolves a tenant-bound opaque token only while the stored session remains
+// active and its lineage is inside the absolute lifetime cap. Every browser-session
+// authentication passes through here, so the cap is enforced on each request, not only when the
+// session rotates; it is refused at exactly OriginAt + MaxSessionAge.
+//
+// The error wraps authz.ErrCredentialInvalid when the token is unknown, revoked, expired or over
+// the cap, and authz.ErrAuthenticationUnavailable when the store failed. The two must never be
+// confused: an unavailable store does not make a valid cookie invalid.
 func (s *Service) AuthenticateSession(ctx context.Context, tenantID shared.ID, token string) (identity.Session, error) {
-	if tenantID.IsZero() || strings.TrimSpace(token) == "" {
-		return identity.Session{}, fmt.Errorf("%w: session tenant and token are required", shared.ErrValidation)
+	if tenantID.IsZero() {
+		return identity.Session{}, fmt.Errorf("%w: session tenant is required", shared.ErrValidation)
+	}
+	if strings.TrimSpace(token) == "" {
+		return identity.Session{}, fmt.Errorf("session token is empty: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
 	}
 	session, err := s.store.GetSessionByTokenHash(shared.WithTenant(ctx, tenantID), stateHash(token))
-	if err != nil {
-		return identity.Session{}, fmt.Errorf("get session: %w", err)
+	if errors.Is(err, shared.ErrNotFound) {
+		return identity.Session{}, fmt.Errorf("session unknown: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
 	}
-	if !session.Active(s.clock.Now().UTC()) {
-		return identity.Session{}, fmt.Errorf("session inactive: %w", shared.ErrForbidden)
+	if err != nil {
+		return identity.Session{}, fmt.Errorf("get session: %w: %w", authz.ErrAuthenticationUnavailable, err)
+	}
+	now := s.clock.Now().UTC()
+	if !session.Active(now) {
+		return identity.Session{}, fmt.Errorf("session inactive: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
+	}
+	if session.BeyondMaxAge(now) {
+		return identity.Session{}, fmt.Errorf("session exceeded its maximum lifetime: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
 	}
 	return session, nil
 }

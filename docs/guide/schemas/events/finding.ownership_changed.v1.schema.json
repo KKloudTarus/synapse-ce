@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/finding.ownership_changed.v1.schema.json",
+  "title": "finding.ownership_changed event (v1)",
+  "description": "An ownership decision changed a finding team or assignee.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "finding.ownership_changed"
+    },
+    "source_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "decision_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "finding_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "engagement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "old_team_id": {
+          "type": "string"
+        },
+        "new_team_id": {
+          "type": "string"
+        },
+        "old_assignee_id": {
+          "type": "string"
+        },
+        "new_assignee_id": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "decision_id",
+        "finding_id",
+        "engagement_id",
+        "old_team_id",
+        "new_team_id",
+        "old_assignee_id",
+        "new_assignee_id",
+        "actor",
+        "reason"
+      ],
+      "additionalProperties": true
+    },
+    "engagement_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "source_kind",
+    "source_id",
+    "schema_version",
+    "occurred_at",
+    "data"
+  ],
+  "additionalProperties": true
+}

@@ -22,7 +22,7 @@ export function AITriageObservability() {
   )
 
   return (
-    <div className="mx-auto max-w-[1600px] animate-fade-in space-y-6">
+    <div data-ai-outcomes={data && !loading && !error ? data.totals.findings : undefined} className="mx-auto max-w-[1600px] animate-fade-in space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-4 pb-1">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-primary sm:text-display-xs">

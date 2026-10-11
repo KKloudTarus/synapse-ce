@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scmconnector"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -43,18 +44,25 @@ type GitHubDecorator struct {
 	api            *jsonHTTPClient
 	credentials    ports.GitCredentialResolver
 	credentialHost string
+	selfHosted     *selfHostedAPI
 	locks          [32]sync.Mutex
 }
 
 var _ ports.PRDecorator = (*GitHubDecorator)(nil)
 
-// NewGitHubDecorator constructs the production github.com adapter. Provider composition is intentionally
-// left to #1125; creating this adapter alone causes no outward traffic.
-func NewGitHubDecorator(credentials ports.GitCredentialResolver) (*GitHubDecorator, error) {
+// NewGitHubDecorator constructs the production github.com adapter. With WithSelfHostedRules it also
+// decorates GitHub Enterprise Server through the API base on the repository host's connector.
+// Creating this adapter alone causes no outward traffic.
+func NewGitHubDecorator(credentials ports.GitCredentialResolver, opts ...Option) (*GitHubDecorator, error) {
 	if credentials == nil {
 		return nil, fmt.Errorf("%w: github decoration needs a credential resolver", shared.ErrValidation)
 	}
-	return newGitHubDecorator(safehttp.New(30*time.Second, false), githubAPIBase, githubCredentialHost, credentials)
+	d, err := newGitHubDecorator(safehttp.New(30*time.Second, false), githubAPIBase, githubCredentialHost, credentials)
+	if err != nil {
+		return nil, err
+	}
+	d.selfHosted = newSelfHostedAPI(scmconnector.ProviderGitHub, collectOptions(opts))
+	return d, nil
 }
 
 func newGitHubDecorator(client *http.Client, apiBase, credentialHost string, credentials ports.GitCredentialResolver) (*GitHubDecorator, error) {
@@ -91,32 +99,30 @@ func (d *GitHubDecorator) Decorate(ctx context.Context, decoration ports.PRDecor
 		return fmt.Errorf("%w: github pull request number is invalid", shared.ErrValidation)
 	}
 
-	credential, ok, err := d.credentials.ResolveGitCredential(ctx, d.credentialHost)
+	api, credential, err := resolveForgeEndpoint(ctx, d.credentials, d.credentialHost, d.api, d.selfHosted, decoration.ForgeHost, "github")
 	if err != nil {
-		return fmt.Errorf("resolve github decoration credential: %w", err)
+		return err
 	}
-	if !ok || len(credential.Token) == 0 {
-		return fmt.Errorf("%w: no github credential is configured for decoration", shared.ErrValidation)
-	}
-	defer func() {
-		for i := range credential.Token {
-			credential.Token[i] = 0
-		}
-	}()
+	defer zeroToken(credential.Token)
 	headers := githubHeaders(credential.Token)
+	// A GitHub Enterprise Server target runs the same publishing code against its own API base.
+	call := d
+	if api != d.api {
+		call = &GitHubDecorator{api: api, credentials: d.credentials}
+	}
 
-	lock := d.targetLock(decoration.Target.Repository, decoration.Target.PullRequest)
+	lock := d.targetLock(decoration.ForgeHost+"\x00"+decoration.Target.Repository, decoration.Target.PullRequest)
 	lock.Lock()
 	defer lock.Unlock()
 
 	var errs []error
-	if err := d.publishStatus(ctx, repoPath, decoration, headers); err != nil {
+	if err := call.publishStatus(ctx, repoPath, decoration, headers); err != nil {
 		errs = append(errs, fmt.Errorf("github commit status: %w", err))
 	}
-	if err := d.publishCheck(ctx, repoPath, decoration, headers); err != nil {
+	if err := call.publishCheck(ctx, repoPath, decoration, headers); err != nil {
 		errs = append(errs, fmt.Errorf("github check run: %w", err))
 	}
-	if err := d.publishComment(ctx, repoPath, prNumber, decoration, headers); err != nil {
+	if err := call.publishComment(ctx, repoPath, prNumber, decoration, headers); err != nil {
 		errs = append(errs, fmt.Errorf("github pull request comment: %w", err))
 	}
 	return errors.Join(errs...)

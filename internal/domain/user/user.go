@@ -24,12 +24,16 @@ const (
 	// RoleMember is the name for RoleConsultant. Kept valid so existing users (and the
 	// createUser default) keep working; it is granted exactly the consultant permission set.
 	RoleMember Role = "member"
+	// RoleIntegrationAdmin owns the tenant's integrations (EPIC #1327 WS0): notification channels,
+	// rules, templates, CI and SIEM integrations, without the destination-changing actions that stay
+	// with administrators. It reads engagement data like readonly and never writes it.
+	RoleIntegrationAdmin Role = "integration_admin"
 )
 
 // Valid reports whether r is a known role.
 func (r Role) Valid() bool {
 	switch r {
-	case RoleAdmin, RoleConsultant, RoleReviewer, RoleReadOnly, RoleMember:
+	case RoleAdmin, RoleConsultant, RoleReviewer, RoleReadOnly, RoleMember, RoleIntegrationAdmin:
 		return true
 	}
 	return false
@@ -55,6 +59,13 @@ const (
 	PermReview Permission = "review"
 	// PermAdminister – user management + tenant assignment. Admin only.
 	PermAdminister Permission = "administer"
+	// PermManageIntegrations – run the tenant's existing integrations: read and test notification
+	// channels, rename, enable, disable, resume or delete them, edit routing rules and message
+	// templates, read delivery history, and operate CI and SIEM integrations. Creating a
+	// destination, changing its host or secret, raising a data class, enabling private-network
+	// access and replacing credentials stay under PermAdminister. Held by admin and
+	// integration_admin; NEVER by a machine (mcp/agent) role.
+	PermManageIntegrations Permission = "manage_integrations"
 )
 
 // rolePermissions is the static RBAC policy: role → the permissions it grants. A role absent from
@@ -65,10 +76,11 @@ const (
 // only accessor. Do not write to it – a guarded static table is what makes authorization a pure,
 // race-free decision.
 var rolePermissions = map[Role]map[Permission]bool{
-	RoleAdmin:      {PermView: true, PermOperate: true, PermTriage: true, PermReview: true, PermAdminister: true},
-	RoleConsultant: {PermView: true, PermOperate: true, PermTriage: true},
-	RoleReviewer:   {PermView: true, PermTriage: true, PermReview: true},
-	RoleReadOnly:   {PermView: true},
+	RoleAdmin:            {PermView: true, PermOperate: true, PermTriage: true, PermReview: true, PermAdminister: true, PermManageIntegrations: true},
+	RoleConsultant:       {PermView: true, PermOperate: true, PermTriage: true},
+	RoleReviewer:         {PermView: true, PermTriage: true, PermReview: true},
+	RoleReadOnly:         {PermView: true},
+	RoleIntegrationAdmin: {PermView: true, PermManageIntegrations: true},
 }
 
 // Can reports whether role r is granted permission p. Unknown and machine roles grant nothing.

@@ -1,0 +1,18 @@
+{
+  "id": "event-sla-approaching_deadline",
+  "type": "sla.approaching_deadline",
+  "source_kind": "sla_reminder",
+  "source_id": "source-42",
+  "schema_version": 1,
+  "occurred_at": "2026-09-27T08:00:00Z",
+  "data": {
+    "title": "Remediation SLA approaching",
+    "summary": "A high finding is approaching its remediation deadline.",
+    "assessment_id": "assessment-42",
+    "engagement_id": "eng-42",
+    "finding_id": "finding-42",
+    "deadline": "2026-09-28T08:00:00Z",
+    "lead_time_seconds": 86400
+  },
+  "engagement_id": "eng-42"
+}

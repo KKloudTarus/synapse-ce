@@ -1,0 +1,120 @@
+{
+  "captured_at_utc": "2026-10-04",
+  "provider": "bitbucket",
+  "repository": "https://bitbucket.org/synapse-ce-webhooks-vku/webhook-validation",
+  "pull_requests": [
+    "https://bitbucket.org/synapse-ce-webhooks-vku/webhook-validation/pull-requests/1",
+    "https://bitbucket.org/synapse-ce-webhooks-vku/webhook-validation/pull-requests/2"
+  ],
+  "source": "real provider deliveries and live Synapse API backed by PostgreSQL",
+  "retry": {
+    "analysis_count_before": 4,
+    "analysis_count_after": 5,
+    "attempts": [
+      {
+        "event": "pullrequest:updated",
+        "request_uuid": "7034dd71-73e8-457c-8f8d-82b962a179dd",
+        "upstream_status": 202,
+        "provider_status": 503
+      },
+      {
+        "event": "pullrequest:updated",
+        "request_uuid": "7034dd71-73e8-457c-8f8d-82b962a179dd",
+        "upstream_status": 202,
+        "provider_status": 202
+      }
+    ]
+  },
+  "analyses": [
+    {
+      "created_at": "2026-10-04T15:54:53.2578967Z",
+      "id": "3d823122cdc7d3bb319a834fa707be8d",
+      "source_revision": {
+        "kind": "git",
+        "head": "0ae05ec04b4263b665140145b5c77361dc111e16",
+        "base": "15778e2daa3c46a0d60961f9866c46b1ca4d3646",
+        "merge_base": "15778e2daa3c46a0d60961f9866c46b1ca4d3646",
+        "analysis_id": "3d823122cdc7d3bb319a834fa707be8d"
+      },
+      "source_ref": "feature/message",
+      "source_commit": "0ae05ec04b4263b665140145b5c77361dc111e16"
+    },
+    {
+      "created_at": "2026-10-04T15:49:24.1774052Z",
+      "id": "130e4cc4ea5841788f7e964f1413d2db",
+      "source_revision": {
+        "kind": "git",
+        "head": "0ae05ec04b4263b665140145b5c77361dc111e16",
+        "base": "15778e2daa3c46a0d60961f9866c46b1ca4d3646",
+        "merge_base": "15778e2daa3c46a0d60961f9866c46b1ca4d3646",
+        "analysis_id": "130e4cc4ea5841788f7e964f1413d2db"
+      },
+      "source_ref": "feature/message",
+      "source_commit": "0ae05ec04b4263b665140145b5c77361dc111e16"
+    },
+    {
+      "created_at": "2026-10-04T15:47:36.588488Z",
+      "id": "95cff09680edbc88f839e2330dfec0a2",
+      "source_revision": {
+        "kind": "git",
+        "head": "0ae05ec04b4263b665140145b5c77361dc111e16",
+        "analysis_id": "95cff09680edbc88f839e2330dfec0a2"
+      },
+      "source_ref": "feature/message",
+      "source_commit": "0ae05ec04b4263b665140145b5c77361dc111e16"
+    },
+    {
+      "created_at": "2026-10-04T15:43:42.9718939Z",
+      "id": "7f1a0dda52b3bea207fb33bacf0bd7d6",
+      "source_revision": {
+        "kind": "git",
+        "head": "8db8a7f191595e577998f9c970ddd6f74a8733e3",
+        "base": "15778e2daa3c46a0d60961f9866c46b1ca4d3646",
+        "merge_base": "15778e2daa3c46a0d60961f9866c46b1ca4d3646",
+        "analysis_id": "7f1a0dda52b3bea207fb33bacf0bd7d6"
+      },
+      "source_ref": "feature/greeting",
+      "source_commit": "8db8a7f191595e577998f9c970ddd6f74a8733e3"
+    },
+    {
+      "created_at": "2026-10-04T15:29:19.5952324Z",
+      "id": "d84ed9f66716208330697473e2443228",
+      "source_revision": {
+        "kind": "git",
+        "head": "8db8a7f191595e577998f9c970ddd6f74a8733e3",
+        "analysis_id": "d84ed9f66716208330697473e2443228"
+      },
+      "source_ref": "feature/greeting",
+      "source_commit": "8db8a7f191595e577998f9c970ddd6f74a8733e3"
+    }
+  ],
+  "screenshots": [
+    "delivery-history.jpg",
+    "pull-request-bilingual.jpg",
+    "console-light.jpg",
+    "console-dark.jpg",
+    "integration-light.jpg",
+    "retry-attempt-one.jpg",
+    "retry-attempt-two.jpg",
+    "fork-pull-request.jpg",
+    "fork-console-dark.jpg"
+  ],
+  "locale_evidence": "English Bitbucket interface with English and Vietnamese user content; no native Vietnamese locale claimed",
+  "fork": {
+    "pull_request": "https://bitbucket.org/synapse-ce-webhooks-vku/webhook-validation/pull-requests/3",
+    "event": "pullrequest:created",
+    "request_uuid": "38a1eea3-2248-4a82-a7db-1935627877ab",
+    "http_status": 202,
+    "analysis_id": "561f2837386b63c894e9568f23e57980",
+    "analysis_status": "succeeded",
+    "head": "66229771a7d4d20a4492555a0fb1ab1146e760ba",
+    "base": "15778e2daa3c46a0d60961f9866c46b1ca4d3646",
+    "queue_job_id": "6dfbe9dd946487378e750ef9905f5815",
+    "queue_status": "done",
+    "repository": "https://bitbucket.org/synapse-ce-webhooks-vku/webhook-validation.git",
+    "disable_git_credentials": true,
+    "no_build_execution": true,
+    "forge_build_count": 0,
+    "private_fork_tested": false
+  }
+}

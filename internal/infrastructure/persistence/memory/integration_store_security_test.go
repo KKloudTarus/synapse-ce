@@ -218,3 +218,80 @@ func TestIntegrationBindingCountIsCappedAtAdmission(t *testing.T) {
 		}
 	}
 }
+
+func TestGitLabConcurrentBindingsAdmitOnlyOneProject(t *testing.T) {
+	clock := idgen.SystemClock{}
+	ids := idgen.RandomID{}
+	cipher, err := vault.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewIntegrationStore(NewJobQueue(ids, clock.Now), cipher, clock, &integrationFailingAudit{})
+	ctx := shared.WithTenant(context.Background(), "tenant")
+	now := clock.Now()
+	item := integration.Integration{ID: "gitlab-one-binding", TenantID: "tenant", Provider: "gitlab", Name: "GitLab", Endpoint: "https://gitlab.com", Config: []byte(`{}`), PollInterval: time.Minute, Version: 1, CreatedAt: now, UpdatedAt: now}
+	if err = store.CreateIntegration(ctx, item, ports.AuditEntry{Actor: "admin", Action: "integration.created", Target: item.ID.String(), At: now}); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 8)
+	for i := range 8 {
+		go func() {
+			<-start
+			binding := integration.Binding{ID: shared.ID(fmt.Sprintf("b%d", i)), TenantID: "tenant", IntegrationID: item.ID, ProjectID: shared.ID(fmt.Sprintf("p%d", i)), ExternalKey: fmt.Sprintf("org/repo%d", i), ExternalName: "Repo", Version: 1, CreatedAt: now, UpdatedAt: now}
+			results <- store.CreateIntegrationBinding(ctx, binding, ports.AuditEntry{Actor: "admin", Action: "integration.binding_created", Target: binding.ID.String(), At: now})
+		}()
+	}
+	close(start)
+	accepted := 0
+	for range 8 {
+		err := <-results
+		if err == nil {
+			accepted++
+		} else if !errors.Is(err, shared.ErrConflict) {
+			t.Fatal(err)
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("accepted=%d want=1", accepted)
+	}
+}
+
+func TestGitHubInboundIntegrationEnablesWithoutPollingCredentialOrTest(t *testing.T) {
+	clock := idgen.SystemClock{}
+	ids := idgen.RandomID{}
+	queue := NewJobQueue(ids, clock.Now)
+	cipher, err := vault.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewIntegrationStore(queue, cipher, clock, &integrationFailingAudit{})
+	tenantID := shared.ID("tenant-github")
+	ctx := shared.WithTenant(context.Background(), tenantID)
+	now := time.Now().UTC()
+
+	github := integration.Integration{
+		ID: "integration-github", TenantID: tenantID, Provider: "github", Name: "GitHub",
+		Endpoint: "https://github.com", Config: []byte(`{}`), PollInterval: time.Minute,
+		Version: 1, ConnectionRevision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateIntegration(ctx, github, ports.AuditEntry{Actor: "admin", Action: "integration.created", Target: github.ID.String(), At: now}); err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := store.SetIntegrationEnabled(ctx, github.ID, true, github.Version, ports.IntegrationEnableRequirements{}, ports.AuditEntry{Actor: "admin", Action: "integration.enabled", Target: github.ID.String(), At: now})
+	if err != nil || !enabled.Enabled {
+		t.Fatalf("credentialless GitHub enable=%+v err=%v", enabled, err)
+	}
+
+	jenkins := integration.Integration{
+		ID: "integration-jenkins", TenantID: tenantID, Provider: "jenkins", Name: "Jenkins",
+		Endpoint: "https://jenkins.example.com", Config: []byte(`{}`), PollInterval: time.Minute,
+		Version: 1, ConnectionRevision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateIntegration(ctx, jenkins, ports.AuditEntry{Actor: "admin", Action: "integration.created", Target: jenkins.ID.String(), At: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetIntegrationEnabled(ctx, jenkins.ID, true, jenkins.Version, ports.IntegrationEnableRequirements{RequireCredential: true, RequireSuccessfulTest: true}, ports.AuditEntry{Actor: "admin", Action: "integration.enabled", Target: jenkins.ID.String(), At: now}); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("credentialless Jenkins enable error=%v, want conflict", err)
+	}
+}

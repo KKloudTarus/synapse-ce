@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,7 +32,10 @@ func NewTicketStore() *TicketStore {
 		intents:  make(map[shared.ID]map[shared.ID]ticketing.Intent),
 	}
 }
-func (s *TicketStore) CreateMapping(_ context.Context, tenant shared.ID, m ticketing.Mapping) error {
+func (s *TicketStore) CreateMapping(ctx context.Context, tenant shared.ID, m ticketing.Mapping) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := m.Validate(); err != nil {
 		return err
 	}
@@ -51,7 +56,10 @@ func (s *TicketStore) CreateMapping(_ context.Context, tenant shared.ID, m ticke
 	s.mappings[tenant][m.ID] = m.Clone()
 	return nil
 }
-func (s *TicketStore) GetMapping(_ context.Context, tenant, id shared.ID) (ticketing.Mapping, error) {
+func (s *TicketStore) GetMapping(ctx context.Context, tenant, id shared.ID) (ticketing.Mapping, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Mapping{}, err
+	}
 	if tenant.IsZero() || id.IsZero() {
 		return ticketing.Mapping{}, shared.ErrValidation
 	}
@@ -62,7 +70,10 @@ func (s *TicketStore) GetMapping(_ context.Context, tenant, id shared.ID) (ticke
 	}
 	return ticketing.Mapping{}, shared.ErrNotFound
 }
-func (s *TicketStore) CreateLink(_ context.Context, tenant shared.ID, link ticketing.Link) (ticketing.Link, bool, error) {
+func (s *TicketStore) CreateLink(ctx context.Context, tenant shared.ID, link ticketing.Link) (ticketing.Link, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Link{}, false, err
+	}
 	if err := link.Validate(); err != nil {
 		return ticketing.Link{}, false, err
 	}
@@ -88,7 +99,10 @@ func (s *TicketStore) CreateLink(_ context.Context, tenant shared.ID, link ticke
 	s.links[tenant][link.ID] = link
 	return link, true, nil
 }
-func (s *TicketStore) ListLinks(_ context.Context, tenant, finding shared.ID) ([]ticketing.Link, error) {
+func (s *TicketStore) ListLinks(ctx context.Context, tenant, finding shared.ID) ([]ticketing.Link, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if tenant.IsZero() || finding.IsZero() {
 		return nil, shared.ErrValidation
 	}
@@ -101,17 +115,18 @@ func (s *TicketStore) ListLinks(_ context.Context, tenant, finding shared.ID) ([
 		}
 	}
 	// Stable order matches PostgreSQL's (created_at DESC, id DESC).
-	for a := 0; a < len(out); a++ {
-		for b := a + 1; b < len(out); b++ {
-			if out[b].CreatedAt.After(out[a].CreatedAt) ||
-				(out[b].CreatedAt.Equal(out[a].CreatedAt) && out[b].ID > out[a].ID) {
-				out[a], out[b] = out[b], out[a]
-			}
+	slices.SortFunc(out, func(a, b ticketing.Link) int {
+		if order := b.CreatedAt.Compare(a.CreatedAt); order != 0 {
+			return order
 		}
-	}
+		return strings.Compare(b.ID.String(), a.ID.String())
+	})
 	return out, nil
 }
-func (s *TicketStore) DeleteLink(_ context.Context, tenant, id shared.ID) error {
+func (s *TicketStore) DeleteLink(ctx context.Context, tenant, id shared.ID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if tenant.IsZero() || id.IsZero() {
 		return shared.ErrValidation
 	}
@@ -128,7 +143,10 @@ func sameCommand(a, b ticketing.Intent) bool {
 		a.FindingID == b.FindingID && a.EngagementID == b.EngagementID && a.Action == b.Action && a.RequestKey == b.RequestKey &&
 		a.PayloadDigest == b.PayloadDigest
 }
-func (s *TicketStore) CreateOrGetIntent(_ context.Context, tenant shared.ID, intent ticketing.Intent) (ticketing.Intent, bool, error) {
+func (s *TicketStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, intent ticketing.Intent) (ticketing.Intent, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Intent{}, false, err
+	}
 	if err := intent.Validate(); err != nil {
 		return ticketing.Intent{}, false, err
 	}
@@ -162,7 +180,10 @@ func (s *TicketStore) CreateOrGetIntent(_ context.Context, tenant shared.ID, int
 	s.intents[tenant][intent.ID] = intent.Clone()
 	return intent.Clone(), true, nil
 }
-func (s *TicketStore) GetIntent(_ context.Context, tenant, id shared.ID) (ticketing.Intent, error) {
+func (s *TicketStore) GetIntent(ctx context.Context, tenant, id shared.ID) (ticketing.Intent, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Intent{}, err
+	}
 	if tenant.IsZero() || id.IsZero() {
 		return ticketing.Intent{}, shared.ErrValidation
 	}
@@ -173,7 +194,10 @@ func (s *TicketStore) GetIntent(_ context.Context, tenant, id shared.ID) (ticket
 	}
 	return ticketing.Intent{}, shared.ErrNotFound
 }
-func (s *TicketStore) TransitionIntent(_ context.Context, tenant, id shared.ID, expectedVersion int, event writeintent.Event, leaseUntil *time.Time, at time.Time) (ticketing.Intent, error) {
+func (s *TicketStore) TransitionIntent(ctx context.Context, tenant, id shared.ID, expectedVersion int, event writeintent.Event, leaseUntil *time.Time, at time.Time) (ticketing.Intent, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Intent{}, err
+	}
 	if tenant.IsZero() || id.IsZero() || expectedVersion < 1 || at.IsZero() {
 		return ticketing.Intent{}, shared.ErrValidation
 	}

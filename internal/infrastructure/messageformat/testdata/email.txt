@@ -1,0 +1,9 @@
+SQL injection in /login on prod_eu
+Rule CWE-89, severity critical
+
+- Host: api.example.com
+- Owner: team <platform> & ops
+
+Reported by Synapse.
+
+Open finding: https://synapse.example.com/engagements/e1/findings/f1

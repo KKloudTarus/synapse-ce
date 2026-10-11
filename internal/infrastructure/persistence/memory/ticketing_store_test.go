@@ -6,9 +6,11 @@ import (
 )
 
 func TestTicketStoreConformance(t *testing.T) {
-	f := storetest.Fixture{Tenant: "ticket-j01-a", Other: "ticket-j01-b", Integration: "ticket-integration-a",
+	f := storetest.Fixture{Tenant: "ticket-a", Other: "ticket-b", Integration: "ticket-integration-a",
 		Engagement: "ticket-engagement-a", Finding: "ticket-finding-a"}
 	store := NewTicketStore()
 	storetest.Run(t, store, f)
 	storetest.ConcurrentReplay(t, store, f)
+	storetest.ConcurrentClaim(t, store, f)
+	storetest.CanceledContext(t, store, f)
 }

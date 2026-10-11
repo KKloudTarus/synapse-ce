@@ -78,7 +78,7 @@ func TestOwnershipNotificationFanoutRecoveryAndSuppression(t *testing.T) {
 	// Crash after commit, before dispatch. A new source has no activation watermark
 	// yet, but the eligible intent must still be recovered.
 	newSource := func() *NotificationSource {
-		return NewNotificationSource(f.pool, NewNotificationRepository(f.pool), time.Minute, false)
+		return NewNotificationSource(f.pool, NewNotificationRepository(f.pool), time.Minute)
 	}
 	n, err := newSource().Poll(f.ctx, f.at.Add(time.Minute), 1)
 	if err != nil || n != 1 {
@@ -163,7 +163,7 @@ func TestOwnershipNotificationRollbackAndConcurrentPoll(t *testing.T) {
 		CREATE TRIGGER fail_ownership_dispatch BEFORE UPDATE ON ownership_intents FOR EACH ROW WHEN (NEW.state='processed') EXECUTE FUNCTION fail_ownership_dispatch()`); err != nil {
 		t.Fatal(err)
 	}
-	source := NewNotificationSource(f.pool, NewNotificationRepository(f.pool), time.Minute, false)
+	source := NewNotificationSource(f.pool, NewNotificationRepository(f.pool), time.Minute)
 	if n, err := source.Poll(f.ctx, f.at, 200); err == nil || n != 0 {
 		t.Fatalf("fault=%d %v", n, err)
 	}

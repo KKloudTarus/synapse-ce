@@ -54,3 +54,16 @@ func TestChannelRequiresEmailRecipients(t *testing.T) {
 		t.Fatal("email channel without recipients accepted")
 	}
 }
+
+func TestEventValidateAcceptsSchemaVersionsUpToTheCatalog(t *testing.T) {
+	spec, ok := LookupEvent(EventScanCompleted)
+	if !ok {
+		t.Fatal("scan.completed missing from the catalog")
+	}
+	for version, want := range map[int]bool{0: false, -1: false, 1: true, spec.SchemaVersion: true, spec.SchemaVersion + 1: false} {
+		e := Event{TenantID: "tenant", ID: "event", Type: EventScanCompleted, SourceKind: "scan_job", SourceID: "scan-1", SchemaVersion: version, OccurredAt: time.Now(), Data: json.RawMessage(`{}`)}
+		if err := e.Validate(); (err == nil) != want {
+			t.Errorf("schema version %d: err = %v, want valid=%v", version, err, want)
+		}
+	}
+}

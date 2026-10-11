@@ -25,6 +25,13 @@ func TestMultiplexDecoratorRoutesByProvider(t *testing.T) {
 	if _, ok := github.(*GitHubDecorator); !ok {
 		t.Fatalf("github-actions routed to %T", github)
 	}
+	azure, err := decorator.decoratorFor("azure-pipelines")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := azure.(*AzureDevOpsDecorator); !ok {
+		t.Fatalf("azure-pipelines routed to %T", azure)
+	}
 	gitlab, err := decorator.decoratorFor("gitlab-ci")
 	if err != nil {
 		t.Fatal(err)

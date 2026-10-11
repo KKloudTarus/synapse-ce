@@ -36,16 +36,53 @@ func notificationAdmission(ctx context.Context, tx pgx.Tx, tenant shared.ID, kin
 }
 
 func (r *NotificationRepository) reconcileTx(ctx context.Context, tx pgx.Tx, tenant shared.ID) error {
-	// Repair the crash window between queue.Deadletter and OnDeadLetter.
-	if _, err := tx.Exec(ctx, `WITH repaired AS (
-        UPDATE notification_deliveries d SET state='dead_letter',last_error='worker_dead_letter',next_attempt_at=NULL,updated_at=now()
-        FROM jobs j WHERE j.tenant_id=d.tenant_id AND j.id='notification-'||d.id AND j.status='failed'
-        AND d.tenant_id=$1 AND d.state IN ('pending','retrying') RETURNING d.id)
-        INSERT INTO notification_audit_intents(tenant_id,id,delivery_id,action,occurred_at)
-        SELECT $1,'dead:'||id,id,'notification.delivery_failed',now() FROM repaired ON CONFLICT DO NOTHING`, tenant); err != nil {
+	// Repair the crash window between queue.Deadletter and OnDeadLetter. Lock the
+	// failed job before its delivery, matching redrive and the callback. A query
+	// that only joins job state could observe a pre-redrive snapshot and incorrectly
+	// dead-letter the newly queued cycle.
+	rows, err := tx.Query(ctx, `SELECT j.id,d.id,j.claim_fence
+		FROM jobs j JOIN notification_deliveries d
+		  ON d.tenant_id=j.tenant_id AND j.id='notification-'||d.id
+		WHERE j.tenant_id=$1 AND j.kind='notification.deliver' AND j.status='failed'
+		  AND d.state IN ('pending','retrying')
+		ORDER BY j.updated_at,d.id LIMIT 200 FOR UPDATE OF j SKIP LOCKED`, tenant)
+	if err != nil {
 		return err
 	}
-	rows, err := tx.Query(ctx, `SELECT id,delivery_id,action,error_code,occurred_at FROM notification_audit_intents WHERE tenant_id=$1 AND recorded_at IS NULL ORDER BY occurred_at,id LIMIT 200 FOR UPDATE SKIP LOCKED`, tenant)
+	type deadCandidate struct {
+		jobID, deliveryID string
+		fence             int64
+	}
+	var candidates []deadCandidate
+	for rows.Next() {
+		var candidate deadCandidate
+		if err := rows.Scan(&candidate.jobID, &candidate.deliveryID, &candidate.fence); err != nil {
+			rows.Close()
+			return err
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, candidate := range candidates {
+		tag, err := tx.Exec(ctx, `UPDATE notification_deliveries SET state='dead_letter',last_error='worker_dead_letter',next_attempt_at=NULL,updated_at=now()
+			WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying')`, tenant, candidate.deliveryID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO notification_audit_intents(tenant_id,id,delivery_id,action,error_code,occurred_at)
+			VALUES($1,$2,$3,'notification.delivery_failed','worker_dead_letter',now()) ON CONFLICT DO NOTHING`,
+			tenant, fmt.Sprintf("dead:%s:%d", candidate.deliveryID, candidate.fence), candidate.deliveryID); err != nil {
+			return err
+		}
+	}
+	rows, err = tx.Query(ctx, `SELECT id,delivery_id,action,error_code,occurred_at FROM notification_audit_intents WHERE tenant_id=$1 AND recorded_at IS NULL ORDER BY occurred_at,id LIMIT 200 FOR UPDATE SKIP LOCKED`, tenant)
 	if err != nil {
 		return err
 	}

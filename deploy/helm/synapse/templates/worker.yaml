@@ -45,6 +45,11 @@ spec:
           image: {{ include "synapse.image" .Values.image | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/opt/synapse/synapse-worker"]
+          {{- if .Values.worker.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.worker.metrics.port }}
+          {{- end }}
           securityContext:
             {{- include "synapse.containerSecurityContext" . | nindent 12 }}
           env:
@@ -61,7 +66,11 @@ spec:
             - name: SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH
               value: {{ .Values.worker.integrationScheduler.maxQueueDepth | quote }}
             - name: SYNAPSE_METRICS_ENABLED
-              value: "false"
+              value: {{ .Values.worker.metrics.enabled | quote }}
+            {{- if .Values.worker.metrics.enabled }}
+            - name: SYNAPSE_METRICS_ADDR
+              value: {{ printf "0.0.0.0:%d" (.Values.worker.metrics.port | int) | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           startupProbe:
@@ -81,9 +90,15 @@ spec:
             - {name: egress-broker-socket, mountPath: {{ .Values.egressBroker.socketHostPath }}}
       volumes:
         - name: synapse-data
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ .Values.worker.scratch.dataSizeLimit }}
         - name: tmp
-          emptyDir: {}
+          # A clone, an extracted archive or an image layout is staged here, bounded by
+          # SYNAPSE_MAX_WORKSPACE_BYTES. Without a sizeLimit an oversized target filled the node's
+          # ephemeral storage and the kubelet evicted the pod; with one, the pod is evicted alone and
+          # the scan fails instead of the node degrading. Keep this above scan.maxWorkspaceBytes.
+          emptyDir:
+            sizeLimit: {{ .Values.worker.scratch.tmpSizeLimit }}
         - name: database-ca
           secret:
             secretName: {{ required "externalDatabase.caBundle.secretName is required" .Values.externalDatabase.caBundle.secretName }}

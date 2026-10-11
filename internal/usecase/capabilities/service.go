@@ -35,19 +35,37 @@ type Flags struct {
 	SingleTenant         bool // SYNAPSE_SINGLE_TENANT
 	OIDC                 bool // SYNAPSE_OIDC_ENABLED
 	Ownership            bool // effective SYNAPSE_OWNERSHIP_MODE != off with PostgreSQL
+	InboundWebhooks      bool // SYNAPSE_INBOUND_WEBHOOKS_ENABLED
+	Notifications        bool // SYNAPSE_NOTIFICATIONS_ENABLED
+	// NotificationChannelTypes is every channel type the notification driver registry holds, in
+	// registry order. The composition root reads it from the registry, so a new driver is
+	// advertised without editing this package.
+	NotificationChannelTypes []string
+	// NotificationProvidersDisabled is SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED: types the operator
+	// switched off. They are left out of notifications.channel_types.
+	NotificationProvidersDisabled []string
+	// LegacyAlertWebhook reports only whether SYNAPSE_ALERT_WEBHOOK_URL is set, never its value (the
+	// URL may embed a credential). The console uses it to warn that incident.created rules and the
+	// deprecated deployment-wide webhook both deliver (#1347).
+	LegacyAlertWebhook bool
 }
 
 // Capability describes one optional subsystem to a client. Key is stable API: a dashboard keys its
 // navigation off it. Switch names the SYNAPSE_* variable an operator sets to change Enabled, so the
 // product can say "Fleet is off because SYNAPSE_FLEET_ENABLED is false" instead of showing a dead
 // link. Requires lists the keys of other capabilities this one needs, so a client can explain an
-// enabled switch that still yields a disabled subsystem.
+// enabled switch that still yields a disabled subsystem. Values lists the options an enabled
+// capability offers, such as the channel types the notification sender supports. Planned marks a
+// subsystem this build does not ship yet: it is always disabled and names no switch, so a client
+// never tells an operator to set a variable that does nothing.
 type Capability struct {
 	Key      string
 	Name     string
 	Enabled  bool
 	Switch   string
 	Requires []string
+	Values   []string
+	Planned  bool
 }
 
 // Service serves the immutable capability catalog resolved at startup.
@@ -55,7 +73,7 @@ type Service struct{ catalog []Capability }
 
 // NewService resolves the catalog from the deployment's flags. It rejects a catalog with a
 // duplicate or incomplete entry, so a future edit cannot ship an ambiguous key or a capability that
-// names no switch.
+// names no switch, unless it is planned.
 func NewService(flags Flags) (*Service, error) {
 	catalog := build(flags)
 	if err := validate(catalog); err != nil {
@@ -65,12 +83,19 @@ func NewService(flags Flags) (*Service, error) {
 }
 
 // validate rejects a catalog with a blank field, a duplicate key, or a dependency on a capability
-// that does not exist. It runs at startup so a bad edit fails the process, never a request.
+// that does not exist. A planned capability must be disabled and name no switch; every other one
+// must name its switch. It runs at startup so a bad edit fails the process, never a request.
 func validate(catalog []Capability) error {
 	seen := make(map[string]bool, len(catalog))
 	for _, capability := range catalog {
-		if capability.Key == "" || capability.Name == "" || capability.Switch == "" {
-			return fmt.Errorf("%w: capability %q is missing a key, name, or switch", shared.ErrValidation, capability.Key)
+		if capability.Key == "" || capability.Name == "" {
+			return fmt.Errorf("%w: capability %q is missing a key or name", shared.ErrValidation, capability.Key)
+		}
+		if capability.Planned && (capability.Enabled || capability.Switch != "") {
+			return fmt.Errorf("%w: planned capability %q must be disabled and name no switch", shared.ErrValidation, capability.Key)
+		}
+		if !capability.Planned && capability.Switch == "" {
+			return fmt.Errorf("%w: capability %q is missing a switch", shared.ErrValidation, capability.Key)
 		}
 		if seen[capability.Key] {
 			return fmt.Errorf("%w: duplicate capability key %q", shared.ErrValidation, capability.Key)
@@ -93,10 +118,34 @@ func (s *Service) List() []Capability {
 	out := make([]Capability, len(s.catalog))
 	copy(out, s.catalog)
 	for i := range out {
-		if len(out[i].Requires) > 0 {
-			requires := make([]string, len(out[i].Requires))
-			copy(requires, out[i].Requires)
-			out[i].Requires = requires
+		out[i].Requires = cloneStrings(out[i].Requires)
+		out[i].Values = cloneStrings(out[i].Values)
+	}
+	return out
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+// notificationChannelTypes is the channel types a tenant may use: the driver registry's types
+// (#1351) minus those the operator switched off (#1362), in registry order. When every type is
+// switched off the list is empty and `values` is omitted on the wire; a client reads an enabled
+// notifications.channel_types without values as "no type may be created".
+func notificationChannelTypes(f Flags) []string {
+	disabled := make(map[string]bool, len(f.NotificationProvidersDisabled))
+	for _, name := range f.NotificationProvidersDisabled {
+		disabled[name] = true
+	}
+	out := make([]string, 0, len(f.NotificationChannelTypes))
+	for _, channelType := range f.NotificationChannelTypes {
+		if !disabled[channelType] {
+			out = append(out, channelType)
 		}
 	}
 	return out
@@ -150,5 +199,23 @@ func build(f Flags) []Capability {
 		{Key: "single_tenant", Name: "Single-tenant mode", Enabled: f.SingleTenant, Switch: "SYNAPSE_SINGLE_TENANT"},
 		{Key: "oidc", Name: "OIDC browser login", Enabled: f.OIDC, Switch: "SYNAPSE_OIDC_ENABLED"},
 		{Key: "ownership", Name: "Finding ownership", Enabled: f.Ownership, Switch: "SYNAPSE_OWNERSHIP_MODE"},
+		{Key: "inbound_webhooks", Name: "Inbound webhook plane", Enabled: f.InboundWebhooks, Switch: "SYNAPSE_INBOUND_WEBHOOKS_ENABLED"},
+		{Key: "notifications", Name: "Tenant notifications", Enabled: f.Notifications, Switch: "SYNAPSE_NOTIFICATIONS_ENABLED"},
+		{
+			Key: "notifications.channel_types", Name: "Notification channel types",
+			Enabled: f.Notifications, Switch: "SYNAPSE_NOTIFICATIONS_ENABLED",
+			Requires: []string{"notifications"}, Values: notificationChannelTypes(f),
+		},
+		// Ticketing (WS5) and documentation publishing (WS6) are not in this build yet. They are listed
+		// so a client can render them as planned instead of guessing from a 404.
+		{Key: "ticketing", Name: "Ticketing", Planned: true},
+		{Key: "docpublish", Name: "Documentation publishing", Planned: true},
+		{
+			// Deprecated compatibility path, removed in alerting.LegacyWebhookRemovalRelease. Enabled
+			// means the API posts every incident to the deployment-wide webhook in addition to any
+			// tenant incident.created rule.
+			Key: "legacy_alert_webhook", Name: "Legacy incident alert webhook (deprecated)",
+			Enabled: f.LegacyAlertWebhook, Switch: "SYNAPSE_ALERT_WEBHOOK_URL",
+		},
 	}
 }

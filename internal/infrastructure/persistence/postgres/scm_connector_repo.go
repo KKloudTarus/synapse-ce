@@ -40,8 +40,17 @@ var _ ports.SCMConnectorStore = (*SCMConnectorRepository)(nil)
 // fields (host, username) in addition to the ids means a database-write attacker cannot repoint a
 // connector at their own host (UPDATE ... SET host='evil') and have the tenant's real token decrypt for
 // it: any change to host or username fails the GCM tag check on Open, so the token stays inert.
-func scmAAD(tenantID, id shared.ID, host, username string) []byte {
-	return []byte("scm:" + tenantID.String() + ":" + id.String() + ":" + host + ":" + username)
+//
+// A self-hosted API base is bound the same way: when set, it is appended to the AAD, so rewriting
+// api_base (or clearing it) in the database also leaves the token undecryptable, and moving a
+// connector to another API origin needs the token re-entered. An empty base keeps the original AAD,
+// so rows sealed before the column existed still open.
+func scmAAD(tenantID, id shared.ID, host, username, apiBase string) []byte {
+	aad := "scm:" + tenantID.String() + ":" + id.String() + ":" + host + ":" + username
+	if apiBase != "" {
+		aad += "\x00api_base=" + apiBase
+	}
+	return []byte(aad)
 }
 
 func ctxTenant(ctx context.Context) (shared.ID, error) {
@@ -68,19 +77,19 @@ func (r *SCMConnectorRepository) Put(ctx context.Context, c scmconnector.Connect
 	}
 	c.TenantID = tenantID
 	return requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
-		ciphertext, serr := r.cipher.Seal(token, scmAAD(tenantID, c.ID, c.Host, c.Username))
+		ciphertext, serr := r.cipher.Seal(token, scmAAD(tenantID, c.ID, c.Host, c.Username, c.APIBase))
 		if serr != nil {
 			return fmt.Errorf("seal connector token: %w", serr)
 		}
 		tag, err := tx.Exec(ctx,
-			`INSERT INTO scm_connectors (tenant_id, id, name, provider, host, username, auth_kind, token_ciphertext, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), now())
+			`INSERT INTO scm_connectors (tenant_id, id, name, provider, host, username, auth_kind, api_base, token_ciphertext, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
 			 ON CONFLICT (tenant_id, id) DO UPDATE SET
 			     name = EXCLUDED.name, provider = EXCLUDED.provider, host = EXCLUDED.host,
-			     username = EXCLUDED.username, auth_kind = EXCLUDED.auth_kind,
+			     username = EXCLUDED.username, auth_kind = EXCLUDED.auth_kind, api_base = EXCLUDED.api_base,
 			     token_ciphertext = EXCLUDED.token_ciphertext, updated_at = now()
 			 WHERE scm_connectors.tenant_id = $1`,
-			tenantID.String(), c.ID.String(), c.Name, string(c.Provider), c.Host, c.Username, string(c.AuthKind), ciphertext)
+			tenantID.String(), c.ID.String(), c.Name, string(c.Provider), c.Host, c.Username, string(c.AuthKind), c.APIBase, ciphertext)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" { // UNIQUE(tenant_id, host)
@@ -104,7 +113,7 @@ func (r *SCMConnectorRepository) List(ctx context.Context) ([]ports.SCMConnector
 	var out []ports.SCMConnectorMeta
 	err = requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx,
-			`SELECT id, name, provider, host, username, auth_kind, created_at, updated_at
+			`SELECT id, name, provider, host, username, auth_kind, api_base, created_at, updated_at
 			   FROM scm_connectors WHERE tenant_id = $1 ORDER BY host, name`, tenantID.String())
 		if err != nil {
 			return fmt.Errorf("list connectors: %w", err)
@@ -131,7 +140,7 @@ func (r *SCMConnectorRepository) Get(ctx context.Context, id shared.ID) (ports.S
 	var m ports.SCMConnectorMeta
 	err = requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
 		row := tx.QueryRow(ctx,
-			`SELECT id, name, provider, host, username, auth_kind, created_at, updated_at
+			`SELECT id, name, provider, host, username, auth_kind, api_base, created_at, updated_at
 			   FROM scm_connectors WHERE tenant_id = $1 AND id = $2`, tenantID.String(), id.String())
 		var serr error
 		m, serr = scanConnectorMeta(row)
@@ -171,21 +180,21 @@ func (r *SCMConnectorRepository) ResolveGitCredential(ctx context.Context, host 
 	var cred ports.GitCredential
 	found := false
 	err = requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
-		var id, username, ciphertext string
+		var id, username, apiBase, ciphertext string
 		qerr := tx.QueryRow(ctx,
-			`SELECT id, username, token_ciphertext FROM scm_connectors WHERE tenant_id = $1 AND host = $2`,
-			tenantID.String(), host).Scan(&id, &username, &ciphertext)
+			`SELECT id, username, api_base, token_ciphertext FROM scm_connectors WHERE tenant_id = $1 AND host = $2`,
+			tenantID.String(), host).Scan(&id, &username, &apiBase, &ciphertext)
 		if errors.Is(qerr, pgx.ErrNoRows) {
 			return nil
 		}
 		if qerr != nil {
 			return fmt.Errorf("resolve connector for host: %w", qerr)
 		}
-		token, oerr := r.cipher.Open(ciphertext, scmAAD(tenantID, shared.ID(id), host, username))
+		token, oerr := r.cipher.Open(ciphertext, scmAAD(tenantID, shared.ID(id), host, username, apiBase))
 		if oerr != nil {
 			return fmt.Errorf("open connector token: %w", oerr)
 		}
-		cred = ports.GitCredential{Username: username, Token: token}
+		cred = ports.GitCredential{Username: username, Token: token, APIBase: apiBase}
 		found = true
 		return nil
 	})
@@ -195,7 +204,7 @@ func (r *SCMConnectorRepository) ResolveGitCredential(ctx context.Context, host 
 func scanConnectorMeta(row pgx.Row) (ports.SCMConnectorMeta, error) {
 	var m ports.SCMConnectorMeta
 	var provider, authKind string
-	if err := row.Scan(&m.ID, &m.Name, &provider, &m.Host, &m.Username, &authKind, &m.CreatedAt, &m.UpdatedAt); err != nil {
+	if err := row.Scan(&m.ID, &m.Name, &provider, &m.Host, &m.Username, &authKind, &m.APIBase, &m.CreatedAt, &m.UpdatedAt); err != nil {
 		return ports.SCMConnectorMeta{}, err
 	}
 	m.Provider = scmconnector.Provider(provider)

@@ -29,20 +29,65 @@ broken one both answer `404`. Read this endpoint first and render a disabled sub
 still report `enabled: false`. The response carries booleans and variable names, never a configured
 value. Any authenticated role may read it.
 
+Some entries carry more than a switch:
+
+- `notifications.channel_types` lists, in `values`, the channel types this build can deliver to
+  (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`, `slack_bot`), read from the
+  notification driver registry, minus any type named in
+  `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`. The console offers only these types when creating a
+  channel. When the operator disables every type, `values` is omitted and no channel can be created.
+- `ticketing` and `docpublish` report `planned: true`. They are not in this build yet, so they are
+  always disabled and their `switch` is empty.
+
+```json
+{"key": "notifications.channel_types", "name": "Notification channel types", "enabled": true,
+ "switch": "SYNAPSE_NOTIFICATIONS_ENABLED", "requires": ["notifications"],
+ "values": ["webhook", "slack", "email", "teams", "telegram", "google_chat", "discord", "slack_bot"]}
+{"key": "ticketing", "name": "Ticketing", "enabled": false, "switch": "", "planned": true}
+```
+
 ## Required
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_API_TOKEN` | (none) | Bootstrap-admin bearer token. The API exits if empty. Operational routes require it; liveness `GET /healthz` and readiness `GET /readyz` are intentionally public. Generate with `openssl rand -hex 32`. |
-| `SYNAPSE_OIDC_ENABLED` | `false` | Enable the browser OIDC BFF. Requires the fixed HTTPS issuer, client credentials, callback URL, fixed frontend URL, fixed tenant, and allowlisted group-to-role mapping below. |
-| `SYNAPSE_OIDC_ISSUER` | (none) | Absolute HTTPS issuer used for pinned discovery and ID-token validation. |
+| `SYNAPSE_OIDC_ENABLED` | `false` | Enable the browser OIDC BFF. Requires the fixed HTTPS issuer, client credentials, callback URL, fixed frontend URL, and fixed tenant below. A subject signs in only through an approved exact `(issuer, subject)` link to an existing user; see the note after this table. |
+| `SYNAPSE_OIDC_ISSUER` | (none) | Absolute HTTPS issuer used for pinned discovery and ID-token validation. It must have no query or fragment; an invalid value fails configuration validation at startup. Approved `(issuer, subject)` links must match it exactly. |
 | `SYNAPSE_OIDC_CLIENT_ID`, `SYNAPSE_OIDC_CLIENT_SECRET`, `SYNAPSE_OIDC_REDIRECT_URL` | (none) | OAuth client settings. The callback must be the exact registered `https://<api-host>/api/auth/oidc/callback` URL. Never log the secret. |
 | `SYNAPSE_OIDC_FRONTEND_URL` | (none) | Fixed absolute HTTPS dashboard URL for a successful callback redirect. Query strings, fragments, and credentials are rejected; request parameters never control this destination. |
+| `SYNAPSE_PUBLIC_BASE_URL` | `SYNAPSE_OIDC_FRONTEND_URL` if set; otherwise unset | Trusted HTTPS console URL (optionally including the deployment path prefix) for outgoing deep links. Works without OIDC. HTTP, relative URLs, credentials, query strings, fragments, invalid ports, control and Unicode format characters (including percent-encoded characters in hostnames), and double-encoded path segments are rejected at API and worker startup. Never put tokens or secrets in this value. Set explicitly if no OIDC frontend URL exists. |
 | `SYNAPSE_OIDC_TENANT_ID` | (none) | The one fixed Synapse tenant accepted by this BFF instance. |
-| `SYNAPSE_OIDC_GROUP_ROLE_MAPPING` | (none) | Comma-separated exact `provider-group=role` entries. Roles may only be `admin`, `consultant`, `reviewer`, or `readonly`; unmapped, duplicate, and multi-role group claims are rejected. |
-| `SYNAPSE_OIDC_TRANSACTION_TTL`, `SYNAPSE_OIDC_SESSION_TTL` | `10m`, `8h` | Maximum authorization-transaction and opaque browser-session lifetimes. |
+| `SYNAPSE_OIDC_GROUP_ROLE_MAPPING` | (none) | Deprecated and ignored. Still accepted so existing deployments start, with a startup warning. Identity-provider groups never assign or change a Synapse role. |
+| `SYNAPSE_OIDC_TRANSACTION_TTL`, `SYNAPSE_OIDC_SESSION_TTL` | `10m`, `8h` | Maximum authorization-transaction and sliding browser-session lifetimes. Independently, a session lineage is refused on every request once 12 hours have passed since sign-in. |
+
+OIDC sign-in never creates a user. An administrator approves each subject with `POST /api/v1/users/{id}/oidc-links` and body `{"issuer": "...", "subject": "..."}`; `GET` on the same path lists a user's links. The issuer must equal the normalized `SYNAPSE_OIDC_ISSUER` exactly, the user must belong to `SYNAPSE_OIDC_TENANT_ID` and be enabled, and the bootstrap operator cannot be linked. The link and its audit record commit together. Links created by earlier releases keep working. A callback for an unlinked subject answers `403 access_denied`. The user's role is the one set in Synapse. Disabling a user revokes its browser sessions and API key permanently; after re-enabling, rotate the key and sign in again.
+
+The console link builder routes to engagements, incidents, the Findings tab (`#finding-<id>`) and the Scan Runs tab (`#scan-<id>`). The latter opens scan history and preserves the scan ID in its fragment; the current UI does not yet auto-select a scan from that fragment. If neither public URL nor OIDC frontend is configured, link generation is unavailable until an HTTPS base is supplied.
 
 ## Core and server
+
+### Shared organization authentication
+
+Existing bearer and fixed-tenant OIDC remain authoritative with the settings below disabled.
+Shared authentication requires durable PostgreSQL persistence, the trusted HTTPS
+`SYNAPSE_PUBLIC_BASE_URL`, and migrate-first rollout. The callback is
+`/api/auth/enterprise/callback` on that base. Provider discovery is lazy and does not block startup.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_IDENTITY_CUTOVER_ENABLED` | `false` | Register shared identity flows and administration. Durable tenant declaration decides authority; disabling this flag after declaration fails closed. |
+| `SYNAPSE_IDENTITY_CUTOVER_READ_TENANTS` | empty | Up to 100 explicit, unique tenant IDs. Wildcards are rejected. Required when enabled. |
+| `SYNAPSE_IDENTITY_CUTOVER_MUTATION_TENANTS` | empty | Explicit subset of read tenants eligible for protocol, administration and session mutations. |
+| `SYNAPSE_IDENTITY_LEGACY_BEARER_GRACE_DURATION` | `0s` | Deployment grace ceiling from `0s` through `24h`. Each organization must separately enable grace; required policy admits legacy bearer only before activation time plus this duration. |
+
+Without a configured contact SMTP sender, new-person invitation acceptance stays closed.
+Recovery uses the same direct sender and retains alert obligations independently of ordinary
+notification rules and channel switches. See [cutover](identity-cutover.md) and
+[recovery](identity-recovery.md) for the operator procedures.
+
+Helm deployments can pass these nonsecret variables through the existing `extraEnv` list;
+no chart value or schema change is required. Keep both allowlists empty with the flag disabled.
+Changing the settings does not declare cutover or enable required SSO for an organization.
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -55,11 +100,31 @@ value. Any authenticated role may read it.
 | `SYNAPSE_AUDIT_FILE` | `data/audit.jsonl` | File-backed path, in-memory mode only. |
 | `SYNAPSE_MEASURE_CURSOR_SECRET` | Ephemeral in development; required in production | HMAC key for signing Measures pagination cursors; minimum 32 bytes |
 
+## Inbound provider webhooks (WS10 / #1434)
+
+Set `SYNAPSE_INBOUND_WEBHOOKS_ENABLED=true` to mount the **separate** `POST /api/v1/hooks/{public_id}` authentication plane. It is off by default and requires a PostgreSQL runtime role capable of enforcing RLS and a durable `SYNAPSE_VAULT_MASTER_KEY`. Startup fails rather than silently falling back to the default human tenant. Disable the switch to remove this route; sibling /hooks routes remain on human auth.
+
+Provision each endpoint through a tenant-authorized integration lifecycle after its provider receiver is installed. The global `inbound_webhook_endpoints` routing table uses a 32–64-character cryptographically random base64url public ID, a required nonempty tenant ID, an owner integration ID, and a secret sealed with AES-256-GCM using AAD bound to tenant, public ID, integration and version. The exact-ID SECURITY DEFINER lookup exposes **only a tenant ID**; sealed keys and endpoint status are read separately under that tenant's FORCE-RLS transaction. An unscoped runtime SELECT sees no rows; direct runtime DML is revoked. Row-locked admission rechecks endpoint identity, owner status, version and previous-key expiry. The integration must remain enabled and unarchived. No public management API or automatic endpoint activation is supplied by this transport-plane PR.
+
+Send at most 1 MiB of **raw** bytes. Provider-neutral endpoints use HMAC-SHA256 over those exact bytes in one `X-Synapse-Hook-Signature: sha256=<64 hex>` header. Never put a token, secret, tenant identifier or signature in the URL or query string. The current secret and the immediately previous version overlap for up to 24 hours; a revoked endpoint is rejected. The limit is 60 authenticated requests/minute by default per endpoint, bounded between 1 and 600, enforced transactionally across API replicas. Unknown endpoint, bad signature, expired/revoked key and disabled integration all return the same generic 401 response. A missing provider receiver returns 503 rather than falsely acknowledging a dropped event.
+
+### GitLab push and merge-request hooks (#1452)
+
+GitLab is registered as an **inbound-only** Integration provider. Create the `gitlab` integration with the forge HTTPS endpoint, enable it, and bind it to exactly one existing Git-source Project; it has no credential fields and no polling/discovery capabilities, so the integration scheduler never contacts GitLab. The WS10 opaque hook endpoint and its sealed signing/legacy secret remain operator-provisioned as described above; this feature does not turn the transport registry into a public secret-management API.
+
+For an endpoint whose owner integration has provider `gitlab`, prefer a GitLab **signing token**. Store the complete `whsec_<base64>` token as the endpoint secret. Synapse requires exactly one `webhook-id`, `webhook-timestamp` and `webhook-signature` header, accepts any matching `v1,<base64-HMAC-SHA256>` member of the signature list, and rejects timestamps outside a ±5 minute window. The signed bytes are exactly `{webhook-id}.{webhook-timestamp}.{raw-body}`. If `webhook-signature` is absent, Synapse falls back to one legacy `X-Gitlab-Token` header and compares it in constant time. If a signature header is present but invalid, a valid legacy token does **not** downgrade authentication.
+
+GitLab deliveries require one `X-Gitlab-Event`. Standard Webhooks deliveries use the signed `webhook-id` for replay identity; legacy deliveries require one valid UUID in `X-Gitlab-Event-UUID`. Both the message ID and SHA-256 of the authenticated raw body are deduplicated durably. Delivery receipt, audit, scan status and durable job enqueue commit in one transaction. Failed processing, request cancellation or connection loss rolls back the entire attempt so a provider retry can enqueue work. A conflicting event header and payload `object_kind` is rejected. Only push events and open/reopen/update merge requests start scans; closed/merged MRs, unsupported hook types and branch deletion pushes do not scan. Scan targeting accepts a conservative branch ref and a lowercase 40- or 64-character hex commit SHA. Repository URLs in the payload are ignored: the clone URL comes from the stored Project. One inbound integration binds one Git-source Project, enforced under a storage lock.
+
+A fork merge request is detected only to tighten execution policy. Synapse keeps the webhook `source_branch` as the Project analysis ref shown in history, while acquisition first fetches the immutable SHA from the stored target Project origin, falling back to the server-owned `refs/merge-requests/:iid/head` ref (which GitLab exposes even for private forks) and verifies that the fetched HEAD equals the webhook `last_commit.id` before scanning. **SCM connector credentials are disabled entirely** for fork acquisition, package-manager/build-system resolution is disabled, and fork scans never trigger forge decoration writes. MR number and target branch are retained as server-authenticated analysis metadata for comparison and New Code baselines; trusted MRs may decorate the stored repository when the Project explicitly enables decoration. If the target origin cannot expose the pinned MR commit anonymously, the fork scan fails closed instead of receiving a potentially write-capable connector token. Branch deletion pushes are acknowledged without a scan.
+
+Request logs and metrics contain no raw path IDs, credentials or tenant IDs.
+
 ## Observability
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_METRICS_ENABLED` | `false` | Expose Prometheus metrics on a SEPARATE listener (`SYNAPSE_METRICS_ADDR`). Off by default; the listener is never bearer-protected and is never itself instrumented. |
+| `SYNAPSE_METRICS_ENABLED` | `false` | Expose Prometheus metrics on a SEPARATE listener (`SYNAPSE_METRICS_ADDR`). Off by default; the listener is never bearer-protected and is never itself instrumented. On an `all` profile worker with notifications enabled, it also exposes worker-owned delivery metrics. |
 | `SYNAPSE_METRICS_ADDR` | `127.0.0.1:9090` | Metrics listener address. Loopback-only by default; widen it only onto a private scrape network, never a public interface. |
 | `SYNAPSE_ACCESS_LOG_ENABLED` | `true` | Emit one structured `http access` log event per request (method, matched route, status, latency, request id, and (once authenticated) the resolved principal id). Never logs raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or secrets. |
 
@@ -73,6 +138,13 @@ Metric names and label cardinality:
 | `synapse_job_queue_in_flight` | gauge | none | Aggregate claimed/in-flight durable jobs, across every tenant. |
 | `synapse_job_queue_oldest_active_age_seconds` | gauge | none | Age of the oldest still-queued-or-claimed job (`ports.JobStats.OldestActiveAt`), `0` when the queue is empty. |
 | `synapse_job_queue_scrape_errors_total` | counter | none | Failed attempts to read aggregate durable job queue stats for a scrape. The three `synapse_job_queue_*` gauges above are omitted from that scrape (never a stale or bogus value) when this increments. |
+| `synapse_notification_worker_sent_total` | counter | `channel_type`, `provider` | Committed successful notification delivery attempts, emitted by the worker only. |
+| `synapse_notification_worker_failed_total` | counter | `channel_type`, `provider` | Committed unsuccessful attempts, including retryable ones. |
+| `synapse_notification_worker_dead_lettered_total` | counter | `channel_type`, `provider` | Committed terminal delivery transitions observed by the worker. |
+| `synapse_notification_worker_delivery_duration_seconds` | histogram | `channel_type`, `provider` | Attempt duration excluding durable queue wait. |
+| `synapse_notification_worker_oldest_pending_age_seconds` | gauge | `channel_type`, `provider` | Oldest pending/retrying delivery across RLS-scoped tenants (0 if none). Omitted when any tenant read fails. |
+| `synapse_notification_worker_pending_scrape_error` | gauge | none | 1 if aggregate backlog read failed, otherwise 0. |
+| `synapse_notification_worker_template_fallback_total` | counter | `channel_type`, `provider` | Committed attempts that rendered built-in title/summary fallback content. |
 | `synapse_sca_scan_duration_seconds` | histogram | `outcome` | Completed synchronous or asynchronous SCA execution duration. For an async scan, measured from worker execution start, not from `StartScan`/enqueue time. Queue failures, dead letters, stale sweeps, and blocked gates do not record a duration. |
 | `synapse_sca_scan_outcomes_total` | counter | `outcome` | Terminal SCA outcomes: `success`, `failed`, or `blocked`. Queue failures, dead letters, and stale sweeps count as `failed` without a duration. `blocked` is recorded only for an execution-gate denial reached after a genuine scan attempt, never for a pre-gate validation failure. |
 | `synapse_finding_lineage_operations_total` | counter | `outcome`, `method`, `reason` | Finding correlation and human-review outcomes. Every label is reduced to a fixed allowlist. |
@@ -97,7 +169,7 @@ scrape_configs:
       - targets: ["127.0.0.1:9090"]
 ```
 
-The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. Startup logs a WARN if `SYNAPSE_METRICS_ENABLED` is set and `SYNAPSE_METRICS_ADDR` does not resolve to a loopback address.
+The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord`, `slack_bot/slack` or `other/other`, never tenant or destination data.
 
 ## Persistence
 
@@ -111,6 +183,16 @@ The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADD
 | `SYNAPSE_DB_MIN_CONNS` | `0` | pgx pool minimum connections. |
 | `SYNAPSE_DB_MAX_CONN_LIFETIME` | `1h` | Connection lifetime. |
 | `SYNAPSE_DB_MAX_CONN_IDLE` | `30m` | Idle connection timeout. |
+
+Notification capture defaults to legacy mode after migration. Once all notification
+workers have capable projectors, use `synapse-migrate --notification-capture-mode identity`
+with the migration credential. The command refuses to change mode while identity
+records remain pending and leaves the existing mode intact; `--allow-pending` is an
+explicit controlled-drain exception, not permission to deploy an older worker. For
+rollback, switch to `legacy` and drain pending identity records before replacing
+workers. Detail webhook channels now disclose finding titles, so review their receiver
+access before the rollout. See [notification content and rollout](notification-content.md).
+The mode is an operator command, not an API or runtime environment toggle.
 
 ## Shared artifact store (S3 or MinIO)
 
@@ -324,18 +406,21 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE` | `500` | Maximum causal timeline references fetched by one materialization page; at least the per-detection cap (1–10000). |
 | `SYNAPSE_FLEET_KEY_REGISTRATION_ENABLED` | `false` | Serve agent signing-key registration (`POST /api/v1/fleet/keys`) + operator key list/revoke (A4, A0.2). |
 | `SYNAPSE_FLEET_STALE_AFTER` | `10m` | An agent older than this reads as stale (`<=0` disables the staleness view). |
-| `SYNAPSE_ALERT_WEBHOOK_URL` | (unset) | Enables operator alerting: each incident correlation opens is posted as signed JSON to this URL. `https` required, `http` only for a loopback host. `POST /api/v1/alerts/test` sends a test alert. |
+| `SYNAPSE_ALERT_WEBHOOK_URL` | (unset) | **Deprecated; removed in 0.4.0.** Use an `incident.created` notification rule instead; both paths deliver while this is set, and startup logs a warning. Enables operator alerting: each incident correlation opens is posted as signed JSON to this URL. `https` required, `http` only for a loopback host. `POST /api/v1/alerts/test` sends a test alert. |
 | `SYNAPSE_ALERT_WEBHOOK_SECRET` | (unset) | Signs each webhook body: `X-Synapse-Signature: sha256=<hex HMAC-SHA256 of "<X-Synapse-Timestamp>.<body>">`. At least 16 bytes when set. |
 | `SYNAPSE_ALERT_MIN_SEVERITY` | `medium` | Inclusive severity floor for delivered alerts (`critical`, `high`, `medium`, `low`, `info`). Test alerts always deliver. |
-| `SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE` | `false` | Let the webhook client dial private and link-local receivers. The SSRF guard refuses them otherwise. |
+| `SYNAPSE_ALERT_WEBHOOK_ALLOW_PRIVATE` | `false` | Let the webhook client dial private-use receivers (RFC 1918 and IPv6 unique-local). The SSRF guard refuses them otherwise. Loopback, link-local, cloud metadata (including `fd00:ec2::/32`) and other special-purpose addresses stay refused either way. |
 | `SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED` | `false` | Allow UNSIGNED alert delivery when no secret is set. Default false: a configured webhook requires `SYNAPSE_ALERT_WEBHOOK_SECRET` so a receiver can trust the alert is genuine. Set true only for a development receiver that does not verify the signature. |
 | `SYNAPSE_NOTIFICATIONS_ENABLED` | `false` | Enable tenant-managed Webhook, Slack, and Email channels, durable rule fan-out, delivery history, and the worker source scheduler. Requires PostgreSQL, a running `synapse-worker`, and a stable shared `SYNAPSE_VAULT_MASTER_KEY`. |
 | `SYNAPSE_OWNERSHIP_MODE` | `off` | Finding ownership rollout: `off`, `observe`, or `enforce`; invalid values stop startup. Enabled modes require PostgreSQL. The API admits durable preview/reroute runs and `synapse-worker` captures scan provenance, dispatches dirty findings, and consumes routing jobs. `observe` evaluates without automatic assignment; `enforce` enables automatic assignment and release-to-auto. Memory mode reports `postgres_required`. See [ownership API](https://github.com/KKloudTarus/synapse-ce/blob/main/docs/ownership-api.md). |
-| `SYNAPSE_NOTIFICATION_SMTP_HOST` | (unset) | Operator-managed SMTP relay host used by every tenant Email channel. Tenants can select recipients but cannot select the relay. |
+| `SYNAPSE_NOTIFICATION_SMTP_HOST` | (unset) | Operator-managed SMTP relay host used by every tenant Email channel. Tenants can select recipients but cannot select the relay. The relay is dialed through the same SSRF guard as HTTP deliveries with the operator policy: loopback and private addresses are allowed for a local or internal MTA, and cloud metadata and link-local addresses are refused with `smtp_destination_blocked`. |
 | `SYNAPSE_NOTIFICATION_SMTP_PORT` | `587` | SMTP relay port. |
 | `SYNAPSE_NOTIFICATION_SMTP_FROM` | (unset) | Envelope and message sender for notification email. Required before an Email channel can deliver. |
 | `SYNAPSE_NOTIFICATION_SMTP_USERNAME` / `SYNAPSE_NOTIFICATION_SMTP_PASSWORD` | (unset) | Optional SMTP authentication. The password is secret and must not be logged. |
 | `SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS` | `true` | Require STARTTLS with certificate verification. Keep enabled in production. |
+| `SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL` | (unset) | Optional absolute HTTPS URL for the operator's recipient-removal workflow. When set, every tenant Email channel message includes it in `List-Unsubscribe`; the receiver must perform recipient removal using its own state. Synapse never interpolates recipient or tenant data and does not advertise one-click unsubscribe. |
+| `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` | (unset) | Operator kill switch: comma-separated channel and provider types no tenant may use, for example `slack,email`. Entries are trimmed, lowercased and deduplicated; empty entries are ignored. Every entry must be a type in this build's notification driver registry (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`, `slack_bot`), so a typo stops API and worker startup. A disabled type is left out of the `notifications.channel_types` capability, creating or testing a channel of that type answers `400`, an existing channel of that type cannot be switched on or given a new destination (it can still be renamed, switched off or deleted), and the worker cancels its queued deliveries with `provider_disabled`. Set the same value on the API and the worker. Removing a type from the list restores its channels. It does not affect personal inbox mail or contact verification email. |
+| `SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD` | `5` | Read by `synapse-worker`. Consecutive permanent delivery failures (for example `destination_blocked` or an HTTP 404) after which a notification channel is paused automatically and tenant administrators get an in-app notice; an administrator resumes it from Settings > Alerting. Retryable failures (408, 429, 5xx, timeouts) never count, and a delivered message resets the count. `0` counts failures but never pauses. Must be between `0` and `100`; other values stop the worker at startup. See [Notifications](notifications.md#channel-health-and-automatic-pause). |
 | `SYNAPSE_FLEET_COVERAGE_FRESHNESS_TARGET` | `24h` | Coverage freshness SLO. |
 | `SYNAPSE_FLEET_MIN_AGENT_VERSION` | empty | Reject agents below this version (empty = no floor). |
 | `SYNAPSE_FLEET_ENROL_URL` | `SYNAPSE_FLEET_URL` | One-time enrollment API base URL for `synapse-agent`; after enrollment, the agent uses `SYNAPSE_FLEET_URL`. HTTPS is required except for a loopback host. |
@@ -359,7 +444,9 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT` | `10` | Maximum integration poll operations created per scheduler tick. |
 | `SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH` | `100` | Stop integration dispatch when the durable queue reaches this aggregate depth. |
 | `SYNAPSE_ACCURACY_EVAL_INTERVAL` | `0` (off) | Interval at which the leader worker runs the detection-accuracy regression over the golden corpus and persists a run for the console trend. Zero disables it. |
-| `SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK` | `false` | Operator gate allowing tenant administrators to request private-address Jenkins origins. Keep off unless internal egress is explicitly approved; loopback, link-local, metadata, CGNAT, 6to4, and well-known NAT64 ranges remain blocked. |
+| `SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK` | `false` | Operator gate allowing tenant administrators to request private-address Jenkins origins. Keep off unless internal egress is explicitly approved; loopback, link-local, metadata, CGNAT, 6to4, and well-known NAT64 ranges remain blocked. Turning it off also stops integrations saved while it was on from reaching private addresses. |
+| `SYNAPSE_INTEGRATION_HOST_ALLOWLIST` | (unset) | Comma-separated hosts that self-hosted integrations (Jenkins) may be saved with and connect to: `host`, `host:port`, `*.domain` (subdomains only, not `domain` itself), or an IP literal (`[2001:db8::1]:8443` with a port). Unset allows any public host. When set, a tenant cannot save an endpoint on another host, and an integration saved before the list changed is refused before it connects. SaaS providers such as Azure Pipelines pin their vendor host and are not affected. An invalid entry stops startup. Leaving it unset lets any tenant administrator point the control plane at any public host. Source-control connectors are stricter: a connector's self-hosted API base (GitHub Enterprise Server, self-managed GitLab) is accepted only when its host is listed here, and is refused while the list is unset (see [Self-hosted forges](#self-hosted-forges-github-enterprise-server-self-managed-gitlab)). |
+| `SYNAPSE_INTEGRATION_PRIVATE_CIDRS` | (unset) | Comma-separated private-use CIDRs (inside `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` or `fc00::/7`) that private-network integrations are limited to. It only narrows `SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK`, and setting it without that switch stops startup. Unset lets a private-network integration reach any private-use address. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_ENABLED` | `false` | Dispatch due vulnerability-source syncs and recover stale runs. PostgreSQL deployments must also enable leader election. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_POLL` | `1m` | Scheduler polling interval. |
 | `SYNAPSE_VULNERABILITY_SCHEDULER_STALE_AFTER` | `30m` | Age after which a queued/running sync is eligible for checkpoint-based recovery. |
@@ -489,6 +576,166 @@ All are best-effort and no-op without inputs. Set a flag to `false` to opt out.
 The settings below are intentionally grouped by owning process. They are real operator controls even
 when they are used only by a CLI, helper, or optional subsystem.
 
+### SIEM streams
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_SIEM_ENABLED` | `true` | Set `false` on every API and worker replica to stop incident capture and SIEM sends. Pausing one sink does not stop capture. Events written while capture is off are not in the live partition; a historical backfill can still copy identities that were never captured. |
+| `SYNAPSE_SIEM_PUBLIC_BASE_URL` | empty | Optional absolute `https` console origin, with no path, added to exported SIEM records as a deep link. Empty omits links. It does not fall back to `SYNAPSE_PUBLIC_BASE_URL`, because that console builder can include a deployment prefix and uses different routes. |
+
+Microsoft Sentinel credentials are configured per sink, not through a process
+environment variable. Store the Entra client credential as the sink's sealed
+one-line JSON secret with `tenant_id`, `client_id`, and `client_secret`.
+Use an Azure public-cloud Logs Ingestion endpoint under
+`*.ingest.monitor.azure.com` and a target of
+`dcr-<immutable-id>/Custom-<stream>`. The driver uses the public Azure
+Monitor audience and never serializes that credential back through the SIEM
+API. Private Link DCEs are intentionally unsupported because SIEM egress
+rejects private addresses.
+
+### GitHub push and pull-request hooks (#1451)
+
+Create a `github` integration and bind it to **exactly one existing Git-backed Project**. With inbound webhooks enabled, an administrator then calls `POST /api/v1/integrations/{id}/inbound-webhook` with a 32-128 byte `secret` in the JSON request body. Use that same secret when configuring the webhook in GitHub. Synapse seals the secret immediately and never returns it in an API response. The response contains only the opaque relative `path`, version and rotation metadata. Provisioning may be done while the integration is disabled; configure the GitHub hook first, then enable the integration when it is ready to accept deliveries. A later call with a new secret keeps the same path and rotates the sealed secret, accepting the immediately previous secret only during the bounded overlap. The runtime database role still has no direct DML on the routing registry: provision and rotation go through tenant-bound SECURITY DEFINER functions, and the mutation plus its audit record share one tenant transaction.
+
+Configure the GitHub webhook for **push** and **pull_request** events, point it at the deployment's public HTTPS origin plus the returned path, and use the same caller-supplied secret. Synapse requires one `X-GitHub-Delivery` value and deduplicates that delivery durably across API replicas; a replay is acknowledged with `202` without creating another scan. A receiver failure releases the claim so GitHub can retry instead of silently losing the scan.
+
+For a push, Synapse accepts only the event kind, branch ref and 40- or 64-hex commit SHA needed to select the scan. For a pull request, only `opened`, `reopened`, `synchronize` and `ready_for_review` trigger scans. **The repository/clone URL in the provider payload is never used**: the target URL always comes from the Project's persisted `source_binding`, and the scan fetches the exact signed-event commit instead of a mutable branch head. Deleted pushes and other GitHub event/action types are acknowledged without scanning.
+
+A pull request whose GitHub head repository is a fork is treated as untrusted source. Its acquisition path hard-disables SCM connector credentials even when the tenant has a matching connector, and its scan disables Maven, Gradle, npm, manifest and Go dependency-graph command execution. Static source/SBOM analysis still runs. This prevents fork-controlled code from causing a tenant source-control token to be presented or a repository build/dependency command to execute.
+
+Provider receivers receive only the authenticated tenant/owner context and the bounded provider event. Request logs and metrics contain no raw path IDs, credentials or tenant IDs.
+
+## Observability
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_METRICS_ENABLED` | `false` | Expose Prometheus metrics on a SEPARATE listener (`SYNAPSE_METRICS_ADDR`). Off by default; the listener is never bearer-protected and is never itself instrumented. On an `all` profile worker with notifications enabled, it also exposes worker-owned delivery metrics. |
+| `SYNAPSE_METRICS_ADDR` | `127.0.0.1:9090` | Metrics listener address. Loopback-only by default; widen it only onto a private scrape network, never a public interface. |
+| `SYNAPSE_ACCESS_LOG_ENABLED` | `true` | Emit one structured `http access` log event per request (method, matched route, status, latency, request id, and (once authenticated) the resolved principal id). Never logs raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or secrets. |
+
+Metric names and label cardinality:
+
+| Metric | Type | Labels | Description |
+| --- | --- | --- | --- |
+| `synapse_http_requests_total` | counter | `method`, `route`, `status_class` | Total HTTP requests. `route` is the matched `net/http` `ServeMux` pattern (e.g. `GET /api/v1/engagements/{id}`), never the raw path, path *values* collapse into one bounded label. An unmatched request reports `route="unmatched"`. `status_class` is `2xx`/`3xx`/`4xx`/`5xx`. |
+| `synapse_http_request_duration_seconds` | histogram | `method`, `route`, `status_class` | Request handling latency. |
+| `synapse_job_queue_queued` | gauge | none | Aggregate queued durable jobs, across every tenant. Present only when the configured job queue supports aggregate stats (Postgres and in-memory both do). |
+| `synapse_job_queue_in_flight` | gauge | none | Aggregate claimed/in-flight durable jobs, across every tenant. |
+| `synapse_job_queue_oldest_active_age_seconds` | gauge | none | Age of the oldest still-queued-or-claimed job (`ports.JobStats.OldestActiveAt`), `0` when the queue is empty. |
+| `synapse_job_queue_scrape_errors_total` | counter | none | Failed attempts to read aggregate durable job queue stats for a scrape. The three `synapse_job_queue_*` gauges above are omitted from that scrape (never a stale or bogus value) when this increments. |
+| `synapse_notification_worker_sent_total` | counter | `channel_type`, `provider` | Committed successful notification delivery attempts, emitted by the worker only. |
+| `synapse_notification_worker_failed_total` | counter | `channel_type`, `provider` | Committed unsuccessful attempts, including retryable ones. |
+| `synapse_notification_worker_dead_lettered_total` | counter | `channel_type`, `provider` | Committed terminal delivery transitions observed by the worker. |
+| `synapse_notification_worker_delivery_duration_seconds` | histogram | `channel_type`, `provider` | Attempt duration excluding durable queue wait. |
+| `synapse_notification_worker_oldest_pending_age_seconds` | gauge | `channel_type`, `provider` | Oldest pending/retrying delivery across RLS-scoped tenants (0 if none). Omitted when any tenant read fails. |
+| `synapse_notification_worker_pending_scrape_error` | gauge | none | 1 if aggregate backlog read failed, otherwise 0. |
+| `synapse_notification_worker_template_fallback_total` | counter | `channel_type`, `provider` | Committed attempts that rendered built-in title/summary fallback content. |
+| `synapse_sca_scan_duration_seconds` | histogram | `outcome` | Completed synchronous or asynchronous SCA execution duration. For an async scan, measured from worker execution start, not from `StartScan`/enqueue time. Queue failures, dead letters, stale sweeps, and blocked gates do not record a duration. |
+| `synapse_sca_scan_outcomes_total` | counter | `outcome` | Terminal SCA outcomes: `success`, `failed`, or `blocked`. Queue failures, dead letters, and stale sweeps count as `failed` without a duration. `blocked` is recorded only for an execution-gate denial reached after a genuine scan attempt, never for a pre-gate validation failure. |
+| `synapse_finding_lineage_operations_total` | counter | `outcome`, `method`, `reason` | Finding correlation and human-review outcomes. Every label is reduced to a fixed allowlist. |
+| `synapse_finding_lineage_backfill_items_total` | counter | `outcome` | Backfill item outcomes: `observation_created`, `provisional_candidate_created`, `skipped`, or `unknown`. |
+| `synapse_finding_lineage_backfill_runs_total` | counter | `state` | Backfill terminal states: `completed`, `cancelled`, `failed`, or `unknown`. |
+| `synapse_assessment_comparison_operations_total` | counter | `status`, `mode`, `reason` | Comparison generation outcomes with allowlisted status, mode, and reason values. |
+| `synapse_assessment_comparison_backlog` | gauge | `tenant_id`, `state` | Per-tenant queued, generating, failed, and dead-lettered Comparison backlog used by rollout gates. |
+| `synapse_assessment_comparison_oldest_active_age_seconds` | gauge | `tenant_id` | Age of the oldest queued or generating Comparison for a tenant. |
+| `synapse_assessment_comparison_generation_duration_seconds` | histogram | `tenant_id`, `mode`, `status`, `fingerprint_version`, `risk_model_version`, `item_count_band` | Worker generation latency; item counts are reduced to bounded bands. |
+| `synapse_assessment_relationship_candidates_total` | counter | `outcome`, `confidence` | Historical relationship candidate generation outcomes. |
+| `synapse_assessment_relationship_decisions_total` | counter | `action`, `outcome` | Relationship review decision outcomes. |
+| `synapse_assessment_closure_reports_total` | counter | `outcome`, `reason` | Deterministic closure-report generation outcomes with bounded reasons. |
+
+Only the explicitly documented Assessment Comparison rollout series carry `tenant_id`; access logs and every other metric omit tenant, engagement, target, raw path, and free-form error text. All non-tenant label values are fixed allowlists or bounded bands.
+
+Example Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: synapse-api
+    static_configs:
+      - targets: ["127.0.0.1:9090"]
+```
+
+The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord`, `slack_bot/slack` or `other/other`, never tenant or destination data.
+
+## Persistence
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_DB_DSN` | (in-memory) | Runtime PostgreSQL connection URL. Empty runs an in-memory dev store, so nothing is durable. |
+| `SYNAPSE_DB_MIGRATION_DSN` | `SYNAPSE_DB_DSN` in development | Optional owner-level PostgreSQL DSN used only by `synapse-migrate`, separating migration authority from the least-privileged runtime DSN. In production it must use a database user distinct from the runtime DSN. |
+| `SYNAPSE_DB_HALT_WRITER_DSN` | (none) | PostgreSQL DSN for the dedicated response halt-writer role. Required with PostgreSQL-backed live response execution; its database user must differ from both migration and ordinary runtime users. Expose it only to the API, and grant only the fence, dispatch, and response-audit-intent privileges provisioned by `synapse-migrate`. |
+| `SYNAPSE_DB_AUTO_MIGRATE` | `true` in development | Long-running services apply embedded migrations only in development. Production requires `false`; run `synapse-migrate` first. Use backward-compatible, phased, migrate-first changes: the API accepts only an applied forward migration strictly above its embedded maximum and exposes a stale or divergent schema through `/readyz`; worker and MCP refuse startup until the schema is current because they have no readiness endpoint. |
+| `SYNAPSE_DB_MAX_CONNS` | `32` | pgx pool maximum connections. |
+| `SYNAPSE_DB_MIN_CONNS` | `0` | pgx pool minimum connections. |
+| `SYNAPSE_DB_MAX_CONN_LIFETIME` | `1h` | Connection lifetime. |
+| `SYNAPSE_DB_MAX_CONN_IDLE` | `30m` | Idle connection timeout. |
+
+## Shared artifact store (S3 or MinIO)
+
+When S3/MinIO is configured, the same object store retains evidence artifacts and Engagement source
+packages uploaded from the UI. Uploaded packages accept non-empty `.zip`, `.tar`, `.tar.gz`, and `.tgz`
+files up to 512 MiB compressed. API and worker processes must use the same endpoint and bucket.
+Without an endpoint, evidence uses the non-durable development store, but uploaded source uses a
+persistent filesystem root. Durable source metadata also requires PostgreSQL; an in-memory database
+is not a restart-safe deployment even when archive files are retained.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_BLOB_ENDPOINT` | (none) | Host and port without a scheme. Empty uses in-memory evidence storage and filesystem storage for uploaded Engagement source. |
+| `SYNAPSE_BLOB_ACCESS_KEY` | (none) | Object-store access key; provide through the deployment's secret-management mechanism. |
+| `SYNAPSE_BLOB_SECRET_KEY` | (none) | Object-store secret key; never commit it to configuration or logs. |
+| `SYNAPSE_BLOB_BUCKET` | `synapse-evidence` | Shared bucket for evidence artifacts and uploaded Engagement source packages. |
+| `SYNAPSE_BLOB_USE_SSL` | `false` | Set true for HTTPS endpoints; use TLS for production object-store traffic. |
+| `SYNAPSE_ENGAGEMENT_SOURCE_DIR` | OS user configuration directory + `synapse/engagement-sources` | Durable operator-owned source archive root when the blob endpoint is empty. Must be an absolute, non-root real directory, not a symlink. API and workers must use the same persistent volume and root; keep it outside scanned repositories and temporary workspaces. |
+
+The filesystem adapter creates private directories/files and refuses unsafe roots or invalid object
+paths. Do not treat this root as a disposable cache. Separate containers or hosts do not share their
+default user configuration directories: mount the same retained volume and configure the path in each
+process, or use S3/MinIO. Back up PostgreSQL and source objects consistently. Changing an existing
+filesystem root or bucket does not migrate retained objects. Source reuse verifies the actual bytes;
+metadata or SHA-256 alone cannot restore a missing archive. See the
+[uploaded-source lifecycle](assessment-lifecycle-operations.md#uploaded-source-lifecycle) for immutable
+versions, Re-test choices, legacy limitations and migrations `0159`/`0160`.
+
+## Restore verification (synapse-verify-restore)
+
+`synapse-verify-restore` is a read-only recovery tool. It reuses `SYNAPSE_DB_DSN` and the evidence
+blob-store settings above, and requires a database identity permitted to read every tenant's
+evidence chain; a least-privilege runtime role fails closed rather than reporting an empty restore
+as intact.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_RESTORE_VERIFY_TIMEOUT` | `2m` | Maximum duration for one restore-verification run before it fails. |
+| `SYNAPSE_RESTORE_VERIFY_EXPECTED_STATE` | (none) | Path to an independently captured expected-state manifest (audit head, per-engagement evidence heads and counts, expected applied migration versions). Equivalent to `--expected-state`. Without it a run reports `completeness: incomplete_no_expected_state`, because an emptied database cannot be distinguished from an intact one. |
+
+## Custody, signing, and anchoring (required in production)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_VAULT_MASTER_KEY` | (ephemeral) | AES-256 credential-vault master key, 64 hex chars or base64 of 32 bytes. Empty uses an ephemeral dev key, so stored secrets do not survive a restart. Never logged. |
+| `SYNAPSE_EVIDENCE_SIGNING_SEED` | (ephemeral) | ed25519 seed attesting evidence and audit chain heads. Never logged. |
+| `SYNAPSE_TSA_URL` | (none) | RFC-3161 timestamp authority for external anchoring. Empty leaves the chain signed but not anchored, still tamper-evident. |
+
+## Software composition analysis
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SYNAPSE_SBOM_PRODUCER` | `ownsbom` | `ownsbom` (default; detection-independent owned parsers across 23 ecosystems with dep-graph edges, so no third-party scanner binary is required) or `syft` (the pinned Syft binary, an opt-in cross-check). Set `syft` to roll back. |
+| `SYNAPSE_SYFT_BIN` | `syft` | Syft executable, resolved on PATH. |
+| `SYNAPSE_GRYPE_BIN` | `grype` | Grype executable. Missing means detection degrades to the live source only. |
+| `SYNAPSE_GRYPE_DB_DIR` | (online) | Pin Grype's vulnerability database to a pre-synced directory for offline, reproducible scans. |
+| `SYNAPSE_DETECTION_SOURCES` | (owned default) | Comma list selecting and ordering the vulnerability detection sources from `grype`, `osv`, `advisory-store` (Synapse's own advisory corpus). Empty selects the owned-only default: `osv` unless offline, then `advisory-store` when `SYNAPSE_OWNED_ADVISORY` (the default), with Grype dropped to an opt-in cross-check. Dropping Grype does not silently lower OS-package recall: the OS-distro coverage guard marks a scan not-confident when an OS-package's distro is not covered by the owned store and Grype is absent. When set it is authoritative, so an operator restores Grype with `osv,grype,advisory-store`. Unknown names fail closed at startup. |
+| `SYNAPSE_STRICT_SOURCES` | `false` | Fail closed on a detection-source error. Default degrades: a source that errors (a transient OSV.dev outage, an advisory-store read blip) is skipped with a warning and the remaining sources still run, matching how Grype self-degrades when its binary or database is absent. |
+| `SYNAPSE_SCAN_TIMEOUT` | `10m` | Per-scan timeout. 0 disables. |
+| `SYNAPSE_FINDING_MIN_SEVERITY` | `info` | Lowest severity promoted to a finding: critical, high, medium, low, info. The default promotes everything; set `high` to tighten the floor and drop medium/low/info. |
+| `SYNAPSE_MAX_WORKSPACE_BYTES` | `2147483648` | Maximum prepared workspace size. A bigger target or archive is rejected. |
+| `SYNAPSE_OWNED_ADVISORY` | `true` | Match the SBOM against the owned advisory store, the default primary vulnerability source. Populate it first with `synapse-cli sync-advisories`; an empty store yields no findings, so a deployment that has not synced advisories should keep `osv`/`grype` in `SYNAPSE_DETECTION_SOURCES`. |
+| `SYNAPSE_SYMBOL_OVERLAY_DIR` | (none) | Directory of curated advisory-id -> affected-symbol JSON files; the owned matcher merges these onto findings so non-Go / NVD-CSAF-only advisories can drive symbol reachability. Best-effort. |
+| `SYNAPSE_JARHASH_ONLINE_ENABLED` | `false` | Recover the coordinate of a shaded or metadata-less JAR by its SHA-1. |
+| `SYNAPSE_OSV_URL`, `SYNAPSE_OSV_BULK_URL`, `SYNAPSE_DEPSDEV_URL`, `SYNAPSE_KEV_URL`, `SYNAPSE_EPSS_URL` | (public) | Feed overrides for tests or mirrors. |
+| `SYNAPSE_ALPINE_SECDB_URL` | `https://secdb.alpinelinux.org` | Base URL `sync-advisories --remote-secdb` ingests Alpine's apk advisories from. Point it at an internal mirror of the same layout for an air-gapped estate. |
+
+
 ### Database, project storage, and maintenance
 
 | Variable | Default | Description |
@@ -592,8 +839,21 @@ The following variables are read by `synapse-agent` and `synapse-cluster-agent`,
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_API_URL` | empty | Server base URL used by `synapse-cli publish-source`; overridden by `--server`. |
-| `SYNAPSE_DECORATION_TOKEN` | (none) | Forge write token for `synapse-cli gate --decorate`. Scoped to the CI provider's forge (a GitHub/GitLab/Bitbucket token with permission to write commit statuses, checks/reports, and PR/MR comments). Prefer a short-lived CI-provided token. Never logged, and never needed for `--dry-run`. |
-| `SYNAPSE_DECORATION_USERNAME` | empty | Username paired with `SYNAPSE_DECORATION_TOKEN` for Bitbucket Basic auth. Leave empty for GitHub/GitLab and for Bitbucket access tokens (defaults to `x-token-auth`). |
+| `SYNAPSE_DECORATION_TOKEN` | (none) | Forge write token for `synapse-cli gate --decorate`. Scoped to the CI provider's forge (a GitHub/GitLab/Bitbucket/Azure DevOps token with permission to write commit statuses, checks/reports, and PR/MR comments). Prefer a short-lived CI-provided token. Never logged, and never needed for `--dry-run`. |
+| `SYNAPSE_DECORATION_USERNAME` | empty | Username paired with `SYNAPSE_DECORATION_TOKEN` for Bitbucket Basic auth. Leave empty for GitHub/GitLab/Azure DevOps and for Bitbucket access tokens (defaults to `x-token-auth`). |
+
+For Azure Repos, register a tenant-scoped source-control connector with provider `azure-devops`, host `dev.azure.com`, and a PAT with **Code (Read & write)** (`vso.code_write`) plus **Code (Status)** (`vso.code_status`) scopes. The API resolves that PAT only for `dev.azure.com` and uses it for both PR status and a root summary comment thread. The decoration target repository is `organization/project/repository` (not a clone URL), with the numeric PR ID, source commit, and target branch. A rerun updates the Synapse-owned thread and publishes a new status only when the verdict or source revision changes. Azure DevOps Services (`dev.azure.com`) is supported; on-premises Azure DevOps Server is not supported by this SaaS adapter. Until Azure Pipelines auto-detection (#1455) lands, CLI callers must explicitly supply the `azure-pipelines` provider claim in the CI context. PR decoration is fail-soft: publishing failures do not change the scan's quality-gate verdict. No token is present in an API response, log, or decoration payload.
+
+#### Self-hosted forges (GitHub Enterprise Server, self-managed GitLab)
+
+Server-side PR decoration looks up the connector for the host of the project's git source (`source_binding.value`), not for a fixed SaaS host. To decorate a project on GitHub Enterprise Server or self-managed GitLab, give that host's connector an **API base URL**:
+
+- GitHub Enterprise Server: `https://<host>/api/v3`
+- self-managed GitLab: `https://<host>/api/v4`, or `https://<host>/<relative-root>/api/v4`
+
+The API base must use `https`, carry no credentials, query or fragment, have a clean path ending in the provider's API suffix, and sit on the same host and port as the connector's **Host**, so the token stored for a host is only ever sent to that host. The operator must also list the host in `SYNAPSE_INTEGRATION_HOST_ALLOWLIST`: with the allowlist unset, no API base is accepted. A self-hosted forge on a private address additionally needs `SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK=true`, and must fall inside `SYNAPSE_INTEGRATION_PRIVATE_CIDRS` when that is set. The allowlist and the address rules are checked when the connector is saved and again before every decoration request, so removing a host from the allowlist stops decoration to it immediately.
+
+The token is sealed together with the API base: changing the base in the database leaves the token undecryptable, and pointing a connector at another API means removing it and adding it again with the token. A connector without an API base keeps today's behaviour: github.com, gitlab.com and bitbucket.org projects use the public API with the credential for that SaaS host. Bitbucket Data Center uses a different REST API (`/rest/api/1.0`, `/rest/build-status/1.0`) and is not supported yet; a Bitbucket connector with an API base is refused. `synapse-cli gate --decorate` still decorates the public SaaS forges only.
 | `SYNAPSE_REACH_RUST` | `true` | Conservative Rust manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_REACH_RUBY` | `true` | Conservative Ruby manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
 | `SYNAPSE_REACH_PHP` | `true` | Conservative PHP manifest/import reachability (Tier-1). Default ON; fails to unknown on any coverage gap. Needs judgments. |
@@ -612,3 +872,24 @@ Read and propose only. It never executes. The token and engagement ID are requir
 | `SYNAPSE_MCP_ADDR` | `:8081` | Listen address. |
 
 Next: [CLI](cli.md)
+
+
+### Bitbucket Cloud inbound webhooks
+
+Enable `SYNAPSE_INBOUND_WEBHOOKS_ENABLED=true` with PostgreSQL, a tenant-isolated runtime role, and `SYNAPSE_VAULT_MASTER_KEY`. Apply migration `0204_bitbucket_inbound_webhooks.sql` and grant runtime privileges using the normal migration/startup flow. The durable scan queue and its worker must be running; webhook requests never run scans inline. Upgrade external `synapse-worker` processes to the same release before enabling Bitbucket inbound webhooks, so they understand deferred scan admission.
+
+In **Settings → Integrations → CI/CD**, create a **Bitbucket Cloud** integration and bind exactly one existing Git Project. As an administrator, enter a randomly generated 32–128-byte secret and save it. The equivalent API is `POST /api/v1/integrations/{id}/inbound-webhook` with `{"secret":"<the same secret configured in Bitbucket>"}`. Synapse seals the secret and returns only the opaque relative hook path, its version and rotation metadata. Combine the path with your public HTTPS origin, configure that URL and the same secret in Bitbucket Cloud's repository webhook settings, then enable the integration. Do not put credentials or tenant IDs in the URL. Bitbucket integrations accept no outbound polling credentials.
+
+Subscribe to `repo:push`, `pullrequest:created` and `pullrequest:updated`. Bitbucket Cloud deliveries must carry exactly one of each header:
+
+- `X-Hub-Signature: sha256=<hex HMAC-SHA256 over the exact raw body>`;
+- `X-Event-Key` identifying the event;
+- `X-Request-UUID`, a delivery UUID, optionally enclosed in braces. `X-Hook-UUID` identifies the webhook configuration and cannot replace the request UUID.
+
+Bodies are capped at 1 MiB. Replays of either a request UUID or the authenticated raw body are acknowledged without a second job. Receipt insertion, frozen scan requests, queue enqueue and admission audit writes share one PostgreSQL transaction. A multi-ref push queues every validated branch. Workers reserve the single running-scan slot only at execution; contention retries without consuming delivery attempts. Scan tracking becomes visible when the worker admits the scan, and scope/authorization are checked again before execution. Failures roll back the receipt so a retry can succeed; integration and endpoint locks prevent disabling or archiving from racing acceptance. Rotating the secret preserves the hook path and accepts the previous key for less than 24 hours. Neither responses nor audit payloads include the secret.
+
+Pushes scan distinct live branch/ref and commit pairs; branch deletion and tags are ignored. A push contains at most 100 changes and all scan targets are validated before enqueue. Open PR creation/update scans use the source commit and destination base branch. Closed PRs and other valid event types are acknowledged without scanning. Commits must be exactly 40 or 64 lowercase hexadecimal characters, and refs must pass Git branch-name restrictions. Payload clone URLs never override the Project repository.
+
+A PR whose source and destination repository UUIDs differ, or whose identities are missing/invalid, uses the restricted fork path: no Git credentials (including ambient credential helpers), no Maven/Gradle/npm or other build execution, and no forge status/comment writes. Acquisition still uses only the stored origin. Consequently, a fork commit must be reachable anonymously from that origin; unavailable fork commits and private origins fail closed. This change does not fetch arbitrary fork URLs or add Bitbucket PR decoration.
+
+Protocol references: [Bitbucket Cloud webhook management](https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/), [event payloads](https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/), and the [Jenkins Bitbucket plugin signature verifier](https://github.com/jenkinsci/bitbucket-push-and-pull-request-plugin/blob/b5b8b6a134d513e80ed62307306168d6c906584f/src/main/java/io/jenkins/plugins/bitbucketpushandpullrequest/receiver/SignatureUtils.java). This implementation targets Bitbucket Cloud, not Server/Data Center payloads.

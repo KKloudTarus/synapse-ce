@@ -1,0 +1,121 @@
+{
+  "blocks": [
+    {
+      "text": {
+        "emoji": false,
+        "text": "Critical finding in payments-api",
+        "type": "plain_text"
+      },
+      "type": "header"
+    },
+    {
+      "elements": [
+        {
+          "elements": [
+            {
+              "style": {
+                "bold": true
+              },
+              "text": "SQL injection in /login",
+              "type": "text"
+            },
+            {
+              "text": " on ",
+              "type": "text"
+            },
+            {
+              "style": {
+                "italic": true
+              },
+              "text": "prod_eu",
+              "type": "text"
+            },
+            {
+              "text": "\n",
+              "type": "text"
+            },
+            {
+              "text": "Rule ",
+              "type": "text"
+            },
+            {
+              "style": {
+                "code": true
+              },
+              "text": "CWE-89",
+              "type": "text"
+            },
+            {
+              "text": ", severity ",
+              "type": "text"
+            },
+            {
+              "style": {
+                "bold": true
+              },
+              "text": "critical",
+              "type": "text"
+            },
+            {
+              "text": "\n",
+              "type": "text"
+            }
+          ],
+          "type": "rich_text_section"
+        },
+        {
+          "elements": [
+            {
+              "elements": [
+                {
+                  "text": "Host: api.example.com",
+                  "type": "text"
+                }
+              ],
+              "type": "rich_text_section"
+            },
+            {
+              "elements": [
+                {
+                  "text": "Owner: team \u003cplatform\u003e \u0026 ops",
+                  "type": "text"
+                }
+              ],
+              "type": "rich_text_section"
+            }
+          ],
+          "indent": 0,
+          "style": "bullet",
+          "type": "rich_text_list"
+        },
+        {
+          "elements": [
+            {
+              "text": "Reported by Synapse.",
+              "type": "text"
+            },
+            {
+              "text": "\n",
+              "type": "text"
+            }
+          ],
+          "type": "rich_text_section"
+        },
+        {
+          "elements": [
+            {
+              "text": "Open finding",
+              "type": "link",
+              "url": "https://synapse.example.com/engagements/e1/findings/f1"
+            }
+          ],
+          "type": "rich_text_section"
+        }
+      ],
+      "type": "rich_text"
+    }
+  ],
+  "text": "Critical finding in payments-api",
+  "unfurl_links": false,
+  "unfurl_media": false
+}

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/notification.destination_changed.v1.schema.json",
+  "title": "notification.destination_changed event (v1)",
+  "description": "An operator-created or changed notification channel destination.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "notification.destination_changed"
+    },
+    "source_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "created",
+            "host_changed"
+          ]
+        },
+        "class": {
+          "type": "string",
+          "enum": [
+            "webhook",
+            "slack"
+          ]
+        },
+        "scheme": {
+          "type": "string",
+          "enum": [
+            "http",
+            "https"
+          ]
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "actor",
+        "action",
+        "class",
+        "scheme",
+        "host"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "source_kind",
+    "source_id",
+    "schema_version",
+    "occurred_at",
+    "data"
+  ],
+  "additionalProperties": true
+}

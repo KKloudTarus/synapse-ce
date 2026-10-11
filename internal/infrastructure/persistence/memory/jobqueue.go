@@ -269,3 +269,14 @@ func (q *JobQueue) Retry(_ context.Context, id string, fence int64, retryIn time
 func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) (ports.JobStats, error) {
 	return q.Stats(ctx, kinds...)
 }
+
+// holdsClaim reports whether fence is the live claim on the tenant's job: the job is claimed with
+// that fence and the lease has not expired. It is the check the Postgres notification repository
+// runs against the jobs table before every attempt transition.
+func (q *JobQueue) holdsClaim(id string, tenant shared.ID, fence int64) bool {
+	now := q.now()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	j := q.jobs[id]
+	return j != nil && j.tenantID == tenant && j.status == "claimed" && j.claimFence == fence && j.claimedUntil.After(now)
+}

@@ -208,7 +208,7 @@ func assessmentSnapshotHTTPRun(t *testing.T, now time.Time) scanrun.ScanRun {
 			TenantID: "tenant-snapshot-http", EngagementID: "assessment-snapshot-http", ScanRunID: "snapshot-http-run",
 			LaneKey: "sca", Producer: "sca", TerminalStatus: scanrun.StatusSucceeded, Target: target,
 			AuthoritativeFindingKinds: []string{"vulnerability"}, IncludedScope: []string{"src/**"}, StartedAt: now, FinishedAt: &finished,
-			ResultRef: "result:snapshot-http", EvidenceRef: "evidence:snapshot-http", ResultSHA256: strings.Repeat("a", 64), ManifestSchemaVersion: 1,
+			ResultRef: "result:snapshot-http", EvidenceRef: "evidence:snapshot-http", ResultSHA256: strings.Repeat("a", 64), ManifestSchemaVersion: scanrun.CurrentManifestSchemaVersion,
 			Versions: []scanrun.LaneVersion{{VersionKind: scanrun.VersionScanner, Name: "sca", Version: "1"}},
 			Stages:   []scanrun.LaneStage{{StageKey: "scan", Status: scanrun.StageSucceeded, StartedAt: now, FinishedAt: &finished}},
 		}},

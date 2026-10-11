@@ -25,12 +25,14 @@ import {
   type Severity,
 } from '../../lib/types'
 import { useProjectRouteContext } from './CodeQualityProject'
+import { projectCodePath } from '../../lib/projectCodeNavigation'
 import { FacetItem, IssueItemRow } from './components/IssueItemRow'
 import { IssueDetail } from './components/IssueDetail'
 import { DEFAULT_FILE_LIMIT, groupIssuesByFile, severityBadge, statusBadge } from './components/projectIssueHelpers'
 
 export function ProjectIssuesPage() {
-  const { projectKey } = useProjectRouteContext()
+  const { projectKey, branch } = useProjectRouteContext()
+  const demoBranch = import.meta.env.VITE_PLAYGROUND === '1' ? branch : undefined
   const [params, setParams] = useSearchParams()
 
   const status = (params.get('status') as IssueStatus) || undefined
@@ -42,8 +44,8 @@ export function ProjectIssuesPage() {
   const selectedId = params.get('id')
 
   const filter = useMemo<IssueListFilter>(
-    () => ({ status, type, severity, language, search, newCode, limit: 100 }),
-    [status, type, severity, language, search, newCode],
+    () => ({ status, type, severity, language, search, newCode, limit: 100, ...(demoBranch ? { branch: demoBranch } : {}) }),
+    [status, type, severity, language, search, newCode, demoBranch],
   )
 
   const [page, setPage] = useState<IssuePage | null>(null)
@@ -213,9 +215,9 @@ export function ProjectIssuesPage() {
       )}
 
       {/* Main 2-Column Layout */}
-      <div className="flex flex-col lg:flex-row gap-4 items-start">
+      <div className={cn("grid items-start gap-4", selected ? "xl:grid-cols-2" : "lg:grid-cols-[240px_minmax(0,1fr)]")}>
         {/* Left Facet Sidebar (Sticky) */}
-        <aside className="w-full lg:w-[270px] shrink-0 space-y-4 rounded-xl border border-secondary bg-primary p-4 shadow-xs lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <details key={selected ? "inspecting" : "browsing"} open={!selected} className={cn("min-w-0 rounded-xl border border-secondary bg-primary p-4 shadow-xs", selected ? "xl:col-span-2" : "lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto")}><summary className="cursor-pointer text-sm font-semibold text-primary">Filters{hasActiveFilters ? " · Active" : ""}</summary><div className={cn("mt-4 space-y-4", selected && "sm:grid sm:grid-cols-2 sm:gap-4 xl:grid-cols-4")}>
           {/* Search Box */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-tertiary" />
@@ -336,10 +338,10 @@ export function ProjectIssuesPage() {
               )
             })}
           </div>
-        </aside>
+        </div></details>
 
         {/* Center: Issues Stream & Controls */}
-        <div className="flex-1 min-w-0 space-y-3.5">
+        <div className={cn("min-w-0 space-y-3.5", selected && "order-3 xl:order-2")}>
           {initialLoading && !page ? (
             <div className="flex items-center justify-center p-12 rounded-xl border border-secondary bg-primary">
               <Spinner className="size-6 text-brand" />
@@ -484,7 +486,7 @@ export function ProjectIssuesPage() {
                             </div>
 
                             <Link
-                              to={`/code-quality/projects/${encodeURIComponent(projectKey)}/code`}
+                              to={import.meta.env.VITE_PLAYGROUND === '1' ? projectCodePath(projectKey, { analysisId: fileIssues[0].lastSeenAnalysisId, path: filePath, view: 'source', line: null, findingId: null }, demoBranch) : `/code-quality/projects/${encodeURIComponent(projectKey)}/code`}
                               className="inline-flex items-center gap-1 font-semibold text-brand-secondary hover:underline pl-1"
                             >
                               <span>Open</span>
@@ -584,7 +586,7 @@ export function ProjectIssuesPage() {
             tabIndex={-1}
             role="region"
             aria-labelledby="issue-detail-title"
-            className="w-full lg:w-[480px] xl:w-[520px] shrink-0 overflow-y-auto rounded-xl border border-secondary bg-primary p-5 shadow-xs transition-all lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)]"
+            className="order-2 min-w-0 w-full overflow-y-auto rounded-xl border border-secondary bg-primary p-5 shadow-xs xl:order-3 xl:sticky xl:top-4 xl:max-h-[calc(100dvh-2rem)]"
           >
             {/* Keyed on the issue so selecting another one remounts the inspector. The target
                 status is seeded from the issue's current status in a useState initializer and the
@@ -593,6 +595,7 @@ export function ProjectIssuesPage() {
             <IssueDetail
               key={selected.id}
               projectKey={projectKey}
+              demoBranch={demoBranch}
               issue={selected}
               onClose={() => patch('id', null)}
               onTransitioned={() => setRefresh((c) => c + 1)}

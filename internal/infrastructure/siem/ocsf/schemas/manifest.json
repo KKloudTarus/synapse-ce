@@ -1,0 +1,26 @@
+{
+  "version": "1.5.0",
+  "tag": "1.5.0",
+  "commit": "78bf68a24b38c0d6441ddd13b9028c1b1eb53f07",
+  "source": "https://github.com/ocsf/ocsf-schema/tree/1.5.0",
+  "files": [
+    {
+      "name": "detection_finding.json",
+      "sha256": "a448df2cf393b9c3b19564e28abd1e3b27670308a7604530e075227982608806",
+      "url": "https://schema.ocsf.io/schema/1.5.0/classes/detection_finding",
+      "profiles": "all"
+    },
+    {
+      "name": "vulnerability_finding.json",
+      "sha256": "b407be1d8282e34fbb2cdf293829c5c830b96e138526a6083d4a49050c89ae36",
+      "url": "https://schema.ocsf.io/schema/1.5.0/classes/vulnerability_finding",
+      "profiles": "all"
+    },
+    {
+      "name": "incident_finding.json",
+      "sha256": "b89eb06e6f37756e7cb4fe5c7fabfbe48469ec96d9d6d110e52c6d825e54ab6b",
+      "url": "https://schema.ocsf.io/schema/1.5.0/classes/incident_finding?profiles=incident",
+      "profiles": "incident"
+    }
+  ]
+}

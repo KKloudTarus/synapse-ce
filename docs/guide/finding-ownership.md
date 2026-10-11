@@ -8,6 +8,19 @@ rescans. It can use ordered policy rules, a trusted CODEOWNERS snapshot, or an
 explicit business-asset mapping. It never guesses a team from names, email
 addresses, folders, package cache paths, or free-text asset owners.
 
+Personal notification routing uses the nullable `assignee_user_id` on each
+finding. The existing `assignee` text remains for older API clients and manual
+protection. On upgrade, exact same-tenant user IDs are backfilled first; an
+exact display name is resolved only when unique. Admins can inspect unresolved
+legacy labels at **Settings → Assignee review**, which reads
+`GET /api/v1/findings/assignee-review` (50 per page by default). The page
+shows the label and the reason it stayed unresolved. It does not treat that
+label as a user. The finding and ownership screens provide a server-side searchable
+user picker; choosing a user writes its stable ID. A changed free-text label
+from an older binary clears the canonical binding rather than leaving a stale
+personal recipient. Disabled users may remain in historical bindings but are
+not offered for new assignment or delivery.
+
 ## Enable ownership
 
 Apply database migrations before deploying the new API and worker binaries. Both

@@ -1,0 +1,12 @@
+{
+  "subject_kind": "incident",
+  "subject_id": "incident-42",
+  "vars": {
+    "event_label": "Incident created",
+    "event_type": "incident.created",
+    "occurred_at": "2026-09-27T08:00:00Z",
+    "severity": "critical",
+    "summary": "Fleet correlation created an incident.",
+    "title": "Suspicious network activity"
+  }
+}

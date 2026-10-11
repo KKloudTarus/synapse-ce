@@ -52,6 +52,8 @@ const (
 	ReasonLaneCancelled       = "lane_cancelled"
 	ReasonStageFailed         = "stage_failed"
 	ReasonStageSkipped        = "stage_skipped"
+	ReasonEnginePartial       = "engine_coverage_partial"
+	ReasonEngineUnknown       = "engine_coverage_unknown"
 )
 
 type Boundary struct {
@@ -324,6 +326,15 @@ func coverageDecision(run SelectedRun, lane scanrun.Lane) (CoverageState, string
 		}
 		if stage.Status == scanrun.StageSkipped {
 			return CoveragePartial, ReasonStageSkipped
+		}
+	}
+	if len(lane.EngineOutcomes) > 0 {
+		coverage := scanrun.ComputeEngineCoverage(lane.EngineOutcomes)
+		if coverage.Status == scanrun.CoveragePartial {
+			return CoveragePartial, ReasonEnginePartial
+		}
+		if !coverage.Complete() {
+			return CoverageUnknown, ReasonEngineUnknown
 		}
 	}
 	return CoverageComplete, ReasonTrustedTerminalLane

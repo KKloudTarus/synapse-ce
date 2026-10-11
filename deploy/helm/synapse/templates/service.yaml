@@ -18,6 +18,24 @@ spec:
       port: {{ .Values.api.metrics.port }}
       targetPort: metrics
     {{- end }}
+{{- if and .Values.worker.metrics.enabled (eq (include "synapse.executionMode" .) "inClusterBroker") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "synapse.fullname" . }}-worker-metrics
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "synapse.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+  ports:
+    - name: metrics
+      port: {{ .Values.worker.metrics.port }}
+      targetPort: metrics
+{{- end }}
 {{- if .Values.api.grantAuthority.enabled }}
 {{- if not .Values.api.grantAuthority.networkPolicySourceCIDRs }}
 {{- fail "api.grantAuthority.networkPolicySourceCIDRs must list the dedicated private NLB subnet CIDRs" }}

@@ -161,6 +161,7 @@ export function HotspotList({
                   key={h.id}
                   type="button"
                   onClick={() => onSelect(isSelected ? null : h.id)}
+                  data-hotspot-id={h.id}
                   className={cn(
                     'flex w-full items-start gap-3 p-3.5 text-left transition-all',
                     isSelected

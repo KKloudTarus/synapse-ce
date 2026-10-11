@@ -1,4 +1,19 @@
-{{- $dataRegion := default "" (index .Values.api.nodeSelector "topology.kubernetes.io/region") | trim -}}
+{{- /*
+The Job runs the same image as the API and writes the same tenant-owned durable state, so it
+inherits the API's placement wholesale rather than one key of it. Copying only
+topology.kubernetes.io/region left the Job with no architecture constraint, and on a cluster with
+both amd64 and graviton pools the scheduler placed it on arm64, where the amd64-only control-plane
+image cannot be pulled (ImagePullBackOff, "no match for platform in manifest"). Set
+migration.nodeSelector or migration.tolerations to place the Job somewhere else on purpose.
+*/ -}}
+{{- $nodeSelector := .Values.api.nodeSelector -}}
+{{- if .Values.migration.nodeSelector -}}
+{{- $nodeSelector = .Values.migration.nodeSelector -}}
+{{- end -}}
+{{- $tolerations := .Values.api.tolerations -}}
+{{- if .Values.migration.tolerations -}}
+{{- $tolerations = .Values.migration.tolerations -}}
+{{- end -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -23,11 +38,13 @@ spec:
       restartPolicy: Never
       serviceAccountName: {{ include "synapse.serviceAccountName" . }}
       automountServiceAccountToken: false
-      {{- if $dataRegion }}
-      # The migration job handles tenant-owned durable state, so keep it in the same
-      # governed region as the API rather than allowing the scheduler to place it freely.
+      {{- if $nodeSelector }}
       nodeSelector:
-        topology.kubernetes.io/region: {{ $dataRegion | quote }}
+        {{- toYaml $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if $tolerations }}
+      tolerations:
+        {{- toYaml $tolerations | nindent 8 }}
       {{- end }}
       securityContext:
         {{- include "synapse.podSecurityContext" . | nindent 8 }}

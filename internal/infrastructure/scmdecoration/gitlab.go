@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scmconnector"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -42,18 +43,25 @@ type GitLabDecorator struct {
 	api            *jsonHTTPClient
 	credentials    ports.GitCredentialResolver
 	credentialHost string
+	selfHosted     *selfHostedAPI
 	locks          [32]sync.Mutex
 }
 
 var _ ports.PRDecorator = (*GitLabDecorator)(nil)
 
-// NewGitLabDecorator constructs the production gitlab.com adapter. Provider composition is intentionally
-// left to #1125; creating this adapter alone causes no outward traffic.
-func NewGitLabDecorator(credentials ports.GitCredentialResolver) (*GitLabDecorator, error) {
+// NewGitLabDecorator constructs the production gitlab.com adapter. With WithSelfHostedRules it also
+// decorates self-managed GitLab through the API base on the repository host's connector. Creating
+// this adapter alone causes no outward traffic.
+func NewGitLabDecorator(credentials ports.GitCredentialResolver, opts ...Option) (*GitLabDecorator, error) {
 	if credentials == nil {
 		return nil, fmt.Errorf("%w: gitlab decoration needs a credential resolver", shared.ErrValidation)
 	}
-	return newGitLabDecorator(safehttp.New(30*time.Second, false), gitlabAPIBase, gitlabCredentialHost, credentials)
+	d, err := newGitLabDecorator(safehttp.New(30*time.Second, false), gitlabAPIBase, gitlabCredentialHost, credentials)
+	if err != nil {
+		return nil, err
+	}
+	d.selfHosted = newSelfHostedAPI(scmconnector.ProviderGitLab, collectOptions(opts))
+	return d, nil
 }
 
 func newGitLabDecorator(client *http.Client, apiBase, credentialHost string, credentials ports.GitCredentialResolver) (*GitLabDecorator, error) {
@@ -94,29 +102,27 @@ func (d *GitLabDecorator) Decorate(ctx context.Context, decoration ports.PRDecor
 		return fmt.Errorf("%w: gitlab commit sha is invalid", shared.ErrValidation)
 	}
 
-	credential, ok, err := d.credentials.ResolveGitCredential(ctx, d.credentialHost)
+	api, credential, err := resolveForgeEndpoint(ctx, d.credentials, d.credentialHost, d.api, d.selfHosted, decoration.ForgeHost, "gitlab")
 	if err != nil {
-		return fmt.Errorf("resolve gitlab decoration credential: %w", err)
+		return err
 	}
-	if !ok || len(credential.Token) == 0 {
-		return fmt.Errorf("%w: no gitlab credential is configured for decoration", shared.ErrValidation)
-	}
-	defer func() {
-		for i := range credential.Token {
-			credential.Token[i] = 0
-		}
-	}()
+	defer zeroToken(credential.Token)
 	headers := gitlabHeaders(credential.Token)
+	// A self-managed GitLab target runs the same publishing code against its own API base.
+	call := d
+	if api != d.api {
+		call = &GitLabDecorator{api: api, credentials: d.credentials}
+	}
 
-	lock := d.targetLock(decoration.Target.Repository, decoration.Target.PullRequest)
+	lock := d.targetLock(decoration.ForgeHost+"\x00"+decoration.Target.Repository, decoration.Target.PullRequest)
 	lock.Lock()
 	defer lock.Unlock()
 
 	var errs []error
-	if err := d.publishStatus(ctx, projectID, sha, decoration, headers); err != nil {
+	if err := call.publishStatus(ctx, projectID, sha, decoration, headers); err != nil {
 		errs = append(errs, fmt.Errorf("gitlab commit status: %w", err))
 	}
-	if err := d.publishNote(ctx, projectID, mrIID, decoration, headers); err != nil {
+	if err := call.publishNote(ctx, projectID, mrIID, decoration, headers); err != nil {
 		errs = append(errs, fmt.Errorf("gitlab merge request note: %w", err))
 	}
 	return errors.Join(errs...)

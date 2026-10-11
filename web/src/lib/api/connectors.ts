@@ -6,7 +6,7 @@ import { req } from './client'
  * internal/adapter/httpapi/scm_connector_handler.go. The token is write-only — it is sent on create
  * and never returned, so a Connector carries only metadata.
  */
-export type ConnectorProvider = 'github' | 'gitlab' | 'bitbucket' | 'generic'
+export type ConnectorProvider = 'github' | 'gitlab' | 'bitbucket' | 'azure-devops' | 'generic'
 
 export interface Connector {
   id: string
@@ -15,6 +15,8 @@ export interface Connector {
   host: string
   username: string
   authKind: string
+  /** Self-hosted forge API base for PR decoration (GHES, self-managed GitLab); empty for the SaaS API. */
+  apiBase: string
   createdAt: string
   updatedAt: string
 }
@@ -25,6 +27,8 @@ export interface ConnectorCreate {
   host: string
   username?: string
   token: string
+  /** Optional self-hosted forge API base (https://host/api/v3 or /api/v4). Sent as `api_base`. */
+  apiBase?: string
 }
 
 function mapConnector(raw: any): Connector {
@@ -35,6 +39,7 @@ function mapConnector(raw: any): Connector {
     host: raw?.host ?? '',
     username: raw?.username ?? '',
     authKind: raw?.auth_kind ?? '',
+    apiBase: raw?.api_base ?? '',
     createdAt: raw?.created_at ?? '',
     updatedAt: raw?.updated_at ?? '',
   }
@@ -52,8 +57,13 @@ export const connectorsApi = {
       throw e
     }
   },
-  createConnector: async (body: ConnectorCreate): Promise<Connector> =>
-    mapConnector(await req('/connectors', { method: 'POST', body: JSON.stringify(body) })),
+  createConnector: async ({ apiBase, ...rest }: ConnectorCreate): Promise<Connector> =>
+    mapConnector(
+      await req('/connectors', {
+        method: 'POST',
+        body: JSON.stringify(apiBase ? { ...rest, api_base: apiBase } : rest),
+      }),
+    ),
   deleteConnector: async (id: string): Promise<void> => {
     await req(`/connectors/${encodeURIComponent(id)}`, { method: 'DELETE' })
   },

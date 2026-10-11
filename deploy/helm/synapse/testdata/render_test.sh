@@ -16,13 +16,49 @@ helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 \
   --set execution.mode=inClusterBroker \
   --set egressBroker.enabled=true \
   --set egressBroker.grantAuthorityURL=https://grant.internal.example \
-  --set egressBroker.grantPublicKey=Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMzJieXRlcw== >"$in_cluster"
+  --set egressBroker.grantPublicKey=Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMzJieXRlcw== \
+  `# The broker mounts /run/netns with bidirectional propagation, which the kubelet allows only on a` \
+  `# privileged container, so the capability-scoped default renders a DaemonSet the API server rejects.` \
+  `# A render guard now refuses that combination; this leg has to ask for the posture it is testing.` \
+  --set egressBroker.privileged=true >"$in_cluster"
 
 # controlPlaneOnly must BOOT on any node (managed EKS / kind): non-production, sandbox off, in-process,
 # no worker, no broker, and it does NOT require the grant authority. This is the portable/offline posture.
 cpo=$(mktemp); trap 'rm -f "$out" "$in_cluster" "$cpo"' EXIT
 helm template synapse "$chart_dir" -f "$chart_dir/values-dev.yaml" --kube-version 1.29.0 \
   --set execution.mode=controlPlaneOnly >"$cpo"
+
+# Optional worker scrape endpoint: private by default, explicitly scoped
+# to the monitoring namespace when enabled; never routed through the ingress.
+worker_metrics=$(mktemp)
+trap 'rm -f "$out" "$in_cluster" "$cpo" "$worker_metrics"' EXIT
+! grep -Eq 'name: [^ ]*worker-metrics$' "$in_cluster"
+helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 \
+  --set execution.mode=inClusterBroker \
+  --set egressBroker.enabled=true \
+  --set egressBroker.grantAuthorityURL=https://grant.internal.example \
+  --set egressBroker.grantPublicKey=Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMzJieXRlcw== \
+  `# inClusterBroker renders only with a privileged broker; see the guard's reason on the leg above.` \
+  --set egressBroker.privileged=true \
+  --set worker.metrics.enabled=true \
+  --set worker.metrics.port=9091 \
+  --set worker.metrics.monitoringNamespace=monitoring >"$worker_metrics"
+grep -q 'containerPort: 9091' "$worker_metrics"
+grep -q 'value: "0.0.0.0:9091"' "$worker_metrics"
+awk '
+  /^---$/ {kind=""; policy=0}
+  /^kind: Service$/ {kind="svc"}
+  /^kind: NetworkPolicy$/ {kind="np"}
+  /name: [^ ]*worker-metrics$/ {
+    if (kind=="svc") service=1
+    if (kind=="np") policy=1
+  }
+  policy && /app.kubernetes.io\/component: worker/ {selector=1}
+  policy && /kubernetes.io\/metadata.name: "monitoring"/ {monitor=1}
+  policy && /port: 9091/ {port=1}
+  END {exit service && selector && monitor && port ? 0 : 1}
+' "$worker_metrics"
+! awk '/^kind: Ingress$/{ingress=1} /^---$/{ingress=0} ingress && /9091|worker-metrics/{found=1} END{exit found ? 0 : 1}' "$worker_metrics"
 grep -q 'value: development' "$cpo"
 awk '/name: SYNAPSE_SANDBOX_ENABLED/{getline; if ($0 ~ /value: "false"/) ok=1} END{exit ok?0:1}' "$cpo"
 ! grep -q 'app.kubernetes.io/component: worker' "$cpo"
@@ -219,3 +255,46 @@ if helm lint "$chart_dir" -f "$chart_dir/tests/invalid-tag-values.yaml" >/dev/nu
   printf '%s\n' 'expected tag-only image values to fail schema validation' >&2
   exit 1
 fi
+
+# /var/lib/synapse holds the Code view's captured source, project uploads and engagement sources. On a
+# per-pod emptyDir a second replica cannot read what the first one captured, which the console reported
+# as "source artifact is missing from this server's storage". The production posture therefore binds a
+# shared claim, and the render refuses the combination that cannot work.
+grep -q 'kind: PersistentVolumeClaim' "$out"
+grep -q 'claimName: synapse-synapse-data' "$out"
+awk '
+  /^---$/ { pvc=0; next }
+  /^kind: PersistentVolumeClaim$/ { pvc=1 }
+  pvc && /- ReadWriteMany/ { ok=1 }
+  END { exit ok ? 0 : 1 }
+' "$out" || {
+  printf '%s\n' 'the production data claim must be ReadWriteMany so every API replica reads the same captures' >&2
+  exit 1
+}
+
+if helm template synapse "$chart_dir" -f "$chart_dir/values-dev.yaml" --kube-version 1.29.0 \
+  --set api.persistence.acknowledgeEphemeral=false >/dev/null 2>&1; then
+  printf '%s\n' 'expected multi-replica pod-local /var/lib/synapse to fail the render' >&2
+  exit 1
+fi
+
+if helm template synapse "$chart_dir" -f "$chart_dir/tests/production-values.yaml" --kube-version 1.29.0 \
+  --set 'api.persistence.accessModes[0]=ReadWriteOnce' >/dev/null 2>&1; then
+  printf '%s\n' 'expected a ReadWriteOnce data claim with several API replicas to fail the render' >&2
+  exit 1
+fi
+
+# The documented escape hatch still renders, and it renders the emptyDir it describes.
+ephemeral=$(mktemp)
+trap 'rm -f "$out" "$in_cluster" "$cpo" "$worker_metrics" "$ephemeral"' EXIT
+helm template synapse "$chart_dir" -f "$chart_dir/values-dev.yaml" --kube-version 1.29.0 >"$ephemeral"
+! grep -q 'kind: PersistentVolumeClaim' "$ephemeral"
+awk '
+  /- name: synapse-data/ { data=1; next }
+  data && /emptyDir:/ { ok=1 }
+  data && /^ *- name:/ { data=0 }
+  END { exit ok ? 0 : 1 }
+' "$ephemeral" || {
+  printf '%s\n' 'api.persistence.acknowledgeEphemeral must still render the per-pod emptyDir' >&2
+  exit 1
+}

@@ -11,9 +11,12 @@ export const authApi = {
     const value = await req('/me')
     return {
       id: value.id ?? '', name: value.name ?? '', role: value.role ?? '',
+      tenantId: value.tenant_id, personId: value.person_id, membershipId: value.membership_id,
+      credentialKind: value.credential_kind, recentAuth: value.recent_auth === true,
       features: value.features ? {
         assessmentLifecycleRead: Boolean(value.features.assessment_lifecycle_read),
         assessmentLifecycleUIDefault: Boolean(value.features.assessment_lifecycle_ui_default),
+        enterpriseIdentity: value.features.enterprise_identity === true,
       } : undefined,
     }
   },

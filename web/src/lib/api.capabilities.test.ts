@@ -15,6 +15,11 @@ const wire = {
       key: 'cspm', name: 'Cloud security posture management', enabled: false,
       switch: 'SYNAPSE_CSPM_ENABLED', requires: ['fleet_assets'],
     },
+    {
+      key: 'notifications.channel_types', name: 'Notification channel types', enabled: true,
+      switch: 'SYNAPSE_NOTIFICATIONS_ENABLED', requires: ['notifications'], values: ['webhook', 'slack', 'email'],
+    },
+    { key: 'ticketing', name: 'Ticketing', enabled: false, switch: '', planned: true },
   ],
 }
 
@@ -26,15 +31,21 @@ describe('capabilities API', () => {
     fetchSpy = vi.spyOn(globalThis, 'fetch')
   })
 
-  it('maps the catalog and defaults an absent requires to empty', async () => {
+  it('maps the catalog and defaults absent requires, values and planned', async () => {
     fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => wire } as Response)
     const list = await api.listCapabilities()
     expect(fetchSpy).toHaveBeenCalledWith('/api/v1/capabilities', expect.any(Object))
+    const plain = { values: [], planned: false }
     expect(list).toEqual([
-      { key: 'fleet', name: 'Agent fleet transport', enabled: false, switch: 'SYNAPSE_FLEET_ENABLED', requires: [] },
-      { key: 'ai_triage', name: 'AI false-positive triage', enabled: false, switch: 'SYNAPSE_FP_TRIAGE_ENABLED', requires: [] },
-      { key: 'judgments', name: 'Judgment lifecycle', enabled: true, switch: 'SYNAPSE_JUDGMENTS_ENABLED', requires: [] },
-      { key: 'cspm', name: 'Cloud security posture management', enabled: false, switch: 'SYNAPSE_CSPM_ENABLED', requires: ['fleet_assets'] },
+      { key: 'fleet', name: 'Agent fleet transport', enabled: false, switch: 'SYNAPSE_FLEET_ENABLED', requires: [], ...plain },
+      { key: 'ai_triage', name: 'AI false-positive triage', enabled: false, switch: 'SYNAPSE_FP_TRIAGE_ENABLED', requires: [], ...plain },
+      { key: 'judgments', name: 'Judgment lifecycle', enabled: true, switch: 'SYNAPSE_JUDGMENTS_ENABLED', requires: [], ...plain },
+      { key: 'cspm', name: 'Cloud security posture management', enabled: false, switch: 'SYNAPSE_CSPM_ENABLED', requires: ['fleet_assets'], ...plain },
+      {
+        key: 'notifications.channel_types', name: 'Notification channel types', enabled: true,
+        switch: 'SYNAPSE_NOTIFICATIONS_ENABLED', requires: ['notifications'], values: ['webhook', 'slack', 'email'], planned: false,
+      },
+      { key: 'ticketing', name: 'Ticketing', enabled: false, switch: '', requires: [], values: [], planned: true },
     ])
   })
 
@@ -58,7 +69,10 @@ describe('capabilities API', () => {
 
 describe('capability gating', () => {
   const index = new Map(
-    wire.capabilities.map((c) => [c.key, { ...c, requires: c.requires ?? [] }]),
+    wire.capabilities.map((c) => [
+      c.key,
+      { ...c, requires: c.requires ?? [], values: c.values ?? [], planned: c.planned === true },
+    ]),
   )
 
   it('gates a disabled subsystem and lets an enabled one through', () => {
@@ -79,5 +93,9 @@ describe('capability gating', () => {
       'Agent fleet transport is disabled. Set SYNAPSE_FLEET_ENABLED=true on the API and restart it.',
     )
     expect(capabilityHint(index.get('cspm')!)).toContain('It also needs: fleet_assets.')
+  })
+
+  it('does not name a switch for a subsystem this build does not ship', () => {
+    expect(capabilityHint(index.get('ticketing')!)).toBe('Ticketing is not available in this build yet.')
   })
 })

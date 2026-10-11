@@ -7,6 +7,7 @@ import { useFetch } from '../../../hooks'
 import { api, ApiError } from '../../../lib/api'
 import { canTransitionIssue, ISSUE_STATUSES, issueStatusLabel, type IssueReviewEvent, type IssueStatus, type ProjectIssue } from '../../../lib/types'
 import { cleanIssueTitle, severityBadge, typeMeta } from './projectIssueHelpers'
+import { projectCodePath } from '../../../lib/projectCodeNavigation'
 
 /**
  * `issueStatusLabel` is an exhaustive switch with no default, so a status outside the known set
@@ -69,11 +70,13 @@ function ReviewHistory({ projectKey, issueId, revision }: { projectKey: string; 
 
 export function IssueDetail({
   projectKey,
+  demoBranch,
   issue,
   onClose,
   onTransitioned,
 }: {
   projectKey: string
+  demoBranch?: string
   issue: ProjectIssue
   onClose: () => void
   onTransitioned: () => void
@@ -140,7 +143,7 @@ export function IssueDetail({
   }
 
   return (
-    <div ref={panelRef} tabIndex={-1} className="space-y-5 focus-visible:outline-none">
+    <div data-issue-inspector={issue.id} ref={panelRef} tabIndex={-1} className="space-y-5 focus-visible:outline-none">
       {/* Header Bar */}
       <div className="flex items-start justify-between gap-3 border-b border-secondary pb-4">
         <div className="space-y-2">
@@ -193,7 +196,7 @@ export function IssueDetail({
               <span>{copied ? 'Copied' : 'Copy'}</span>
             </button>
             <Link
-              to={`/code-quality/projects/${encodeURIComponent(projectKey)}/code`}
+              to={import.meta.env.VITE_PLAYGROUND === '1' ? projectCodePath(projectKey, { analysisId: issue.lastSeenAnalysisId, path: issue.file, view: 'source', line: Number(issue.location.match(/:(\d+)$/)?.[1]) || null, findingId: issue.id }, demoBranch) : `/code-quality/projects/${encodeURIComponent(projectKey)}/code`}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold text-brand-secondary hover:underline"
             >
               <span>View Code</span>
@@ -263,6 +266,7 @@ export function IssueDetail({
                   <button
                     key={st}
                     type="button"
+                    aria-pressed={to === st}
                     disabled={busy}
                     onClick={() => setTo(st)}
                     className={cn(

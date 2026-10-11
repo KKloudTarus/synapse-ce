@@ -102,7 +102,9 @@ func (r *ReconciliationRunner) RunOnce(ctx context.Context) error {
 			return err
 		}
 		if tenantID.IsZero() {
-			r.log.Error("fleet audit reconciliation tenant is invalid")
+			// See the note in the tenant lister: the legacy empty-id row is filtered there, and a zero
+			// id cannot be reconciled under RLS, so this is a skip and not an error.
+			r.log.Debug("fleet audit reconciliation skipped a zero tenant")
 			continue
 		}
 		if err := r.reconciler.Reconcile(shared.WithTenant(ctx, tenantID)); err != nil {

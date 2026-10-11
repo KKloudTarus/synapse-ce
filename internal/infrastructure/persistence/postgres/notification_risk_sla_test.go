@@ -26,7 +26,7 @@ func TestNotificationPostgresRiskAndSLA(t *testing.T) {
 		}
 	}
 	repo := NewNotificationRepository(pool)
-	source := NewNotificationSource(pool, repo, time.Minute, true)
+	source := NewNotificationSource(pool, repo, time.Minute)
 	if _, err := source.Poll(ctx, now.Add(-time.Minute), 100); err != nil {
 		t.Fatal(err)
 	}
@@ -97,12 +97,13 @@ func TestNotificationPostgresRiskAndSLA(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		assertPublishedEventSchema(t, w.Event)
 		if w.Event.Type == notification.EventVulnerabilityAction && w.Event.Severity != shared.SeverityHigh {
 			t.Fatal("used mutable finding severity")
 		}
 		if w.Event.Type == notification.EventSLAApproaching {
 			exec("UPDATE sla_lifecycles SET status='remediated' WHERE tenant_id='risk-tenant'")
-			if relevant, err := repo.DeliveryStillRelevant(ctx, w); err != nil || relevant {
+			if relevant, err := deliveryStillRelevant(repo, ctx, w); err != nil || relevant {
 				t.Fatalf("resolved SLA remains relevant: %v %v", relevant, err)
 			}
 		}

@@ -38,7 +38,8 @@ const DOMAINS = [
 ]
 
 export function ProjectMeasuresPage() {
-  const { projectKey, job } = useProjectRouteContext()
+  const { projectKey, branch, job } = useProjectRouteContext()
+  const demoBranch = import.meta.env.VITE_PLAYGROUND === '1' ? branch : ''
   const [searchParams, setSearchParams] = useSearchParams()
   const path = searchParams.get('path') ?? ''
   const domain = searchParams.get('domain') ?? 'size'
@@ -53,8 +54,8 @@ export function ProjectMeasuresPage() {
   const requestGenerationRef = useRef(0)
 
   const { data: fetchedData, loading, error: fetchError } = useFetch(
-    (signal) => api.projectMeasures(projectKey, { path, domain: [domain], limit: 100 }, signal),
-    { deps: [projectKey, path, domain] },
+    (signal) => api.projectMeasures(projectKey, { path, domain: [domain], limit: 100, ...(demoBranch ? { branch: demoBranch } : {}) }, signal),
+    { deps: [projectKey, path, domain, demoBranch] },
   )
 
   // Sync fetched data to local state
@@ -85,6 +86,7 @@ export function ProjectMeasuresPage() {
         domain: [domain],
         limit: 100,
         cursor: data.children.nextCursor,
+        ...(demoBranch ? { branch: demoBranch } : {}),
       })
 
       if (

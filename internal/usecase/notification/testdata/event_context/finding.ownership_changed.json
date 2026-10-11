@@ -1,0 +1,13 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "actor": "system",
+    "event_label": "Finding ownership changed",
+    "event_type": "finding.ownership_changed",
+    "occurred_at": "2026-09-27T08:00:00Z",
+    "reason": "routing rule",
+    "summary": "A finding was assigned to the response team.",
+    "title": "Finding ownership changed"
+  }
+}

@@ -59,6 +59,17 @@ func TestScrubSecretsPatterns(t *testing.T) {
 	}
 }
 
+func TestScrubSecretPatternsForAuditFreeText(t *testing.T) {
+	input := "retry after password=hunter2 and token=opaque-value"
+	got := ScrubSecretPatterns(input)
+	if strings.Contains(got, "hunter2") || strings.Contains(got, "opaque-value") {
+		t.Fatalf("audit free text retained credentials: %q", got)
+	}
+	if ScrubSecretPatterns(got) != got {
+		t.Fatalf("audit scrubber is not idempotent: %q", got)
+	}
+}
+
 func TestClassifyDispositions(t *testing.T) {
 	p := DefaultPolicy()
 	// env is dropped by default.

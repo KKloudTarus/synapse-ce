@@ -1,10 +1,13 @@
 name: CI
 
+# A patch release branches from its tag rather than from main, so `release/**` has to be gated
+# here too. Filtering on main alone meant a PR into a release branch reported no checks at all,
+# and the branch that gets tagged was the one branch nothing ever built.
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   pull_request:
-    branches: [main]
+    branches: [main, "release/**"]
 
 permissions:
   contents: read

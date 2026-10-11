@@ -1,0 +1,11 @@
+{
+  "subject_kind": "channel",
+  "subject_id": "channel-7",
+  "vars": {
+    "event_label": "Channel paused",
+    "event_type": "notification.channel_paused",
+    "occurred_at": "2026-09-29T08:00:00Z",
+    "summary": "\"Ops webhook\" (webhook) stopped sending after 5 consecutive permanent failures (last: destination_blocked). Fix the destination, then resume the channel in Alerting.",
+    "title": "Notification channel paused"
+  }
+}

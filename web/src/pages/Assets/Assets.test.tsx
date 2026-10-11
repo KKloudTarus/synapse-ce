@@ -111,12 +111,12 @@ describe('Assets', () => {
 
     await screen.findByText('37')
     expect(screen.getByText('Total assets')).toBeInTheDocument()
-    expect(screen.getByText('Critical')).toBeInTheDocument()
+    expect(screen.getByText('Critical business assets')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Search assets'), { target: { value: 'mobile' } })
 
     expect(await screen.findByText('Matching this filter')).toBeInTheDocument()
-    expect(screen.getByText('Critical in all assets')).toBeInTheDocument()
+    expect(screen.getByText('Critical business assets · All')).toBeInTheDocument()
     expect(screen.queryByText('Total assets')).not.toBeInTheDocument()
   })
 

@@ -49,11 +49,20 @@ var (
 	ErrSaturated  = errors.New("system saturated") // bounded admission rejected (backpressure → 503)
 )
 
+// severityVocabulary is shared by validation and schema contract tests.
+var severityVocabulary = [...]Severity{SeverityCritical, SeverityHigh, SeverityMedium, SeverityLow, SeverityInfo, SeverityUnknown}
+
+// AllSeverities returns a defensive copy of all accepted severity labels.
+func AllSeverities() []Severity {
+	return append([]Severity(nil), severityVocabulary[:]...)
+}
+
 // Valid reports whether s is a known severity label.
 func (s Severity) Valid() bool {
-	switch s {
-	case SeverityCritical, SeverityHigh, SeverityMedium, SeverityLow, SeverityInfo, SeverityUnknown:
-		return true
+	for _, allowed := range severityVocabulary {
+		if s == allowed {
+			return true
+		}
 	}
 	return false
 }

@@ -192,6 +192,14 @@ func TestAcquireGitPrivateRepoEndToEnd(t *testing.T) {
 		t.Fatal("the token must not appear in the cloned .git/config")
 	}
 
+	// A fork webhook uses the same Acquirer with credentials hard-disabled.
+	// Even though this instance has a matching connector, the private clone must
+	// fail unauthenticated instead of presenting the tenant PAT.
+	if forkWS, err := a.Acquire(context.Background(), ports.AcquireRequest{Kind: ports.TargetGit, Value: cloneURL, Ref: "main", DisableGitCredentials: true}); err == nil {
+		_ = forkWS.Close()
+		t.Fatal("credential-disabled fork acquisition unexpectedly authenticated")
+	}
+
 	// Without the connector: the same private clone is refused (401), never a silent empty success.
 	noConn := New()
 	noConn.allowInternalHosts = true

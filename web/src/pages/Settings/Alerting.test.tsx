@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, AlertNotEnabledError } from '../../lib/api'
+import { resetCapabilityCache } from '../../lib/capabilities'
 import { Alerting } from './Alerting'
 
 vi.mock('../../lib/api', () => ({
-  api: { testAlert: vi.fn(), me: vi.fn(), listNotificationChannels: vi.fn() },
+  api: { testAlert: vi.fn(), me: vi.fn(), listCapabilities: vi.fn(), listNotificationChannels: vi.fn() },
   AlertNotEnabledError: class AlertNotEnabledError extends Error {
     constructor() {
       super('Alerting is not enabled in this deployment.')
@@ -16,7 +17,21 @@ vi.mock('../../lib/api', () => ({
 describe('Alerting', () => {
   beforeEach(() => {
     vi.resetAllMocks()
-    vi.mocked(api.listNotificationChannels).mockResolvedValue(null)
+    resetCapabilityCache()
+    vi.mocked(api.listCapabilities).mockResolvedValue([
+      {
+        key: 'notifications', name: 'Tenant notifications', enabled: false,
+        switch: 'SYNAPSE_NOTIFICATIONS_ENABLED', requires: [], values: [], planned: false,
+      },
+    ])
+  })
+
+  it('reads the notifications capability instead of probing the channel route', async () => {
+    vi.mocked(api.me).mockResolvedValue({ role: 'admin' } as never)
+    render(<Alerting />)
+    expect(await screen.findByText('Notification framework is not enabled')).toBeInTheDocument()
+    expect(screen.getByText(/Set SYNAPSE_NOTIFICATIONS_ENABLED=true/)).toBeInTheDocument()
+    expect(api.listNotificationChannels).not.toHaveBeenCalled()
   })
 
   it('an admin sends a test alert and sees the per-sink outcome', async () => {

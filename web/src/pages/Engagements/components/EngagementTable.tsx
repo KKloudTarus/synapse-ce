@@ -96,11 +96,11 @@ export const EngagementTable: FC<EngagementTableProps> = ({
     <div className="flex flex-col overflow-hidden rounded-xl border border-secondary bg-primary shadow-xs">
       {/* Table Container */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-sm" role="table" aria-rowcount={totalItems + 1}>
+        <table className="w-full min-w-[1120px] table-fixed border-collapse text-left text-sm" role="table" aria-rowcount={totalItems + 1}>
           <thead>
             <tr className="border-b border-secondary bg-secondary text-xs font-semibold text-tertiary">
               {/* Column 1: Name */}
-              <th scope="col" className="px-5 py-3">
+              <th scope="col" className="w-[280px] px-5 py-3">
                 <button
                   type="button"
                   onClick={() => onSort('name')}
@@ -112,7 +112,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
               </th>
 
               {/* Column 2: In Scope */}
-              <th scope="col" className="w-[260px] px-4 py-3">
+              <th scope="col" className="w-[220px] px-4 py-3">
                 <button
                   type="button"
                   onClick={() => onSort('repository')}
@@ -136,7 +136,7 @@ export const EngagementTable: FC<EngagementTableProps> = ({
               </th>
 
               {/* Column 4: Findings */}
-              <th scope="col" className="w-[250px] px-4 py-3">
+              <th scope="col" className="w-[220px] px-4 py-3">
                 <button
                   type="button"
                   onClick={() => onSort('findings')}

@@ -56,6 +56,12 @@ jobs:
   action-major-tag:
     name: action major tag
     runs-on: ubuntu-latest
+    # MUST wait for goreleaser. Moving v1 onto the release commit while goreleaser is still starting makes
+    # goreleaser resolve the current tag as v1 rather than the release tag, because both then point at the
+    # same commit and v1 was created later. v0.2.2 published as a release named "v1" carrying
+    # synapse-ce_1_linux_amd64.tar.gz that way. Ordering it after the release also matches what the tag
+    # means: v1 should name a release that exists.
+    needs: goreleaser
     # The README, docs/guide/cli.md and the Marketplace listing all tell people to write
     # `uses: KKloudTarus/synapse-ce@v1`, and that tag never existed, so every copied snippet failed with
     # "Unable to resolve action". An Action's major tag is its INTERFACE version and is independent of the
@@ -81,15 +87,52 @@ jobs:
           git push --force origin "refs/tags/$ACTION_MAJOR"
 
   image:
-    name: synapse-cli image
+    name: ${{ matrix.image }} image
     runs-on: ubuntu-latest
     # Independent of goreleaser: a release whose binaries publish but whose image build fails must be visible
-    # as a failed image job, not hidden behind a skipped step.
+    # as a failed image job, not hidden behind a skipped step. One row per image the deploy artefacts
+    # reference, so an image nobody built is a red job rather than a pull that fails in a cluster months
+    # later. Two releases shipped with the Helm chart pointing at ghcr.io/kkloudtarus/synapse and
+    # ghcr.io/kkloudtarus/synapse-web, neither of which had ever been pushed.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The CLI: what a pipeline runs, and what the reusable action installs.
+          - image: synapse-cli
+            file: Dockerfile.cli
+            target: ""
+            platforms: linux/amd64,linux/arm64
+          # The control plane: api, worker, migrate, the egress broker and the sandbox helpers, at the
+          # /opt/synapse paths the chart's commands name. amd64 only, because the production target builds
+          # Synapse's seccomp filter for linux/amd64 and bubblewrap needs that runtime.
+          - image: synapse
+            file: deploy/Dockerfile
+            target: production
+            platforms: linux/amd64
+          # The dashboard: a static server, since the ingress routes /api, /healthz and /readyz to the api.
+          - image: synapse-web
+            file: deploy/Dockerfile.web
+            target: production
+            platforms: linux/amd64,linux/arm64
+          # The endpoint agent, deployed by deploy/k8s/endpoint-agent-daemonset.yaml.
+          - image: synapse-agent
+            file: deploy/Dockerfile.agent
+            target: endpoint
+            platforms: linux/amd64,linux/arm64
+          # The cluster agent, deployed by deploy/k8s/cluster-agent.yaml.
+          - image: synapse-cluster-agent
+            file: deploy/Dockerfile.agent
+            target: cluster
+            platforms: linux/amd64,linux/arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # Dockerfile.cli cross-compiles with CGO_ENABLED=0 from a native builder, so arm64 needs buildx but no
-      # QEMU: nothing is emulated and the build is as fast as the amd64 one.
+      # No QEMU, because nothing here is emulated: the Go Dockerfiles cross-compile with CGO_ENABLED=0 from
+      # a native builder, and Dockerfile.web pins its Node stage to $BUILDPLATFORM because its output is
+      # static assets. That pin was missing at first and a linux/arm64 leg emulated `pnpm install` under
+      # QEMU for an hour before it was cancelled. The one CGO stage, the tree-sitter helper in
+      # deploy/Dockerfile, is why the control-plane image stays single-arch.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -101,19 +144,20 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: Dockerfile.cli
-          platforms: linux/amd64,linux/arm64
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          platforms: ${{ matrix.platforms }}
           push: true
           build-args: |
             VERSION=${{ github.ref_name }}
           tags: |
-            ghcr.io/kkloudtarus/synapse-cli:${{ github.ref_name }}
-            ghcr.io/kkloudtarus/synapse-cli:latest
+            ghcr.io/kkloudtarus/${{ matrix.image }}:${{ github.ref_name }}
+            ghcr.io/kkloudtarus/${{ matrix.image }}:latest
           labels: |
-            org.opencontainers.image.title=synapse-cli
+            org.opencontainers.image.title=${{ matrix.image }}
             org.opencontainers.image.version=${{ github.ref_name }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=https://github.com/KKloudTarus/synapse-ce

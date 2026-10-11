@@ -22,15 +22,16 @@ type NotificationSource struct {
 	pool                  *pgxpool.Pool
 	repo                  *NotificationRepository
 	fleetStaleAfter       time.Duration
-	incidentEnabled       bool
 	vulnerabilityDisabled bool
 }
 
-func NewNotificationSource(pool *pgxpool.Pool, repo *NotificationRepository, fleetStaleAfter time.Duration, incidentEnabled bool) *NotificationSource {
+// NewNotificationSource builds the projector. incident.created is projected unconditionally (#1347): the
+// deprecated SYNAPSE_ALERT_WEBHOOK_URL no longer suppresses it, so tenant rules for it always deliver.
+func NewNotificationSource(pool *pgxpool.Pool, repo *NotificationRepository, fleetStaleAfter time.Duration) *NotificationSource {
 	if fleetStaleAfter <= 0 {
 		fleetStaleAfter = 10 * time.Minute
 	}
-	return &NotificationSource{pool: pool, repo: repo, fleetStaleAfter: fleetStaleAfter, incidentEnabled: incidentEnabled}
+	return &NotificationSource{pool: pool, repo: repo, fleetStaleAfter: fleetStaleAfter}
 }
 
 var _ ports.NotificationSource = (*NotificationSource)(nil)
@@ -70,7 +71,10 @@ func (s *NotificationSource) Poll(ctx context.Context, now time.Time, limit int)
 		if ctx.Err() != nil {
 			return total, ctx.Err()
 		}
-		n, err := s.pollTenant(ctx, tenant, now.UTC(), limit)
+		if total >= limit {
+			break
+		}
+		n, err := s.pollTenant(ctx, tenant, now.UTC(), limit-total)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("poll notification sources for tenant %s: %w", tenant, err))
 			continue
@@ -99,6 +103,9 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			return err
 		}
 		count += n
+		if err := retainPersonalInbox(ctx, tx, tenant, now); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, `INSERT INTO notification_source_state(tenant_id,source_kind,source_id,fingerprint,active,observed_at) VALUES($1,'framework','activation','v1',true,$2) ON CONFLICT DO NOTHING`, tenant, now)
 		if err != nil {
 			return err
@@ -115,7 +122,7 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 		if err := tx.QueryRow(ctx, `SELECT observed_at FROM notification_source_state WHERE tenant_id=$1 AND source_kind='framework' AND source_id='activation'`, tenant).Scan(&activated); err != nil {
 			return err
 		}
-		remaining := limit
+		remaining := limit - count
 		for _, poll := range []func(context.Context, pgx.Tx, shared.ID, time.Time, time.Time, int) (int, error){s.pollVulnerability, s.pollScans, s.pollQualityGates, s.pollSLA, s.pollIncidents} {
 			if remaining <= 0 {
 				break
@@ -125,8 +132,7 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 				return err
 			}
 			count += n
-			// Each source receives a bounded budget so sustained scans cannot starve SLA/fleet.
-			remaining = limit
+			remaining -= n
 		}
 		if remaining > 0 {
 			n, err := s.pollFleet(ctx, tx, tenant, activated, now, remaining)
@@ -149,7 +155,7 @@ func (s *NotificationSource) pollVulnerability(ctx context.Context, tx pgx.Tx, t
 	if s.vulnerabilityDisabled {
 		return 0, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT o.id,o.payload,o.created_at,a.engagement_id,a.action_type,a.title,ra.severity FROM vulnerability_action_outbox o JOIN vulnerability_actions a ON a.tenant_id=o.tenant_id AND a.id=o.action_id JOIN vulnerability_risk_transitions t ON t.tenant_id=a.tenant_id AND t.id=a.transition_id JOIN vulnerability_risk_assessments ra ON ra.tenant_id=t.tenant_id AND ra.id=t.after_assessment_id WHERE o.tenant_id=$1 AND (o.state='pending' OR (o.state='delivering' AND o.locked_until<$3)) AND o.created_at >= $2 AND o.available_at <= $3 ORDER BY o.available_at,o.id FOR UPDATE OF o SKIP LOCKED LIMIT $4`, tenant, activated, now, limit)
+	rows, err := tx.Query(ctx, `SELECT o.id,o.payload,o.created_at,a.id,a.engagement_id,COALESCE(eg.name,''),a.action_type,a.title,ra.severity FROM vulnerability_action_outbox o JOIN vulnerability_actions a ON a.tenant_id=o.tenant_id AND a.id=o.action_id LEFT JOIN engagements eg ON eg.tenant_id=a.tenant_id AND eg.id=a.engagement_id JOIN vulnerability_risk_transitions t ON t.tenant_id=a.tenant_id AND t.id=a.transition_id JOIN vulnerability_risk_assessments ra ON ra.tenant_id=t.tenant_id AND ra.id=t.after_assessment_id WHERE o.tenant_id=$1 AND (o.state='pending' OR (o.state='delivering' AND o.locked_until<$3)) AND o.created_at >= $2 AND o.available_at <= $3 ORDER BY o.available_at,o.id FOR UPDATE OF o SKIP LOCKED LIMIT $4`, tenant, activated, now, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -158,13 +164,15 @@ func (s *NotificationSource) pollVulnerability(ctx context.Context, tx pgx.Tx, t
 		id                      shared.ID
 		payload                 []byte
 		at                      time.Time
+		actionID                string
 		eng                     shared.ID
+		engagementName          string
 		action, title, severity string
 	}
 	var items []item
 	for rows.Next() {
 		var v item
-		if err := rows.Scan(&v.id, &v.payload, &v.at, &v.eng, &v.action, &v.title, &v.severity); err != nil {
+		if err := rows.Scan(&v.id, &v.payload, &v.at, &v.actionID, &v.eng, &v.engagementName, &v.action, &v.title, &v.severity); err != nil {
 			return 0, err
 		}
 		items = append(items, v)
@@ -179,7 +187,7 @@ func (s *NotificationSource) pollVulnerability(ctx context.Context, tx pgx.Tx, t
 	rows.Close()
 	for _, v := range items {
 		data, _ := json.Marshal(map[string]any{"title": v.title, "summary": "A vulnerability risk action requires review.", "action_type": v.action, "outbox_id": v.id})
-		e := notification.Event{TenantID: tenant, ID: stableID(tenant.String(), "vulnerability", v.id.String()), Type: notification.EventVulnerabilityAction, SourceKind: "vulnerability_action_outbox", SourceID: v.id.String(), EngagementID: v.eng, Severity: shared.Severity(v.severity), SchemaVersion: 1, OccurredAt: v.at, Data: data}
+		e := notification.Event{TenantID: tenant, ID: stableID(tenant.String(), "vulnerability", v.id.String()), Type: notification.EventVulnerabilityAction, SourceKind: "vulnerability_action_outbox", SourceID: v.id.String(), EngagementID: v.eng, Severity: shared.Severity(v.severity), SchemaVersion: 1, OccurredAt: v.at, Data: data, SubjectID: v.actionID, Context: seedContext(map[string]string{"engagement_name": v.engagementName})}
 		if _, err := s.repo.publishTx(ctx, tx, e, ""); err != nil {
 			return 0, err
 		}
@@ -191,11 +199,11 @@ func (s *NotificationSource) pollVulnerability(ctx context.Context, tx pgx.Tx, t
 }
 
 func (s *NotificationSource) pollScans(ctx context.Context, tx pgx.Tx, tenant shared.ID, activated, now time.Time, limit int) (int, error) {
-	return s.pollCaptured(ctx, tx, tenant, "scan_job", now, limit, true)
+	return s.pollCaptured(ctx, tx, tenant, "scan_job", now, limit)
 }
 
 func (s *NotificationSource) pollQualityGates(ctx context.Context, tx pgx.Tx, tenant shared.ID, activated, now time.Time, limit int) (int, error) {
-	return s.pollCaptured(ctx, tx, tenant, "project_analysis_gate", now, limit, true)
+	return s.pollCaptured(ctx, tx, tenant, "project_analysis_gate", now, limit)
 }
 
 func (s *NotificationSource) pollSLA(ctx context.Context, tx pgx.Tx, tenant shared.ID, _, now time.Time, limit int) (int, error) {
@@ -224,7 +232,7 @@ func (s *NotificationSource) pollSLA(ctx context.Context, tx pgx.Tx, tenant shar
 		if count >= limit {
 			break
 		}
-		rows, err := tx.Query(ctx, `SELECT ca.assessment_id,ca.engagement_id,ca.finding_id,a.remediate_by,a.tier FROM sla_current_assessments ca JOIN sla_assessments a ON a.tenant_id=ca.tenant_id AND a.id=ca.assessment_id JOIN sla_lifecycles l ON l.tenant_id=ca.tenant_id AND l.engagement_id=ca.engagement_id AND l.finding_id=ca.finding_id WHERE ca.tenant_id=$1 AND l.status IN ('open','mitigating') AND a.tier<>'exception' AND a.remediate_by>$2 AND a.remediate_by<=$2::timestamptz+make_interval(secs=>$3) AND NOT EXISTS (SELECT 1 FROM notification_events n WHERE n.tenant_id=$1 AND n.source_kind='sla_reminder' AND n.data->>'assessment_id'=ca.assessment_id AND (n.data->>'lead_time_seconds')::bigint=$3) ORDER BY a.remediate_by,ca.assessment_id LIMIT $4`, tenant, now, lead, limit-count)
+		rows, err := tx.Query(ctx, `SELECT ca.assessment_id,ca.engagement_id,ca.finding_id,a.remediate_by,a.tier,COALESCE(eg.name,''),COALESCE(f.title,'') FROM sla_current_assessments ca JOIN sla_assessments a ON a.tenant_id=ca.tenant_id AND a.id=ca.assessment_id JOIN sla_lifecycles l ON l.tenant_id=ca.tenant_id AND l.engagement_id=ca.engagement_id AND l.finding_id=ca.finding_id LEFT JOIN engagements eg ON eg.tenant_id=ca.tenant_id AND eg.id=ca.engagement_id LEFT JOIN findings f ON f.tenant_id=ca.tenant_id AND f.id=ca.finding_id WHERE ca.tenant_id=$1 AND l.status IN ('open','mitigating') AND a.tier<>'exception' AND a.remediate_by>$2 AND a.remediate_by<=$2::timestamptz+make_interval(secs=>$3) AND NOT EXISTS (SELECT 1 FROM notification_events n WHERE n.tenant_id=$1 AND n.source_kind='sla_reminder' AND n.data->>'assessment_id'=ca.assessment_id AND (n.data->>'lead_time_seconds')::bigint=$3) ORDER BY a.remediate_by,ca.assessment_id LIMIT $4`, tenant, now, lead, limit-count)
 		if err != nil {
 			return count, err
 		}
@@ -233,11 +241,13 @@ func (s *NotificationSource) pollSLA(ctx context.Context, tx pgx.Tx, tenant shar
 			eng, finding shared.ID
 			deadline     time.Time
 			tier         string
+			engagement   string
+			findingTitle string
 		}
 		var items []item
 		for rows.Next() {
 			var v item
-			if err := rows.Scan(&v.assessment, &v.eng, &v.finding, &v.deadline, &v.tier); err != nil {
+			if err := rows.Scan(&v.assessment, &v.eng, &v.finding, &v.deadline, &v.tier, &v.engagement, &v.findingTitle); err != nil {
 				rows.Close()
 				return count, err
 			}
@@ -251,7 +261,7 @@ func (s *NotificationSource) pollSLA(ctx context.Context, tx pgx.Tx, tenant shar
 		for _, v := range items {
 			source := v.assessment + ":" + strconv.FormatInt(lead, 10) + ":" + v.deadline.UTC().Format(time.RFC3339Nano)
 			data, _ := json.Marshal(map[string]any{"title": "Remediation SLA approaching", "summary": "A " + v.tier + " finding is approaching its remediation deadline.", "assessment_id": v.assessment, "engagement_id": v.eng, "finding_id": v.finding, "deadline": v.deadline, "lead_time_seconds": lead})
-			e := notification.Event{TenantID: tenant, ID: stableID(tenant.String(), "sla", source), Type: notification.EventSLAApproaching, SourceKind: "sla_reminder", SourceID: source, EngagementID: v.eng, SchemaVersion: 1, OccurredAt: now, Data: data}
+			e := notification.Event{TenantID: tenant, ID: stableID(tenant.String(), "sla", source), Type: notification.EventSLAApproaching, SourceKind: "sla_reminder", SourceID: source, EngagementID: v.eng, SchemaVersion: 1, OccurredAt: now, Data: data, Context: seedContext(map[string]string{"tier": v.tier, "engagement_name": v.engagement, "finding_title": v.findingTitle})}
 			if _, err := s.repo.publishTx(ctx, tx, e, ""); err != nil {
 				return count, err
 			}
@@ -262,7 +272,7 @@ func (s *NotificationSource) pollSLA(ctx context.Context, tx pgx.Tx, tenant shar
 }
 
 func (s *NotificationSource) pollIncidents(ctx context.Context, tx pgx.Tx, tenant shared.ID, activated, now time.Time, limit int) (int, error) {
-	return s.pollCaptured(ctx, tx, tenant, "incident", now, limit, s.incidentEnabled)
+	return s.pollCaptured(ctx, tx, tenant, "incident", now, limit)
 }
 
 func (s *NotificationSource) pollFleet(ctx context.Context, tx pgx.Tx, tenant shared.ID, activated, now time.Time, limit int) (int, error) {
@@ -314,7 +324,7 @@ func (s *NotificationSource) pollFleet(ctx context.Context, tx pgx.Tx, tenant sh
 		}
 		source := v.id + ":" + fingerprint
 		data, _ := json.Marshal(map[string]any{"title": "Fleet agent offline", "summary": "Agent " + v.name + " has missed its heartbeat freshness window.", "agent_id": v.id, "last_seen_at": v.last})
-		e := notification.Event{TenantID: tenant, ID: stableID(tenant.String(), "fleet-offline", source), Type: notification.EventFleetAgentOffline, SourceKind: "fleet_agent_offline_episode", SourceID: source, SchemaVersion: 1, OccurredAt: now, Data: data}
+		e := notification.Event{TenantID: tenant, ID: stableID(tenant.String(), "fleet-offline", source), Type: notification.EventFleetAgentOffline, SourceKind: "fleet_agent_offline_episode", SourceID: source, SchemaVersion: 1, OccurredAt: now, Data: data, Context: seedContext(map[string]string{"agent_name": v.name})}
 		if _, err := s.repo.publishTx(ctx, tx, e, ""); err != nil {
 			return count, err
 		}
@@ -324,4 +334,12 @@ func (s *NotificationSource) pollFleet(ctx context.Context, tx pgx.Tx, tenant sh
 		count++
 	}
 	return count, nil
+}
+
+// seedContext passes template variables a poller read from its source row but the event data does
+// not carry. The event builder keeps them over what it derives, and the catalog decides which
+// survive in the snapshot.
+func seedContext(vars map[string]string) json.RawMessage {
+	raw, _ := notification.TemplateContext{Vars: vars}.Encode()
+	return raw
 }

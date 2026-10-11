@@ -8,12 +8,17 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
+type IntegrationEnableRequirements struct {
+	RequireCredential     bool
+	RequireSuccessfulTest bool
+}
+
 type IntegrationStore interface {
 	CreateIntegration(ctx context.Context, item integration.Integration, audit AuditEntry) error
 	ListIntegrations(ctx context.Context, includeArchived bool) ([]integration.Integration, error)
 	GetIntegration(ctx context.Context, id shared.ID) (integration.Integration, error)
 	UpdateIntegration(ctx context.Context, item integration.Integration, expectedVersion int, audit AuditEntry) (integration.Integration, error)
-	SetIntegrationEnabled(ctx context.Context, id shared.ID, enabled bool, expectedVersion int, audit AuditEntry) (integration.Integration, error)
+	SetIntegrationEnabled(ctx context.Context, id shared.ID, enabled bool, expectedVersion int, requirements IntegrationEnableRequirements, audit AuditEntry) (integration.Integration, error)
 	ArchiveIntegration(ctx context.Context, id shared.ID, expectedVersion int, audit AuditEntry) error
 
 	PutIntegrationCredential(ctx context.Context, integrationID shared.ID, credentialID string, plaintext []byte, expectedVersion, expectedConnectionRevision int, audit AuditEntry) error
@@ -32,7 +37,7 @@ type IntegrationStore interface {
 	FinishIntegrationOperation(ctx context.Context, id shared.ID, state integration.OperationState, checkpoint string, counts integration.OperationCounts, errors []string, pipelines []integration.Pipeline, finishedAt time.Time) (integration.Operation, error)
 	FinishIntegrationPoll(ctx context.Context, id shared.ID, state integration.OperationState, checkpoint string, counts integration.OperationCounts, errors []string, runs []integration.ExternalRun, finishedAt time.Time) (integration.Operation, error)
 	CancelIntegrationOperation(ctx context.Context, id shared.ID, finishedAt time.Time, audit AuditEntry) (integration.Operation, error)
-	ListDueIntegrations(ctx context.Context, now time.Time, limit int) ([]integration.Integration, error)
+	ListDueIntegrations(ctx context.Context, now time.Time, limit int, providers []integration.Provider) ([]integration.Integration, error)
 
 	ListIntegrationExternalRuns(ctx context.Context, integrationID shared.ID, limit int) ([]integration.ExternalRun, error)
 }

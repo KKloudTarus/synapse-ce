@@ -562,11 +562,12 @@ Teams, members and the routing policy that decides which team owns a finding.
 
 `/settings/integrations`
 
-Outbound systems Synapse talks to, and whether each is enabled.
+Every external system Synapse talks to, grouped by capability: CI/CD, Source control, Messaging, Ticketing, Documentation and SIEM.
 
-1. Add an integration and supply its credential; secrets go to the vault.
-2. Enable or disable one without deleting it.
-3. Check its bindings to see what it is wired to.
+1. Each card shows the integration's health, last success and last error. A field its API does not report reads **Not reported by this integration**.
+2. **Test** runs the integration's own test (a CI/CD connection test or a notification test delivery). Only tenant administrators can run it, and only administrators see source-control connectors and notification channels.
+3. A group whose capability is switched off shows **Off** and the switch that turns it on. Ticketing, Documentation and SIEM show **Not available yet** until they ship.
+4. **Manage CI/CD** (`/settings/integrations/ci`), **Manage connectors** and **Manage channels** open the pages where each integration is configured.
 
 === "Desktop"
 
@@ -583,8 +584,9 @@ Outbound systems Synapse talks to, and whether each is enabled.
 Source-control hosts a scan can clone a private repository from.
 
 1. Pick the **Provider**, then fill **Name**, **Host**, **Username** and the **Personal access token**.
-2. The token is encrypted at rest and supplied to git only at clone time.
-3. `Add connector` saves it.
+2. For GitHub Enterprise Server or self-managed GitLab, optionally fill **API base URL** (`https://<host>/api/v3` or `https://<host>/api/v4`) so PR decoration reaches that forge. The host must match **Host** and be on the operator's allowlist; see [Self-hosted forges](configuration.md#self-hosted-forges-github-enterprise-server-self-managed-gitlab).
+3. The token is encrypted at rest and supplied to git only at clone time.
+4. `Add connector` saves it.
 
 === "Desktop"
 
@@ -636,10 +638,18 @@ What offensive tooling is permitted and under what authorization.
 
 Where notifications go, which events trigger them, and what was delivered.
 
-1. `Add channel`, then set **Type**, **Name**, **Webhook URL**, **HMAC secret**.
+1. `Add channel`, choose **Type** (signed webhook, Slack incoming webhook, or email), and set
+   **Name**. A signed webhook needs a **Webhook URL** and **HMAC secret**; Slack needs its incoming
+   webhook URL; email needs **Recipients**.
 2. Add rules mapping events to channels.
-3. `Send test alert` proves the path end to end before you rely on it.
-4. Review deliveries with the channel / event / state filters; open one to see each attempt.
+3. Click `Test` on a channel row. This queues a test delivery for that channel; the returned
+   delivery ID and `pending` state do **not** mean the receiver acknowledged it.
+4. Review delivery history using the channel / event / state filters. Open the delivery to
+   inspect its attempts and confirm whether it was delivered.
+
+The separate `Send test alert` button under **Legacy incident webhook** tests only the
+compatibility webhook configured with `SYNAPSE_ALERT_WEBHOOK_*` (deprecated, removed in 0.4.0); it does not test tenant-managed
+channels.
 
 === "Desktop"
 
@@ -648,6 +658,40 @@ Where notifications go, which events trigger them, and what was delivered.
 === "Phone"
 
     ![settings_alerting at phone width](assets/ui/phone_settings_alerting.webp)
+
+### Templates
+
+`/settings/templates`
+
+The wording of notification messages. Only tenant administrators and integration administrators
+see this tab's content; everyone else sees **Administrator access required**.
+
+1. **Built-in defaults** lists the read-only default templates with `Clone to customize`, which
+   opens a new draft pre-filled with the default's key and text. Until the default template set
+   ships, the section says the defaults are not available in this build yet.
+2. **Custom templates** lists the tenant's templates grouped by event type, then channel family,
+   with status (`Draft`, `Active`, `Archived`), language, the latest version and the version that
+   renders. Filter by event, channel family and status.
+3. `New template` (`/settings/templates/new`) asks for a name, the event (or **Any event (*)**),
+   the channel family and the language; these three are fixed after creation. Each family has its
+   own fields (chat: title and body; email: subject and body; pager: summary; ticket: summary and
+   description; webhook: body).
+4. The **Variables** panel lists the variables the chosen event exposes, with their data class and
+   list cap in a tooltip; pressing one inserts `{{.name}}` at the cursor. An event without
+   variables says so.
+5. `Save new version` appends a version; a field the template engine rejects shows its message and
+   line under that field. `Activate` makes the latest saved version render, and `Archive` retires
+   the template. If someone else changed the template meanwhile, the page reloads it, keeps your
+   unsaved text and says so.
+6. **Version history** lists every version with who saved it and when (`Load older versions` pages
+   past the newest 200). The comparison opens on the version that renders against the latest, or
+   on the latest against the one before it; `Changes in vN` shows what a version changed, and the
+   **From** and **To** selects compare any two, including the rendering and latest versions when
+   they are older than the loaded pages; a version that is not loaded is read on its own. Each field
+   is shown side by side, removed lines on
+   the left and added lines on the right; picking the same version twice shows it on its own.
+   `Roll back to vN` asks for confirmation first, naming the version that stops rendering and the
+   fields that differ.
 
 ### Telemetry privacy
 

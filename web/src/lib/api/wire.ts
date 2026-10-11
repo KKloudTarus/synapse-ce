@@ -81,6 +81,8 @@ export interface ProjectWire {
   source_binding: SourceBindingWire
   default_profile_by_lang: Record<string, string>
   gate_id?: string
+  /** Always sent by `projectView`; absent from `projectSummaryResponse`, so list rows read false. */
+  decorate_pull_requests?: boolean
   created_at: string
   updated_at: string
   /** List-only enrichment from `projectSummaryResponse`. Null when the project has none. */
@@ -124,6 +126,7 @@ export const PROJECT_WIRE_KEYS = [
   'source_binding',
   'default_profile_by_lang',
   'gate_id',
+  'decorate_pull_requests',
   'created_at',
   'updated_at',
 ] as const

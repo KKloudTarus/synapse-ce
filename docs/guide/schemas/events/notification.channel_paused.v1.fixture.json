@@ -1,0 +1,17 @@
+{
+  "id": "event-notification-channel_paused",
+  "type": "notification.channel_paused",
+  "source_kind": "notification_channel_health",
+  "source_id": "pause:channel-7:pause-42",
+  "schema_version": 1,
+  "occurred_at": "2026-09-29T08:00:00Z",
+  "data": {
+    "title": "Notification channel paused",
+    "summary": "\"Ops webhook\" (webhook) stopped sending after 5 consecutive permanent failures (last: destination_blocked). Fix the destination, then resume the channel in Alerting.",
+    "channel_id": "channel-7",
+    "class": "webhook",
+    "reason": "consecutive_permanent_failures",
+    "failure_code": "destination_blocked",
+    "failures": 5
+  }
+}

@@ -73,6 +73,17 @@ func (scheduler *Scheduler) Tick(ctx context.Context) (int, error) {
 	if !scheduler.leadership.IsLeader() {
 		return 0, nil
 	}
+	// Select eligible providers before the store applies ORDER BY / LIMIT: write-only
+	// integrations must never displace a Jenkins poll from a bounded tick.
+	pollProviders := make([]integration.Provider, 0)
+	for _, descriptor := range scheduler.service.ProviderDescriptors() {
+		if descriptor.Supports(integration.CapabilityReadRuns) {
+			pollProviders = append(pollProviders, descriptor.Provider)
+		}
+	}
+	if len(pollProviders) == 0 {
+		return 0, nil
+	}
 	tenantIDs, err := scheduler.tenants.ListTenantIDs(ctx)
 	if err != nil {
 		return 0, err
@@ -91,7 +102,7 @@ func (scheduler *Scheduler) Tick(ctx context.Context) (int, error) {
 		if depth >= scheduler.config.MaxQueueDepth {
 			continue
 		}
-		due, err := scheduler.store.ListDueIntegrations(tenantCtx, scheduler.clock.Now().UTC(), scheduler.config.DispatchLimit-dispatched)
+		due, err := scheduler.store.ListDueIntegrations(tenantCtx, scheduler.clock.Now().UTC(), scheduler.config.DispatchLimit-dispatched, pollProviders)
 		if err != nil {
 			return dispatched, err
 		}

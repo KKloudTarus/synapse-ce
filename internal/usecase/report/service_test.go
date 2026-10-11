@@ -10,6 +10,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -228,6 +229,58 @@ func TestRenderDeliverableSections(t *testing.T) {
 	// Methodology states the prioritization model (KEV → EPSS × CVSS).
 	if !sectionMentions(cap.last, "Methodology", "EPSS") {
 		t.Error("methodology must state the EPSS-based prioritization")
+	}
+}
+
+func TestReportQualifiesIncompleteEngineCoverage(t *testing.T) {
+	insight := ports.ReportInsight{
+		HasScan:        true,
+		EngineCoverage: scanrun.EngineCoverage{Status: scanrun.CoverageComplete, Required: 3, Completed: 3}, // stale projection must not override outcomes
+		EngineOutcomes: []scanrun.EngineOutcome{
+			{Engine: "secrets", Execution: scanrun.EngineCompleted, Coverage: scanrun.CoverageComplete, Required: true},
+			{Engine: "sast", Execution: scanrun.EngineTimedOut, Coverage: scanrun.CoveragePartial, Reason: scanrun.ReasonDeadlineExceeded, Required: true},
+		},
+	}
+	if got := executivePosture([]finding.Finding{{Severity: shared.SeverityHigh}}, insight); !strings.Contains(got, "ELEVATED RISK") || !strings.Contains(got, "lower bound") {
+		t.Fatalf("high-risk incomplete posture = %q", got)
+	}
+	if got := executivePosture(nil, insight); !strings.Contains(got, "INCONCLUSIVE") {
+		t.Fatalf("zero-finding incomplete posture = %q", got)
+	}
+	section, ok := scanSection(insight)
+	if !ok || section.Table == nil || len(section.Table.Rows) != 2 || section.Table.Rows[0][0] != "sast" {
+		t.Fatalf("scan section must deterministically render outcomes: %+v", section)
+	}
+}
+
+func TestReportTreatsHistoricalMissingEngineCoverageAsUnknown(t *testing.T) {
+	insight := ports.ReportInsight{HasScan: true, Confident: true, EngineCoverage: scanrun.EngineCoverage{Status: scanrun.CoverageComplete, Required: 3, Completed: 3}}
+	if got := executivePosture(nil, insight); !strings.Contains(got, "INCONCLUSIVE") || !strings.Contains(got, "unknown") {
+		t.Fatalf("historical scan posture = %q", got)
+	}
+}
+
+func TestReportQualifiesMixedCurrentAndRetainedResults(t *testing.T) {
+	insight := ports.ReportInsight{
+		HasScan:                 true,
+		ExecutionMode:           "full",
+		IncludesPreviousResults: true,
+		EngineCoverage:          scanrun.EngineCoverage{Status: scanrun.CoverageComplete, Required: 3, Completed: 3},
+		EngineOutcomes: []scanrun.EngineOutcome{
+			{Engine: "sca", Execution: scanrun.EngineCompleted, Coverage: scanrun.CoverageComplete, Required: true},
+			{Engine: "sast", Execution: scanrun.EngineCompleted, Coverage: scanrun.CoverageComplete, Required: true},
+			{Engine: "secrets", Execution: scanrun.EngineCompleted, Coverage: scanrun.CoverageComplete, Required: true},
+		},
+	}
+	if got := executivePosture([]finding.Finding{{Severity: shared.SeverityLow}}, insight); !strings.Contains(got, "INCONCLUSIVE") || !strings.Contains(got, "previous execution") {
+		t.Fatalf("mixed low-risk posture = %q", got)
+	}
+	if got := executivePosture([]finding.Finding{{Severity: shared.SeverityHigh}}, insight); !strings.Contains(got, "ELEVATED RISK") || !strings.Contains(got, "whole-assessment") {
+		t.Fatalf("mixed high-risk posture = %q", got)
+	}
+	section, ok := scanSection(insight)
+	if !ok || !strings.Contains(strings.Join(section.Paragraphs, " "), "Current execution mode: full") || !strings.Contains(strings.Join(section.Paragraphs, " "), "retained findings") {
+		t.Fatalf("mixed scan section = %+v", section)
 	}
 }
 

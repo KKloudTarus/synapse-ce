@@ -24,7 +24,7 @@ func NewUserRepository() *UserRepository {
 
 var _ ports.UserRepository = (*UserRepository)(nil)
 
-func (r *UserRepository) Create(_ context.Context, u *user.User) error {
+func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.byID[u.ID]; ok {
@@ -32,14 +32,33 @@ func (r *UserRepository) Create(_ context.Context, u *user.User) error {
 	}
 	cp := *u
 	r.byID[u.ID] = &cp
+	r.registerRestore(ctx, u.ID, nil)
 	return nil
 }
 
-func (r *UserRepository) Upsert(_ context.Context, u *user.User) error {
+// registerRestore joins the tenant transaction bound to ctx, if any, so a later failure in the
+// same unit (an audit write, for example) restores the user exactly as it was. previous is the
+// stored row before the write, or nil when the write created it. Callers hold r.mu; the
+// compensation runs after they return and takes the lock itself.
+func (r *UserRepository) registerRestore(ctx context.Context, id shared.ID, previous *user.User) {
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if previous == nil {
+			delete(r.byID, id)
+			return
+		}
+		r.byID[id] = previous
+	})
+}
+
+func (r *UserRepository) Upsert(ctx context.Context, u *user.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	previous := r.byID[u.ID]
 	cp := *u
 	r.byID[u.ID] = &cp
+	r.registerRestore(ctx, u.ID, previous)
 	return nil
 }
 
@@ -68,7 +87,7 @@ func (r *UserRepository) GetByID(_ context.Context, tenantID, id shared.ID) (*us
 
 // Update writes the mutable fields of an existing user inside tenantID. The tenant of the stored
 // row is preserved, so an update can never move a user between tenants.
-func (r *UserRepository) Update(_ context.Context, tenantID shared.ID, u *user.User) error {
+func (r *UserRepository) Update(ctx context.Context, tenantID shared.ID, u *user.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	existing, ok := r.byID[u.ID]
@@ -78,6 +97,7 @@ func (r *UserRepository) Update(_ context.Context, tenantID shared.ID, u *user.U
 	updated := *u
 	updated.TenantID = existing.TenantID
 	r.byID[u.ID] = &updated
+	r.registerRestore(ctx, u.ID, existing)
 	return nil
 }
 

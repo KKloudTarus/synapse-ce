@@ -83,6 +83,10 @@ type ProviderDescriptor struct {
 	Capabilities []Capability      `json:"capabilities"`
 	ConfigFields []FieldDescriptor `json:"config_fields"`
 	SecretFields []FieldDescriptor `json:"secret_fields"`
+	// SelfHosted marks a provider whose endpoint is a tenant's own server (Jenkins, Jira Data
+	// Center). Only such providers are subject to the operator's self-hosted endpoint rules; a SaaS
+	// provider pins its vendor host in its adapter instead (EPIC #1327 D6).
+	SelfHosted bool `json:"-"`
 }
 
 func (descriptor ProviderDescriptor) Validate() error {

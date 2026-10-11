@@ -84,9 +84,9 @@ func TestReadinessEndpointReportsDependencyStateWithoutDetails(t *testing.T) {
 }
 
 func TestReadinessTimesOutAndRemainsPublic(t *testing.T) {
-	rt := &Router{auth: NewAuthenticator(func(context.Context, string) (Principal, bool) {
+	rt := &Router{auth: NewAuthenticator(func(context.Context, string) (Principal, error) {
 		t.Fatal("public readiness probe attempted authentication")
-		return Principal{}, false
+		return Principal{}, errTestCredentialInvalid
 	})}
 	rt.readiness.timeout = 10 * time.Millisecond
 	rt.SetReadinessChecks(map[string]ReadinessCheck{

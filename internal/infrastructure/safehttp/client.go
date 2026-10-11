@@ -1,31 +1,30 @@
+// Package safehttp builds outbound HTTP clients and dialers that refuse destinations an attacker
+// could use to reach internal services: private networks unless a policy opens them, loopback,
+// link-local and cloud metadata endpoints, and every other IANA special-purpose range. The check
+// runs at dial time on the address actually dialed, so it holds across redirects and DNS
+// rebinding.
 package safehttp
 
 import (
-	"context"
-	"fmt"
-	"net"
 	"net/http"
-	"net/netip"
 	"time"
 )
 
-var (
-	carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
-	sixToFour       = netip.MustParsePrefix("2002::/16")
-	nat64WellKnown  = netip.MustParsePrefix("64:ff9b::/96")
-)
-
-type lookupFunc func(context.Context, string, string) ([]netip.Addr, error)
-type dialFunc func(context.Context, string, string) (net.Conn, error)
-
+// New returns an HTTP client that admits public destinations and, when allowPrivate is set,
+// private-use ones. It is NewClient with Policy{AllowPrivate: allowPrivate}.
 func New(timeout time.Duration, allowPrivate bool) *http.Client {
-	dialer := net.Dialer{Timeout: 30 * time.Second}
-	return newClient(timeout, allowPrivate, net.DefaultResolver.LookupNetIP, dialer.DialContext)
+	return NewClient(timeout, Policy{AllowPrivate: allowPrivate})
 }
 
-func newClient(timeout time.Duration, allowPrivate bool, lookup lookupFunc, dial dialFunc) *http.Client {
+// NewClient returns an HTTP client whose every connection goes through a Dialer for policy. It
+// follows no redirects and uses no proxy, so the dialed address is the one the policy checked.
+func NewClient(timeout time.Duration, policy Policy) *http.Client {
+	return newClient(timeout, NewDialer(policy, 0))
+}
+
+func newClient(timeout time.Duration, dialer *Dialer) *http.Client {
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = defaultDialTimeout
 	}
 	return &http.Client{
 		Timeout: timeout,
@@ -41,41 +40,7 @@ func newClient(timeout time.Duration, allowPrivate bool, lookup lookupFunc, dial
 			MaxIdleConns:          16,
 			MaxIdleConnsPerHost:   4,
 			MaxConnsPerHost:       8,
-			DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-				host, port, err := net.SplitHostPort(address)
-				if err != nil {
-					return nil, err
-				}
-				addresses, err := lookup(ctx, "ip", host)
-				if err != nil {
-					return nil, err
-				}
-				var lastErr error
-				for _, address := range addresses {
-					address = address.Unmap()
-					if blocked(address, allowPrivate) {
-						lastErr = fmt.Errorf("source endpoint resolves to a disallowed address")
-						continue
-					}
-					connection, err := dial(ctx, network, net.JoinHostPort(address.String(), port))
-					if err == nil {
-						return connection, nil
-					}
-					lastErr = err
-				}
-				if lastErr != nil {
-					return nil, lastErr
-				}
-				return nil, fmt.Errorf("source endpoint has no usable address")
-			},
+			DialContext:           dialer.DialContext,
 		},
 	}
-}
-
-func blocked(address netip.Addr, allowPrivate bool) bool {
-	address = address.Unmap()
-	if !address.IsValid() || address.IsUnspecified() || address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() || carrierGradeNAT.Contains(address) || sixToFour.Contains(address) || nat64WellKnown.Contains(address) {
-		return true
-	}
-	return !allowPrivate && address.IsPrivate()
 }

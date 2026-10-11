@@ -1,0 +1,11 @@
+{
+  "subject_kind": "project_analysis",
+  "subject_id": "analysis-42",
+  "vars": {
+    "event_label": "Quality gate failed",
+    "event_type": "quality_gate.failed",
+    "occurred_at": "2026-09-27T08:00:00Z",
+    "summary": "A finalized project analysis failed its quality gate.",
+    "title": "Quality gate failed"
+  }
+}

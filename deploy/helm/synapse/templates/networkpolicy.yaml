@@ -68,6 +68,27 @@ spec:
               kubernetes.io/metadata.name: {{ .Values.api.metrics.monitoringNamespace | quote }}
       ports: [{protocol: TCP, port: {{ .Values.api.metrics.port }}}]
 {{- end }}
+{{- if and .Values.worker.metrics.enabled (eq (include "synapse.executionMode" .) "inClusterBroker") }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "synapse.fullname" . }}-worker-metrics
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "synapse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.worker.metrics.monitoringNamespace | quote }}
+      ports: [{protocol: TCP, port: {{ .Values.worker.metrics.port }}}]
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

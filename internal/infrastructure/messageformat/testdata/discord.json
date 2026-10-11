@@ -1,0 +1,11 @@
+{
+  "allowed_mentions": {
+    "parse": []
+  },
+  "embeds": [
+    {
+      "description": "**SQL injection in \\/login** on *prod\\_eu*\nRule `CWE-89`\\, severity **critical**\n\n- Host\\: api\\.example\\.com\n- Owner\\: team \\\u003cplatform\\\u003e \\\u0026 ops\n\nReported by Synapse\\.\n\n[Open finding](https://synapse.example.com/engagements/e1/findings/f1)",
+      "title": "Critical finding in payments\\-api"
+    }
+  ]
+}

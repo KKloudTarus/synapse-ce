@@ -1,0 +1,11 @@
+{
+  "subject_kind": "user_contact",
+  "subject_id": "",
+  "vars": {
+    "event_label": "Destination changed",
+    "event_type": "notification.destination_changed",
+    "occurred_at": "2026-09-27T08:00:00Z",
+    "summary": "system changed the webhook destination https://alerts.example.com.",
+    "title": "Notification destination host changed"
+  }
+}

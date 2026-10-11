@@ -211,7 +211,7 @@ function ComparisonBody({ projectKey, base, head, targets }: { projectKey: strin
   const headLabel = targets.find((t) => t.branch === head)?.label ?? head
 
   return (
-    <div className="space-y-6">
+    <div data-quality-base={baseData.latestAnalysis?.id} data-quality-head={headData.latestAnalysis?.id} className="space-y-6">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <GateColumn label={baseLabel} overview={baseData} />
         <GateColumn label={headLabel} overview={headData} />
@@ -240,7 +240,7 @@ function MetricDiff({ baseLabel, headLabel, base, head }: { baseLabel: string; h
     <Card className="shadow-xs">
       <h2 className="mb-3 text-lg font-semibold text-primary">Overall code metrics</h2>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table data-quality-metric-comparison className="w-full text-sm">
           <thead>
             <tr className="border-b border-secondary text-left text-xs uppercase tracking-wider text-tertiary">
               <th scope="col" className="py-2 pr-3 font-semibold">Metric</th>

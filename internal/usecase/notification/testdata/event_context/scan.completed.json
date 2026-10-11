@@ -1,0 +1,12 @@
+{
+  "subject_kind": "scan_job",
+  "subject_id": "scan-42",
+  "vars": {
+    "event_label": "Scan completed",
+    "event_type": "scan.completed",
+    "occurred_at": "2026-09-27T08:00:00Z",
+    "scan_kind": "sast",
+    "summary": "A scan completed successfully.",
+    "title": "Scan completed"
+  }
+}

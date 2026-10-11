@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
@@ -28,6 +29,27 @@ type pushTarget struct {
 	// insecureHTTP allows a plain-http server that is not loopback. The bearer token travels in the
 	// clear then; a pipeline has to say so explicitly.
 	insecureHTTP bool
+	// source publishes the scanned tree for the analysis this push creates, so the console's Code view
+	// can serve it. Without it a CI-pushed analysis reports source as unavailable with the reason
+	// not_retained, because the CLI pushes results and not files, and only a server-side git or archive
+	// acquisition retains source. Opt-in: it uploads source to the server.
+	source bool
+	// engagement records the scan's security findings against an engagement, through the server's own
+	// SARIF ingest. It is independent of project: a pipeline may record code quality, engagement
+	// findings, or both from one run.
+	engagement string
+	// asset optionally binds the ingested findings to a business asset.
+	asset string
+	// coverage is a test-coverage report (lcov, cobertura or jacoco) to record with the analysis. The
+	// analysis payload has carried a line_coverage field all along and the scan subcommand had no way
+	// to fill it, so a pushed analysis showed no coverage and the managed gate could not evaluate a
+	// coverage condition. Only meaningful with a project destination.
+	coverage string
+	// sbom uploads the generated CycloneDX SBOM to the engagement, which is how an image scan's
+	// component inventory (its OS and language packages) becomes visible on the console next to the
+	// findings. Opt-in, because the server keeps ONE active imported SBOM per engagement: an automatic
+	// push would silently replace one an operator had imported by hand.
+	sbom bool
 }
 
 // projectKeyPattern mirrors the server's project key rule (internal/domain/project): lowercase
@@ -37,17 +59,41 @@ var projectKeyPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 func (p pushTarget) enabled() bool { return strings.TrimSpace(p.server) != "" }
 
+// project and engagement destinations are independent; run() consults each before doing its half.
+func (p pushTarget) pushesAnalysis() bool {
+	return p.enabled() && strings.TrimSpace(p.project) != ""
+}
+
+func (p pushTarget) pushesEngagement() bool {
+	return p.enabled() && strings.TrimSpace(p.engagement) != ""
+}
+
 // validate checks the target before the scan runs, so a pipeline learns about a missing token in
 // seconds rather than after a full scan.
 func (p pushTarget) validate() error {
 	if !p.enabled() {
 		return nil
 	}
-	if strings.TrimSpace(p.project) == "" {
-		return fmt.Errorf("--server requires --project KEY (the server-owned project this result belongs to)")
+	// --server needs a destination, and there are two: a project records the code-quality analysis, an
+	// engagement records the security findings. Either alone is valid, and both together record one run
+	// in both places, which is what a pipeline scanning a repository usually wants.
+	if strings.TrimSpace(p.project) == "" && strings.TrimSpace(p.engagement) == "" {
+		return fmt.Errorf("--server requires --project KEY, --engagement ID, or both")
 	}
-	if !projectKeyPattern.MatchString(strings.TrimSpace(p.project)) {
+	if project := strings.TrimSpace(p.project); project != "" && !projectKeyPattern.MatchString(project) {
 		return fmt.Errorf("--project %q is not a project key (lowercase letters, digits and single hyphens)", p.project)
+	}
+	if strings.TrimSpace(p.asset) != "" && strings.TrimSpace(p.engagement) == "" {
+		return fmt.Errorf("--asset binds ingested findings to a business asset and needs --engagement")
+	}
+	if p.source && strings.TrimSpace(p.project) == "" {
+		return fmt.Errorf("--push-source publishes source for a project analysis and needs --project")
+	}
+	if strings.TrimSpace(p.coverage) != "" && strings.TrimSpace(p.project) == "" {
+		return fmt.Errorf("--coverage is recorded on a project analysis and needs --project")
+	}
+	if p.sbom && strings.TrimSpace(p.engagement) == "" {
+		return fmt.Errorf("--push-sbom uploads the SBOM to an engagement and needs --engagement")
 	}
 	if strings.TrimSpace(p.token) == "" {
 		return fmt.Errorf("--server requires SYNAPSE_API_TOKEN in the environment")
@@ -276,6 +322,40 @@ func ciContextFromEnvWithReader(explicit projectanalysis.CIContext, lookup func(
 		pick(&out.TargetBranch, "BITBUCKET_PR_DESTINATION_BRANCH")
 		pick(&out.RepoSlug, "BITBUCKET_REPO_FULL_NAME")
 		pick(&out.HeadSHA, "BITBUCKET_COMMIT")
+	case strings.EqualFold(strings.TrimSpace(lookup("TF_BUILD")), "true"):
+		if out.Provider == "" {
+			pick(&out.Provider, "SYNAPSE_CI_PROVIDER")
+			if out.Provider == "" {
+				out.Provider = "azure-pipelines"
+			}
+		}
+		pick(&out.Branch, "SYSTEM_PULLREQUEST_SOURCEBRANCH", "BUILD_SOURCEBRANCH")
+		if explicit.Branch == "" {
+			out.Branch = strings.TrimPrefix(out.Branch, "refs/heads/")
+		}
+		pick(&out.RunID, "BUILD_BUILDID")
+		pick(&out.Actor, "BUILD_REQUESTEDFOR")
+		pick(&out.PullRequest, "SYNAPSE_PR_NUMBER")
+		if out.PullRequest == "" {
+			out.PullRequest = azurePipelinesPullRequest(lookup)
+		}
+		pick(&out.TargetBranch, "SYNAPSE_PR_TARGET_BRANCH", "SYSTEM_PULLREQUEST_TARGETBRANCH")
+		if explicit.TargetBranch == "" {
+			out.TargetBranch = strings.TrimPrefix(out.TargetBranch, "refs/heads/")
+		}
+		pick(&out.RepoSlug, "SYNAPSE_REPO_SLUG")
+		if out.RepoSlug == "" {
+			out.RepoSlug = azurePipelinesRepoSlug(lookup)
+		}
+		// Azure PR builds check out a synthetic merge commit. Never claim it as the forge head.
+		if out.PullRequest != "" {
+			pick(&out.HeadSHA, "SYNAPSE_PR_HEAD_SHA", "SYSTEM_PULLREQUEST_SOURCECOMMITID")
+		} else {
+			pick(&out.HeadSHA, "SYNAPSE_PR_HEAD_SHA", "BUILD_SOURCEVERSION")
+		}
+		if out.RunURL == "" {
+			out.RunURL = azurePipelinesRunURL(lookup)
+		}
 	case lookup("JENKINS_URL") != "":
 		if out.Provider == "" {
 			out.Provider = "jenkins"
@@ -294,6 +374,101 @@ func ciContextFromEnvWithReader(explicit projectanalysis.CIContext, lookup func(
 	pick(&out.RepoSlug, "SYNAPSE_REPO_SLUG")
 	pick(&out.HeadSHA, "SYNAPSE_PR_HEAD_SHA")
 	return out
+}
+
+func azurePipelinesPullRequest(lookup func(string) string) string {
+	provider := strings.ToLower(strings.TrimSpace(lookup("BUILD_REPOSITORY_PROVIDER")))
+	// Azure documents PullRequestNumber specifically for GitHub, where its forge-visible number can
+	// differ from PullRequestId. For Azure Repos the ID is the PR number used by the REST API.
+	keys := []string{"SYSTEM_PULLREQUEST_PULLREQUESTID", "SYSTEM_PULLREQUEST_PULLREQUESTNUMBER"}
+	if strings.HasPrefix(provider, "github") {
+		keys[0], keys[1] = keys[1], keys[0]
+	}
+	for _, key := range keys {
+		if value := strings.TrimSpace(lookup(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func azurePipelinesRepoSlug(lookup func(string) string) string {
+	provider := strings.ToLower(strings.TrimSpace(lookup("BUILD_REPOSITORY_PROVIDER")))
+	// Only Azure Repos has the organization/project/repository identity consumed by the Azure DevOps
+	// decorator. Do not fabricate an Azure target for GitHub or another external repository just
+	// because Azure Pipelines happens to run the build; those forges require explicit overrides.
+	if provider != "" && provider != "tfsgit" {
+		return ""
+	}
+	org, ok := azurePipelinesOrganization(lookup("SYSTEM_COLLECTIONURI"))
+	if !ok {
+		return ""
+	}
+	project := strings.TrimSpace(lookup("SYSTEM_TEAMPROJECT"))
+	repository := strings.TrimSpace(lookup("BUILD_REPOSITORY_NAME"))
+	if !safeAzurePipelinesIdentitySegment(project) || !safeAzurePipelinesIdentitySegment(repository) {
+		return ""
+	}
+	return org + "/" + project + "/" + repository
+}
+
+func safeAzurePipelinesIdentitySegment(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || value == "." || value == ".." || strings.ContainsAny(value, "/\\\\?#%") {
+		return false
+	}
+	for _, ch := range value {
+		if unicode.IsControl(ch) || unicode.Is(unicode.Cf, ch) {
+			return false
+		}
+	}
+	return true
+}
+
+func azurePipelinesOrganization(raw string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), "dev.azure.com") ||
+		(u.Port() != "" && u.Port() != "443") || u.User != nil || u.RawQuery != "" || u.ForceQuery ||
+		u.Fragment != "" || u.RawFragment != "" {
+		return "", false
+	}
+	org := strings.Trim(u.Path, "/")
+	if len(org) == 0 || len(org) > 64 {
+		return "", false
+	}
+	for _, ch := range org {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-') {
+			return "", false
+		}
+	}
+	return org, true
+}
+
+// azurePipelinesRunURL builds a credential-free link from the current Azure job.
+// An arbitrary collection URL must never become an outbound link in the console.
+func azurePipelinesRunURL(lookup func(string) string) string {
+	raw := strings.TrimSpace(lookup("SYSTEM_COLLECTIONURI"))
+	project := strings.TrimSpace(lookup("SYSTEM_TEAMPROJECT"))
+	id := strings.TrimSpace(lookup("BUILD_BUILDID"))
+	if raw == "" || project == "" || id == "" {
+		return ""
+	}
+	for _, ch := range id {
+		if ch < '0' || ch > '9' {
+			return ""
+		}
+	}
+	for _, ch := range project {
+		if unicode.IsControl(ch) || unicode.Is(unicode.Cf, ch) || ch == '/' || ch == '\\' || ch == '?' || ch == '#' {
+			return ""
+		}
+	}
+	org, ok := azurePipelinesOrganization(raw)
+	if !ok {
+		return ""
+	}
+	u := &url.URL{Scheme: "https", Host: "dev.azure.com", Path: "/" + org + "/" + project + "/_build/results"}
+	u.RawQuery = url.Values{"buildId": {id}}.Encode()
+	return u.String()
 }
 
 func githubPullRequestNumber(ref string) string {

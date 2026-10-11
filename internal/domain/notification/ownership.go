@@ -25,10 +25,10 @@ type OwnershipChanged struct {
 	Reason        string    `json:"reason"`
 }
 
-func (r *Rule) normalizeTeamScope() error {
-	if r.EventType != EventOwnershipChanged {
+func (r *Rule) normalizeTeamScope(spec EventSpec) error {
+	if !spec.Allows(FilterTeams) {
 		if len(r.TeamIDs) > 0 || r.AllTeams {
-			return fmt.Errorf("%w: team scope only applies to ownership events", shared.ErrValidation)
+			return unsupportedFilter(r.EventType, "team scope")
 		}
 		return nil
 	}
@@ -45,7 +45,12 @@ func (r *Rule) normalizeTeamScope() error {
 	return nil
 }
 
-func (r Rule) matchesOwnership(e Event) bool {
+// matchesTeams applies the team scope. Only ownership events carry teams today; any other event
+// type that allows a team filter fails closed until its payload is mapped here.
+func (r Rule) matchesTeams(e Event) bool {
+	if e.Type != EventOwnershipChanged {
+		return false
+	}
 	var data OwnershipChanged
 	if json.Unmarshal(e.Data, &data) != nil || data.DecisionID.IsZero() || data.FindingID.IsZero() || data.EngagementID != e.EngagementID {
 		return false

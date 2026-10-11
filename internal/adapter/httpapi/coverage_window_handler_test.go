@@ -50,14 +50,14 @@ func TestCoverageWindowRouteUsesHumanRBACAndTenantContext(t *testing.T) {
 	aupStore.accepted["1.0"] = aup.Acceptance{Version: "1.0"}
 	rt := &Router{
 		log: discardLog(),
-		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
+		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
 			switch token {
 			case "viewer":
-				return Principal{ID: "viewer", Role: "readonly", TenantID: "tenant-a"}, true
+				return Principal{ID: "viewer", Role: "readonly", TenantID: "tenant-a"}, nil
 			case "agent":
-				return Principal{ID: "agent", Role: "agent", TenantID: "tenant-a"}, true
+				return Principal{ID: "agent", Role: "agent", TenantID: "tenant-a"}, nil
 			default:
-				return Principal{}, false
+				return Principal{}, errTestCredentialInvalid
 			}
 		}),
 		aup: newTestAUP(aupStore, &fakeAudit{}),
@@ -169,8 +169,8 @@ func TestCoverageWindowRouteIsAbsentWhenReaderUnwired(t *testing.T) {
 	aupStore.accepted["1.0"] = aup.Acceptance{Version: "1.0"}
 	rt := &Router{
 		log: discardLog(),
-		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
-			return Principal{ID: "viewer", Role: "readonly", TenantID: "tenant-a"}, token == "viewer"
+		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
+			return Principal{ID: "viewer", Role: "readonly", TenantID: "tenant-a"}, testCredentialErr(token == "viewer")
 		}),
 		aup: newTestAUP(aupStore, &fakeAudit{}),
 	}

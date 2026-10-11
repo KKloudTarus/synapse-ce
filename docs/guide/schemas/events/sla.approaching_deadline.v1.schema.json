@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/sla.approaching_deadline.v1.schema.json",
+  "title": "sla.approaching_deadline event (v1)",
+  "description": "A remediation deadline is approaching for a finding.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "sla.approaching_deadline"
+    },
+    "source_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "assessment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "engagement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "finding_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deadline": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lead_time_seconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "assessment_id",
+        "engagement_id",
+        "finding_id",
+        "deadline",
+        "lead_time_seconds"
+      ],
+      "additionalProperties": true
+    },
+    "engagement_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "source_kind",
+    "source_id",
+    "schema_version",
+    "occurred_at",
+    "data"
+  ],
+  "additionalProperties": true
+}

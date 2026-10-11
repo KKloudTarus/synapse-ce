@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/scmconnector"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -24,6 +25,7 @@ type Service struct {
 	store ports.SCMConnectorStore
 	ids   ports.IDGenerator
 	clock ports.Clock
+	rules selfhosted.Rules
 }
 
 // NewService validates its dependencies.
@@ -34,6 +36,10 @@ func NewService(store ports.SCMConnectorStore, ids ports.IDGenerator, clock port
 	return &Service{store: store, ids: ids, clock: clock}, nil
 }
 
+// SetSelfHostedRules installs the operator's self-hosted endpoint rules. Without them (the zero
+// value) the allowlist is empty and every self-hosted API base is refused.
+func (s *Service) SetSelfHostedRules(rules selfhosted.Rules) { s.rules = rules }
+
 // CreateInput is a new connector plus its plaintext token. Token is required and is sealed
 // by the store; it never appears on the returned metadata.
 type CreateInput struct {
@@ -43,6 +49,9 @@ type CreateInput struct {
 	Host     string
 	Username string
 	Token    string
+	// APIBase is the optional REST API base of a self-hosted forge (GitHub Enterprise Server,
+	// self-managed GitLab) for pull request decoration. Empty keeps the public SaaS API.
+	APIBase string
 }
 
 // Create validates and stores a connector, returning its non-secret metadata. A second
@@ -64,6 +73,17 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (ports.SCMConnecto
 	// same at clone time, but rejecting at creation keeps such a connector from ever being stored.
 	if scmconnector.IsInternalHost(c.Host) {
 		return ports.SCMConnectorMeta{}, fmt.Errorf("%w: a connector host must not be a loopback or link-local address", shared.ErrValidation)
+	}
+	// A self-hosted API base receives the token on every decoration, so it must be well formed, share
+	// the connector host's origin, and have that host on the operator's allowlist. The decorator checks
+	// the allowlist again on every call, so tightening it later stops a stored base too.
+	if err := c.SetAPIBase(in.APIBase); err != nil {
+		return ports.SCMConnectorMeta{}, err
+	}
+	if c.APIBase != "" {
+		if err := s.rules.CheckListedEndpoint(c.APIBase, true); err != nil {
+			return ports.SCMConnectorMeta{}, err
+		}
 	}
 	if err := s.store.Put(ctx, *c, []byte(token)); err != nil {
 		return ports.SCMConnectorMeta{}, err

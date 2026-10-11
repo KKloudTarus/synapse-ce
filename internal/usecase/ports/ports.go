@@ -25,6 +25,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedsbom"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/issue"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/promotion"
@@ -993,6 +994,13 @@ type ScanJob struct {
 	StartedAt     time.Time              `json:"started_at"`
 	FinishedAt    *time.Time             `json:"finished_at,omitempty"`
 	DebugEvents   []ScanDebugEvent       `json:"debug_events"`
+	// EngineOutcomes and EngineCoverage describe the current attempt. Job success
+	// means the worker completed; it is deliberately distinct from coverage.
+	EngineOutcomes []scanrun.EngineOutcome `json:"engine_outcomes,omitempty"`
+	EngineCoverage scanrun.EngineCoverage  `json:"engine_coverage"`
+	// NotificationSnapshot is the bounded successful result captured at the
+	// terminal transition. It is internal and is never returned by scan APIs.
+	NotificationSnapshot notification.ScanSummary `json:"-"`
 }
 
 // ScanJobStore persists scan-job status (upserted as the pipeline progresses).
@@ -1329,22 +1337,26 @@ type AuditReader interface {
 // findings: license coverage, scan completeness, reproducibility, and the
 // evidence-integrity attestation. Assembled from the latest scan + evidence chain.
 type ReportInsight struct {
-	ScanTarget       string
-	HasScan          bool
-	ScanTime         time.Time // pinned scan timestamp – the report uses this (not Now) so it is byte-reproducible
-	LicenseDetected  int
-	LicenseUnknown   int
-	LicensePct       float64
-	Confident        bool
-	CompletenessNote string
-	ReproScore       int
-	PinnedInputs     []string
-	UnpinnedInputs   []string
-	VulnDBSnapshot   string
-	GrypeDBVersion   string
-	EvidenceIntact   bool
-	EvidenceHead     string
-	EvidenceCount    int
+	ScanTarget              string
+	HasScan                 bool
+	ScanTime                time.Time // pinned scan timestamp – the report uses this (not Now) so it is byte-reproducible
+	LicenseDetected         int
+	LicenseUnknown          int
+	LicensePct              float64
+	Confident               bool
+	CompletenessNote        string
+	EngineOutcomes          []scanrun.EngineOutcome
+	EngineCoverage          scanrun.EngineCoverage
+	ExecutionMode           string
+	IncludesPreviousResults bool
+	ReproScore              int
+	PinnedInputs            []string
+	UnpinnedInputs          []string
+	VulnDBSnapshot          string
+	GrypeDBVersion          string
+	EvidenceIntact          bool
+	EvidenceHead            string
+	EvidenceCount           int
 	// EvidenceAttested + EvidenceKeyID describe the chain-head origin attestation
 	// when Attested, the head is signed (ed25519) by the key with this id.
 	EvidenceAttested bool
@@ -1484,7 +1496,10 @@ type AcquireRequest struct {
 	Kind                      string // local | git | archive | upload | image (default: local)
 	Value                     string // path, git URL, archive path, or image ref
 	Locator                   string // internal locator for a server-owned uploaded source package
-	Ref                       string // optional git branch/tag to clone (git kind only)
+	Ref                       string // optional git branch/tag metadata recorded with the scan
+	FetchRef                  string // optional server-owned git ref used only to fetch a pinned Commit
+	Commit                    string // optional immutable git commit to fetch and scan exactly
+	DisableGitCredentials     bool   // never resolve/inject a connector credential (untrusted fork hooks)
 	BaseRef                   string // optional validated Git comparison base ref
 	BaseCommit                string // optional immutable base commit from a previous analysis
 	RequireCodeQualityHistory bool   // optional hint to clone bounded history for code-quality behavioral hotspots

@@ -1,0 +1,14 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: SAMEORIGIN
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# The service worker is the playground's whole API layer, so it must never be served stale while
+# index.html is fresh: a new deployment would then answer the new bundle's requests from the old
+# fixture set.
+/mockServiceWorker.js
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache

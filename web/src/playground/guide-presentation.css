@@ -1,0 +1,21 @@
+/* Match the Overview's icon column, content hierarchy and persistent navigation. */
+[data-demo-focus] { scroll-margin-top: 6rem; scroll-margin-bottom: 1rem; }
+.demo-guide-panel > div:first-child { margin-left: 32px; margin-bottom: 4px; }
+.demo-guide-panel > div:first-child > div:first-child > svg {
+  position: absolute;
+  left: 16px;
+  top: 18px;
+  width: 20px;
+  height: 20px;
+}
+.demo-guide-panel > [hidden],
+.demo-guide-panel > .overflow-y-auto,
+.demo-guide-panel > p { margin-left: 32px; }
+.demo-guide-panel > div:last-child { align-items: center; flex-wrap: nowrap; }
+.demo-guide-panel > div:last-child > div:last-child { margin-left: auto; }
+@media (max-width: 479px) {
+  .demo-guide-panel > div:first-child,
+  .demo-guide-panel > .overflow-y-auto,
+  .demo-guide-panel > p { margin-left: 0; }
+  .demo-guide-panel > div:first-child > div:first-child > svg { display: none; }
+}

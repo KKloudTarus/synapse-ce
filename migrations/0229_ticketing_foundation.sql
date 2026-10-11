@@ -1,5 +1,5 @@
 -- +goose Up
--- J01: ticketing is a bounded context, not an integration_operations or notification channel.
+-- Ticketing is a bounded context, not an integration operation or notification channel.
 CREATE TABLE ticket_mappings (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL REFERENCES tenants(id),
@@ -9,8 +9,13 @@ CREATE TABLE ticket_mappings (
     project_key TEXT NOT NULL CHECK (length(btrim(project_key)) BETWEEN 1 AND 255),
     issue_type TEXT NOT NULL CHECK (length(btrim(issue_type)) BETWEEN 1 AND 255),
     component TEXT NOT NULL DEFAULT '' CHECK (octet_length(component) <= 255),
-    labels JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(labels)='array' AND octet_length(labels::text)<=8192),
-    priority_map JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(priority_map)='object' AND octet_length(priority_map::text)<=8192),
+    -- jsonb::text adds a space after each array comma. The domain admits a
+    -- compact JSON representation through 8192 bytes (at most 32 labels),
+    -- so retain that contract after PostgreSQL normalizes it.
+    labels JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(labels)='array' AND octet_length(labels::text)<=8223),
+    -- Object normalization adds a space after each comma and colon (at most
+    -- 32 entries), so allow the corresponding 63-byte representation delta.
+    priority_map JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(priority_map)='object' AND octet_length(priority_map::text)<=8255),
     security_level TEXT NOT NULL DEFAULT '' CHECK (octet_length(security_level)<=255),
     version INT NOT NULL CHECK (version > 0),
     created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
@@ -23,7 +28,6 @@ CREATE TABLE ticket_mappings (
 );
 CREATE UNIQUE INDEX ticket_mappings_project_unique ON ticket_mappings (tenant_id,integration_id,project_id) WHERE project_id IS NOT NULL;
 CREATE UNIQUE INDEX ticket_mappings_engagement_unique ON ticket_mappings (tenant_id,integration_id,engagement_id) WHERE engagement_id IS NOT NULL;
-CREATE INDEX ticket_mappings_integration_idx ON ticket_mappings (tenant_id,integration_id);
 CALL synapse_enable_tenant_rls('ticket_mappings');
 
 -- Manual links deliberately do not need an integration. A display URL is never fetched.
@@ -76,6 +80,27 @@ CREATE INDEX ticket_intents_finding_idx ON ticket_intents (tenant_id,finding_id,
 CALL synapse_enable_tenant_rls('ticket_intents');
 
 -- +goose Down
+-- The rollback check must see every tenant even though these tables use FORCE
+-- RLS. Keep the migration owner visible only while the tables are locked; if
+-- the guard fails, Goose rolls the policy changes back with this transaction.
+-- +goose StatementBegin
+LOCK TABLE ticket_mappings IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE ticket_links IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE ticket_intents IN ACCESS EXCLUSIVE MODE;
+ALTER TABLE ticket_mappings NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE ticket_links NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE ticket_intents NO FORCE ROW LEVEL SECURITY;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM ticket_intents LIMIT 1)
+        OR EXISTS (SELECT 1 FROM ticket_links LIMIT 1)
+        OR EXISTS (SELECT 1 FROM ticket_mappings LIMIT 1) THEN
+        RAISE EXCEPTION 'cannot roll back ticketing foundation while durable ticket data exists'
+            USING ERRCODE = '55000';
+    END IF;
+END $$;
+-- +goose StatementEnd
+
 DROP TABLE ticket_intents;
 DROP TABLE ticket_links;
 DROP TABLE ticket_mappings;

@@ -10,6 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/consolelink"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
 )
 
 const (
@@ -40,6 +44,11 @@ type Config struct {
 	MetricsEnabled bool
 	// MetricsAddr is the loopback-by-default listen address for the metrics endpoint.
 	MetricsAddr string
+	// SIEMEnabled stops worker sends and, when set consistently on writers,
+	// disables incident capture. Events during an outage require backfill.
+	SIEMEnabled bool
+	// SIEMPublicBaseURL is an optional HTTPS console origin for exported links.
+	SIEMPublicBaseURL string
 	// AccessLogEnabled turns on the single structured access-log event per HTTP
 	// request (method, matched route, status, latency, request id). On by default.
 	AccessLogEnabled bool
@@ -50,13 +59,18 @@ type Config struct {
 	// APIToken protects all API + UI routes; required (no anonymous access).
 	APIToken string
 	// OIDCEnabled enables the browser-based OIDC authorization-code BFF flow.
-	OIDCEnabled          bool
-	OIDCIssuer           string
-	OIDCClientID         string
-	OIDCClientSecret     string
-	OIDCRedirectURL      string
-	OIDCFrontendURL      string
-	OIDCTenantID         string
+	OIDCEnabled      bool
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCRedirectURL  string
+	OIDCFrontendURL  string
+	// PublicBaseURL is the trusted console URL for outbound links, independent of OIDC enablement.
+	PublicBaseURL string
+	OIDCTenantID  string
+	// OIDCGroupRoleMapping is deprecated and ignored. It is still parsed so an existing
+	// SYNAPSE_OIDC_GROUP_ROLE_MAPPING does not break startup, and a non-empty value produces a
+	// deprecation warning. Provider groups never assign or change a Synapse role.
 	OIDCGroupRoleMapping []string
 	OIDCTransactionTTL   time.Duration
 	OIDCSessionTTL       time.Duration
@@ -226,7 +240,10 @@ type Config struct {
 	VaultMasterKey string
 	// NotificationEnabled enables tenant-managed durable notification delivery.
 	// It requires PostgreSQL and a stable VaultMasterKey shared by API and worker.
-	NotificationEnabled        bool
+	NotificationEnabled bool
+	// InboundWebhooksEnabled mounts a separate authenticated ingress plane; off by default.
+	// PostgreSQL, a durable vault key, and an RLS-enforcing runtime role are mandatory.
+	InboundWebhooksEnabled     bool
 	OwnershipMode              string // off (default), observe, enforce; PostgreSQL only
 	NotificationSMTPHost       string
 	NotificationSMTPPort       int
@@ -234,6 +251,17 @@ type Config struct {
 	NotificationSMTPUsername   string
 	NotificationSMTPPassword   string
 	NotificationSMTPRequireTLS bool
+	// NotificationUnsubscribeURL is an operator-owned receiver endpoint for tenant-channel email.
+	// It must remove the recipient using receiver-side state; Synapse never interpolates a recipient.
+	NotificationUnsubscribeURL string
+	// NotificationProvidersDisabled is the operator kill switch
+	// (SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED): channel and provider types no tenant may create,
+	// test or deliver to. Parsed trimmed, lowercased and deduplicated; the API and the worker check
+	// each name against the notification driver registry at startup.
+	NotificationProvidersDisabled []string
+	// NotificationChannelPauseThreshold is how many consecutive permanent delivery failures pause
+	// a notification channel (#1464). Zero keeps counting but never pauses. Read by the worker.
+	NotificationChannelPauseThreshold int
 	// ReconViaWorker routes recon runs through the durable queue: the API enqueues
 	// and the non-root synapse-worker claims and executes them. Scoped egress is
 	// configured by a separate root-owned broker. Requires Postgres. Default false
@@ -445,6 +473,12 @@ type Config struct {
 	// tenant administrators to configure integrations targeting private address space.
 	// It is intentionally off by default because the API flag alone must not weaken SSRF controls.
 	IntegrationAllowPrivateNetwork bool
+	// IntegrationHostAllowlist, when set, is the only set of hosts a self-hosted integration
+	// (Jenkins, Jira Data Center) may be saved with or dial. Entries are host, host:port or
+	// *.domain. Empty keeps the default: any public host.
+	IntegrationHostAllowlist []string
+	// IntegrationPrivateCIDRs narrows IntegrationAllowPrivateNetwork to these private-use ranges.
+	IntegrationPrivateCIDRs []string
 	// Vulnerability rollout gates default off. Tenant-scoped mutations additionally require
 	// an explicit tenant allowlist entry; "*" enables all tenants. Dry-run records correlation
 	// differences without mutating occurrences, findings, actions, or notification outbox rows.
@@ -494,15 +528,21 @@ type Config struct {
 	AssessmentSnapshotCompletionTenants []string
 	AssessmentShadowEnabled             bool
 	AssessmentShadowTenants             []string
-	AssessmentLifecycleReadEnabled      bool
-	AssessmentLifecycleReadTenants      []string
-	AssessmentLifecycleUIDefault        bool
-	AssessmentLifecycleUITenants        []string
-	AssessmentClosureEnabled            bool
-	AssessmentBatchSize                 int
-	AssessmentTenantJobs                int
-	AssessmentBacklogWarning            int
-	AssessmentBacklogHardLimit          int
+	// IdentityCutoverEnabled permits the shared enterprise identity request path. Tenant lists
+	// remain explicit and native mutation tenants are always a subset of read tenants.
+	IdentityCutoverEnabled            bool
+	IdentityCutoverReadTenants        []string
+	IdentityCutoverMutationTenants    []string
+	IdentityLegacyBearerGraceDuration time.Duration
+	AssessmentLifecycleReadEnabled    bool
+	AssessmentLifecycleReadTenants    []string
+	AssessmentLifecycleUIDefault      bool
+	AssessmentLifecycleUITenants      []string
+	AssessmentClosureEnabled          bool
+	AssessmentBatchSize               int
+	AssessmentTenantJobs              int
+	AssessmentBacklogWarning          int
+	AssessmentBacklogHardLimit        int
 	// SASTEnabled turns on the deterministic pattern-SAST analyzer in the scan pipeline; off by default.
 	SASTEnabled bool
 	// SecretScanEnabled turns on the deterministic secret scanner in the scan pipeline; off by default.
@@ -707,8 +747,10 @@ type Config struct {
 	// JudgmentsEnabled (it mints judgments) AND the SCA sandbox (it compiles untrusted target source).
 	TaintEnabled bool
 	// GoModGraphEnabled turns on transitive Go dependency-edge resolution via `go mod graph`:
-	// post-SBOM, add pkg:golang edges between existing components (go.mod alone has no edge graph). Off by
-	// default; opt-in + best-effort (a non-Go target / no module cache adds no edges, never fails the scan).
+	// post-SBOM, add pkg:golang edges between existing components (go.mod alone has no edge graph). ON by
+	// default, and best-effort (a non-Go target / no module cache adds no edges, never fails the scan). The
+	// composition root skips it when no Go toolchain is on PATH, which is the case in the published images
+	// and on a stock CI runner, and says so once at startup rather than failing a step in every scan.
 	// GoBin is the go executable. Low-risk (go mod graph only reads go.mod files, never compiles the target).
 	GoModGraphEnabled bool
 	GoBin             string
@@ -834,6 +876,8 @@ func Load() Config {
 		HTTPAddr:                         getenv("SYNAPSE_HTTP_ADDR", ":8080"),
 		MetricsEnabled:                   getbool("SYNAPSE_METRICS_ENABLED", false),
 		MetricsAddr:                      getenv("SYNAPSE_METRICS_ADDR", "127.0.0.1:9090"),
+		SIEMEnabled:                      getbool("SYNAPSE_SIEM_ENABLED", true),
+		SIEMPublicBaseURL:                getenv("SYNAPSE_SIEM_PUBLIC_BASE_URL", ""),
 		AccessLogEnabled:                 getbool("SYNAPSE_ACCESS_LOG_ENABLED", true),
 		Environment:                      normalizeEnv(getenv("SYNAPSE_ENV", "development")),
 		LogLevel:                         getenv("SYNAPSE_LOG_LEVEL", "info"),
@@ -845,6 +889,7 @@ func Load() Config {
 		OIDCClientSecret:                 getenv("SYNAPSE_OIDC_CLIENT_SECRET", ""),
 		OIDCRedirectURL:                  getenv("SYNAPSE_OIDC_REDIRECT_URL", ""),
 		OIDCFrontendURL:                  getenv("SYNAPSE_OIDC_FRONTEND_URL", ""),
+		PublicBaseURL:                    getenv("SYNAPSE_PUBLIC_BASE_URL", getenv("SYNAPSE_OIDC_FRONTEND_URL", "")),
 		OIDCTenantID:                     getenv("SYNAPSE_OIDC_TENANT_ID", ""),
 		OIDCGroupRoleMapping:             splitList(getenv("SYNAPSE_OIDC_GROUP_ROLE_MAPPING", "")),
 		OIDCTransactionTTL:               getduration("SYNAPSE_OIDC_TRANSACTION_TTL", 10*time.Minute),
@@ -903,6 +948,8 @@ func Load() Config {
 
 		ReconAllowCapabilitySensitive: getbool("SYNAPSE_RECON_ALLOW_CAPABILITY_SENSITIVE", false),
 
+		NotificationProvidersDisabled: parseLowerSet(getenv("SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED", "")),
+
 		EvidenceSigningSeed:        getenv("SYNAPSE_EVIDENCE_SIGNING_SEED", ""),
 		TSAURL:                     getenv("SYNAPSE_TSA_URL", ""),
 		SandboxEnabled:             getbool("SYNAPSE_SANDBOX_ENABLED", false),
@@ -918,6 +965,7 @@ func Load() Config {
 		DASTMaxWallClock:           maxWallClock,
 		VaultMasterKey:             getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
 		NotificationEnabled:        getbool("SYNAPSE_NOTIFICATIONS_ENABLED", false),
+		InboundWebhooksEnabled:     getbool("SYNAPSE_INBOUND_WEBHOOKS_ENABLED", false),
 		OwnershipMode:              getenv("SYNAPSE_OWNERSHIP_MODE", "off"),
 		NotificationSMTPHost:       getenv("SYNAPSE_NOTIFICATION_SMTP_HOST", ""),
 		NotificationSMTPPort:       getint("SYNAPSE_NOTIFICATION_SMTP_PORT", 587),
@@ -925,6 +973,7 @@ func Load() Config {
 		NotificationSMTPUsername:   getenv("SYNAPSE_NOTIFICATION_SMTP_USERNAME", ""),
 		NotificationSMTPPassword:   getenv("SYNAPSE_NOTIFICATION_SMTP_PASSWORD", ""),
 		NotificationSMTPRequireTLS: getbool("SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS", true),
+		NotificationUnsubscribeURL: getenv("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL", ""),
 		ReconViaWorker:             getbool("SYNAPSE_RECON_VIA_WORKER", false),
 		EgressBrokerSocket:         getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
 		EgressGrantAuthorityAddr:   getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR", ""),
@@ -1029,6 +1078,8 @@ func Load() Config {
 		IntegrationSchedulerDispatch:                getint("SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT", 10),
 		IntegrationSchedulerQueueDepth:              getint("SYNAPSE_INTEGRATION_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		IntegrationAllowPrivateNetwork:              getbool("SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK", false),
+		IntegrationHostAllowlist:                    splitList(os.Getenv("SYNAPSE_INTEGRATION_HOST_ALLOWLIST")),
+		IntegrationPrivateCIDRs:                     splitList(os.Getenv("SYNAPSE_INTEGRATION_PRIVATE_CIDRS")),
 		VulnerabilityProviderSyncEnabled:            getbool("SYNAPSE_VULNERABILITY_PROVIDER_SYNC_ENABLED", false),
 		VulnerabilityInlineWorkerEnabled:            getbool("SYNAPSE_VULNERABILITY_INLINE_WORKER_ENABLED", false),
 		VulnerabilitySyncSchedulerInterval:          getduration("SYNAPSE_VULNERABILITY_SYNC_SCHEDULER_INTERVAL", 0),
@@ -1113,6 +1164,10 @@ func Load() Config {
 		AssessmentSnapshotCompletionTenants:         splitList(getenv("SYNAPSE_ASSESSMENT_SNAPSHOT_COMPLETION_TENANTS", "")),
 		AssessmentShadowEnabled:                     getbool("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_ENABLED", false),
 		AssessmentShadowTenants:                     splitList(getenv("SYNAPSE_ASSESSMENT_IDENTITY_COMPARISON_SHADOW_TENANTS", "")),
+		IdentityCutoverEnabled:                      getbool("SYNAPSE_IDENTITY_CUTOVER_ENABLED", false),
+		IdentityCutoverReadTenants:                  splitList(getenv("SYNAPSE_IDENTITY_CUTOVER_READ_TENANTS", "")),
+		IdentityCutoverMutationTenants:              splitList(getenv("SYNAPSE_IDENTITY_CUTOVER_MUTATION_TENANTS", "")),
+		IdentityLegacyBearerGraceDuration:           getduration("SYNAPSE_IDENTITY_LEGACY_BEARER_GRACE_DURATION", 0),
 		AssessmentLifecycleReadEnabled:              getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_ENABLED", false),
 		AssessmentLifecycleReadTenants:              splitList(getenv("SYNAPSE_ASSESSMENT_LIFECYCLE_READ_TENANTS", "")),
 		AssessmentLifecycleUIDefault:                getbool("SYNAPSE_ASSESSMENT_LIFECYCLE_UI_DEFAULT_ENABLED", false),
@@ -1159,6 +1214,8 @@ func Load() Config {
 		MCPToken:        getenv("SYNAPSE_MCP_TOKEN", ""),
 		MCPAddr:         getenv("SYNAPSE_MCP_ADDR", ":8081"),
 		MCPEngagementID: getenv("SYNAPSE_MCP_ENGAGEMENT_ID", ""),
+
+		NotificationChannelPauseThreshold: getint("SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD", 5),
 	}
 }
 
@@ -1170,6 +1227,21 @@ func splitList(s string) []string {
 	var out []string
 	for _, p := range strings.Split(s, ",") {
 		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// parseLowerSet parses a comma-separated list of names into trimmed, lowercased, deduplicated
+// entries in first-seen order. Empty entries are ignored and "" yields nil.
+func parseLowerSet(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range splitList(s) {
+		p = strings.ToLower(p)
+		if !seen[p] {
+			seen[p] = true
 			out = append(out, p)
 		}
 	}
@@ -1560,6 +1632,14 @@ func (c Config) ValidateWorkerConcurrency() error {
 	return nil
 }
 
+// ValidateNotificationChannelHealth bounds the channel auto-pause threshold (0 disables pausing).
+func (c Config) ValidateNotificationChannelHealth() error {
+	if c.NotificationChannelPauseThreshold < 0 || c.NotificationChannelPauseThreshold > 100 {
+		return fmt.Errorf("SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD must be between 0 and 100 (got %d)", c.NotificationChannelPauseThreshold)
+	}
+	return nil
+}
+
 // ValidateAssessmentLifecycleRollout rejects rollout settings that can create
 // unbounded migration work or expose UI/closure paths before their read inputs.
 func (c Config) ValidateAssessmentLifecycleRollout() error {
@@ -1675,13 +1755,122 @@ func (c Config) ValidateOIDCPosture() error {
 	if !c.OIDCEnabled {
 		return nil
 	}
-	if strings.TrimSpace(c.OIDCIssuer) == "" || strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" || strings.TrimSpace(c.OIDCRedirectURL) == "" || strings.TrimSpace(c.OIDCTenantID) == "" || len(c.OIDCGroupRoleMapping) == 0 || c.OIDCTransactionTTL <= 0 || c.OIDCSessionTTL <= 0 {
-		return errors.New("OIDC requires issuer, client id, client secret, redirect URL, fixed tenant, group-role mapping, and positive lifetimes")
+	if strings.TrimSpace(c.OIDCIssuer) == "" || strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" || strings.TrimSpace(c.OIDCRedirectURL) == "" || strings.TrimSpace(c.OIDCTenantID) == "" || c.OIDCTransactionTTL <= 0 || c.OIDCSessionTTL <= 0 {
+		return errors.New("OIDC requires issuer, client id, client secret, redirect URL, fixed tenant, and positive lifetimes")
+	}
+	if !validOIDCIssuer(c.OIDCIssuer) {
+		return errors.New("OIDC requires SYNAPSE_OIDC_ISSUER to be an absolute HTTPS URL without query or fragment")
 	}
 	if !validOIDCFrontendURL(c.OIDCFrontendURL) {
 		return errors.New("OIDC requires an absolute HTTPS SYNAPSE_OIDC_FRONTEND_URL without query or fragment")
 	}
 	return nil
+}
+
+// OIDCDeprecationWarnings lists configuration that is accepted but ignored, for a startup warning.
+func (c Config) OIDCDeprecationWarnings() []string {
+	if len(c.OIDCGroupRoleMapping) == 0 {
+		return nil
+	}
+	return []string{"SYNAPSE_OIDC_GROUP_ROLE_MAPPING is deprecated and ignored: identity-provider groups no longer assign or change Synapse roles; roles are managed in Synapse and new subjects need an operator-approved link"}
+}
+
+// EffectivePublicBaseURL resolves the console origin even when OIDC is disabled.
+func (c Config) EffectivePublicBaseURL() string {
+	if c.PublicBaseURL != "" {
+		return c.PublicBaseURL
+	}
+	return c.OIDCFrontendURL
+}
+
+// IntegrationSelfHostedRules parses the operator's self-hosted integration endpoint rules. An
+// invalid value is an error that names its variable, so the process refuses to start rather than
+// running with an allowlist that admits nothing, or everything, by mistake.
+func (c Config) IntegrationSelfHostedRules() (selfhosted.Rules, error) {
+	hosts, err := selfhosted.ParseHostAllowlist(c.IntegrationHostAllowlist)
+	if err != nil {
+		return selfhosted.Rules{}, fmt.Errorf("SYNAPSE_INTEGRATION_HOST_ALLOWLIST: %w", err)
+	}
+	cidrs, err := selfhosted.ParsePrivateCIDRs(c.IntegrationPrivateCIDRs)
+	if err != nil {
+		return selfhosted.Rules{}, fmt.Errorf("SYNAPSE_INTEGRATION_PRIVATE_CIDRS: %w", err)
+	}
+	rules, err := selfhosted.NewRules(c.IntegrationAllowPrivateNetwork, hosts, cidrs)
+	if err != nil {
+		return selfhosted.Rules{}, fmt.Errorf("SYNAPSE_INTEGRATION_PRIVATE_CIDRS requires SYNAPSE_INTEGRATION_ALLOW_PRIVATE_NETWORK=true: %w", err)
+	}
+	return rules, nil
+}
+
+// ValidateNotificationProvidersDisabled rejects a SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED entry
+// that cannot be a channel or provider type name. Whether the name is one this build knows is
+// checked against the driver registry by the composition root, so a typo stops startup there.
+func (c Config) ValidateNotificationProvidersDisabled() error {
+	for _, name := range c.NotificationProvidersDisabled {
+		if !validProviderTypeName(name) {
+			return fmt.Errorf("SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED entry %q is not a channel or provider type name", name)
+		}
+	}
+	return nil
+}
+
+// validProviderTypeName accepts 1-64 characters of a-z, 0-9, '_' and '-', starting with a letter
+// or number.
+func validProviderTypeName(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	for i, r := range name {
+		alnum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if !alnum && (i == 0 || (r != '_' && r != '-')) {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidatePublicBaseURL rejects unsafe origins without echoing credential-bearing input.
+// An unset base is permitted until an outbound deep-link consumer is configured.
+func (c Config) ValidatePublicBaseURL() error {
+	base := c.EffectivePublicBaseURL()
+	if base == "" {
+		return nil
+	}
+	if _, err := consolelink.NewBuilder(base); err != nil {
+		return errors.New("SYNAPSE_PUBLIC_BASE_URL must be an absolute HTTPS console URL without credentials, query, or fragment")
+	}
+	return nil
+}
+
+// ValidateNotificationUnsubscribeURL checks the optional operator-owned List-Unsubscribe target.
+// The destination cannot depend on a channel recipient or on tenant-provided content.
+func (c Config) ValidateNotificationUnsubscribeURL() error {
+	raw := c.NotificationUnsubscribeURL
+	if raw == "" {
+		return nil
+	}
+	if raw != strings.TrimSpace(raw) || strings.ContainsAny(raw, "<>") {
+		return errors.New("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL must be an absolute HTTPS URL without credentials or whitespace")
+	}
+	for _, r := range raw {
+		if unicode.IsControl(r) || unicode.IsSpace(r) {
+			return errors.New("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL must be an absolute HTTPS URL without credentials or whitespace")
+		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.Host == "" || u.Hostname() == "" || u.User != nil {
+		return errors.New("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL must be an absolute HTTPS URL without credentials or whitespace")
+	}
+	return nil
+}
+
+// validOIDCIssuer applies the issuer rules the OIDC provider enforces when it normalizes the
+// issuer (absolute HTTPS URL, no query, no fragment), so a bad value fails configuration
+// validation instead of startup wiring. The config package cannot import the provider adapter;
+// a test asserts that both checks agree.
+func validOIDCIssuer(value string) bool {
+	u, err := url.Parse(strings.TrimSpace(value))
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.Hostname() != "" && u.RawQuery == "" && u.Fragment == ""
 }
 
 func validOIDCFrontendURL(value string) bool {
@@ -1708,15 +1897,79 @@ func validateResponseDatabaseRoleSeparation(migrationDSN, runtimeDSN, haltWriter
 	return nil
 }
 
+// postgresDSNUser extracts the role a DSN connects as, for the role-separation check.
+//
+// It accepts both forms pgx accepts. Only the URL form was handled before, so a libpq
+// keyword/value DSN, which pgxpool.ParseConfig takes and which therefore works on every other code
+// path, was rejected here with "DSN has no user" as soon as response execution was enabled.
 func postgresDSNUser(dsn string) (string, error) {
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return "", err
+	trimmed := strings.TrimSpace(dsn)
+	if trimmed == "" {
+		return "", errors.New("DSN is empty")
 	}
-	if u.User == nil || strings.TrimSpace(u.User.Username()) == "" {
-		return "", errors.New("DSN has no user")
+	if strings.Contains(trimmed, "://") {
+		u, err := url.Parse(trimmed)
+		if err != nil {
+			return "", err
+		}
+		if u.User == nil || strings.TrimSpace(u.User.Username()) == "" {
+			return "", errors.New("DSN has no user; add user= to the connection URL")
+		}
+		return u.User.Username(), nil
 	}
-	return u.User.Username(), nil
+	user, ok := libpqKeywordValue(trimmed, "user")
+	if !ok || strings.TrimSpace(user) == "" {
+		// pgx would fall back to PGUSER or the OS user here, which this check cannot compare
+		// against the other DSNs, so the role separation is unverifiable rather than violated.
+		return "", errors.New("keyword/value DSN has no user= field; the role-separation check needs it stated explicitly")
+	}
+	return user, nil
+}
+
+// libpqKeywordValue reads one field out of a libpq keyword/value connection string, honouring the
+// single-quoted form and its backslash escapes (`host=/tmp user='odd name' dbname=synapse`).
+func libpqKeywordValue(dsn, key string) (string, bool) {
+	runes := []rune(dsn)
+	for i := 0; i < len(runes); {
+		for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+			i++
+		}
+		start := i
+		for i < len(runes) && runes[i] != '=' && runes[i] != ' ' && runes[i] != '\t' {
+			i++
+		}
+		if i >= len(runes) || runes[i] != '=' {
+			return "", false // malformed remainder; nothing more to read
+		}
+		field := string(runes[start:i])
+		i++ // consume '='
+		var value strings.Builder
+		if i < len(runes) && runes[i] == '\'' {
+			i++
+			for i < len(runes) && runes[i] != '\'' {
+				if runes[i] == '\\' && i+1 < len(runes) {
+					i++
+				}
+				value.WriteRune(runes[i])
+				i++
+			}
+			if i < len(runes) {
+				i++ // closing quote
+			}
+		} else {
+			for i < len(runes) && runes[i] != ' ' && runes[i] != '\t' {
+				if runes[i] == '\\' && i+1 < len(runes) {
+					i++
+				}
+				value.WriteRune(runes[i])
+				i++
+			}
+		}
+		if field == key {
+			return value.String(), true
+		}
+	}
+	return "", false
 }
 
 // MigrationDSN returns the DDL credential when configured, falling back to the runtime

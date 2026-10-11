@@ -1,0 +1,17 @@
+{
+  "id": "event-notification-destination_changed",
+  "type": "notification.destination_changed",
+  "source_kind": "notification_destination",
+  "source_id": "source-42",
+  "schema_version": 1,
+  "occurred_at": "2026-09-27T08:00:00Z",
+  "data": {
+    "title": "Notification destination host changed",
+    "summary": "system changed the webhook destination https://alerts.example.com.",
+    "actor": "system",
+    "action": "host_changed",
+    "class": "webhook",
+    "scheme": "https",
+    "host": "alerts.example.com"
+  }
+}

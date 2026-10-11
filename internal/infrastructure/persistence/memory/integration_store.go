@@ -157,7 +157,7 @@ func (store *IntegrationStore) UpdateIntegration(ctx context.Context, item integ
 	return item.Clone(), nil
 }
 
-func (store *IntegrationStore) SetIntegrationEnabled(ctx context.Context, id shared.ID, enabled bool, expectedVersion int, audit ports.AuditEntry) (integration.Integration, error) {
+func (store *IntegrationStore) SetIntegrationEnabled(ctx context.Context, id shared.ID, enabled bool, expectedVersion int, requirements ports.IntegrationEnableRequirements, audit ports.AuditEntry) (integration.Integration, error) {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return integration.Integration{}, err
@@ -173,21 +173,27 @@ func (store *IntegrationStore) SetIntegrationEnabled(ctx context.Context, id sha
 		return integration.Integration{}, shared.ErrConflict
 	}
 	if enabled {
-		if _, configured := store.credentials[credentialKey(tenantID, id, "default")]; !configured {
-			return integration.Integration{}, shared.ErrConflict
-		}
-		tested := false
-		for _, operation := range store.operations {
-			if operation.TenantID == tenantID && operation.IntegrationID == id && operation.Type == integration.OperationTest && operation.State == integration.OperationSucceeded && operation.ConnectionRevision == item.ConnectionRevision && operation.CredentialRevision == item.CredentialRevision {
-				tested = true
-				break
+		if requirements.RequireCredential {
+			if _, configured := store.credentials[credentialKey(tenantID, id, "default")]; !configured {
+				return integration.Integration{}, shared.ErrConflict
 			}
 		}
-		if !tested {
-			return integration.Integration{}, shared.ErrConflict
+		if requirements.RequireSuccessfulTest {
+			tested := false
+			for _, operation := range store.operations {
+				if operation.TenantID == tenantID && operation.IntegrationID == id && operation.Type == integration.OperationTest && operation.State == integration.OperationSucceeded && operation.ConnectionRevision == item.ConnectionRevision && operation.CredentialRevision == item.CredentialRevision {
+					tested = true
+					break
+				}
+			}
+			if !tested {
+				return integration.Integration{}, shared.ErrConflict
+			}
 		}
-	} else if err := store.invalidateActiveOperationsLocked(ctx, tenantID, id, store.clock.Now().UTC()); err != nil {
-		return integration.Integration{}, err
+	} else if !enabled {
+		if err := store.invalidateActiveOperationsLocked(ctx, tenantID, id, store.clock.Now().UTC()); err != nil {
+			return integration.Integration{}, err
+		}
 	}
 	if err := store.recordAuditLocked(ctx, audit); err != nil {
 		return integration.Integration{}, err
@@ -373,6 +379,9 @@ func (store *IntegrationStore) CreateIntegrationBinding(ctx context.Context, bin
 		if existing.TenantID == tenantID && existing.IntegrationID == binding.IntegrationID {
 			bindingCount++
 		}
+	}
+	if (item.Provider == "gitlab" || item.Provider == "bitbucket") && bindingCount > 0 {
+		return fmt.Errorf("%w: SCM inbound integration supports one project binding", shared.ErrConflict)
 	}
 	if bindingCount >= integration.MaxBindingsPerPoll {
 		return fmt.Errorf("%w: an integration supports at most %d bindings", shared.ErrValidation, integration.MaxBindingsPerPoll)
@@ -619,16 +628,23 @@ func (store *IntegrationStore) CancelIntegrationOperation(ctx context.Context, i
 	return operation.Clone(), nil
 }
 
-func (store *IntegrationStore) ListDueIntegrations(ctx context.Context, now time.Time, limit int) ([]integration.Integration, error) {
+func (store *IntegrationStore) ListDueIntegrations(ctx context.Context, now time.Time, limit int, providers []integration.Provider) ([]integration.Integration, error) {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if len(providers) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	allowed := make(map[integration.Provider]struct{}, len(providers))
+	for _, provider := range providers {
+		allowed[provider] = struct{}{}
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	items := make([]integration.Integration, 0)
 	for _, item := range store.integrations {
-		if item.TenantID != tenantID || !item.Enabled || item.Archived {
+		if _, ok := allowed[item.Provider]; !ok || item.TenantID != tenantID || !item.Enabled || item.Archived {
 			continue
 		}
 		active := false

@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -53,20 +56,18 @@ type UpdateInput struct {
 }
 
 type Service struct {
-	store               ports.IntegrationStore
-	registry            *integration.Registry
-	projects            ports.ProjectRepository
-	matcher             ports.IntegrationAnalysisMatcher
-	ids                 ports.IDGenerator
-	clock               ports.Clock
-	observer            ports.IntegrationObserver
-	runLock             ports.RunLocker
-	allowPrivateNetwork bool
+	store    ports.IntegrationStore
+	registry *integration.Registry
+	projects ports.ProjectRepository
+	matcher  ports.IntegrationAnalysisMatcher
+	ids      ports.IDGenerator
+	clock    ports.Clock
+	observer ports.IntegrationObserver
+	runLock  ports.RunLocker
 }
 
 func (service *Service) SetObserver(observer ports.IntegrationObserver) { service.observer = observer }
 func (service *Service) SetRunLock(runLock ports.RunLocker)             { service.runLock = runLock }
-func (service *Service) SetPrivateNetworkAllowed(allowed bool)          { service.allowPrivateNetwork = allowed }
 
 func NewService(store ports.IntegrationStore, registry *integration.Registry, projects ports.ProjectRepository, matcher ports.IntegrationAnalysisMatcher, ids ports.IDGenerator, clock ports.Clock) (*Service, error) {
 	if store == nil || registry == nil || projects == nil || matcher == nil || ids == nil || clock == nil {
@@ -80,9 +81,6 @@ func (service *Service) ProviderDescriptors() []integration.ProviderDescriptor {
 }
 
 func (service *Service) Create(ctx context.Context, input CreateInput) (integration.Integration, error) {
-	if input.AllowPrivateNetwork && !service.allowPrivateNetwork {
-		return integration.Integration{}, fmt.Errorf("%w: private-network integrations are disabled by the operator", shared.ErrValidation)
-	}
 	provider, err := integration.NormalizeProvider(input.Provider)
 	if err != nil {
 		return integration.Integration{}, err
@@ -108,6 +106,9 @@ func (service *Service) Create(ctx context.Context, input CreateInput) (integrat
 		PollInterval: input.PollInterval, Version: 1, ConnectionRevision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := item.Normalize(); err != nil {
+		return integration.Integration{}, err
+	}
+	if err := checkEndpointRules(service.registry.SelfHostedRules(), descriptor, item.Endpoint, item.AllowPrivateNetwork); err != nil {
 		return integration.Integration{}, err
 	}
 	tenantCtx := shared.WithTenant(ctx, item.TenantID)
@@ -145,9 +146,6 @@ func (service *Service) Get(ctx context.Context, tenantID, id shared.ID) (integr
 }
 
 func (service *Service) Update(ctx context.Context, tenantID, id shared.ID, input UpdateInput) (integration.Integration, error) {
-	if input.AllowPrivateNetwork && !service.allowPrivateNetwork {
-		return integration.Integration{}, fmt.Errorf("%w: private-network integrations are disabled by the operator", shared.ErrValidation)
-	}
 	tenantID = shared.TenantOrDefault(tenantID)
 	tenantCtx := shared.WithTenant(ctx, tenantID)
 	current, err := service.store.GetIntegration(tenantCtx, id)
@@ -168,6 +166,7 @@ func (service *Service) Update(ctx context.Context, tenantID, id shared.ID, inpu
 	if err != nil {
 		return integration.Integration{}, fmt.Errorf("%w: integration configuration is invalid", shared.ErrValidation)
 	}
+	previousDestination := auditDestination(current.Endpoint)
 	current.Name = input.Name
 	current.Endpoint = input.Endpoint
 	current.Config = config
@@ -177,7 +176,15 @@ func (service *Service) Update(ctx context.Context, tenantID, id shared.ID, inpu
 	if err := current.Normalize(); err != nil {
 		return integration.Integration{}, err
 	}
-	audit := service.auditEntry(input.Actor, "integration.updated", id, integrationAuditMetadata(current))
+	if err := checkEndpointRules(service.registry.SelfHostedRules(), descriptor, current.Endpoint, current.AllowPrivateNetwork); err != nil {
+		return integration.Integration{}, err
+	}
+	metadata := integrationAuditMetadata(current)
+	metadata["destination_changed"] = fmt.Sprintf("%t", previousDestination != metadata["destination"])
+	if metadata["destination_changed"] == "true" {
+		metadata["previous_destination"] = previousDestination
+	}
+	audit := service.auditEntry(input.Actor, "integration.updated", id, metadata)
 	updated, err := service.store.UpdateIntegration(tenantCtx, current, input.Version, audit)
 	if err != nil {
 		return integration.Integration{}, err
@@ -203,7 +210,7 @@ func (service *Service) SetCredential(ctx context.Context, tenantID, integration
 	if err != nil || len(plaintext) > integration.MaxCredentialBytes {
 		return fmt.Errorf("%w: integration credential bundle is invalid", shared.ErrValidation)
 	}
-	audit := service.auditEntry(actor, "integration.credential_replaced", integrationID, map[string]string{"provider": string(item.Provider)})
+	audit := service.auditEntry(actor, "integration.credential_replaced", integrationID, integrationTargetMetadata(item, nil))
 	return service.store.PutIntegrationCredential(tenantCtx, integrationID, credentialIdentity, plaintext, expectedVersion, expectedConnectionRevision, audit)
 }
 
@@ -214,7 +221,7 @@ func (service *Service) DeleteCredential(ctx context.Context, tenantID, integrat
 	if err != nil {
 		return err
 	}
-	audit := service.auditEntry(actor, "integration.credential_deleted", integrationID, map[string]string{"provider": string(item.Provider)})
+	audit := service.auditEntry(actor, "integration.credential_deleted", integrationID, integrationTargetMetadata(item, nil))
 	return service.store.DeleteIntegrationCredential(tenantCtx, integrationID, credentialIdentity, expectedVersion, expectedConnectionRevision, audit)
 }
 
@@ -225,23 +232,32 @@ func (service *Service) SetEnabled(ctx context.Context, tenantID, integrationID 
 	if err != nil {
 		return integration.Integration{}, err
 	}
+	requirements := ports.IntegrationEnableRequirements{}
 	if enabled {
-		configured, err := service.store.IntegrationCredentialConfigured(tenantCtx, integrationID, credentialIdentity)
-		if err != nil {
-			return integration.Integration{}, err
+		descriptor, descriptorErr := service.registry.Descriptor(item.Provider)
+		if descriptorErr != nil {
+			return integration.Integration{}, descriptorErr
 		}
-		if !configured {
-			return integration.Integration{}, fmt.Errorf("%w: configure credentials before enabling the integration", shared.ErrConflict)
+		requirements.RequireCredential = len(descriptor.SecretFields) > 0
+		requirements.RequireSuccessfulTest = descriptor.Supports(integration.CapabilityTestConnection)
+		if requirements.RequireCredential {
+			configured, credentialErr := service.store.IntegrationCredentialConfigured(tenantCtx, integrationID, credentialIdentity)
+			if credentialErr != nil {
+				return integration.Integration{}, credentialErr
+			}
+			if !configured {
+				return integration.Integration{}, fmt.Errorf("%w: configure credentials before enabling the integration", shared.ErrConflict)
+			}
 		}
 	}
 	action := "integration.disabled"
 	if enabled {
 		action = "integration.enabled"
 	}
-	audit := service.auditEntry(actor, action, integrationID, map[string]string{"provider": string(item.Provider)})
-	updated, err := service.store.SetIntegrationEnabled(tenantCtx, integrationID, enabled, version, audit)
+	audit := service.auditEntry(actor, action, integrationID, integrationTargetMetadata(item, nil))
+	updated, err := service.store.SetIntegrationEnabled(tenantCtx, integrationID, enabled, version, requirements, audit)
 	if err != nil {
-		if enabled && errors.Is(err, shared.ErrConflict) {
+		if enabled && requirements.RequireSuccessfulTest && errors.Is(err, shared.ErrConflict) {
 			return integration.Integration{}, fmt.Errorf("%w: test the exact connection and credential revision successfully before enabling the integration", err)
 		}
 		return integration.Integration{}, err
@@ -256,22 +272,30 @@ func (service *Service) Archive(ctx context.Context, tenantID, integrationID sha
 	if err != nil {
 		return err
 	}
-	audit := service.auditEntry(actor, "integration.archived", integrationID, map[string]string{"provider": string(item.Provider)})
+	audit := service.auditEntry(actor, "integration.archived", integrationID, integrationTargetMetadata(item, nil))
 	return service.store.ArchiveIntegration(tenantCtx, integrationID, version, audit)
 }
 
 func (service *Service) CreateBinding(ctx context.Context, tenantID, integrationID, projectID shared.ID, externalKey, externalName, actor string) (integration.Binding, error) {
 	tenantID = shared.TenantOrDefault(tenantID)
 	tenantCtx := shared.WithTenant(ctx, tenantID)
-	if _, err := service.store.GetIntegration(tenantCtx, integrationID); err != nil {
+	item, err := service.store.GetIntegration(tenantCtx, integrationID)
+	if err != nil {
 		return integration.Binding{}, err
 	}
-	if _, err := service.projects.GetByID(tenantCtx, tenantID, projectID); err != nil {
+	boundProject, err := service.projects.GetByID(tenantCtx, tenantID, projectID)
+	if err != nil {
 		return integration.Binding{}, err
+	}
+	if (item.Provider == "gitlab" || item.Provider == "github" || item.Provider == "bitbucket") && (boundProject == nil || boundProject.SourceBinding.Kind != project.SourceGit) {
+		return integration.Binding{}, fmt.Errorf("%w: inbound SCM webhook binding requires a git project", shared.ErrValidation)
 	}
 	bindings, err := service.store.ListIntegrationBindings(tenantCtx, integrationID)
 	if err != nil {
 		return integration.Binding{}, err
+	}
+	if (item.Provider == "gitlab" || item.Provider == "github" || item.Provider == "bitbucket") && len(bindings) > 0 {
+		return integration.Binding{}, fmt.Errorf("%w: inbound SCM integration supports one project binding", shared.ErrConflict)
 	}
 	if len(bindings) >= integration.MaxBindingsPerPoll {
 		return integration.Binding{}, fmt.Errorf("%w: an integration supports at most %d bindings", shared.ErrValidation, integration.MaxBindingsPerPoll)
@@ -281,7 +305,7 @@ func (service *Service) CreateBinding(ctx context.Context, tenantID, integration
 	if err := binding.Normalize(); err != nil {
 		return integration.Binding{}, err
 	}
-	audit := service.auditEntry(actor, "integration.binding_created", binding.ID, map[string]string{"integration_id": integrationID.String(), "project_id": projectID.String()})
+	audit := service.auditEntry(actor, "integration.binding_created", binding.ID, integrationTargetMetadata(item, map[string]string{"integration_id": integrationID.String(), "project_id": projectID.String()}))
 	if err := service.store.CreateIntegrationBinding(tenantCtx, binding, audit); err != nil {
 		return integration.Binding{}, err
 	}
@@ -294,7 +318,11 @@ func (service *Service) ListBindings(ctx context.Context, tenantID, integrationI
 
 func (service *Service) DeleteBinding(ctx context.Context, tenantID, integrationID, bindingID shared.ID, actor string) error {
 	tenantCtx := shared.WithTenant(ctx, shared.TenantOrDefault(tenantID))
-	audit := service.auditEntry(actor, "integration.binding_deleted", bindingID, map[string]string{"integration_id": integrationID.String()})
+	item, err := service.store.GetIntegration(tenantCtx, integrationID)
+	if err != nil {
+		return err
+	}
+	audit := service.auditEntry(actor, "integration.binding_deleted", bindingID, integrationTargetMetadata(item, map[string]string{"integration_id": integrationID.String()}))
 	return service.store.DeleteIntegrationBinding(tenantCtx, integrationID, bindingID, audit)
 }
 
@@ -334,7 +362,7 @@ func (service *Service) StartOperation(ctx context.Context, tenantID, integratio
 	if operation.Actor != "system:integration-scheduler" {
 		audit = ports.AuditEntry{
 			Actor: operation.Actor, Action: "integration.operation_started", Target: operation.ID.String(), At: now,
-			Metadata: map[string]string{"integration_id": integrationID.String(), "operation": string(operationType), "provider": string(item.Provider)},
+			Metadata: integrationTargetMetadata(item, map[string]string{"integration_id": integrationID.String(), "operation": string(operationType)}),
 		}
 	}
 	operation, err = service.store.StartIntegrationOperation(tenantCtx, operation, JobKind, payload, audit)
@@ -361,7 +389,11 @@ func (service *Service) CancelOperation(ctx context.Context, tenantID, operation
 	if err != nil {
 		return integration.Operation{}, err
 	}
-	audit := service.auditEntry(actor, "integration.operation_cancelled", operationID, map[string]string{"integration_id": current.IntegrationID.String(), "operation": string(current.Type)})
+	metadata := map[string]string{"integration_id": current.IntegrationID.String(), "operation": string(current.Type)}
+	if item, getErr := service.store.GetIntegration(tenantCtx, current.IntegrationID); getErr == nil {
+		metadata = integrationTargetMetadata(item, metadata)
+	}
+	audit := service.auditEntry(actor, "integration.operation_cancelled", operationID, metadata)
 	operation, err := service.store.CancelIntegrationOperation(tenantCtx, operationID, service.clock.Now().UTC(), audit)
 	if err != nil {
 		return integration.Operation{}, err
@@ -673,10 +705,31 @@ func sanitizeOperationReason(raw string) string {
 	return clean
 }
 
+// auditDestination masks an integration endpoint to scheme://host for the audit log (#1358). A path
+// can name a customer's job layout, so it stays out; an unparseable endpoint records nothing.
+func auditDestination(endpoint string) string {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
+}
+
+// integrationTargetMetadata is the metadata every integration audit entry carries: the provider and
+// the masked destination, plus extra. The actor is the entry's Actor. Integrations have no data
+// class yet (#1360); it joins this map when they gain one.
+func integrationTargetMetadata(item integration.Integration, extra map[string]string) map[string]string {
+	meta := map[string]string{"provider": string(item.Provider), "destination": auditDestination(item.Endpoint)}
+	for k, v := range extra {
+		meta[k] = v
+	}
+	return meta
+}
+
 func integrationAuditMetadata(item integration.Integration) map[string]string {
 	return map[string]string{
 		"provider":              string(item.Provider),
-		"endpoint":              item.Endpoint,
+		"destination":           auditDestination(item.Endpoint),
 		"allow_private_network": fmt.Sprintf("%t", item.AllowPrivateNetwork),
 	}
 }
@@ -745,4 +798,13 @@ func encodeCheckpoints(checkpoints map[string]string) (string, error) {
 
 func IsRetryable(err error) bool {
 	return integration.IsRetryable(err) || errors.Is(err, ports.ErrRetryable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+// checkEndpointRules applies the operator's rules on save: the private-network switch to every
+// provider, and the host allowlist and private CIDRs to self-hosted ones.
+func checkEndpointRules(rules selfhosted.Rules, descriptor integration.ProviderDescriptor, endpoint string, requestPrivate bool) error {
+	if descriptor.SelfHosted {
+		return rules.CheckSave(endpoint, requestPrivate)
+	}
+	return rules.CheckPrivateRequest(requestPrivate)
 }

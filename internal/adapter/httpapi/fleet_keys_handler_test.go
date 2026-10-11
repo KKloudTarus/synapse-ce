@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -74,7 +75,7 @@ func signedKeyBody(t *testing.T, agentID shared.ID) (map[string]any, ed25519.Pub
 
 func operatorReq(method, path string, tenant shared.ID) *http.Request {
 	req := httptest.NewRequest(method, path, nil)
-	ctx := context.WithValue(req.Context(), principalKey, Principal{ID: "operator", Name: "operator", Role: "admin", TenantID: string(tenant)})
+	ctx := context.WithValue(req.Context(), principalKey, Principal{ID: "operator", Name: "operator", Role: "admin", TenantID: string(tenant), Credential: authz.KindBootstrap})
 	return req.WithContext(shared.WithTenant(ctx, tenant))
 }
 

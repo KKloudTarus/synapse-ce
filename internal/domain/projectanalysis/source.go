@@ -64,10 +64,16 @@ var (
 	ErrFileChangeStatus  = errors.New("file change status is invalid")
 	ErrFileChangePaths   = errors.New("file change paths are invalid")
 	ErrSourceNotRetained = errors.New("source artifact not retained")
-	ErrSourceIntegrity   = errors.New("source artifact integrity mismatch")
-	ErrSourceLimit       = errors.New("source artifact exceeds retained limit")
-	ErrSourceUnsupported = errors.New("source artifact content is unsupported")
-	ErrSourceTransient   = errors.New("source artifact temporarily unavailable")
+	// ErrSourceMissingFromStore separates a deployment problem from a retention decision. The analysis
+	// recorded the file as captured, and the server answering this request has no bytes for it. That
+	// happens when the artifact directory is pod-local storage and more than one API replica serves the
+	// console, so only the replica that ran the analysis holds the capture, or when that storage did not
+	// survive a restart. Reporting it as "not retained" sent operators looking for a retention setting.
+	ErrSourceMissingFromStore = errors.New("source artifact is missing from this server's storage: the analysis captured it, so either another replica holds it or the artifact storage did not survive a restart")
+	ErrSourceIntegrity        = errors.New("source artifact integrity mismatch")
+	ErrSourceLimit            = errors.New("source artifact exceeds retained limit")
+	ErrSourceUnsupported      = errors.New("source artifact content is unsupported")
+	ErrSourceTransient        = errors.New("source artifact temporarily unavailable")
 )
 
 // Capability says whether one analysis-time Code feature can be served. An unavailable

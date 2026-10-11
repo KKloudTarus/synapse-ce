@@ -598,10 +598,22 @@ func (s *Scanner) scanDecoded(rel, text, original string, seen map[string]bool, 
 		if inlineAllow(lineOf(original, start)) {
 			return false // an inline allow on the encoded token's line suppresses it
 		}
-		decodedText := string(decoded)
+		// A PEM block's body is masked before the detectors run, so one key carried inside an encoded
+		// value stays one credential rather than one finding per base64 body line. The armour lines stay,
+		// so the private-key rule still sees its header.
+		decodedText := string(maskPEMBlockBodies(decoded))
 		line := 1 + strings.Count(text[:start], "\n")
 		for i := range s.rules {
 			r := &s.rules[i]
+			// A KEYWORD-FREE rule must not run here. Decoded bytes are high-entropy by construction, so the
+			// entropy rule fired on anything base64 carried: an EKS cluster's base64 CA certificate decodes
+			// to a PEM whose DER body is a perfect high-entropy token, and that was 19 findings on one
+			// Terraform module repository, one per rendered fixture, for a value that is public by
+			// definition. It also contradicted this pass's own contract, which is that a hit requires a real
+			// detector with its distinctive keyword to fire on the decoded bytes.
+			if len(r.keywords) == 0 {
+				continue
+			}
 			if !hasAnyKeyword(decodedText, r.keywords) {
 				continue
 			}
@@ -1031,6 +1043,9 @@ func assignedValueNotCredential(secret string) bool {
 	if wordlikePathToken(secret) {
 		return true
 	}
+	if identifierAssignment(secret) {
+		return true
+	}
 	hasDigit := false
 	for i := 0; i < len(secret); i++ {
 		c := secret[i]
@@ -1043,6 +1058,106 @@ func assignedValueNotCredential(secret string) bool {
 		}
 	}
 	return !hasDigit
+}
+
+// nextAssignmentRe matches an identifier immediately followed by "=": the shape of another assignment, not
+// of a value.
+var nextAssignmentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}=`)
+
+// identifierAssignment reports whether the captured value is itself an assignment. The whitespace between a
+// key and its value may cross a newline, which is how a JSON formatter breaks a long line, so a key with an
+// EMPTY value reaches past its own line and takes the next one:
+//
+//	CAPTCHA_H_SECRET=
+//	CAPTCHA_H_TIMEOUT=5
+//
+// captured CAPTCHA_H_TIMEOUT=5 as the secret and reported it a line below the key. Three of those sat in one
+// env template on a real repository. A base64 value carries "=" only as trailing padding, never after an
+// identifier, so this cannot reject a real credential.
+func identifierAssignment(secret string) bool {
+	return nextAssignmentRe.MatchString(secret)
+}
+
+// connectionStringPlaceholder reports whether a connection string's password component is a substitution
+// placeholder rather than a credential.
+func connectionStringPlaceholder(value string) bool {
+	at := strings.LastIndex(value, "@")
+	if at < 0 {
+		return false
+	}
+	colon := strings.LastIndex(value[:at], ":")
+	if colon < 0 {
+		return false
+	}
+	password := value[colon+1 : at]
+	if templatePlaceholder(password) {
+		return true
+	}
+	// The other documented shape names the parts with the words themselves: `postgres://user:password@host/db`
+	// in a docstring is the URI grammar, not a credential. 65 of one repository's findings were that line in
+	// driver docs and translation catalogues. BOTH components must be generic, so `admin:password` stays
+	// reported: a real account name beside a weak password is a credential, and a weak one at that.
+	scheme := strings.Index(value, "://")
+	if scheme < 0 {
+		return false
+	}
+	user := value[scheme+3 : colon]
+	return placeholderWords[strings.ToLower(user)] && placeholderWords[strings.ToLower(password)]
+}
+
+// placeholderWords are the self-describing names documentation uses in place of a value.
+var placeholderWords = map[string]bool{
+	"user": true, "username": true, "user_name": true, "youruser": true, "your_user": true,
+	"myuser": true, "dbuser": true, "db_user": true, "login": true, "account": true,
+	"password": true, "passwd": true, "pwd": true, "pass": true, "secret": true,
+	"yourpassword": true, "your_password": true, "mypassword": true, "my_password": true,
+	"dbpassword": true, "db_password": true, "changeme": true, "changethis": true,
+}
+
+// templatePlaceholder recognises the substitution shapes documentation and configuration use to stand in for
+// a value: <NAME>, {name}, {{name}}, ${NAME}, %(name)s and $NAME.
+func templatePlaceholder(value string) bool {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return true
+	}
+	switch {
+	case strings.HasPrefix(v, "<") && strings.HasSuffix(v, ">"):
+		return true
+	case strings.HasPrefix(v, "{") && strings.HasSuffix(v, "}"):
+		return true
+	case strings.HasPrefix(v, "${"), strings.HasPrefix(v, "%("), strings.HasPrefix(v, "%{"):
+		return true
+	case strings.HasPrefix(v, "$"):
+		return true
+	}
+	return false
+}
+
+// codecAlphabets are the ordered character tables every base64/base32/base36 implementation carries. They
+// have maximal character variety, so they clear any entropy floor by construction, and one of them appears
+// in a vendored polyfill in most JavaScript repositories.
+var codecAlphabets = []string{
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_=",
+	"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+	"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567=",
+	"0123456789abcdefghijklmnopqrstuvwxyz",
+}
+
+// codecAlphabetToken reports whether the candidate is a run of one of those tables. A credential that is a
+// contiguous slice of an ordered alphabet is not a credential anyone generated.
+func codecAlphabetToken(value string) bool {
+	if len(value) < 24 {
+		return false // too short to be a table; leave it to the entropy floor
+	}
+	for _, alphabet := range codecAlphabets {
+		if strings.Contains(alphabet, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func wordlikePathToken(secret string) bool {
@@ -1075,10 +1190,24 @@ func wordlikePathToken(secret string) bool {
 var resourcePathExtensions = []string{
 	".xml", ".sql", ".yaml", ".yml", ".json", ".properties", ".java", ".kt", ".ts", ".js", ".go", ".py",
 	".html", ".csv", ".md", ".txt", ".png", ".jpg", ".svg",
+	// Media and font assets. A CDN asset URL carries a high-entropy path segment by design: an avatar at
+	// pbs.twimg.com/profile_images/<18 digits>/<8 mixed-case chars>_400x400.jpeg cleared the entropy floor
+	// six times in one repository, where gitleaks reported nothing.
+	".jpeg", ".gif", ".webp", ".avif", ".ico", ".bmp", ".mp4", ".webm", ".woff", ".woff2", ".ttf", ".eot",
 }
 
 // resourcePathIndicators mark the line as declaring where something lives.
-var resourcePathIndicators = []string{"classpath:", "file=", "file:", "path=", "resource=", "src=", "href=", "include"}
+// A URL is a location by definition, so "://" is the indicator for the asset case. Both halves are still
+// required: the line must name a location AND carry a known non-credential extension, so a credential in a
+// query string is untouched.
+var resourcePathIndicators = []string{
+	"classpath:", "file=", "file:", "path=", "resource=", "src=", "href=", "include", "://",
+	// CSS and SCSS name a location with `src:` and `url(` rather than an attribute. A webfont is served
+	// under a content hash, so `src: url(/fonts/UcC73FwrK3iLTeHuS_fvQtMwCp50KnMa25L7W0Q5n-wU.woff2)` is a
+	// 44-character high-entropy token by design: two font stylesheets produced 20 of one repository's 26
+	// secret findings, where gitleaks reported one.
+	"src:", "url(", "srcset=",
+}
 
 // lineDeclaresResourcePath reports whether the line is a resource declaration whose high-entropy token is a
 // FILE NAME, not a credential. Liquibase and Flyway generate migration names long and varied enough to clear
@@ -1162,7 +1291,11 @@ func baseDefaultRules() []rule {
 		{
 			id: "gcp-service-account-key", category: "GCP", title: "GCP service account key", severity: shared.SeverityHigh,
 			keywords: []string{"service_account"},
-			re:       regexp.MustCompile(`"type"\s*:\s*"service_account"`),
+			// The type marker alone is the FORMAT, not the credential. Every page documenting how to paste a
+			// service-account JSON carries it, and 10 of one repository's findings were exactly that, each
+			// sitting beside `"private_key": "..."`. A real key file carries PEM material in that field, so
+			// both the marker and the material are required, in either order, within a bounded span (Go caps a repeat at 1000, and a real key file puts the two fields about 200 characters apart).
+			re: regexp.MustCompile(`"type"\s*:\s*"service_account"[\s\S]{0,1000}?"private_key"\s*:\s*"(?:\\n)?-----BEGIN|"private_key"\s*:\s*"(?:\\n)?-----BEGIN[\s\S]{0,1000}?"type"\s*:\s*"service_account"`),
 		},
 		{
 			id: "azure-storage-key", category: "Azure", title: "Azure storage account key", severity: shared.SeverityHigh,
@@ -1313,6 +1446,11 @@ func baseDefaultRules() []rule {
 			id: "db-connection-string", category: "Database", title: "Database connection string with credentials", severity: shared.SeverityHigh,
 			keywords: []string{"://"},
 			re:       regexp.MustCompile(`\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?|redis|amqp|mssql)://[^:@\s/"']+:[^@\s/"']{3,}@[^\s"']+`),
+			// A database's own documentation gives the URI shape with the parts named, so every such line
+			// matched: `postgresql://<UserName>:<DBPassword>@<Database Host>/<Database Name>` was 234 of one
+			// repository's 267 secret findings, almost all of them in docs. A password component that is a
+			// substitution placeholder is a documented shape, not a credential.
+			skipValue: connectionStringPlaceholder,
 		},
 		{
 			id: "putty-private-key", category: "PrivateKey", title: "PuTTY private key", severity: shared.SeverityCritical,
@@ -1359,7 +1497,7 @@ func baseDefaultRules() []rule {
 			lineSkip: func(line string) bool {
 				return hasAnyKeyword(line, highEntropyDeferKeywords) || lineDeclaresResourcePath(line)
 			},
-			skipValue:          wordlikePathToken,
+			skipValue:          func(v string) bool { return wordlikePathToken(v) || codecAlphabetToken(v) },
 			maskNotebookOutput: true,
 			maskPEMBodies:      true,
 		},
@@ -1394,7 +1532,7 @@ func baseDefaultRules() []rule {
 			// variable declaration is how a Go program assigns a literal, and the single-character
 			// separator had never matched it. `==` matches too, and a comparison against a literal
 			// credential is a hardcoded credential just the same.
-			re:        regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?\s*\]?\$?\s*(?:as\s+[A-Za-z_][A-Za-z0-9_.]*)?\s*["']?\s*\]?\s*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
+			re:        regexp.MustCompile(`(?i)(?:(?:(?:public|private|protected|friend|shared|static|readonly|writable|shadows|overrides|overridable|notinheritable|mustinherit)\s+)*(?:dim|const)\s+)?(?:\[\s*["']?)?(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?[ \t]*\]?\$?[ \t]*(?:as[ \t]+[A-Za-z_][A-Za-z0-9_.]*)?[ \t]*["']?[ \t]*\]?[ \t]*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
 			group:     1,
 			minEnt:    3.5,
 			allow:     compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),
@@ -1415,7 +1553,7 @@ func baseDefaultRules() []rule {
 			// in live code, and the two never see the same text: generic-secret reads the masked file.
 			id: "commented-credential", category: "Generic", title: "Credential left in a comment", severity: shared.SeverityMedium,
 			keywords:        []string{"secret", "token", "passwd", "password", "api_key", "apikey", "apiKey", "access_key", "SECRET", "TOKEN", "API_KEY"},
-			re:              regexp.MustCompile(`(?im)^[ \t]*(?:#|//|--|;)+[ \t]*["']?[A-Za-z0-9_.\-]{0,32}(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?\s*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
+			re:              regexp.MustCompile(`(?im)^[ \t]*(?:#|//|--|;)+[ \t]*["']?[A-Za-z0-9_.\-]{0,32}(?:api[_-]?key|secret|token|passwd|password|access[_-]?key)[A-Za-z0-9_-]{0,32}["']?[ \t]*[:=]=?\s*\\?["']?([A-Za-z0-9/+=_\-]{16,})(?:\\?["']|\s|$|[,;)\]}])`),
 			group:           1,
 			minEnt:          3.5,
 			allow:           compileAll([]string{`(?i)^(true|false|null|none|localhost)$`}),

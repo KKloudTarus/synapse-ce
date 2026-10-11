@@ -41,6 +41,10 @@ export interface Capability {
   enabled: boolean
   switch: string
   requires: string[]
+  /** Options an enabled capability offers, e.g. the notification channel types. */
+  values: string[]
+  /** Not shipped in this build: always disabled, and `switch` is empty. */
+  planned: boolean
 }
 
 /** Offensive rules of engagement. riskCeiling is '' | 'low' | 'medium' | 'high' | 'prohibited'. */
@@ -774,6 +778,7 @@ export interface Finding {
   impact: string
   priority: number
   assignee: string
+  assigneeUserId?: string // null/omitted when a legacy label is ambiguous or unmatched
   version: number // optimistic-concurrency token
   kind: FindingKind // external is a reader-only origin; native writers never persist it
   evidenceScore: number // 0-100; exploitation findings need >= 75 to be reportable
@@ -1046,6 +1051,24 @@ export interface Completeness {
   warning: string
 }
 
+export type EngineExecution = 'completed' | 'failed' | 'timed_out' | 'cancelled' | 'not_run'
+export type EngineCoverageStatus = 'complete' | 'partial' | 'unknown' | 'not_applicable'
+
+export interface EngineOutcome {
+  engine: string
+  execution: EngineExecution
+  coverage: EngineCoverageStatus
+  reason: string
+  required: boolean
+  counts: Record<string, number>
+}
+
+export interface EngineCoverage {
+  status: EngineCoverageStatus
+  required: number
+  completed: number
+}
+
 export interface LicenseCoverage {
   total: number
   detected: number
@@ -1162,6 +1185,8 @@ export interface ScanJob {
   startedAt: string | null
   finishedAt: string | null
   debugEvents: ScanDebugEvent[]
+  engineOutcomes?: EngineOutcome[]
+  engineCoverage?: EngineCoverage
 }
 
 export interface ScanDebugEvent {
@@ -1180,6 +1205,10 @@ export interface ScanDebugEvent {
 export interface ScanResult {
   target: string
   scanMode: ScanMode
+  executionMode?: string
+  includesPreviousResults?: boolean
+  engineOutcomes?: EngineOutcome[]
+  engineCoverage?: EngineCoverage
   languages: DetectedLanguage[]
   components: Component[]
   dependencies: Dependency[]
@@ -1367,7 +1396,7 @@ export interface EvidenceLedger {
 // User: a real operator identity for attribution.
 // The roles the server accepts (internal/domain/user/user.go). 'member' is the historical name
 // for 'consultant' and is kept because existing users carry it and createUser defaults to it.
-export type UserRole = 'admin' | 'consultant' | 'reviewer' | 'readonly' | 'member'
+export type UserRole = 'admin' | 'consultant' | 'reviewer' | 'readonly' | 'member' | 'integration_admin'
 
 export interface User {
   id: string
@@ -1381,9 +1410,15 @@ export interface CurrentUser {
   id: string
   name: string
   role: string
+  tenantId?: string
+  personId?: string
+  membershipId?: string
+  credentialKind?: string
+  recentAuth?: boolean
   features?: {
     assessmentLifecycleRead: boolean
     assessmentLifecycleUIDefault: boolean
+    enterpriseIdentity?: boolean
   }
 }
 
@@ -1630,6 +1665,8 @@ export interface Project {
   sourceBinding: ProjectSourceBinding
   defaultProfileByLang: Record<string, string>
   gateId: string
+  /** Opt-in to writing the gate result back to the forge PR/MR. Off by default; toggled with `setProjectDecoration`. */
+  decoratePullRequests: boolean
   createdAt: string | null
   latestAnalysis: ProjectAnalysis | null
   latestJob: ScanJob | null
@@ -1927,6 +1964,7 @@ export interface Hotspot {
 }
 
 export interface HotspotListFilter {
+  branch?: string
   lens?: 'overall' | 'new-code'
   status?: HotspotStatus
   rule?: string
@@ -2005,6 +2043,7 @@ export interface ProjectIssue {
 }
 
 export interface IssueListFilter {
+  branch?: string
   lens?: 'overall' | 'new-code'
   status?: IssueStatus
   type?: RuleType

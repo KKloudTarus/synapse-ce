@@ -60,13 +60,26 @@ describe('Team administration', () => {
     await waitFor(() => expect(api.updateUser).toHaveBeenCalledWith('u-1', 'reviewer'))
   })
 
+  it('grants the integration_admin role (#1358)', async () => {
+    vi.mocked(api.updateUser).mockResolvedValue({ ...alice, role: 'integration_admin' })
+    renderTeam()
+
+    await screen.findByText('Alice')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change role' })[0])
+    const editor = screen.getByRole('group', { name: /Role for Alice/ })
+    fireEvent.click(within(editor).getByLabelText('Integration admin'))
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save role' }))
+
+    await waitFor(() => expect(api.updateUser).toHaveBeenCalledWith('u-1', 'integration_admin'))
+  })
+
   it('offers every role the server accepts, not just admin and member', async () => {
     renderTeam()
 
     await screen.findByText('Alice')
     fireEvent.click(screen.getAllByRole('button', { name: 'Change role' })[0])
     const editor = screen.getByRole('group', { name: /Role for Alice/ })
-    for (const label of ['Member', 'Consultant', 'Reviewer', 'Read only', 'Admin']) {
+    for (const label of ['Member', 'Consultant', 'Reviewer', 'Read only', 'Integration admin', 'Admin']) {
       expect(within(editor).getByLabelText(label)).toBeInTheDocument()
     }
   })

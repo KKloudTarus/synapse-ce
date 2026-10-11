@@ -3,17 +3,24 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
 type cookieSessionResolver struct{ principal Principal }
 
 func (s cookieSessionResolver) Authenticate(_ context.Context, token, csrf string, unsafe bool) (Principal, error) {
-	if token != "opaque" || unsafe && csrf != "csrf" {
-		return Principal{}, errors.New("denied")
+	if token != "opaque" {
+		return Principal{}, authz.ErrCredentialInvalid
+	}
+	if unsafe && csrf != "csrf" {
+		return Principal{}, authz.ErrCSRFInvalid
 	}
 	return s.principal, nil
 }
@@ -110,8 +117,8 @@ func TestOIDCCallbackRedirectsToConfiguredFrontendOnly(t *testing.T) {
 
 func TestCookieCSRFAndBearerUnchanged(t *testing.T) {
 	resolver := cookieSessionResolver{principal: Principal{ID: "u1", Role: "admin", TenantID: "tenant"}}
-	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
-		return Principal{ID: "bearer", Role: "admin"}, token == "api"
+	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
+		return Principal{ID: "bearer", Role: "admin"}, testCredentialErr(token == "api")
 	})
 	auth.SetSessionResolver(resolver)
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -120,7 +127,7 @@ func TestCookieCSRFAndBearerUnchanged(t *testing.T) {
 		name, method, authz, cookie, csrf string
 		want                              int
 	}{
-		{"unsafe cookie lacks csrf", http.MethodPost, "", "opaque", "", http.StatusUnauthorized},
+		{"unsafe cookie lacks csrf", http.MethodPost, "", "opaque", "", http.StatusForbidden},
 		{"unsafe cookie csrf", http.MethodPost, "", "opaque", "csrf", http.StatusNoContent},
 		{"bearer ignores csrf", http.MethodPost, "Bearer api", "opaque", "", http.StatusNoContent},
 	} {
@@ -139,5 +146,45 @@ func TestCookieCSRFAndBearerUnchanged(t *testing.T) {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
 			}
 		})
+	}
+}
+
+// Two tabs discovering the same session at once: the rotation loser answers a retryable 409 and
+// keeps the cookie, because the winner's response may already have replaced it. Clearing it here
+// would sign the user out of every tab.
+func TestSessionDiscoveryRotationConflictIsRetryableAndKeepsTheCookie(t *testing.T) {
+	rt := &Router{log: discardLog(), oidc: oidcTestService{discover: func(context.Context, string) (OIDCSession, error) {
+		return OIDCSession{}, fmt.Errorf("rotate discovered OIDC session: rotate opaque session: previous session no longer active: %w", shared.ErrConflict)
+	}}}
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "opaque"})
+	rec := httptest.NewRecorder()
+	rec.Header().Set("X-Request-ID", "req-1")
+	rt.oidcSession(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("a retryable conflict must carry Retry-After")
+	}
+	if got := rec.Header().Values("Set-Cookie"); len(got) != 0 {
+		t.Fatalf("a rotation conflict must not touch the session cookie, got %q", got)
+	}
+	body := decodeErrorContract(t, rec)
+	if ErrorCode(body.Code) != CodeConflict || !*body.Retryable || body.RequestID != "req-1" {
+		t.Fatalf("conflict body = %+v", body)
+	}
+}
+
+// Marking one conflict retryable must not change the default for every other 409.
+func TestOrdinaryConflictStaysNotRetryable(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeJSON(rec, http.StatusConflict, errorBody{Error: "already exists"})
+	body := decodeErrorContract(t, rec)
+	if ErrorCode(body.Code) != CodeConflict || *body.Retryable {
+		t.Fatalf("ordinary conflict body = %+v", body)
+	}
+	if rec.Header().Get("Retry-After") != "" {
+		t.Fatal("an ordinary conflict must not carry Retry-After")
 	}
 }

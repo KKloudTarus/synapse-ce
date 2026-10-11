@@ -9,6 +9,9 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apiTarget = env.VITE_API_PROXY_TARGET
+  if (env.VITE_PLAYGROUND === '1' && apiTarget) {
+    throw new Error('Playground uses browser-local demo data. Remove VITE_API_PROXY_TARGET before starting it.')
+  }
 
   return {
     plugins: [
@@ -20,13 +23,16 @@ export default defineConfig(({ mode }) => {
       // same-origin registration from a dev session. It is copied verbatim from
       // public/, so it has to be removed after the write rather than filtered out
       // of the bundle graph.
-      {
+      // The playground build is the one exception: it is a static site with no backend, served
+      // from its own hostname, so the stale-registration footgun cannot reach a dev session on
+      // localhost or a customer's deployed install.
+      ...(env.VITE_PLAYGROUND === '1' ? [] : [{
         name: 'synapse-strip-msw-worker',
         apply: 'build' as const,
         closeBundle() {
           rmSync(path.resolve(import.meta.dirname, 'dist/mockServiceWorker.js'), { force: true })
         },
-      },
+      }]),
     ],
     resolve: {
       alias: {

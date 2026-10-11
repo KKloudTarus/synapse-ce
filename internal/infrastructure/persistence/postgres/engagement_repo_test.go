@@ -200,6 +200,68 @@ func TestEngagementRepository(t *testing.T) {
 	}
 }
 
+func TestEngagementRepositoryListTenantIDsExcludesLegacyEmptyTenant(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	var legacyTenantCount, defaultTenantCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE id=''`).Scan(&legacyTenantCount); err != nil {
+		t.Fatalf("count legacy empty tenant: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE id=$1`, shared.DefaultTenant.String()).Scan(&defaultTenantCount); err != nil {
+		t.Fatalf("count default tenant: %v", err)
+	}
+	if legacyTenantCount != 1 || defaultTenantCount != 1 {
+		t.Fatalf("migrations must retain legacy and default tenants: legacy=%d default=%d", legacyTenantCount, defaultTenantCount)
+	}
+
+	tenantID := shared.ID("tenant-list-" + randHex(t))
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants (id, name) VALUES ($1, $1)`, tenantID.String()); err != nil {
+		t.Fatalf("insert reconciliation tenant: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM tenants WHERE id=$1`, tenantID.String()) })
+
+	tenants, err := NewEngagementRepository(pool).ListTenantIDs(ctx)
+	if err != nil {
+		t.Fatalf("list tenant IDs: %v", err)
+	}
+	if len(tenants) == 0 {
+		t.Fatal("ListTenantIDs returned no tenants")
+	}
+	counts := make(map[shared.ID]int, len(tenants))
+	for i, tenant := range tenants {
+		if i > 0 && tenants[i-1] > tenant {
+			t.Fatalf("ListTenantIDs is not sorted: %q before %q", tenants[i-1], tenant)
+		}
+		counts[tenant]++
+	}
+	if counts[""] != 0 {
+		t.Fatalf("ListTenantIDs included legacy empty tenant: %v", tenants)
+	}
+	for _, tenant := range []shared.ID{shared.DefaultTenant, tenantID} {
+		if counts[tenant] != 1 {
+			t.Fatalf("ListTenantIDs count for %q = %d, want 1: %v", tenant, counts[tenant], tenants)
+		}
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE id=''`).Scan(&legacyTenantCount); err != nil {
+		t.Fatalf("verify legacy empty tenant remains: %v", err)
+	}
+	if legacyTenantCount != 1 {
+		t.Fatalf("legacy empty tenant row changed: got %d, want 1", legacyTenantCount)
+	}
+}
+
 func randHex(t *testing.T) string {
 	t.Helper()
 	b := make([]byte, 8)

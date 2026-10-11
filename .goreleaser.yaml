@@ -94,9 +94,53 @@ builds:
     goarch: *build_goarch
     ignore: *build_ignore
 
+  # An operator running the control plane outside Kubernetes needs the migrator: production migrates
+  # before the binaries deploy, with the owner credential. The container image has carried it all along,
+  # so it was missing only from the archive an operator downloads.
+  - id: synapse-migrate
+    main: ./cmd/synapse-migrate
+    binary: synapse-migrate
+    env: *build_env
+    flags: *build_flags
+    ldflags: *build_ldflags
+    goos: *build_goos
+    goarch: *build_goarch
+    ignore: *build_ignore
+
+  # The fleet agents. Linux only: the endpoint agent inventories a Linux host and the cluster agent runs
+  # as a Kubernetes workload, and neither has a darwin or windows deployment in this repository. The
+  # native .deb/.rpm packages are a separate artifact built from packaging/nfpm.yaml.
+  - id: synapse-agent
+    main: ./cmd/synapse-agent
+    binary: synapse-agent
+    env: *build_env
+    flags: *build_flags
+    ldflags: *build_ldflags
+    goos:
+      - linux
+    goarch: *build_goarch
+
+  - id: synapse-cluster-agent
+    main: ./cmd/synapse-cluster-agent
+    binary: synapse-cluster-agent
+    env: *build_env
+    flags: *build_flags
+    ldflags: *build_ldflags
+    goos:
+      - linux
+    goarch: *build_goarch
+
 archives:
-  # One archive per OS/arch bundling all five binaries (download once, get the whole suite).
+  # One archive per OS/arch bundling the whole suite (download once, get everything).
+  #
+  # allow_different_binary_count is required and deliberate. The agents are linux-only, because that is
+  # where they deploy: the endpoint agent inventories a Linux host and the cluster agent runs as a
+  # Kubernetes workload. So the Linux archives carry nine binaries and the darwin and windows archives
+  # carry seven, and goreleaser refuses that asymmetry by default to protect users from a surprise.
+  # Here the asymmetry is the honest answer: building a windows synapse-agent that has no deployment
+  # would be worse than shipping an archive whose contents match the platform.
   - id: synapse
+    allow_different_binary_count: true
     ids:
       - synapse-cli
       - synapse-api
@@ -104,6 +148,9 @@ archives:
       - synapse-worker
       - synapse-callgraph
       - synapse-mcp
+      - synapse-migrate
+      - synapse-agent
+      - synapse-cluster-agent
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats:
       - tar.gz
@@ -117,8 +164,7 @@ archives:
       - CHANGELOG.md
 
   # A slim CI archive: just synapse-cli. A scan/gate job needs only that one binary, so this avoids
-  # downloading the full ~44MB suite (synapse-agent, synapse-cspm, synapse-dast-helper, …) on every
-  # pipeline run across hundreds of projects.
+  # downloading the whole suite on every pipeline run across hundreds of projects.
   - id: synapse-cli
     ids:
       - synapse-cli

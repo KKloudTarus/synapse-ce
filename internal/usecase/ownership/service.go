@@ -513,18 +513,20 @@ func (s *Service) SetLegacyAssignee(ctx context.Context, eng, id shared.ID, assi
 		if e != nil {
 			return e
 		}
-		// Free text remains free text. Never infer identity from a display name or token.
+		// The repository binds an exact eligible user ID. Display names and
+		// unmatched labels remain free text.
 		out, e = s.findings.GetByEngagementAndID(ctx, eng, id)
 		if e != nil {
 			return e
 		}
 		at := s.clock.Now().UTC()
-		_, e = s.repo.ApplyAssignment(ctx, ports.OwnershipMutation{EngagementID: eng, FindingID: id, Actor: actor, Kind: "assign", Key: "legacy:" + s.ids.NewID().String(), DecisionID: s.ids.NewID(), TeamID: current.Assignment.TeamID, LegacyAssignee: strings.TrimSpace(assignee), ExpectedFindingVersion: version, ExpectedRevision: current.Assignment.Revision, ExpectedManualGeneration: current.Assignment.ManualGeneration, Notify: s.notify, LegacyEndpoint: true, At: at})
+		decision, e := s.repo.ApplyAssignment(ctx, ports.OwnershipMutation{EngagementID: eng, FindingID: id, Actor: actor, Kind: "assign", Key: "legacy:" + s.ids.NewID().String(), DecisionID: s.ids.NewID(), TeamID: current.Assignment.TeamID, LegacyAssignee: strings.TrimSpace(assignee), ExpectedFindingVersion: version, ExpectedRevision: current.Assignment.Revision, ExpectedManualGeneration: current.Assignment.ManualGeneration, Notify: s.notify, LegacyEndpoint: true, At: at})
 		if e != nil {
 			return e
 		}
 		// ApplyAssignment holds the finding CAS and appends audit last. No I/O after it.
 		out.Assignee = strings.TrimSpace(assignee)
+		out.AssigneeUserID = decision.After.AssigneeID
 		out.Version = version + 1
 		out.Audit.UpdatedAt = at
 		return nil

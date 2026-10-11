@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -36,7 +37,10 @@ type Adapter interface {
 	Descriptor() ProviderDescriptor
 }
 
-type Factory func(Integration, CredentialBundle) (Adapter, error)
+// Factory builds an adapter for one integration. rules are the operator's self-hosted endpoint
+// rules; a provider that opens outbound connections builds its dialer policy from them, so the
+// operator's current settings apply to every connection, not only to the ones saved after a change.
+type Factory func(Integration, CredentialBundle, selfhosted.Rules) (Adapter, error)
 
 type ProviderError struct {
 	// Err must contain a bounded, credential-free diagnostic suitable for an
@@ -88,10 +92,27 @@ type registeredProvider struct {
 type Registry struct {
 	mu        sync.RWMutex
 	providers map[Provider]registeredProvider
+	rules     selfhosted.Rules
 }
 
 func NewRegistry() *Registry {
 	return &Registry{providers: map[Provider]registeredProvider{}}
+}
+
+// SetSelfHostedRules installs the operator's self-hosted endpoint rules. The registry is their one
+// holder: the integration service checks them at save time and Resolve at adapter build time, so
+// the two can never disagree.
+func (registry *Registry) SetSelfHostedRules(rules selfhosted.Rules) {
+	registry.mu.Lock()
+	registry.rules = rules
+	registry.mu.Unlock()
+}
+
+// SelfHostedRules returns the operator's self-hosted endpoint rules.
+func (registry *Registry) SelfHostedRules() selfhosted.Rules {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	return registry.rules
 }
 
 func (registry *Registry) Register(descriptor ProviderDescriptor, factory Factory) error {
@@ -134,11 +155,19 @@ func (registry *Registry) Descriptors() []ProviderDescriptor {
 func (registry *Registry) Resolve(item Integration, credentials CredentialBundle) (Adapter, error) {
 	registry.mu.RLock()
 	registered, exists := registry.providers[item.Provider]
+	rules := registry.rules
 	registry.mu.RUnlock()
 	if !exists {
 		return nil, fmt.Errorf("%w: integration provider %q is not registered", shared.ErrNotFound, item.Provider)
 	}
-	adapter, err := registered.factory(item.Clone(), credentials.Clone())
+	// An integration saved before the operator tightened the rules is refused here, before any
+	// connection is attempted. SaaS providers pin their vendor host and are not subject to them.
+	if registered.descriptor.SelfHosted {
+		if err := rules.CheckEndpoint(item.Endpoint, item.AllowPrivateNetwork); err != nil {
+			return nil, err
+		}
+	}
+	adapter, err := registered.factory(item.Clone(), credentials.Clone(), rules)
 	if err != nil {
 		return nil, err
 	}

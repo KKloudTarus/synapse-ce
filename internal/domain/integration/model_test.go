@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -27,7 +28,7 @@ func TestRegistryResolvesSecondProviderWithoutCoreSwitches(t *testing.T) {
 	registry := NewRegistry()
 	for _, provider := range []Provider{"jenkins", "fake-ci"} {
 		descriptor := ProviderDescriptor{Provider: provider, Name: string(provider), Capabilities: []Capability{CapabilityTestConnection}}
-		if err := registry.Register(descriptor, func(item Integration, credentials CredentialBundle) (Adapter, error) {
+		if err := registry.Register(descriptor, func(item Integration, credentials CredentialBundle, _ selfhosted.Rules) (Adapter, error) {
 			if credentials["token"] != "secret" {
 				t.Fatalf("factory credentials = %#v", credentials)
 			}

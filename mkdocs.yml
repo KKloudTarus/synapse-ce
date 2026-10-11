@@ -66,8 +66,13 @@ nav:
   - Operate:
       - Configuration: configuration.md
       - Notifications and webhooks: notifications.md
+      - Notification content and capture rollout: notification-content.md
+      - SIEM streams: siem-stream.md
       - Finding ownership and routing: finding-ownership.md
       - Assessment lifecycle rollout: assessment-lifecycle-operations.md
+      - Identity foundation rollout: identity-foundation-rollout.md
+      - Identity cutover: identity-cutover.md
+      - Identity recovery: identity-recovery.md
       - Deployment: deployment.md
       - Capacity and service objectives: capacity-slos.md
       - Backup, restore, and upgrade: backup-restore-upgrade.md
@@ -78,6 +83,7 @@ nav:
       - Reachability benchmark: reachability-benchmark-runbook.md
       - Reachability soundness: reachability-soundness.md
       - SCA accuracy benchmark: sca-accuracy-benchmark.md
+      - Source-repository benchmark: source-repository-benchmark.md
       - Public SCA diagnostic inputs: sca-public-inputs.md
       - Trusted benchmark provisioning: trusted-benchmark-provisioning.md
       - SAST post-triage benchmark: sast-post-triage-benchmark.md
@@ -88,9 +94,12 @@ nav:
       - Troubleshooting: troubleshooting.md
   - Integrate:
       - CLI: cli.md
+      - Scan coverage: scan-coverage.md
       - MCP integration: mcp-integration.md
       - CI/CD integrations: integrations.md
       - Ticketing foundation: ticketing-foundation.md
+      - Bitbucket webhook review evidence: bitbucket-webhook-evidence.md
+      - Notification event schemas: schemas/events/README.md
       - Code quality rule authoring: code-quality-rules.md
   - Architecture and security:
       - Architecture: architecture.md

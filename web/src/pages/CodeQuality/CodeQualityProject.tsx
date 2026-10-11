@@ -1,11 +1,16 @@
-import { AlertTriangle, ArrowLeft, BarChart01, Check, CheckCircle, Copy01, GitBranch01 as BranchIcon, Play, Upload01 } from '@untitledui/icons'
+import { AlertTriangle, ArrowLeft, BarChart01, Check, CheckCircle, Copy01, GitBranch01 as BranchIcon, Play, Trash01, Upload01 } from '@untitledui/icons'
 import { copyText } from '../../lib/clipboard'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import { Button, EmptyState, ErrorState, Pill, Spinner, cn } from '../../components/ui'
+import { Toggle } from '../../components/base/toggle/toggle'
 import { api } from '../../lib/api'
 import { useFetch } from '../../hooks'
 import type { Project, QualityGate, ScanJob } from '../../lib/types'
+
+// Roles holding PermOperate, which PUT /projects/{key}/decoration requires (router.go). This only
+// disables the control for accounts the server would refuse; the server still decides.
+const OPERATE_ROLES = ['admin', 'consultant', 'member']
 
 export interface ProjectRouteContext {
   projectKey: string
@@ -51,6 +56,9 @@ export function CodeQualityProject() {
   const [coverageFile, setCoverageFile] = useState<File | null>(null)
   const [analysisRevision, setAnalysisRevision] = useState(0)
   const [copied, setCopied] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { data: branchList } = useFetch(() => api.projectBranches(key), { deps: [key, analysisRevision], enabled: !!key })
   const poll = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -177,6 +185,16 @@ export function CodeQualityProject() {
     { deps: [] },
   )
   const gates = fetchedGates ?? []
+  // async so a missing or throwing api.me still resolves to null rather than escaping useFetch.
+  const { data: me } = useFetch(async () => {
+    try {
+      return await api.me()
+    } catch {
+      return null
+    }
+  }, { deps: [] })
+  const canOperate = OPERATE_ROLES.includes(me?.role ?? '')
+  const [savingDecoration, setSavingDecoration] = useState(false)
 
   if (project && project.key !== key) return <Spinner label="Loading project…" />
 
@@ -186,6 +204,33 @@ export function CodeQualityProject() {
       setProject(await api.assignProjectGate(key, gateId))
     } catch (e) {
       setOperationError(e instanceof Error ? e.message : 'Failed to assign quality gate')
+    }
+  }
+
+  async function setDecoration(enabled: boolean) {
+    setOperationError(null)
+    setSavingDecoration(true)
+    try {
+      const next = await api.setProjectDecoration(key, enabled)
+      // The user may have moved to another project while the request was in flight.
+      setProject((current) => (current && current.key === next.key ? next : current))
+    } catch (e) {
+      setOperationError(e instanceof Error ? e.message : 'Failed to change PR decoration')
+    } finally {
+      setSavingDecoration(false)
+    }
+  }
+
+  async function deleteProject() {
+    setOperationError(null)
+    setDeleting(true)
+    try {
+      await api.deleteProject(key)
+      navigate('/code-quality', { replace: true })
+    } catch (e) {
+      setDeleting(false)
+      setConfirmingDelete(false)
+      setOperationError(e instanceof Error ? e.message : 'Failed to delete project')
     }
   }
 
@@ -302,6 +347,22 @@ export function CodeQualityProject() {
                   <option key={gate.key} value={gate.key}>{gate.name}</option>
                 ))}
               </select>
+              <span className="text-quaternary">·</span>
+              {/* Decoration writes the gate result back to the forge PR/MR (status, check, comment).
+                  It is off by default, so no project writes outward until someone turns it on here. */}
+              <span
+                title={canOperate
+                  ? 'Post the quality gate result to the pull or merge request when an analysis is for one'
+                  : 'Changing PR decoration needs the operate permission'}
+              >
+                <Toggle
+                  size="sm"
+                  label="PR decoration"
+                  isSelected={project.decoratePullRequests}
+                  isDisabled={!canOperate || savingDecoration}
+                  onChange={setDecoration}
+                />
+              </span>
             </div>
           </div>
 
@@ -317,6 +378,29 @@ export function CodeQualityProject() {
             <Button loading={isRunning} disabled={isRunning} onClick={startAnalysis}>
               <Play className="size-4" aria-hidden="true" /> Run analysis
             </Button>
+            {/* DELETE /api/v1/projects/{key} has always existed; the dashboard never called it, so a
+                project could be created and never removed. Two steps, because deleting a project
+                takes its analyses and their history with it. */}
+            {confirmingDelete ? (
+              <div className="inline-flex items-center gap-1.5 rounded-lg border border-error/40 bg-error-primary/10 px-2 py-1">
+                <span className="text-xs text-error-primary">Delete {project.key} and its analyses?</span>
+                <Button variant="danger" loading={deleting} disabled={deleting} onClick={deleteProject}>
+                  Delete
+                </Button>
+                <Button variant="secondary" disabled={deleting} onClick={() => setConfirmingDelete(false)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="secondary"
+                disabled={isRunning}
+                title={isRunning ? 'Wait for the running analysis to finish' : 'Delete this project'}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Trash01 className="size-4" aria-hidden="true" /> Delete
+              </Button>
+            )}
           </div>
         </div>
         {isRunning && (
@@ -349,9 +433,11 @@ export function CodeQualityProject() {
 }
 
 function ProjectNavLink({ to, end = false, children }: { to: string; end?: boolean; children: React.ReactNode }) {
+  const [params] = useSearchParams()
+  const branch = import.meta.env.VITE_PLAYGROUND === '1' ? params.get('branch') : null
   return (
     <NavLink
-      to={to}
+      to={branch ? `${to}?${new URLSearchParams({ branch })}` : to}
       end={end}
       className={({ isActive }) => cn(
         'shrink-0 border-b-2 px-1 pb-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60',

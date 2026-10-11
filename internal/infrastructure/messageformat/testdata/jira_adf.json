@@ -1,0 +1,121 @@
+{
+  "content": [
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "text": "SQL injection in /login",
+          "type": "text"
+        },
+        {
+          "text": " on ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "em"
+            }
+          ],
+          "text": "prod_eu",
+          "type": "text"
+        },
+        {
+          "type": "hardBreak"
+        },
+        {
+          "text": "Rule ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "text": "CWE-89",
+          "type": "text"
+        },
+        {
+          "text": ", severity ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "text": "critical",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Host: api.example.com",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "listItem"
+        },
+        {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Owner: team \u003cplatform\u003e \u0026 ops",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "listItem"
+        }
+      ],
+      "type": "bulletList"
+    },
+    {
+      "content": [
+        {
+          "text": "Reported by Synapse.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://synapse.example.com/engagements/e1/findings/f1"
+              },
+              "type": "link"
+            }
+          ],
+          "text": "Open finding",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    }
+  ],
+  "type": "doc",
+  "version": 1
+}

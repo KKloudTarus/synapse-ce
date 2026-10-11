@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/scmconnector"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -89,6 +90,58 @@ func TestCreateConnectorTokenIsWriteOnly(t *testing.T) {
 		t.Fatalf("dto = %+v", dto)
 	}
 }
+
+func TestCreateConnectorCarriesTheSelfHostedAPIBase(t *testing.T) {
+	svc, err := scmconnectoruc.NewService(memory.NewSCMConnectorStore(), fixedConnectorIDs{}, connectorClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts, err := selfhosted.ParseHostAllowlist([]string{"ghe.corp.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetSelfHostedRules(selfhosted.Rules{Hosts: hosts})
+	rt := &Router{log: discardLog(), connectors: svc}
+
+	rec := httptest.NewRecorder()
+	rt.createConnector(rec, adminReq(http.MethodPost, "/api/v1/connectors",
+		`{"name":"ghes","provider":"github","host":"ghe.corp.example","token":"ghp_ghes_secret","api_base":"https://ghe.corp.example/api/v3/"}`))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var dto connectorDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.APIBase != "https://ghe.corp.example/api/v3" || strings.Contains(rec.Body.String(), "ghp_ghes_secret") {
+		t.Fatalf("create body = %s", rec.Body.String())
+	}
+
+	for _, body := range []string{
+		`{"name":"x","provider":"github","host":"ghe.other.example","token":"t","api_base":"https://ghe.other.example/api/v3"}`,
+		`{"name":"x","provider":"gitlab","host":"ghe.corp.example","token":"t","api_base":"http://ghe.corp.example/api/v4"}`,
+	} {
+		rec = httptest.NewRecorder()
+		rt.createConnector(rec, adminReq(http.MethodPost, "/api/v1/connectors", body))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("body %s: status %d, want 400", body, rec.Code)
+		}
+	}
+
+	rec = httptest.NewRecorder()
+	rt.listConnectors(rec, adminReq(http.MethodGet, "/api/v1/connectors", ""))
+	if !strings.Contains(rec.Body.String(), `"api_base":"https://ghe.corp.example/api/v3"`) || strings.Contains(rec.Body.String(), "ghp_ghes_secret") {
+		t.Fatalf("list body = %s", rec.Body.String())
+	}
+}
+
+type fixedConnectorIDs struct{}
+
+func (fixedConnectorIDs) NewID() shared.ID { return "conn-ghes" }
+
+type connectorClock struct{}
+
+func (connectorClock) Now() time.Time { return time.Unix(0, 0).UTC() }
 
 func TestListConnectorsOmitsToken(t *testing.T) {
 	svc := &fakeConnectors{list: []ports.SCMConnectorMeta{

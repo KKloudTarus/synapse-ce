@@ -1,0 +1,16 @@
+{
+  "id": "event-incident-created",
+  "type": "incident.created",
+  "source_kind": "incident",
+  "source_id": "source-42",
+  "schema_version": 1,
+  "occurred_at": "2026-09-27T08:00:00Z",
+  "data": {
+    "title": "Suspicious network activity",
+    "summary": "Fleet correlation created an incident.",
+    "incident_id": "incident-42",
+    "asset_id": ""
+  },
+  "engagement_id": "eng-42",
+  "severity": "critical"
+}

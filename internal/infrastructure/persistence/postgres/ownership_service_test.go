@@ -75,3 +75,55 @@ func TestOwnershipServiceAuditFailureRollsBack(t *testing.T) {
 		t.Fatalf("retry history: %+v %v", history, err)
 	}
 }
+
+func TestLegacyAssigneePickerIDPublishesPersonalInbox(t *testing.T) {
+	f := newOwnershipFixture(t)
+	svc, err := ownershipuc.NewService(f.repo, f.repo, NewFindingRepository(f.pool), NewTenantTransactionRunner(f.pool), NewAuditLog(f.pool), ownershipServiceClock{f.at}, &ownershipTestIDs{}, "observe", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.SetLegacyAssignee(f.ctx, "own-a-eng", "own-a-legacy", "bob", "alice", 1)
+	if err != nil || updated.AssigneeUserID != "bob" {
+		t.Fatalf("picker assignment did not return canonical ID: %+v %v", updated, err)
+	}
+	var afterID string
+	if err := WithTenant(f.ctx, f.pool, "own-a", func(tx pgx.Tx) error {
+		return tx.QueryRow(f.ctx, `SELECT payload->'after'->>'assignee_id' FROM ownership_decisions
+			WHERE tenant_id='own-a' AND finding_id='own-a-legacy'`).Scan(&afterID)
+	}); err != nil || afterID != "bob" {
+		t.Fatalf("decision lost canonical assignee %q: %v", afterID, err)
+	}
+	source := NewNotificationSource(f.pool, NewNotificationRepository(f.pool), time.Minute)
+	if err := WithTenant(f.ctx, f.pool, "own-a", func(tx pgx.Tx) error {
+		_, err := source.pollOwnership(f.ctx, tx, "own-a", 10)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := WithTenant(f.ctx, f.pool, "own-a", func(tx pgx.Tx) error {
+		return tx.QueryRow(f.ctx, `SELECT count(*) FROM user_notifications
+			WHERE tenant_id='own-a' AND user_id='bob' AND event_type='finding.ownership_changed'`).Scan(&count)
+	}); err != nil || count != 1 {
+		t.Fatalf("assignee received %d inbox rows: %v", count, err)
+	}
+	current, err := f.repo.GetAssignment(f.ctx, "own-a-eng", "own-a-legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.repo.ApplyAssignment(f.ctx, ports.OwnershipMutation{
+		EngagementID: "own-a-eng", FindingID: "own-a-legacy", Actor: "alice",
+		Kind: "transfer", Key: "transfer-to-ops", DecisionID: "decision-transfer-to-ops",
+		TeamID: "ops", AssigneeID: "bob", LegacyAssignee: "bob",
+		ExpectedFindingVersion: current.FindingVersion, ExpectedRevision: current.Assignment.Revision,
+		ExpectedManualGeneration: current.Assignment.ManualGeneration, Notify: true, At: f.at.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The picker can search all tenant users, but a selected ID outside the
+	// current team must fail instead of succeeding as an unbound legacy label.
+	if _, err := svc.SetLegacyAssignee(f.ctx, "own-a-eng", "own-a-legacy", "alice", "alice", current.FindingVersion+1); err == nil {
+		t.Fatal("out-of-team picker selection was accepted without routing")
+	}
+}

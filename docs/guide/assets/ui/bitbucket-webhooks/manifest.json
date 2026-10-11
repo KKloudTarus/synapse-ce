@@ -1,0 +1,122 @@
+[
+  {
+    "theme": "light",
+    "state": "ready",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "light",
+    "state": "loading",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "light",
+    "state": "empty",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "light",
+    "state": "unbound",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "light",
+    "state": "error",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "light",
+    "state": "permission-denied",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "light",
+    "state": "saved",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "light",
+    "state": "save-error",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "light",
+    "state": "save-loading",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "light",
+    "state": "editing",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "ready",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "loading",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "empty",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "unbound",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "error",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "permission-denied",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "saved",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "save-error",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "save-loading",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  },
+  {
+    "theme": "dark",
+    "state": "editing",
+    "errors": [],
+    "source": "Local console with mocked HTTP API; not a real Bitbucket delivery"
+  }
+]

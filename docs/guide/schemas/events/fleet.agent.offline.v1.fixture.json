@@ -1,0 +1,14 @@
+{
+  "id": "event-fleet-agent-offline",
+  "type": "fleet.agent.offline",
+  "source_kind": "fleet_agent_offline_episode",
+  "source_id": "source-42",
+  "schema_version": 1,
+  "occurred_at": "2026-09-27T08:00:00Z",
+  "data": {
+    "title": "Fleet agent offline",
+    "summary": "Agent node-42 has missed its heartbeat freshness window.",
+    "agent_id": "agent-42",
+    "last_seen_at": "2026-09-27T07:45:00Z"
+  }
+}

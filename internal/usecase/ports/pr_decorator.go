@@ -9,7 +9,7 @@ import (
 )
 
 // PRDecorationTarget identifies the forge change that should receive an analysis result.
-// PullRequest is provider-neutral: it is a GitHub/Bitbucket PR number or a GitLab MR IID.
+// PullRequest is provider-neutral: it is a GitHub/Bitbucket/Azure Repos PR number or a GitLab MR IID.
 type PRDecorationTarget struct {
 	Repository   string
 	CommitSHA    string
@@ -34,7 +34,12 @@ func (t PRDecorationTarget) Complete() bool {
 type PRDecoration struct {
 	// Provider is the forge/CI provider claim (for example "github-actions", "gitlab-ci"). A concrete
 	// single-provider decorator ignores it; a provider-multiplexing decorator dispatches on it.
-	Provider          string
+	Provider string
+	// ForgeHost is the normalized host (scmconnector.NormalizeHost) of the forge the repository lives
+	// on, taken server-side from the project's git source, never from the CI payload. Adapters resolve
+	// the credential for it, and use its connector's API base when one is set (GitHub Enterprise
+	// Server, self-managed GitLab). Empty means the provider's public SaaS host.
+	ForgeHost         string
 	Target            PRDecorationTarget
 	Gate              qualitygate.Result
 	Summary           string

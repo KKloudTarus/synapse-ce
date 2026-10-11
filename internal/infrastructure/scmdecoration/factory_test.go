@@ -17,6 +17,8 @@ func TestForProviderSelectsOwnedAdapter(t *testing.T) {
 		"gitlab-ci":           (*GitLabDecorator)(nil),
 		"bitbucket":           (*BitbucketDecorator)(nil),
 		"bitbucket-pipelines": (*BitbucketDecorator)(nil),
+		"azure-devops":        (*AzureDevOpsDecorator)(nil),
+		"azure-pipelines":     (*AzureDevOpsDecorator)(nil),
 	}
 	for provider, want := range cases {
 		got, err := ForProvider(provider, creds)
@@ -36,6 +38,10 @@ func TestForProviderSelectsOwnedAdapter(t *testing.T) {
 			if _, ok := got.(*BitbucketDecorator); !ok {
 				t.Fatalf("ForProvider(%q) = %T, want *BitbucketDecorator", provider, got)
 			}
+		case *AzureDevOpsDecorator:
+			if _, ok := got.(*AzureDevOpsDecorator); !ok {
+				t.Fatalf("ForProvider(%q) = %T, want *AzureDevOpsDecorator", provider, got)
+			}
 		}
 	}
 }
@@ -47,7 +53,7 @@ func TestForProviderRejectsUnsupported(t *testing.T) {
 }
 
 func TestCredentialHostForProvider(t *testing.T) {
-	cases := map[string]string{"github-actions": githubCredentialHost, "gitlab-ci": gitlabCredentialHost, "bitbucket-pipelines": bitbucketCredentialHost}
+	cases := map[string]string{"github-actions": githubCredentialHost, "gitlab-ci": gitlabCredentialHost, "bitbucket-pipelines": bitbucketCredentialHost, "azure-pipelines": azureSCMHost}
 	for provider, want := range cases {
 		got, ok := CredentialHostForProvider(provider)
 		if !ok || got != want {

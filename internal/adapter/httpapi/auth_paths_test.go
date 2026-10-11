@@ -1,6 +1,9 @@
 package httpapi
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A public path skips authentication but NOT the AUP gate. An unauthenticated visitor has no
 // principal that could have accepted the policy, so a public path missing from the AUP exemption
@@ -31,5 +34,17 @@ func TestBrowserLoginPathsAreReachableUnauthenticated(t *testing.T) {
 	}
 	if !exempt["/api/auth/logout"] {
 		t.Error("/api/auth/logout must be AUP-exempt so an operator can always sign out")
+	}
+}
+
+// Webhooks are a separate authentication plane. A prefix exemption would let
+// unknown sibling paths (and GETs) bypass the human bearer and AUP gates.
+func TestInboundWebhookPathNeverAddedToHumanPublicPaths(t *testing.T) {
+	for _, paths := range []map[string]bool{publicPaths(), aupExemptPaths()} {
+		for path := range paths {
+			if path == "/api/v1/hooks" || strings.HasPrefix(path, "/api/v1/hooks/") {
+				t.Fatalf("inbound webhook %q must be mounted outside the human chain, never exempted", path)
+			}
+		}
 	}
 }

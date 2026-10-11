@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -51,6 +52,7 @@ type Service struct {
 	gateMutator                      ports.QualityGateMutator
 	profiles                         *qualityprofilesuc.Service
 	decorator                        ports.PRDecorator
+	bitbucketCommits                 ports.BitbucketCommitResolver
 	allowLocalSource                 bool
 	projectAnalysisCompletionTimeout time.Duration
 	shortLivedBranchKeep             int
@@ -62,6 +64,10 @@ func NewService(repo ports.ProjectRepository, engagements ports.EngagementReposi
 }
 
 func (s *Service) SetScanner(scanner *scauc.Service) { s.scanner = scanner }
+
+func (s *Service) SetBitbucketCommitResolver(resolver ports.BitbucketCommitResolver) {
+	s.bitbucketCommits = resolver
+}
 
 // SetScanJobs lets an imported analysis leave a scan-job record behind, so the project's analysis
 // status and its job history show the CI run the same way they show a server run.
@@ -343,6 +349,63 @@ func (s *Service) SetPullRequestDecoration(ctx context.Context, actor string, te
 	return p, nil
 }
 
+// StartGitLabWebhookAnalysis starts a server-owned project scan from authenticated SCM
+// metadata. The repository URL always comes from the persisted project binding;
+// callers may supply only a source-ref label, an optional server-owned fetch ref,
+// and an immutable commit SHA.
+func (s *Service) StartGitLabWebhookAnalysis(ctx context.Context, actor string, tenantID, projectID shared.ID, target ports.WebhookScanTarget) (ports.ScanJob, error) {
+	if err := requireActor(actor); err != nil {
+		return ports.ScanJob{}, err
+	}
+	if s.scanner == nil {
+		return ports.ScanJob{}, fmt.Errorf("%w: project analysis is not configured", shared.ErrValidation)
+	}
+	p, err := s.repo.GetByID(ctx, tenantID, projectID)
+	if err != nil {
+		return ports.ScanJob{}, fmt.Errorf("get webhook project: %w", err)
+	}
+	if p == nil || p.SourceBinding.Kind != project.SourceGit {
+		return ports.ScanJob{}, fmt.Errorf("%w: webhook project must use a git source", shared.ErrValidation)
+	}
+	e, err := s.engagements.GetByProjectID(ctx, tenantID, p.ID)
+	if err != nil {
+		return ports.ScanJob{}, fmt.Errorf("get webhook project analysis context: %w", err)
+	}
+	gate, err := s.resolveManagedGate(ctx, tenantID, p.GateID)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	request := ports.AcquireRequest{
+		Kind:                  project.SourceGit,
+		Value:                 p.SourceBinding.Value,
+		Ref:                   strings.TrimSpace(target.Ref),
+		FetchRef:              strings.TrimSpace(target.FetchRef),
+		Commit:                strings.ToLower(strings.TrimSpace(target.SHA)),
+		DisableGitCredentials: target.Fork,
+	}
+	request.BaseRef = strings.TrimSpace(target.BaseRef)
+	var ci *projectanalysis.CIContext
+	if target.MergeRequestNumber > 0 {
+		if request.BaseRef == "" {
+			request.BaseRef = p.SourceBinding.DefaultBranch
+		}
+		ci = &projectanalysis.CIContext{Provider: target.Provider, Branch: request.Ref,
+			PullRequest: strconv.FormatInt(target.MergeRequestNumber, 10), TargetBranch: request.BaseRef, HeadSHA: request.Commit}
+		if source, err := url.Parse(p.SourceBinding.Value); err == nil {
+			ci.RepoSlug = strings.TrimSuffix(strings.Trim(source.Path, "/"), ".git")
+		}
+		if _, err := ci.Normalize(); err != nil {
+			return ports.ScanJob{}, fmt.Errorf("%w: invalid webhook SCM context", shared.ErrValidation)
+		}
+	} else {
+		request.BaseRef = p.SourceBinding.BaseRef
+	}
+	return s.scanner.StartDurableScanWithOptions(ctx, actor, e.ID, request, scauc.ScanOptions{
+		Mode: scauc.ScanModeFull, CodeQuality: true, ProjectAnalysis: true,
+		NoBuildExecution: target.Fork, Gate: gate, WebhookContext: ci,
+	})
+}
+
 func (s *Service) StartAnalysis(ctx context.Context, actor string, tenantID shared.ID, key string, coverage *measure.CoverageReport) (ports.ScanJob, error) {
 	if err := requireActor(actor); err != nil {
 		return ports.ScanJob{}, err
@@ -363,6 +426,59 @@ func (s *Service) StartAnalysis(ctx context.Context, actor string, tenantID shar
 		return ports.ScanJob{}, err
 	}
 	return s.scanner.StartScanWithOptions(ctx, actor, e.ID, request, scauc.ScanOptions{Mode: scauc.ScanModeFull, CodeQuality: true, ProjectAnalysis: true, LineCoverage: coverage, Gate: gate})
+}
+
+type WebhookAnalysisInput struct {
+	Ref                   string
+	Commit                string
+	PullRequest           bool
+	DisableGitCredentials bool
+	NoBuildExecution      bool
+}
+
+// StartWebhookAnalysis queues an analysis for an already-stored Project from an
+// authenticated SCM webhook. The repository URL is always the Project's source
+// binding; provider payloads may select only the ref and immutable commit.
+func (s *Service) StartWebhookAnalysis(ctx context.Context, actor string, tenantID, projectID shared.ID, in WebhookAnalysisInput) (ports.ScanJob, error) {
+	if err := requireActor(actor); err != nil {
+		return ports.ScanJob{}, err
+	}
+	if s.scanner == nil {
+		return ports.ScanJob{}, fmt.Errorf("%w: project analysis is not configured", shared.ErrValidation)
+	}
+	p, err := s.repo.GetByID(ctx, tenantID, projectID)
+	if err != nil {
+		return ports.ScanJob{}, fmt.Errorf("get webhook project: %w", err)
+	}
+	if p == nil || p.SourceBinding.Kind != project.SourceGit {
+		return ports.ScanJob{}, fmt.Errorf("%w: webhook project must use a git source", shared.ErrValidation)
+	}
+	e, err := s.engagements.GetByProjectID(ctx, tenantID, p.ID)
+	if err != nil {
+		return ports.ScanJob{}, fmt.Errorf("get project analysis context: %w", err)
+	}
+	gate, err := s.resolveManagedGate(ctx, tenantID, p.GateID)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	ref := strings.TrimSpace(in.Ref)
+	request := ports.AcquireRequest{
+		Kind: p.SourceBinding.Kind, Value: p.SourceBinding.Value,
+		Ref: ref, Commit: strings.TrimSpace(in.Commit),
+		DisableGitCredentials: in.DisableGitCredentials,
+	}
+	if in.PullRequest {
+		request.BaseRef = p.SourceBinding.DefaultBranch
+		if request.BaseRef == "" {
+			request.BaseRef = p.SourceBinding.Ref
+		}
+	} else {
+		request.BaseRef = p.SourceBinding.BaseRef
+	}
+	return s.scanner.StartScanWithOptions(ctx, actor, e.ID, request, scauc.ScanOptions{
+		Mode: scauc.ScanModeFull, CodeQuality: true, ProjectAnalysis: true,
+		NoBuildExecution: in.NoBuildExecution, Gate: gate,
+	})
 }
 
 func (s *Service) projectAcquireRequest(ctx context.Context, p *project.Project) (ports.AcquireRequest, error) {
@@ -485,7 +601,11 @@ func (s *Service) GetAnalysis(ctx context.Context, tenantID shared.ID, key, id s
 // RecordProjectAnalysis is called by SCA only after a successful pipeline and
 // before its ScanJob becomes succeeded. Non-Project scans intentionally no-op.
 func (s *Service) RecordProjectAnalysis(ctx context.Context, engagementID shared.ID, jobID string, completedAt time.Time, result *scauc.ScanResult) error {
-	return s.recordProjectAnalysis(ctx, engagementID, jobID, completedAt, result, projectanalysis.OriginServer, nil)
+	var ci *projectanalysis.CIContext
+	if result != nil {
+		ci = result.WebhookContext
+	}
+	return s.recordProjectAnalysis(ctx, engagementID, jobID, completedAt, result, projectanalysis.OriginServer, ci)
 }
 
 // ImportAnalysisInput is a scan result a pipeline produced with synapse-cli and is handing to the
@@ -509,6 +629,26 @@ type ImportAnalysisInput struct {
 //
 // The gate is deliberately NOT taken from the payload. The project's managed gate is the server's
 // policy, and a pipeline that could ship its own gate definition could ship a passing one.
+// ciImportInternalError preserves the cause in server logs while marking
+// infrastructure failures as internal-only at the HTTP boundary.
+type ciImportInternalError struct {
+	message string
+	cause   error
+}
+
+func (e ciImportInternalError) Error() string {
+	if e.cause == nil {
+		return e.message
+	}
+	return e.message + ": " + e.cause.Error()
+}
+
+func (e ciImportInternalError) Unwrap() error { return e.cause }
+
+// InternalOnly prevents wrapped domain sentinels in infrastructure errors
+// from exposing internal diagnostics through the public HTTP error mapper.
+func (ciImportInternalError) InternalOnly() {}
+
 func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key string, in ImportAnalysisInput) (projectanalysis.Analysis, error) {
 	if err := requireActor(in.Actor); err != nil {
 		return projectanalysis.Analysis{}, err
@@ -538,19 +678,38 @@ func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key st
 	now := s.clock.Now().UTC()
 	jobID := s.ids.NewID().String()
 
-	// Leave a scan-job record so the project's analysis status and job history reflect this run.
-	// It is recorded as already succeeded: the work happened in the pipeline, not here.
+	// A CI import is not successful until its analysis is persisted. The
+	// notification capture trigger observes succeeded scan jobs, so this row
+	// starts as running even though the CI pipeline already completed.
 	var job ports.ScanJob
 	if s.jobs != nil {
-		finished := now
 		job = ports.ScanJob{
 			ID: jobID, EngagementID: e.ID.String(), Target: result.Target, Kind: "ci-import",
-			Status: ports.ScanSucceeded, Stage: "imported", Progress: 100,
-			StartedAt: now, FinishedAt: &finished, DebugEvents: []ports.ScanDebugEvent{},
+			Status: ports.ScanRunning, Stage: "importing", Progress: 99,
+			StartedAt: now, DebugEvents: []ports.ScanDebugEvent{},
 		}
 		if err := s.jobs.CreateRunning(ctx, job); err != nil {
-			return projectanalysis.Analysis{}, fmt.Errorf("record imported scan job: %w", err)
+			return projectanalysis.Analysis{}, ciImportInternalError{message: "record imported scan job failed", cause: err}
 		}
+	}
+	// Rejections never pass through succeeded, including failures after the
+	// analysis write such as an unavailable audit chain or final read.
+	rejectImport := func(cause error, safeReason string) (projectanalysis.Analysis, error) {
+		if s.jobs != nil {
+			finished := s.clock.Now().UTC()
+			// The job error is exposed in scan history; never persist raw
+			// validation or audit errors that may include credentials or URLs.
+			job.Status, job.Stage, job.Error = ports.ScanFailed, "import-rejected", safeReason
+			job.FinishedAt = &finished
+			// The original request may already be cancelled. Preserve its
+			// tenant context while compensating the admitted running job.
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.completionTimeout())
+			defer cancel()
+			if saveErr := s.jobs.Save(cleanupCtx, job); saveErr != nil {
+				return projectanalysis.Analysis{}, ciImportInternalError{message: "CI import rejected but could not finalize scan history", cause: errors.Join(cause, saveErr)}
+			}
+		}
+		return projectanalysis.Analysis{}, cause
 	}
 
 	var ciPtr *projectanalysis.CIContext
@@ -558,15 +717,7 @@ func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key st
 		ciPtr = &ci
 	}
 	if err := s.recordProjectAnalysis(ctx, e.ID, jobID, now, &result, projectanalysis.OriginCI, ciPtr); err != nil {
-		// The job row exists so the history shows the run. A rejected result (a payload the
-		// recorder refuses) must not leave it reading as a success with no analysis behind it.
-		if s.jobs != nil {
-			job.Status, job.Stage, job.Error = ports.ScanFailed, "import-rejected", err.Error()
-			if saveErr := s.jobs.Save(ctx, job); saveErr != nil {
-				return projectanalysis.Analysis{}, errors.Join(err, fmt.Errorf("mark imported scan job failed: %w", saveErr))
-			}
-		}
-		return projectanalysis.Analysis{}, err
+		return rejectImport(err, "CI import analysis rejected")
 	}
 	if s.audit != nil {
 		if err := s.audit.Record(ctx, ports.AuditEntry{
@@ -578,10 +729,28 @@ func (s *Service) ImportAnalysis(ctx context.Context, tenantID shared.ID, key st
 			},
 			At: now,
 		}); err != nil {
-			return projectanalysis.Analysis{}, fmt.Errorf("audit imported analysis: %w", err)
+			return rejectImport(ciImportInternalError{message: "audit imported analysis failed", cause: err}, "CI import audit failed")
 		}
 	}
-	return s.analyses.Get(ctx, tenantID, p.ID, shared.ID(jobID))
+	analysis, err := s.analyses.Get(ctx, tenantID, p.ID, shared.ID(jobID))
+	if err != nil {
+		return rejectImport(ciImportInternalError{message: "read imported analysis failed", cause: err}, "CI import analysis lookup failed")
+	}
+	// Only this final transition can capture scan.completed for CI imports.
+	if s.jobs != nil {
+		finished := s.clock.Now().UTC()
+		job.Status, job.Stage, job.Progress = ports.ScanSucceeded, "imported", 100
+		job.FinishedAt = &finished
+		job.NotificationSnapshot = result.NotificationScanSummary(job.Target, job.Kind)
+		// Once the analysis and audit are accepted, finish the durable job
+		// even if the CI HTTP caller disconnects at this final transition.
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.completionTimeout())
+		defer cancel()
+		if err := s.jobs.Save(finishCtx, job); err != nil {
+			return projectanalysis.Analysis{}, ciImportInternalError{message: "finalize imported scan job failed", cause: err}
+		}
+	}
+	return analysis, nil
 }
 
 // baselineBranchForRecording returns the branch whose latest analysis is the New-Code baseline. A
@@ -944,7 +1113,9 @@ func (s *Service) recordProjectAnalysis(ctx context.Context, engagementID shared
 		return fmt.Errorf("save project analysis: %w", err)
 	}
 	s.pruneShortLivedBranch(ctx, p, recordingBranch)
-	s.decorateProjectAnalysis(ctx, analysis)
+	if !result.WebhookFork {
+		s.decorateProjectAnalysis(ctx, analysis)
+	}
 	return nil
 }
 

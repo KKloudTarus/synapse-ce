@@ -1,0 +1,13 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "deadline": "2026-09-28T08:00:00Z",
+    "event_label": "SLA approaching deadline",
+    "event_type": "sla.approaching_deadline",
+    "lead_time_hours": "24",
+    "occurred_at": "2026-09-27T08:00:00Z",
+    "summary": "A high finding is approaching its remediation deadline.",
+    "title": "Remediation SLA approaching"
+  }
+}

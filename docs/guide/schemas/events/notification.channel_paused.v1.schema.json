@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/notification.channel_paused.v1.schema.json",
+  "title": "notification.channel_paused event (v1)",
+  "description": "A notification channel the worker paused after consecutive permanent delivery failures. Carries the channel id, type and failure code only; never a destination, recipient or error text.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "notification.channel_paused"
+    },
+    "source_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "channel_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "class": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "consecutive_permanent_failures"
+          ]
+        },
+        "failure_code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "failures": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "channel_id",
+        "class",
+        "reason",
+        "failure_code"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "source_kind",
+    "source_id",
+    "schema_version",
+    "occurred_at",
+    "data"
+  ],
+  "additionalProperties": true
+}

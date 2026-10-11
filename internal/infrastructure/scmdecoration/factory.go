@@ -10,17 +10,22 @@ import (
 )
 
 // ForProvider builds the owned PR decorator for a forge provider. The provider string is the CI
-// context's `Provider` claim (for example "github-actions", "gitlab-ci", "bitbucket-pipelines") or a
-// bare forge name ("github"/"gitlab"/"bitbucket"); the concrete cloud host is chosen by the adapter.
+// context's `Provider` claim (for example "github-actions", "gitlab-ci", "bitbucket-pipelines",
+// "azure-pipelines") or a bare forge name; the concrete cloud host is chosen by the adapter.
 // An unsupported provider is a validation error so the caller can skip decoration rather than guess.
-func ForProvider(provider string, credentials ports.GitCredentialResolver) (ports.PRDecorator, error) {
+//
+// Options reach the adapters that support a self-hosted forge (GitHub and GitLab); see
+// WithSelfHostedRules.
+func ForProvider(provider string, credentials ports.GitCredentialResolver, opts ...Option) (ports.PRDecorator, error) {
 	switch normalizeProvider(provider) {
 	case "github":
-		return NewGitHubDecorator(credentials)
+		return NewGitHubDecorator(credentials, opts...)
 	case "gitlab":
-		return NewGitLabDecorator(credentials)
+		return NewGitLabDecorator(credentials, opts...)
 	case "bitbucket":
 		return NewBitbucketDecorator(credentials)
+	case "azure-devops":
+		return NewAzureDevOpsDecorator(credentials)
 	default:
 		return nil, fmt.Errorf("%w: unsupported decoration provider %q (want one of %s)", shared.ErrValidation, provider, strings.Join(SupportedProviders(), ", "))
 	}
@@ -28,7 +33,7 @@ func ForProvider(provider string, credentials ports.GitCredentialResolver) (port
 
 // SupportedProviders lists the decoration provider tokens ForProvider accepts, for CLI help and errors.
 func SupportedProviders() []string {
-	return []string{"github", "gitlab", "bitbucket"}
+	return []string{"github", "gitlab", "bitbucket", "azure-devops"}
 }
 
 // CredentialHostForProvider returns the forge host a decoration credential must answer for, so a caller
@@ -41,13 +46,15 @@ func CredentialHostForProvider(provider string) (string, bool) {
 		return gitlabCredentialHost, true
 	case "bitbucket":
 		return bitbucketCredentialHost, true
+	case "azure-devops":
+		return azureSCMHost, true
 	default:
 		return "", false
 	}
 }
 
-// normalizeProvider folds a CI provider claim to one of github/gitlab/bitbucket. It matches on a prefix
-// so "github", "github-actions", and "github-enterprise" all resolve to github, and returns the input
+// normalizeProvider folds a CI provider claim to one of github/gitlab/bitbucket/azure-devops. It matches
+// the existing forge prefixes plus explicit Azure aliases, and returns the input
 // lowercased when it matches nothing so the caller reports the unsupported value verbatim.
 func normalizeProvider(provider string) string {
 	p := strings.ToLower(strings.TrimSpace(provider))
@@ -58,6 +65,8 @@ func normalizeProvider(provider string) string {
 		return "gitlab"
 	case strings.HasPrefix(p, "bitbucket"):
 		return "bitbucket"
+	case p == "azure" || p == "azure-devops" || p == "azure-pipelines" || p == "azure-repos":
+		return "azure-devops"
 	default:
 		return p
 	}

@@ -72,13 +72,14 @@ export function normalizeProjectCodeSearch(searchParams: URLSearchParams): Norma
   return { analysisId, path, view, line, findingId, params, changed }
 }
 
-export function projectCodePath(projectKey: string, selection: ProjectCodeSelection): string {
+export function projectCodePath(projectKey: string, selection: ProjectCodeSelection, branch = ''): string {
   const params = new URLSearchParams()
   if (selection.analysisId) params.set('analysis', selection.analysisId)
   if (selection.path) params.set('path', selection.path)
   if (selection.view !== 'source') params.set('view', selection.view)
   if (selection.path && selection.line) params.set('line', String(selection.line))
   if (selection.path && selection.findingId) params.set('finding', selection.findingId)
+  if (branch) params.set('branch', branch)
   const query = params.toString()
   return `/code-quality/projects/${encodeURIComponent(projectKey)}/code${query ? `?${query}` : ''}`
 }

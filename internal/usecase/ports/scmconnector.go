@@ -17,6 +17,7 @@ type SCMConnectorMeta struct {
 	Host      string                `json:"host"`
 	Username  string                `json:"username"`
 	AuthKind  scmconnector.AuthKind `json:"auth_kind"`
+	APIBase   string                `json:"api_base,omitempty"`
 	CreatedAt time.Time             `json:"created_at"`
 	UpdatedAt time.Time             `json:"updated_at"`
 }
@@ -27,6 +28,10 @@ type SCMConnectorMeta struct {
 type GitCredential struct {
 	Username string
 	Token    []byte
+	// APIBase is the connector's self-hosted forge API base (scmconnector.NormalizeAPIBase), or empty
+	// for the provider's public SaaS API. Its origin is the host the credential was resolved for, so a
+	// PR decorator that sends Token to APIBase never sends it to another host.
+	APIBase string
 }
 
 // GitCredentialResolver resolves a normalized clone-URL host to a source-control credential.

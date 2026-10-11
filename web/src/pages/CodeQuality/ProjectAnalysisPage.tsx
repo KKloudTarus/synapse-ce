@@ -41,14 +41,15 @@ const LANGUAGE_COLORS = [
 ]
 
 export function ProjectAnalysisPage() {
-  const { projectKey, isRunning, analysisRevision } = useProjectRouteContext()
+  const { projectKey, branch, isRunning, analysisRevision } = useProjectRouteContext()
+  const demoBranch = import.meta.env.VITE_PLAYGROUND === '1' ? branch : ''
   const [searchParams, setSearchParams] = useSearchParams()
   const navigation = normalizeProjectAnalysisSearch(searchParams)
   const normalizedSearch = navigation.params.toString()
 
   const { data: latest, loading, error, refetch } = useFetch(
-    () => api.latestProjectAnalysis(projectKey),
-    { deps: [projectKey, analysisRevision] },
+    () => demoBranch ? api.latestProjectAnalysis(projectKey, demoBranch) : api.latestProjectAnalysis(projectKey),
+    { deps: [projectKey, analysisRevision, demoBranch] },
   )
 
   useEffect(() => {
@@ -78,7 +79,7 @@ export function ProjectAnalysisPage() {
     )
   }
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-quality-analysis={latest.analysis.id}>
       <LatestAnalysisView
         latest={latest}
         running={isRunning}
@@ -142,6 +143,14 @@ function LatestAnalysisView({
       <Card title="Quality gate decision" className="border-secondary bg-primary">
         <GateEvidence compact gate={snapshot.gate} info={snapshot.gateInfo} />
       </Card>
+      {snapshot.origin === 'ci' && snapshot.ci && <Card title="CI provenance">
+        <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+          <div><dt className="text-tertiary">Provider</dt><dd className="mt-1 text-primary">{snapshot.ci.provider}</dd></div>
+          <div><dt className="text-tertiary">Run</dt><dd className="mt-1 font-mono text-primary">{snapshot.ci.runId}</dd></div>
+          <div><dt className="text-tertiary">Pull request</dt><dd className="mt-1 text-primary">{snapshot.ci.pullRequest || 'Not supplied'}</dd></div>
+          <div><dt className="text-tertiary">Source reference</dt><dd className="mt-1 break-all font-mono text-primary">{snapshot.sourceRef}</dd></div>
+        </dl>
+      </Card>}
 
       {/* Section 2: Analysis Summary & Quality Ratings */}
       <Card

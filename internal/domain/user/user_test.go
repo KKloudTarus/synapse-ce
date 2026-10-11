@@ -21,10 +21,18 @@ func TestRolePermissions(t *testing.T) {
 		{RoleReviewer, PermView, true}, {RoleReviewer, PermTriage, true}, {RoleReviewer, PermReview, true}, {RoleReviewer, PermOperate, false}, {RoleReviewer, PermAdminister, false},
 		// readonly: view only.
 		{RoleReadOnly, PermView, true}, {RoleReadOnly, PermOperate, false}, {RoleReadOnly, PermTriage, false}, {RoleReadOnly, PermReview, false}, {RoleReadOnly, PermAdminister, false},
+		// integration_admin: view + manage_integrations; never operate, triage, review or administer.
+		{RoleIntegrationAdmin, PermView, true}, {RoleIntegrationAdmin, PermManageIntegrations, true}, {RoleIntegrationAdmin, PermOperate, false},
+		{RoleIntegrationAdmin, PermTriage, false}, {RoleIntegrationAdmin, PermReview, false}, {RoleIntegrationAdmin, PermAdminister, false},
+		// manage_integrations: admin keeps it; no other human role has it.
+		{RoleAdmin, PermManageIntegrations, true}, {RoleConsultant, PermManageIntegrations, false}, {RoleMember, PermManageIntegrations, false},
+		{RoleReviewer, PermManageIntegrations, false}, {RoleReadOnly, PermManageIntegrations, false},
 		// machine + unknown roles: NOTHING (the SoD invariant – an agent/mcp principal can never
 		// approve its own actions or verify findings, and an unknown role is fail-closed).
 		{Role("mcp"), PermView, false}, {Role("mcp"), PermReview, false}, {Role("mcp"), PermOperate, false}, {Role("mcp"), PermAdminister, false},
 		{Role("agent"), PermView, false}, {Role("agent"), PermReview, false}, {Role("agent"), PermOperate, false},
+		{Role("mcp"), PermManageIntegrations, false}, {Role("agent"), PermManageIntegrations, false}, {Role("service"), PermManageIntegrations, false},
+		{Role("bogus"), PermManageIntegrations, false}, {Role(""), PermManageIntegrations, false},
 		{Role("bogus"), PermView, false}, {Role(""), PermView, false}, {Role(""), PermReview, false},
 	}
 	for _, c := range cases {
@@ -39,7 +47,7 @@ func TestRolePermissions(t *testing.T) {
 // the exhaustive case table above would not catch for a NEW role). Every canonical human role must
 // appear and grant at least the view floor. (RoleMember aliases to consultant, so it is exempt.)
 func TestEveryDeclaredRoleIsInMatrix(t *testing.T) {
-	for _, r := range []Role{RoleAdmin, RoleConsultant, RoleReviewer, RoleReadOnly} {
+	for _, r := range []Role{RoleAdmin, RoleConsultant, RoleReviewer, RoleReadOnly, RoleIntegrationAdmin} {
 		if _, ok := rolePermissions[r]; !ok {
 			t.Errorf("role %q is declared but missing from rolePermissions (would silently grant nothing)", r)
 		}
@@ -50,7 +58,7 @@ func TestEveryDeclaredRoleIsInMatrix(t *testing.T) {
 }
 
 func TestRoleValid(t *testing.T) {
-	for _, r := range []Role{RoleAdmin, RoleConsultant, RoleReviewer, RoleReadOnly, RoleMember} {
+	for _, r := range []Role{RoleAdmin, RoleConsultant, RoleReviewer, RoleReadOnly, RoleMember, RoleIntegrationAdmin} {
 		if !r.Valid() {
 			t.Errorf("%q must be a valid role", r)
 		}

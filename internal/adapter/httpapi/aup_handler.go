@@ -40,7 +40,8 @@ func (rt *Router) acceptAUP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid json body"})
 		return
 	}
-	// Attribute to the authenticated principal (single-user → operator today).
+	// Attribute to the authenticated principal. The route guard guarantees one is bound; an
+	// empty actor is refused by the use case rather than recorded as the operator.
 	if err := rt.aup.Accept(r.Context(), PrincipalFrom(r.Context()), req.Version); err != nil {
 		writeError(w, rt.log, err)
 		return
@@ -63,6 +64,7 @@ func (rt *Router) requireAUP(exempt map[string]bool, next http.Handler) http.Han
 		}
 		if !ok {
 			writeJSON(w, http.StatusForbidden, errorBody{
+				Code:  CodeAUPRequired,
 				Error: "acceptable-use policy not accepted; GET then POST /api/v1/aup/accept",
 			})
 			return

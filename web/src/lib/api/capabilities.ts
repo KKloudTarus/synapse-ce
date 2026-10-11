@@ -18,6 +18,8 @@ function mapCapability(raw: any): Capability {
     enabled: raw?.enabled === true,
     switch: raw?.switch ?? '',
     requires: Array.isArray(raw?.requires) ? raw.requires : [],
+    values: Array.isArray(raw?.values) ? raw.values : [],
+    planned: raw?.planned === true,
   }
 }
 

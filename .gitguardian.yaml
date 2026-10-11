@@ -5,7 +5,15 @@
 version: 2
 secret:
   ignored-paths:
-    - "**/secretscan/*_test.go" # secret-scanner test fixtures: synthetic high-entropy values, not real credentials
+    # A detector's own fixtures and examples are credential-SHAPED by construction: a rule that claims to
+    # find a hardcoded credential is only testable against a value that looks like one. None of these is a
+    # real credential and there is nothing to rotate.
+    - "**/secretscan/*_test.go" # secret-scanner test fixtures: synthetic high-entropy values
+    - "**/misconfig/*_test.go" # IaC-scanner fixtures, including the parity test that asserts each rule fires
+    # The rule catalog is the published description of every rule, and a rule's NoncompliantExample must
+    # contain the shape it detects or TestCatalogParity fails. `.golangci.yml` excludes gosec's G101 on this
+    # same path for the same reason.
+    - "internal/infrastructure/rulecatalog/*.go"
   ignored-matches:
     - name: "Local dev docker stack password (Postgres/MinIO); dev-only default, not a real secret"
       match: synapse-secret

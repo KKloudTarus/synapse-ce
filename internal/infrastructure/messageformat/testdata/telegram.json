@@ -1,0 +1,7 @@
+{
+  "link_preview_options": {
+    "is_disabled": true
+  },
+  "parse_mode": "MarkdownV2",
+  "text": "*Critical finding in payments\\-api*\n\n*SQL injection in /login* on _prod\\_eu_\nRule `CWE-89`, severity *critical*\n\n• Host: api\\.example\\.com\n• Owner: team \u003cplatform\\\u003e \u0026 ops\n\nReported by Synapse\\.\n\n[Open finding](https://synapse.example.com/engagements/e1/findings/f1)"
+}

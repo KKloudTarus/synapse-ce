@@ -72,7 +72,7 @@ function StepInspectorCard({ event }: { event: ScanDebugEvent }) {
   const hasMetrics = countEntries.length > 0
 
   return (
-    <div className="rounded-2xl border border-secondary bg-primary p-4 sm:p-5 shadow-xs space-y-4 transition-all">
+    <div role="region" aria-label={`Scan phase: ${event.step || event.stage}`} data-scan-inspector className="rounded-2xl border border-secondary bg-primary p-4 sm:p-5 shadow-xs space-y-4 transition-all">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -238,17 +238,19 @@ function writeStoredPreference(open: boolean) {
 }
 
 export function ScanDebugTimeline({
+  initiallyCollapsed = false,
   events,
   running,
   scanStatus,
 }: {
+  initiallyCollapsed?: boolean
   events: ScanDebugEvent[]
   running: boolean
   /** Latest scan job status. A finished scan collapses the track by default. */
   scanStatus?: string
 }) {
   const [selectedIdx, setSelectedIdx] = useState<number>(Math.max(0, events.length - 1))
-  const [userOpen, setUserOpen] = useState<boolean | null>(readStoredPreference)
+  const [userOpen, setUserOpen] = useState<boolean | null>(() => initiallyCollapsed ? false : readStoredPreference())
 
   // Update selected index when new events arrive
   useEffect(() => {
@@ -268,7 +270,7 @@ export function ScanDebugTimeline({
   const open = userOpen ?? defaultOpen
 
   return (
-    <details
+    <details aria-label="Scan pipeline"
       className="group mt-3 text-xs"
       open={open}
       onToggle={(e) => {
@@ -323,6 +325,8 @@ export function ScanDebugTimeline({
                       {/* Step Milestone Node */}
                       <button
                         type="button"
+                        data-scan-step={event.stage}
+                        aria-pressed={isSelected}
                         onClick={() => setSelectedIdx(idx)}
                         className={cn(
                           'group relative flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-all',

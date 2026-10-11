@@ -35,6 +35,7 @@ type connectorCreateRequest struct {
 	Host     string `json:"host"`
 	Username string `json:"username"`
 	Token    string `json:"token"` // write-only: sealed by the store, never returned
+	APIBase  string `json:"api_base"`
 }
 
 // connectorDTO is the non-secret view returned to the client. It never carries the token.
@@ -45,6 +46,7 @@ type connectorDTO struct {
 	Host      string    `json:"host"`
 	Username  string    `json:"username"`
 	AuthKind  string    `json:"auth_kind"`
+	APIBase   string    `json:"api_base"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -52,7 +54,7 @@ type connectorDTO struct {
 func toConnectorDTO(m ports.SCMConnectorMeta) connectorDTO {
 	return connectorDTO{
 		ID: m.ID.String(), Name: m.Name, Provider: string(m.Provider), Host: m.Host,
-		Username: m.Username, AuthKind: string(m.AuthKind), CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+		Username: m.Username, AuthKind: string(m.AuthKind), APIBase: m.APIBase, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
 }
 
@@ -73,6 +75,7 @@ func (rt *Router) createConnector(w http.ResponseWriter, r *http.Request) {
 		Host:     req.Host,
 		Username: req.Username,
 		Token:    req.Token,
+		APIBase:  req.APIBase,
 	})
 	if err != nil {
 		writeError(w, rt.log, err)

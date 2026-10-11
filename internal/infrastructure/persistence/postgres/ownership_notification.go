@@ -20,7 +20,13 @@ func (s *NotificationSource) pollOwnership(ctx context.Context, tx pgx.Tx, tenan
 	rows, err := tx.Query(ctx, `SELECT i.id,d.id,d.engagement_id,d.finding_id,d.created_at,
 		d.payload->>'actor',d.payload->'result'->>'reason',
 		COALESCE(d.payload->'before'->>'team_id',''),COALESCE(d.payload->'after'->>'team_id',''),
-		COALESCE(d.payload->'before'->>'assignee_id',''),COALESCE(d.payload->'after'->>'assignee_id','')
+		COALESCE(d.payload->'before'->>'assignee_id',''),COALESCE(d.payload->'after'->>'assignee_id',''),
+		COALESCE((SELECT name FROM engagements eg WHERE eg.tenant_id=d.tenant_id AND eg.id=d.engagement_id),''),
+		COALESCE((SELECT title FROM findings f WHERE f.tenant_id=d.tenant_id AND f.id=d.finding_id),''),
+		COALESCE((SELECT name FROM ownership_teams t WHERE t.tenant_id=d.tenant_id AND t.id=d.payload->'before'->>'team_id'),''),
+		COALESCE((SELECT name FROM ownership_teams t WHERE t.tenant_id=d.tenant_id AND t.id=d.payload->'after'->>'team_id'),''),
+		COALESCE((SELECT name FROM users u WHERE u.tenant_id=d.tenant_id AND u.id=d.payload->'before'->>'assignee_id'),''),
+		COALESCE((SELECT name FROM users u WHERE u.tenant_id=d.tenant_id AND u.id=d.payload->'after'->>'assignee_id'),'')
 		FROM ownership_intents i
 		JOIN ownership_decisions d ON d.tenant_id=i.tenant_id AND d.engagement_id=i.engagement_id
 		AND d.finding_id=i.finding_id AND d.id=i.decision_id
@@ -30,16 +36,18 @@ func (s *NotificationSource) pollOwnership(ctx context.Context, tx pgx.Tx, tenan
 		return 0, err
 	}
 	type item struct {
-		id   shared.ID
-		at   time.Time
-		data notification.OwnershipChanged
+		id    shared.ID
+		at    time.Time
+		data  notification.OwnershipChanged
+		names [6]string // engagement, finding, old team, new team, old assignee, new assignee
 	}
 	var items []item
 	for rows.Next() {
 		var v item
 		if err := rows.Scan(&v.id, &v.data.DecisionID, &v.data.EngagementID, &v.data.FindingID, &v.at,
 			&v.data.Actor, &v.data.Reason, &v.data.OldTeamID, &v.data.NewTeamID,
-			&v.data.OldAssigneeID, &v.data.NewAssigneeID); err != nil {
+			&v.data.OldAssigneeID, &v.data.NewAssigneeID,
+			&v.names[0], &v.names[1], &v.names[2], &v.names[3], &v.names[4], &v.names[5]); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -59,7 +67,9 @@ func (s *NotificationSource) pollOwnership(ctx context.Context, tx pgx.Tx, tenan
 		}
 		e := notification.Event{TenantID: tenant, ID: stableID(tenant.String(), "ownership_decision", v.data.DecisionID.String()),
 			Type: notification.EventOwnershipChanged, SourceKind: "ownership_decision", SourceID: v.data.DecisionID.String(),
-			EngagementID: v.data.EngagementID, SchemaVersion: 1, OccurredAt: v.at, Data: data}
+			EngagementID: v.data.EngagementID, SchemaVersion: 1, OccurredAt: v.at, Data: data,
+			Context: seedContext(map[string]string{"engagement_name": v.names[0], "finding_title": v.names[1],
+				"old_team": v.names[2], "new_team": v.names[3], "old_assignee": v.names[4], "new_assignee": v.names[5]})}
 		if _, err := s.repo.publishTx(ctx, tx, e, ""); err != nil {
 			return 0, err
 		}

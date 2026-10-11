@@ -11,14 +11,14 @@ import (
 
 func TestRouter_RulesAPI_FullMiddleware(t *testing.T) {
 	// 1. Setup Auth
-	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
+	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
 		if token == "secret" {
-			return Principal{ID: "u1", Name: "Tester", Role: "readonly", TenantID: "tenantA"}, true
+			return Principal{ID: "u1", Name: "Tester", Role: "readonly", TenantID: "tenantA"}, nil
 		}
 		if token == "agent-secret" {
-			return Principal{ID: "m1", Name: "Machine", Role: "agent", TenantID: "tenantA"}, true
+			return Principal{ID: "m1", Name: "Machine", Role: "agent", TenantID: "tenantA"}, nil
 		}
-		return Principal{}, false
+		return Principal{}, errTestCredentialInvalid
 	})
 
 	// 2. Setup AUP

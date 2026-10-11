@@ -48,7 +48,7 @@ func TestMigration0138ResponseAttemptInvariants(t *testing.T) {
 		t.Fatalf("create isolated migration database: %v", err)
 	}
 	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		_, _ = admin.Exec(cleanupCtx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=$1`, database)
 		if _, err := admin.Exec(cleanupCtx, "DROP DATABASE "+quotedDatabase); err != nil {

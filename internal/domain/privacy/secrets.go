@@ -65,6 +65,14 @@ func scrubSecrets(value string) (string, bool) {
 	return out, out != value
 }
 
+// ScrubSecretPatterns removes common credentials from untrusted free text before
+// a caller stores it in an audit record or a durable message. Callers that know
+// additional vault values should apply their targeted redactor as well.
+func ScrubSecretPatterns(value string) string {
+	clean, _ := scrubSecrets(value)
+	return clean
+}
+
 // hashValue is the DispositionHash transform: a salted digest that preserves correlation (same salt+value
 // → same output) without revealing the cleartext. The salt is domain-separated from the value with 0x1e.
 func hashValue(salt, value string) string {

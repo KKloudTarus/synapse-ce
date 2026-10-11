@@ -171,6 +171,8 @@ describe('project wire contract', () => {
       sourceBinding: { kind: 'git', value: 'https://github.com/OWASP/NodeGoat', ref: 'main' },
       defaultProfileByLang: { javascript: 'default' },
       gateId: 'release',
+      // projectSummaryResponse does not carry decorate_pull_requests; list rows read it as off.
+      decoratePullRequests: false,
       createdAt: '2026-09-05T02:57:07.865295985Z',
       latestAnalysis: null,
       latestJob: null,
@@ -187,6 +189,17 @@ describe('project wire contract', () => {
     expect(project.createdAt).not.toBeNull()
     expect(project.sourceBinding.value).not.toBe('')
     expect(Object.keys(project.defaultProfileByLang)).toHaveLength(1)
+  })
+
+  it('reads decorate_pull_requests from the single-project view', async () => {
+    const { latest_analysis: _a, latest_job: _j, ...view } = projectWire()
+    const body = { ...view, decorate_pull_requests: true }
+    for (const key of Object.keys(body)) {
+      expect(PROJECT_WIRE_KEYS, `resource_view.go does not serialize "${key}"`).toContain(key)
+    }
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => body } as Response)
+    const project = await api.getProject('review-nodegoat')
+    expect(project.decoratePullRequests).toBe(true)
   })
 
   it('keeps the MSW fixtures on the server shape', () => {

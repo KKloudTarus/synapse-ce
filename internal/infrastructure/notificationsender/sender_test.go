@@ -19,7 +19,7 @@ import (
 func testWork(kind notification.ChannelType) ports.NotificationWork {
 	at := time.Unix(1700000000, 0).UTC()
 	data, _ := json.Marshal(map[string]string{"title": "Critical <event>", "summary": "needs & review"})
-	return ports.NotificationWork{Delivery: notification.Delivery{TenantID: "tenant", ID: "delivery", EventID: "event", ChannelID: "channel", ChannelType: kind, State: notification.DeliveryPending}, Event: notification.Event{TenantID: "tenant", ID: "event", Type: notification.EventVulnerabilityAction, SourceKind: "test", SourceID: "source", SchemaVersion: 1, OccurredAt: at, Data: data}, Channel: notification.Channel{TenantID: "tenant", ID: "channel", Type: kind, Enabled: true, Name: "test", Revision: 1, SecretVersion: 1, CreatedAt: at, UpdatedAt: at}}
+	return ports.NotificationWork{Delivery: notification.Delivery{TenantID: "tenant", ID: "delivery", EventID: "event", ChannelID: "channel", ChannelType: kind, State: notification.DeliveryPending}, Event: notification.Event{TenantID: "tenant", ID: "event", Type: notification.EventVulnerabilityAction, SourceKind: "test", SourceID: "source", SchemaVersion: 1, OccurredAt: at, Data: data, Context: json.RawMessage(`{"vars":{"title":"Critical <event>","summary":"needs & review"}}`)}, Channel: notification.Channel{TenantID: "tenant", ID: "channel", Type: kind, Enabled: true, Name: "test", Revision: 1, SecretVersion: 1, CreatedAt: at, UpdatedAt: at}}
 }
 
 func TestWebhookSignsExactBody(t *testing.T) {
@@ -37,7 +37,7 @@ func TestWebhookSignsExactBody(t *testing.T) {
 	s := New(SMTPConfig{}, time.Second)
 	s.http = server.Client()
 	s.now = func() time.Time { return time.Unix(1700000100, 0) }
-	result := s.Send(context.Background(), testWork(notification.ChannelWebhook), ports.NotificationChannelConfig{URL: server.URL, Secret: "0123456789abcdef"})
+	result := s.Send(context.Background(), testWork(notification.ChannelWebhook), ports.WebhookChannelConfig{URL: server.URL, Secret: "0123456789abcdef"})
 	if result.StatusCode != 204 || result.ErrorCode != "" {
 		t.Fatalf("result=%+v", result)
 	}
@@ -58,7 +58,7 @@ func TestSlack429IsRetryable(t *testing.T) {
 	defer server.Close()
 	s := New(SMTPConfig{}, time.Second)
 	s.http = server.Client()
-	result := s.Send(context.Background(), testWork(notification.ChannelSlack), ports.NotificationChannelConfig{URL: server.URL})
+	result := s.Send(context.Background(), testWork(notification.ChannelSlack), ports.SlackChannelConfig{URL: server.URL})
 	if !result.Retryable || result.RetryAfter != 17*time.Second || result.ErrorCode != "http_429" {
 		t.Fatalf("result=%+v", result)
 	}
@@ -67,7 +67,7 @@ func TestSlack429IsRetryable(t *testing.T) {
 func TestEmailFailsClosedWithoutOperatorRelay(t *testing.T) {
 	work := testWork(notification.ChannelEmail)
 	work.Delivery.Recipient = "security@example.com"
-	result := New(SMTPConfig{}, time.Second).Send(context.Background(), work, ports.NotificationChannelConfig{})
+	result := New(SMTPConfig{}, time.Second).Send(context.Background(), work, ports.EmailChannelConfig{})
 	if result.Retryable || result.ErrorCode != "smtp_not_configured" {
 		t.Fatalf("result=%+v", result)
 	}

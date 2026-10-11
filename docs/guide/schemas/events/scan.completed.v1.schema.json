@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/scan.completed.v1.schema.json",
+  "title": "scan.completed event (v1)",
+  "description": "A persisted scan finished successfully.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "scan.completed"
+    },
+    "source_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "scan_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scan_kind": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "scan_id",
+        "scan_kind"
+      ],
+      "additionalProperties": true
+    },
+    "engagement_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "source_kind",
+    "source_id",
+    "schema_version",
+    "occurred_at",
+    "data"
+  ],
+  "additionalProperties": true
+}

@@ -50,7 +50,7 @@ func (q *JobQueue) Enqueue(ctx context.Context, kind string, payload []byte) (st
 }
 
 func (q *JobQueue) Claim(ctx context.Context, visibility time.Duration, kinds ...string) (*ports.QueuedJob, error) {
-	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants WHERE id <> '' ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list queue tenants: %w", err)
 	}
@@ -190,7 +190,7 @@ func (q *JobQueue) JobStatus(ctx context.Context, id string) (status ports.JobSt
 // per-tenant transaction remains the only way any job row is read; no tenant label is
 // ever attached to the aggregated totals.
 func (q *JobQueue) AggregateJobQueueStats(ctx context.Context, kinds ...string) (ports.JobStats, error) {
-	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	rows, err := q.pool.Query(ctx, `SELECT id FROM tenants WHERE id <> '' ORDER BY id`)
 	if err != nil {
 		return ports.JobStats{}, fmt.Errorf("list queue tenants: %w", err)
 	}

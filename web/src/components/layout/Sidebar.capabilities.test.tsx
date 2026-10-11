@@ -23,9 +23,9 @@ function renderSidebar() {
 }
 
 const CATALOG = [
-  { key: 'fleet', name: 'Agent fleet transport', enabled: false, switch: 'SYNAPSE_FLEET_ENABLED', requires: [] },
-  { key: 'ai_triage', name: 'AI false-positive triage', enabled: false, switch: 'SYNAPSE_FP_TRIAGE_ENABLED', requires: [] },
-  { key: 'ownership', name: 'Finding ownership', enabled: false, switch: 'SYNAPSE_OWNERSHIP_MODE', requires: [] },
+  { key: 'fleet', name: 'Agent fleet transport', enabled: false, switch: 'SYNAPSE_FLEET_ENABLED', requires: [], values: [], planned: false },
+  { key: 'ai_triage', name: 'AI false-positive triage', enabled: false, switch: 'SYNAPSE_FP_TRIAGE_ENABLED', requires: [], values: [], planned: false },
+  { key: 'ownership', name: 'Finding ownership', enabled: false, switch: 'SYNAPSE_OWNERSHIP_MODE', requires: [], values: [], planned: false },
 ]
 
 describe('Sidebar capability gating', () => {

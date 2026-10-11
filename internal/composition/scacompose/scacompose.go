@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -377,7 +378,7 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 	// Transitive Go dependency edges via `go mod graph`, opt-in + best-effort. Sandboxed when the
 	// SCA sandbox is on (low-risk: go mod graph only reads go.mod files, never compiles); a non-Go target /
 	// no module cache adds no edges and never fails the scan.
-	if cfg.GoModGraphEnabled {
+	if cfg.GoModGraphEnabled && goToolchainPresent(cfg.GoBin, log) {
 		gmg := gomodgraph.New(cfg.GoBin)
 		if sb != nil {
 			gmg = gmg.WithRunner(sb)
@@ -448,6 +449,7 @@ func Configure(svc *scauc.Service, cfg config.Config, sb *sandbox.Runner, log *s
 		svc.SetJVMReachability(jvmreach.New())
 		log.Info("coarse JVM class-reachability ENABLED (deprioritizes findings on unreferenced deps)")
 	}
+	svc.SetSourceEngineSelection(cfg.SASTEnabled, cfg.SecretScanEnabled, cfg.MisconfigEnabled)
 	if cfg.SASTEnabled {
 		// SYNAPSE_SAST_SOURCE_BUDGET_BYTES raises the source retained for cross-file context. The default
 		// never binds on an ordinary repository; on a monorepo the unretained part of the tree is scanned by
@@ -718,4 +720,26 @@ func pythonTaintScanner(cfg config.Config, sb *sandbox.Runner, proposer TaintPro
 		return nil, fmt.Errorf("python semantic taint coordinator init: %w", err)
 	}
 	return coordinator, nil
+}
+
+// goToolchainPresent reports whether the go binary the transitive-edge resolver would run exists.
+//
+// SYNAPSE_GOMODGRAPH_ENABLED defaults to true, and neither the control-plane image nor a stock CI
+// runner carries a Go toolchain, so wiring the resolver there put a step into every single scan that
+// could only fail: `go mod graph "...": exec: "go": executable file not found in $PATH`. The scan
+// still succeeded, because the hook is best-effort, and what was lost was the transitive half of the
+// Go dependency graph. Deciding once at startup replaces a per-scan failure with one honest line an
+// operator can act on, and changes nothing where a toolchain is installed.
+func goToolchainPresent(goBin string, log *slog.Logger) bool {
+	bin := strings.TrimSpace(goBin)
+	if bin == "" {
+		bin = "go"
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		log.Info("Go transitive-edge resolution DISABLED: no Go toolchain on PATH; "+
+			"pkg:golang dependency edges will be direct-only (set SYNAPSE_GOMODGRAPH_ENABLED=false to silence, "+
+			"or install Go and set SYNAPSE_GO_BIN)", "go_bin", bin)
+		return false
+	}
+	return true
 }

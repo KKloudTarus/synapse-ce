@@ -139,6 +139,20 @@ func (r *OwnershipRepository) ApplyAssignment(ctx context.Context, m ports.Owner
 		}
 		before := current.Assignment
 		after := ownership.Assignment{TeamID: m.TeamID, AssigneeID: m.AssigneeID, LegacyAssignee: m.LegacyAssignee, Mode: "manual", Revision: before.Revision, ManualGeneration: before.ManualGeneration + 1}
+		if m.LegacyEndpoint && after.AssigneeID.IsZero() && after.LegacyAssignee != "" {
+			// The legacy route still accepts arbitrary labels. Only an exact,
+			// eligible user ID becomes a structured recipient in the decision;
+			// display names and unknown IDs remain free text.
+			var userID shared.ID
+			err := tx.QueryRow(ctx, `SELECT u.id FROM users u WHERE u.ownership_tenant_id=$1 AND u.id=$2
+				AND NOT u.disabled AND u.role IN ('admin','consultant','reviewer','member')`, tenant, after.LegacyAssignee).Scan(&userID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if err == nil {
+				after.AssigneeID = userID
+			}
+		}
 		preserveAssignee := m.Kind == "transfer" && !m.ClearAssignee && m.AssigneeID.IsZero()
 		if preserveAssignee {
 			if before.AssigneeID.IsZero() && current.FindingAssignee != "" {
@@ -195,7 +209,7 @@ func (r *OwnershipRepository) ApplyAssignment(ctx context.Context, m ports.Owner
 			after.Revision++
 		}
 		if effectiveChanged || m.LegacyEndpoint {
-			if err := ownershipCAS(tx.Exec(ctx, `UPDATE findings SET assignee=$4,version=version+1,updated_at=$5 WHERE tenant_id=$1 AND engagement_id=$2 AND id=$3 AND version=$6`, tenant, m.EngagementID, m.FindingID, after.LegacyAssignee, m.At, m.ExpectedFindingVersion)); err != nil {
+			if err := ownershipCAS(tx.Exec(ctx, `UPDATE findings SET assignee=$4,assignee_user_id=$7,version=version+1,updated_at=$5 WHERE tenant_id=$1 AND engagement_id=$2 AND id=$3 AND version=$6`, tenant, m.EngagementID, m.FindingID, after.LegacyAssignee, m.At, m.ExpectedFindingVersion, nullableID(after.AssigneeID))); err != nil {
 				return err
 			}
 		}

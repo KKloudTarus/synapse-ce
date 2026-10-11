@@ -45,6 +45,19 @@
         },
         "resources": {
           "$ref": "#/definitions/resources"
+        },
+        "scratch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tmpSizeLimit"
+          ],
+          "properties": {
+            "tmpSizeLimit": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },
@@ -59,7 +72,8 @@
         "nodeSelector",
         "tolerations",
         "affinity",
-        "assessmentCycleApi"
+        "assessmentCycleApi",
+        "persistence"
       ],
       "properties": {
         "replicaCount": {
@@ -240,6 +254,67 @@
                 "minLength": 1
               },
               "uniqueItems": true
+            }
+          }
+        },
+        "scratch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tmpSizeLimit",
+            "dataSizeLimit"
+          ],
+          "properties": {
+            "tmpSizeLimit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dataSizeLimit": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "persistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "existingClaim",
+            "storageClass",
+            "accessModes",
+            "size",
+            "acknowledgeEphemeral"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "existingClaim": {
+              "type": "string"
+            },
+            "storageClass": {
+              "type": "string"
+            },
+            "accessModes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "ReadWriteOnce",
+                  "ReadOnlyMany",
+                  "ReadWriteMany",
+                  "ReadWriteOncePod"
+                ]
+              }
+            },
+            "size": {
+              "type": "string",
+              "minLength": 1
+            },
+            "acknowledgeEphemeral": {
+              "type": "boolean"
             }
           }
         }
@@ -456,7 +531,8 @@
         "nodeSelector",
         "tolerations",
         "affinity",
-        "integrationScheduler"
+        "integrationScheduler",
+        "metrics"
       ],
       "properties": {
         "enabled": {
@@ -475,6 +551,16 @@
         },
         "affinity": {
           "type": "object"
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "port", "monitoringNamespace"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "port": {"type": "integer", "minimum": 1024, "maximum": 65535},
+            "monitoringNamespace": {"type": "string", "minLength": 1}
+          }
         },
         "integrationScheduler": {
           "type": "object",
@@ -507,6 +593,24 @@
         },
         "resources": {
           "$ref": "#/definitions/resources"
+        },
+        "scratch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tmpSizeLimit",
+            "dataSizeLimit"
+          ],
+          "properties": {
+            "tmpSizeLimit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dataSizeLimit": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },
@@ -519,6 +623,12 @@
       "properties": {
         "resources": {
           "$ref": "#/definitions/resources"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
         }
       }
     },
@@ -716,10 +826,10 @@
           "type": "string"
         },
         "groupRoleMapping": {
+          "description": "Deprecated and ignored: provider groups never assign or change a Synapse role.",
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[^=]+=(admin|consultant|reviewer|readonly|member)$"
+            "type": "string"
           }
         },
         "transactionTTL": {
@@ -934,6 +1044,9 @@
         },
         "mavenAllowPrivateRepos": {
           "type": "boolean"
+        },
+        "maxWorkspaceBytes": {
+          "type": "string"
         }
       }
     },

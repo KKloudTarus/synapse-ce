@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1
+#
+# Fleet agent images. Two targets, one per agent, because they run in different places and the
+# manifests that deploy them name different images:
+#
+#   --target endpoint  ghcr.io/kkloudtarus/synapse-agent          deploy/k8s/endpoint-agent-daemonset.yaml
+#   --target cluster   ghcr.io/kkloudtarus/synapse-cluster-agent   deploy/k8s/cluster-agent.yaml
+#
+# Both are distroless and non-root, which is what those manifests already require: the DaemonSet drops
+# every capability, forbids privilege escalation, and mounts the host filesystem READ-ONLY, so the agent
+# needs no shell, no package manager and no writable path inside the image. Its state directory is a
+# hostPath volume, not an image directory.
+#
+# Both binaries are pure Go with CGO_ENABLED=0, so one native builder cross-compiles every architecture
+# with nothing emulated. The eBPF objects the endpoint agent can load are committed and embedded at
+# compile time, so enabling runtime detection needs kernel capabilities from the pod spec rather than
+# anything added here.
+
+FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine AS build
+ARG TARGETOS
+ARG TARGETARCH
+# VERSION is the release tag, embedded so the agent reports the release it is actually running in its
+# heartbeat and version-skew fields. It defaults to "dev" so a local build is honest about not being one.
+ARG VERSION=dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build -trimpath \
+    -ldflags "-s -w -X github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version=${VERSION}" \
+    -o /out/synapse-agent ./cmd/synapse-agent \
+    && CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build -trimpath \
+    -ldflags "-s -w -X github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo.version=${VERSION}" \
+    -o /out/synapse-cluster-agent ./cmd/synapse-cluster-agent
+
+# ---------------------------------------------------------------------------
+# target: endpoint – the host agent, one per node, inventories the host it runs on.
+# ---------------------------------------------------------------------------
+FROM gcr.io/distroless/static-debian12:nonroot AS endpoint
+COPY --from=build /out/synapse-agent /usr/local/bin/synapse-agent
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/synapse-agent"]
+
+# ---------------------------------------------------------------------------
+# target: cluster – the cluster agent, one per cluster, reads the Kubernetes API read-only.
+# ---------------------------------------------------------------------------
+FROM gcr.io/distroless/static-debian12:nonroot AS cluster
+COPY --from=build /out/synapse-cluster-agent /usr/local/bin/synapse-cluster-agent
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/synapse-cluster-agent"]

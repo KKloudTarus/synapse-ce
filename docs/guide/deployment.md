@@ -164,6 +164,23 @@ role is a SUPERUSER** (superusers bypass RLS). Run migrations with an owner role
 create such a role; a managed database must be configured the same way (the runtime DSN's role is not the
 database owner and is not a superuser).
 
+The migration role needs two grants beyond owning the schema, because after applying the schema it hardens the
+runtime role: it runs `ALTER ROLE <runtime> NOINHERIT`, revokes `CREATE`, and grants the table and sequence
+privileges. PostgreSQL 16 permits a non-superuser to alter another role only when it holds **both `CREATEROLE`
+and `ADMIN OPTION` on that role**, and creating both roles as the superuser leaves admin with the superuser, not
+with the migration role. Grant them once, as the superuser:
+
+```sql
+ALTER ROLE synapse_migration CREATEROLE;
+GRANT synapse_runtime TO synapse_migration WITH ADMIN OPTION;
+-- Only when response execution is enabled, which adds a second least-privilege role:
+GRANT synapse_halt_writer TO synapse_migration WITH ADMIN OPTION;
+```
+
+Without them the migration Job applies every migration and *then* exits with
+`permission denied to alter role (SQLSTATE 42501)`, which looks like a schema failure and is not one. The
+migrator names these grants in that error.
+
 ### Local Kubernetes smoke (kind)
 
 `make kind-smoke` (or `deploy/kind/kind-smoke.sh`) installs `execution.mode=controlPlaneOnly` into a local
@@ -200,6 +217,32 @@ dedicated frontend security group, dedicated NLB subnets and fixed private addre
 `networkPolicySourceCIDRs`. The frontend security group accepts only the native-worker security group. The pod
 NetworkPolicy accepts only the dedicated NLB-subnet CIDRs on the authority backend port. Put the certificate
 hostname in private Route 53 and never reuse the browser API token for this listener.
+
+### `/var/lib/synapse` must be shared storage
+
+Three paths in the control-plane image live under `/var/lib/synapse`: `SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR`
+(the source the Code view shows for an analysis), `SYNAPSE_PROJECT_UPLOAD_DIR` (archives uploaded for a scan),
+and `SYNAPSE_ENGAGEMENT_SOURCE_DIR`. The schema requires at least two API replicas, so on a per-pod `emptyDir`
+each replica holds only what it produced. The Code view then answers
+`source artifact is missing from this server's storage` for every request the load balancer sends to a replica
+that did not run the analysis, and a restart discards the lot.
+
+Bind a `ReadWriteMany` claim (EFS on EKS, Filestore on GKE, Azure Files) so every replica reads the same
+captures:
+
+```yaml
+api:
+  persistence:
+    enabled: true
+    storageClass: efs-sc
+    accessModes: [ReadWriteMany]
+    size: 50Gi
+    # or: existingClaim: synapse-data
+```
+
+The render refuses several replicas on pod-local storage rather than serving a console whose captured source
+appears and disappears. An install that does not read captured source can say so with
+`api.persistence.acknowledgeEphemeral=true`, which keeps the `emptyDir`.
 
 Run static validation before installation:
 

@@ -313,7 +313,7 @@ func (r *OwnershipExecution) DispatchOwnership(ctx context.Context, mode string,
 	if mode != "observe" && mode != "enforce" {
 		return 0, shared.ErrValidation
 	}
-	rows, err := r.repo.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	rows, err := r.repo.pool.Query(ctx, `SELECT id FROM tenants WHERE id <> '' ORDER BY id`)
 	if err != nil {
 		return 0, err
 	}

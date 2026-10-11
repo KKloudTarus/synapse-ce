@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
 )
 
 func TestLoadOwnershipIsExplicitOptIn(t *testing.T) {
@@ -391,6 +393,32 @@ func TestWorkerConcurrencyValidation(t *testing.T) {
 			err := Load().ValidateWorkerConcurrency()
 			if (err == nil) != tt.valid {
 				t.Fatalf("ValidateWorkerConcurrency() error = %v, valid=%v", err, tt.valid)
+			}
+		})
+	}
+}
+
+func TestNotificationChannelPauseThresholdValidation(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		value string
+		want  int
+		valid bool
+	}{
+		{"default", "", 5, true},
+		{"disabled", "0", 0, true},
+		{"maximum", "100", 100, true},
+		{"negative", "-1", -1, false},
+		{"above maximum", "101", 101, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD", tt.value)
+			cfg := Load()
+			if cfg.NotificationChannelPauseThreshold != tt.want {
+				t.Fatalf("threshold = %d, want %d", cfg.NotificationChannelPauseThreshold, tt.want)
+			}
+			if err := cfg.ValidateNotificationChannelHealth(); (err == nil) != tt.valid {
+				t.Fatalf("ValidateNotificationChannelHealth() error = %v, valid=%v", err, tt.valid)
 			}
 		})
 	}
@@ -941,9 +969,114 @@ func TestValidateOIDCPosture(t *testing.T) {
 		t.Fatal("missing OIDC client secret must fail")
 	}
 	valid.OIDCClientSecret = "secret"
+	for _, issuer := range []string{"http://issuer.example", "https://issuer.example/?tenant=a", "https://issuer.example/#x", "issuer.example", "https://"} {
+		valid.OIDCIssuer = issuer
+		err := valid.ValidateOIDCPosture()
+		if err == nil || !strings.Contains(err.Error(), "SYNAPSE_OIDC_ISSUER") {
+			t.Fatalf("issuer %q must fail OIDC posture naming SYNAPSE_OIDC_ISSUER, got %v", issuer, err)
+		}
+	}
+	valid.OIDCIssuer = "https://issuer.example/realms/synapse/"
+	if err := valid.ValidateOIDCPosture(); err != nil {
+		t.Fatalf("an issuer with a path and trailing slash is valid: %v", err)
+	}
 	valid.OIDCFrontendURL = "https://synapse.example/?next=https://attacker.example"
 	if err := valid.ValidateOIDCPosture(); err == nil {
 		t.Fatal("request-like OIDC frontend URL must fail")
+	}
+}
+
+// The group-role mapping is no longer required and is only parsed for compatibility: a
+// deployment that still sets it starts, with a deprecation warning.
+func TestOIDCGroupRoleMappingIsOptionalAndDeprecated(t *testing.T) {
+	cfg := Config{OIDCEnabled: true, OIDCIssuer: "https://issuer.example", OIDCClientID: "client", OIDCClientSecret: "secret", OIDCRedirectURL: "https://synapse.example/api/auth/oidc/callback", OIDCFrontendURL: "https://synapse.example/", OIDCTenantID: "tenant", OIDCTransactionTTL: time.Minute, OIDCSessionTTL: time.Hour}
+	if err := cfg.ValidateOIDCPosture(); err != nil {
+		t.Fatalf("OIDC without a group mapping must be valid: %v", err)
+	}
+	if warnings := cfg.OIDCDeprecationWarnings(); len(warnings) != 0 {
+		t.Fatalf("no mapping must produce no warning: %v", warnings)
+	}
+	t.Setenv("SYNAPSE_OIDC_GROUP_ROLE_MAPPING", "admins=admin,readers=readonly")
+	loaded := Load()
+	if len(loaded.OIDCGroupRoleMapping) != 2 {
+		t.Fatalf("legacy mapping must stay parse-compatible: %v", loaded.OIDCGroupRoleMapping)
+	}
+	if warnings := loaded.OIDCDeprecationWarnings(); len(warnings) != 1 || !strings.Contains(warnings[0], "SYNAPSE_OIDC_GROUP_ROLE_MAPPING") {
+		t.Fatalf("legacy mapping must warn: %v", warnings)
+	}
+}
+
+func TestPublicBaseURLLoadAndValidation(t *testing.T) {
+	t.Setenv("SYNAPSE_OIDC_FRONTEND_URL", "https://console.example/app/")
+	t.Setenv("SYNAPSE_PUBLIC_BASE_URL", "")
+	cfg := Load()
+	if cfg.PublicBaseURL != "https://console.example/app/" || cfg.EffectivePublicBaseURL() != cfg.OIDCFrontendURL {
+		t.Fatalf("public base did not default to OIDC frontend: %q", cfg.PublicBaseURL)
+	}
+	if err := cfg.ValidatePublicBaseURL(); err != nil {
+		t.Fatalf("valid fallback rejected: %v", err)
+	}
+	t.Setenv("SYNAPSE_PUBLIC_BASE_URL", "https://public.example/console")
+	cfg = Load()
+	if cfg.PublicBaseURL != "https://public.example/console" || cfg.EffectivePublicBaseURL() != cfg.PublicBaseURL {
+		t.Fatalf("explicit base did not override the frontend: %q", cfg.PublicBaseURL)
+	}
+	if err := cfg.ValidatePublicBaseURL(); err != nil {
+		t.Fatalf("valid override rejected: %v", err)
+	}
+}
+
+func TestValidatePublicBaseURLRejectsUnsafeOrigins(t *testing.T) {
+	for _, input := range []string{
+		"http://console.example", "/engagements/eng-1", "//console.example",
+		"https://user:password@console.example", "https://console.example/?return=attacker",
+		"https://console.example/#fragment", "https://console.example/?",
+		"https://console.example/%0a", "https://console.example/../admin", "https://console.example/%252e%252e/admin",
+		"https://console.example:65536/path", "https://console.example:0/path",
+		"https://exa\u202emple.com", "https://ex\u200bample.com",
+		"https://exa%E2%80%AEple.com", "https://exa%C2%A0ple.com",
+		" https://console.example", "https://console.example\\evil",
+	} {
+		t.Run(input, func(t *testing.T) {
+			err := (Config{PublicBaseURL: input}).ValidatePublicBaseURL()
+			if err == nil {
+				t.Fatal("unsafe console base accepted")
+			}
+			if strings.Contains(err.Error(), "password") {
+				t.Fatal("validation leaked credentials")
+			}
+		})
+	}
+	if err := (Config{}).ValidatePublicBaseURL(); err != nil {
+		t.Fatalf("unset optional base rejected: %v", err)
+	}
+	if err := (Config{OIDCFrontendURL: "http://insecure.example"}).ValidatePublicBaseURL(); err == nil {
+		t.Fatal("unsafe fallback accepted")
+	}
+}
+
+func TestNotificationUnsubscribeURLLoadAndValidation(t *testing.T) {
+	t.Setenv("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL", "https://mail.example/unsubscribe?list=security")
+	if cfg := Load(); cfg.NotificationUnsubscribeURL != "https://mail.example/unsubscribe?list=security" || cfg.ValidateNotificationUnsubscribeURL() != nil {
+		t.Fatalf("valid unsubscribe URL rejected: %+v", cfg)
+	}
+	for _, input := range []string{
+		"http://mail.example/unsubscribe", "/unsubscribe", "https://user:password@mail.example/unsubscribe",
+		"https://mail.example/unsubscribe\r\nBcc: attacker@example.com", " https://mail.example/unsubscribe",
+		"https://mail.example/unsubscribe path", "https://mail.example/<unsubscribe>",
+	} {
+		t.Run(input, func(t *testing.T) {
+			err := (Config{NotificationUnsubscribeURL: input}).ValidateNotificationUnsubscribeURL()
+			if err == nil {
+				t.Fatal("unsafe unsubscribe URL accepted")
+			}
+			if strings.Contains(err.Error(), "password") {
+				t.Fatal("validation leaked credentials")
+			}
+		})
+	}
+	if err := (Config{}).ValidateNotificationUnsubscribeURL(); err != nil {
+		t.Fatalf("unset unsubscribe URL rejected: %v", err)
 	}
 }
 
@@ -1140,5 +1273,35 @@ func TestVulnerabilityMaintenanceDefaultsDryRunAndBounded(t *testing.T) {
 	cfg.VulnerabilityMaintenanceBatchSize = 1001
 	if err := cfg.ValidateVulnerabilityMaintenance(); err == nil {
 		t.Fatal("unbounded maintenance batch must fail")
+	}
+}
+
+// The configuration preflight must accept exactly the issuers the OIDC provider accepts, so a
+// value that passes validation never fails late in startup and a value the provider would take
+// is never refused.
+func TestOIDCIssuerPreflightAgreesWithTheProvider(t *testing.T) {
+	for _, issuer := range []string{
+		"https://issuer.example",
+		"https://issuer.example/",
+		"  https://issuer.example/realms/synapse  ",
+		"https://issuer.example:8443/tenant/v2.0",
+		"https://user@issuer.example",
+		"https://issuer.example/?",
+		"http://issuer.example",
+		"HTTPS://issuer.example",
+		"https://issuer.example?x=1",
+		"https://issuer.example/#frag",
+		"https://",
+		"https:///path",
+		"issuer.example",
+		"",
+		"://bad",
+		"https://iss\x00uer.example",
+		"https://[::1",
+	} {
+		_, providerErr := oidc.NormalizeIssuer(issuer)
+		if got, want := validOIDCIssuer(issuer), providerErr == nil; got != want {
+			t.Errorf("issuer %q: config preflight accepts=%v, provider accepts=%v", issuer, got, want)
+		}
 	}
 }

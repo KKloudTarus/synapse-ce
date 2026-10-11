@@ -206,7 +206,7 @@ export function ProjectCodeWorkspace({
             />
           ) : view === 'source' ? (
             !selectedFile.sourceAvailable ? (
-              <Unavailable file={selectedFile} />
+              <Unavailable file={selectedFile} analysisId={index.analysisId} />
             ) : sourceError ? (
               <PaneError message={sourceError} onRetry={onRetrySource} />
             ) : !source ? (
@@ -1128,16 +1128,34 @@ function humanReason(reason: string): string {
   return reason.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase())
 }
 
-function Unavailable({ file }: { file: ProjectCodeFile }) {
+// The reason the server records is a stable enum, and "not_retained" was rendered as "Not retained",
+// which tells a reader nothing about how to get the source. Every reason a reader can act on now says
+// what to do; the rest keep the reason itself.
+export function unavailableHint(file: ProjectCodeFile, analysisId: string): string {
+  switch (file.sourceReason) {
+    case 'not_retained':
+      return `This analysis recorded its results without the source. A pipeline scan keeps the source with --push-source, and an analysis already recorded can be completed with: synapse-cli publish-source --analysis ${analysisId}`
+    case 'capture_failed':
+      return 'Capturing this file failed while the analysis ran, so the snapshot holds no copy of it.'
+    case 'limit_exceeded':
+      return 'This file is larger than the source limit the analysis retains.'
+    case 'binary':
+    case 'non_utf8':
+      return 'This file is not UTF-8 text, so the snapshot keeps no rendered copy.'
+    case null:
+    case '':
+      return 'Source was not retained for this immutable analysis.'
+    default:
+      return `This captured file is unavailable: ${humanReason(file.sourceReason)}.`
+  }
+}
+
+function Unavailable({ file, analysisId }: { file: ProjectCodeFile; analysisId: string }) {
   return (
     <EmptyState
       icon={FileCode2}
       title={file.binary ? 'Binary file' : 'Source preview unavailable'}
-      hint={
-        file.sourceReason
-          ? `This captured file is unavailable: ${humanReason(file.sourceReason)}.`
-          : 'Source was not retained for this immutable analysis.'
-      }
+      hint={unavailableHint(file, analysisId)}
     />
   )
 }

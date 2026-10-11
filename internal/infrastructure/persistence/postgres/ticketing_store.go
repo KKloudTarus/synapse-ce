@@ -17,11 +17,16 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-// TicketStore is the durable J01 adapter; it does not use integration_operations,
+// TicketStore is the durable ticketing adapter; it does not use integration_operations,
 // integration_bindings, the CI scheduler or a notification delivery.
 type TicketStore struct{ pool *pgxpool.Pool }
 
-func NewTicketStore(pool *pgxpool.Pool) *TicketStore { return &TicketStore{pool: pool} }
+func NewTicketStore(pool *pgxpool.Pool) (*TicketStore, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("%w: ticket store requires a PostgreSQL pool", shared.ErrValidation)
+	}
+	return &TicketStore{pool: pool}, nil
+}
 
 var _ ports.TicketStore = (*TicketStore)(nil)
 

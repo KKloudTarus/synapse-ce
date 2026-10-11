@@ -42,7 +42,13 @@ import {
   type MeasuresQuery,
   type ProjectMeasureResponse,
 } from '../projectMeasures'
-import { ApiError, blobDownload, getToken, getOnUnauthorized, req } from './client'
+import { ApiError, errorFromResponse } from './errors'
+import { blobDownload, req, snapshotAuth } from './client'
+
+// Branch arguments on measures, issues, hotspots, dependency graphs/subtree exports
+// and latest-analysis reads serve playground fixtures only. Keep those call sites
+// gated until the server supports them; project overview already supports branch.
+
 import type { ProjectWire } from './wire'
 import { mapScanJob, mapCodeQualityReport } from './scan'
 
@@ -91,6 +97,7 @@ function mapProject(r: ProjectWire): Project {
     },
     defaultProfileByLang: r.default_profile_by_lang ?? {},
     gateId: r.gate_id ?? '',
+    decoratePullRequests: r.decorate_pull_requests === true,
     createdAt: r.created_at ?? null,
     latestAnalysis: r.latest_analysis ? mapProjectSummaryAnalysis(r.latest_analysis) : null,
     latestJob: r.latest_job ? mapScanJob(r.latest_job) : null,
@@ -372,6 +379,7 @@ function asRuleType(value: unknown): RuleType {
 export const codeQualityApi = {
   projectMeasures: async (projectKey: string, query: MeasuresQuery, signal?: AbortSignal): Promise<ProjectMeasureResponse> => {
     const q = new URLSearchParams()
+    if (query.branch) q.set('branch', query.branch)
     if (query.path) q.set('path', query.path)
     if (query.limit) q.set('limit', query.limit.toString())
     if (query.cursor) q.set('cursor', query.cursor)
@@ -441,6 +449,12 @@ export const codeQualityApi = {
   listProjects: async (): Promise<Project[]> =>
     ((await req('/projects')) ?? []).map(mapProject),
 
+  // DELETE /api/v1/projects/{key} has existed since the route table was written; nothing in the
+  // dashboard called it, so a project could be created and never removed from the console.
+  deleteProject: async (projectKey: string): Promise<void> => {
+    await req(`/projects/${encodeURIComponent(projectKey)}`, { method: 'DELETE' })
+  },
+
   createProject: async (input: CreateProjectInput): Promise<Project> =>
     mapProject(
       await req('/projects', {
@@ -464,18 +478,12 @@ export const codeQualityApi = {
     form.append('key', key)
     form.append('gate_id', gateId)
     form.append('archive', archive)
-    const token = getToken()
-    const onUnauthorized = getOnUnauthorized()
-    const res = await fetch('/api/v1/projects', {
-      method: 'POST',
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-      body: form,
-    })
-    if (res.status === 401 && onUnauthorized) onUnauthorized()
+    const auth = snapshotAuth()
+    const res = await fetch('/api/v1/projects', auth.requestInit({ method: 'POST', body: form }, false))
     if (!res.ok) {
-      let message = `HTTP ${res.status}`
-      try { message = (await res.json())?.error ?? message } catch { /* non-JSON */ }
-      throw new ApiError(res.status, message)
+      const error = await errorFromResponse(res)
+      auth.notifyUnauthorized(error)
+      throw error
     }
     return mapProject(await res.json())
   },
@@ -504,11 +512,14 @@ export const codeQualityApi = {
       .filter((b: ProjectBranch | null): b is ProjectBranch => b !== null)
   },
 
-  projectDependencyGraph: async (key: string, signal?: AbortSignal): Promise<ProjectDependencyGraph> =>
-    mapProjectDependencyGraph(await req(`/projects/${encodeURIComponent(key)}/dependency-graph`, { signal })),
+  projectDependencyGraph: async (key: string, signal?: AbortSignal, branch = ''): Promise<ProjectDependencyGraph> =>
+    mapProjectDependencyGraph(await req(`/projects/${encodeURIComponent(key)}/dependency-graph${branch ? `?${new URLSearchParams({ branch })}` : ''}`, { signal })),
 
-  downloadProjectDependencySubtree: async (key: string, root = ''): Promise<void> => {
-    const query = root ? `?${new URLSearchParams({ root })}` : ''
+  downloadProjectDependencySubtree: async (key: string, root = '', branch = ''): Promise<void> => {
+    const params = new URLSearchParams()
+    if (root) params.set('root', root)
+    if (branch) params.set('branch', branch)
+    const query = params.size ? `?${params}` : ''
     await blobDownload(
       `/api/v1/projects/${encodeURIComponent(key)}/dependency-graph/export${query}`,
       `${key}-dependencies${root ? '-subtree' : ''}.cdx.json`,
@@ -530,6 +541,7 @@ export const codeQualityApi = {
 
   listProjectHotspots: async (projectKey: string, lens: 'overall' | 'new-code', filter: HotspotListFilter): Promise<HotspotPage> => {
     const q = new URLSearchParams()
+    if (filter.branch) q.set('branch', filter.branch)
     q.set('lens', lens)
     if (filter.status) q.set('status', filter.status)
     if (filter.rule) q.set('rule', filter.rule)
@@ -557,8 +569,8 @@ export const codeQualityApi = {
     }
   },
 
-  getProjectHotspot: async (projectKey: string, id: string): Promise<Hotspot> =>
-    mapHotspot(await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}`)),
+  getProjectHotspot: async (projectKey: string, id: string, branch = ''): Promise<Hotspot> =>
+    mapHotspot(await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}${branch ? `?${new URLSearchParams({ branch })}` : ''}`)),
 
   transitionProjectHotspot: async (projectKey: string, id: string, status: HotspotStatus, rationale: string, expectedVersion: number): Promise<{ hotspot: Hotspot, event: HotspotReviewEvent }> => {
     const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/transitions`, {
@@ -568,13 +580,14 @@ export const codeQualityApi = {
     return { hotspot: mapHotspot(res.hotspot), event: mapHotspotReviewEvent(res.event) }
   },
 
-  getProjectHotspotHistory: async (projectKey: string, id: string): Promise<HotspotReviewEvent[]> => {
-    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/history`)
+  getProjectHotspotHistory: async (projectKey: string, id: string, branch = ''): Promise<HotspotReviewEvent[]> => {
+    const res = await req(`/projects/${encodeURIComponent(projectKey)}/hotspots/${encodeURIComponent(id)}/history${branch ? `?${new URLSearchParams({ branch })}` : ''}`)
     return (res ?? []).map(mapHotspotReviewEvent)
   },
 
   listProjectIssues: async (projectKey: string, filter: IssueListFilter): Promise<IssuePage> => {
     const q = new URLSearchParams()
+    if (filter.branch) q.set('branch', filter.branch)
     if (filter.lens) q.set('lens', filter.lens)
     if (filter.status) q.set('status', filter.status)
     if (filter.type) q.set('type', filter.type)
@@ -624,19 +637,21 @@ export const codeQualityApi = {
   assignProjectGate: async (key: string, gateId: string): Promise<Project> =>
     mapProject(await req(`/projects/${encodeURIComponent(key)}/gate`, { method: 'PUT', body: JSON.stringify({ gate_id: gateId }) })),
 
+  /** Opt the project in or out of PR/MR decoration. PermOperate. Returns the updated project. */
+  setProjectDecoration: async (key: string, enabled: boolean): Promise<Project> =>
+    mapProject(await req(`/projects/${encodeURIComponent(key)}/decoration`, { method: 'PUT', body: JSON.stringify({ enabled }) })),
+
   startProjectAnalysis: async (key: string, coverage?: File): Promise<ScanJob> => {
     const path = `/projects/${encodeURIComponent(key)}/analyses`
     if (!coverage) return mapScanJob(await req(path, { method: 'POST' }))
     const form = new FormData()
     form.append('coverage', coverage)
-    const token = getToken()
-    const onUnauthorized = getOnUnauthorized()
-    const res = await fetch(`/api/v1${path}`, { method: 'POST', headers: token ? { authorization: `Bearer ${token}` } : {}, body: form })
-    if (res.status === 401 && onUnauthorized) onUnauthorized()
+    const auth = snapshotAuth()
+    const res = await fetch(`/api/v1${path}`, auth.requestInit({ method: 'POST', body: form }, false))
     if (!res.ok) {
-      let message = `HTTP ${res.status}`
-      try { message = (await res.json())?.error ?? message } catch { /* non-JSON */ }
-      throw new ApiError(res.status, message)
+      const error = await errorFromResponse(res)
+      auth.notifyUnauthorized(error)
+      throw error
     }
     return mapScanJob(await res.json())
   },
@@ -667,9 +682,9 @@ export const codeQualityApi = {
     }
   },
 
-  latestProjectAnalysis: async (key: string): Promise<LatestProjectAnalysis | null> => {
+  latestProjectAnalysis: async (key: string, branch = ''): Promise<LatestProjectAnalysis | null> => {
     try {
-      const latest = await req(`/projects/${encodeURIComponent(key)}/analysis`)
+      const latest = await req(`/projects/${encodeURIComponent(key)}/analysis${branch ? `?${new URLSearchParams({ branch })}` : ''}`)
       return { analysis: mapProjectAnalysis(latest.analysis), result: mapScanResult(latest.result) }
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) return null

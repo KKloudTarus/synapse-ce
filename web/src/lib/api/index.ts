@@ -14,7 +14,12 @@ export { type AttackPathResult, type AttackPath, type AttackPathNode, type Attac
 export { type SLAPoliciesView, type SLAPolicy, type SLAConfig, type SLAWeights, type SLAThresholds, type SLADueRange, type SLADueRanges, type SLADueTier, type SLAActivateResult, nsToDays, daysToNs } from './sla'
 export { type OffensivePolicy, type OffensiveTechnique, type OffensiveLegalReview } from './offensivepolicy'
 export { type AlertTestResult, type AlertTestOutcome, AlertNotEnabledError } from './alerting'
-export { type NotificationChannel, type NotificationChannelInput, type NotificationChannelType, type NotificationRule, type NotificationRuleInput, type NotificationEventType, type NotificationDelivery, type NotificationDeliveryState, type NotificationAttempt } from './notifications'
+export { type NotificationChannel, type NotificationChannelHealth, type NotificationChannelHealthEvent, type NotificationChannelInput, type NotificationChannelType, type NotificationRule, type NotificationRuleInput, type NotificationEventType, type NotificationEventSpec, type NotificationRuleFilter, type NotificationDelivery, type NotificationDeliveryState, type NotificationSourceFailure, type NotificationAttempt, type NotificationLocale, type NotificationDataClass, type EngagementExternalNotifications, type NotificationEngagementSetting, type NotificationEngagementSettingInput, type NotificationTemplateOption, type NotificationTemplateResolution, type SlackConversation, type SlackConversations } from './notifications'
+export { type NotificationTemplate, type NotificationTemplateDetail, type NotificationTemplateFamily, type NotificationTemplateInput, type NotificationTemplateLocale, type NotificationTemplateQuery, type NotificationTemplateStatus, type NotificationTemplateUpdateInput, type NotificationTemplateValidationError, type NotificationTemplateVersion, type BuiltinNotificationTemplate, TEMPLATE_FAMILIES, TEMPLATE_FAMILY_FIELDS, TEMPLATE_FIELD_MAX_BYTES, TEMPLATE_LOCALES, TEMPLATE_STATUSES, TEMPLATE_VERSION_PAGE, templateValidationError } from './notification-templates'
+export { type SIEMSink, type SIEMSinkInput, type SIEMProvider, type SIEMDataClass, type SIEMAckMode, type SIEMReplay, type SIEMStatus, type SIEMPartition } from './siem'
+export { type TenantLocale, type TenantSettings, type TenantSettingsInput } from './tenant-settings'
+export { type UserContact } from './user-contacts'
+export { type InboxItem, type InboxPreference } from './inbox'
 export { type EngagementCredential } from './engagements'
 export { type AutoVerifyResult } from './dashboard'
 export { type DetectionProvenanceCurrent, type DetectionProvenanceTransition } from './incidents'
@@ -50,7 +55,12 @@ import { slaApi } from './sla'
 import { offensivePolicyApi } from './offensivepolicy'
 import { alertingApi } from './alerting'
 import { notificationsApi } from './notifications'
+import { notificationTemplatesApi } from './notification-templates'
+import { siemApi } from './siem'
+import { tenantSettingsApi } from './tenant-settings'
 import { ownershipApi } from './ownership'
+import { userContactsApi } from './user-contacts'
+import { inboxApi } from './inbox'
 import { privacyApi } from './privacy'
 import { writeupApi } from './writeup'
 import { cspmApi } from './cspm'
@@ -71,6 +81,8 @@ export const downloadReportDoc = evidenceApi.downloadReportDoc
 // Unified api object — same shape as before
 export const api = {
   ...ownershipApi,
+  ...userContactsApi,
+  ...inboxApi,
   ...authApi,
   ...teamApi,
   ...auditApi,
@@ -101,6 +113,9 @@ export const api = {
   ...offensivePolicyApi,
   ...alertingApi,
   ...notificationsApi,
+  ...notificationTemplatesApi,
+  ...siemApi,
+  ...tenantSettingsApi,
   ...privacyApi,
   ...writeupApi,
   ...cspmApi,

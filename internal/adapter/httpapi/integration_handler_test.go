@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
@@ -47,7 +48,7 @@ func newIntegrationHTTPRouter(t *testing.T) *Router {
 		SecretFields: []integration.FieldDescriptor{{Name: "token", Label: "Token", Kind: integration.FieldPassword, Required: true}},
 	}
 	registry := integration.NewRegistry()
-	if err := registry.Register(descriptor, func(integration.Integration, integration.CredentialBundle) (integration.Adapter, error) {
+	if err := registry.Register(descriptor, func(integration.Integration, integration.CredentialBundle, selfhosted.Rules) (integration.Adapter, error) {
 		return integrationHTTPAdapter{descriptor: descriptor}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -222,15 +223,16 @@ func TestIntegrationRoutesFailClosedForMachineAndMissingPrincipals(t *testing.T)
 	for _, test := range []struct {
 		name string
 		req  *http.Request
+		want int
 	}{
-		{name: "missing principal", req: httptest.NewRequest(http.MethodGet, "/api/v1/integrations", nil)},
-		{name: "machine principal", req: integrationHTTPRequest(http.MethodGet, "/api/v1/integrations", "", "agent", "tenant-a")},
-		{name: "readonly mutation", req: integrationHTTPRequest(http.MethodPost, "/api/v1/integrations", `{}`, string(user.RoleReadOnly), "tenant-a")},
+		{name: "missing principal", req: httptest.NewRequest(http.MethodGet, "/api/v1/integrations", nil), want: http.StatusUnauthorized},
+		{name: "machine principal", req: integrationHTTPRequest(http.MethodGet, "/api/v1/integrations", "", "agent", "tenant-a"), want: http.StatusForbidden},
+		{name: "readonly mutation", req: integrationHTTPRequest(http.MethodPost, "/api/v1/integrations", `{}`, string(user.RoleReadOnly), "tenant-a"), want: http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			response := httptest.NewRecorder()
 			mux.ServeHTTP(response, test.req)
-			if response.Code != http.StatusForbidden {
+			if response.Code != test.want {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
 		})

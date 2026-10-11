@@ -6,11 +6,28 @@ import (
 	"log/slog"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/measure"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/projectanalysis"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/qualitygate"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scmconnector"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+// forgeHost is the connector host key of the project's git repository, so decoration resolves the
+// credential (and any self-hosted API base) for the forge the repository actually lives on. It comes
+// from the project's stored source binding, never from the uploaded CI context. A non-git project
+// yields "", which keeps the provider's public SaaS host.
+func forgeHost(source project.SourceBinding) string {
+	if source.Kind != project.SourceGit {
+		return ""
+	}
+	host, err := scmconnector.NormalizeHost(source.Value)
+	if err != nil {
+		return ""
+	}
+	return host
+}
 
 // decorateProjectAnalysis is deliberately fail-soft: persistence and the quality-gate verdict are
 // authoritative, while forge write-back is an outward convenience. A missing/partial PR identity is
@@ -56,8 +73,9 @@ func (s *Service) decorateProjectAnalysis(ctx context.Context, analysis projecta
 		newCoverageReason = ""
 	}
 	if err := s.decorator.Decorate(ctx, ports.PRDecoration{
-		Provider: analysis.CI.Provider,
-		Target:   target, Gate: analysis.Gate, Summary: summary, Annotations: annotations, FileChanges: fileChanges,
+		Provider:  analysis.CI.Provider,
+		ForgeHost: forgeHost(proj.SourceBinding),
+		Target:    target, Gate: analysis.Gate, Summary: summary, Annotations: annotations, FileChanges: fileChanges,
 		NewIssues: &newIssues, NewCoverage: newCoverage, NewCoverageReason: newCoverageReason,
 	}); err != nil {
 		slog.Warn("project analysis PR decoration failed; analysis result is unchanged")

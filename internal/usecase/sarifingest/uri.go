@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/textsafety"
 )
 
 // This file holds the two security-critical transformations applied to untrusted tool output: turning a
@@ -173,8 +174,7 @@ func sanitizeText(in string, limit int, allowNewlines bool) (string, bool) {
 			} else {
 				b.WriteRune(' ')
 			}
-		case r < 0x20 || r == 0x7f:
-		case r >= 0x80 && r <= 0x9f:
+		case textsafety.IsControl(r):
 		case isBidiOrZeroWidth(r):
 		default:
 			b.WriteRune(r)
@@ -185,7 +185,7 @@ func sanitizeText(in string, limit int, allowNewlines bool) (string, bool) {
 
 func containsControlOrBidi(s string) bool {
 	for _, r := range s {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || isBidiOrZeroWidth(r) {
+		if textsafety.IsControl(r) || isBidiOrZeroWidth(r) {
 			return true
 		}
 	}
@@ -193,11 +193,7 @@ func containsControlOrBidi(s string) bool {
 }
 
 // isBidiOrZeroWidth reports whether r can make stored text read as something other than what it is.
-// U+200C and U+200D are excluded on purpose — see sanitizeText.
+// U+200C and U+200D are excluded on purpose — see sanitizeText and package textsafety.
 func isBidiOrZeroWidth(r rune) bool {
-	switch r {
-	case 0x061C, 0x200B, 0x200E, 0x200F, 0xFEFF:
-		return true
-	}
-	return (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069)
+	return textsafety.IsBidiControl(r) || textsafety.IsInvisibleSeparator(r)
 }

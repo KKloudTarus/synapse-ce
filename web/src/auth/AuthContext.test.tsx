@@ -1,18 +1,19 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AuthProvider } from './AuthContext'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { StrictMode } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AuthProvider, useAuth } from './AuthContext'
 import { Connect } from '../pages/Connect'
+import { ApiError } from '../lib/api/errors'
 
 const mocks = vi.hoisted(() => ({
   aup: vi.fn(),
+  me: vi.fn(),
   acceptAup: vi.fn(),
 }))
 
 vi.mock('../lib/api', () => ({
-  api: { aup: mocks.aup, acceptAup: mocks.acceptAup },
-  ApiError: class ApiError extends Error {
-    constructor(public status: number, message: string) { super(message) }
-  },
+  api: { aup: mocks.aup, me: mocks.me, acceptAup: mocks.acceptAup },
   discoverSession: vi.fn(),
   logoutSession: vi.fn(),
   setCSRFToken: vi.fn(),
@@ -20,19 +21,122 @@ vi.mock('../lib/api', () => ({
   setUnauthorizedHandler: vi.fn(),
 }))
 
-import { ApiError, discoverSession, logoutSession, setCSRFToken, setToken } from '../lib/api'
+import { discoverSession, logoutSession, setCSRFToken, setToken, setUnauthorizedHandler } from '../lib/api'
 
-function renderConnect() {
-  return render(<AuthProvider><Connect /></AuthProvider>)
+const ACCEPTED = { accepted: true, version: 'v1', text: 'Use responsibly.' }
+const PENDING_AUP = { accepted: false, version: 'v1', text: 'Use responsibly.' }
+const CURRENT_USER = { id: 'user-1', name: 'Operator', role: 'admin' }
+const fetchSpy = vi.fn<typeof fetch>()
+
+function apiError(status: number, code?: string, extra: Record<string, unknown> = {}) {
+  const message = code ? `server says ${code}` : `HTTP ${status}`
+  return new ApiError(status, message, code ? { error: message, code, ...extra } : undefined)
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
+function PhaseProbe() {
+  const { phase } = useAuth()
+  return <output data-testid="phase">{phase}</output>
+}
+
+function SwitchProbe() {
+  const { completeOrganizationSwitch } = useAuth()
+  return <button type="button" onClick={() => { void completeOrganizationSwitch('destination-csrf') }}>Complete organization switch</button>
+}
+
+function renderConnect() {
+  return render(<AuthProvider><PhaseProbe /><Connect /></AuthProvider>)
+}
+
+const phase = () => screen.getByTestId('phase').textContent
+
+function latestUnauthorizedHandler(): (e?: ApiError) => void {
+  const calls = vi.mocked(setUnauthorizedHandler).mock.calls
+  return calls[calls.length - 1][0] as (e?: ApiError) => void
+}
+
+beforeEach(() => {
+  localStorage.clear()
+  sessionStorage.clear()
+  window.history.replaceState(null, '', '/')
+  vi.mocked(discoverSession).mockReset().mockResolvedValue({ authenticated: false, csrfToken: '' })
+  vi.mocked(logoutSession).mockReset().mockResolvedValue()
+  vi.mocked(setToken).mockClear()
+  vi.mocked(setCSRFToken).mockClear()
+  vi.mocked(setUnauthorizedHandler).mockClear()
+  mocks.aup.mockReset().mockResolvedValue(ACCEPTED)
+  mocks.me.mockReset().mockResolvedValue(CURRENT_USER)
+  mocks.acceptAup.mockReset().mockResolvedValue({})
+  // Connect also loads the enterprise-context feature hook. The legacy authentication scenarios
+  // deliberately model a deployment where that route is absent, rather than relying on jsdom's
+  // unimplemented relative fetch behavior.
+  fetchSpy.mockReset().mockResolvedValue({
+    ok: false,
+    status: 404,
+    headers: new Headers(),
+    json: async () => ({ error: 'not found' }),
+  } as Response)
+  vi.stubGlobal('fetch', fetchSpy)
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
 describe('BFF authentication', () => {
-  beforeEach(() => {
-    localStorage.clear()
-    sessionStorage.clear()
-    vi.mocked(discoverSession).mockResolvedValue({ authenticated: false, csrfToken: '' })
-    vi.mocked(logoutSession).mockResolvedValue()
-    mocks.aup.mockResolvedValue({ accepted: true, version: 'v1', text: 'Use responsibly.' })
+  it('continues mailbox verification after provider restoration and StrictMode replay', async () => {
+    window.history.replaceState(null, '', '/?auth_error=mailbox_verification_required')
+    const discovery = deferred<{ authenticated: boolean; csrfToken: string }>()
+    vi.mocked(discoverSession).mockReturnValue(discovery.promise)
+    fetchSpy.mockImplementation(async (url) => new Response(JSON.stringify(String(url).endsWith('/invitation/pending') ? { challenge_required: true } : { enabled: true, tenant_id: 'tenant-a', requirement: 'optional', connections: [], bootstrap_eligible: false }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    render(<StrictMode><AuthProvider><Connect /></AuthProvider></StrictMode>)
+    await act(async () => discovery.resolve({ authenticated: false, csrfToken: '' }))
+    expect(await screen.findByLabelText('Mailbox verification code')).toBeInTheDocument()
+    expect(fetchSpy).toHaveBeenCalledWith('/api/auth/enterprise/invitation/pending', expect.anything())
+    expect(window.location.search).not.toContain('auth_error')
+    expect(screen.queryByText(/Organization sign-in could not be completed/)).not.toBeInTheDocument()
+  })
+
+  it('shows callback denial with approved enterprise sign-in choices', async () => {
+    window.history.replaceState(null, '', '/?auth_error=access_denied')
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ enabled: true, tenant_id: 'tenant-a', requirement: 'optional', connections: [{ id: 'approved', name: 'Approved SSO' }], bootstrap_eligible: false }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    renderConnect()
+    expect(await screen.findByRole('button', { name: 'Continue with Approved SSO' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('This sign-in is not approved for Synapse.')
+  })
+
+  it('retries the initial pending mailbox lookup after a dependency failure', async () => {
+    window.history.replaceState(null, '', '/?auth_error=mailbox_verification_required')
+    let pendingLookups = 0
+    fetchSpy.mockImplementation(async (url) => {
+      const pending = String(url).endsWith('/invitation/pending')
+      if (pending && ++pendingLookups === 1) return new Response(JSON.stringify({ error: 'Mailbox service unavailable.' }), { status: 503, headers: { 'content-type': 'application/json' } })
+      return new Response(JSON.stringify(pending ? { challenge_required: true } : { enabled: true, tenant_id: 'tenant-a', requirement: 'optional', connections: [], bootstrap_eligible: false }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    renderConnect()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Mailbox service unavailable.')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByLabelText('Mailbox verification code')).toBeInTheDocument()
+    expect(pendingLookups).toBe(2)
+  })
+  it('clears the prior tenant state and restores the destination session after a switch', async () => {
+    vi.mocked(discoverSession)
+      .mockResolvedValueOnce({ authenticated: true, csrfToken: 'source-csrf' })
+      .mockResolvedValueOnce({ authenticated: true, csrfToken: 'destination-csrf' })
+    render(<AuthProvider><PhaseProbe /><SwitchProbe /></AuthProvider>)
+
+    await waitFor(() => expect(phase()).toBe('ready'))
+    fireEvent.click(screen.getByRole('button', { name: 'Complete organization switch' }))
+
+    await waitFor(() => expect(setCSRFToken).toHaveBeenCalledWith('destination-csrf'))
+    expect(discoverSession).toHaveBeenCalledTimes(2)
+    expect(phase()).toBe('ready')
   })
 
   it('discovers an existing BFF session before loading the AUP', async () => {
@@ -76,7 +180,7 @@ describe('BFF authentication', () => {
 
   it('discards the saved bearer token only when the token is rejected', async () => {
     sessionStorage.setItem('synapse.token', 'saved-token')
-    mocks.aup.mockRejectedValue(new ApiError(401, 'unauthorized'))
+    mocks.aup.mockRejectedValue(apiError(401, 'authentication_invalid'))
     renderConnect()
 
     expect(await screen.findByText('Invalid API token.')).toBeInTheDocument()
@@ -85,7 +189,7 @@ describe('BFF authentication', () => {
 
   it('logs out through the BFF and returns to unauthenticated state', async () => {
     vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'csrf-1' })
-    mocks.aup.mockResolvedValue({ accepted: false, version: 'v1', text: 'Use responsibly.' })
+    mocks.aup.mockResolvedValue(PENDING_AUP)
     renderConnect()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
@@ -96,7 +200,7 @@ describe('BFF authentication', () => {
   it('stays signed in when server-side session revocation fails', async () => {
     vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'csrf-1' })
     vi.mocked(logoutSession).mockRejectedValue(new Error('gateway down'))
-    mocks.aup.mockResolvedValue({ accepted: false, version: 'v1', text: 'Use responsibly.' })
+    mocks.aup.mockResolvedValue(PENDING_AUP)
     renderConnect()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
@@ -104,9 +208,20 @@ describe('BFF authentication', () => {
     expect(screen.queryByRole('link', { name: 'Sign in with your organization' })).not.toBeInTheDocument()
   })
 
+  it('signs out when the server already rejects the session being revoked', async () => {
+    vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'csrf-1' })
+    vi.mocked(logoutSession).mockRejectedValue(new ApiError(401, 'missing or invalid API token', { error: 'missing or invalid API token', code: 'authentication_invalid' }))
+    mocks.aup.mockResolvedValue(PENDING_AUP)
+    renderConnect()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
+    expect(await screen.findByRole('link', { name: 'Sign in with your organization' })).toBeInTheDocument()
+    expect(screen.queryByText(/Could not end the server session/)).not.toBeInTheDocument()
+  })
+
   it('clears a local bearer session without calling the BFF', async () => {
     sessionStorage.setItem('synapse.token', 'saved-token')
-    mocks.aup.mockResolvedValue({ accepted: false, version: 'v1', text: 'Use responsibly.' })
+    mocks.aup.mockResolvedValue(PENDING_AUP)
     renderConnect()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
@@ -141,5 +256,268 @@ describe('BFF authentication', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Hide token' }))
     expect(input).toHaveAttribute('type', 'password')
+  })
+})
+
+describe('credential restoration outcomes', () => {
+  it('keeps the saved token and offers retry when authentication is unavailable, then reaches ready on retry', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup
+      .mockRejectedValueOnce(apiError(503, 'authentication_unavailable', { retryable: true, request_id: 'req-123' }))
+      .mockResolvedValueOnce(ACCEPTED)
+    renderConnect()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/temporarily unavailable/)
+    expect(screen.getByText('req-123')).toBeInTheDocument()
+    expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
+    expect(phase()).toBe('unauthenticated')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(mocks.aup).toHaveBeenCalledTimes(2)
+    expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
+  })
+
+  it('keeps the saved token when the API cannot be reached', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup.mockRejectedValue(new ApiError(0, 'Cannot reach the API.'))
+    renderConnect()
+
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
+  })
+
+  it('keeps a saved token when /me has a dependency failure and succeeds on Retry', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.me
+      .mockRejectedValueOnce(apiError(503, 'authentication_unavailable', { retryable: true, request_id: 'me-req-7' }))
+      .mockResolvedValueOnce(CURRENT_USER)
+    renderConnect()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/temporarily unavailable/)
+    expect(screen.getByText('me-req-7')).toBeInTheDocument()
+    expect(phase()).toBe('unauthenticated')
+    expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(mocks.me).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not persist a manually entered token when /me has a dependency failure', async () => {
+    mocks.me.mockRejectedValueOnce(apiError(503, 'authentication_unavailable', { retryable: true, request_id: 'me-connect-3' }))
+    renderConnect()
+
+    fireEvent.change(await screen.findByLabelText('API token'), { target: { value: 'unverified-token' } })
+    fireEvent.submit(screen.getByLabelText('API token').closest('form')!)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/authentication_unavailable/)
+    expect(screen.getByText('me-connect-3')).toBeInTheDocument()
+    expect(phase()).toBe('unauthenticated')
+    expect(sessionStorage.getItem('synapse.token')).toBeNull()
+  })
+
+  it('clears the saved token when the server reports authentication_invalid', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup.mockRejectedValue(apiError(401, 'authentication_invalid'))
+    renderConnect()
+
+    expect(await screen.findByText('Invalid API token.')).toBeInTheDocument()
+    expect(sessionStorage.getItem('synapse.token')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+
+  it('clears the saved token on a 401 without a code from an older server', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup.mockRejectedValue(new ApiError(401, 'unauthorized'))
+    renderConnect()
+
+    expect(await screen.findByText('Invalid API token.')).toBeInTheDocument()
+    expect(sessionStorage.getItem('synapse.token')).toBeNull()
+  })
+
+  it('keeps the saved token on authentication_required because nothing was proven invalid', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup.mockRejectedValue(apiError(401, 'authentication_required'))
+    renderConnect()
+
+    expect(await screen.findByLabelText('API token')).toBeInTheDocument()
+    expect(phase()).toBe('unauthenticated')
+    expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
+  })
+
+  it('keeps the saved token on permission_denied and never reaches ready', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup.mockRejectedValue(apiError(403, 'permission_denied'))
+    renderConnect()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/permission_denied/)
+    expect(phase()).toBe('unauthenticated')
+    expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
+    // A 403 is final for this request, so there is no retry loop that could later promote it.
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a cookie session and offers retry when session discovery is unavailable', async () => {
+    vi.mocked(discoverSession)
+      .mockRejectedValueOnce(apiError(503, 'authentication_unavailable', { retryable: true }))
+      .mockResolvedValueOnce({ authenticated: true, csrfToken: 'csrf-2' })
+    renderConnect()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/temporarily unavailable/)
+    expect(logoutSession).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(setCSRFToken).toHaveBeenCalledWith('csrf-2')
+  })
+
+  it('treats an unknown 5xx code as retryable and an unknown 4xx code as final', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup.mockRejectedValueOnce(apiError(503, 'future_dependency_code'))
+    const { unmount } = renderConnect()
+
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
+    unmount()
+
+    mocks.aup.mockRejectedValueOnce(apiError(409, 'future_policy_code'))
+    renderConnect()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/future_policy_code/)
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
+  })
+
+  it('sends one restoration request when Retry is activated twice in a row', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    const late = deferred<typeof ACCEPTED>()
+    mocks.aup
+      .mockRejectedValueOnce(apiError(503, 'authentication_unavailable', { retryable: true }))
+      .mockReturnValueOnce(late.promise)
+    renderConnect()
+
+    const retry = await screen.findByRole('button', { name: 'Retry' })
+    fireEvent.click(retry)
+    fireEvent.click(retry)
+    expect(await screen.findByRole('button', { name: /Retrying/ })).toBeDisabled()
+    expect(mocks.aup).toHaveBeenCalledTimes(2)
+
+    await act(async () => { late.resolve(ACCEPTED) })
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(mocks.aup).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores a late restoration response after a new token is connected', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    const late = deferred<typeof ACCEPTED>()
+    mocks.aup
+      .mockRejectedValueOnce(apiError(503, 'authentication_unavailable', { retryable: true }))
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValueOnce(PENDING_AUP)
+    renderConnect()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
+    // Wait until the retried restoration is waiting on its AUP read before connecting.
+    await waitFor(() => expect(mocks.aup).toHaveBeenCalledTimes(2))
+    fireEvent.change(screen.getByLabelText('API token'), { target: { value: 'new-token' } })
+    fireEvent.submit(screen.getByLabelText('API token').closest('form')!)
+    await waitFor(() => expect(phase()).toBe('need-aup'))
+
+    // The earlier attempt now fails as if the old token were rejected. It must not clear the new one.
+    await act(async () => { late.reject(apiError(401, 'authentication_invalid')) })
+    expect(phase()).toBe('need-aup')
+    expect(sessionStorage.getItem('synapse.token')).toBe('new-token')
+    expect(screen.queryByText('Invalid API token.')).not.toBeInTheDocument()
+  })
+
+  it('ignores a late authenticated response after signing out', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup.mockResolvedValueOnce(PENDING_AUP)
+    renderConnect()
+
+    const late = deferred<typeof ACCEPTED>()
+    mocks.aup.mockReturnValueOnce(late.promise)
+    fireEvent.click(await screen.findByRole('button', { name: /Accept/ }))
+    await waitFor(() => expect(mocks.acceptAup).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    await waitFor(() => expect(phase()).toBe('unauthenticated'))
+
+    await act(async () => { late.resolve(ACCEPTED) })
+    expect(phase()).toBe('unauthenticated')
+  })
+})
+
+describe('requests after sign-in', () => {
+  it('ignores an unavailable dependency reported to the unauthorized handler', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    renderConnect()
+    await waitFor(() => expect(phase()).toBe('ready'))
+
+    act(() => latestUnauthorizedHandler()(apiError(503, 'authentication_unavailable', { retryable: true })))
+    act(() => latestUnauthorizedHandler()(apiError(403, 'csrf_invalid')))
+    expect(phase()).toBe('ready')
+    expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
+  })
+
+  it('returns to sign-in and clears the token when a later request reports authentication_invalid', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    renderConnect()
+    await waitFor(() => expect(phase()).toBe('ready'))
+
+    act(() => latestUnauthorizedHandler()(apiError(401, 'authentication_invalid')))
+    expect(phase()).toBe('unauthenticated')
+    expect(await screen.findByText('Invalid API token.')).toBeInTheDocument()
+    expect(sessionStorage.getItem('synapse.token')).toBeNull()
+  })
+
+  it('reports an expired cookie session when a later request reports authentication_invalid', async () => {
+    vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'csrf-1' })
+    renderConnect()
+    await waitFor(() => expect(phase()).toBe('ready'))
+
+    act(() => latestUnauthorizedHandler()(apiError(401, 'authentication_invalid')))
+    expect(await screen.findByText('Your sign-in session expired. Sign in again.')).toBeInTheDocument()
+    expect(phase()).toBe('unauthenticated')
+  })
+})
+
+describe('OIDC access denied', () => {
+  it('shows the access-denied notice without retrying and removes it from the URL', async () => {
+    window.history.replaceState(null, '', '/?auth_error=access_denied&keep=1')
+    renderConnect()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This sign-in is not approved for Synapse. Ask an administrator to link your identity.')
+    expect(window.location.search).toBe('?keep=1')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(discoverSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a generic notice for any other sign-in error', async () => {
+    window.history.replaceState(null, '', '/?auth_error=something_new')
+    renderConnect()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Organization sign-in could not be completed.')
+    expect(window.location.search).toBe('')
+  })
+})
+
+describe('keyboard access', () => {
+  it('moves focus to Retry, reaches it with Tab, and triggers it with Enter', async () => {
+    const user = userEvent.setup()
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup
+      .mockRejectedValueOnce(apiError(503, 'authentication_unavailable', { retryable: true }))
+      .mockResolvedValueOnce(ACCEPTED)
+    renderConnect()
+
+    const retry = await screen.findByRole('button', { name: 'Retry' })
+    await waitFor(() => expect(retry).toHaveFocus())
+
+    retry.blur()
+    await user.tab()
+    expect(retry).toHaveFocus()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(mocks.aup).toHaveBeenCalledTimes(2)
   })
 })

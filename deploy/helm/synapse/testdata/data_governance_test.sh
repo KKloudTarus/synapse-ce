@@ -7,13 +7,15 @@ trap 'rm -f "$out"' EXIT
 
 # A production deployment must declare one governed Kubernetes region for the
 # control-plane data-processing tier. The migration job must inherit that region.
+# The Job renders its whole nodeSelector through toYaml, which quotes nothing, so
+# both spellings of the same YAML string are accepted here.
 helm template synapse "$chart_dir" -f "$values" --kube-version 1.29.0 >"$out"
-grep -q 'topology.kubernetes.io/region: "us-east-1"' "$out"
+grep -qE 'topology\.kubernetes\.io/region: "?us-east-1"?' "$out"
 awk '
   /^---$/ { kind=""; migrate=0; region=0; next }
   /^kind: Job$/ { kind="Job" }
   /app\.kubernetes\.io\/component: migrate/ { migrate=1 }
-  /topology\.kubernetes\.io\/region: "us-east-1"/ { region=1 }
+  /topology\.kubernetes\.io\/region: "?us-east-1"?/ { region=1 }
   { if (kind == "Job" && migrate && region) ok=1 }
   END { exit ok ? 0 : 1 }
 ' "$out" || {

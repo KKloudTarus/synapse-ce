@@ -76,7 +76,12 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn fun
 		defer cancel()
 		_ = tx.Rollback(rbCtx)
 	}()
-	if _, err = tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID); err != nil {
+	capture := "on"
+	if pool.Config().ConnConfig.RuntimeParams["app.siem_capture_enabled"] == "off" {
+		capture = "off"
+	}
+	if _, err = tx.Exec(ctx, `SELECT set_config('app.current_tenant', $1, true),
+		set_config('app.siem_capture_enabled', $2, true)`, tenantID, capture); err != nil {
 		return fmt.Errorf("rls: set tenant: %w", err)
 	}
 	if err = fn(tx); err != nil {
@@ -195,7 +200,7 @@ func requireTenant(ctx context.Context, pool *pgxpool.Pool, tenantID shared.ID, 
 // sweep for the wrapped error. This is the same fan-out the job queue's Claim and the engagement
 // repository's reconciliation scan already use.
 func listTenantIDs(ctx context.Context, pool *pgxpool.Pool, label string) ([]shared.ID, error) {
-	rows, err := pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	rows, err := pool.Query(ctx, `SELECT id FROM tenants WHERE id <> '' ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list tenants for %s: %w", label, err)
 	}

@@ -20,6 +20,11 @@
 #   --set image.digest=sha256:<api digest> --set web.image.digest=sha256:<web digest>
 
 api:
+  # Development has no ReadWriteMany class, and a kind or minikube install is not keeping captured
+  # source anyway, so it says so rather than asking for storage it cannot get. The consequence is the
+  # documented one: the Code view serves an analysis only from the replica that ran it.
+  persistence:
+    acknowledgeEphemeral: true
   grantAuthority:
     # The machine-only grant-authority listener needs an AWS Load Balancer Controller and a
     # dedicated private NLB, so it stays off in development. values.schema.json still requires a

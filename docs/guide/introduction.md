@@ -75,10 +75,10 @@ because they are not the same capability:
 | Format | Ingest | Export |
 | --- | --- | --- |
 | CycloneDX | Yes, as a scan inventory | Yes |
-| SPDX |, | Yes |
+| SPDX | No, export only | Yes |
 | SARIF | Yes, third-party reports | Yes |
 | OpenVEX | Yes, in-repo `.synapse.vex.json` | Yes |
-| CSAF | Yes, advisory feeds | No |
+| CSAF | Yes, advisory feeds | Yes, CSAF 2.0 VEX |
 | OSV, GHSA, OVAL | Yes, advisory feeds | No |
 
 KEV and EPSS drive prioritization rather than exchange.

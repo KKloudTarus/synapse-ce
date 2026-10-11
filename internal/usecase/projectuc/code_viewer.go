@@ -2,6 +2,7 @@ package projectuc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -176,6 +177,12 @@ func (s *Service) ReadCodeFile(ctx context.Context, tenantID shared.ID, key, ana
 		data, source, err = s.sourceArtifacts.Load(ctx, tenantID, shared.ID(analysis.ProjectID), analysis.ID, canonical)
 	}
 	if err != nil {
+		// The analysis recorded these bytes as captured (file.SourceAvailable above), so an empty store
+		// is this server's storage, not a retention decision. Saying "not retained" here is what sent a
+		// multi-replica install looking for a retention setting that was never the cause.
+		if errors.Is(err, projectanalysis.ErrSourceNotRetained) {
+			return CodeFileView{}, analysis.Capabilities, projectanalysis.ErrSourceMissingFromStore
+		}
 		return CodeFileView{}, analysis.Capabilities, err
 	}
 	expectedSource, found := persistedSourceFileForRead(analysis, canonical, baseSide)

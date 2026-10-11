@@ -24,7 +24,7 @@ const findingCols = `id, engagement_id, title, description, severity, cvss_vecto
 	`reachability, impact, priority, kind, assignee, version, proposed_by, class_reachability, rule_key, ` +
 	`COALESCE(advisory_id, ''), COALESCE(occurrence_id, ''), COALESCE(component_fingerprint, ''), ` +
 	`COALESCE(fixed_version, ''), COALESCE(detection_state, ''), COALESCE(risk_assessment_id, ''), evaluated_at, data_flow, ` +
-	`COALESCE(direct_bumps, ''), COALESCE(public_exploit, false), COALESCE(epss_percentile, 0)`
+	`COALESCE(direct_bumps, ''), COALESCE(public_exploit, false), COALESCE(epss_percentile, 0), assignee_user_id`
 
 // FindingRepository persists findings to PostgreSQL, deduped per engagement.
 type FindingRepository struct{ pool *pgxpool.Pool }
@@ -441,13 +441,17 @@ func scanFinding(row rowScanner) (finding.Finding, error) {
 		advisoryID, occurrenceID, componentFingerprint, fixedVersion, detectionState, riskAssessmentID string
 		directBumps                                                                                    string
 		dataFlowJSON                                                                                   []byte
+		canonicalAssignee                                                                              *string
 	)
 	if err := row.Scan(&id, &eid, &f.Title, &f.Description, &sev, &f.CVSSVector, &f.CWE,
 		&status, &f.EvidenceScore, &dedup, &f.KEV, &f.RiskScore, &f.Audit.CreatedAt, &f.Audit.UpdatedAt,
 		&sources, &f.Confidence, &f.Class, &f.Scope, &f.Reachability, &f.Impact, &f.Priority, &kind,
 		&f.Assignee, &f.Version, &f.ProposedBy, &f.ClassReachability, &f.RuleKey,
-		&advisoryID, &occurrenceID, &componentFingerprint, &fixedVersion, &detectionState, &riskAssessmentID, &f.EvaluatedAt, &dataFlowJSON, &directBumps, &f.PublicExploit, &f.EPSSPercentile); err != nil {
+		&advisoryID, &occurrenceID, &componentFingerprint, &fixedVersion, &detectionState, &riskAssessmentID, &f.EvaluatedAt, &dataFlowJSON, &directBumps, &f.PublicExploit, &f.EPSSPercentile, &canonicalAssignee); err != nil {
 		return finding.Finding{}, err
+	}
+	if canonicalAssignee != nil {
+		f.AssigneeUserID = shared.ID(*canonicalAssignee)
 	}
 	f.DirectBumps = splitLines(directBumps)
 	f.ID = shared.ID(id)

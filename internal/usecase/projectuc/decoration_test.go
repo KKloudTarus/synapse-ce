@@ -106,6 +106,31 @@ func TestDecorateProjectAnalysisPublishesCompletePayloadWhenOptedIn(t *testing.T
 	}
 }
 
+func TestDecorationForgeHostComesFromTheProjectGitSource(t *testing.T) {
+	for _, tc := range []struct {
+		source project.SourceBinding
+		want   string
+	}{
+		{project.SourceBinding{Kind: project.SourceGit, Value: "https://GHE.corp.example/org/repo.git"}, "ghe.corp.example"},
+		{project.SourceBinding{Kind: project.SourceGit, Value: "https://gitlab.corp.example:8443/group/sub/repo.git"}, "gitlab.corp.example:8443"},
+		{project.SourceBinding{Kind: project.SourceGit, Value: "https://github.com/acme/widget.git"}, "github.com"},
+		{project.SourceBinding{Kind: project.SourceLocal, Value: "/repo"}, ""},
+		{project.SourceBinding{Kind: project.SourceArchive, Value: "/src.zip"}, ""},
+	} {
+		if got := forgeHost(tc.source); got != tc.want {
+			t.Errorf("forgeHost(%+v) = %q, want %q", tc.source, got, tc.want)
+		}
+	}
+}
+
+func TestDecorateProjectAnalysisSendsNoForgeHostForANonGitProject(t *testing.T) {
+	svc, fake := decorationService(t, true)
+	svc.decorateProjectAnalysis(context.Background(), prAnalysis())
+	if fake.calls != 1 || fake.got.ForgeHost != "" {
+		t.Fatalf("calls = %d forge host = %q, want the SaaS default for a local project", fake.calls, fake.got.ForgeHost)
+	}
+}
+
 func TestDecorateProjectAnalysisSkipsWhenProjectNotOptedIn(t *testing.T) {
 	svc, fake := decorationService(t, false)
 	svc.decorateProjectAnalysis(context.Background(), prAnalysis())

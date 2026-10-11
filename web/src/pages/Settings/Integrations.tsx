@@ -1,7 +1,10 @@
 import { Link01, Plus, RefreshCw01 } from '@untitledui/icons'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Pill, Select, Spinner, cn } from '../../components/ui'
 import { api } from '../../lib/api'
+import { useFetch } from '../../hooks'
+import { canManageIntegrations, isAdminRole } from '../../lib/roles'
 import type {
   Integration,
   IntegrationBinding,
@@ -35,6 +38,11 @@ export function Integrations() {
   const selectedIdRef = useRef(selectedId)
   const detailGeneration = useRef(0)
   selectedIdRef.current = selectedId
+  // Operating an integration needs manage_integrations; creating one, changing its endpoint and
+  // replacing its credential need administer (#1358). The server enforces both.
+  const { data: me } = useFetch(() => api.me(), { deps: [] })
+  const canAdmin = isAdminRole(me?.role)
+  const canManage = canManageIntegrations(me?.role)
 
   const selected = integrations.find((item) => item.id === selectedId) ?? null
   const provider = providers.find((item) => item.provider === selected?.provider) ?? null
@@ -198,10 +206,11 @@ export function Integrations() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
+          <Link to="/settings/integrations" className="text-sm font-semibold text-brand-secondary hover:underline">← All integrations</Link>
           <h2 className="text-lg font-semibold text-primary">CI/CD integrations</h2>
-          <p className="mt-1 text-sm text-tertiary">Connect read-only providers, discover pipelines, and link external runs to Project analyses.</p>
+          <p className="mt-1 text-sm text-tertiary">Receive repository webhooks or discover pipelines and link external runs to Project analyses.</p>
         </div>
-        <Button onClick={() => setCreating(true)}><Plus className="size-4" />Add integration</Button>
+        {canAdmin && <Button onClick={() => setCreating(true)}><Plus className="size-4" />Add integration</Button>}
       </div>
 
       {error && <ErrorState message={error} />}
@@ -217,7 +226,7 @@ export function Integrations() {
       )}
 
       {integrations.length === 0 && !creating ? (
-        <EmptyState icon={Link01} title="No integrations configured" hint="Add a provider connection to start discovering external pipelines." action={<Button onClick={() => setCreating(true)}>Add integration</Button>} />
+        <EmptyState icon={Link01} title="No integrations configured" hint={canAdmin ? 'Add a provider connection to receive webhooks or discover external pipelines.' : 'A tenant administrator can add a provider connection.'} action={canAdmin ? <Button onClick={() => setCreating(true)}>Add integration</Button> : undefined} />
       ) : integrations.length > 0 && (
         <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
           <Card title="Connections" bodyClass="p-2">
@@ -227,6 +236,7 @@ export function Integrations() {
                   key={item.id}
                   type="button"
                   onClick={() => setSelectedId(item.id)}
+                  aria-pressed={item.id === selectedId}
                   className={cn(
                     'w-full rounded-lg px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
                     item.id === selectedId ? 'bg-brand-primary text-brand-secondary' : 'hover:bg-secondary',
@@ -252,6 +262,8 @@ export function Integrations() {
                 busy={busy}
                 editing={editing}
                 credentialOpen={credentialOpen}
+                canAdmin={canAdmin}
+                canManage={canManage}
                 onEdit={() => setEditing(true)}
                 onCancelEdit={() => setEditing(false)}
                 onUpdate={saveUpdated}
@@ -263,9 +275,10 @@ export function Integrations() {
                 onToggle={toggleEnabled}
                 onArchive={archiveSelected}
               />
-              <BindingsCard integration={selected} projects={projects} operations={operations} bindings={bindings} busy={busy} operate={operate} onReload={() => loadDetail(selected.id, true)} />
+              <BindingsCard canManage={canManage} integration={selected} provider={provider} projects={projects} operations={operations} bindings={bindings} busy={busy} operate={operate} onReload={() => loadDetail(selected.id, true)} />
+              {selected.provider === 'bitbucket' && <BitbucketWebhookCard key={selected.id} canAdmin={canAdmin} integration={selected} bound={bindings.length === 1} />}
               <RunsCard runs={runs} />
-              <OperationsCard operations={operations} activeOperation={activeOperation} busy={busy} operate={operate} />
+              <OperationsCard canManage={canManage} operations={operations} activeOperation={activeOperation} busy={busy} operate={operate} />
             </div>
           )}
         </div>
@@ -274,7 +287,7 @@ export function Integrations() {
   )
 }
 
-function IntegrationOverview({ integration, provider, operations, activeOperation, busy, editing, credentialOpen, onEdit, onCancelEdit, onUpdate, onCredentialOpen, onCredentialClose, onCredentialSave, onCredentialDelete, onOperation, onToggle, onArchive }: {
+function IntegrationOverview({ integration, provider, operations, activeOperation, busy, editing, credentialOpen, canAdmin, canManage, onEdit, onCancelEdit, onUpdate, onCredentialOpen, onCredentialClose, onCredentialSave, onCredentialDelete, onOperation, onToggle, onArchive }: {
   integration: Integration
   provider: IntegrationProviderDescriptor
   operations: IntegrationOperation[]
@@ -282,6 +295,8 @@ function IntegrationOverview({ integration, provider, operations, activeOperatio
   busy: string
   editing: boolean
   credentialOpen: boolean
+  canAdmin: boolean
+  canManage: boolean
   onEdit: () => void
   onCancelEdit: () => void
   onUpdate: (input: IntegrationInput) => Promise<void>
@@ -294,10 +309,15 @@ function IntegrationOverview({ integration, provider, operations, activeOperatio
   onArchive: () => Promise<void>
 }) {
   const latest = operations[0]
+  const supportsTest = provider.capabilities.includes('test_connection')
+  const supportsDiscover = provider.capabilities.includes('discover_pipelines')
+  const supportsPoll = provider.capabilities.includes('read_runs')
+  const requiresCredential = provider.secretFields.length > 0
   const successfulTest = operations.find((operation) => operation.type === 'test' && operation.state === 'succeeded')
   const successfulPoll = operations.find((operation) => operation.type === 'poll' && operation.state === 'succeeded')
   const staleAfter = Math.max(integration.pollIntervalSeconds * 2, 600) * 1000
-  const stale = integration.enabled && (!successfulPoll || Date.now() - Date.parse(successfulPoll.finishedAt ?? successfulPoll.updatedAt) > staleAfter)
+  const stale = supportsPoll && integration.enabled && (!successfulPoll || Date.now() - Date.parse(successfulPoll.finishedAt ?? successfulPoll.updatedAt) > staleAfter)
+  const enableReady = (!requiresCredential || integration.credentialConfigured) && (!supportsTest || !!successfulTest)
   const health = activeOperation ? activeOperation.state : latest?.state === 'failed' ? 'error' : stale ? 'stale' : integration.enabled ? 'healthy' : 'disabled'
 
   return (
@@ -311,20 +331,22 @@ function IntegrationOverview({ integration, provider, operations, activeOperatio
         <div className="space-y-5">
           <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Endpoint" value={integration.endpoint} />
-            <Stat label="Credentials" value={integration.credentialConfigured ? 'Configured' : 'Missing'} />
-            <Stat label="Last successful test" value={formatDate(successfulTest?.finishedAt)} />
-            <Stat label="Last successful poll" value={formatDate(successfulPoll?.finishedAt)} />
+            <Stat label="Credentials" value={requiresCredential ? (integration.credentialConfigured ? 'Configured' : 'Missing') : 'Not required'} />
+            <Stat label="Last successful test" value={supportsTest ? formatDate(successfulTest?.finishedAt) : 'Not applicable'} />
+            <Stat label="Last successful poll" value={supportsPoll ? formatDate(successfulPoll?.finishedAt) : 'Not applicable'} />
           </dl>
           {latest?.errors[0] && <ErrorState message={latest.errors[0]} />}
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={onEdit}>Edit configuration</Button>
-            <Button variant="secondary" onClick={onCredentialOpen}>{integration.credentialConfigured ? 'Replace credentials' : 'Add credentials'}</Button>
-            {integration.credentialConfigured && <Button variant="ghost" loading={busy === 'delete-credential'} onClick={onCredentialDelete}>Delete credentials</Button>}
-            <Button variant="secondary" disabled={!!activeOperation || !integration.credentialConfigured} loading={busy === 'operation:test'} onClick={() => onOperation('test')}>Test connection</Button>
-            <Button variant="secondary" disabled={!!activeOperation || !integration.credentialConfigured} loading={busy === 'operation:discover'} onClick={() => onOperation('discover')}>Discover</Button>
-            <Button variant="secondary" disabled={!!activeOperation || !integration.enabled} loading={busy === 'operation:poll'} onClick={() => onOperation('poll')}>Poll now</Button>
-            <Button disabled={!!activeOperation || (!integration.enabled && !successfulTest)} loading={busy === 'toggle'} onClick={onToggle}>{integration.enabled ? 'Disable' : 'Enable'}</Button>
+            {canAdmin && <Button variant="secondary" onClick={onEdit}>Edit configuration</Button>}
+            {canAdmin && requiresCredential && <Button variant="secondary" onClick={onCredentialOpen}>{integration.credentialConfigured ? 'Replace credentials' : 'Add credentials'}</Button>}
+            {canAdmin && requiresCredential && integration.credentialConfigured && <Button variant="ghost" loading={busy === 'delete-credential'} onClick={onCredentialDelete}>Delete credentials</Button>}
+            {canManage && <>
+            {supportsTest && <Button variant="secondary" disabled={!!activeOperation || (requiresCredential && !integration.credentialConfigured)} loading={busy === 'operation:test'} onClick={() => onOperation('test')}>Test connection</Button>}
+            {supportsDiscover && <Button variant="secondary" disabled={!!activeOperation || (requiresCredential && !integration.credentialConfigured)} loading={busy === 'operation:discover'} onClick={() => onOperation('discover')}>Discover</Button>}
+            {supportsPoll && <Button variant="secondary" disabled={!!activeOperation || !integration.enabled} loading={busy === 'operation:poll'} onClick={() => onOperation('poll')}>Poll now</Button>}
+            <Button disabled={!!activeOperation || (!integration.enabled && !enableReady)} loading={busy === 'toggle'} onClick={onToggle}>{integration.enabled ? 'Disable' : 'Enable'}</Button>
             <Button variant="ghost" loading={busy === 'archive'} onClick={onArchive}>Archive</Button>
+            </>}
           </div>
         </div>
       )}
@@ -346,6 +368,8 @@ function IntegrationForm({ providers, integration, loading, onCancel, onSubmit }
 }) {
   const [providerSlug, setProviderSlug] = useState(integration?.provider ?? providers[0]?.provider ?? '')
   const descriptor = providers.find((item) => item.provider === providerSlug) ?? providers[0]
+  const supportsPoll = descriptor?.capabilities.includes('read_runs') ?? false
+  const inboundOnly = descriptor?.capabilities.length === 0
   const [name, setName] = useState(integration?.name ?? '')
   const [endpoint, setEndpoint] = useState(integration?.endpoint ?? '')
   const [pollInterval, setPollInterval] = useState(String(integration?.pollIntervalSeconds ?? 300))
@@ -365,8 +389,8 @@ function IntegrationForm({ providers, integration, loading, onCancel, onSubmit }
     event.preventDefault()
     setFormError('')
     if (!descriptor || !name.trim() || !endpoint.trim()) return setFormError('Provider, name, and HTTPS endpoint are required.')
-    const seconds = Number(pollInterval)
-    if (!Number.isInteger(seconds) || seconds < 30 || seconds > 86400) return setFormError('Poll interval must be between 30 and 86400 seconds.')
+    const seconds = supportsPoll ? Number(pollInterval) : (integration?.pollIntervalSeconds ?? 300)
+    if (supportsPoll && (!Number.isInteger(seconds) || seconds < 30 || seconds > 86400)) return setFormError('Poll interval must be between 30 and 86400 seconds.')
     const missingSecret = !integration && descriptor.secretFields.some((field) => field.required && !secrets[field.name]?.trim())
     if (missingSecret) return setFormError('Complete all required credential fields.')
     await onSubmit({ provider: descriptor.provider, name: name.trim(), endpoint: endpoint.trim(), config, allowPrivateNetwork: allowPrivate, pollIntervalSeconds: seconds }, secrets)
@@ -382,14 +406,14 @@ function IntegrationForm({ providers, integration, loading, onCancel, onSubmit }
             <Select id="integration-provider" value={descriptor?.provider ?? ''} disabled={!!integration} onValueChange={setProviderSlug} options={providers.map((item) => ({ value: item.provider, label: item.name }))} />
           </Field>
           <Field label="Display name" htmlFor="integration-name"><Input id="integration-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></Field>
-          <Field label="HTTPS endpoint" hint="Example: https://jenkins.example.com" htmlFor="integration-endpoint"><Input id="integration-endpoint" type="url" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://jenkins.example.com" required /></Field>
-          <Field label="Poll interval (seconds)" htmlFor="integration-poll"><Input id="integration-poll" type="number" min={30} max={86400} value={pollInterval} onChange={(event) => setPollInterval(event.target.value)} required /></Field>
+          <Field label="HTTPS endpoint" hint={descriptor?.provider === 'bitbucket' ? 'Bitbucket Cloud origin: https://bitbucket.org' : 'Example: https://jenkins.example.com'} htmlFor="integration-endpoint"><Input id="integration-endpoint" type="url" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder={descriptor?.provider === 'bitbucket' ? 'https://bitbucket.org' : 'https://jenkins.example.com'} required /></Field>
+          {supportsPoll && <Field label="Poll interval (seconds)" htmlFor="integration-poll"><Input id="integration-poll" type="number" min={30} max={86400} value={pollInterval} onChange={(event) => setPollInterval(event.target.value)} required /></Field>}
           {descriptor?.configFields.map((field) => <DynamicField key={field.name} field={field} value={config[field.name]} onChange={(value) => setConfig((current) => ({ ...current, [field.name]: value }))} />)}
         </div>
-        <label className="flex items-start gap-3 rounded-lg border border-secondary p-3 text-sm text-secondary">
+        {!inboundOnly && <label className="flex items-start gap-3 rounded-lg border border-secondary p-3 text-sm text-secondary">
           <input type="checkbox" className="mt-0.5 size-4 accent-brand" checked={allowPrivate} onChange={(event) => setAllowPrivate(event.target.checked)} />
-          <span><strong className="block text-primary">Allow private network</strong>Only enable for explicitly approved internal Jenkins endpoints; public-network protections remain enforced per request.</span>
-        </label>
+          <span><strong className="block text-primary">Allow private network</strong>Only enable for explicitly approved self-hosted endpoints; public-network protections remain enforced per request.</span>
+        </label>}
         {!integration && descriptor?.secretFields.length > 0 && (
           <div className="grid gap-4 border-t border-secondary pt-4 md:grid-cols-2">
             {descriptor.secretFields.map((field) => <DynamicField key={field.name} field={field} value={secrets[field.name]} onChange={(value) => setSecrets((current) => ({ ...current, [field.name]: String(value) }))} />)}
@@ -427,40 +451,62 @@ function DynamicField({ field, value, onChange }: { field: IntegrationFieldDescr
   return <Field label={field.label} hint={field.description} htmlFor={`integration-field-${field.name}`}><Input id={`integration-field-${field.name}`} type={field.kind === 'password' ? 'password' : 'text'} autoComplete={field.kind === 'password' ? 'new-password' : 'off'} value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value)} required={field.required} /></Field>
 }
 
-function BindingsCard({ integration, projects, operations, bindings, busy, operate, onReload }: { integration: Integration; projects: Project[]; operations: IntegrationOperation[]; bindings: IntegrationBinding[]; busy: string; operate: (key: string, action: () => Promise<void>, success: string) => Promise<void>; onReload: () => Promise<void> }) {
+function BindingsCard({ canManage, integration, provider, projects, operations, bindings, busy, operate, onReload }: { canManage: boolean; integration: Integration; provider: IntegrationProviderDescriptor; projects: Project[]; operations: IntegrationOperation[]; bindings: IntegrationBinding[]; busy: string; operate: (key: string, action: () => Promise<void>, success: string) => Promise<void>; onReload: () => Promise<void> }) {
+  const supportsDiscover = provider.capabilities.includes('discover_pipelines')
+  const bindableProjects = !supportsDiscover ? projects.filter((item) => item.sourceBinding.kind === 'git') : projects
   const pipelines = useMemo(() => operations.find((operation) => operation.type === 'discover' && operation.pipelines.length > 0)?.pipelines ?? [], [operations])
   const available = pipelines.filter((pipeline) => !bindings.some((binding) => binding.externalKey === pipeline.externalKey))
   const [pipelineKey, setPipelineKey] = useState('')
   const [projectId, setProjectId] = useState('')
   const projectNames = new Map(projects.map((project) => [project.id, project.name]))
   const selectedPipeline = available.find((pipeline) => pipeline.externalKey === pipelineKey)
+  const selectedProject = bindableProjects.find((project) => project.id === projectId)
 
   async function bind() {
-    if (!selectedPipeline || !projectId) return
+    if (!projectId) return
+    if (supportsDiscover) {
+      if (!selectedPipeline) return
+      await operate('bind', async () => {
+        await api.createIntegrationBinding(integration.id, projectId, selectedPipeline.externalKey, selectedPipeline.fullName || selectedPipeline.name)
+        setPipelineKey('')
+        setProjectId('')
+        await onReload()
+      }, 'Pipeline bound to Project.')
+      return
+    }
+    if (!selectedProject || bindings.length > 0) return
     await operate('bind', async () => {
-      await api.createIntegrationBinding(integration.id, projectId, selectedPipeline.externalKey, selectedPipeline.fullName || selectedPipeline.name)
-      setPipelineKey('')
+      await api.createIntegrationBinding(integration.id, projectId, `/inbound/${projectId}`, selectedProject.name)
       setProjectId('')
       await onReload()
-    }, 'Pipeline bound to Project.')
+    }, 'Inbound integration bound to Project.')
   }
 
   return (
     <Card title="Project bindings" actions={<Pill>{bindings.length}</Pill>}>
       <div className="space-y-4">
-        {pipelines.length === 0 ? <p className="text-sm text-tertiary">Run discovery to select a pipeline.</p> : (
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <Select value={pipelineKey} onValueChange={setPipelineKey} ariaLabel="Discovered pipeline" placeholder="Select pipeline" options={available.map((pipeline) => ({ value: pipeline.externalKey, label: `${pipeline.fullName || pipeline.name} (${pipeline.kind})` }))} />
-            <Select value={projectId} onValueChange={setProjectId} ariaLabel="Synapse Project" placeholder="Select Project" options={projects.map((project) => ({ value: project.id, label: project.name }))} />
-            <Button disabled={!selectedPipeline || !projectId} loading={busy === 'bind'} onClick={bind}>Bind</Button>
+        {!canManage ? null : supportsDiscover ? (
+          pipelines.length === 0 ? <p className="text-sm text-tertiary">Run discovery to select a pipeline.</p> : (
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+              <Select value={pipelineKey} onValueChange={setPipelineKey} ariaLabel="Discovered pipeline" placeholder="Select pipeline" options={available.map((pipeline) => ({ value: pipeline.externalKey, label: `${pipeline.fullName || pipeline.name} (${pipeline.kind})` }))} />
+              <Select value={projectId} onValueChange={setProjectId} ariaLabel="Synapse Project" placeholder="Select Project" options={projects.map((project) => ({ value: project.id, label: project.name }))} />
+              <Button disabled={!selectedPipeline || !projectId} loading={busy === 'bind'} onClick={bind}>Bind</Button>
+            </div>
+          )
+        ) : bindings.length > 0 ? (
+          <p className="text-sm text-tertiary">This inbound integration is already bound to a Project. Remove the binding before choosing another Project.</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+            <Select value={projectId} onValueChange={setProjectId} ariaLabel="Synapse Project" placeholder="Select Project" options={bindableProjects.map((project) => ({ value: project.id, label: project.name }))} />
+            <Button disabled={!selectedProject} loading={busy === 'bind'} onClick={bind}>Bind Project</Button>
           </div>
         )}
-        {bindings.length === 0 ? <p className="text-sm text-tertiary">No pipelines are bound yet.</p> : (
+        {bindings.length === 0 ? <p className="text-sm text-tertiary">{supportsDiscover ? 'No pipelines are bound yet.' : 'No Projects are bound yet.'}</p> : (
           <div className="divide-y divide-secondary rounded-lg border border-secondary">
             {bindings.map((binding) => (
               <div key={binding.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
                 <div className="min-w-0"><p className="truncate font-medium text-primary">{binding.externalName}</p><p className="truncate text-xs text-tertiary">{projectNames.get(binding.projectId) ?? binding.projectId} · {binding.externalKey}</p></div>
-                <Button variant="ghost" loading={busy === `unbind:${binding.id}`} onClick={() => operate(`unbind:${binding.id}`, async () => { await api.deleteIntegrationBinding(integration.id, binding.id); await onReload() }, 'Binding removed.')}>Remove</Button>
+                {canManage && <Button variant="ghost" loading={busy === `unbind:${binding.id}`} onClick={() => operate(`unbind:${binding.id}`, async () => { await api.deleteIntegrationBinding(integration.id, binding.id); await onReload() }, 'Binding removed.')}>Remove</Button>}
               </div>
             ))}
           </div>
@@ -474,15 +520,15 @@ function RunsCard({ runs }: { runs: IntegrationExternalRun[] }) {
   return (
     <Card title="Recent external runs" actions={<Pill>{runs.length}</Pill>} bodyClass="p-0">
       {runs.length === 0 ? <p className="p-6 text-sm text-tertiary">No external runs materialized yet.</p> : (
-        <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="border-b border-secondary bg-secondary/40 text-xs uppercase tracking-wide text-tertiary"><tr><th className="px-5 py-3">Run</th><th className="px-5 py-3">Pipeline</th><th className="px-5 py-3">Result</th><th className="px-5 py-3">Revision</th><th className="px-5 py-3">Correlation</th><th className="px-5 py-3">Updated</th></tr></thead><tbody className="divide-y divide-secondary">{runs.map((run) => <tr key={run.id}><td className="px-5 py-3 font-medium text-primary">{run.url ? <a className="text-brand-secondary hover:underline" href={run.url} target="_blank" rel="noreferrer">#{run.number || run.providerKey}</a> : `#${run.number || run.providerKey}`}</td><td className="max-w-64 truncate px-5 py-3 text-secondary">{run.pipelineKey}</td><td className="px-5 py-3"><StatusPill value={run.lifecycle === 'completed' ? run.result : run.lifecycle} /></td><td className="px-5 py-3 font-mono text-xs text-tertiary">{run.revision ? run.revision.slice(0, 12) : '—'}</td><td className="px-5 py-3"><StatusPill value={run.correlation} /></td><td className="px-5 py-3 text-tertiary">{formatDate(run.providerUpdatedAt)}</td></tr>)}</tbody></table></div>
+        <div data-integration-runs className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="border-b border-secondary bg-secondary/40 text-xs uppercase tracking-wide text-tertiary"><tr><th className="px-5 py-3">Run</th><th className="px-5 py-3">Pipeline</th><th className="px-5 py-3">Result</th><th className="px-5 py-3">Revision</th><th className="px-5 py-3">Correlation</th><th className="px-5 py-3">Updated</th></tr></thead><tbody className="divide-y divide-secondary">{runs.map((run) => <tr key={run.id}><td className="px-5 py-3 font-medium text-primary">{run.url ? <a className="text-brand-secondary hover:underline" href={run.url} target="_blank" rel="noreferrer">#{run.number || run.providerKey}</a> : `#${run.number || run.providerKey}`}</td><td className="max-w-64 truncate px-5 py-3 text-secondary">{run.pipelineKey}</td><td className="px-5 py-3"><StatusPill value={run.lifecycle === 'completed' ? run.result : run.lifecycle} /></td><td className="px-5 py-3 font-mono text-xs text-tertiary">{run.revision ? run.revision.slice(0, 12) : '—'}</td><td className="px-5 py-3"><StatusPill value={run.correlation} /></td><td className="px-5 py-3 text-tertiary">{formatDate(run.providerUpdatedAt)}</td></tr>)}</tbody></table></div>
       )}
     </Card>
   )
 }
 
-function OperationsCard({ operations, activeOperation, busy, operate }: { operations: IntegrationOperation[]; activeOperation?: IntegrationOperation; busy: string; operate: (key: string, action: () => Promise<void>, success: string) => Promise<void> }) {
+function OperationsCard({ canManage, operations, activeOperation, busy, operate }: { canManage: boolean; operations: IntegrationOperation[]; activeOperation?: IntegrationOperation; busy: string; operate: (key: string, action: () => Promise<void>, success: string) => Promise<void> }) {
   return (
-    <Card title="Operation history" actions={activeOperation ? <Button variant="ghost" loading={busy === 'cancel'} onClick={() => operate('cancel', async () => { await api.cancelIntegrationOperation(activeOperation.id) }, 'Operation cancelled.')}>Cancel active</Button> : <RefreshCw01 className="size-4 text-tertiary" />} bodyClass="p-0">
+    <Card title="Operation history" actions={activeOperation && canManage ? <Button variant="ghost" loading={busy === 'cancel'} onClick={() => operate('cancel', async () => { await api.cancelIntegrationOperation(activeOperation.id) }, 'Operation cancelled.')}>Cancel active</Button> : <RefreshCw01 className="size-4 text-tertiary" />} bodyClass="p-0">
       {operations.length === 0 ? <p className="p-6 text-sm text-tertiary">No operations have run yet.</p> : <div className="divide-y divide-secondary">{operations.map((operation) => <div key={operation.id} className="grid gap-2 px-5 py-4 text-sm sm:grid-cols-[120px_110px_minmax(0,1fr)_auto]"><span className="font-medium capitalize text-primary">{operationLabel(operation.type)}</span><StatusPill value={operation.state} /><span className="text-tertiary">{operation.type === 'discover' ? `${operation.counts.pipelines} pipelines` : operation.type === 'poll' ? `${operation.counts.runs} runs · ${operation.counts.linked} linked` : operation.errors[0] ?? 'Connection check'}</span><span className="text-xs text-tertiary">{formatDate(operation.finishedAt ?? operation.createdAt)}</span></div>)}</div>}
     </Card>
   )
@@ -502,3 +548,47 @@ function formatDate(value?: string | null) { return value ? new Intl.DateTimeFor
 function message(error: unknown) { return error instanceof Error ? error.message : 'An unexpected error occurred.' }
 
 export default Integrations
+
+function BitbucketWebhookCard({ canAdmin, integration, bound }: { canAdmin: boolean; integration: Integration; bound: boolean }) {
+  const [secret, setSecret] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [path, setPath] = useState('')
+  const [error, setError] = useState('')
+  const secretBytes = new Blob([secret]).size
+  const validSecret = secretBytes >= 32 && secretBytes <= 128 && secret.trim() === secret
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    const submitted = secret
+    setSecret('')
+    try {
+      const result = await api.configureInboundWebhook(integration.id, submitted)
+      setPath(result.path)
+    } catch (err) {
+      setError(message(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <Card title="Bitbucket webhook">
+    <div className="space-y-4">
+      <p className="text-sm text-secondary">In Bitbucket Cloud, configure this webhook for repository pushes and pull request creation or updates. Use the same secret here and in Bitbucket.</p>
+      {!bound && <p className="text-sm text-tertiary">Bind one Git Project before configuring the webhook.</p>}
+      {!canAdmin ? <p className="text-sm text-tertiary">An administrator must configure or rotate the webhook secret.</p> : <form onSubmit={save} className="space-y-3">
+        <Field label="Webhook secret" htmlFor="bitbucket-webhook-secret" hint="Use a random secret of 32–128 bytes. Saving again rotates the secret; the previous secret remains valid for less than 24 hours.">
+          <Input id="bitbucket-webhook-secret" type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} disabled={!bound || saving} required maxLength={128} />
+        </Field>
+        <Button type="submit" disabled={!bound || !validSecret} loading={saving}>Save webhook secret</Button>
+      </form>}
+      {error && <ErrorState message={error} />}
+      {path && <div className="space-y-2">
+        <p className="text-sm text-secondary">Add this path to the public URL of your Synapse instance and copy it into Bitbucket's webhook URL.</p>
+        <code className="block break-all text-sm text-primary">{path}</code>
+        <p className="text-sm text-tertiary">The secret is never returned. Copy the path before leaving this page.</p>
+      </div>}
+    </div>
+  </Card>
+}

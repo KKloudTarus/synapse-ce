@@ -1,0 +1,15 @@
+{
+  "id": "event-scan-completed",
+  "type": "scan.completed",
+  "source_kind": "scan_job",
+  "source_id": "source-42",
+  "schema_version": 1,
+  "occurred_at": "2026-09-27T08:00:00Z",
+  "data": {
+    "title": "Scan completed",
+    "summary": "A scan completed successfully.",
+    "scan_id": "scan-42",
+    "scan_kind": "sast"
+  },
+  "engagement_id": "eng-42"
+}

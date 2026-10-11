@@ -22,10 +22,49 @@ type phpLexState struct {
 	heredoc             string
 	sawOpenTag          bool
 	sawMalformedOpenTag bool
+	// blade marks a Laravel Blade template, where PHP is opened by @php, {{ }} and {!! !!} rather than
+	// only by <?php. bladeClose is the token that closes the region currently open, and bladeComment is
+	// set inside a {{-- --}} comment.
+	blade        bool
+	bladeClose   string
+	bladeComment bool
 }
 
 func newPHPLexState(template, inPHP bool) phpLexState {
 	return phpLexState{initialized: true, template: template, inPHP: inPHP}
+}
+
+func newBladeLexState() phpLexState {
+	return phpLexState{initialized: true, template: true, blade: true}
+}
+
+// bladeOpeners are the Blade constructs that open PHP, longest prefix first so {{-- is not read as {{
+// and {!! is not read as {{. Each maps to the token that closes it.
+var bladeOpeners = []struct{ open, close string }{
+	{"{{--", "--}}"},
+	{"{!!", "!!}"},
+	{"{{", "}}"},
+	{"@php", "@endphp"},
+}
+
+// bladeOpenAt reports the Blade construct starting at line[i], if any.
+func bladeOpenAt(line string, i int) (open, close string, ok bool) {
+	for _, o := range bladeOpeners {
+		if strings.HasPrefix(line[i:], o.open) {
+			return o.open, o.close, true
+		}
+	}
+	return "", "", false
+}
+
+// bladeOpen finds the first Blade construct at or after start.
+func bladeOpen(line string, start int) (pos int, open, close string) {
+	for i := start; i < len(line); i++ {
+		if o, c, ok := bladeOpenAt(line, i); ok {
+			return i, o, c
+		}
+	}
+	return -1, "", ""
 }
 
 func (s *phpLexState) codeOnly(line string) string { return s.views(line).code }
@@ -60,10 +99,37 @@ func (s *phpLexState) views(line string) phpLineView {
 	}
 
 	for i := start; i < len(line); {
+		// A Blade comment spans lines and is never code, so it is consumed before anything else.
+		if s.bladeComment {
+			if close := strings.Index(line[i:], "--}}"); close >= 0 {
+				maskBoth(i, i+close+4)
+				s.bladeComment = false
+				i += close + 4
+				continue
+			}
+			maskBoth(i, len(line))
+			break
+		}
 		if s.template && !s.inPHP {
 			open, size := phpOpenTag(line, i)
 			if malformed := phpMalformedOpenTag(line, i); malformed >= 0 && (open < 0 || malformed < open) {
 				s.sawMalformedOpenTag = true
+			}
+			// In a Blade template the earliest of a <?php tag and a Blade construct wins, so the HTML and
+			// the JavaScript between them stay masked: a backtick in a <script> block is a JavaScript
+			// template literal, never PHP shell execution.
+			if s.blade {
+				if bpos, bopen, bclose := bladeOpen(line, i); bpos >= 0 && (open < 0 || bpos < open) {
+					maskBoth(i, bpos+len(bopen))
+					if bopen == "{{--" {
+						s.bladeComment = true
+						i = bpos + len(bopen)
+						continue
+					}
+					s.inPHP, s.bladeClose = true, bclose
+					i = bpos + len(bopen)
+					continue
+				}
 			}
 			if open < 0 {
 				maskBoth(i, len(line))
@@ -110,6 +176,14 @@ func (s *phpLexState) views(line string) phpLineView {
 			continue
 		}
 
+		// A Blade region closes on its own token rather than on ?>.
+		if s.bladeClose != "" && strings.HasPrefix(line[i:], s.bladeClose) {
+			size := len(s.bladeClose)
+			maskBoth(i, i+size)
+			s.inPHP, s.bladeClose = false, ""
+			i += size
+			continue
+		}
 		switch {
 		case phpMalformedOpenTagAt(line, i):
 			s.sawMalformedOpenTag = true
@@ -194,8 +268,21 @@ func phpMalformedOpenTagAt(line string, start int) bool {
 }
 
 // phpLineViews masks PHP comments, literals, and template text while preserving offsets.
-// PHTML is always a template; other PHP extensions use tagless mode unless a real opening tag appears.
-func phpLineViews(ext string, lines []string) []phpLineView {
+// PHTML and Blade are always templates; other PHP extensions use tagless mode unless a real opening tag
+// appears.
+//
+// Blade had to be named explicitly because its extension IS .php and it carries no <?php tag, so tagless
+// mode read the whole file as executable PHP. On one real repository that reported 18 CRITICAL backtick
+// shell executions, every one a JavaScript template literal inside a <script> block.
+func phpLineViews(ext, rel string, lines []string) []phpLineView {
+	if isBladeTemplate(rel) {
+		lex := newBladeLexState()
+		views := make([]phpLineView, len(lines))
+		for i, line := range lines {
+			views[i] = lex.views(line)
+		}
+		return views
+	}
 	template := ext == ".phtml"
 	lex := newPHPLexState(template, !template)
 	views := make([]phpLineView, len(lines))
@@ -209,6 +296,11 @@ func phpLineViews(ext string, lines []string) []phpLineView {
 		}
 	}
 	return views
+}
+
+// isBladeTemplate reports whether rel names a Laravel Blade template.
+func isBladeTemplate(rel string) bool {
+	return strings.HasSuffix(strings.ToLower(rel), ".blade.php")
 }
 
 func phpContextLines(ext string, lines []string, views []phpLineView) (text, code []string) {

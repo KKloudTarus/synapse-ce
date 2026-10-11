@@ -1,0 +1,100 @@
+package notification
+
+// This file defines the shape of an event declaration. The declarations themselves live in
+// catalog.go.
+
+// Filter names a rule filter. An event type accepts only the filters its EventSpec lists.
+type Filter string
+
+const (
+	FilterMinSeverity Filter = "min_severity"
+	FilterActionTypes Filter = "action_types"
+	FilterEngagements Filter = "engagement_ids"
+	FilterTeams       Filter = "team_ids"
+	FilterLeadTime    Filter = "lead_time_seconds"
+)
+
+// DataClass is the most sensitive content a payload may carry (EPIC #1327 D7). signal is the event
+// type, severity, counts and a deep link; summary adds titles, engagement or project names and
+// target hosts; detail adds advisory IDs, assets, file paths and affected-item lists.
+type DataClass string
+
+const (
+	DataClassSignal  DataClass = "signal"
+	DataClassSummary DataClass = "summary"
+	DataClassDetail  DataClass = "detail"
+)
+
+// Rank orders data classes; an unknown class ranks zero.
+func (c DataClass) Rank() int {
+	switch c {
+	case DataClassSignal:
+		return 1
+	case DataClassSummary:
+		return 2
+	case DataClassDetail:
+		return 3
+	}
+	return 0
+}
+
+// Variable is one template variable an event exposes. The per-type payload builders declare them.
+type Variable struct {
+	Name        string    `json:"name"`
+	Class       DataClass `json:"class"`
+	Description string    `json:"description"`
+	// ListCap bounds the items of a list variable; zero marks a scalar.
+	ListCap int `json:"list_cap"`
+	// ItemFields declares the only fields each list item may expose to a
+	// template. It is empty for scalar variables.
+	ItemFields []string `json:"item_fields,omitempty"`
+	// Format is "time" for a variable that holds an RFC 3339 instant: the send-time render shows it
+	// in the tenant's time zone (#1365). Empty for plain text.
+	Format string `json:"format,omitempty"`
+}
+
+// VariableFormatTime marks a variable whose value is an RFC 3339 instant.
+const VariableFormatTime = "time"
+
+// EventSpec is the single declaration of an event type. Rule validation and matching read it,
+// and the event-type API, the rule form and the docs derive from it.
+type EventSpec struct {
+	Type          EventType `json:"type"`
+	Label         string    `json:"label"`
+	SchemaVersion int       `json:"schema_version"`
+	// SubjectKind is the entity the event is about, distinct from its idempotency source.
+	SubjectKind   string    `json:"subject_kind"`
+	HasEngagement bool      `json:"has_engagement"`
+	HasSeverity   bool      `json:"has_severity"`
+	HasTeam       bool      `json:"has_team"`
+	HasLeadTime   bool      `json:"has_lead_time"`
+	Filters       []Filter  `json:"filters"`
+	MaxDataClass  DataClass `json:"max_data_class"`
+	// Mandatory events cannot be muted by a rule or a user preference.
+	Mandatory bool `json:"mandatory"`
+	// OperatorOnly events are sent on demand to one channel and never matched by rules.
+	OperatorOnly bool       `json:"operator_only"`
+	Variables    []Variable `json:"variables"`
+}
+
+// Allows reports whether rules for this event type may use filter f.
+func (s EventSpec) Allows(f Filter) bool {
+	for _, allowed := range s.Filters {
+		if allowed == f {
+			return true
+		}
+	}
+	return false
+}
+
+// clone keeps callers from mutating the shared catalog through its slices. The copies are never
+// nil, so a spec without filters or variables marshals as [] rather than null, which is what the
+// event-type API schema declares.
+func (s EventSpec) clone() EventSpec {
+	s.Filters = append(make([]Filter, 0, len(s.Filters)), s.Filters...)
+	s.Variables = append(make([]Variable, 0, len(s.Variables)), s.Variables...)
+	for i := range s.Variables {
+		s.Variables[i].ItemFields = append(make([]string, 0, len(s.Variables[i].ItemFields)), s.Variables[i].ItemFields...)
+	}
+	return s
+}

@@ -30,7 +30,10 @@ lives in `internal/composition/*`, above the platform and infrastructure package
 PR/MR decoration follows the same boundary. `ports.PRDecorator` carries only a normalized forge
 target plus the quality-gate result, deterministic Markdown summary, and stored line annotations;
 credentials stay outside the render payload. Project-analysis completion and the CLI gate finalize
-path call the port fail-soft, and incomplete PR identity is skipped rather than guessed.
+path call the port fail-soft, and incomplete PR identity is skipped rather than guessed. The
+server also passes the forge host from the project's git source (never from the CI payload); the
+adapters resolve the credential for that host and, for GitHub Enterprise Server and self-managed
+GitLab, send it only to the connector's operator-allowlisted API base on the same host.
 Provider-specific network adapters and opt-in wiring are separate follow-up work, so this foundation
 does not contact a forge by itself.
 
@@ -69,6 +72,7 @@ An **Assessment Cycle** owns rooted Assessment/Re-test ancestry and a frozen Ass
 | `synapse-assessment-backfill` | Resumable tenant-scoped historical singleton-Cycle backfill. |
 | `synapse-assessment-snapshot-backfill` | Append-only projection of historical scan evidence into legacy Snapshots with explicit unknown coverage. |
 | `synapse-finding-lineage-backfill` | Resumable conversion of legacy Findings into versioned Identities, immutable Observations, review Candidates, or explicit redacted Skip records. |
+| `synapse-identity-backfill` | Fenced, resumable projection of legacy users into the identity model, plus shadow parity, rollback drill and person-audit delivery. `users` stays the writer of record. |
 | `synapse-assessment-comparison-backfill` | Tenant-scoped shadow Comparison generation and deterministic failed-item repair. |
 | `synapse-assessment-integrity` | Read-only Cycle integrity verification and deterministic repair-plan output. |
 | `synapse-assessment-rollout-gate` | Offline fail-closed evaluator for canary, read-cutover, UI-default, and rollback evidence. |

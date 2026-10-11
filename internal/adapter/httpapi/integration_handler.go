@@ -278,6 +278,27 @@ func (rt *Router) deleteIntegrationBinding(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (rt *Router) configureIntegrationInboundWebhook(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Secret string `json:"secret"`
+	}
+	if !decodeIntegrationJSON(w, r, &body) {
+		return
+	}
+	configuration, err := rt.inboundWebhookAdmin.ConfigureInboundWebhook(
+		r.Context(),
+		shared.ID(TenantFrom(r.Context())),
+		shared.ID(r.PathValue("id")),
+		PrincipalFrom(r.Context()),
+		body.Secret,
+	)
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, configuration)
+}
+
 func (rt *Router) listIntegrationExternalRuns(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	runs, err := rt.integrations.ListExternalRuns(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.PathValue("id")), limit)

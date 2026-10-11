@@ -15,14 +15,42 @@ import (
 type ChannelType string
 
 const (
-	ChannelWebhook ChannelType = "webhook"
-	ChannelSlack   ChannelType = "slack"
-	ChannelEmail   ChannelType = "email"
+	ChannelWebhook    ChannelType = "webhook"
+	ChannelSlack      ChannelType = "slack"
+	ChannelEmail      ChannelType = "email"
+	ChannelTeams      ChannelType = "teams"
+	ChannelTelegram   ChannelType = "telegram"
+	ChannelGoogleChat ChannelType = "google_chat"
+	ChannelDiscord    ChannelType = "discord"
+	// ChannelSlackBot posts as a Slack app with a bot token through chat.postMessage (#1383),
+	// unlike ChannelSlack, which posts to an incoming webhook.
+	ChannelSlackBot ChannelType = "slack_bot"
 )
 
 func (v ChannelType) Valid() bool {
-	return v == ChannelWebhook || v == ChannelSlack || v == ChannelEmail
+	switch v {
+	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord, ChannelSlackBot:
+		return true
+	}
+	return false
 }
+
+// HTTPEndpoint reports whether the channel type delivers to one HTTPS endpoint, so its masked
+// destination is "https://host/…" and a host change is a destination change admins are told about.
+// Email is the only type that delivers to recipients instead.
+func (v ChannelType) HTTPEndpoint() bool {
+	return v.Valid() && v != ChannelEmail
+}
+
+// CodeProviderDisabled is the reason a delivery is cancelled when the operator switched its channel
+// type off with SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED. The operator owns it: it is never a fault
+// of the channel, so channel health must not count it and the channel is not retried for it.
+const CodeProviderDisabled = "provider_disabled"
+
+// CodeEngagementSuppressed is the reason a delivery is cancelled when its engagement allows no
+// external notification (#1360). Like a disabled provider it is an operator decision, never a
+// fault of the channel.
+const CodeEngagementSuppressed = "engagement_suppressed"
 
 type EventType string
 
@@ -34,16 +62,15 @@ const (
 	EventFleetAgentOffline   EventType = "fleet.agent.offline"
 	EventIncidentCreated     EventType = "incident.created"
 	EventOwnershipChanged    EventType = "finding.ownership_changed"
+	EventDestinationChanged  EventType = "notification.destination_changed"
+	EventChannelPaused       EventType = "notification.channel_paused"
 	EventTest                EventType = "notification.test"
 )
 
+// Valid reports whether the event type is declared in the catalog.
 func (v EventType) Valid() bool {
-	switch v {
-	case EventVulnerabilityAction, EventScanCompleted, EventQualityGateFailed,
-		EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged, EventTest:
-		return true
-	}
-	return false
+	_, ok := catalog[v]
+	return ok
 }
 
 type DeliveryState string
@@ -75,6 +102,15 @@ type Channel struct {
 	CreatedAt     time.Time   `json:"created_at"`
 	UpdatedAt     time.Time   `json:"updated_at"`
 	DeletedAt     *time.Time  `json:"deleted_at,omitempty"`
+	// Health is maintained by the delivery worker (#1464); administrators change it only by resuming.
+	Health ChannelHealth `json:"health"`
+	// DataClass is the most sensitive content the channel's messages may carry (#1360). Empty means
+	// the type's default (DefaultDataClass).
+	DataClass DataClass `json:"data_class"`
+	// RawEvent is an audited opt-in to the legacy webhook envelope at detail class.
+	RawEvent bool `json:"raw_event"`
+	// TemplateBinding is the channel's template and locale (#1371).
+	TemplateBinding
 }
 
 func (c Channel) Validate() error {
@@ -84,7 +120,13 @@ func (c Channel) Validate() error {
 	if c.Type == ChannelEmail && len(c.Recipients) == 0 {
 		return fmt.Errorf("%w: email channel requires recipients", shared.ErrValidation)
 	}
-	return nil
+	if c.DataClass != "" && !c.DataClass.Valid() {
+		return invalidDataClass()
+	}
+	if c.RawEvent && (c.Type != ChannelWebhook || c.Class() != DataClassDetail || c.CustomBody) {
+		return fmt.Errorf("%w: raw event mode requires a detail webhook without a custom body", shared.ErrValidation)
+	}
+	return c.TemplateBinding.Validate(c.Type)
 }
 
 type Rule struct {
@@ -101,42 +143,49 @@ type Rule struct {
 	ChannelIDs    []shared.ID     `json:"channel_ids"`
 	LeadTime      time.Duration   `json:"-"`
 	LeadTimeSecs  int64           `json:"lead_time_seconds,omitempty"`
-	Revision      int             `json:"revision"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	// DisabledReason explains a rule the system disabled; any save by an administrator clears it.
+	DisabledReason string    `json:"disabled_reason,omitempty"`
+	Revision       int       `json:"revision"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
+
+// DisabledEngagementFilterUnsupported marks rules that migration 0181 disabled because their event
+// type carries no engagement, so their engagement filter could never match.
+const DisabledEngagementFilterUnsupported = "engagement_filter_unsupported"
 
 func (r *Rule) Normalize() error {
 	r.Name = strings.TrimSpace(r.Name)
+	spec, known := catalog[r.EventType]
 	if r.LeadTimeSecs < 0 || r.LeadTimeSecs > 2592000 {
 		return fmt.Errorf("%w: invalid lead time", shared.ErrValidation)
 	}
 	if r.LeadTime == 0 && r.LeadTimeSecs > 0 {
 		r.LeadTime = time.Duration(r.LeadTimeSecs) * time.Second
 	}
-	if r.EventType == EventSLAApproaching && r.LeadTime == 0 {
+	if spec.HasLeadTime && r.LeadTime == 0 {
 		r.LeadTime = 24 * time.Hour
 	}
 	r.LeadTimeSecs = int64(r.LeadTime / time.Second)
-	if r.TenantID.IsZero() || r.ID.IsZero() || r.Name == "" || !r.EventType.Valid() || r.EventType == EventTest || len(r.ChannelIDs) == 0 || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
+	if r.TenantID.IsZero() || r.ID.IsZero() || r.Name == "" || !known || spec.OperatorOnly || len(r.ChannelIDs) == 0 || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: invalid notification rule", shared.ErrValidation)
 	}
 	if r.MinSeverity != "" && shared.SeverityRank(r.MinSeverity) == 0 {
 		return fmt.Errorf("%w: invalid notification minimum severity", shared.ErrValidation)
 	}
-	if r.MinSeverity != "" && r.EventType != EventVulnerabilityAction && r.EventType != EventIncidentCreated {
-		return fmt.Errorf("%w: minimum severity only applies to vulnerability and incident events", shared.ErrValidation)
+	if r.MinSeverity != "" && !spec.Allows(FilterMinSeverity) {
+		return unsupportedFilter(r.EventType, "minimum severity")
 	}
-	if len(r.ActionTypes) > 0 && r.EventType != EventVulnerabilityAction {
-		return fmt.Errorf("%w: action types only apply to vulnerability action events", shared.ErrValidation)
+	if len(r.ActionTypes) > 0 && !spec.Allows(FilterActionTypes) {
+		return unsupportedFilter(r.EventType, "action types")
 	}
 	for _, action := range r.ActionTypes {
 		if !validActionType(strings.TrimSpace(action)) {
 			return fmt.Errorf("%w: invalid vulnerability action type", shared.ErrValidation)
 		}
 	}
-	if r.EventType != EventSLAApproaching && r.LeadTime != 0 {
-		return fmt.Errorf("%w: lead time only applies to SLA events", shared.ErrValidation)
+	if r.LeadTime != 0 && !spec.Allows(FilterLeadTime) {
+		return unsupportedFilter(r.EventType, "lead time")
 	}
 	if r.LeadTime < 0 || r.LeadTime > 30*24*time.Hour {
 		return fmt.Errorf("%w: notification lead time must be between zero and 30 days", shared.ErrValidation)
@@ -144,13 +193,20 @@ func (r *Rule) Normalize() error {
 	r.ActionTypes = uniqueStrings(r.ActionTypes)
 	r.ChannelIDs = uniqueIDs(r.ChannelIDs)
 	r.EngagementIDs = uniqueIDs(r.EngagementIDs)
-	if err := r.normalizeTeamScope(); err != nil {
+	if len(r.EngagementIDs) > 0 && !spec.Allows(FilterEngagements) {
+		return unsupportedFilter(r.EventType, "engagement scope")
+	}
+	if err := r.normalizeTeamScope(spec); err != nil {
 		return err
 	}
 	if len(r.ChannelIDs) == 0 || len(r.ChannelIDs) > 50 || len(r.EngagementIDs) > 200 || len(r.Name) > 200 {
 		return fmt.Errorf("%w: invalid rule bounds", shared.ErrValidation)
 	}
 	return nil
+}
+
+func unsupportedFilter(t EventType, filter string) error {
+	return fmt.Errorf("%w: %s is not a filter for %s events", shared.ErrValidation, filter, t)
 }
 
 type Event struct {
@@ -164,21 +220,43 @@ type Event struct {
 	SchemaVersion int             `json:"schema_version"`
 	OccurredAt    time.Time       `json:"occurred_at"`
 	Data          json.RawMessage `json:"data"`
+	// SubjectKind and SubjectID name the entity the event is about (EPIC D8), and Context is the
+	// template context snapshot its builder took at projection (D5). They are not part of the
+	// webhook body, which is the raw event and a public contract (D4).
+	SubjectKind string          `json:"-"`
+	SubjectID   string          `json:"-"`
+	Context     json.RawMessage `json:"-"`
+}
+
+// schemaVersionKnown accepts any envelope version from 1 up to the one the catalog declares for the
+// event type. The schema no longer pins version 1 (migration 0190), so a type can move to a new
+// version by changing its catalog entry; an event claiming a version this build does not know is
+// still refused.
+func (e Event) schemaVersionKnown() bool {
+	spec, ok := LookupEvent(e.Type)
+	return ok && e.SchemaVersion >= 1 && e.SchemaVersion <= spec.SchemaVersion
 }
 
 func (e Event) Validate() error {
-	if e.TenantID.IsZero() || e.ID.IsZero() || !e.Type.Valid() || strings.TrimSpace(e.SourceKind) == "" || strings.TrimSpace(e.SourceID) == "" || e.SchemaVersion != 1 || e.OccurredAt.IsZero() {
+	if e.TenantID.IsZero() || e.ID.IsZero() || !e.Type.Valid() || strings.TrimSpace(e.SourceKind) == "" || strings.TrimSpace(e.SourceID) == "" || !e.schemaVersionKnown() || e.OccurredAt.IsZero() {
 		return fmt.Errorf("%w: invalid notification event", shared.ErrValidation)
 	}
 	var data map[string]any
 	if len(e.Data) == 0 || len(e.Data) > 16384 || json.Unmarshal(e.Data, &data) != nil || data == nil {
 		return fmt.Errorf("%w: notification event data must be an object", shared.ErrValidation)
 	}
+	if (e.SubjectKind != "" && !sourceKindShape.MatchString(e.SubjectKind)) || len(e.SubjectID) > maxSubjectIDLength {
+		return fmt.Errorf("%w: invalid notification event subject", shared.ErrValidation)
+	}
+	if len(e.Context) != 0 && !isJSONObject(e.Context, maxContextBytes) {
+		return fmt.Errorf("%w: notification event context must be an object", shared.ErrValidation)
+	}
 	return nil
 }
 
 func (r Rule) Matches(e Event) bool {
-	if !r.Enabled || r.TenantID != e.TenantID || r.EventType != e.Type {
+	spec, known := catalog[e.Type]
+	if !known || spec.OperatorOnly || !r.Enabled || r.TenantID != e.TenantID || r.EventType != e.Type {
 		return false
 	}
 	if r.MinSeverity != "" && (e.Severity == "" || shared.SeverityRank(e.Severity) < shared.SeverityRank(r.MinSeverity)) {
@@ -187,7 +265,7 @@ func (r Rule) Matches(e Event) bool {
 	if len(r.EngagementIDs) > 0 && !containsID(r.EngagementIDs, e.EngagementID) {
 		return false
 	}
-	if e.Type == EventOwnershipChanged && !r.matchesOwnership(e) {
+	if spec.Allows(FilterTeams) && !r.matchesTeams(e) {
 		return false
 	}
 	if len(r.ActionTypes) > 0 {
@@ -198,7 +276,7 @@ func (r Rule) Matches(e Event) bool {
 			return false
 		}
 	}
-	if e.Type == EventSLAApproaching {
+	if spec.HasLeadTime {
 		var data struct {
 			LeadTimeSeconds int64 `json:"lead_time_seconds"`
 		}
@@ -210,11 +288,14 @@ func (r Rule) Matches(e Event) bool {
 }
 
 type Delivery struct {
-	TenantID       shared.ID     `json:"-"`
-	ID             shared.ID     `json:"id"`
-	EventID        shared.ID     `json:"event_id"`
-	ChannelID      shared.ID     `json:"channel_id"`
-	ChannelType    ChannelType   `json:"channel_type"`
+	TenantID    shared.ID   `json:"-"`
+	ID          shared.ID   `json:"id"`
+	EventID     shared.ID   `json:"event_id"`
+	ChannelID   shared.ID   `json:"channel_id"`
+	ChannelType ChannelType `json:"channel_type"`
+	// RedriveFence is the durable queue's claim fence for this delivery's stable job.
+	// It is returned for optimistic redrive requests; every claim and redrive advances it.
+	RedriveFence   int64         `json:"redrive_fence"`
 	Recipient      string        `json:"recipient,omitempty"`
 	MatchedRuleIDs []shared.ID   `json:"matched_rule_ids"`
 	State          DeliveryState `json:"state"`
@@ -224,6 +305,8 @@ type Delivery struct {
 	DeliveredAt    *time.Time    `json:"delivered_at,omitempty"`
 	CreatedAt      time.Time     `json:"created_at"`
 	UpdatedAt      time.Time     `json:"updated_at"`
+	// TemplateRef is the template pinned by the first attempt (#1365); retries render with it.
+	TemplateRef string `json:"template_ref,omitempty"`
 }
 
 type Attempt struct {
@@ -235,11 +318,29 @@ type Attempt struct {
 	Outcome      string     `json:"outcome"`
 	ResponseCode int        `json:"response_code,omitempty"`
 	ErrorCode    string     `json:"error_code,omitempty"`
+	// TemplateRef is the template this attempt rendered with (#1365).
+	TemplateRef string `json:"template_ref,omitempty"`
 }
 
 type Page struct {
 	Items []Delivery `json:"items"`
 	Next  string     `json:"next,omitempty"`
+}
+
+// SourceFailure is a captured event that could not be projected. It contains
+// source identity and a fixed reason code, never the captured payload.
+type SourceFailure struct {
+	SourceKind   string    `json:"source_kind"`
+	SourceID     string    `json:"source_id"`
+	EventType    EventType `json:"event_type"`
+	OccurredAt   time.Time `json:"occurred_at"`
+	ProcessedAt  time.Time `json:"processed_at"`
+	FailedReason string    `json:"failed_reason"`
+}
+
+type SourceFailurePage struct {
+	Items      []SourceFailure `json:"items"`
+	NextOffset *int            `json:"next_offset,omitempty"`
 }
 
 func uniqueStrings(in []string) []string {
@@ -284,10 +385,27 @@ func containsID(in []shared.ID, v shared.ID) bool {
 	return false
 }
 
+// actionTypes is shared by rule validation and schema drift guards.
+var actionTypes = [...]string{"new_exposure", "escalation", "withdrawal", "reexposure", "retest_required", "risk_review"}
+
+// ActionTypes returns a defensive copy of the accepted action vocabulary.
+func ActionTypes() []string {
+	return append([]string(nil), actionTypes[:]...)
+}
+
 func validActionType(v string) bool {
-	switch v {
-	case "new_exposure", "escalation", "withdrawal", "reexposure", "retest_required", "risk_review":
-		return true
+	for _, allowed := range actionTypes {
+		if v == allowed {
+			return true
+		}
 	}
 	return false
+}
+
+// Class is the channel's data class, or its type's default when none was set.
+func (c Channel) Class() DataClass {
+	if c.DataClass.Valid() {
+		return c.DataClass
+	}
+	return DefaultDataClass(c.Type)
 }

@@ -145,6 +145,34 @@ func TestSCMConnectorRepositorySealsAndIsolates(t *testing.T) {
 		t.Fatalf("restore: %v", err)
 	}
 
+	// A self-hosted connector stores its API base, returns it as metadata and with the credential, and
+	// binds the sealed token to it: a database rewrite or clear of api_base makes the token inert.
+	ghes := mustConn(t, "c3-"+sfx, ta.String(), "ghe.corp.example", "x-access-token")
+	if err := ghes.SetAPIBase("https://ghe.corp.example/api/v3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Put(ctxA, ghes, []byte(token)); err != nil {
+		t.Fatalf("put ghes: %v", err)
+	}
+	if meta, err := repo.Get(ctxA, ghes.ID); err != nil || meta.APIBase != "https://ghe.corp.example/api/v3" {
+		t.Fatalf("get ghes = %+v err=%v", meta, err)
+	}
+	cred, ok, err = repo.ResolveGitCredential(ctxA, "ghe.corp.example")
+	if err != nil || !ok || string(cred.Token) != token || cred.APIBase != "https://ghe.corp.example/api/v3" {
+		t.Fatalf("resolve ghes = %+v ok=%v err=%v", cred, ok, err)
+	}
+	for _, tampered := range []string{"https://ghe.corp.example/evil/api/v3", ""} {
+		if _, err := pool.Exec(ctx, `UPDATE scm_connectors SET api_base=$3 WHERE tenant_id=$1 AND id=$2`, ta.String(), ghes.ID.String(), tampered); err != nil {
+			t.Fatalf("tamper api_base: %v", err)
+		}
+		if _, ok, err := repo.ResolveGitCredential(ctxA, "ghe.corp.example"); ok || err == nil {
+			t.Fatalf("api_base %q: a repointed token must fail to decrypt: ok=%v err=%v", tampered, ok, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `UPDATE scm_connectors SET api_base='http://ghe.corp.example/api/v3' WHERE tenant_id=$1 AND id=$2`, ta.String(), ghes.ID.String()); err == nil {
+		t.Fatal("the api_base CHECK must refuse a non-https base")
+	}
+
 	// Delete removes it.
 	if err := repo.Delete(ctxA, shared.ID("c1-"+sfx)); err != nil {
 		t.Fatalf("delete: %v", err)

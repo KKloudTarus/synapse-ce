@@ -13,6 +13,7 @@ import {
   Key01,
   LogOut01,
   Plus,
+  User01,
   Monitor01,
   Server01,
   Signal01,
@@ -27,6 +28,7 @@ import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import logo from '../../assets/logo.png'
 import { useOptionalAuth } from '../../auth/AuthContext'
+import { OrganizationPicker } from '../../auth/OrganizationPicker'
 import { capabilityHint, disabledCapability, useCapabilities } from '../../lib/capabilities'
 import type { Capability } from '../../lib/types'
 import { Tooltip, TooltipTrigger } from '../base/tooltip/tooltip'
@@ -51,6 +53,7 @@ type NavItem = {
 
 const DASHBOARD: NavItem = { icon: BarChartSquare02, label: 'Dashboard', to: '/dashboard', end: true }
 const SETTINGS: NavItem = { icon: Settings01, label: 'Settings', to: '/settings' }
+const PROFILE: NavItem = { icon: User01, label: 'My profile', to: '/profile' }
 
 const NAV_GROUPS: Array<{
   label: string
@@ -353,8 +356,12 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       </nav>
 
       <div className="shrink-0 border-t border-secondary p-3">
-        <div className="space-y-0.5">{renderItems([SETTINGS])}</div>
+        <div className="space-y-0.5">{renderItems([PROFILE, SETTINGS])}</div>
         {auth && (
+        <>
+        <div className={cn('mt-3', collapsed && 'hidden')}>
+          <OrganizationPicker />
+        </div>
         <button
           type="button"
           onClick={onSignOut}
@@ -369,6 +376,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
           <LogOut01 className="size-5 shrink-0 text-tertiary group-hover:text-primary" aria-hidden="true" />
           <span className={cn('truncate', collapsed ? 'sr-only' : 'inline')}>{signingOut ? 'Signing out…' : 'Sign out'}</span>
         </button>
+        </>
         )}
       </div>
     </>

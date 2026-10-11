@@ -100,18 +100,14 @@ func (d *BitbucketDecorator) Decorate(ctx context.Context, decoration ports.PRDe
 		return fmt.Errorf("%w: bitbucket commit sha is invalid", shared.ErrValidation)
 	}
 
-	credential, ok, err := d.credentials.ResolveGitCredential(ctx, d.credentialHost)
+	// Bitbucket Data Center has a different REST API (/rest/api/1.0, /rest/build-status/1.0), so this
+	// adapter is Bitbucket Cloud only: it passes no self-hosted API, and a connector cannot store a
+	// Bitbucket API base.
+	_, credential, err := resolveForgeEndpoint(ctx, d.credentials, d.credentialHost, d.api, nil, decoration.ForgeHost, "bitbucket")
 	if err != nil {
-		return fmt.Errorf("resolve bitbucket decoration credential: %w", err)
+		return err
 	}
-	if !ok || len(credential.Token) == 0 {
-		return fmt.Errorf("%w: no bitbucket credential is configured for decoration", shared.ErrValidation)
-	}
-	defer func() {
-		for i := range credential.Token {
-			credential.Token[i] = 0
-		}
-	}()
+	defer zeroToken(credential.Token)
 	headers := bitbucketHeaders(credential.Username, credential.Token)
 
 	lock := d.targetLock(decoration.Target.Repository, decoration.Target.PullRequest)

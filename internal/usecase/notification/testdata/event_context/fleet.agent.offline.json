@@ -1,0 +1,12 @@
+{
+  "subject_kind": "fleet_agent",
+  "subject_id": "agent-42",
+  "vars": {
+    "event_label": "Fleet agent offline",
+    "event_type": "fleet.agent.offline",
+    "last_seen_at": "2026-09-27T07:45:00Z",
+    "occurred_at": "2026-09-27T08:00:00Z",
+    "summary": "Agent node-42 has missed its heartbeat freshness window.",
+    "title": "Fleet agent offline"
+  }
+}

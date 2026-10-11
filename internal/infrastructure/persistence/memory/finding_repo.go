@@ -137,6 +137,7 @@ func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding
 			f.ID = existing.ID
 			f.Status = existing.Status // preserve triage
 			f.Assignee = existing.Assignee
+			f.AssigneeUserID = existing.AssigneeUserID
 			f.Audit.CreatedAt = existing.Audit.CreatedAt
 			f.Version = existing.Version
 			if machineChanged {
@@ -259,6 +260,7 @@ func (r *FindingRepository) SetAssignee(_ context.Context, engagementID, finding
 				return finding.Finding{}, fmt.Errorf("finding %s changed since you loaded it: %w", findingID, shared.ErrConflict)
 			}
 			f.Assignee = assignee
+			f.AssigneeUserID = "" // memory adapter cannot infer identity from a label
 			f.Version++
 			r.data[engagementID][key] = cloneFinding(f)
 			return cloneFinding(f), nil

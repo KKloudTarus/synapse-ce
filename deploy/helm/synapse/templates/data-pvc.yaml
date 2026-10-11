@@ -1,0 +1,22 @@
+{{- if and .Values.api.persistence.enabled (not .Values.api.persistence.existingClaim) }}
+# The claim behind /var/lib/synapse: the Code view's captured source, uploaded project archives and
+# engagement sources. accessModes decides whether several API replicas can read what one of them
+# wrote, so a multi-replica install needs ReadWriteMany from a filesystem class (EFS, Filestore,
+# Azure Files) rather than a block class, which can only attach to one node.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "synapse.fullname" . }}-data
+  labels:
+    {{- include "synapse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  accessModes:
+    {{- toYaml .Values.api.persistence.accessModes | nindent 4 }}
+  {{- if .Values.api.persistence.storageClass }}
+  storageClassName: {{ .Values.api.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.api.persistence.size | quote }}
+{{- end }}

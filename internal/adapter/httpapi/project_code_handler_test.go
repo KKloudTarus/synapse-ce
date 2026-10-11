@@ -151,6 +151,9 @@ func TestWriteCodeErrorMapsArtifactAvailability(t *testing.T) {
 		{projectanalysis.ErrSourceLimit, http.StatusRequestEntityTooLarge},
 		{projectanalysis.ErrSourceUnsupported, http.StatusUnsupportedMediaType},
 		{projectanalysis.ErrSourceTransient, http.StatusServiceUnavailable},
+		// Captured, but absent from the replica that answered: a retry can reach the one holding it,
+		// so this is unavailable rather than gone.
+		{projectanalysis.ErrSourceMissingFromStore, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.err.Error(), func(t *testing.T) {
 			rec := httptest.NewRecorder()

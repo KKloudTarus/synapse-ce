@@ -1,0 +1,37 @@
+{
+  "cardsV2": [
+    {
+      "card": {
+        "header": {
+          "title": "Critical finding in payments-api"
+        },
+        "sections": [
+          {
+            "widgets": [
+              {
+                "textParagraph": {
+                  "text": "\u003cb\u003eSQL injection in /login\u003c/b\u003e on \u003ci\u003eprod_eu\u003c/i\u003e\u003cbr\u003eRule \u003ccode\u003eCWE-89\u003c/code\u003e, severity \u003cb\u003ecritical\u003c/b\u003e\u003cbr\u003e\u003cbr\u003e• Host: api.example.com\u003cbr\u003e• Owner: team \u0026lt;platform\u0026gt; \u0026amp; ops\u003cbr\u003e\u003cbr\u003eReported by Synapse."
+                }
+              },
+              {
+                "buttonList": {
+                  "buttons": [
+                    {
+                      "onClick": {
+                        "openLink": {
+                          "url": "https://synapse.example.com/engagements/e1/findings/f1"
+                        }
+                      },
+                      "text": "Open finding"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "cardId": "synapse-notification"
+    }
+  ]
+}

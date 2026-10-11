@@ -4,6 +4,7 @@ import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoadingFallback } from './components/layout/LoadingFallback'
+import { NotificationBell } from './components/layout/NotificationBell'
 import { MobileSidebar, Sidebar } from './components/layout/Sidebar'
 import { ToastProvider } from './components/synapse/Toast'
 import { VulnerabilityExposureNotifier } from './components/synapse/VulnerabilityExposureNotifier'
@@ -11,6 +12,10 @@ import { Connect } from './pages/Connect'
 import { NotFound } from './pages/NotFound'
 
 // --- Lazy-loaded page components ---
+const SetupPreview = import.meta.env.VITE_PLAYGROUND === '1' ? lazy(() => import('./playground/setup/SetupPreview').then(m => ({ default: m.SetupPreview }))) : null
+const DemoEntry = import.meta.env.VITE_PLAYGROUND === '1'
+  ? lazy(() => import('./playground/DemoEntry').then(m => ({ default: m.DemoEntry })))
+  : null
 const Dashboard = lazy(() => import('./pages/Dashboard/DashboardPage').then(m => ({ default: m.DashboardPage })))
 const Engagements = lazy(() => import('./pages/Engagements/EngagementsPage').then(m => ({ default: m.EngagementsPage })))
 const AssessmentCycles = lazy(() => import('./pages/AssessmentCycles/AssessmentCyclesPage').then(m => ({ default: m.AssessmentCyclesPage })))
@@ -42,8 +47,12 @@ const Rules = lazy(() => import('./pages/Rules/index'))
 const RuleDetail = lazy(() => import('./pages/Rules/RuleDetail'))
 const Audit = lazy(() => import('./pages/Settings/Audit').then(m => ({ default: m.Audit })))
 const Settings = lazy(() => import('./pages/Settings/Settings').then(m => ({ default: m.Settings })))
+const Authentication = lazy(() => import('./pages/Authentication'))
+const Profile = lazy(() => import('./pages/Profile/ProfilePage').then(m => ({ default: m.ProfilePage })))
+const Inbox = lazy(() => import('./pages/Inbox/InboxPage').then(m => ({ default: m.InboxPage })))
 const SettingsConfig = lazy(() => import('./pages/Settings/SettingsConfig').then(m => ({ default: m.SettingsConfig })))
 const Integrations = lazy(() => import('./pages/Settings/Integrations').then(m => ({ default: m.Integrations })))
+const IntegrationsHub = lazy(() => import('./pages/Settings/IntegrationsHub').then(m => ({ default: m.IntegrationsHub })))
 const Connectors = lazy(() => import('./pages/Settings/Connectors').then(m => ({ default: m.Connectors })))
 const TelemetryPrivacy = lazy(() => import('./pages/Settings/TelemetryPrivacy').then(m => ({ default: m.TelemetryPrivacy })))
 const ResponseOps = lazy(() => import('./pages/BlueTeam/ResponseOps').then(m => ({ default: m.ResponseOps })))
@@ -57,8 +66,13 @@ const Team = lazy(() => import('./pages/Settings/Team').then(m => ({ default: m.
 const SLAPolicy = lazy(() => import('./pages/Settings/SLAPolicy').then(m => ({ default: m.SLAPolicy })))
 const OffensivePolicy = lazy(() => import('./pages/Settings/OffensivePolicy').then(m => ({ default: m.OffensivePolicy })))
 const Alerting = lazy(() => import('./pages/Settings/Alerting').then(m => ({ default: m.Alerting })))
+const TemplateLibrary = lazy(() => import('./pages/Settings/Templates/TemplateLibrary').then(m => ({ default: m.TemplateLibrary })))
+const TemplateEditor = lazy(() => import('./pages/Settings/Templates/TemplateEditor').then(m => ({ default: m.TemplateEditor })))
+const SIEM = lazy(() => import('./pages/Settings/SIEM').then(m => ({ default: m.SIEM })))
+const RegionalSettings = lazy(() => import('./pages/Settings/RegionalSettings').then(m => ({ default: m.RegionalSettings })))
 const OwnershipInbox = lazy(() => import('./pages/Ownership/OwnershipInbox').then(m => ({ default: m.OwnershipInbox })))
 const OwnershipSettings = lazy(() => import('./pages/Ownership/OwnershipSettings').then(m => ({ default: m.OwnershipSettings })))
+const AssigneeReview = lazy(() => import('./pages/Settings/AssigneeReview').then(m => ({ default: m.AssigneeReview })))
 const ProjectOverviewPage = lazy(() => import('./pages/CodeQuality/ProjectOverviewPage').then(m => ({ default: m.ProjectOverviewPage })))
 const ProjectAnalysisPage = lazy(() => import('./pages/CodeQuality/ProjectAnalysisPage').then(m => ({ default: m.ProjectAnalysisPage })))
 const ProjectActivityPage = lazy(() => import('./pages/CodeQuality/ProjectActivityPage').then(m => ({ default: m.ProjectActivityPage })))
@@ -84,8 +98,10 @@ function Gate() {
   if (phase !== 'ready') return <Connect />
   return (
     <Routes>
+      {DemoEntry && <Route path="demo" element={<Suspense fallback={<LoadingFallback />}><DemoEntry /></Suspense>} />}
       <Route element={<Shell />}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
+        {SetupPreview && <Route path="demo/setup/:kind" element={<Suspense fallback={<LoadingFallback />}><SetupPreview /></Suspense>} />}
+        <Route index element={<Navigate to={import.meta.env.VITE_PLAYGROUND === '1' ? '/demo' : '/dashboard'} replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="engagements" element={<Engagements />} />
         <Route path="assessment-cycles" element={<AssessmentLifecycleRoute><AssessmentCycles /></AssessmentLifecycleRoute>} />
@@ -129,19 +145,29 @@ function Gate() {
         <Route path="rules" element={<Rules />} />
         <Route path="rules/:key" element={<RuleDetail />} />
         <Route path="ownership" element={<OwnershipInbox />} />
+        <Route path="profile" element={<Profile />} />
+        <Route path="inbox" element={<Inbox />} />
         <Route path="settings" element={<Settings />}>
           <Route index element={<Audit />} />
           <Route path="team" element={<Team />} />
-          <Route path="integrations" element={<Integrations />} />
+          <Route path="integrations" element={<IntegrationsHub />} />
+          <Route path="integrations/ci" element={<Integrations />} />
           <Route path="connectors" element={<Connectors />} />
           <Route path="privacy" element={<TelemetryPrivacy />} />
 
           <Route path="relationships" element={<AssessmentRelationships />} />
           <Route path="config" element={<SettingsConfig />} />
+          <Route path="authentication" element={<EnterpriseAuthenticationRoute />} />
           <Route path="sla" element={<SLAPolicy />} />
           <Route path="offensive-policy" element={<OffensivePolicy />} />
           <Route path="alerting" element={<Alerting />} />
+          <Route path="templates" element={<TemplateLibrary />} />
+          <Route path="templates/new" element={<TemplateEditor />} />
+          <Route path="templates/:id" element={<TemplateEditor />} />
+          <Route path="siem" element={<SIEM />} />
+          <Route path="regional" element={<RegionalSettings />} />
           <Route path="ownership" element={<OwnershipSettings />} />
+          <Route path="assignee-review" element={<AssigneeReview />} />
         </Route>
         <Route path="audit" element={<Navigate to="/settings" replace />} />
         <Route path="team" element={<Navigate to="/settings/team" replace />} />
@@ -159,6 +185,11 @@ function AssessmentLifecycleRoute({ children }: { children: ReactNode }) {
   const { currentUser } = useAuth()
   if (currentUser?.features?.assessmentLifecycleUIDefault !== true) return <Navigate to="/engagements" replace />
   return children
+}
+
+function EnterpriseAuthenticationRoute() {
+  const { currentUser } = useAuth()
+  return <Authentication enabled={currentUser?.features?.enterpriseIdentity === true} />
 }
 
 function Shell() {
@@ -185,20 +216,21 @@ function Shell() {
       <MobileSidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
       <div className="flex min-h-0 min-w-0 flex-col bg-primary md:pt-4">
         {/* Mobile hamburger only */}
-        <div className="flex h-14 shrink-0 items-center px-4 md:hidden">
+        <div className="flex h-14 shrink-0 items-center justify-between px-4">
           <button
             type="button"
             onClick={() => setMenuOpen(true)}
             aria-label="Open menu"
-            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-primary_hover hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand md:hidden"
           >
             <Menu01 className="size-5" />
           </button>
+          <NotificationBell />
         </div>
         <main
           id="main-content"
           tabIndex={-1}
-          className="flex-1 overflow-auto bg-secondary-subtle p-4 sm:p-6 xl:p-8 outline-none md:rounded-tl-[40px] md:border-t md:border-l md:border-secondary md:shadow-md"
+          className="flex-1 overflow-auto bg-secondary p-4 sm:p-6 xl:p-8 outline-none md:rounded-tl-[40px] md:border-t md:border-l md:border-secondary md:shadow-md"
         >
           <ErrorBoundary key={location.pathname}>
             <Suspense fallback={<LoadingFallback />}>

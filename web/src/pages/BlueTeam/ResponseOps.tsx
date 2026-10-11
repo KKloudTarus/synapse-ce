@@ -60,7 +60,7 @@ export function ResponseOps() {
         <KillSwitch />
       </header>
 
-      <div className="rounded-lg border border-warning-primary bg-warning-secondary px-4 py-3 text-sm text-warning-primary">
+      <div className="rounded-lg border border-utility-orange-300 bg-warning-primary px-4 py-3 text-sm text-warning-primary">
         <span className="font-semibold">Executor is simulation.</span> The governance workflow is real and audited,
         but the current executor makes no change on any host. Containment takes effect once a host executor is wired.
       </div>

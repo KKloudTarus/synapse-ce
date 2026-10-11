@@ -83,7 +83,7 @@ export function ProjectOverviewPage() {
 
   const selectedMetrics = lens === 'overall' ? overview.lenses.overall : overview.lenses.newCode
   return (
-    <div className="space-y-6">
+    <div data-quality-analysis={overview.latestAnalysis?.id} className="space-y-6">
       {isRunning && (
         <Card>
           <p className="text-sm text-tertiary">A new analysis is in progress. Values below are from the latest completed analysis.</p>

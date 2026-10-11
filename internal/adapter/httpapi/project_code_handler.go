@@ -253,6 +253,10 @@ func writeCodeError(w http.ResponseWriter, rt *Router, err error) {
 		writeJSON(w, http.StatusUnsupportedMediaType, errorBody{Error: err.Error()})
 	case errors.Is(err, projectanalysis.ErrSourceTransient):
 		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "source artifact temporarily unavailable"})
+	// 503 rather than 410: the analysis did capture this file, so a retry that reaches the replica
+	// holding it succeeds. 410 would tell the client the artifact is gone for good.
+	case errors.Is(err, projectanalysis.ErrSourceMissingFromStore):
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: err.Error()})
 	case errors.Is(err, projectanalysis.ErrSourceNotRetained):
 		writeJSON(w, http.StatusGone, errorBody{Error: err.Error()})
 	default:

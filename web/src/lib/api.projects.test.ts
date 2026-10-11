@@ -28,6 +28,20 @@ describe('Projects API', () => {
     expect(JSON.parse(String(init.body))).toEqual({ name: 'Synapse', key: 'synapse', gate_id: 'release', source_binding: { kind: 'local', value: '/repo', ref: '' } })
   })
 
+  it('toggles PR decoration with the enabled body and maps the returned project', async () => {
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 'p1', key: 'team/app', name: 'App', source_binding: { kind: 'git', value: 'https://example.com/repo.git' }, decorate_pull_requests: true }) } as Response)
+    const project = await api.setProjectDecoration('team/app', true)
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/projects/team%2Fapp/decoration')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(String(init.body))).toEqual({ enabled: true })
+    expect(project.decoratePullRequests).toBe(true)
+
+    fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 'p1', key: 'team/app', decorate_pull_requests: false }) } as Response)
+    expect((await api.setProjectDecoration('team/app', false)).decoratePullRequests).toBe(false)
+    expect(JSON.parse(String((fetchSpy.mock.calls[1][1] as RequestInit).body))).toEqual({ enabled: false })
+  })
+
   it('manages quality gates', async () => {
     fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => [{ key: 'synapse-way', name: 'Synapse way', built_in: true, conditions: [] }] } as Response)
     expect(await api.listQualityGates()).toMatchObject([{ key: 'synapse-way', builtIn: true }])

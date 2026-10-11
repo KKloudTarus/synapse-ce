@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeintent"
@@ -41,7 +42,7 @@ func (m Mapping) Validate() error {
 	if m.ID.IsZero() || m.TenantID.IsZero() || m.IntegrationID.IsZero() ||
 		m.ScopeID.IsZero() || (m.Scope != Project && m.Scope != Engagement) ||
 		!bounded(m.ProjectKey, 255) || !bounded(m.IssueType, 255) ||
-		len(m.Component) > 255 || len(m.SecurityLevel) > 255 ||
+		len(m.Component) > 255 || !validText(m.Component) || len(m.SecurityLevel) > 255 || !validText(m.SecurityLevel) ||
 		len(m.Labels) > 32 || len(m.PriorityMap) > 32 || m.Version < 1 ||
 		m.CreatedAt.IsZero() || m.UpdatedAt.Before(m.CreatedAt) {
 		return fmt.Errorf("%w: invalid ticket mapping", shared.ErrValidation)
@@ -80,13 +81,16 @@ func (m Mapping) Clone() Mapping {
 	}
 	return m
 }
-func bounded(v string, max int) bool { return strings.TrimSpace(v) != "" && len(v) <= max }
+func validText(v string) bool { return utf8.ValidString(v) && !strings.ContainsRune(v, 0) }
+func bounded(v string, max int) bool {
+	return validText(v) && strings.TrimSpace(v) != "" && len(v) <= max
+}
 
 // CanonicalURL refuses credentials, query-string tokens, fragments and non-HTTPS schemes.
-// For J02 manual links no provider is required; a linked URL is display-only and is never fetched.
+// For manual links no provider is required; a linked URL is display-only and is never fetched.
 func CanonicalURL(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" ||
+	if err != nil || !validText(raw) || u.Scheme != "https" || u.Hostname() == "" ||
 		u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || len(raw) > 2048 {
 		return "", fmt.Errorf("%w: external ticket URL must be HTTPS without credentials, query or fragment", shared.ErrValidation)
 	}
@@ -105,7 +109,7 @@ type Link struct {
 }
 
 func (l Link) Validate() error {
-	if l.ID.IsZero() || l.TenantID.IsZero() || l.FindingID.IsZero() || l.EngagementID.IsZero() || l.CreatedAt.IsZero() || len(l.ExternalID) > 512 {
+	if l.ID.IsZero() || l.TenantID.IsZero() || l.FindingID.IsZero() || l.EngagementID.IsZero() || l.CreatedAt.IsZero() || len(l.ExternalID) > 512 || !validText(l.ExternalID) {
 		return fmt.Errorf("%w: invalid ticket link", shared.ErrValidation)
 	}
 	normalized, err := CanonicalURL(l.ExternalURL)

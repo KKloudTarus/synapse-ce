@@ -1,0 +1,109 @@
+{
+  "attachments": [
+    {
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "actions": [
+          {
+            "title": "Open finding",
+            "type": "Action.OpenUrl",
+            "url": "https://synapse.example.com/engagements/e1/findings/f1"
+          }
+        ],
+        "body": [
+          {
+            "inlines": [
+              {
+                "size": "Medium",
+                "text": "Critical finding in payments-api",
+                "type": "TextRun",
+                "weight": "Bolder"
+              }
+            ],
+            "type": "RichTextBlock"
+          },
+          {
+            "inlines": [
+              {
+                "text": "SQL injection in /login",
+                "type": "TextRun",
+                "weight": "Bolder"
+              },
+              {
+                "text": " on ",
+                "type": "TextRun"
+              },
+              {
+                "italic": true,
+                "text": "prod_eu",
+                "type": "TextRun"
+              },
+              {
+                "text": "\n",
+                "type": "TextRun"
+              },
+              {
+                "text": "Rule ",
+                "type": "TextRun"
+              },
+              {
+                "fontType": "Monospace",
+                "text": "CWE-89",
+                "type": "TextRun"
+              },
+              {
+                "text": ", severity ",
+                "type": "TextRun"
+              },
+              {
+                "text": "critical",
+                "type": "TextRun",
+                "weight": "Bolder"
+              }
+            ],
+            "type": "RichTextBlock"
+          },
+          {
+            "inlines": [
+              {
+                "text": "• ",
+                "type": "TextRun"
+              },
+              {
+                "text": "Host: api.example.com",
+                "type": "TextRun"
+              }
+            ],
+            "type": "RichTextBlock"
+          },
+          {
+            "inlines": [
+              {
+                "text": "• ",
+                "type": "TextRun"
+              },
+              {
+                "text": "Owner: team \u003cplatform\u003e \u0026 ops",
+                "type": "TextRun"
+              }
+            ],
+            "type": "RichTextBlock"
+          },
+          {
+            "inlines": [
+              {
+                "text": "Reported by Synapse.",
+                "type": "TextRun"
+              }
+            ],
+            "type": "RichTextBlock"
+          }
+        ],
+        "type": "AdaptiveCard",
+        "version": "1.4"
+      },
+      "contentType": "application/vnd.microsoft.card.adaptive"
+    }
+  ],
+  "type": "message"
+}

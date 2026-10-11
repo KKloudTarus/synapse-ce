@@ -11,23 +11,24 @@ import (
 
 // MultiplexDecorator dispatches one decoration to the owned adapter for its forge, chosen from the
 // decoration's Provider claim. It exists for the server, where a single tenant can host projects on
-// different forges: one injected decorator must be able to reach GitHub, GitLab, and Bitbucket. Every
+// different forges: one injected decorator must be able to reach GitHub, GitLab, Bitbucket, and Azure Repos. Every
 // adapter shares the same tenant-scoped credential resolver (the SCM connector store), so the concrete
 // token is resolved per call from tenant context and is never held here.
 type MultiplexDecorator struct {
 	credentials ports.GitCredentialResolver
 	mu          sync.Mutex
 	byProvider  map[string]ports.PRDecorator
+	options     []Option
 }
 
 var _ ports.PRDecorator = (*MultiplexDecorator)(nil)
 
 // NewMultiplexDecorator builds a provider-multiplexing decorator over one credential resolver.
-func NewMultiplexDecorator(credentials ports.GitCredentialResolver) (*MultiplexDecorator, error) {
+func NewMultiplexDecorator(credentials ports.GitCredentialResolver, opts ...Option) (*MultiplexDecorator, error) {
 	if credentials == nil {
 		return nil, fmt.Errorf("%w: multiplex decoration needs a credential resolver", shared.ErrValidation)
 	}
-	return &MultiplexDecorator{credentials: credentials, byProvider: make(map[string]ports.PRDecorator)}, nil
+	return &MultiplexDecorator{credentials: credentials, byProvider: make(map[string]ports.PRDecorator), options: opts}, nil
 }
 
 // Decorate routes to the adapter for decoration.Provider. An empty or unsupported provider is a
@@ -48,7 +49,7 @@ func (m *MultiplexDecorator) decoratorFor(provider string) (ports.PRDecorator, e
 	if decorator, ok := m.byProvider[key]; ok {
 		return decorator, nil
 	}
-	decorator, err := ForProvider(provider, m.credentials)
+	decorator, err := ForProvider(provider, m.credentials, m.options...)
 	if err != nil {
 		return nil, err
 	}

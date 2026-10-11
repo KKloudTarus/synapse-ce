@@ -6,22 +6,27 @@ import type { User, UserRole } from '../../lib/types'
 import { Button, Card, EmptyState, ErrorState, Input, Pill, Select, Spinner } from '../../components/ui'
 import { useToast } from '../../components/synapse/Toast'
 import { useUserList } from '../../hooks'
+import { useOptionalAuth } from '../../auth/AuthContext'
+import { EnterpriseTeam } from './EnterpriseTeam'
 
 const ROLE_OPTIONS = [
   { value: 'member', label: 'Member' },
   { value: 'consultant', label: 'Consultant' },
   { value: 'reviewer', label: 'Reviewer' },
   { value: 'readonly', label: 'Read only' },
+  { value: 'integration_admin', label: 'Integration admin' },
   { value: 'admin', label: 'Admin' },
 ]
 
 export function Team() {
+  const enterprise = useOptionalAuth()?.currentUser?.features?.enterpriseIdentity === true
   const { data: users, loading, error, forbidden, refetch } = useUserList()
 
   if (forbidden) {
     return <EmptyState icon={ShieldTick} title="Admin only" hint="Ask an admin to add you to the team or grant the admin role." />
   }
 
+  if (enterprise) return <EnterpriseTeam />
   return (
     <div className="space-y-4">
       <Card
@@ -166,7 +171,11 @@ function MemberRow({ user, onChanged }: { user: User; onChanged: () => void }) {
             onClick={() => void run(
               'disabled',
               async () => { await api.setUserDisabled(user.id, !user.disabled) },
-              user.disabled ? `${user.name} can sign in again.` : `${user.name} can no longer sign in.`,
+              // Enabling revokes the key and sessions held before the change, so the user needs a
+              // rotated key (or a new browser sign-in) before they can authenticate again.
+              user.disabled
+                ? `${user.name} is enabled. Rotate their API key to restore API access; they can sign in again in the browser.`
+                : `${user.name} can no longer sign in. Their API key and browser sessions were revoked.`,
             )}
           >
             {user.disabled ? 'Enable' : 'Disable'}
@@ -281,7 +290,7 @@ function CreateUserInline({ onCreated }: { onCreated: () => void }) {
           value={role}
           onValueChange={(v) => setRole(v as UserRole)}
           ariaLabel="Role"
-          className="h-9 w-32 text-sm"
+          className="h-9 w-40 text-sm"
           options={ROLE_OPTIONS}
         />
         <Button loading={busy} onClick={submit} className="h-9 px-3.5 text-sm">

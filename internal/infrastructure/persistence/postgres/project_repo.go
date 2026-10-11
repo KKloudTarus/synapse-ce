@@ -185,10 +185,38 @@ func (r *ProjectRepository) CountByGate(ctx context.Context, tenantID shared.ID,
 	return n, nil
 }
 
+// projectDeleteBlockers explains, per foreign key, why a relation refuses to give the project up.
+// These rows REFERENCE a project rather than belong to it, so a delete that silently removed them
+// would rewrite a record somebody else owns. The message names the record and what to do about it,
+// because the operator sees it in the console's delete dialog.
+var projectDeleteBlockers = map[string]string{
+	"engagements_assessment_project_fk":                       "an assessment engagement records this project; delete or re-scope that engagement first",
+	"assessment_cycles_tenant_id_project_id_fkey":             "an assessment cycle's frozen boundary names this project; a closed cycle is evidence and is not rewritten by a delete",
+	"ownership_policy_project_refs_tenant_id_project_id_fkey": "a published ownership policy version scopes this project; publish a version without it first",
+}
+
 func (r *ProjectRepository) DeleteByKey(ctx context.Context, tenantID shared.ID, key string) error {
 	return requireTenant(ctx, r.pool, tenantID, func(tx pgx.Tx) error {
+		// The asset link is current state, not history: putBusinessAssetProjects replaces the whole set
+		// on every save and the row carries no version. It is the project's side of the link, so the
+		// delete takes it and the business asset itself survives. Left in place its ON DELETE RESTRICT
+		// turned an ordinary delete into SQLSTATE 23503, which the handler could only report as a 500.
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM business_asset_projects WHERE tenant_id=$1 AND project_id IN (SELECT id FROM projects WHERE tenant_id=$1 AND key=$2)`,
+			tenantID.String(), key); err != nil {
+			return fmt.Errorf("delete project asset links: %w", err)
+		}
 		ct, err := tx.Exec(ctx, `DELETE FROM projects WHERE tenant_id=$1 AND key=$2`, tenantID.String(), key)
 		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				if reason, ok := projectDeleteBlockers[pgErr.ConstraintName]; ok {
+					return fmt.Errorf("%w: %s", shared.ErrConflict, reason)
+				}
+				// A relation nobody has classified yet. Report the constraint rather than an internal
+				// error, so the next one of these arrives as a question instead of a 500.
+				return fmt.Errorf("%w: %s still references this project (%s)", shared.ErrConflict, pgErr.TableName, pgErr.ConstraintName)
+			}
 			return fmt.Errorf("delete project: %w", err)
 		}
 		if ct.RowsAffected() == 0 {

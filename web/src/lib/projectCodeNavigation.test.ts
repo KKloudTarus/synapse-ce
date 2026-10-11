@@ -13,4 +13,11 @@ describe('project Code navigation', () => {
     expect(result).toMatchObject({ analysisId: null, path: null, view: 'source', line: null, findingId: null, changed: true })
     expect(result.params.toString()).toBe('other=kept')
   })
+
+  it('retains the selected branch alongside a pinned finding location', () => {
+    const path = projectCodePath('checkout-quality', { analysisId: 'baseline', path: 'services/session/lookup.go', view: 'source', line: 42, findingId: 'issue-2' }, 'main')
+    const params = new URLSearchParams(path.split('?')[1])
+    expect(params.get('branch')).toBe('main')
+    expect(normalizeProjectCodeSearch(params)).toMatchObject({ analysisId: 'baseline', path: 'services/session/lookup.go', line: 42, findingId: 'issue-2' })
+  })
 })

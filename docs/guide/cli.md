@@ -24,6 +24,29 @@ pins, so prepare dependencies with `go mod download` before an offline local run
 The hosted workflow uploads the scorecard as an artifact when generated and fails
 the gate unless it passes.
 
+## Notification capture administration
+
+`synapse-migrate` applies schema migrations before API and worker startup. It uses
+`SYNAPSE_DB_MIGRATION_DSN` when configured; development can fall back to
+`SYNAPSE_DB_DSN`. Production requires separate migration and runtime credentials.
+The optional
+`--notification-capture-mode identity|legacy` flag switches capture mode after
+migrations succeed; omitting it keeps the current mode. A mode change with pending
+identity records is refused without committing the change. Pass `--allow-pending`
+only for a controlled drain with capable workers still running. Invalid modes, an
+unpaired `--allow-pending`, or a failed migration or mode switch exit with code 1.
+
+Only the migration credential can change capture policy. Deploy capable
+notification workers before enabling `identity`; to restore older workers, switch
+to `legacy` and drain pending identity records with a capable worker first. The
+command reports the pending identity count and shares a two-minute deadline
+across migration and mode switching. See [Notification content and capture rollout](notification-content.md)
+for the migration maintenance window, cutover checks, and webhook rollback limits.
+The webhook runtime guard blocks old workers before they can make an outbound send;
+disable or pause webhook channels, drain started and pending work, then replace
+workers. Existing `detail` webhook receivers will receive finding titles after this
+release, so review receiver authorization before cutover.
+
 ## Assessment lifecycle administration
 
 These are separate operator binaries, not `synapse-cli` subcommands. `make build`
@@ -36,6 +59,7 @@ for migration order, dry-run examples, checkpoints, approval and rollback gates.
 | `synapse-assessment-backfill` | Create historical singleton Cycles with durable checkpoints. |
 | `synapse-assessment-snapshot-backfill` | Append immutable legacy Snapshots after Cycle backfill. |
 | `synapse-finding-lineage-backfill` | Project source Findings into Identities, Observations, review candidates or explicit skips. |
+| `synapse-identity-backfill` | Project legacy users into persons, memberships and credentials, check shadow parity, rehearse rollback, and deliver person-audit obligations. See [Identity foundation rollout](identity-foundation-rollout.md). The `prepare`, `canary`, `declare`, `contract`, and `abort` modes govern shared authentication rollout; see [Identity cutover](identity-cutover.md) for flags, prerequisites, and rollback limits. |
 | `synapse-assessment-integrity` | Verify membership, boundaries and source reconciliation without repairing source data. |
 | `synapse-assessment-comparison-backfill` | Queue root-to-selected-head comparisons and optionally repair failed artifacts. |
 | `synapse-assessment-rollout-gate` | Evaluate supplied JSON rollout evidence; it does not enable feature flags or collect metrics. |
@@ -138,6 +162,7 @@ synapse-cli scan <path|image-ref> [flags]
 | --- | --- |
 | `--mode full\|vulnerabilities\|licenses` | What to scan. Default is full. |
 | `--fail-on critical\|high\|medium\|low\|info` | Exit non-zero if a finding at or above this severity is present. Default is high. |
+| `--require-complete` | After the report is written, exit non-zero unless every required scan engine completed with complete coverage. This is opt-in; it does not change the existing finding-severity gate. |
 | `--image` | Treat the argument as a container image reference, pulled daemonlessly in-process, instead of a local path. |
 | `--offline` | Make the scan run without network egress. Detection uses the local sources only, the owned advisory store, plus Grype's pre-synced database when `SYNAPSE_DETECTION_SOURCES` names it (Grype is not in the default set), and every network-capable resolver and enricher is switched off: npm, composer, poetry, Bundler, Maven, Gradle, the Maven Central JAR SHA-1 lookup, KEV/EPSS, online NVD CVSS backfill, deps.dev and PyPI license metadata, and AI false-positive triage. `SYNAPSE_OFFLINE=true` does the same. Recall drops in exchange; the run makes no outbound request. Target acquisition is the one step outside the flag: a registry `--image` reference or a remote git URL is still fetched, so on an air-gapped runner point the scan at a local path or a local OCI layout. |
 | `--ignore-unfixed` | Ignore vulnerabilities that have no fix available. |
@@ -146,15 +171,23 @@ synapse-cli scan <path|image-ref> [flags]
 | `--detection-priority comprehensive\|precise` | `comprehensive` (default) reports every match. `precise` moves single-source, non-KEV findings into a needs-verify queue that does not trip `--fail-on`. |
 | `--include-test` | Also gate on findings in test, fixture, and example paths. They are reported but gate-exempt by default. |
 | `--verify-secrets` | Actively confirm each detected credential is live by making one minimal read-only API call to its provider's public host (GitHub, GitLab, OpenAI), stamping the finding verified/unverified/unknown. Opt-in and off by default, and IGNORED under `--offline` (which forbids network egress). It sends the raw leaked secret over the network to the public provider host, so use it only against credentials you are authorized to test; a self-managed-instance token is still sent to the public host and yields `unknown`. The secret is never logged or written to output; a verified live credential is raised to `very_high` confidence, and an unverified or unknown verdict never removes a finding. |
-| `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. |
+| `--json` | Print the full scan result as JSON to stdout, for machine consumption in CI. When the scan finishes, stderr gets a short engine-coverage summary (how many required engines completed, each one that did not with its execution and reason, and the engines excluded on purpose) followed by every source warning in full, so a partial scan is visible without reading the document. |
 | `--sarif` | Print a SARIF 2.1.0 report to stdout, ready to upload to GitHub code scanning. Covers every finding kind; SAST, secret and misconfig findings carry a file and line so the platform annotates the exact source line. Findings exempted from the CI gate by verified AI consensus remain present and carry an external suppression with the policy version and reason. `--fail-on` still sets the exit code. |
+| `--sarif-out <file>` | Write the same SARIF report to `<file>` and keep the human report on stdout. Prefer this in a pipeline: `--sarif` owns stdout, so redirecting it to a file leaves the job log with nothing but the exit code. |
 | `--sbom` | Print the generated CycloneDX SBOM to stdout instead of a findings report. |
 | `--server <url> --project <key>` | Record the result on a Synapse server as that project's next analysis. The token comes from `SYNAPSE_API_TOKEN`. `https` is required unless the host is loopback. See [Push results to the console](#push-results-to-the-console). |
+| `--engagement <id>` | Record the scan's security findings on that engagement, through the server's own SARIF ingest, so a pipeline scan reaches the console the way a code-quality analysis does. Independent of `--project`: give either, or both to record one run in both places. The server deduplicates against existing first-party findings and reports what it refused. |
+| `--asset <id>` | Bind the findings ingested by `--engagement` to a business asset. Needs `--engagement`. |
+| `--coverage <file>` | Record test coverage with the project analysis. lcov, cobertura and jacoco are auto-detected, by the same parser `synapse-cli coverage` and `gate --coverage` use. The analysis payload has always carried a `line_coverage` field and the scan had no way to fill it, so a pushed analysis showed no coverage and a managed gate could not evaluate a coverage condition. Needs `--project`. |
+| `--push-sbom` | Import the generated CycloneDX SBOM into the engagement, which is how an image scan's component inventory becomes visible on the console beside its findings. The server keeps one active imported SBOM per engagement, so this replaces any SBOM imported by hand. Needs `--engagement`. |
+| `--push-source` | Upload the scanned tree for the analysis `--project` creates, so the console's Code view can show the source. Without it a CI-pushed analysis reports source as unavailable with the reason `not_retained`, because the CLI pushes results and not files. Best-effort: a failed upload warns and names the `publish-source` command that retries it, and never fails the build. Needs `--project`. |
 | `--insecure-http` | Accept a plain-`http` `--server` that is not loopback. The API token then travels in the clear; use it only on a network you trust. |
-| `--branch <ref>`, `--run-url <url>`, `--ci-provider <name>` | What the pipeline says about itself, shown on the analysis in the console. On GitHub Actions, GitLab CI and Jenkins these are read from the provider's variables when not given. |
+| `--branch <ref>`, `--run-url <url>`, `--ci-provider <name>` | What the pipeline says about itself, shown on the analysis in the console. On GitHub Actions, GitLab CI, Bitbucket Pipelines, Jenkins and Azure Pipelines these are read from provider variables when not given. |
 
 `--json`, `--sarif`, and `--sbom` each take over stdout completely, so they are mutually exclusive.
-Passing more than one exits `2` rather than silently honoring the last flag.
+Passing more than one exits `2` rather than silently honoring the last flag. While one of them owns stdout,
+the `--server` push status lines (engagement ingest, SBOM import, source publication) go to stderr, so stdout
+stays exactly one document.
 
 ### Suppressing findings with `.synapseignore`
 
@@ -190,7 +223,7 @@ synapse-cli scan . --mode licenses
 synapse-cli scan alpine:3.19 --image --offline
 ```
 
-The exit code is 0 when no finding meets the `--fail-on` threshold. See
+The exit code is 0 when no finding meets the `--fail-on` threshold and, when enabled, `--require-complete` finds complete required-engine coverage. See
 [Exit codes](#exit-codes) for the full contract, which distinguishes a gate result from a usage error.
 
 ### Push results to the console
@@ -219,9 +252,12 @@ right about what they measure, and the server's is the one the console records.
 A push that fails is an error whatever the local gate says. A pipeline that asked for its result to
 be recorded must not go green because the record silently did not happen.
 
-`--server` runs a full source analysis, so it cannot be combined with `--image` or with a `--mode`
-other than `full`. The project must exist on the server first; create it in the console or with
-`POST /api/v1/projects`.
+`--project` records a full source analysis, so it cannot be combined with `--image` or with a `--mode`
+other than `full`: measures, ratings and a code-quality report have no meaning for an image. `--engagement`
+has no such limit, because an ingest is findings and an image scan produces those as well as a source scan
+does. An image pipeline therefore records with `--engagement`, optionally adding `--push-sbom` so the
+image's package inventory lands on the console too, and the findings appear under the engagement's
+**Imported** tab with the tool and rule that produced each one.
 
 Recording a result needs the operate permission. Give the pipeline its own user with that role
 rather than the bootstrap operator token.
@@ -236,6 +272,9 @@ When a scan is pushed with `--server`, Synapse also captures provider-neutral pu
 | GitLab CI | `CI_MERGE_REQUEST_IID`, `CI_MERGE_REQUEST_TARGET_BRANCH_NAME`, `CI_PROJECT_PATH`, `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` (falling back to `CI_COMMIT_SHA`). |
 | Bitbucket Pipelines | `BITBUCKET_PR_ID`, `BITBUCKET_PR_DESTINATION_BRANCH`, `BITBUCKET_REPO_FULL_NAME`, `BITBUCKET_COMMIT`. |
 | Jenkins multibranch | `CHANGE_ID`, `CHANGE_TARGET`, `GIT_COMMIT`; set `SYNAPSE_REPO_SLUG` when Jenkins cannot infer the repository slug. |
+| Azure Pipelines | `TF_BUILD=true`, `BUILD_BUILDID`, `SYSTEM_COLLECTIONURI`, `SYSTEM_TEAMPROJECT`, `BUILD_REPOSITORY_PROVIDER`, `BUILD_REPOSITORY_NAME`, `SYSTEM_PULLREQUEST_PULLREQUESTID`, `SYSTEM_PULLREQUEST_PULLREQUESTNUMBER`, `SYSTEM_PULLREQUEST_TARGETBRANCH`, `SYSTEM_PULLREQUEST_SOURCEBRANCH`, `SYSTEM_PULLREQUEST_SOURCECOMMITID`. Azure Repos identities are normalized as `organization/project/repository`; GitHub-backed pipelines prefer the forge PR number when Azure exposes both an ID and number. The CLI never substitutes a PR's synthetic `BUILD_SOURCEVERSION` merge SHA for the actual PR head. |
+
+Azure Pipelines is detected through `TF_BUILD=true`. A credential-free run URL is constructed only for a valid `https://dev.azure.com/{organization}/` collection URI and numeric build ID. When `BUILD_REPOSITORY_PROVIDER=TfsGit`, the same trusted collection URI supplies the organization portion of the Azure Repos decoration target. For a GitHub or other external repository, Synapse does not invent an Azure Repos slug; set `SYNAPSE_CI_PROVIDER` and `SYNAPSE_REPO_SLUG` explicitly when decoration should target that external forge. A standalone `synapse-cli` scan requires no Azure API token for auto-detection; the server's separate read-only integration uses a PAT.
 
 Provider-independent overrides are `SYNAPSE_PR_NUMBER`, `SYNAPSE_PR_TARGET_BRANCH`, `SYNAPSE_REPO_SLUG`, and `SYNAPSE_PR_HEAD_SHA`. Decoration is skipped unless all four identity fields are present.
 
@@ -441,7 +480,7 @@ live and offline sources.
 
 The reusable action installs the released `synapse-cli` and runs the gate, so a whole scan step is three
 lines. `v1` is the action's INTERFACE version and moves with every release; pin a release tag such as
-`@v0.2.1` instead when you want the action itself frozen.
+`@v0.2.4` instead when you want the action itself frozen.
 
 ```yaml
 - uses: KKloudTarus/synapse-ce@v1
@@ -750,9 +789,13 @@ decoration needs and prefer a short-lived CI-provided token:
     SYNAPSE_DECORATION_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-The server decorates automatically too: a project that opts in
-(`PUT /api/v1/projects/{key}/decoration {"enabled": true}`) has every PR-ref analysis decorated using
+The server decorates automatically too: a project that opts in (the **PR decoration** switch in the
+project header in the console, or `PUT /api/v1/projects/{key}/decoration {"enabled": true}`; both need
+the operate permission) has every PR-ref analysis decorated using
 the tenant's configured SCM connector, so a CI push through the import route needs no `--decorate` flag.
+The server picks the connector for the host of the project's git source, so a project on GitHub
+Enterprise Server or self-managed GitLab is decorated through that connector's API base URL
+(see [Self-hosted forges](configuration.md#self-hosted-forges-github-enterprise-server-self-managed-gitlab)).
 Decoration is off for every project by default, so no project performs an outward forge write until it
 opts in.
 

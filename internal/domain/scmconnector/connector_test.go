@@ -23,6 +23,7 @@ func TestNewConnectorNormalizesHostAndDefaultsUsername(t *testing.T) {
 		{"url host, gitlab default user", "https://gitlab.example.com/group", ProviderGitLab, "", "gitlab.example.com", "oauth2"},
 		{"non-default port kept", "ghe.corp.io:8443", ProviderGeneric, "svc-scanner", "ghe.corp.io:8443", "svc-scanner"},
 		{"explicit username kept", "github.com", ProviderGitHub, "octo-bot", "github.com", "octo-bot"},
+		{"azure default username", "dev.azure.com", ProviderAzureDevOps, "", "dev.azure.com", "pat"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

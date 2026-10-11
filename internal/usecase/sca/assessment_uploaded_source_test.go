@@ -109,3 +109,83 @@ func TestAssessmentCoverageVersionsExcludeRiskOnlyEnrichment(t *testing.T) {
 		}
 	}
 }
+
+func TestAssessmentFreshOutcomePlanMissingEngineIsRejected(t *testing.T) {
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	item, err := engdom.New("initial", "tenant", "Native upload", "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := ports.AcquireRequest{Kind: ports.TargetUpload, Value: sourcepackage.TargetPrefix + strings.Repeat("a", 64)}
+	result := &ScanResult{Target: request.Value, ExecutionMode: ScanModeFull, ReproDigest: strings.Repeat("b", 64), Completeness: ports.Completeness{Confident: true}}
+	if _, _, err := assessmentSCALane(item, "run", now, now.Add(time.Second), request, result, ""); err == nil {
+		t.Fatal("fresh result without its planned engine outcomes was accepted")
+	}
+}
+
+func TestAssessmentSelectedZeroFindingEngineProducesSealableLane(t *testing.T) {
+	now := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	item, err := engdom.New("initial", "tenant", "Native upload", "", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := ports.AcquireRequest{Kind: ports.TargetUpload, Value: sourcepackage.TargetPrefix + strings.Repeat("a", 64)}
+	svc := &Service{}
+	svc.SetSourceEngineSelection(true, false, false)
+	outcomes := svc.engineOutcomePlan(ScanOptions{Mode: ScanModeFull}, false, true)
+	planned := scanrun.CloneEngineOutcomes(outcomes)
+	for i := range outcomes {
+		if outcomes[i].Required {
+			outcomes[i].Execution, outcomes[i].Coverage, outcomes[i].Reason = scanrun.EngineCompleted, scanrun.CoverageComplete, scanrun.ReasonNone
+		}
+		if outcomes[i].Engine == "sast" {
+			outcomes[i] = scanrun.EngineOutcome{Engine: "sast", Required: true, Execution: scanrun.EngineCompleted, Coverage: scanrun.CoverageComplete, Counts: map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: 0}}
+		}
+	}
+	result := &ScanResult{Target: request.Value, ExecutionMode: ScanModeFull, EngineOutcomes: outcomes, plannedEngines: planned, ReproDigest: strings.Repeat("b", 64), Completeness: ports.Completeness{Confident: true}}
+	base, status, err := assessmentSCALane(item, "run", now, now.Add(time.Second), request, result, "")
+	if err != nil || status != scanrun.StatusSucceeded {
+		t.Fatalf("base lane status=%s err=%v", status, err)
+	}
+	items := assessmentProducerOutcomes(base.EngineOutcomes)["sast"]
+	if len(items) != 1 || items[0].Counts[scanrun.MeasureFindings] != 0 {
+		t.Fatalf("zero-finding SAST outcome was not retained: %+v", items)
+	}
+	base.LaneKey, base.Producer = "sast", "sast"
+	base.AuthoritativeFindingKinds = []string{"sast"}
+	base.EngineOutcomes = items
+	finished := now.Add(time.Second)
+	base.SealedAt = &finished
+	hash, err := scanrun.ComputeManifestHash(base)
+	if err != nil || hash == "" {
+		t.Fatalf("zero-finding SAST lane is not sealable: hash=%q err=%v", hash, err)
+	}
+}
+
+func TestAssessmentFreshOutcomePlanRejectsForgedOptionalEngine(t *testing.T) {
+	svc := &Service{}
+	planned := svc.engineOutcomePlan(ScanOptions{Mode: ScanModeFull}, false, true)
+	actual := scanrun.CloneEngineOutcomes(planned)
+	for i := range actual {
+		if actual[i].Required {
+			actual[i].Execution, actual[i].Coverage, actual[i].Reason = scanrun.EngineCompleted, scanrun.CoverageComplete, scanrun.ReasonNone
+		}
+		if actual[i].Engine == "inventory" {
+			actual[i].Required = false
+		}
+	}
+	result := &ScanResult{ExecutionMode: ScanModeFull, EngineOutcomes: actual, plannedEngines: planned}
+	if _, err := assessmentFreshEngineOutcomes(result); err == nil {
+		t.Fatal("forged optional required engine was accepted")
+	}
+}
+
+func TestAssessmentFreshOutcomePlanRejectsOmission(t *testing.T) {
+	svc := &Service{}
+	planned := svc.engineOutcomePlan(ScanOptions{Mode: ScanModeFull}, false, true)
+	actual := scanrun.CloneEngineOutcomes(planned[:len(planned)-1])
+	result := &ScanResult{ExecutionMode: ScanModeFull, EngineOutcomes: actual, plannedEngines: planned}
+	if _, err := assessmentFreshEngineOutcomes(result); err == nil {
+		t.Fatal("fresh result missing a server-planned engine was accepted")
+	}
+}

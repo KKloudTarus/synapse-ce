@@ -88,7 +88,14 @@ jobs:
           done
           # Fail closed: a release with no scannable artifact must NOT pass vacuously.
           test "${scanned}" -gt 0 || { echo "no artifacts were scanned — failing the release"; exit 1; }
-          # The container image is scanned the same way once dockers_v2 image publishing is re-enabled.
+          # SCOPE: this gate covers the release ARTIFACTS (the binaries goreleaser publishes). The five
+          # container images are built and pushed by the `image` matrix in release.yml, and they are NOT
+          # scanned here. Saying so is deliberate: a loop that scanned them would have to tell "the image
+          # has not propagated to the registry yet" apart from "the image has a finding above the floor",
+          # and both are a non-zero exit from the scanner. Guessing between them either blocks releases
+          # spuriously or passes vacuously, which is the exact failure this gate exists to prevent. The
+          # honest scope is stated here rather than implied by a comment about a condition that no longer
+          # holds ("once dockers_v2 image publishing is re-enabled" — it is enabled).
 
   tarball-smoke:
     name: Smoke-test the packaged CLI tarball

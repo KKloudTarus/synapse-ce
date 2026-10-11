@@ -13,7 +13,7 @@ import (
 )
 
 // CurrentManifestSchemaVersion is the canonical schema version for sealed manifest envelopes.
-const CurrentManifestSchemaVersion = 1
+const CurrentManifestSchemaVersion = 2
 
 const (
 	maxScanRunIDLength = 255
@@ -157,29 +157,36 @@ func (s LaneStage) Validate() error {
 
 // Lane represents a normalized producer-lane provenance execution within a scan run.
 type Lane struct {
-	TenantID                  shared.ID      `json:"tenant_id"`
-	EngagementID              shared.ID      `json:"engagement_id"`
-	ScanRunID                 string         `json:"scan_run_id"`
-	LaneKey                   string         `json:"lane_key"`
-	Producer                  string         `json:"producer"`
-	TerminalStatus            TerminalStatus `json:"terminal_status"`
-	Target                    TargetIdentity `json:"target"`
-	AuthoritativeFindingKinds []string       `json:"authoritative_finding_kinds"`
-	IncludedScope             []string       `json:"included_scope"`
-	ExcludedScope             []string       `json:"excluded_scope"`
-	StartedAt                 time.Time      `json:"started_at"`
-	FinishedAt                *time.Time     `json:"finished_at,omitempty"`
-	ResultRef                 string         `json:"result_ref,omitempty"`
-	EvidenceRef               string         `json:"evidence_ref,omitempty"`
-	ResultSHA256              string         `json:"result_sha256,omitempty"`
-	ManifestSchemaVersion     int            `json:"manifest_schema_version"`
-	ManifestHash              string         `json:"manifest_hash"`
-	SealedAt                  *time.Time     `json:"sealed_at,omitempty"`
-	Versions                  []LaneVersion  `json:"versions,omitempty"`
-	Stages                    []LaneStage    `json:"stages,omitempty"`
+	TenantID                  shared.ID       `json:"tenant_id"`
+	EngagementID              shared.ID       `json:"engagement_id"`
+	ScanRunID                 string          `json:"scan_run_id"`
+	LaneKey                   string          `json:"lane_key"`
+	Producer                  string          `json:"producer"`
+	TerminalStatus            TerminalStatus  `json:"terminal_status"`
+	Target                    TargetIdentity  `json:"target"`
+	AuthoritativeFindingKinds []string        `json:"authoritative_finding_kinds"`
+	IncludedScope             []string        `json:"included_scope"`
+	ExcludedScope             []string        `json:"excluded_scope"`
+	StartedAt                 time.Time       `json:"started_at"`
+	FinishedAt                *time.Time      `json:"finished_at,omitempty"`
+	ResultRef                 string          `json:"result_ref,omitempty"`
+	EvidenceRef               string          `json:"evidence_ref,omitempty"`
+	ResultSHA256              string          `json:"result_sha256,omitempty"`
+	ManifestSchemaVersion     int             `json:"manifest_schema_version"`
+	ManifestHash              string          `json:"manifest_hash"`
+	SealedAt                  *time.Time      `json:"sealed_at,omitempty"`
+	Versions                  []LaneVersion   `json:"versions,omitempty"`
+	Stages                    []LaneStage     `json:"stages,omitempty"`
+	EngineOutcomes            []EngineOutcome `json:"engine_outcomes,omitempty"`
 }
 
 func (l Lane) Validate() error {
+	if _, err := CanonicalEngineOutcomes(l.EngineOutcomes); err != nil {
+		return err
+	}
+	if len(l.EngineOutcomes) > 0 && l.ManifestSchemaVersion != 2 {
+		return fmt.Errorf("%w: engine outcomes require manifest version 2", shared.ErrValidation)
+	}
 	if l.TenantID.IsZero() {
 		return fmt.Errorf("%w: tenant ID is required", shared.ErrValidation)
 	}
@@ -338,6 +345,9 @@ func (r ScanRun) IsCompleteCoverage() bool {
 				return false
 			}
 		}
+		if len(lane.EngineOutcomes) > 0 && !ComputeEngineCoverage(lane.EngineOutcomes).Complete() {
+			return false
+		}
 	}
 	computed, err := ComputeRunManifestHash(r.Lanes)
 	return err == nil && computed == r.ManifestHash
@@ -358,6 +368,7 @@ type CanonicalManifestEnvelope struct {
 	Versions                  []LaneVersion        `json:"versions"`
 	Stages                    []CanonicalLaneStage `json:"stages"`
 	ResultSHA256              string               `json:"result_sha256,omitempty"`
+	EngineOutcomes            []EngineOutcome      `json:"engine_outcomes,omitempty"`
 }
 
 // CanonicalLaneStage fixes timestamp precision and zone so a manifest reloaded
@@ -432,7 +443,18 @@ func ComputeManifestHash(lane Lane) (string, error) {
 
 	schemaVer := lane.ManifestSchemaVersion
 	if schemaVer < 1 {
-		schemaVer = CurrentManifestSchemaVersion
+		// The original hash algorithm used version 1 for unspecified versions.
+		schemaVer = 1
+	}
+	if schemaVer > CurrentManifestSchemaVersion {
+		return "", fmt.Errorf("%w: unsupported manifest schema version", shared.ErrValidation)
+	}
+	outcomes, err := CanonicalEngineOutcomes(lane.EngineOutcomes)
+	if err != nil {
+		return "", err
+	}
+	if len(outcomes) > 0 && schemaVer != 2 {
+		return "", fmt.Errorf("%w: engine outcomes require manifest version 2", shared.ErrValidation)
 	}
 
 	envelope := CanonicalManifestEnvelope{
@@ -449,6 +471,7 @@ func ComputeManifestHash(lane Lane) (string, error) {
 		Versions:                  versions,
 		Stages:                    stages,
 		ResultSHA256:              lane.ResultSHA256,
+		EngineOutcomes:            outcomes,
 	}
 
 	payload, err := json.Marshal(envelope)

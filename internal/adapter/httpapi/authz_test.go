@@ -36,7 +36,7 @@ func TestAuthzDecorator(t *testing.T) {
 	if code, ran := call("agent", true); code != http.StatusForbidden || ran {
 		t.Errorf("machine(agent)+operate: want 403 + handler NOT run, got code=%d ran=%v", code, ran)
 	}
-	if code, ran := call("", false); code != http.StatusForbidden || ran {
-		t.Errorf("unauthenticated: want 403 + handler NOT run, got code=%d ran=%v", code, ran)
+	if code, ran := call("", false); code != http.StatusUnauthorized || ran {
+		t.Errorf("unauthenticated: want 401 + handler NOT run, got code=%d ran=%v", code, ran)
 	}
 }

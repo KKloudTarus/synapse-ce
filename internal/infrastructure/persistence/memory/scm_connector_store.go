@@ -123,7 +123,7 @@ func (s *SCMConnectorStore) ResolveGitCredential(ctx context.Context, host strin
 	defer s.mu.RUnlock()
 	for _, row := range s.data[t] {
 		if row.conn.Host == host {
-			return ports.GitCredential{Username: row.conn.Username, Token: append([]byte(nil), row.token...)}, true, nil
+			return ports.GitCredential{Username: row.conn.Username, Token: append([]byte(nil), row.token...), APIBase: row.conn.APIBase}, true, nil
 		}
 	}
 	return ports.GitCredential{}, false, nil
@@ -132,6 +132,6 @@ func (s *SCMConnectorStore) ResolveGitCredential(ctx context.Context, host strin
 func metaOf(c scmconnector.Connector) ports.SCMConnectorMeta {
 	return ports.SCMConnectorMeta{
 		ID: c.ID, Name: c.Name, Provider: c.Provider, Host: c.Host,
-		Username: c.Username, AuthKind: c.AuthKind, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		Username: c.Username, AuthKind: c.AuthKind, APIBase: c.APIBase, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }

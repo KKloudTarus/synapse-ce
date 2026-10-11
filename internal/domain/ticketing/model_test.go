@@ -39,3 +39,38 @@ func TestLinkRefusesCredentialBearingURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMappingRejectsNonPersistableText(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	base := Mapping{ID: "mapping", TenantID: "tenant", IntegrationID: "integration",
+		Scope: Engagement, ScopeID: "engagement", ProjectKey: "SEC", IssueType: "Bug",
+		Version: 1, CreatedAt: now, UpdatedAt: now}
+	fields := []struct {
+		name string
+		set  func(*Mapping, string)
+	}{
+		{"project key", func(m *Mapping, v string) { m.ProjectKey = v }},
+		{"issue type", func(m *Mapping, v string) { m.IssueType = v }},
+		{"component", func(m *Mapping, v string) { m.Component = v }},
+		{"security level", func(m *Mapping, v string) { m.SecurityLevel = v }},
+		{"label", func(m *Mapping, v string) { m.Labels = []string{v} }},
+		{"priority key", func(m *Mapping, v string) { m.PriorityMap = map[string]string{v: "High"} }},
+		{"priority value", func(m *Mapping, v string) { m.PriorityMap = map[string]string{"high": v} }},
+	}
+	for _, field := range fields {
+		t.Run(field.name, func(t *testing.T) {
+			for _, value := range []string{"text\x00", "text\xff"} {
+				mapping := base.Clone()
+				field.set(&mapping, value)
+				if err := mapping.Validate(); !errors.Is(err, shared.ErrValidation) {
+					t.Fatalf("accepted unsupported text %q: %v", value, err)
+				}
+			}
+			mapping := base.Clone()
+			field.set(&mapping, "Ưu tiên")
+			if err := mapping.Validate(); err != nil {
+				t.Fatalf("rejected UTF-8 text: %v", err)
+			}
+		})
+	}
+}

@@ -50,4 +50,6 @@ spec:
             - {name: tmp, mountPath: /tmp}
       volumes:
         - name: tmp
-          emptyDir: {}
+          # nginx writes only its PID and small client bodies here.
+          emptyDir:
+            sizeLimit: {{ .Values.web.scratch.tmpSizeLimit }}

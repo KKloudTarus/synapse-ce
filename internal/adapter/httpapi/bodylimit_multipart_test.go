@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -193,11 +194,11 @@ func TestUploadCeilingSurvivesTheRealChain(t *testing.T) {
 	aupStore.accepted["1.0"] = aup.Acceptance{Version: "1.0"}
 	rt := &Router{
 		log: discardLog(),
-		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
+		auth: NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
 			if token == "operator" {
-				return Principal{ID: "operator", Role: "admin", TenantID: "tenant-a"}, true
+				return Principal{ID: "operator", Role: "admin", TenantID: "tenant-a", Credential: authz.KindBootstrap}, nil
 			}
-			return Principal{}, false
+			return Principal{}, errTestCredentialInvalid
 		}),
 		aup: newTestAUP(aupStore, &fakeAudit{}),
 	}

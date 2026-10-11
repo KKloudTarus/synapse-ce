@@ -22,16 +22,22 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	// The tenant settings API validates IANA time zones (#1359). Embedding the database keeps that
+	// independent of whether the runtime image ships /usr/share/zoneinfo.
+	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	eventschemas "github.com/KKloudTarus/synapse-ce/docs/guide/schemas/events"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/httpapi"
+	"github.com/KKloudTarus/synapse-ce/internal/adapter/notificationbuiltin"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/alerting"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/consolelink"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/correlation"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
@@ -39,6 +45,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/symbolcanon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/taint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
@@ -50,9 +57,14 @@ import (
 	egressinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/egress"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
+	azurepipelinesintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/azurepipelines"
+	bitbucketintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/bitbucket"
+	githubintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/github"
+	gitlabintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/gitlab"
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
 	oidcadapter "github.com/KKloudTarus/synapse-ce/internal/infrastructure/oidc"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
@@ -66,9 +78,17 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/responsekey"
 	responseobserverinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/responseobserver"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/rulecatalog"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/scmdecoration"
+	elastic "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/elastic"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
+	siemseal "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/seal"
+	sentinel "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/sentinel"
+	splunk "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/splunk"
+	syslogtls "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/syslog"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/slackapi"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
@@ -174,6 +194,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/fleetwork"
 	identitybff "github.com/KKloudTarus/synapse-ce/internal/usecase/identitybff"
 	identityuc "github.com/KKloudTarus/synapse-ce/internal/usecase/identityuc"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/inbox"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/jsreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/leaderuc"
@@ -206,12 +227,16 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	scanrunuc "github.com/KKloudTarus/synapse-ce/internal/usecase/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/scmconnectoruc"
+	scmwebhookuc "github.com/KKloudTarus/synapse-ce/internal/usecase/scmwebhook"
+	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/srcreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/symreach"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/taintscan"
+	tenancyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/tenancy"
 	threatmodeluc "github.com/KKloudTarus/synapse-ce/internal/usecase/threatmodeluc"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 	vexuc "github.com/KKloudTarus/synapse-ce/internal/usecase/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityactionuc"
@@ -353,9 +378,39 @@ func main() {
 		log.Error("vulnerability maintenance configuration invalid", "err", err)
 		os.Exit(1)
 	}
+	if err := cfg.ValidateNotificationProvidersDisabled(); err != nil {
+		log.Error("notification kill switch invalid", "err", err)
+		os.Exit(1)
+	}
+	if err := cfg.ValidateNotificationUnsubscribeURL(); err != nil {
+		log.Error("notification unsubscribe URL invalid", "err", err)
+		os.Exit(1)
+	}
+	// The notification driver registry is the one list of channel types this build delivers to. The
+	// capability catalog advertises it and the operator kill switch is checked against it, so it is
+	// built whether or not tenant notifications are enabled: a typo in the switch always stops startup.
+	notificationSender := notificationsender.New(notificationsender.SMTPConfig{
+		Host: cfg.NotificationSMTPHost, Port: cfg.NotificationSMTPPort, From: cfg.NotificationSMTPFrom,
+		Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS, UnsubscribeURL: cfg.NotificationUnsubscribeURL,
+	}, 10*time.Second)
+	disabledNotificationTypes, err := notificationSender.ResolveDisabled(cfg.NotificationProvidersDisabled)
+	if err != nil {
+		log.Error("notification kill switch invalid", "err", err)
+		os.Exit(1)
+	}
+	if len(disabledNotificationTypes) > 0 {
+		log.Warn("notification channel types disabled by the operator", "types", cfg.NotificationProvidersDisabled)
+	}
+	if err := cfg.ValidatePublicBaseURL(); err != nil {
+		log.Error("console link configuration invalid", "err", err)
+		os.Exit(1)
+	}
 	if err := cfg.ValidateOIDCPosture(); err != nil {
 		log.Error("OIDC posture invalid", "err", err)
 		os.Exit(1)
+	}
+	for _, warning := range cfg.OIDCDeprecationWarnings() {
+		log.Warn("deprecated OIDC configuration", "detail", warning)
 	}
 	if err := cfg.ValidateSecretVerification(); err != nil {
 		log.Error("active secret verification configuration invalid", "err", err)
@@ -603,6 +658,7 @@ func main() {
 		pool, err := postgres.ConnectPool(startup, cfg.DBDSN, postgres.PoolConfig{
 			MaxConns: int32(cfg.DBMaxConns), MinConns: int32(cfg.DBMinConns),
 			MaxConnLifetime: cfg.DBMaxConnLifetime, MaxConnIdleTime: cfg.DBMaxConnIdleTime,
+			SIEMCaptureEnabled: &cfg.SIEMEnabled,
 		})
 		if err != nil {
 			log.Error("db connect failed", "err", err)
@@ -610,7 +666,7 @@ func main() {
 		}
 		defer pool.Close()
 		databasePool = pool
-		haltPool, err := postgres.ConnectPool(startup, cfg.DBHaltWriterDSN, postgres.PoolConfig{MaxConns: 2, MinConns: 0, MaxConnLifetime: cfg.DBMaxConnLifetime, MaxConnIdleTime: cfg.DBMaxConnIdleTime})
+		haltPool, err := postgres.ConnectPool(startup, cfg.DBHaltWriterDSN, postgres.PoolConfig{MaxConns: 2, MinConns: 0, MaxConnLifetime: cfg.DBMaxConnLifetime, MaxConnIdleTime: cfg.DBMaxConnIdleTime, SIEMCaptureEnabled: &cfg.SIEMEnabled})
 		if err != nil {
 			log.Error("halt-writer database connect failed", "err", err)
 			os.Exit(1)
@@ -925,12 +981,33 @@ func main() {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
 	}
+	if err := azurepipelinesintegration.Register(integrationRegistry); err != nil {
+		log.Error("integration provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := githubintegration.Register(integrationRegistry); err != nil {
+		log.Error("integration provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := gitlabintegration.Register(integrationRegistry); err != nil {
+		log.Error("integration provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := bitbucketintegration.Register(integrationRegistry); err != nil {
+		log.Error("integration provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	integrationRules, err := cfg.IntegrationSelfHostedRules()
+	if err != nil {
+		log.Error("integration endpoint configuration invalid", "err", err)
+		os.Exit(1)
+	}
+	integrationRegistry.SetSelfHostedRules(integrationRules)
 	integrationService, err := integrationuc.NewService(integrationStore, integrationRegistry, projectRepo, integrationMatcher, ids, clock)
 	if err != nil {
 		log.Error("integration service init failed", "err", err)
 		os.Exit(1)
 	}
-	integrationService.SetPrivateNetworkAllowed(cfg.IntegrationAllowPrivateNetwork)
 	if cfg.DBDSN == "" {
 		integrationService.SetRunLock(memory.NewRunLock())
 	}
@@ -968,8 +1045,10 @@ func main() {
 	// (project.DecoratePullRequests). One multiplexing decorator serves all forges, resolving the
 	// write credential from the tenant-scoped SCM connector store per call. It stays off for every
 	// project by default, so composing it here performs no outward write until a project opts in.
+	// A project hosted on GHES or self-managed GitLab is decorated through its connector's API base,
+	// only while that host stays on the operator's integration host allowlist.
 	if scmConnectorStore != nil {
-		if decorator, decErr := scmdecoration.NewMultiplexDecorator(scmConnectorStore); decErr != nil {
+		if decorator, decErr := scmdecoration.NewMultiplexDecorator(scmConnectorStore, scmdecoration.WithSelfHostedRules(integrationRules)); decErr != nil {
 			log.Warn("pr decoration disabled: multiplex decorator not constructed", "error", decErr.Error())
 		} else {
 			projectService.SetPRDecorator(decorator)
@@ -1366,22 +1445,28 @@ func main() {
 		log.Error("users service init failed", "err", err)
 		os.Exit(1)
 	}
+	// The last-admin guard counts the roster and then writes, and every user mutation commits with
+	// its audit record. Both need one transaction: PostgreSQL uses the tenant runner, and the
+	// no-DSN stores use the in-memory runner, whose repositories register compensations.
 	if vulnerabilityTransactions != nil {
-		// The last-admin guard counts the roster and then writes. Both statements must be one
-		// transaction, or two concurrent demotions each see the other admin still enabled and the
-		// tenant is left with nobody who can administer it.
 		usersService.SetTransactionRunner(vulnerabilityTransactions)
+	} else {
+		usersService.SetTransactionRunner(memory.NewTenantTransactionRunner())
 	}
 	if err := usersService.EnsureBootstrapAdmin(context.Background(), cfg.APIToken); err != nil {
 		log.Error("bootstrap admin seed failed", "err", err)
 		os.Exit(1)
 	}
-	auth := httpapi.NewAuthenticator(func(ctx context.Context, token string) (httpapi.Principal, bool) {
-		u, err := usersService.Authenticate(ctx, token)
+	// Disabling a user revokes its browser sessions in the same transaction as the user write.
+	usersService.SetIdentityStore(identityStore)
+	auth := httpapi.NewAuthenticator(func(ctx context.Context, token string) (httpapi.Principal, error) {
+		// The users service classifies the failure (invalid credential versus dependency outage)
+		// and constructs the bootstrap principal explicitly from SYNAPSE_API_TOKEN.
+		p, u, err := usersService.AuthenticatePrincipal(ctx, token)
 		if err != nil {
-			return httpapi.Principal{}, false
+			return httpapi.Principal{}, err
 		}
-		return httpapi.Principal{ID: u.ID.String(), Name: u.Name, Role: string(u.Role), TenantID: u.TenantID}, true
+		return httpapi.Principal{ID: p.ActorID, Name: u.Name, Role: string(p.Role), TenantID: u.TenantID, Credential: p.Credential.Kind, Provenance: p.Provenance}, nil
 	})
 	// Audit read/verify use case: same signer as evidence, so the audit head is
 	// origin-attested at parity with the evidence chain.
@@ -1415,6 +1500,52 @@ func main() {
 		os.Exit(1)
 	}
 	router := httpapi.NewRouter(log, auth, engService, scaService, aupService, findingsService, exportService, reportService, evidenceService, reconService, logBroker, transferService, auditService, vexService, usersService, credentialsService)
+	if cfg.InboundWebhooksEnabled {
+		if databasePool == nil || reconQueue == nil || cfg.VaultMasterKey == "" {
+			log.Error("inbound webhooks require PostgreSQL and SYNAPSE_VAULT_MASTER_KEY")
+			os.Exit(1)
+		}
+		checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := postgres.CheckRLSRuntimeRole(checkCtx, databasePool)
+		cancel()
+		if err != nil {
+			log.Error("inbound webhook runtime DB role cannot enforce tenant isolation", "err", err)
+			os.Exit(1)
+		}
+		// Receipt and enqueue commit together before any source work starts.
+		scaService.SetQueue(reconQueue)
+		if toolExecution != config.ToolExecutionDispatchOnly && scaWorker == nil {
+			scaWorker = worker.New(reconQueue, map[string]worker.Handler{
+				scauc.ScanJobKind: scaJobHandler{svc: scaService},
+			}, worker.Config{Visibility: cfg.ScanTimeout + time.Minute, MaxAttempts: 3}, log)
+		}
+		webhookRepository := postgres.NewInboundWebhookRepository(databasePool)
+		githubWebhookReceiver := scmwebhookuc.NewService(integrationService, projectService)
+		if err := githubWebhookReceiver.SetAdmin(
+			webhookRepository, vaultCipher, auditLog, clock,
+			postgres.NewTenantTransactionRunner(databasePool),
+		); err != nil {
+			log.Error("GitHub inbound webhook administration init failed", "err", err)
+			os.Exit(1)
+		}
+		bitbucketReceiver, err := scmwebhookuc.NewBitbucketReceiver(integrationService, projectService, webhookRepository)
+		if err != nil {
+			log.Error("Bitbucket webhook receiver init failed", "err", err)
+			os.Exit(1)
+		}
+		gitlabWebhookReceiver, err := scmwebhookuc.NewReceiver(integrationStore, projectService, webhookRepository, clock)
+		if err != nil {
+			log.Error("GitLab inbound webhook receiver init failed", "err", err)
+			os.Exit(1)
+		}
+		providerReceiver, err := scmwebhookuc.NewProviderReceiver(githubWebhookReceiver, gitlabWebhookReceiver, bitbucketReceiver)
+		if err != nil {
+			log.Error("SCM inbound webhook receiver init failed", "err", err)
+			os.Exit(1)
+		}
+		router.SetInboundWebhookPlane(webhookRepository, vaultCipher, providerReceiver)
+		router.SetInboundWebhookAdmin(githubWebhookReceiver)
+	}
 	if cfg.OwnershipMode != "off" && cfg.OwnershipMode != "observe" && cfg.OwnershipMode != "enforce" {
 		log.Error("SYNAPSE_OWNERSHIP_MODE must be off, observe or enforce")
 		os.Exit(1)
@@ -1458,6 +1589,22 @@ func main() {
 	} else {
 		router.SetOwnership(nil, "off", "disabled")
 	}
+	// Tenant language and time zone (#1359), read by message templates and digests.
+	var tenantSettingsStore ports.TenantSettingsStore = memory.NewTenantSettingsStore()
+	if databasePool != nil {
+		tenantSettingsStore = postgres.NewTenantSettingsStore(databasePool)
+	}
+	tenantSettingsService, err := tenancyuc.NewService(tenantSettingsStore, auditLog, clock)
+	if err != nil {
+		log.Error("tenant settings service init failed", "err", err)
+		os.Exit(1)
+	}
+	router.SetTenantSettings(tenantSettingsService)
+	var userContactService *usercontacts.Service
+	if databasePool != nil {
+		router.SetAssigneeReviewReader(postgres.NewAssigneeReviewReader(databasePool))
+		router.SetUserPickerReader(postgres.NewUserPickerReader(databasePool))
+	}
 	if cfg.NotificationEnabled {
 		if databasePool == nil {
 			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires PostgreSQL")
@@ -1467,18 +1614,77 @@ func main() {
 			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires SYNAPSE_VAULT_MASTER_KEY shared by API and worker")
 			os.Exit(1)
 		}
-		notificationSender := notificationsender.New(notificationsender.SMTPConfig{
-			Host: cfg.NotificationSMTPHost, Port: cfg.NotificationSMTPPort, From: cfg.NotificationSMTPFrom,
-			Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS,
-		}, 10*time.Second)
-		notificationService, notificationErr := notificationuc.NewService(postgres.NewNotificationRepository(databasePool), vaultCipher, notificationSender, auditLog, clock, ids)
+		notificationRepository := postgres.NewNotificationRepository(databasePool)
+		notificationRepository.EnableDestinationNotices()
+		notificationRepository.SetEventProjector(notificationuc.NewEventBuilders())
+		notificationService, notificationErr := notificationuc.NewService(notificationRepository, vaultCipher, nil, auditLog, clock, ids)
 		if notificationErr != nil {
 			log.Error("notification service init failed", "err", notificationErr)
 			os.Exit(1)
 		}
 		notificationService.SetTransactionRunner(postgres.NewTenantTransactionRunner(databasePool))
+		notificationService.SetDisabledChannelTypes(disabledNotificationTypes)
+		notificationService.SetTemplateStore(postgres.NewNotificationTemplateStore(databasePool))
+		notificationService.SetTenantSettings(tenantSettingsStore)
+		notificationService.SetFormatters(messageformat.Formatters())
+		notificationService.SetBuiltinTemplates(notificationbuiltin.New())
+		if base := cfg.EffectivePublicBaseURL(); base != "" {
+			builder, linkErr := consolelink.NewBuilder(base)
+			if linkErr != nil {
+				log.Error("notification console link configuration invalid", "err", linkErr)
+				os.Exit(1)
+			}
+			notificationService.SetConsoleLinkBuilder(builder)
+		}
+		// The template preview (#1372) renders against the published fixtures or the tenant's
+		// recent events.
+		notificationService.SetEventFixtures(eventschemas.Fixtures)
+		notificationService.SetEventReader(notificationRepository)
+		// Slack bot channels (#1383) are checked against the Slack Web API when they are saved, and
+		// the channel form lists a bot's conversations. The client goes through the SSRF guard.
+		notificationService.SetSlackWorkspace(slackapi.Workspace{Client: slackapi.New(safehttp.New(10*time.Second, false))})
 		router.SetNotifications(notificationService)
+		// The API still needs SMTP for contact verification and personal inbox mail.
+		userContactService, notificationErr = usercontacts.NewService(postgres.NewUserContactStore(databasePool), userRepo, vaultCipher, notificationSender, ids, clock, usercontacts.DeriveVerifierKey(cfg.VaultMasterKey), cfg.NotificationSMTPHost != "" && cfg.NotificationSMTPFrom != "")
+		if notificationErr != nil {
+			log.Error("user contact service init failed", "err", notificationErr)
+			os.Exit(1)
+		}
+		router.SetUserContacts(userContactService)
+		inboxService, inboxErr := inbox.NewService(postgres.NewInboxStore(databasePool), clock)
+		if inboxErr != nil {
+			log.Error("personal inbox init failed", "err", inboxErr)
+			os.Exit(1)
+		}
+		inboxService.SetMailer(notificationSender)
+		router.SetInbox(inboxService)
 		log.Info("tenant notification management ENABLED")
+	}
+	var siemService *siemuc.Service
+	if databasePool != nil {
+		siemRepository := postgres.NewSIEMRepository(databasePool)
+		schema, siemErr := ocsf.New()
+		if siemErr != nil {
+			log.Error("siem schema init failed", "err", siemErr)
+			os.Exit(1)
+		}
+		siemService, siemErr = siemuc.NewService(siemRepository, siemRepository, siemRepository, siemseal.Vault{Cipher: vaultCipher}, map[siem.Provider]ports.SIEMDriver{
+			siem.ProviderSplunk:            splunk.New(5*time.Second, true),
+			siem.ProviderElasticsearch:     elastic.New(5 * time.Second),
+			siem.ProviderMicrosoftSentinel: sentinel.New(5 * time.Second),
+			siem.ProviderSyslogTLS:         syslogtls.New(5 * time.Second),
+		}, auditLog, clock, ids, schema)
+		if siemErr != nil {
+			log.Error("siem service init failed", "err", siemErr)
+			os.Exit(1)
+		}
+		siemService.SetTransactions(postgres.NewTenantTransactionRunner(databasePool))
+		if err := siemService.SetPublicBase(cfg.SIEMPublicBaseURL); err != nil {
+			log.Error("siem public base URL is invalid", "err", err)
+			os.Exit(1)
+		}
+		router.SetSIEM(siemService)
+		log.Info("siem streams enabled")
 	}
 	router.SetIntegrations(integrationService)
 	if summaries, ok := findingRepo.(ports.FindingSummaryReader); ok {
@@ -1647,6 +1853,13 @@ func main() {
 		SingleTenant:         cfg.SingleTenant,
 		OIDC:                 cfg.OIDCEnabled,
 		Ownership:            cfg.OwnershipMode != "off" && databasePool != nil,
+		InboundWebhooks:      cfg.InboundWebhooksEnabled,
+		Notifications:        cfg.NotificationEnabled,
+		// Read from the driver registry, so a newly registered driver is advertised without a
+		// catalog edit; the kill switch then removes the types the operator turned off.
+		NotificationChannelTypes:      channelTypeNames(notificationSender.ChannelTypes()),
+		NotificationProvidersDisabled: cfg.NotificationProvidersDisabled,
+		LegacyAlertWebhook:            cfg.AlertWebhookURL != "",
 	})
 	if err != nil {
 		log.Error("capability catalog init failed", "err", err)
@@ -1658,7 +1871,7 @@ func main() {
 	if cfg.OIDCEnabled {
 		provider, oidcErr := oidcadapter.New(context.Background(), oidcadapter.Config{
 			Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret,
-			RedirectURL: cfg.OIDCRedirectURL, GroupRoleMapping: cfg.OIDCGroupRoleMapping,
+			RedirectURL: cfg.OIDCRedirectURL,
 		})
 		if oidcErr != nil {
 			log.Error("OIDC provider initialization failed", "err", oidcErr)
@@ -1676,6 +1889,18 @@ func main() {
 			log.Error("OIDC BFF initialization failed", "err", oidcErr)
 			os.Exit(1)
 		}
+		if userContactService != nil {
+			oidcService.SetVerifiedEmailImporter(userContactService)
+		}
+		// Operator-approved subject linking uses the issuer exactly as the provider verifies it.
+		linkIssuer, oidcErr := oidcadapter.NormalizeIssuer(cfg.OIDCIssuer)
+		if oidcErr == nil {
+			oidcErr = usersService.SetOIDCLinking(linkIssuer, shared.ID(cfg.OIDCTenantID))
+		}
+		if oidcErr != nil {
+			log.Error("OIDC identity linking initialization failed", "err", oidcErr)
+			os.Exit(1)
+		}
 		httpOIDCService, oidcErr := httpapi.NewOIDCService(
 			func(ctx context.Context) (httpapi.OIDCAuthorization, error) {
 				result, err := oidcService.Begin(ctx)
@@ -1683,15 +1908,15 @@ func main() {
 			},
 			func(ctx context.Context, state, code, nonce string) (httpapi.OIDCSession, error) {
 				result, err := oidcService.Complete(ctx, state, code, nonce)
-				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: httpapi.OIDCPrincipal{ID: result.Principal.ID, Name: result.Principal.Name, Role: result.Principal.Role, TenantID: result.Principal.TenantID}}, err
+				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: oidcHTTPPrincipal(result.Principal)}, err
 			},
 			func(ctx context.Context, token string) (httpapi.OIDCSession, error) {
 				result, err := oidcService.Discover(ctx, token)
-				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: httpapi.OIDCPrincipal{ID: result.Principal.ID, Name: result.Principal.Name, Role: result.Principal.Role, TenantID: result.Principal.TenantID}}, err
+				return httpapi.OIDCSession{Token: result.Token, CSRFToken: result.CSRFToken, Principal: oidcHTTPPrincipal(result.Principal)}, err
 			},
 			func(ctx context.Context, token, csrf string, unsafe bool) (httpapi.OIDCPrincipal, error) {
 				result, err := oidcService.Authenticate(ctx, token, csrf, unsafe)
-				return httpapi.OIDCPrincipal{ID: result.ID, Name: result.Name, Role: result.Role, TenantID: result.TenantID}, err
+				return oidcHTTPPrincipal(result), err
 			},
 			oidcService.Logout,
 		)
@@ -1700,6 +1925,10 @@ func main() {
 			os.Exit(1)
 		}
 		router.SetOIDC(httpOIDCService, cfg.OIDCFrontendURL)
+	}
+	if err := wireEnterpriseIdentity(cfg, router, auth, databasePool, vaultCipher, notificationSender, clock, ids); err != nil {
+		log.Error("enterprise identity initialization failed", "err", err)
+		os.Exit(1)
 	}
 	router.SetReadinessChecks(readinessChecks)
 	if slaService != nil {
@@ -1991,6 +2220,12 @@ func main() {
 	}
 	router.SetAITriageReviews(aiTriageReviewService)
 	projectService.SetScanner(scaService)
+	bitbucketCommits, err := bitbucketintegration.NewCommitResolver(scmConnectorStore)
+	if err != nil {
+		log.Error("configure Bitbucket commit resolution", "error", err)
+		os.Exit(1)
+	}
+	projectService.SetBitbucketCommitResolver(bitbucketCommits)
 	scaService.SetProjectAnalysisRecorder(projectService)
 	scaService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
 	projectService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
@@ -2015,6 +2250,9 @@ func main() {
 			log.Error("source-control connector service init failed", "err", connErr)
 			os.Exit(1)
 		}
+		// A connector's self-hosted API base (GHES, self-managed GitLab) must be on the operator's
+		// integration host allowlist, the same rules the decorator re-checks on every call.
+		connectorSvc.SetSelfHostedRules(integrationRules)
 		router.SetConnectors(connectorSvc)
 		log.Info("source-control connectors ENABLED (manage at /api/v1/connectors; private-repo clone auth)")
 	}
@@ -2313,8 +2551,12 @@ func main() {
 
 	// Operator alerting (#822): a signed webhook that receives every incident correlation opens, plus the
 	// correlator handle detection ingest uses so an incident exists as soon as its detections are sealed.
+	// Deprecated (#1347): tenant notification rules for incident.created are delivered by the worker's
+	// notification framework whether or not this webhook is set, so both paths deliver while it is
+	// configured. It stays as a compatibility path until alertinguc.LegacyWebhookRemovalRelease.
 	var alertSvc *alertinguc.Service
 	if cfg.AlertWebhookURL != "" {
+		alertinguc.WarnLegacyWebhookDeprecated(log, true)
 		rule := alerting.Rule{MinSeverity: shared.Severity(strings.ToLower(strings.TrimSpace(cfg.AlertMinSeverity)))}
 		sink, aerr := alertwebhook.New(cfg.AlertWebhookURL, cfg.AlertWebhookSecret, 10*time.Second, cfg.AlertWebhookAllowPrivate, cfg.AlertWebhookAllowUnsigned)
 		if aerr != nil {
@@ -3408,6 +3650,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	startIdentityMaintenance(ctx, cfg, databasePool, notificationSender, clock, ids, log)
 	if promotionRunner != nil {
 		startupTimeout := cfg.PromotionReconcileInterval
 		if startupTimeout <= 0 {
@@ -3758,4 +4001,20 @@ func (h scaJobHandler) Handle(ctx context.Context, job ports.QueuedJob) error {
 
 func (h scaJobHandler) OnDeadLetter(ctx context.Context, job ports.QueuedJob, cause error) error {
 	return h.svc.FailStrandedScanJob(ctx, job.Payload, cause)
+}
+
+// channelTypeNames converts the notification registry's channel types to the plain names the
+// capability catalog carries.
+// oidcHTTPPrincipal maps the BFF principal to the HTTP boundary shape, keeping the session id and
+// lineage origin the authorization principal carries.
+func oidcHTTPPrincipal(p identitybff.Principal) httpapi.OIDCPrincipal {
+	return httpapi.OIDCPrincipal{ID: p.ID, Name: p.Name, Role: p.Role, TenantID: p.TenantID, SessionID: p.SessionID, AuthenticatedAt: p.AuthenticatedAt}
+}
+
+func channelTypeNames[T ~string](types []T) []string {
+	out := make([]string, len(types))
+	for i, channelType := range types {
+		out[i] = string(channelType)
+	}
+	return out
 }

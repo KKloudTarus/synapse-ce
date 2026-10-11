@@ -1,0 +1,14 @@
+{
+  "id": "event-quality_gate-failed",
+  "type": "quality_gate.failed",
+  "source_kind": "project_analysis_gate",
+  "source_id": "source-42",
+  "schema_version": 1,
+  "occurred_at": "2026-09-27T08:00:00Z",
+  "data": {
+    "title": "Quality gate failed",
+    "summary": "A finalized project analysis failed its quality gate.",
+    "analysis_id": "analysis-42",
+    "project_id": "project-42"
+  }
+}

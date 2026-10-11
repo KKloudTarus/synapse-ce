@@ -63,7 +63,12 @@ func New(id, tenantID shared.ID, name, key string, source SourceBinding, profile
 	source.Kind, source.Value, source.Ref = strings.TrimSpace(source.Kind), strings.TrimSpace(source.Value), strings.TrimSpace(source.Ref)
 	source.DefaultBranch, source.BaseRef = strings.TrimSpace(source.DefaultBranch), strings.TrimSpace(source.BaseRef)
 	if source.Value == "" {
-		return nil, fmt.Errorf("%w: project source value is required", shared.ErrValidation)
+		// Name the request field and the shape it needs. The old text said "project source value is
+		// required", which names neither the field a caller sends nor the fact that the whole object is
+		// mandatory, so a POST /api/v1/projects without it read as an unexplained rejection.
+		return nil, fmt.Errorf("%w: source_binding is required and needs a value: "+
+			`{"kind":"git","value":"https://host/org/repo.git"} for a repository, `+
+			`or {"kind":"local","value":"/path"} / {"kind":"archive","value":"/path.zip"}`, shared.ErrValidation)
 	}
 	switch source.Kind {
 	case SourceLocal, SourceArchive:

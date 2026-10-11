@@ -43,6 +43,24 @@ func TestSCMConnectorStoreResolvesByHostAndKeepsTokenSecret(t *testing.T) {
 	}
 }
 
+func TestSCMConnectorStoreReturnsAPIBaseWithCredential(t *testing.T) {
+	s := NewSCMConnectorStore()
+	c := conn("c1", "t1", "ghe.corp.example")
+	if err := c.SetAPIBase("https://ghe.corp.example/api/v3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(tctx("t1"), c, []byte("tok")); err != nil {
+		t.Fatal(err)
+	}
+	if meta, err := s.Get(tctx("t1"), "c1"); err != nil || meta.APIBase != "https://ghe.corp.example/api/v3" {
+		t.Fatalf("get = %+v err=%v", meta, err)
+	}
+	cred, ok, err := s.ResolveGitCredential(tctx("t1"), "ghe.corp.example")
+	if err != nil || !ok || cred.APIBase != "https://ghe.corp.example/api/v3" {
+		t.Fatalf("resolve = %+v ok=%v err=%v", cred, ok, err)
+	}
+}
+
 func TestSCMConnectorStoreTenantIsolation(t *testing.T) {
 	s := NewSCMConnectorStore()
 	if err := s.Put(tctx("t1"), conn("c1", "t1", "github.com"), []byte("tok-1")); err != nil {

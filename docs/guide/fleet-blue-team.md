@@ -224,6 +224,11 @@ by default and has no authentication. Exported series have bounded labels (prior
 
 ## Alerting
 
+**Deprecated.** `SYNAPSE_ALERT_WEBHOOK_*` is deprecated and will be removed in 0.4.0. Use an
+`incident.created` notification rule instead; see
+[Legacy incident webhook](notifications.md#legacy-incident-webhook-deprecated). While both are
+configured, each incident is delivered through both paths.
+
 Set `SYNAPSE_ALERT_WEBHOOK_URL` and the control plane posts a signed JSON alert to that URL every time
 correlation opens an incident. Correlation itself runs after every detection batch that seals new
 detections, off the agent's request, one run per engagement at a time (batches that arrive during a run
@@ -234,13 +239,19 @@ detection on an agent becomes an incident and a notification without anyone call
 
 ```bash
 SYNAPSE_ALERT_WEBHOOK_URL=https://hooks.example.com/synapse
-SYNAPSE_ALERT_WEBHOOK_SECRET=$(openssl rand -hex 24)     # optional; >= 16 bytes
+SYNAPSE_ALERT_WEBHOOK_SECRET=$(openssl rand -hex 24)     # required; >= 16 bytes
 SYNAPSE_ALERT_MIN_SEVERITY=medium                        # critical | high | medium | low | info
 ```
 
+When `SYNAPSE_ALERT_WEBHOOK_URL` is configured, the signing secret is required by default:
+startup refuses a webhook without one. Set `SYNAPSE_ALERT_WEBHOOK_ALLOW_UNSIGNED=true` only for
+a development receiver that cannot verify signatures; this explicitly permits delivery without
+a secret, so the receiver cannot authenticate those alerts. Leave unsigned delivery disabled in
+production.
+
 The body is `{"type": "incident.created", "sent_at": ..., "alert": {...}}` with the incident id, asset,
 engagement, severity, title, a short summary and a console link (`/fleet/incidents/{id}`). It carries no
-raw telemetry. With a secret set, `X-Synapse-Signature` is `sha256=<hex HMAC-SHA256>` over
+raw telemetry. For signed delivery, `X-Synapse-Signature` is `sha256=<hex HMAC-SHA256>` over
 `<X-Synapse-Timestamp>.<body>`; verify it and reject stale timestamps. Transient failures (network, 429,
 5xx) are retried three times; a 4xx is final. Every attempt is audited as `alert.delivered` or
 `alert.failed` with the sink and the error (the error never carries the webhook URL, whose path is the

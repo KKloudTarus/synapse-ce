@@ -22,6 +22,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -78,7 +79,7 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 	m.AddRow(5,
 		text.NewCol(4, fmt.Sprintf("Third-party findings: %d", len(thirdParty)), props.Text{Size: 9, Style: fontstyle.Bold}),
 		text.NewCol(4, fmt.Sprintf("First-party historical advisories: %d", len(historical)), props.Text{Size: 9, Color: gray()}),
-		text.NewCol(4, fmt.Sprintf("Scan confidence: %s", confidenceWord(insight)), props.Text{Size: 9}))
+		text.NewCol(4, fmt.Sprintf("Dependency confidence: %s", confidenceWord(insight)), props.Text{Size: 9}))
 	if insight.HasScan {
 		m.AddRow(5,
 			text.NewCol(4, fmt.Sprintf("Raw findings: %d", insight.RawFindings), props.Text{Size: 8, Color: gray()}),
@@ -234,13 +235,35 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 			text.NewCol(3, fmt.Sprintf("Detected: %d", insight.LicenseDetected), props.Text{Size: 9, Color: gray()}),
 			text.NewCol(3, fmt.Sprintf("Unknown: %d", insight.LicenseUnknown), props.Text{Size: 9, Color: gray()}))
 
-		// Scan completeness + detection confidence.
+		// Required-engine coverage is distinct from dependency resolution confidence.
 		section(m, "Scan completeness")
+		coverage := reportEngineCoverage(insight)
+		m.AddRow(5, text.NewCol(12, fmt.Sprintf("Required-engine coverage: %s (%d/%d completed).", coverage.Status, coverage.Completed, coverage.Required), props.Text{Size: 9, Style: fontstyle.Bold}))
+		if insight.ExecutionMode != "" {
+			m.AddRow(5, text.NewCol(12, "Current execution mode: "+insight.ExecutionMode+".", props.Text{Size: 8, Color: gray()}))
+		}
+		if insight.IncludesPreviousResults {
+			m.AddRow(8, text.NewCol(12, "This report includes retained findings from a previous result. Required-engine coverage applies only to the current execution and does not establish whole-assessment coverage.", props.Text{Size: 8, Color: gray()}))
+		}
 		note := insight.CompletenessNote
 		if note == "" {
-			note = "Complete – dependency versions resolved with confidence."
+			note = "Dependency versions resolved with confidence."
 		}
 		m.AddRow(8, text.NewCol(12, note, props.Text{Size: 9, Color: gray()}))
+		if outcomes := reportEngineOutcomes(insight.EngineOutcomes); len(outcomes) > 0 {
+			m.AddRow(5,
+				text.NewCol(3, "ENGINE", hdr()),
+				text.NewCol(3, "EXECUTION", hdr()),
+				text.NewCol(3, "COVERAGE", hdr()),
+				text.NewCol(3, "REASON", hdr()))
+			for _, outcome := range outcomes {
+				m.AddRow(5,
+					text.NewCol(3, outcome.Engine, props.Text{Size: 8}),
+					text.NewCol(3, string(outcome.Execution), props.Text{Size: 8}),
+					text.NewCol(3, string(outcome.Coverage), props.Text{Size: 8}),
+					text.NewCol(3, string(outcome.Reason), props.Text{Size: 8, Color: gray()}))
+			}
+		}
 
 		// Evidence integrity – the chain-of-custody attestation.
 		section(m, "Evidence integrity")
@@ -380,18 +403,50 @@ func severityOf(findings []finding.Finding, sev shared.Severity) int {
 
 // executivePosture is the one-line risk verdict for the executive summary.
 func executivePosture(crit, high, total int, insight ports.ReportInsight) string {
+	coverage := reportEngineCoverage(insight)
+	incompleteCoverage := insight.HasScan && !coverage.Complete()
+	mixedResults := insight.HasScan && insight.IncludesPreviousResults
+	qualifier := ""
+	if incompleteCoverage {
+		qualifier = fmt.Sprintf(" Required-engine coverage is %s (%d/%d completed), so these findings are a lower bound.", coverage.Status, coverage.Completed, coverage.Required)
+	} else if mixedResults {
+		qualifier = " This report includes retained findings from a previous result; current required-engine coverage does not establish whole-assessment coverage."
+	}
 	switch {
 	case crit > 0:
-		return fmt.Sprintf("This project is at HIGH RISK: %d critical and %d high-severity findings require prompt remediation.", crit, high)
+		return fmt.Sprintf("This project is at HIGH RISK: %d critical and %d high-severity findings require prompt remediation.%s", crit, high, qualifier)
 	case high > 0:
-		return fmt.Sprintf("This project has ELEVATED RISK: %d high-severity findings should be remediated.", high)
+		return fmt.Sprintf("This project has ELEVATED RISK: %d high-severity findings should be remediated.%s", high, qualifier)
+	case incompleteCoverage || mixedResults:
+		limitation := fmt.Sprintf("required-engine coverage is %s (%d/%d completed)", coverage.Status, coverage.Completed, coverage.Required)
+		if mixedResults {
+			limitation = "the result includes retained findings from a previous execution and current coverage does not establish whole-assessment coverage"
+		}
+		return fmt.Sprintf("This project has an INCONCLUSIVE result: %d findings were identified, but %s.", total, limitation)
 	case total > 0:
 		return fmt.Sprintf("This project has LOW RISK: %d findings, none critical or high.", total)
-	case insight.HasScan && !insight.Confident:
-		return "No findings, but the scan was INCOMPLETE – treat the result as indicative, not conclusive."
 	default:
 		return "No findings at or above the promotion threshold were identified."
 	}
+}
+
+func reportEngineCoverage(insight ports.ReportInsight) scanrun.EngineCoverage {
+	canonical, err := scanrun.CanonicalEngineOutcomes(insight.EngineOutcomes)
+	if err != nil {
+		return scanrun.EngineCoverage{Status: scanrun.CoverageUnknown}
+	}
+	return scanrun.ComputeEngineCoverage(canonical)
+}
+
+func reportEngineOutcomes(outcomes []scanrun.EngineOutcome) []scanrun.EngineOutcome {
+	if len(outcomes) == 0 || len(outcomes) > 64 {
+		return nil
+	}
+	canonical, err := scanrun.CanonicalEngineOutcomes(outcomes)
+	if err != nil {
+		return nil
+	}
+	return canonical
 }
 
 func confidenceWord(insight ports.ReportInsight) string {

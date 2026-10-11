@@ -6,6 +6,8 @@ import type {
   Component,
   ImportedSBOMMetadata,
   ScanDrift,
+  EngineCoverage,
+  EngineOutcome,
   ScanJob,
   ScanManifest,
   ScanResult,
@@ -94,6 +96,31 @@ function mapScanDebugEvent(r: any) {
   }
 }
 
+function mapEngineCoverage(r: any): EngineCoverage {
+  let status = r?.status
+  const required = Number.isSafeInteger(r?.required) && r.required >= 0 && r.required <= 64 ? r.required : 0
+  const completed = Number.isSafeInteger(r?.completed) && r.completed >= 0 && r.completed <= 64 ? r.completed : 0
+  if (status === 'complete' && (required === 0 || completed !== required)) status = 'unknown'
+  return {
+    status: status === 'complete' || status === 'partial' || status === 'not_applicable' ? status : 'unknown',
+    required,
+    completed,
+  }
+}
+
+function mapEngineOutcome(r: any): EngineOutcome {
+  const execution = r?.execution
+  const coverage = r?.coverage
+  return {
+    engine: typeof r?.engine === 'string' ? r.engine : '',
+    execution: execution === 'completed' || execution === 'failed' || execution === 'timed_out' || execution === 'cancelled' ? execution : 'not_run',
+    coverage: coverage === 'complete' || coverage === 'partial' || coverage === 'not_applicable' ? coverage : 'unknown',
+    reason: typeof r?.reason === 'string' ? r.reason : '',
+    required: r?.required === true,
+    counts: r?.counts && typeof r.counts === 'object' ? r.counts : {},
+  }
+}
+
 export function mapScanJob(r: any): ScanJob {
   return {
     id: r.id ?? '',
@@ -107,6 +134,8 @@ export function mapScanJob(r: any): ScanJob {
     finishedAt: r.finished_at ?? null,
     error: r.error ?? '',
     debugEvents: (r.debug_events ?? []).map(mapScanDebugEvent),
+    engineOutcomes: (r.engine_outcomes ?? []).map(mapEngineOutcome),
+    engineCoverage: mapEngineCoverage(r.engine_coverage),
   }
 }
 
@@ -189,10 +218,14 @@ function mapImportedSBOMMetadata(r: any): ImportedSBOMMetadata {
   }
 }
 
-function mapScanResult(r: any): ScanResult {
+export function mapScanResult(r: any): ScanResult {
   return {
     target: r.target ?? '',
     scanMode: r.scan_mode ?? 'full',
+    executionMode: r.execution_mode ?? '',
+    includesPreviousResults: r.includes_previous_results === true,
+    engineOutcomes: (r.engine_outcomes ?? []).map(mapEngineOutcome),
+    engineCoverage: mapEngineCoverage(r.engine_coverage),
     languages: (r.languages ?? []).map((l: any) => ({ name: l.Name ?? '', percent: l.Percent ?? 0 })),
     components: (r.sbom?.Components ?? []).map(mapComponent),
     dependencies: (r.sbom?.Dependencies ?? []).map((d: any) => ({ ref: d.Ref ?? '', dependsOn: d.DependsOn ?? [] })),

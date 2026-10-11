@@ -9,6 +9,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aitriagereview"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
@@ -32,6 +33,7 @@ import (
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	exportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/export"
 	findingsuc "github.com/KKloudTarus/synapse-ce/internal/usecase/findings"
+	inboxuc "github.com/KKloudTarus/synapse-ce/internal/usecase/inbox"
 	integrationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/integrations"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	ownershipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ownership"
@@ -39,8 +41,12 @@ import (
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
 	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	scmwebhookuc "github.com/KKloudTarus/synapse-ce/internal/usecase/scmwebhook"
+	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
+	tenancyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/tenancy"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 	vexuc "github.com/KKloudTarus/synapse-ce/internal/usecase/vex"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityactionuc"
@@ -61,6 +67,8 @@ type Router struct {
 	auth                     *Authenticator
 	oidc                     OIDCService
 	oidcFrontendURL          string
+	legacyOIDCFence          func(context.Context) error
+	enterprise               *enterpriseDeps
 	eng                      *enguc.Service
 	sca                      *scauc.Service
 	aup                      *aupuc.Service
@@ -74,6 +82,9 @@ type Router struct {
 	audit                    *audituc.Service
 	vex                      *vexuc.Service
 	users                    *usersuc.Service
+	userContacts             *usercontacts.Service
+	assigneeReview           ports.AssigneeReviewReader
+	userPicker               ports.UserPickerReader
 	credentials              *credentialsuc.Service
 	integrations             *integrationuc.Service
 	dastVerifier             runtimeVerifierService
@@ -129,6 +140,8 @@ type Router struct {
 	accuracyRuns             accuracyRunReader          // optional read side for the engine detection-accuracy trend (#860 D8.6)
 	chainRehearsal           chainRehearser             // optional: governed exploitation chain rehearsal (simulation)
 	fleet                    *fleetRouter               // optional; nil ⇒ agent transport plane is not served
+	inboundWebhooks          *inboundWebhookPlane       // separate header-HMAC auth plane, no human fallback
+	inboundWebhookAdmin      *scmwebhookuc.Service      // tenant-authorized SCM endpoint provision/rotation
 	fleetAdmin               fleetAdminService          // optional; nil ⇒ operator agent-admin routes not registered
 	fleetKeys                fleetKeyAdmin              // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
 	qualityGates             qualityGateService         // optional; nil ⇒ quality-gate routes are not registered
@@ -155,6 +168,9 @@ type Router struct {
 	incidentResponses        incidentResponseCoordinator // optional; nil ⇒ incident-scoped governed response route is not registered
 	responseObservers        responseObserverAdmin       // optional; nil ⇒ response-observer assignment route is not registered
 	notifications            *notificationuc.Service     // optional; nil ⇒ tenant notification management routes are not registered
+	inbox                    *inboxuc.Service
+	siem                     *siemuc.Service
+	tenantSettings           *tenancyuc.Service // optional; nil ⇒ the tenant settings routes are not registered
 }
 
 // findingVerifier is the narrow slice of the exploitation use-case the verify endpoint needs:
@@ -332,8 +348,16 @@ func (rt *Router) SetSLA(service *slauc.Service) { rt.sla = service }
 // SetNotifications wires tenant-managed channels, rules, and delivery history.
 func (rt *Router) SetNotifications(service *notificationuc.Service) { rt.notifications = service }
 
+// SetSIEM wires tenant SIEM sink management. Nil leaves the routes unregistered.
+func (rt *Router) SetSIEM(service *siemuc.Service) { rt.siem = service }
+
 // SetIntegrations wires the CI/CD integration API.
 func (rt *Router) SetIntegrations(service *integrationuc.Service) { rt.integrations = service }
+
+// SetInboundWebhookAdmin exposes tenant-authorized provider endpoint lifecycle.
+func (rt *Router) SetInboundWebhookAdmin(service *scmwebhookuc.Service) {
+	rt.inboundWebhookAdmin = service
+}
 
 // SetObservability installs the optional bounded HTTP observer and access-log policy.
 // A nil observer disables metrics feed but access logging (if enabled) still runs.
@@ -353,14 +377,44 @@ func NewRouter(log *slog.Logger, auth *Authenticator, eng *enguc.Service, sca *s
 // child routes (role 403 is decided first and cheaply, without revealing whether a cross-tenant
 // engagement exists; a role-allowed caller then hits the tenant 404). Machine (mcp/agent) and
 // unknown roles are granted nothing here (user.Role.Can), so the human REST API is closed to them.
+//
+// It asks the same decision (authz.Decide) that handler-level checks use. A request that reaches
+// it without a principal is refused with 401 authentication_required: a missing principal is never
+// treated as the operator or as any role.
 func (rt *Router) authz(perm userdom.Permission, h http.HandlerFunc) http.HandlerFunc {
+	return rt.authorize(authz.Action{Permission: perm}, h)
+}
+
+// authenticated guards a route that needs an authenticated human principal but no role, such as
+// the consent gate.
+func (rt *Router) authenticated(h http.HandlerFunc) http.HandlerFunc {
+	return rt.authorize(authz.Action{}, h)
+}
+
+// recoverable guards a route that is also one of the closed identity-recovery actions, so a
+// recovery-only credential may reach it. perm is still required ("" means no role); the recovery
+// tag never widens an ordinary credential.
+func (rt *Router) recoverable(perm userdom.Permission, action authz.RecoveryAction, h http.HandlerFunc) http.HandlerFunc {
+	return rt.authorize(authz.Action{Permission: perm, Recovery: action}, h)
+}
+
+// authorize is the one route-level enforcement point for authz.Decide.
+func (rt *Router) authorize(action authz.Action, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := principalObj(r.Context())
-		if !ok || !userdom.Role(p.Role).Can(perm) {
-			writeJSON(w, http.StatusForbidden, errorBody{Error: "insufficient permissions: this action requires the " + string(perm) + " capability"})
+		decision := decideRequest(r, action)
+		if decision.Allowed {
+			h(w, r)
 			return
 		}
-		h(w, r)
+		if decision.Reason == authz.ReasonUnauthenticated {
+			authenticationRequired(w)
+			return
+		}
+		message := "insufficient permissions for this action"
+		if action.Permission != "" {
+			message = "insufficient permissions: this action requires the " + string(action.Permission) + " capability"
+		}
+		writeJSON(w, http.StatusForbidden, errorBody{Error: message, Code: CodePermissionDenied})
 	}
 }
 
@@ -392,15 +446,18 @@ func (rt *Router) withEngTenant(h http.HandlerFunc) http.HandlerFunc {
 func (rt *Router) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	rt.registerOwnership(mux)
+	rt.registerEnterprise(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "synapse-api"})
 	})
 	mux.HandleFunc("GET /readyz", rt.ready)
-	if rt.oidc != nil {
-		mux.HandleFunc("GET /api/auth/oidc/login", rt.oidcLogin)
-		mux.HandleFunc("GET /api/auth/oidc/callback", rt.oidcCallback)
+	if rt.oidc != nil || rt.enterprise != nil {
+		if rt.oidc != nil {
+			mux.HandleFunc("GET /api/auth/oidc/login", rt.oidcLogin)
+			mux.HandleFunc("GET /api/auth/oidc/callback", rt.oidcCallback)
+		}
 		mux.HandleFunc("GET /api/auth/session", rt.oidcSession)
-		mux.HandleFunc("POST /api/auth/logout", rt.oidcLogout)
+		mux.HandleFunc("POST /api/auth/logout", rt.recoverable("", authz.RecoveryLogout, rt.oidcLogout))
 	}
 	// Identity/consent routes carry NO role gate (a brand-new principal must reach them): /aup,
 	// /aup/accept, /me, and public probes. EVERY other route below is registered through
@@ -408,27 +465,32 @@ func (rt *Router) routes() *http.ServeMux {
 	// check. Engagement child routes compose authz OUTSIDE withEngTenant: the role 403 is decided
 	// first and cheaply (without revealing whether a cross-tenant engagement exists); a role-allowed
 	// caller then hits the tenant 404. Machine (mcp/agent) roles are granted nothing here.
-	mux.HandleFunc("GET /api/v1/aup", rt.getAUP)
-	mux.HandleFunc("POST /api/v1/aup/accept", rt.acceptAUP)
+	mux.HandleFunc("GET /api/v1/aup", rt.authenticated(rt.getAUP))
+	mux.HandleFunc("POST /api/v1/aup/accept", rt.authenticated(rt.acceptAUP))
 	if rt.integrations != nil {
 		mux.HandleFunc("GET /api/v1/integration-providers", rt.authz(userdom.PermView, rt.listIntegrationProviders))
 		mux.HandleFunc("POST /api/v1/integrations", rt.authz(userdom.PermAdminister, rt.createIntegration))
 		mux.HandleFunc("GET /api/v1/integrations", rt.authz(userdom.PermView, rt.listIntegrations))
 		mux.HandleFunc("GET /api/v1/integrations/{id}", rt.authz(userdom.PermView, rt.getIntegration))
 		mux.HandleFunc("PUT /api/v1/integrations/{id}", rt.authz(userdom.PermAdminister, rt.updateIntegration))
-		mux.HandleFunc("POST /api/v1/integrations/{id}/enable", rt.authz(userdom.PermAdminister, rt.enableIntegration))
-		mux.HandleFunc("POST /api/v1/integrations/{id}/disable", rt.authz(userdom.PermAdminister, rt.disableIntegration))
-		mux.HandleFunc("POST /api/v1/integrations/{id}/archive", rt.authz(userdom.PermAdminister, rt.archiveIntegration))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/enable", rt.authz(userdom.PermManageIntegrations, rt.enableIntegration))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/disable", rt.authz(userdom.PermManageIntegrations, rt.disableIntegration))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/archive", rt.authz(userdom.PermManageIntegrations, rt.archiveIntegration))
 		mux.HandleFunc("PUT /api/v1/integrations/{id}/credentials", rt.authz(userdom.PermAdminister, rt.putIntegrationCredential))
 		mux.HandleFunc("DELETE /api/v1/integrations/{id}/credentials", rt.authz(userdom.PermAdminister, rt.deleteIntegrationCredential))
-		mux.HandleFunc("POST /api/v1/integrations/{id}/operations", rt.authz(userdom.PermAdminister, rt.startIntegrationOperation))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/operations", rt.authz(userdom.PermManageIntegrations, rt.startIntegrationOperation))
 		mux.HandleFunc("GET /api/v1/integrations/{id}/operations", rt.authz(userdom.PermView, rt.listIntegrationOperations))
 		mux.HandleFunc("GET /api/v1/integration-operations/{operationID}", rt.authz(userdom.PermView, rt.getIntegrationOperation))
-		mux.HandleFunc("POST /api/v1/integration-operations/{operationID}/cancel", rt.authz(userdom.PermAdminister, rt.cancelIntegrationOperation))
-		mux.HandleFunc("POST /api/v1/integrations/{id}/bindings", rt.authz(userdom.PermAdminister, rt.createIntegrationBinding))
+		mux.HandleFunc("POST /api/v1/integration-operations/{operationID}/cancel", rt.authz(userdom.PermManageIntegrations, rt.cancelIntegrationOperation))
+		mux.HandleFunc("POST /api/v1/integrations/{id}/bindings", rt.authz(userdom.PermManageIntegrations, rt.createIntegrationBinding))
 		mux.HandleFunc("GET /api/v1/integrations/{id}/bindings", rt.authz(userdom.PermView, rt.listIntegrationBindings))
-		mux.HandleFunc("DELETE /api/v1/integrations/{id}/bindings/{bindingID}", rt.authz(userdom.PermAdminister, rt.deleteIntegrationBinding))
+		mux.HandleFunc("DELETE /api/v1/integrations/{id}/bindings/{bindingID}", rt.authz(userdom.PermManageIntegrations, rt.deleteIntegrationBinding))
 		mux.HandleFunc("GET /api/v1/integrations/{id}/external-runs", rt.authz(userdom.PermView, rt.listIntegrationExternalRuns))
+		if rt.inboundWebhookAdmin != nil {
+			// The caller supplies a secret for vault sealing. Changing endpoint
+			// authentication requires administer, never manage_integrations.
+			mux.HandleFunc("POST /api/v1/integrations/{id}/inbound-webhook", rt.authz(userdom.PermAdminister, rt.configureIntegrationInboundWebhook))
+		}
 	}
 	if rt.qualityGates != nil {
 		mux.HandleFunc("GET /api/v1/quality-gates", rt.authz(userdom.PermView, rt.listQualityGates))
@@ -485,23 +547,80 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/assets/{assetID}/packages", rt.authz(userdom.PermView, rt.getHostPackages))
 	}
 	if rt.alerts != nil {
-		mux.HandleFunc("POST /api/v1/alerts/test", rt.authz(userdom.PermAdminister, rt.testAlert))
+		mux.HandleFunc("POST /api/v1/alerts/test", rt.authz(userdom.PermManageIntegrations, rt.testAlert))
 	}
 	if rt.notifications != nil {
-		mux.HandleFunc("GET /api/v1/notifications/channels", rt.authz(userdom.PermAdminister, rt.listNotificationChannels))
+		// manage_integrations runs existing channels, rules and delivery history (#1358). Creating a
+		// channel stays on administer, and so does a PATCH that changes a destination (URL, secret
+		// or email recipients): the handler refuses it with 403 for a caller without administer.
+		mux.HandleFunc("GET /api/v1/notifications/event-types", rt.authz(userdom.PermView, rt.listNotificationEventTypes))
+		mux.HandleFunc("GET /api/v1/notifications/channels", rt.authz(userdom.PermManageIntegrations, rt.listNotificationChannels))
 		mux.HandleFunc("POST /api/v1/notifications/channels", rt.authz(userdom.PermAdminister, rt.createNotificationChannel))
-		mux.HandleFunc("GET /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermAdminister, rt.getNotificationChannel))
-		mux.HandleFunc("PATCH /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermAdminister, rt.updateNotificationChannel))
-		mux.HandleFunc("DELETE /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermAdminister, rt.deleteNotificationChannel))
-		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/test", rt.authz(userdom.PermAdminister, rt.testNotificationChannel))
-		mux.HandleFunc("GET /api/v1/notifications/rules", rt.authz(userdom.PermAdminister, rt.listNotificationRules))
-		mux.HandleFunc("POST /api/v1/notifications/rules", rt.authz(userdom.PermAdminister, rt.createNotificationRule))
-		mux.HandleFunc("GET /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermAdminister, rt.getNotificationRule))
-		mux.HandleFunc("PATCH /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermAdminister, rt.updateNotificationRule))
-		mux.HandleFunc("DELETE /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermAdminister, rt.deleteNotificationRule))
-		mux.HandleFunc("GET /api/v1/notifications/deliveries", rt.authz(userdom.PermAdminister, rt.listNotificationDeliveries))
-		mux.HandleFunc("GET /api/v1/notifications/deliveries/{nid}", rt.authz(userdom.PermAdminister, rt.getNotificationDelivery))
-		mux.HandleFunc("GET /api/v1/notifications/deliveries/{nid}/attempts", rt.authz(userdom.PermAdminister, rt.listNotificationAttempts))
+		mux.HandleFunc("GET /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermManageIntegrations, rt.getNotificationChannel))
+		mux.HandleFunc("PATCH /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermManageIntegrations, rt.updateNotificationChannel))
+		mux.HandleFunc("DELETE /api/v1/notifications/channels/{nid}", rt.authz(userdom.PermManageIntegrations, rt.deleteNotificationChannel))
+		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/test", rt.authz(userdom.PermManageIntegrations, rt.testNotificationChannel))
+		mux.HandleFunc("POST /api/v1/notifications/channels/{nid}/resume", rt.authz(userdom.PermManageIntegrations, rt.resumeNotificationChannel))
+		mux.HandleFunc("POST /api/v1/notifications/slack/conversations", rt.authz(userdom.PermAdminister, rt.listSlackConversations))
+		mux.HandleFunc("GET /api/v1/notifications/channels/{nid}/health-events", rt.authz(userdom.PermManageIntegrations, rt.listNotificationChannelHealthEvents))
+		mux.HandleFunc("GET /api/v1/notifications/engagements/{nid}/settings", rt.authz(userdom.PermManageIntegrations, rt.getNotificationEngagementSetting))
+		mux.HandleFunc("PUT /api/v1/notifications/engagements/{nid}/settings", rt.authz(userdom.PermManageIntegrations, rt.putNotificationEngagementSetting))
+		mux.HandleFunc("GET /api/v1/notifications/rules", rt.authz(userdom.PermManageIntegrations, rt.listNotificationRules))
+		mux.HandleFunc("POST /api/v1/notifications/rules", rt.authz(userdom.PermManageIntegrations, rt.createNotificationRule))
+		mux.HandleFunc("GET /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermManageIntegrations, rt.getNotificationRule))
+		mux.HandleFunc("PATCH /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermManageIntegrations, rt.updateNotificationRule))
+		mux.HandleFunc("DELETE /api/v1/notifications/rules/{nid}", rt.authz(userdom.PermManageIntegrations, rt.deleteNotificationRule))
+		mux.HandleFunc("GET /api/v1/notifications/deliveries", rt.authz(userdom.PermManageIntegrations, rt.listNotificationDeliveries))
+		mux.HandleFunc("GET /api/v1/notifications/quarantined-sources", rt.authz(userdom.PermManageIntegrations, rt.listNotificationSourceFailures))
+		mux.HandleFunc("GET /api/v1/notifications/deliveries/{nid}", rt.authz(userdom.PermManageIntegrations, rt.getNotificationDelivery))
+		mux.HandleFunc("GET /api/v1/notifications/deliveries/{nid}/attempts", rt.authz(userdom.PermManageIntegrations, rt.listNotificationAttempts))
+		if rt.notifications.TemplatesEnabled() {
+			// Custom message templates (#1370): every route needs manage_integrations. The tenant
+			// comes from the session; every mutation is revision-guarded and audited with a diff
+			// summary that never quotes template source.
+			mux.HandleFunc("GET /api/v1/notifications/templates/builtins", rt.authz(userdom.PermManageIntegrations, rt.listBuiltinNotificationTemplates))
+			mux.HandleFunc("GET /api/v1/notifications/templates", rt.authz(userdom.PermManageIntegrations, rt.listNotificationTemplates))
+			mux.HandleFunc("POST /api/v1/notifications/templates", rt.authz(userdom.PermManageIntegrations, rt.createNotificationTemplate))
+			mux.HandleFunc("GET /api/v1/notifications/templates/{nid}", rt.authz(userdom.PermManageIntegrations, rt.getNotificationTemplate))
+			mux.HandleFunc("PATCH /api/v1/notifications/templates/{nid}", rt.authz(userdom.PermManageIntegrations, rt.updateNotificationTemplate))
+			mux.HandleFunc("GET /api/v1/notifications/templates/{nid}/versions", rt.authz(userdom.PermManageIntegrations, rt.listNotificationTemplateVersions))
+			mux.HandleFunc("POST /api/v1/notifications/templates/{nid}/activate", rt.authz(userdom.PermManageIntegrations, rt.activateNotificationTemplate))
+			mux.HandleFunc("POST /api/v1/notifications/templates/{nid}/rollback", rt.authz(userdom.PermManageIntegrations, rt.rollbackNotificationTemplate))
+			mux.HandleFunc("POST /api/v1/notifications/templates/{nid}/archive", rt.authz(userdom.PermManageIntegrations, rt.archiveNotificationTemplate))
+			mux.HandleFunc("GET /api/v1/notifications/channels/{nid}/template-resolution", rt.authz(userdom.PermManageIntegrations, rt.previewNotificationTemplateResolution))
+			// Template preview (#1372): renders without sending, against a fixture or one of the
+			// tenant's recent events. Stored events also need view.
+			mux.HandleFunc("POST /api/v1/notifications/templates/preview", rt.authz(userdom.PermManageIntegrations, rt.previewNotificationTemplate))
+			mux.HandleFunc("GET /api/v1/notifications/templates/preview/events", rt.authz(userdom.PermManageIntegrations, rt.listNotificationPreviewEvents))
+		}
+		mux.HandleFunc("POST /api/v1/notifications/deliveries/{nid}/redrive", rt.authz(userdom.PermAdminister, rt.redriveNotificationDelivery))
+	}
+	if rt.siem != nil {
+		// Reading, pausing, resuming and testing a sink need manage_integrations. Creating a
+		// destination, editing it (data class, allowed hosts), rotating its secret and changing
+		// its host stay on administer. Machine roles hold neither permission.
+		mux.HandleFunc("GET /api/v1/siem/sinks", rt.authz(userdom.PermManageIntegrations, rt.listSIEMSinks))
+		mux.HandleFunc("POST /api/v1/siem/sinks", rt.authz(userdom.PermAdminister, rt.createSIEMSink))
+		mux.HandleFunc("GET /api/v1/siem/sinks/{id}", rt.authz(userdom.PermManageIntegrations, rt.getSIEMSink))
+		mux.HandleFunc("PATCH /api/v1/siem/sinks/{id}", rt.authz(userdom.PermAdminister, rt.updateSIEMSink))
+		mux.HandleFunc("POST /api/v1/siem/sinks/{id}/secret", rt.authz(userdom.PermAdminister, rt.rotateSIEMSecret))
+		mux.HandleFunc("POST /api/v1/siem/sinks/{id}/origin", rt.authz(userdom.PermAdminister, rt.changeSIEMOrigin))
+		mux.HandleFunc("POST /api/v1/siem/sinks/{id}/pause", rt.authz(userdom.PermManageIntegrations, rt.pauseSIEMSink))
+		mux.HandleFunc("POST /api/v1/siem/sinks/{id}/resume", rt.authz(userdom.PermManageIntegrations, rt.resumeSIEMSink))
+		mux.HandleFunc("POST /api/v1/siem/sinks/{id}/test", rt.authz(userdom.PermManageIntegrations, rt.testSIEMSink))
+		mux.HandleFunc("GET /api/v1/siem/sinks/{id}/status", rt.authz(userdom.PermManageIntegrations, rt.siemSinkStatus))
+	}
+	if rt.inbox != nil {
+		mux.HandleFunc("GET /api/v1/me/inbox", rt.authz(userdom.PermView, rt.listMyInbox))
+		mux.HandleFunc("GET /api/v1/me/inbox/unread", rt.authz(userdom.PermView, rt.countMyInbox))
+		mux.HandleFunc("POST /api/v1/me/inbox/read", rt.authz(userdom.PermView, rt.readAllMyInbox))
+		mux.HandleFunc("POST /api/v1/me/inbox/{id}/read", rt.authz(userdom.PermView, rt.readMyInbox))
+		mux.HandleFunc("GET /api/v1/me/notification-preferences", rt.authz(userdom.PermView, rt.listMyNotificationPreferences))
+		mux.HandleFunc("PUT /api/v1/me/notification-preferences", rt.authz(userdom.PermView, rt.saveMyNotificationPreference))
+	}
+	if rt.tenantSettings != nil {
+		mux.HandleFunc("GET /api/v1/tenant/settings", rt.authz(userdom.PermView, rt.getTenantSettings))
+		mux.HandleFunc("PUT /api/v1/tenant/settings", rt.authz(userdom.PermAdminister, rt.putTenantSettings))
 	}
 	if rt.businessAssets != nil {
 		if rt.eng != nil && rt.findings != nil {
@@ -747,9 +866,10 @@ func (rt *Router) routes() *http.ServeMux {
 	}
 	if rt.connectors != nil {
 		// Source-control connectors: tenant-scoped git-host + PAT bindings that let a server-initiated
-		// scan clone a PRIVATE repository. PermAdminister to manage; the token is write-only (sealed on
-		// create, never returned), and the acquirer resolves it by host at clone time.
-		mux.HandleFunc("GET /api/v1/connectors", rt.authz(userdom.PermAdminister, rt.listConnectors))
+		// scan clone a PRIVATE repository. Listing needs manage_integrations; creating (a new host
+		// and token) and deleting need PermAdminister. The token is write-only (sealed on create,
+		// never returned), and the acquirer resolves it by host at clone time.
+		mux.HandleFunc("GET /api/v1/connectors", rt.authz(userdom.PermManageIntegrations, rt.listConnectors))
 		mux.HandleFunc("POST /api/v1/connectors", rt.authz(userdom.PermAdminister, rt.createConnector))
 		mux.HandleFunc("DELETE /api/v1/connectors/{id}", rt.authz(userdom.PermAdminister, rt.deleteConnector))
 	}
@@ -883,16 +1003,32 @@ func (rt *Router) routes() *http.ServeMux {
 		// subsystem from a broken one.
 		mux.HandleFunc("GET /api/v1/capabilities", rt.authz(userdom.PermView, rt.listCapabilities))
 	}
-	mux.HandleFunc("GET /api/v1/me", rt.currentUser)
+	mux.HandleFunc("GET /api/v1/me", rt.recoverable("", authz.RecoveryReadSelf, rt.currentUser))
+	if rt.assigneeReview != nil {
+		mux.HandleFunc("GET /api/v1/findings/assignee-review", rt.authz(userdom.PermAdminister, rt.listAssigneeReview))
+	}
+	if rt.userPicker != nil {
+		mux.HandleFunc("GET /api/v1/users/picker", rt.authz(userdom.PermTriage, rt.listUserChoices))
+	}
+	if rt.userContacts != nil {
+		mux.HandleFunc("GET /api/v1/me/contacts", rt.authz(userdom.PermView, rt.listMyContacts))
+		mux.HandleFunc("POST /api/v1/me/contacts", rt.authz(userdom.PermView, rt.addMyContact))
+		mux.HandleFunc("DELETE /api/v1/me/contacts/{id}", rt.authz(userdom.PermView, rt.deleteMyContact))
+		mux.HandleFunc("POST /api/v1/me/contacts/{id}/verification", rt.authz(userdom.PermView, rt.requestMyContactVerification))
+		mux.HandleFunc("POST /api/v1/me/contacts/{id}/verify", rt.authz(userdom.PermView, rt.verifyMyContact))
+	}
 	// User management is administer-only and confined to the caller's own tenant. Deleting a user is
 	// deliberately absent: an identity owns its audit, evidence, and finding attribution, so access is
 	// revoked by disabling the account or rotating its key, never by removing the row.
-	mux.HandleFunc("GET /api/v1/users", rt.authz(userdom.PermAdminister, rt.listUsers))
+	mux.HandleFunc("GET /api/v1/users", rt.recoverable(userdom.PermAdminister, authz.RecoveryListUsers, rt.listUsers))
 	mux.HandleFunc("POST /api/v1/users", rt.authz(userdom.PermAdminister, rt.createUser))
-	mux.HandleFunc("PATCH /api/v1/users/{id}", rt.authz(userdom.PermAdminister, rt.updateUser))
-	mux.HandleFunc("POST /api/v1/users/{id}/disable", rt.authz(userdom.PermAdminister, rt.disableUser))
-	mux.HandleFunc("POST /api/v1/users/{id}/enable", rt.authz(userdom.PermAdminister, rt.enableUser))
+	mux.HandleFunc("PATCH /api/v1/users/{id}", rt.recoverable(userdom.PermAdminister, authz.RecoveryAssignRole, rt.updateUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/disable", rt.recoverable(userdom.PermAdminister, authz.RecoveryDisableUser, rt.disableUser))
+	mux.HandleFunc("POST /api/v1/users/{id}/enable", rt.recoverable(userdom.PermAdminister, authz.RecoveryEnableUser, rt.enableUser))
 	mux.HandleFunc("POST /api/v1/users/{id}/rotate-key", rt.authz(userdom.PermAdminister, rt.rotateUserAPIKey))
+	mux.HandleFunc("GET /api/v1/users/{id}/oidc-links", rt.authz(userdom.PermAdminister, rt.listUserOIDCLinks))
+	mux.HandleFunc("POST /api/v1/users/{id}/oidc-links", rt.authz(userdom.PermAdminister, rt.linkUserOIDCIdentity))
+	mux.HandleFunc("DELETE /api/v1/users/{id}/oidc-links/{linkId}", rt.authz(userdom.PermAdminister, rt.unlinkUserOIDCIdentity))
 	if rt.vulnerabilitySources != nil && rt.vulnerabilityMonitor != nil {
 		mux.HandleFunc("GET /api/v1/vulnerability/sources/types", rt.authz(userdom.PermView, rt.listVulnerabilityAdapterTypes))
 		mux.HandleFunc("GET /api/v1/vulnerability/sources", rt.authz(userdom.PermView, rt.listVulnerabilitySources))
@@ -983,6 +1119,12 @@ func publicPaths() map[string]bool {
 	return map[string]bool{
 		"/healthz": true, "/readyz": true,
 		"/api/auth/oidc/login": true, "/api/auth/oidc/callback": true, "/api/auth/session": true,
+		"/api/auth/enterprise/context": true, "/api/auth/enterprise/begin": true, "/api/auth/enterprise/callback": true,
+		"/api/auth/enterprise/recovery":             true,
+		"/api/auth/enterprise/switch":               true,
+		"/api/auth/enterprise/invitation":           true,
+		"/api/auth/enterprise/invitation/pending":   true,
+		"/api/auth/enterprise/invitation/challenge": true,
 	}
 }
 
@@ -1011,16 +1153,21 @@ func (rt *Router) Handler() http.Handler {
 	// Attach a method-aware route pattern before auth/AUP can reject a known human
 	// route. ServeMux returns an empty pattern for unknown paths and method mismatches.
 	human = annotateRoutePattern(routes, limitRequestBody(human))
+	// Mount exact hook route before the human chain. Never create a prefix-wide
+	// publicPaths exemption: methods and siblings stay on human auth.
 	var complete http.Handler
-	if rt.fleet == nil {
+	if rt.fleet == nil && rt.inboundWebhooks == nil {
 		complete = normalizePath(human)
 	} else {
-		// The untrusted agent transport is a separate auth plane. Mount its exact
-		// subtrees so operator routes under /api/v1/fleet remain on the human chain.
 		top := http.NewServeMux()
-		agentPlane := rt.fleet.handler()
-		for _, mount := range fleetAgentPlaneMounts() {
-			top.Handle(mount, agentPlane)
+		if rt.fleet != nil {
+			agentPlane := rt.fleet.handler()
+			for _, mount := range fleetAgentPlaneMounts() {
+				top.Handle(mount, agentPlane)
+			}
+		}
+		if rt.inboundWebhooks != nil {
+			top.HandleFunc("POST /api/v1/hooks/{public_id}", rt.inboundWebhooks.handle)
 		}
 		top.Handle("/", human)
 		complete = normalizePath(top)

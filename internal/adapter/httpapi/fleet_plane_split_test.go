@@ -34,11 +34,11 @@ func routerWithFleetPlanes(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatalf("work svc: %v", err)
 	}
-	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, bool) {
+	auth := NewAuthenticator(func(_ context.Context, token string) (Principal, error) {
 		if token == "operator-secret" {
-			return Principal{ID: "u1", Name: "Operator", Role: "admin", TenantID: "tenantA"}, true
+			return Principal{ID: "u1", Name: "Operator", Role: "admin", TenantID: "tenantA"}, nil
 		}
-		return Principal{}, false
+		return Principal{}, errTestCredentialInvalid
 	})
 	rt := &Router{log: discardLog(), auth: auth}
 	rt.SetFleet(agentSvc, workSvc, func() time.Time { return time.Now().UTC() }, "")

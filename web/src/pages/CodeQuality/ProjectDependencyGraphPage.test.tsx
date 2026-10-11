@@ -41,6 +41,7 @@ const project: Project = {
   sourceBinding: { kind: 'git', value: 'https://example.test/payments.git', ref: 'main' },
   defaultProfileByLang: {},
   gateId: '',
+  decoratePullRequests: false,
   createdAt: null,
   latestAnalysis: {} as Project['latestAnalysis'],
   latestJob: null,

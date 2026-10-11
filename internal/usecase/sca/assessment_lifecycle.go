@@ -104,6 +104,24 @@ func (s *Service) persistAssessmentScanRun(ctx context.Context, engagementID, pr
 	}
 	lane.LaneKey = lane.Producer
 	lanesByKey := map[string]scanrun.Lane{lane.Producer: lane}
+	for producer, outcomeSet := range assessmentProducerOutcomes(result.EngineOutcomes) {
+		if producer == lane.Producer {
+			current := lanesByKey[producer]
+			current.EngineOutcomes = outcomeSet
+			lanesByKey[producer] = current
+			continue
+		}
+		kind, ok := assessmentProducerFindingKind(producer)
+		if !ok {
+			continue
+		}
+		other := lane
+		other.LaneKey, other.Producer = producer, producer
+		other.AuthoritativeFindingKinds = []string{kind}
+		other.EngineOutcomes = outcomeSet
+		other.TerminalStatus = assessmentProducerStatus(outcomeSet)
+		lanesByKey[producer] = other
+	}
 	for _, record := range evidence.Records {
 		if _, exists := lanesByKey[record.ProducerKind]; exists {
 			continue
@@ -111,6 +129,7 @@ func (s *Service) persistAssessmentScanRun(ctx context.Context, engagementID, pr
 		other := lane
 		other.LaneKey, other.Producer = record.ProducerKind, record.ProducerKind
 		other.AuthoritativeFindingKinds = []string{record.FindingKind}
+		other.EngineOutcomes = nil
 		// Positive observations establish presence, not exhaustive source coverage.
 		other.TerminalStatus = scanrun.StatusPartial
 		lanesByKey[other.LaneKey] = other
@@ -234,11 +253,18 @@ func assessmentSCALane(item *engagement.Engagement, runID string, startedAt, fin
 	if err != nil {
 		return scanrun.Lane{}, "", err
 	}
+	outcomes, err := assessmentFreshEngineOutcomes(result)
+	if err != nil {
+		return scanrun.Lane{}, "", err
+	}
 	status := scanrun.StatusSucceeded
 	if result.VulnsBelowThreshold > 0 || result.UnfixedSuppressed > 0 {
 		status = scanrun.StatusPartial
 	}
 	if !immutable || !result.Completeness.Confident || len(result.SourceWarnings) > 0 || strings.TrimSpace(result.ReproDigest) == "" {
+		status = scanrun.StatusPartial
+	}
+	if len(outcomes) > 0 && !scanrun.ComputeEngineCoverage(outcomes).Complete() {
 		status = scanrun.StatusPartial
 	}
 	for _, event := range result.DebugEvents {
@@ -251,7 +277,7 @@ func assessmentSCALane(item *engagement.Engagement, runID string, startedAt, fin
 		TenantID: shared.TenantOrDefault(item.TenantID), EngagementID: item.ID, ScanRunID: runID, LaneKey: "sca", Producer: "synapse-sca", TerminalStatus: status,
 		Target: target, AuthoritativeFindingKinds: assessmentFindingKinds(result), IncludedScope: assessmentScope(item.Scope.InScope), ExcludedScope: assessmentScope(item.Scope.OutOfScope),
 		StartedAt: startedAt, FinishedAt: &finishedAt, ResultRef: "scan-result/" + runID, ResultSHA256: result.ReproDigest,
-		ManifestSchemaVersion: scanrun.CurrentManifestSchemaVersion, Versions: assessmentScanVersions(result.Manifest), Stages: assessmentScanStages(result.DebugEvents, startedAt, finishedAt),
+		ManifestSchemaVersion: scanrun.CurrentManifestSchemaVersion, Versions: assessmentScanVersions(result.Manifest), Stages: assessmentScanStages(result.DebugEvents, startedAt, finishedAt), EngineOutcomes: outcomes,
 	}
 	return lane, status, lane.Validate()
 }
@@ -324,6 +350,104 @@ func assessmentFindingKinds(result *ScanResult) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// assessmentFreshEngineOutcomes accepts absent outcomes only for historical
+// results. New pipeline results always declare their complete planned surface,
+// including disabled and not-applicable engines, before they can be sealed.
+func assessmentFreshEngineOutcomes(result *ScanResult) ([]scanrun.EngineOutcome, error) {
+	if strings.TrimSpace(result.ExecutionMode) == "" {
+		return nil, nil
+	}
+	outcomes, err := scanrun.CanonicalEngineOutcomes(result.EngineOutcomes)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize scan engine outcomes: %w", err)
+	}
+	planned, err := scanrun.CanonicalEngineOutcomes(result.plannedEngines)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize planned scan engines: %w", err)
+	}
+	if len(planned) == 0 {
+		return nil, fmt.Errorf("%w: fresh scan result has no server-derived engine plan", shared.ErrValidation)
+	}
+	if len(outcomes) != len(planned) {
+		return nil, fmt.Errorf("%w: fresh scan outcomes do not match the server-derived engine plan", shared.ErrValidation)
+	}
+	for index := range planned {
+		actual, expected := outcomes[index], planned[index]
+		if actual.Engine != expected.Engine || actual.Required != expected.Required {
+			return nil, fmt.Errorf("%w: fresh scan outcome %q does not match the server-derived plan", shared.ErrValidation, actual.Engine)
+		}
+	}
+	return outcomes, nil
+}
+
+func assessmentProducerOutcomes(outcomes []scanrun.EngineOutcome) map[string][]scanrun.EngineOutcome {
+	byProducer := make(map[string][]scanrun.EngineOutcome)
+	for _, outcome := range outcomes {
+		producer, ok := assessmentEngineProducer(outcome.Engine)
+		if !ok || (!outcome.Required && outcome.Coverage == scanrun.CoverageNotApplicable) {
+			continue
+		}
+		byProducer[producer] = append(byProducer[producer], outcome)
+	}
+	for producer, items := range byProducer {
+		canonical, err := scanrun.CanonicalEngineOutcomes(items)
+		if err == nil {
+			byProducer[producer] = canonical
+		}
+	}
+	return byProducer
+}
+
+func assessmentEngineProducer(engine string) (string, bool) {
+	switch engine {
+	case "inventory", "dependency_resolution", "sca":
+		return "sca", true
+	case "licenses":
+		return "license", true
+	case "sast", "taint_go", "taint_python", "taint_javascript", "taint_java":
+		return "sast", true
+	case "secrets", "secret_history":
+		return "secret", true
+	case "iac":
+		return "iac", true
+	case "code_quality":
+		return "quality", true
+	default:
+		return "", false
+	}
+}
+
+func assessmentProducerFindingKind(producer string) (string, bool) {
+	switch producer {
+	case "sca":
+		return "vulnerability", true
+	case "license":
+		return "license", true
+	case "sast":
+		return "sast", true
+	case "secret":
+		return "secret", true
+	case "iac":
+		return "misconfig", true
+	case "quality":
+		return "quality", true
+	default:
+		return "", false
+	}
+}
+
+func assessmentProducerStatus(outcomes []scanrun.EngineOutcome) scanrun.TerminalStatus {
+	if len(outcomes) == 0 {
+		return scanrun.StatusPartial
+	}
+	for _, outcome := range outcomes {
+		if outcome.Execution != scanrun.EngineCompleted || outcome.Coverage != scanrun.CoverageComplete {
+			return scanrun.StatusPartial
+		}
+	}
+	return scanrun.StatusSucceeded
 }
 
 func assessmentFindingKeys(findings []finding.Finding) []string {
@@ -479,6 +603,8 @@ func buildAssessmentEvidence(result *ScanResult, target string) (lineageuc.Nativ
 func (s *Service) copyAssessmentScanResult(result *ScanResult) *ScanResult {
 	copy := *result
 	copy.Findings = append([]finding.Finding(nil), result.Findings...)
+	copy.EngineOutcomes = scanrun.CloneEngineOutcomes(result.EngineOutcomes)
+	copy.plannedEngines = scanrun.CloneEngineOutcomes(result.plannedEngines)
 	copy.VulnsBelowThreshold = countBelowThreshold(copy.Vulnerabilities, s.minSeverity)
 	copy.UnfixedSuppressed = countUnfixedSuppressed(copy.Vulnerabilities, s.minSeverity, s.ignoreUnfixed)
 	copy.ReproDigest = ReproDigest(&copy)

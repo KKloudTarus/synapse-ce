@@ -61,8 +61,10 @@ func (r *ReconciliationRunner) RunOnce(ctx context.Context) error {
 			return err
 		}
 		if tenantID.IsZero() {
-			r.log.Error("response reconciliation tenant is invalid")
-			errs = append(errs, fmt.Errorf("%w: response reconciliation tenant is invalid", shared.ErrValidation))
+			// The lister filters the legacy empty-id tenants row, so this is unreachable there.
+			// Debug rather than Error: a zero id cannot be reconciled under RLS, and logging it once
+			// a pass turned a healthy install into a stream of errors.
+			r.log.Debug("response reconciliation skipped a zero tenant")
 			continue
 		}
 		tenantCtx := shared.WithTenant(ctx, tenantID)

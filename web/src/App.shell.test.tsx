@@ -12,6 +12,7 @@ vi.mock('./lib/api', () => ({
     listBusinessAssets: vi.fn(),
     fleetCoverageSummary: vi.fn(),
     dashboardSecurityOperations: vi.fn(),
+    inboxUnread: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     constructor(
@@ -49,6 +50,7 @@ describe('App shell', () => {
       oldestPerCapability: {},
       assetsWithoutAgent: 0,
     })
+    vi.mocked(api.inboxUnread).mockResolvedValue({ unread: 0 })
     vi.mocked(api.dashboardSecurityOperations).mockResolvedValue({
       rangeDays: 30,
       generatedAt: '',

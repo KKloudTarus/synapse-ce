@@ -19,6 +19,7 @@ const project = {
   name: 'Proj',
   sourceBinding: { kind: 'git', value: 'git@example.com:acme/app.git', ref: 'main' },
   gateId: '',
+  decoratePullRequests: false,
 } as unknown as ProjectRouteContext['project']
 
 function renderAt(url: string) {

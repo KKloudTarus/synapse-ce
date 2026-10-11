@@ -14,6 +14,9 @@ image:
   pullPolicy: IfNotPresent
 
 web:
+  # nginx writes only its PID and small client bodies to /tmp.
+  scratch:
+    tmpSizeLimit: 64Mi
   replicaCount: 2
   image:
     repository: ghcr.io/kkloudtarus/synapse-web
@@ -24,7 +27,36 @@ web:
     limits: {cpu: 500m, memory: 256Mi}
 
 api:
+  # values.schema.json requires at least two, so every supported install is multi-replica and
+  # /var/lib/synapse below has to be shared storage for the Code view to work. api.persistence says
+  # how; leaving it off now fails the render with that explanation instead of serving a console whose
+  # captured source is visible only on the pod that produced it.
   replicaCount: 2
+  # Bounded scratch. A scan stages a clone, an extracted archive or an image layout under /tmp, so an
+  # unbounded emptyDir let one oversized target fill the node's ephemeral storage and get the pod
+  # evicted by the kubelet. With a limit the pod is evicted alone and the scan fails, which is the
+  # failure an operator can act on. Keep tmpSizeLimit above scan.maxWorkspaceBytes.
+  scratch:
+    tmpSizeLimit: 4Gi
+    dataSizeLimit: 1Gi
+  # /var/lib/synapse is DATA, not scratch. The image points three paths at it:
+  # SYNAPSE_PROJECT_SOURCE_ARTIFACT_DIR (the Code view's captured source), SYNAPSE_PROJECT_UPLOAD_DIR
+  # and SYNAPSE_ENGAGEMENT_SOURCE_DIR. On an emptyDir each pod keeps its own copy, so with more than
+  # one replica the Code view answers "source artifact is missing from this server's storage" whenever
+  # the request reaches a pod that did not run the analysis, and every restart discards the lot.
+  # Give it a ReadWriteMany claim (EFS on EKS, Filestore on GKE, Azure Files) for a multi-replica
+  # install; a single replica may keep the emptyDir if losing the data on restart is acceptable.
+  persistence:
+    enabled: false
+    # Bind an existing claim instead of letting the chart create one.
+    existingClaim: ""
+    storageClass: ""
+    accessModes: [ReadWriteMany]
+    size: 20Gi
+    # The explicit way to run several replicas on pod-local storage: the Code view then works only
+    # when the request happens to reach the pod that ran the analysis. Set it when nothing reads the
+    # captured source and the uploads are single-shot.
+    acknowledgeEphemeral: false
   assessmentCycleApi:
     enabled: false
     dualWriteEnabled: false
@@ -126,6 +158,13 @@ vulnerabilityIntelligence:
     batchSize: 1000
 
 worker:
+  # Bounded scratch. A scan stages a clone, an extracted archive or an image layout under /tmp, so an
+  # unbounded emptyDir let one oversized target fill the node's ephemeral storage and get the pod
+  # evicted by the kubelet. With a limit the pod is evicted alone and the scan fails, which is the
+  # failure an operator can act on. Keep tmpSizeLimit above scan.maxWorkspaceBytes.
+  scratch:
+    tmpSizeLimit: 4Gi
+    dataSizeLimit: 1Gi
   # Disable this Deployment when execution workers run on the hardened external EC2 tier.
   enabled: true
   # Fenced claim leases, per-run execution locks, and leader-gated maintenance permit safe worker replicas.
@@ -133,6 +172,12 @@ worker:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  metrics:
+    # The unauthenticated worker endpoint is off by default and has a separate
+    # ClusterIP Service and monitoring-namespace-only ingress when enabled.
+    enabled: false
+    port: 9091
+    monitoringNamespace: monitoring
   integrationScheduler:
     enabled: false
     poll: 1m
@@ -146,6 +191,12 @@ migration:
   resources:
     requests: {cpu: 100m, memory: 256Mi}
     limits: {cpu: 500m, memory: 512Mi}
+  # The Job inherits api.nodeSelector and api.tolerations, because it runs the same
+  # amd64-only control-plane image and writes the same tenant-owned state. Set these only to
+  # place the Job somewhere other than the API's pool; each one replaces the API's value
+  # rather than merging with it.
+  nodeSelector: {}
+  tolerations: []
 
 serviceAccount:
   create: true
@@ -214,7 +265,9 @@ oidc:
   frontendURL: ""
   # The tenant is fixed by the operator and never read from a token claim.
   tenantID: ""
-  # Allowlist entries map one provider group to one Synapse role, e.g. "administrators=admin".
+  # Deprecated and ignored. Provider groups never assign or change a Synapse role; an
+  # administrator approves each (issuer, subject) link and sets the role in Synapse. A non-empty
+  # value is still accepted so existing values files render, and the API logs a deprecation warning.
   groupRoleMapping: []
   transactionTTL: 10m
   sessionTTL: 8h
@@ -254,8 +307,13 @@ egressBroker:
       operator: Equal
       value: "true"
       effect: NoSchedule
-  # Base cap set the broker needs to build a per-run netns + veth + NAT + iptables. `privileged: true` is the
-  # last-resort escape hatch for runtimes that will not honour the exact caps + Unconfined seccomp.
+  # MANDATORY for execution.mode=inClusterBroker, and a render guard enforces it. The broker mounts
+  # /run/netns with mountPropagation Bidirectional so each per-run netns is visible to the worker, and
+  # the kubelet allows bidirectional propagation only on a privileged container: with privileged=false
+  # the API server rejects the DaemonSet outright. The capabilities below are what the broker actually
+  # needs to build a per-run netns + veth + NAT + iptables, and they stay declared so the posture is
+  # visible, but on their own they are not a usable configuration today. Keep execution off the cluster
+  # with execution.mode=externalNative if a privileged DaemonSet is not acceptable.
   privileged: false
   capabilities: ["NET_ADMIN", "SYS_ADMIN", "SYS_PTRACE", "DAC_READ_SEARCH", "CHOWN"]
   resources:
@@ -295,6 +353,9 @@ topologySpreadConstraints:
 # Scan-time settings, applied to every component that runs a scan. Each is omitted from the pod when unset, so
 # the binary keeps its own default.
 scan:
+  # Largest target the acquirer will stage into the pod's /tmp, in bytes. The process default is 2 GiB.
+  # Empty leaves that default in place. This is the number the scratch limits above must exceed.
+  maxWorkspaceBytes: ""
   # Bytes of source the static analyser retains for cross-file context. Unset derives it from the container
   # memory limit (one eighth, floored at 64Mi and capped at 512Mi), which is right on almost every repository.
   # Set it explicitly for a monorepo whose source exceeds that and whose pod has the memory to hold it.

@@ -216,7 +216,7 @@ func (r *EngagementRepository) ListPromotionReconciliationScopes(ctx context.Con
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	tenants, err := r.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	tenants, err := r.pool.Query(ctx, `SELECT id FROM tenants WHERE id <> '' ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list promotion reconciliation tenants: %w", err)
 	}
@@ -360,7 +360,12 @@ func (r *EngagementRepository) listInternal(ctx context.Context, tenantID shared
 }
 
 func (r *EngagementRepository) ListTenantIDs(ctx context.Context) ([]shared.ID, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	// Migration 0002 seeded a tenants row with an empty id for the original single-tenant mode, and
+	// every install still carries it. It cannot be reconciled: WithTenant maps an empty id to NULL,
+	// which RLS denies, and 0129 already backfilled the rows that used to carry it to 'default'. Left
+	// in the result it made every periodic reconciler log an error once a pass, forever, on a healthy
+	// install. Filter it here so no caller has to know.
+	rows, err := r.pool.Query(ctx, `SELECT id FROM tenants WHERE id <> '' ORDER BY id COLLATE "C"`)
 	if err != nil {
 		return nil, fmt.Errorf("list vulnerability reconciliation tenants: %w", err)
 	}

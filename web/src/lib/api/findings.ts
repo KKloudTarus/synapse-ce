@@ -59,6 +59,7 @@ export function mapFinding(r: any): Finding {
     impact: r.Impact ?? '',
     priority: r.Priority ?? 3,
     assignee: r.Assignee ?? '',
+    assigneeUserId: r.assignee_user_id ?? undefined,
     version: r.Version ?? 1,
     kind: r.Kind ?? '',
     evidenceScore: r.EvidenceScore ?? 0,
@@ -328,5 +329,17 @@ export const findingsApi = {
       body: JSON.stringify({ outcome, note, version }),
     })
     return { retest: r.retest as Retest, finding: mapFinding(r.finding) }
+  },
+
+  assigneeReview: async (
+    cursor?: { engagement_id: string; finding_id: string },
+    signal?: AbortSignal,
+  ): Promise<{ items: Array<{ engagement_id: string; finding_id: string; legacy_assignee: string; reason: string }>; next?: { engagement_id: string; finding_id: string } | null }> => {
+    const params = new URLSearchParams({ limit: '50' })
+    if (cursor) {
+      params.set('cursor_engagement_id', cursor.engagement_id)
+      params.set('cursor_finding_id', cursor.finding_id)
+    }
+    return req(`/findings/assignee-review?${params}`, signal ? { signal } : undefined)
   },
 }

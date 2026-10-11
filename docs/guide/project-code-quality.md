@@ -168,7 +168,8 @@ no line the report knows about. A condition on one of these then fails closed an
 measurement. `new_coverage` is line coverage over the lines the diff added; `new_duplication` is the share
 of those lines that sit inside a duplicated block. The measures snapshot's `new_code_coverage` carries the
 specific reason when it is unavailable: `no_coverage_report`, `no_changed_lines`, or
-`changed_lines_not_in_report`.
+`changed_lines_not_in_report`. Analyses recorded before those reasons existed keep the single reason they
+were stored with, `changed_line_coverage_not_available`.
 
 ## Quality profiles
 

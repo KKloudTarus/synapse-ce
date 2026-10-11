@@ -34,6 +34,9 @@ func TestMigration0151UpgradeFixtureAndRollbackGuard(t *testing.T) {
 	if err := goose.UpTo(db, ".", 150); err != nil {
 		t.Fatalf("up to 0150: %v", err)
 	}
+	if _, err := db.Exec(`ALTER TABLE scan_run_lanes ADD COLUMN engine_outcomes JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
+		t.Fatalf("add current scan-run fixture column: %v", err)
+	}
 	pool, err := Connect(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +58,9 @@ func TestMigration0151UpgradeFixtureAndRollbackGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	pool.Close()
+	if _, err := db.Exec(`ALTER TABLE scan_run_lanes DROP COLUMN engine_outcomes`); err != nil {
+		t.Fatalf("restore pre-0219 schema before rollback guard: %v", err)
+	}
 	if err := goose.DownTo(db, ".", 150); err == nil || !strings.Contains(err.Error(), "cannot roll back finding lineage while lineage rows exist") {
 		t.Fatalf("rollback with lineage rows error=%v", err)
 	}

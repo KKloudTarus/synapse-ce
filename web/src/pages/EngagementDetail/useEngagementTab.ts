@@ -23,7 +23,7 @@ export function useEngagementTab(id: string, tabSlug: string | undefined, hash: 
       const base = `/engagements/${encodeURIComponent(id)}`
       // Keep the hash: a #finding-<id> deep link switches to the Findings tab and the hash is what
       // FindingsTab scrolls to.
-      navigate(`${next === 'overview' ? base : `${base}/${next}`}${hash}`, { replace: true })
+      navigate(`${next === 'overview' ? base : `${base}/${next}`}${hash}`, { replace: true, state: { focusEngagementViews: true } })
     },
     [hash, id, navigate],
   )

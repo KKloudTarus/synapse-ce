@@ -1,0 +1,9 @@
+*SQL injection in /login* on _prod\_eu_
+Rule {{CWE\-89}}, severity *critical*
+
+* Host&#58; api.example.com
+* Owner&#58; team <platform> &amp; ops
+
+Reported by Synapse.
+
+[Open finding|https://synapse.example.com/engagements/e1/findings/f1]

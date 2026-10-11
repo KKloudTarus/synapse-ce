@@ -18,7 +18,9 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/selfhostedhttp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 )
 
@@ -31,6 +33,7 @@ const (
 )
 
 var descriptor = integration.ProviderDescriptor{
+	SelfHosted:  true,
 	Provider:    Provider,
 	Name:        "Jenkins",
 	Description: "Read-only polling for Jenkins folders, jobs, pipelines, multibranch projects, and builds.",
@@ -60,7 +63,7 @@ func Register(registry *integration.Registry) error {
 	return registry.Register(descriptor, New)
 }
 
-func New(item integration.Integration, credentials integration.CredentialBundle) (integration.Adapter, error) {
+func New(item integration.Integration, credentials integration.CredentialBundle, rules selfhosted.Rules) (integration.Adapter, error) {
 	if err := item.Normalize(); err != nil {
 		return nil, err
 	}
@@ -77,7 +80,7 @@ func New(item integration.Integration, credentials integration.CredentialBundle)
 	return &Adapter{
 		descriptor: descriptor,
 		base:       base,
-		client:     safehttp.New(20*time.Second, item.AllowPrivateNetwork),
+		client:     selfhostedhttp.NewClient(20*time.Second, rules, item.AllowPrivateNetwork),
 		username:   credentials["username"],
 		token:      credentials["api_token"],
 	}, nil
@@ -436,6 +439,10 @@ func (adapter *Adapter) get(ctx context.Context, resource string, query url.Valu
 		if errors.Is(err, context.Canceled) {
 			return err
 		}
+		if errors.Is(err, safehttp.ErrBlockedDestination) {
+			// The operator's rules refuse this endpoint; retrying cannot change that.
+			return integration.PermanentError(fmt.Errorf("jenkins endpoint is not allowed by the operator's network rules"))
+		}
 		return integration.RetryableError(fmt.Errorf("jenkins request failed"))
 	}
 	defer func() { _ = response.Body.Close() }()
@@ -503,7 +510,7 @@ func (adapter *Adapter) externalKey(raw string) (string, error) {
 	if err := adapter.rejectCredentialReflection(decodedPath); err != nil {
 		return "", err
 	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !sameOrigin(parsed, adapter.base) {
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !selfhosted.SameOrigin(parsed, adapter.base) {
 		return "", fmt.Errorf("jenkins returned a cross-origin job URL")
 	}
 	basePath := strings.TrimSuffix(adapter.base.Path, "/")
@@ -539,7 +546,7 @@ func (adapter *Adapter) safeRunURL(raw, fallbackKey string) (string, error) {
 	if !parsed.IsAbs() {
 		parsed = adapter.base.ResolveReference(parsed)
 	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !sameOrigin(parsed, adapter.base) {
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || !selfhosted.SameOrigin(parsed, adapter.base) {
 		return "", fmt.Errorf("jenkins returned an unsafe run URL")
 	}
 	basePath := strings.TrimSuffix(adapter.base.Path, "/")
@@ -608,23 +615,4 @@ func canonicalJenkinsKey(raw string) (string, error) {
 		return "", fmt.Errorf("jenkins pipeline key must start with /job/")
 	}
 	return key, nil
-}
-
-func sameOrigin(left, right *url.URL) bool {
-	return strings.EqualFold(left.Scheme, right.Scheme) &&
-		strings.EqualFold(left.Hostname(), right.Hostname()) &&
-		effectivePort(left) == effectivePort(right)
-}
-
-func effectivePort(value *url.URL) string {
-	if port := value.Port(); port != "" {
-		return port
-	}
-	if strings.EqualFold(value.Scheme, "https") {
-		return "443"
-	}
-	if strings.EqualFold(value.Scheme, "http") {
-		return "80"
-	}
-	return ""
 }

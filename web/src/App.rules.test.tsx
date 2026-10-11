@@ -19,6 +19,7 @@ vi.mock('./lib/api', () => ({
     getProject: vi.fn(),
     getAuditLogs: vi.fn(),
     getTeam: vi.fn(),
+    inboxUnread: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     constructor(public status: number, message: string) {
@@ -37,6 +38,7 @@ describe('App Routing - Rules', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.resetAllMocks()
+    vi.mocked(api.inboxUnread).mockResolvedValue({ unread: 0 })
     vi.mocked(api.listRules).mockResolvedValue([])
     vi.mocked(api.listEngagements).mockResolvedValue([])
     vi.mocked(api.listBusinessAssets).mockResolvedValue({ items: [], total: 0, limit: 200, offset: 0 })

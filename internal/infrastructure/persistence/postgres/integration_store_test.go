@@ -124,6 +124,21 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 	if err := store.CreateIntegration(actx, item, integrationMutationAudit("integration.created", item.ID, now)); err != nil {
 		t.Fatal(err)
 	}
+	inbound := integration.Integration{
+		ID: shared.ID("integration-gitlab-" + suffix), TenantID: tenantA, Provider: "gitlab",
+		Name: "GitLab inbound", Endpoint: "https://gitlab.example.com", Config: []byte(`{}`),
+		PollInterval: time.Minute, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateIntegration(actx, inbound, integrationMutationAudit("integration.created", inbound.ID, now)); err != nil {
+		t.Fatal(err)
+	}
+	inboundEnabled, err := store.SetIntegrationEnabled(
+		actx, inbound.ID, true, inbound.Version, ports.IntegrationEnableRequirements{},
+		integrationMutationAudit("integration.enabled", inbound.ID, now),
+	)
+	if err != nil || !inboundEnabled.Enabled {
+		t.Fatalf("credentialless inbound enable=%+v err=%v", inboundEnabled, err)
+	}
 	secret := []byte(`{"username":"reader","api_token":"secret-token"}`)
 	if err := store.PutIntegrationCredential(actx, item.ID, "default", secret, item.Version, 1, integrationMutationAudit("integration.credential_replaced", item.ID, now)); err != nil {
 		t.Fatal(err)
@@ -269,11 +284,11 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err = store.SetIntegrationEnabled(actx, item.ID, true, current.Version, integrationMutationAudit("integration.enabled", item.ID, now))
+	current, err = store.SetIntegrationEnabled(actx, item.ID, true, current.Version, ports.IntegrationEnableRequirements{RequireCredential: true, RequireSuccessfulTest: true}, integrationMutationAudit("integration.enabled", item.ID, now))
 	if err != nil {
 		t.Fatal(err)
 	}
-	due, err := store.ListDueIntegrations(actx, time.Now().UTC().Add(2*time.Hour), 10)
+	due, err := store.ListDueIntegrations(actx, time.Now().UTC().Add(2*time.Hour), 10, []integration.Provider{"jenkins"})
 	if err != nil || len(due) != 1 || due[0].ID != item.ID {
 		t.Fatalf("due integrations=%+v err=%v", due, err)
 	}
@@ -372,5 +387,129 @@ func TestPostgresIntegrationStoreAtomicityRLSCredentialsAndUpsert(t *testing.T) 
 		if count != want {
 			t.Fatalf("tenant %s sees %d integrations, want %d", tenant, count, want)
 		}
+	}
+}
+
+func TestPostgresIntegrationDueFiltersProvidersBeforeLimit(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	dsn = isolatedIntegrationDatabase(t, ctx, dsn)
+	if err := Migrate(ctx, dsn); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	suffix := randHex(t)
+	tenantID := shared.ID("tenant-due-" + suffix)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,$1)", tenantID.String()); err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := vault.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewIntegrationStore(pool, cipher)
+	tenantCtx := shared.WithTenant(ctx, tenantID)
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	jira := integration.Integration{
+		ID: shared.ID("jira-" + suffix), TenantID: tenantID, Provider: "jira", Name: "Jira",
+		Endpoint: "https://jira.example.com", Config: []byte(`{}`), PollInterval: time.Minute,
+		Enabled: true, Version: 1, CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour),
+	}
+	jenkins := integration.Integration{
+		ID: shared.ID("jenkins-" + suffix), TenantID: tenantID, Provider: "jenkins", Name: "Jenkins",
+		Endpoint: "https://jenkins.example.com", Config: []byte(`{}`), PollInterval: time.Minute,
+		Enabled: true, Version: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}
+	for _, item := range []integration.Integration{jira, jenkins} {
+		if err := store.CreateIntegration(tenantCtx, item, integrationMutationAudit("integration.created", item.ID, now)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name      string
+		providers []integration.Provider
+		want      shared.ID
+	}{
+		{name: "older write-only wins unrestricted limit", providers: []integration.Provider{"jira", "jenkins"}, want: jira.ID},
+		{name: "read_runs selection precedes limit", providers: []integration.Provider{"jenkins"}, want: jenkins.ID},
+		{name: "write-only provider only", providers: []integration.Provider{"jira"}, want: jira.ID},
+		{name: "no registered read provider", providers: nil},
+		{name: "unregistered provider cannot poll", providers: []integration.Provider{"unknown"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			due, err := store.ListDueIntegrations(tenantCtx, now, 1, tc.providers)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want == "" {
+				if len(due) != 0 {
+					t.Fatalf("due=%+v, want none", due)
+				}
+			} else if len(due) != 1 || due[0].ID != tc.want {
+				t.Fatalf("due=%+v, want %s", due, tc.want)
+			}
+		})
+	}
+}
+
+func TestPostgresGitHubInboundIntegrationEnablesWithoutPollingCredentialOrTest(t *testing.T) {
+	dsn := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if dsn == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	dsn = isolatedIntegrationDatabase(t, ctx, dsn)
+	if err := Migrate(ctx, dsn); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := randHex(t)
+	tenantID := shared.ID("github-enable-" + suffix)
+	if _, err := pool.Exec(ctx, "INSERT INTO tenants(id,name) VALUES($1,$1)", tenantID.String()); err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := vault.NewCipher(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewIntegrationStore(pool, cipher)
+	tenantCtx := shared.WithTenant(ctx, tenantID)
+	now := time.Now().UTC()
+
+	github := integration.Integration{
+		ID: shared.ID("github-" + suffix), TenantID: tenantID, Provider: "github", Name: "GitHub",
+		Endpoint: "https://github.com", Config: []byte(`{}`), PollInterval: time.Minute,
+		Version: 1, ConnectionRevision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateIntegration(tenantCtx, github, integrationMutationAudit("integration.created", github.ID, now)); err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := store.SetIntegrationEnabled(tenantCtx, github.ID, true, github.Version, ports.IntegrationEnableRequirements{}, integrationMutationAudit("integration.enabled", github.ID, now))
+	if err != nil || !enabled.Enabled {
+		t.Fatalf("credentialless GitHub enable=%+v err=%v", enabled, err)
+	}
+
+	jenkins := integration.Integration{
+		ID: shared.ID("jenkins-no-cred-" + suffix), TenantID: tenantID, Provider: "jenkins", Name: "Jenkins",
+		Endpoint: "https://jenkins.example.com", Config: []byte(`{}`), PollInterval: time.Minute,
+		Version: 1, ConnectionRevision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateIntegration(tenantCtx, jenkins, integrationMutationAudit("integration.created", jenkins.ID, now)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetIntegrationEnabled(tenantCtx, jenkins.ID, true, jenkins.Version, ports.IntegrationEnableRequirements{RequireCredential: true, RequireSuccessfulTest: true}, integrationMutationAudit("integration.enabled", jenkins.ID, now)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("credentialless Jenkins enable error=%v, want conflict", err)
 	}
 }

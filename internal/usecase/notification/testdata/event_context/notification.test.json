@@ -1,0 +1,9 @@
+{
+  "subject_kind": "channel",
+  "subject_id": "",
+  "vars": {
+    "event_label": "Channel test",
+    "event_type": "notification.test",
+    "occurred_at": "2026-09-27T08:00:00Z"
+  }
+}

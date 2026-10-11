@@ -85,6 +85,27 @@ func TestPostgresIdentityStore(t *testing.T) {
 		t.Fatalf("expired transaction must not be consumable: %v", err)
 	}
 
+	approved, _ := identity.NewSession("approved-"+shared.ID(randHex(t)), "default", u.ID, "approved-token-"+randHex(t), "approved-csrf", nil, now.Add(time.Hour), now)
+	if err := store.CreateSessionForExternalIdentity(ctx, external.Issuer, external.Subject, now.Add(-time.Second), approved); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("stale user approval = %v, want not found", err)
+	}
+	if _, err := store.GetSessionByTokenHash(ctx, approved.TokenHash); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("stale approval persisted session: %v", err)
+	}
+	if err := store.CreateSessionForExternalIdentity(ctx, external.Issuer, external.Subject, now, approved); err != nil {
+		t.Fatalf("create session for approved subject: %v", err)
+	}
+	if _, err := store.DeleteExternalIdentity(ctx, external.TenantID, external.UserID, external.ID); err != nil {
+		t.Fatalf("delete external identity: %v", err)
+	}
+	removed, _ := identity.NewSession("removed-"+shared.ID(randHex(t)), "default", u.ID, "removed-token-"+randHex(t), "removed-csrf", nil, now.Add(time.Hour), now)
+	if err := store.CreateSessionForExternalIdentity(ctx, external.Issuer, external.Subject, now, removed); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("removed subject approval = %v, want not found", err)
+	}
+	if _, err := store.GetSessionByTokenHash(ctx, removed.TokenHash); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("removed approval persisted session: %v", err)
+	}
+
 	session, _ := identity.NewSession("session-"+shared.ID(randHex(t)), "default", u.ID, "token-"+randHex(t), "csrf-hash", map[string]string{"ip": "127.0.0.1"}, now.Add(time.Hour), now)
 	if err := store.CreateSession(ctx, session); err != nil {
 		t.Fatalf("create session: %v", err)

@@ -129,7 +129,7 @@ jobs:
         shell: bash
         run: test "$(git rev-parse HEAD)" = "${{ needs.route.outputs.source_sha }}"
       - name: Download same-run authorization handoff
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           artifact-ids: ${{ needs.provenance.outputs.artifact }}
           path: ${{ runner.temp }}/sca-maintainer-authorization
@@ -173,7 +173,7 @@ jobs:
           print("sha256=" + envelope["sha256"])
           PY
       - name: Assume constrained AWS SSM role
-        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
         with:
           role-to-assume: arn:aws:iam::116378167742:role/synapse-epic1034-ci-oidc-20260925
           role-session-name: sca-accuracy-${{ github.run_id }}-${{ github.run_attempt }}

@@ -26,14 +26,21 @@ async function bootstrap() {
   // MSW mock mode is dev-only AND mutually exclusive with the real backend:
   // when VITE_API_PROXY_TARGET is set the dev server proxies /api to the backend,
   // so the mock worker must stay off or it would intercept those calls first.
-  if (import.meta.env.DEV && !import.meta.env.VITE_API_PROXY_TARGET) {
+  // VITE_PLAYGROUND builds the same mock layer into a static bundle for the hosted playground,
+  // which has no backend to proxy to and must never reach one.
+  const playground = import.meta.env.VITE_PLAYGROUND === '1'
+  if ((import.meta.env.DEV || playground) && !import.meta.env.VITE_API_PROXY_TARGET) {
     const { worker } = await import('./mocks/browser')
     await worker.start({ onUnhandledRequest: 'bypass' })
   }
 
+  // The playground shell is imported dynamically so a normal build never pulls it into the bundle.
+  const Shell = playground ? (await import('./playground/PlaygroundShell')).PlaygroundShell : null
+
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <BrowserRouter>
+        {Shell ? <Shell /> : null}
         <App />
       </BrowserRouter>
     </StrictMode>,

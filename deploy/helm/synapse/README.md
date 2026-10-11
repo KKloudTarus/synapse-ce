@@ -95,6 +95,8 @@ helm upgrade --install synapse deploy/helm/synapse \
 
 The migration hook uses the separate owner DSN Secret. API and worker set `SYNAPSE_DB_AUTO_MIGRATE=false`; the application verifies migration readiness before serving work. The API exposes aggregate Prometheus metrics on a dedicated ClusterIP port. That listener is unauthenticated by design, never appears on the public ingress, and its NetworkPolicy accepts traffic only from `api.metrics.monitoringNamespace`.
 
+To expose notification delivery health in `inClusterBroker` mode, set `worker.metrics.enabled=true` and explicitly enable `SYNAPSE_NOTIFICATIONS_ENABLED=true` through the shared `extraEnv` configuration. The chart then binds the worker's separate listener to `0.0.0.0:9091` by default, creates a worker-only **ClusterIP** metrics Service, and admits inbound scrapes only from `worker.metrics.monitoringNamespace`. The listener is unauthenticated, must never be added to the public ingress, and is disabled by default. Native EC2 workers are configured and scraped outside this chart.
+
 ## Validation
 
 ```bash

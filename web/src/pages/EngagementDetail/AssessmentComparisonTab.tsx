@@ -66,6 +66,7 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
   const [createError, setCreateError] = useState('')
   const [selectedItem, setSelectedItem] = useState<AssessmentComparisonItem | null>(null)
   const [configOpen, setConfigOpen] = useState(!comparisonId)
+  useEffect(() => { if (comparisonId) setConfigOpen(false) }, [comparisonId])
   const [finalizeOpen, setFinalizeOpen] = useState(false)
   const [expandedItemId, setExpandedItemId] = useState('')
   const [cursorHistory, setCursorHistory] = useState<string[]>([])
@@ -90,8 +91,10 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
   const currentSnapshots = context.data?.[1] ?? null
   const assessmentIds = useMemo(() => comparisonAssessmentIds(lifecycle, assessmentId, mode), [assessmentId, lifecycle, mode])
   const baselineAssessmentId = assessmentIds.includes(baselineAssessmentParam) ? baselineAssessmentParam : (assessmentIds[0] ?? '')
-  const baselineFetch = useFetch(() => api.assessmentSnapshots(baselineAssessmentId), { enabled: Boolean(baselineAssessmentId), deps: [baselineAssessmentId] })
-  const baselineSnapshots = baselineAssessmentId === assessmentId ? currentSnapshots : baselineFetch.data
+  const baselineFetch = useFetch(async () => ({ assessmentId: baselineAssessmentId, snapshots: await api.assessmentSnapshots(baselineAssessmentId) }), { enabled: Boolean(baselineAssessmentId), deps: [baselineAssessmentId] })
+  // A sibling selection can change when lifecycle data arrives. An earlier request must not
+  // normalize the new pair against the previous assessment's retained snapshot list.
+  const baselineSnapshots = baselineAssessmentId === assessmentId ? currentSnapshots : baselineFetch.data?.assessmentId === baselineAssessmentId ? baselineFetch.data.snapshots : null
   // Without this the config modal sits on "Preparing comparison options…" forever when the baseline
   // snapshot list fails, so a broken comparison is indistinguishable from a slow one.
   const baselineError = baselineAssessmentId === assessmentId ? '' : (baselineFetch.error ?? '')
@@ -221,7 +224,7 @@ export function AssessmentComparisonTab({ assessmentId }: { assessmentId: string
     setExpandedItemId('')
   }
 
-  return <div className="space-y-5">
+  return <div className="space-y-5" data-comparison-result={comparison?.id} data-comparison-scope={scope} data-comparison-ready={Boolean(terminal && scopedSummary && scopedItemPage && !comparisonFetch.loading && !summaryFetch.loading && !itemFetch.loading && !comparisonFetch.error && !summaryFetch.error && !itemFetch.error)}>
     {!comparisonId ? <EmptyState icon={GitBranch01} title="Configure a comparison" hint="Choose two immutable snapshots and the finding scope you want to inspect." action={<div className="flex flex-wrap justify-center gap-2"><Button onClick={() => setConfigOpen(true)}><Sliders04 className="size-4" />Configure comparison</Button>{canOperate ? <Button variant="secondary" onClick={() => setFinalizeOpen(true)}><Camera01 className="size-4" />Finalize snapshot</Button> : null}</div>} /> : <ComparisonPairBar mode={mode} baseline={baselineSnapshot} current={currentSnapshot} baselineLabel={baselineAssessmentId ? memberLabel(lifecycle, baselineAssessmentId, false) : 'Baseline'} currentLabel={memberLabel(lifecycle, assessmentId, false)} onConfigure={() => setConfigOpen(true)} />}
     {comparisonId ? <CoverageBanner baseline={baselineSnapshot} current={currentSnapshot} /> : null}
     {finalizeOpen ? <FinalizeSnapshotDialog assessmentId={assessmentId} expectedDefaultVersion={currentSnapshots.defaultVersion} onClose={() => setFinalizeOpen(false)} onFinalized={() => { setFinalizeOpen(false); context.refetch() }} /> : null}
@@ -386,7 +389,7 @@ function Summary({ comparison, summary, scope, coverage, onPresenceChange, onSev
 
     <TrendHighlights summary={summary} neutral={neutral} />
 
-    {!neutral ? <section aria-labelledby="lifecycle-heading">
+    {!neutral ? <section data-comparison-summary aria-labelledby="lifecycle-heading">
       <div className="mb-3 flex items-center justify-between gap-3"><h3 id="lifecycle-heading" className="text-sm font-semibold text-primary">Lifecycle outcome</h3><span className="text-xs text-tertiary">Select a metric to inspect its findings</span></div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <LifecycleMetric label="Fixed" value={summary.fixedCount} tone="success" onClick={() => onPresenceChange('not_detected_under_comparable_coverage')} />

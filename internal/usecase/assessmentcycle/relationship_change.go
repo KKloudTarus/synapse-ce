@@ -209,7 +209,9 @@ func (service *APIService) CommitRelationshipChange(ctx context.Context, input R
 		if !service.clock.Now().UTC().Before(token.ExpiresAt) {
 			return 0, nil, &APIError{Code: CodeRelationshipPreviewExpired, Cause: shared.ErrConflict}
 		}
-		currentCycle, err := service.cycles.GetCycle(txCtx, tenantID, input.CycleID)
+		// Keep the stale check and rebuilt preview on the same cycle state;
+		// concurrent graph commands already acquire this lock before mutating it.
+		currentCycle, err := service.cycles.cycles.LockCycleForUpdate(txCtx, tenantID, input.CycleID)
 		if err != nil {
 			return 0, nil, err
 		}

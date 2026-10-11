@@ -50,6 +50,18 @@ spec:
             {{- end }}
           env:
             {{- include "synapse.runtimeEnv" . | nindent 12 }}
+            {{- $maintenance := .Values.vulnerabilityIntelligence.maintenance.interval | toString | trim -}}
+            {{- $syncScheduler := .Values.vulnerabilityIntelligence.syncSchedulerInterval | toString | trim -}}
+            {{- if or (and $maintenance (ne $maintenance "0")) (and $syncScheduler (ne $syncScheduler "0")) }}
+            # A non-zero vulnerability-intelligence interval is refused without this flag, in two
+            # places: config validation for the maintenance interval, and cmd/synapse-api for the sync
+            # scheduler ("requires SYNAPSE_LEADER_ENABLED with Postgres"). The chart modelled neither,
+            # so setting either interval produced a CrashLoopBackOff whose only workaround was
+            # extraEnv. Derive the flag from the intervals instead: an install that leaves both at "0",
+            # which is the default, is unchanged, and the worker sets its own copy unconditionally.
+            - name: SYNAPSE_LEADER_ENABLED
+              value: "true"
+            {{- end }}
             - name: SYNAPSE_DB_HALT_WRITER_DSN
               valueFrom: {secretKeyRef: {name: {{ required "existingSecrets.database.haltWriter.name is required" .Values.existingSecrets.database.haltWriter.name }}, key: {{ required "existingSecrets.database.haltWriter.key is required" .Values.existingSecrets.database.haltWriter.key }}}}
             # A production Helm release is a single-tenant regional cell: tenant
@@ -137,9 +149,20 @@ spec:
             {{- end }}
       volumes:
         - name: synapse-data
-          emptyDir: {}
+          {{- if .Values.api.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.api.persistence.existingClaim | default (printf "%s-data" (include "synapse.fullname" .)) }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.api.scratch.dataSizeLimit }}
+          {{- end }}
         - name: tmp
-          emptyDir: {}
+          # A clone, an extracted archive or an image layout is staged here, bounded by
+          # SYNAPSE_MAX_WORKSPACE_BYTES. Without a sizeLimit an oversized target filled the node's
+          # ephemeral storage and the kubelet evicted the pod; with one, the pod is evicted alone and
+          # the scan fails instead of the node degrading. Keep this above scan.maxWorkspaceBytes.
+          emptyDir:
+            sizeLimit: {{ .Values.api.scratch.tmpSizeLimit }}
         - name: database-ca
           secret:
             secretName: {{ required "externalDatabase.caBundle.secretName is required" .Values.externalDatabase.caBundle.secretName }}

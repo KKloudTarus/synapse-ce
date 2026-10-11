@@ -104,6 +104,36 @@ func browserContextFile(lines []string) bool {
 	return false
 }
 
+// clientComponentExts are single-file component formats that describe a rendered page. The component IS
+// browser code, so it needs no sighting of a browser global: a Vue SFC reaches the DOM through its
+// <template> block and its script talks to the page, and on one real repository 20 SSRF findings sat in
+// .vue files purely because none of them happened to write `window.` or `document.`.
+var clientComponentExts = map[string]bool{".vue": true, ".svelte": true, ".astro": true}
+
+// scriptHostExts are server-rendered markup formats whose <script> element ships JavaScript to the page.
+var scriptHostExts = map[string]bool{
+	".html": true, ".htm": true, ".php": true, ".phtml": true, ".twig": true,
+	".erb": true, ".jsp": true, ".ejs": true, ".hbs": true, ".handlebars": true,
+}
+
+// scriptOpenRe matches an opening <script> element.
+var scriptOpenRe = regexp.MustCompile(`(?i)<script[\s>]`)
+
+// browserScriptHost reports whether the file is markup carrying a <script> element, so the JavaScript in
+// it runs in the reader's browser rather than on the server. A Blade template's extension is .php, and
+// the JavaScript in its <script> block is no more server-side than a .js file's.
+func browserScriptHost(ext string, lines []string) bool {
+	if !scriptHostExts[ext] {
+		return false
+	}
+	for _, line := range lines {
+		if len(line) <= maxLineBytes && scriptOpenRe.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
 // goMainOrInitRe opens the only functions allowed to end the process. log.Fatal there is the
 // documented way to stop a program; anywhere else it skips deferred cleanup in library code.
 var goMainOrInitRe = regexp.MustCompile(`^\s*func\s+(?:main|init)\s*\(\s*\)\s*\{`)

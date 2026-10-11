@@ -27,19 +27,46 @@ type NotificationDeliveryFilter struct {
 	Limit     int
 }
 
+type NotificationSourceFailureFilter struct {
+	TenantID  shared.ID
+	EventType notification.EventType
+	From      time.Time
+	Until     time.Time
+	Limit     int
+	Offset    int
+}
+
+// AttemptAdmission is what an attempt was rendered with: the template reference to record and pin,
+// and the effective data class its content was filtered to. An empty DataClass skips the class
+// check, for an attempt whose content was not rendered from the snapshot.
+// A nonempty DataClass must be valid; repositories reject malformed values without admitting an attempt.
+type AttemptAdmission struct {
+	TemplateRef string
+	DataClass   notification.DataClass
+	// RawEvent requires the administrator's opt-in to remain committed when the
+	// attempt begins, even if the channel still permits detail content.
+	RawEvent bool
+}
+
 type NotificationWork struct {
 	Delivery notification.Delivery
 	Event    notification.Event
-	Channel  notification.Channel
-	Sealed   string
-}
-
-type NotificationChannelConfig struct {
-	URL        string   `json:"url,omitempty"`
-	Secret     string   `json:"secret,omitempty"`
-	Username   string   `json:"username,omitempty"`
-	Password   string   `json:"password,omitempty"`
-	Recipients []string `json:"recipients,omitempty"`
+	// Engagement is the event's engagement override (#1360); inherit when the event has no
+	// engagement or the engagement stores none.
+	Engagement notification.EngagementNotifications
+	Channel    notification.Channel
+	Sealed     string
+	// CustomWebhookBody is a rendered custom JSON body for a webhook channel that opted into one
+	// (#1376). The send-time renderer (#1365) sets it with notification.RenderCustomWebhookBody.
+	// When it is not empty the webhook driver sends exactly these bytes instead
+	// of the event envelope, signs them and sets X-Synapse-Body: custom.
+	CustomWebhookBody []byte
+	// WebhookBody is the versioned, class-filtered default webhook envelope. It is kept separate
+	// from CustomWebhookBody so a driver can preserve custom-body signature semantics.
+	WebhookBody []byte
+	// Formatted is the channel's wire payload rendered from a template (#1365). When it is nil the
+	// driver sends its built-in content.
+	Formatted *FormattedMessage
 }
 
 type NotificationSendResult struct {
@@ -47,14 +74,35 @@ type NotificationSendResult struct {
 	ErrorCode  string
 	Retryable  bool
 	RetryAfter time.Duration
+	// TemplateFallback is true only when the sender rendered built-in fallback
+	// content rather than the preferred event fields/template.
+	TemplateFallback bool
+	// RemoteRef is the provider's handle for the delivered message (a Slack ts, a ticket key), kept
+	// on the delivery so a later event about the same subject can reply to it. Empty when the
+	// provider returns none.
+	RemoteRef string
+}
+
+// NotificationDeliveryObserver is optional worker-only instrumentation. Every
+// callback follows a committed delivery transition, never a speculative send.
+type NotificationDeliveryObserver interface {
+	ObserveNotificationAttempt(notification.ChannelType, time.Duration, bool, bool)
+	ObserveNotificationDeadLetter(notification.ChannelType)
+}
+
+// NotificationPendingMetricsReader returns the oldest pending/retrying delivery
+// by channel family across every tenant without exposing tenant identifiers.
+type NotificationPendingMetricsReader interface {
+	NotificationOldestPending(context.Context) (map[notification.ChannelType]time.Time, error)
 }
 
 type NotificationSender interface {
 	Send(context.Context, NotificationWork, NotificationChannelConfig) NotificationSendResult
 }
 
-// NotificationRepository owns the transactional event → rule → delivery → job
-// handoff. Publish must be idempotent on (tenant, source kind, source id).
+// NotificationRepository owns notification administration and delivery work.
+// Producers publish through their transactional stores; PublishToChannel is
+// retained for targeted channel publication.
 type NotificationRepository interface {
 	CreateChannel(context.Context, notification.Channel, string) (notification.Channel, error)
 	UpdateChannel(context.Context, notification.Channel, string, bool) (notification.Channel, error)
@@ -68,17 +116,75 @@ type NotificationRepository interface {
 	GetRule(context.Context, shared.ID, shared.ID) (notification.Rule, error)
 	ListRules(context.Context, shared.ID) ([]notification.Rule, error)
 
-	Publish(context.Context, notification.Event) ([]shared.ID, error)
 	PublishToChannel(context.Context, notification.Event, shared.ID) (shared.ID, error)
 	GetDelivery(context.Context, shared.ID, shared.ID) (notification.Delivery, error)
 	ListDeliveries(context.Context, NotificationDeliveryFilter) (notification.Page, error)
+	ListSourceFailures(context.Context, NotificationSourceFailureFilter) (notification.SourceFailurePage, error)
 	ListAttempts(context.Context, shared.ID, shared.ID) ([]notification.Attempt, error)
 	LoadWork(context.Context, shared.ID, shared.ID) (NotificationWork, error)
-	DeliveryStillRelevant(context.Context, NotificationWork) (bool, error)
-	BeginAttempt(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time) (notification.Attempt, error)
+	NotificationRelevance
+
+	// GetEngagementNotificationSetting returns an engagement's override, or inherit at revision 0
+	// when none is stored. It reports ErrNotFound for an engagement the tenant does not have.
+	GetEngagementNotificationSetting(ctx context.Context, tenant, engagement shared.ID) (notification.EngagementNotificationSetting, error)
+	// PutEngagementNotificationSetting stores an override whose Revision is the stored one plus one
+	// (1 for the first), and reports ErrConflict when another write got there first.
+	PutEngagementNotificationSetting(ctx context.Context, setting notification.EngagementNotificationSetting) (notification.EngagementNotificationSetting, error)
+	// BeginAttempt starts an attempt for a message rendered as admission says (#1365). It pins the
+	// template ref on the delivery when it has none yet, and refuses with ErrRetryable when the
+	// channel or engagement policy committed now is stricter than the class the message was
+	// rendered at (#1360); the retry reloads the work and renders again.
+	BeginAttempt(ctx context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, admission AttemptAdmission) (notification.Attempt, error)
 	FinishAttempt(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time, string, int, string, *time.Time) error
 	CancelDelivery(context.Context, shared.ID, shared.ID, string, int64, string) error
-	DeadLetterDelivery(context.Context, shared.ID, shared.ID, string) error
+	// DeadLetterDelivery reports whether this call durably transitioned a pending
+	// delivery to dead_letter for the current queue fence. Delayed callbacks from an
+	// earlier redrive cycle return false.
+	DeadLetterDelivery(context.Context, shared.ID, shared.ID, int64, string) (bool, error)
+	// RedriveDelivery requeues the existing failed notification job and resets its
+	// queue retry budget atomically. expectedFence makes repeated/stale UI requests
+	// conflict. It refuses stale channel config and active/paused destinations.
+	RedriveDelivery(context.Context, shared.ID, shared.ID, int64) (notification.Delivery, notification.Channel, error)
+
+	// RecordChannelOutcome applies one finished attempt to its channel's health (#1464). When the
+	// observation pauses the channel, the same transaction appends the pause to the history,
+	// cancels the channel's queued deliveries with channel_paused and publishes the in-app notice
+	// to tenant administrators. Deleted channels are ignored.
+	RecordChannelOutcome(context.Context, shared.ID, NotificationChannelOutcome) (NotificationChannelTransition, error)
+	// ResumeChannel clears a pause for an administrator, guarded by the channel revision, and
+	// appends the resume to the history. It bumps the revision.
+	ResumeChannel(context.Context, shared.ID, shared.ID, int, string, time.Time) (notification.Channel, error)
+	// ListChannelHealthEvents returns a channel's pause and resume history, newest first.
+	ListChannelHealthEvents(context.Context, shared.ID, shared.ID, int) ([]notification.ChannelHealthEvent, error)
+}
+
+// NotificationEventReader reads a tenant's stored notification events for the template preview
+// (#1372). Both methods see only the tenant's own events; another tenant's event is not found.
+type NotificationEventReader interface {
+	// ListRecentNotificationEvents returns up to limit events of one type, newest first.
+	ListRecentNotificationEvents(ctx context.Context, tenant shared.ID, eventType notification.EventType, limit int) ([]notification.Event, error)
+	// GetNotificationEvent returns one event, or shared.ErrNotFound.
+	GetNotificationEvent(ctx context.Context, tenant, id shared.ID) (notification.Event, error)
+}
+
+// NotificationChannelOutcome is one finished attempt as channel health reads it.
+type NotificationChannelOutcome struct {
+	ChannelID  shared.ID
+	DeliveryID shared.ID
+	AttemptID  shared.ID
+	Class      notification.AttemptClass
+	// Code is the sanitized attempt error code; empty for a delivered attempt.
+	Code string
+	At   time.Time
+	// Threshold is the pause threshold; zero counts failures without pausing.
+	Threshold int
+}
+
+// NotificationChannelTransition reports what RecordChannelOutcome committed.
+type NotificationChannelTransition struct {
+	Paused  bool
+	PauseID shared.ID
+	Health  notification.ChannelHealth
 }
 
 // NotificationSource scans durable source state and publishes due events. It is
