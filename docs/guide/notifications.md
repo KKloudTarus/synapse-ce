@@ -572,7 +572,7 @@ earlier release has no `slack_bot` driver: if it claims a `notification.deliver`
 app channel it ends that delivery with `unsupported_channel` (dead letter), and the message is lost.
 Upgrade in this order:
 
-1. Apply migration `0223`.
+1. Apply migration `0228`.
 2. Upgrade every `synapse-worker`.
 3. Upgrade the API. Until all workers run this release, keep
    `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the API so no one can create a Slack app
@@ -582,7 +582,7 @@ Upgrade in this order:
 To roll back, first set `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the API and the
 workers of this release: queued Slack app deliveries are cancelled with `provider_disabled` instead of
 reaching an older worker. Then downgrade the API, then the workers. Existing Slack app channels stay
-stored; migration `0223` down only restores the template family guard.
+stored; migration `0228` down only restores the template family guard.
 
 ## Retry and cutover behavior
 
