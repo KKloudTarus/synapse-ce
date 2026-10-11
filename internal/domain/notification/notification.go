@@ -22,11 +22,15 @@ const (
 	ChannelTelegram   ChannelType = "telegram"
 	ChannelGoogleChat ChannelType = "google_chat"
 	ChannelDiscord    ChannelType = "discord"
+	ChannelMattermost ChannelType = "mattermost"
+	ChannelRocketChat ChannelType = "rocket_chat"
+	ChannelPagerDuty  ChannelType = "pagerduty"
+	ChannelJSM        ChannelType = "jsm"
 )
 
 func (v ChannelType) Valid() bool {
 	switch v {
-	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord:
+	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord, ChannelMattermost, ChannelRocketChat, ChannelPagerDuty, ChannelJSM:
 		return true
 	}
 	return false
@@ -304,6 +308,9 @@ type Delivery struct {
 	UpdatedAt      time.Time     `json:"updated_at"`
 	// TemplateRef is the template pinned by the first attempt (#1365); retries render with it.
 	TemplateRef string `json:"template_ref,omitempty"`
+	// RemoteRef is the acknowledged provider message handle. It is used only to
+	// anchor later deliveries of the same subject to this channel configuration.
+	RemoteRef string `json:"remote_ref,omitempty"`
 }
 
 type Attempt struct {

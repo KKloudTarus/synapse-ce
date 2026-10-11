@@ -7,10 +7,12 @@ package notificationsender
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
@@ -26,12 +28,25 @@ type Driver interface {
 }
 
 type SMTPConfig struct {
-	Host       string
-	Port       int
-	From       string
-	Username   string
-	Password   string
-	RequireTLS bool
+	Host              string
+	Port              int
+	From              string
+	Username          string
+	Password          string
+	RequireTLS        bool
+	OAuthProvider     string
+	OAuthClientID     string
+	OAuthClientSecret string
+	OAuthRefreshToken string
+	OAuthDirectoryID  string
+	OAuthCacheKey     string
+	// TenantRelay marks a tenant-supplied configuration; it is always limited
+	// to implicit TLS 465 or STARTTLS 587. Legacy operator SMTP still supports
+	// test and migration transports while RequireTLS controls TLS there.
+	TenantRelay bool
+	// AllowedHosts constrains any relay selected from tenant email settings.
+	// The operator fallback remains an explicit local configuration.
+	AllowedHosts []string
 	// UnsubscribeURL is an operator-managed recipient removal endpoint for tenant channel email.
 	UnsubscribeURL string
 }
@@ -39,16 +54,22 @@ type SMTPConfig struct {
 // Sender holds the shared transports and the driver registry. Drivers keep a pointer to it, so
 // the HTTP client, clock and SMTP dialer are configured in one place.
 type Sender struct {
-	http    *http.Client
-	smtp    SMTPConfig
-	dial    func(ctx context.Context, network, address string) (net.Conn, error)
-	now     func() time.Time
-	timeout time.Duration
+	http         *http.Client
+	smtp         SMTPConfig
+	dial         func(ctx context.Context, network, address string) (net.Conn, error)
+	now          func() time.Time
+	timeout      time.Duration
+	tlsConfig    func(string) *tls.Config
+	oauthMu      sync.Mutex
+	oauthTokens  map[string]smtpOAuthToken
+	oauthFlights map[string]*smtpOAuthFlight
 	// telegramAPI is the Bot API origin; only tests change it.
 	telegramAPI string
 	drivers     map[notification.ChannelType]Driver
 	// order is the registration order, so the types a deployment offers are listed stably.
-	order []notification.ChannelType
+	order           []notification.ChannelType
+	selfHostedHosts map[string]bool
+	pagerKey        []byte
 }
 
 var _ ports.NotificationSender = (*Sender)(nil)
@@ -63,7 +84,7 @@ func New(smtpConfig SMTPConfig, timeout time.Duration) *Sender {
 	// The relay comes from operator configuration, not from a tenant, and is often a local MTA, so
 	// it may be private or loopback; metadata and other special-purpose ranges stay refused.
 	relay := safehttp.NewDialer(safehttp.OperatorPolicy(), timeout)
-	s := &Sender{http: safehttp.New(timeout, false), smtp: smtpConfig, dial: relay.DialContext, now: time.Now, timeout: timeout, telegramAPI: telegramAPIBase}
+	s := &Sender{http: safehttp.New(timeout, false), smtp: smtpConfig, dial: relay.DialContext, now: time.Now, timeout: timeout, telegramAPI: telegramAPIBase, tlsConfig: func(host string) *tls.Config { return &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12} }, oauthTokens: map[string]smtpOAuthToken{}, oauthFlights: map[string]*smtpOAuthFlight{}}
 	s.drivers = map[notification.ChannelType]Driver{}
 	for _, driver := range builtinDrivers(s) {
 		s.drivers[driver.ChannelType()] = driver
@@ -75,7 +96,7 @@ func New(smtpConfig SMTPConfig, timeout time.Duration) *Sender {
 // builtinDrivers are the channel types every deployment has. Their types are distinct constants,
 // which TestBuiltinDriversCoverEveryChannelType checks, so New needs no duplicate handling.
 func builtinDrivers(s *Sender) []Driver {
-	return []Driver{webhookDriver{s}, slackDriver{s}, emailDriver{s}, teamsDriver{s}, telegramDriver{s}, googleChatDriver{s}, discordDriver{s}}
+	return []Driver{webhookDriver{s}, slackDriver{s}, emailDriver{s}, teamsDriver{s}, telegramDriver{s}, googleChatDriver{s}, discordDriver{s}, mattermostDriver{s}, rocketChatDriver{s}, pagerDutyDriver{s}, jsmDriver{s}}
 }
 
 // Register adds a driver. Registering a second driver for a channel type is an error rather than

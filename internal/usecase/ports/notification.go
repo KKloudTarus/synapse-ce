@@ -67,6 +67,13 @@ type NotificationWork struct {
 	// Formatted is the channel's wire payload rendered from a template (#1365). When it is nil the
 	// driver sends its built-in content.
 	Formatted *FormattedMessage
+	// SubjectAnchor is the acknowledged provider reference for the earliest successful
+	// delivery of this subject to the channel's pinned configuration. Drivers use it
+	// only as a reply or provider-side deduplication key.
+	SubjectAnchor string
+	// SubjectResolved is true only for an event type whose declared catalog state
+	// establishes closure. It is never inferred from untyped event payload data.
+	SubjectResolved bool
 }
 
 type NotificationSendResult struct {
@@ -98,6 +105,20 @@ type NotificationPendingMetricsReader interface {
 
 type NotificationSender interface {
 	Send(context.Context, NotificationWork, NotificationChannelConfig) NotificationSendResult
+}
+
+// NotificationSubjectAnchorReader finds the earliest acknowledged remote reference for a
+// subject. The channel version is pinned so a rotated secret never crosses destinations.
+// A concurrent first delivery may legitimately find no anchor and create another root message.
+type NotificationSubjectAnchorReader interface {
+	SubjectAnchor(context.Context, shared.ID, shared.ID, int, string, string) (string, error)
+}
+
+// NotificationRemoteRefFinisher atomically persists a provider reference with a fenced successful
+// delivery transition. It is intentionally optional so existing repository test doubles can keep
+// the base completion contract; production notification repositories implement it.
+type NotificationRemoteRefFinisher interface {
+	FinishAttemptWithRemoteRef(context.Context, shared.ID, shared.ID, string, int64, shared.ID, time.Time, string, int, string, *time.Time, string) error
 }
 
 // NotificationRepository owns notification administration and delivery work.

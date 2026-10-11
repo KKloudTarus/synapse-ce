@@ -80,6 +80,9 @@ func (s *Service) SetFormatters(formatters map[domain.ChannelType]ports.Notifica
 // result falls back to the driver's built-in content. Errors are store failures only.
 func (s *Service) RenderMessage(ctx context.Context, in RenderInput) (RenderResult, error) {
 	class, deliver := domain.EffectiveDataClass(in.Channel.Class(), in.Engagement)
+	if family, _ := domain.FamilyForChannelType(in.Channel.Type); family == domain.FamilyPager {
+		class = domain.DataClassSignal
+	}
 	if !deliver {
 		return RenderResult{Suppressed: true}, nil
 	}

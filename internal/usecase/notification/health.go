@@ -24,9 +24,19 @@ type finishedAttempt struct {
 // transaction runner (the worker installs one) both commit together, so a crash cannot record a
 // failure without counting it, and the pause, its history row, the cancelled queue, the admin
 // notice and the audit entry are one unit.
-func (s *Service) finishAttempt(ctx context.Context, a finishedAttempt, at time.Time, outcome string, status int, code string, next *time.Time, class domain.AttemptClass) error {
+func (s *Service) finishAttempt(ctx context.Context, a finishedAttempt, at time.Time, outcome string, status int, code string, next *time.Time, remoteRef string, class domain.AttemptClass) error {
 	run := func(ctx context.Context) error {
-		if err := s.repo.FinishAttempt(ctx, a.job.TenantID, a.deliveryID, a.job.ID, a.job.Fence, a.attemptID, at, outcome, status, code, next); err != nil {
+		var err error
+		if remoteRef != "" {
+			if finisher, ok := s.repo.(ports.NotificationRemoteRefFinisher); ok {
+				err = finisher.FinishAttemptWithRemoteRef(ctx, a.job.TenantID, a.deliveryID, a.job.ID, a.job.Fence, a.attemptID, at, outcome, status, code, next, remoteRef)
+			} else {
+				err = s.repo.FinishAttempt(ctx, a.job.TenantID, a.deliveryID, a.job.ID, a.job.Fence, a.attemptID, at, outcome, status, code, next)
+			}
+		} else {
+			err = s.repo.FinishAttempt(ctx, a.job.TenantID, a.deliveryID, a.job.ID, a.job.Fence, a.attemptID, at, outcome, status, code, next)
+		}
+		if err != nil {
 			return err
 		}
 		if class == domain.AttemptIgnored {

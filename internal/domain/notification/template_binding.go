@@ -18,6 +18,10 @@ var channelFamilies = map[ChannelType]TemplateFamily{
 	ChannelTelegram:   FamilyChat,
 	ChannelGoogleChat: FamilyChat,
 	ChannelDiscord:    FamilyChat,
+	ChannelMattermost: FamilyChat,
+	ChannelRocketChat: FamilyChat,
+	ChannelPagerDuty:  FamilyPager,
+	ChannelJSM:        FamilyPager,
 }
 
 // FamilyForChannelType returns the template family a channel type renders. ok is false for a type

@@ -63,6 +63,8 @@ func TestBuiltinRendererGoldenMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read English builtin golden (run UPDATE_GOLDEN=1 after a deliberate content change): %v", err)
 	}
+	// Git may check this JSON fixture out with CRLF on Windows.
+	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(want, encoded) {
 		t.Fatalf("English builtin matrix differs from golden; rerun with UPDATE_GOLDEN=1 only after review\n%s", diffBuiltinGolden(want, encoded))
 	}

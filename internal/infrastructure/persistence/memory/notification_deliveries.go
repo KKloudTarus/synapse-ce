@@ -125,6 +125,34 @@ func (r *NotificationRepository) LoadWork(_ context.Context, tenant, delivery sh
 		Engagement: r.engagementNotifications(tenant, event.event.EngagementID)}, nil
 }
 
+// SubjectAnchor returns the earliest acknowledged remote reference for the same subject and
+// pinned channel version. The repository mutex makes this selection deterministic in memory;
+// two concurrent first sends can still both find no prior acknowledged delivery by design.
+func (r *NotificationRepository) SubjectAnchor(_ context.Context, tenant, channel shared.ID, version int, subjectKind, subjectID string) (string, error) {
+	if subjectKind == "" || subjectID == "" {
+		return "", nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var anchor string
+	var first time.Time
+	var firstID shared.ID
+	for key, stored := range r.deliveries {
+		d := stored.delivery
+		if key.tenant != tenant || d.ChannelID != channel || stored.channelVersion != version || d.State != notification.DeliverySucceeded || d.RemoteRef == "" || d.DeliveredAt == nil {
+			continue
+		}
+		event, ok := r.events[notificationKey{tenant, d.EventID}]
+		if !ok || event.event.SubjectKind != subjectKind || event.event.SubjectID != subjectID {
+			continue
+		}
+		if anchor == "" || d.DeliveredAt.Before(first) || (d.DeliveredAt.Equal(first) && d.ID < firstID) {
+			anchor, first, firstID = d.RemoteRef, *d.DeliveredAt, d.ID
+		}
+	}
+	return anchor, nil
+}
+
 // ScanJobSucceeded, SLAReminderDue and FleetAgentLastSeen report true: the scan job, SLA and fleet
 // agent rows they read have no memory counterpart (see the type documentation), so every queued
 // delivery stays relevant.
@@ -235,6 +263,19 @@ func (r *NotificationRepository) holdsClaim(stored storedDelivery, tenant shared
 
 // FinishAttempt finalizes a started attempt and moves the delivery to the matching state.
 func (r *NotificationRepository) FinishAttempt(_ context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time) error {
+	return r.finishAttempt(tenant, delivery, jobID, fence, attempt, at, outcome, status, errorCode, next, "")
+}
+
+// FinishAttemptWithRemoteRef keeps an acknowledged provider reference in the same locked state
+// transition as the attempt and delivery completion.
+func (r *NotificationRepository) FinishAttemptWithRemoteRef(_ context.Context, tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time, remoteRef string) error {
+	if len(remoteRef) > 512 {
+		return fmt.Errorf("%w: notification remote reference is too long", shared.ErrValidation)
+	}
+	return r.finishAttempt(tenant, delivery, jobID, fence, attempt, at, outcome, status, errorCode, next, remoteRef)
+}
+
+func (r *NotificationRepository) finishAttempt(tenant, delivery shared.ID, jobID string, fence int64, attempt shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time, remoteRef string) error {
 	state, ok := attemptOutcomeState(outcome)
 	if !ok {
 		return fmt.Errorf("%w: invalid notification attempt outcome", shared.ErrValidation)
@@ -259,7 +300,7 @@ func (r *NotificationRepository) FinishAttempt(_ context.Context, tenant, delive
 	d := &stored.delivery
 	d.State, d.LastError, d.NextAttemptAt, d.UpdatedAt = state, errorCode, cloneTime(next), at
 	if outcome == "delivered" {
-		d.LastError, d.DeliveredAt = "", &finished
+		d.LastError, d.DeliveredAt, d.RemoteRef = "", &finished, remoteRef
 	}
 	r.deliveries[key] = stored
 	return nil

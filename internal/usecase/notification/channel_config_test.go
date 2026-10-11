@@ -20,7 +20,7 @@ func TestPerTypeConfigsSealTheLegacyJSON(t *testing.T) {
 	}{
 		{ChannelInput{Name: "hook", Type: domain.ChannelWebhook, URL: "https://hooks.example/in", Secret: "0123456789abcdef"}, `{"url":"https://hooks.example/in","secret":"0123456789abcdef"}`},
 		{ChannelInput{Name: "slack", Type: domain.ChannelSlack, URL: "https://hooks.slack.com/services/T/B/x"}, `{"url":"https://hooks.slack.com/services/T/B/x"}`},
-		{ChannelInput{Name: "mail", Type: domain.ChannelEmail, Recipients: []string{"Sec@Example.com"}}, `{"recipients":["sec@example.com"]}`},
+		{ChannelInput{Name: "mail", Type: domain.ChannelEmail, Recipients: []string{"Sec@Example.com"}}, `{"recipients":["Sec@example.com"]}`},
 	}
 	for _, tc := range cases {
 		config, _, _, err := validateChannel(tc.in, true)
@@ -31,6 +31,17 @@ func TestPerTypeConfigsSealTheLegacyJSON(t *testing.T) {
 		if err != nil || string(raw) != tc.want {
 			t.Errorf("%s sealed %s, want %s (err %v)", tc.in.Type, raw, tc.want, err)
 		}
+	}
+}
+
+func TestValidateEmailChannelPreservesMailboxLocalPart(t *testing.T) {
+	config, _, recipients, err := validateEmailChannel(ChannelInput{Recipients: []string{"A.B+tag@EXAMPLE.COM", "a.b+tag@example.com"}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	email, ok := config.(ports.EmailChannelConfig)
+	if !ok || !reflect.DeepEqual(recipients, []string{"A.B+tag@example.com", "a.b+tag@example.com"}) || !reflect.DeepEqual(email.Recipients, recipients) {
+		t.Fatalf("case-sensitive mailbox recipients = %#v", config)
 	}
 }
 

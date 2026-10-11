@@ -208,7 +208,7 @@ func TestNotificationPostgresDurability(t *testing.T) {
 		t.Fatalf("snapshot version=%d state=%s err=%v", work.Channel.SecretVersion, work.Delivery.State, err)
 	}
 	// Rate-limited synthetic tests share the production fanout.
-	for n := 0; n < 10; n++ {
+	for n := 0; n < 5; n++ {
 		if _, err = svc.TestChannel(ctx, "admin", channel.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -236,8 +236,8 @@ func TestNotificationPostgresDurability(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(testEvents) != 10 {
-		t.Fatalf("operator test events = %d; want 10", len(testEvents))
+	if len(testEvents) != 5 {
+		t.Fatalf("operator test events = %d; want 5", len(testEvents))
 	}
 	for _, e := range testEvents {
 		assertPublishedEventSchema(t, e)

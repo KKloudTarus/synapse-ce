@@ -30,15 +30,20 @@ type emailDriver struct{ s *Sender }
 func (emailDriver) ChannelType() notification.ChannelType { return notification.ChannelEmail }
 
 func (d emailDriver) Send(ctx context.Context, w ports.NotificationWork, config ports.NotificationChannelConfig) ports.NotificationSendResult {
-	if _, ok := config.(ports.EmailChannelConfig); !ok {
+	email, ok := config.(ports.EmailChannelConfig)
+	if !ok {
 		return ports.NotificationSendResult{ErrorCode: "channel_config_invalid"}
+	}
+	relay := d.s.smtp
+	if email.Relay != nil {
+		relay = smtpConfigFromRelay(*email.Relay, d.s.smtp)
 	}
 	if w.Formatted != nil {
 		// A template rendered this message: text and HTML originate from one message formatter.
-		return d.s.sendSMTPParts(ctx, w.Delivery.Recipient, w.Formatted.Subject, string(w.Formatted.Body), string(w.Formatted.HTMLBody), d.s.smtp.UnsubscribeURL, w.Delivery.ID)
+		return d.s.sendSMTPPartsWithConfig(ctx, relay, w.Delivery.Recipient, w.Formatted.Subject, string(w.Formatted.Body), string(w.Formatted.HTMLBody), d.s.smtp.UnsubscribeURL, w.Delivery.ID)
 	}
 	title, summary, fallback := eventText(w)
-	result := d.s.sendSMTPParts(ctx, w.Delivery.Recipient, title, summary, "", d.s.smtp.UnsubscribeURL, w.Delivery.ID)
+	result := d.s.sendSMTPPartsWithConfig(ctx, relay, w.Delivery.Recipient, title, summary, "", d.s.smtp.UnsubscribeURL, w.Delivery.ID)
 	result.TemplateFallback = fallback
 	return result
 }
@@ -62,14 +67,20 @@ func (s *Sender) SendIdentityRecoveryAlert(ctx context.Context, recipient string
 }
 
 func (s *Sender) sendSMTP(ctx context.Context, destination, title, summary string, messageID shared.ID) ports.NotificationSendResult {
-	return s.sendSMTPParts(ctx, destination, title, summary, "", "", messageID)
+	return s.sendSMTPPartsWithConfig(ctx, s.smtp, destination, title, summary, "", "", messageID)
 }
 
-func (s *Sender) sendSMTPParts(ctx context.Context, destination, title, textBody, htmlBody, unsubscribeURL string, messageID shared.ID) ports.NotificationSendResult {
-	if strings.TrimSpace(s.smtp.Host) == "" || strings.TrimSpace(s.smtp.From) == "" {
+func (s *Sender) sendSMTPPartsWithConfig(ctx context.Context, relay SMTPConfig, destination, title, textBody, htmlBody, unsubscribeURL string, messageID shared.ID) ports.NotificationSendResult {
+	if strings.TrimSpace(relay.Host) == "" || strings.TrimSpace(relay.From) == "" {
 		return ports.NotificationSendResult{ErrorCode: "smtp_not_configured"}
 	}
-	from, err := mail.ParseAddress(s.smtp.From)
+	if relay.TenantRelay && relay.Port != 465 && relay.Port != 587 {
+		return ports.NotificationSendResult{ErrorCode: "smtp_port_not_allowed"}
+	}
+	if relay.TenantRelay && !smtpHostAllowed(relay.Host, relay.AllowedHosts) {
+		return ports.NotificationSendResult{ErrorCode: "smtp_host_not_allowed"}
+	}
+	from, err := mail.ParseAddress(relay.From)
 	if err != nil || strings.ContainsAny(from.Address, "\r\n") {
 		return ports.NotificationSendResult{ErrorCode: "smtp_sender_invalid"}
 	}
@@ -82,7 +93,7 @@ func (s *Sender) sendSMTPParts(ctx context.Context, destination, title, textBody
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "smtp_message_invalid"}
 	}
-	address := net.JoinHostPort(s.smtp.Host, strconv.Itoa(s.smtp.Port))
+	address := net.JoinHostPort(relay.Host, strconv.Itoa(relay.Port))
 	conn, err := s.dial(ctx, "tcp", address)
 	if errors.Is(err, safehttp.ErrBlockedDestination) {
 		return ports.NotificationSendResult{ErrorCode: "smtp_destination_blocked"}
@@ -94,23 +105,38 @@ func (s *Sender) sendSMTPParts(ctx context.Context, destination, title, textBody
 	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stopCancel()
 	_ = conn.SetDeadline(time.Now().Add(s.timeout))
-	client, err := smtp.NewClient(conn, s.smtp.Host)
+	if relay.Port == 465 {
+		tlsConn := tls.Client(conn, s.tlsConfig(relay.Host))
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			return ports.NotificationSendResult{ErrorCode: "smtp_tls", Retryable: true}
+		}
+		conn = tlsConn
+	}
+	client, err := smtp.NewClient(conn, relay.Host)
 	if err != nil {
 		return smtpResult(err)
 	}
 	defer func() { _ = client.Close() }()
-	if ok, _ := client.Extension("STARTTLS"); ok {
-		if err = client.StartTLS(&tls.Config{ServerName: s.smtp.Host, MinVersion: tls.VersionTLS12}); err != nil {
+	if relay.Port == 587 || (relay.RequireTLS && relay.Port != 465) {
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return ports.NotificationSendResult{ErrorCode: "smtp_tls_required"}
+		} else if err = client.StartTLS(s.tlsConfig(relay.Host)); err != nil {
 			return smtpResult(err)
 		}
-	} else if s.smtp.RequireTLS {
-		return ports.NotificationSendResult{ErrorCode: "smtp_tls_required"}
 	}
-	if s.smtp.Username != "" {
+	if relay.OAuthProvider != "" {
+		token, err := s.smtpOAuthToken(ctx, relay)
+		if err != nil {
+			return ports.NotificationSendResult{ErrorCode: "smtp_oauth_token", Retryable: true}
+		}
+		if err = client.Auth(xoauth2Auth{username: relay.Username, token: token}); err != nil {
+			return smtpResult(err)
+		}
+	} else if relay.Username != "" {
 		if ok, _ := client.Extension("AUTH"); !ok {
 			return ports.NotificationSendResult{ErrorCode: "smtp_auth_unavailable"}
 		}
-		if err = client.Auth(smtp.PlainAuth("", s.smtp.Username, s.smtp.Password, s.smtp.Host)); err != nil {
+		if err = client.Auth(smtp.PlainAuth("", relay.Username, relay.Password, relay.Host)); err != nil {
 			return smtpResult(err)
 		}
 	}
@@ -134,6 +160,20 @@ func (s *Sender) sendSMTPParts(ctx context.Context, destination, title, textBody
 	// QUIT must not cause a duplicate of an already accepted message.
 	_ = client.Quit()
 	return ports.NotificationSendResult{StatusCode: 250}
+}
+
+func smtpHostAllowed(host string, allowed []string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	for _, value := range allowed {
+		if host == strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), ".")) {
+			return true
+		}
+	}
+	return false
+}
+
+func smtpConfigFromRelay(relay ports.SMTPRelayConfig, fallback SMTPConfig) SMTPConfig {
+	return SMTPConfig{Host: relay.Host, Port: relay.Port, From: relay.From, Username: relay.Username, Password: relay.Password, RequireTLS: true, AllowedHosts: fallback.AllowedHosts, UnsubscribeURL: fallback.UnsubscribeURL, OAuthProvider: relay.OAuthProvider, OAuthClientID: relay.OAuthClientID, OAuthClientSecret: relay.OAuthClientSecret, OAuthRefreshToken: relay.OAuthRefreshToken, OAuthDirectoryID: relay.OAuthDirectoryID, OAuthCacheKey: relay.CacheKey, TenantRelay: true}
 }
 
 // smtpMessage keeps untrusted content after the header separator and uses multipart/alternative

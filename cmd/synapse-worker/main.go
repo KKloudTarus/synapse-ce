@@ -176,10 +176,16 @@ func main() {
 	}
 	// The worker reads the same kill switch as the API and checks it against the same driver
 	// registry, so both refuse a typo and agree on which channel types are off.
+	if err := cfg.ValidateNotificationHosts(); err != nil {
+		log.Error("notification host policy invalid", "err", err)
+		os.Exit(1)
+	}
 	notificationSender := notificationsender.New(notificationsender.SMTPConfig{
 		Host: cfg.NotificationSMTPHost, Port: cfg.NotificationSMTPPort, From: cfg.NotificationSMTPFrom,
-		Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS, UnsubscribeURL: cfg.NotificationUnsubscribeURL,
+		Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS, UnsubscribeURL: cfg.NotificationUnsubscribeURL, AllowedHosts: cfg.NotificationSMTPAllowedHosts,
 	}, 10*time.Second)
+	notificationSender.SetSelfHostedChannelHosts(cfg.NotificationChatAllowedHosts)
+	notificationSender.SetPagerKey(cfg.VaultMasterKey)
 	disabledNotificationTypes, err := notificationSender.ResolveDisabled(cfg.NotificationProvidersDisabled)
 	if err != nil {
 		log.Error("notification kill switch invalid", "err", err)
@@ -720,6 +726,10 @@ func main() {
 			os.Exit(1)
 		}
 		notificationService.SetTransactionRunner(postgres.NewTenantTransactionRunner(pool))
+		notificationService.SetSelfHostedChannelHosts(cfg.NotificationChatAllowedHosts)
+		notificationService.SetSMTPAllowedHosts(cfg.NotificationSMTPAllowedHosts)
+		notificationService.SetEmailSettingsStore(postgres.NewNotificationEmailSettingsStore(pool))
+		notificationService.SetNotificationTXTResolver(net.DefaultResolver)
 		// Send-time rendering (#1365): tenant templates, the tenant's locale and time zone, and the
 		// channel formatters.
 		notificationService.SetTemplateStore(postgres.NewNotificationTemplateStore(pool))

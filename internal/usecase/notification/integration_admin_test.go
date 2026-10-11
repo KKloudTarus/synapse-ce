@@ -78,7 +78,8 @@ func TestUpdateChannelDestinationNeedsAdminister(t *testing.T) {
 		{"new recipients", email, ChannelInput{Name: "mail", Enabled: true, Recipients: []string{"a@example.com", "attacker@example.net"}, Revision: 3}, true},
 		{"rename", webhookChannel(), ChannelInput{Name: "renamed", Enabled: true, Revision: 3}, false},
 		{"disable", webhookChannel(), ChannelInput{Name: "ops", Enabled: false, Revision: 3}, false},
-		{"same recipients reordered", email, ChannelInput{Name: "mail", Enabled: false, Recipients: []string{"B@example.com", "a@example.com"}, Revision: 3}, false},
+		{"same recipients reordered", email, ChannelInput{Name: "mail", Enabled: false, Recipients: []string{"b@EXAMPLE.COM", "a@example.com"}, Revision: 3}, false},
+		{"recipient local-part case changed", email, ChannelInput{Name: "mail", Enabled: true, Recipients: []string{"B@example.com", "a@example.com"}, Revision: 3}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &channelAdminRepo{killSwitchRepo: killSwitchRepo{current: tc.current}}

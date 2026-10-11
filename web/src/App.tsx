@@ -66,6 +66,7 @@ const Team = lazy(() => import('./pages/Settings/Team').then(m => ({ default: m.
 const SLAPolicy = lazy(() => import('./pages/Settings/SLAPolicy').then(m => ({ default: m.SLAPolicy })))
 const OffensivePolicy = lazy(() => import('./pages/Settings/OffensivePolicy').then(m => ({ default: m.OffensivePolicy })))
 const Alerting = lazy(() => import('./pages/Settings/Alerting').then(m => ({ default: m.Alerting })))
+const NotificationEmail = lazy(() => import('./pages/Settings/NotificationEmail').then(m => ({ default: m.NotificationEmail })))
 const TemplateLibrary = lazy(() => import('./pages/Settings/Templates/TemplateLibrary').then(m => ({ default: m.TemplateLibrary })))
 const TemplateEditor = lazy(() => import('./pages/Settings/Templates/TemplateEditor').then(m => ({ default: m.TemplateEditor })))
 const SIEM = lazy(() => import('./pages/Settings/SIEM').then(m => ({ default: m.SIEM })))
@@ -161,6 +162,7 @@ function Gate() {
           <Route path="sla" element={<SLAPolicy />} />
           <Route path="offensive-policy" element={<OffensivePolicy />} />
           <Route path="alerting" element={<Alerting />} />
+          <Route path="email" element={<NotificationEmail />} />
           <Route path="templates" element={<TemplateLibrary />} />
           <Route path="templates/new" element={<TemplateEditor />} />
           <Route path="templates/:id" element={<TemplateEditor />} />

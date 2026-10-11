@@ -57,6 +57,14 @@ func (d telegramDriver) Send(ctx context.Context, w ports.NotificationWork, conf
 	if cfg.MessageThreadID > 0 {
 		payload["message_thread_id"] = cfg.MessageThreadID
 	}
+	if messageID, err := strconv.ParseInt(w.SubjectAnchor, 10, 64); err == nil && messageID > 0 {
+		// The old message may have been deleted. Telegram then creates a new root message,
+		// rather than failing a notification whose provider reference is stale.
+		payload["reply_parameters"] = map[string]any{
+			"message_id":                  messageID,
+			"allow_sending_without_reply": true,
+		}
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "encode_failed", TemplateFallback: fallback}

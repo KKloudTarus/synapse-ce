@@ -39,7 +39,8 @@ type Service struct {
 	ids       ports.IDGenerator
 	observer  ports.NotificationDeliveryObserver
 	// disabled holds the channel types the operator switched off deployment-wide.
-	disabled map[domain.ChannelType]bool
+	disabled        map[domain.ChannelType]bool
+	selfHostedHosts map[string]bool
 	// pauseThreshold is the number of consecutive permanent failures that pauses a channel (#1464).
 	pauseThreshold int
 	// templates stores tenant message templates (#1370); nil disables the template API.
@@ -60,6 +61,10 @@ type Service struct {
 	// two samples a template preview renders against (#1372).
 	fixtures    fs.FS
 	eventReader ports.NotificationEventReader
+	// emailSettings owns the tenant relay and verified recipient/domain policy.
+	emailSettings    ports.NotificationEmailSettingsStore
+	emailTXT         ports.NotificationTXTResolver
+	smtpAllowedHosts map[string]bool
 }
 
 // SetDisabledChannelTypes installs the operator kill switch (SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED),
@@ -169,9 +174,14 @@ func (s *Service) createChannel(ctx context.Context, actor string, in ChannelInp
 		return domain.Channel{}, fmt.Errorf("notification channel limit reached: %w", shared.ErrSaturated)
 	}
 	id, now := s.ids.NewID(), s.clock.Now().UTC()
-	config, destination, recipients, err := validateChannel(in, true)
+	config, destination, recipients, err := s.validateChannelInput(in, true)
 	if err != nil {
 		return domain.Channel{}, err
+	}
+	if in.Type == domain.ChannelEmail {
+		if err = s.validateEmailRecipients(ctx, tenant, recipients); err != nil {
+			return domain.Channel{}, err
+		}
 	}
 	sealed, err := s.seal(tenant, id, 1, config)
 	if err != nil {
@@ -231,7 +241,7 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 	destination := current.Destination
 	recipients := current.Recipients
 	if replace {
-		config, dest, recips, e := validateChannel(in, true)
+		config, dest, recips, e := s.validateChannelInput(in, true)
 		if e != nil {
 			return domain.Channel{}, e
 		}
@@ -243,7 +253,7 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 	} else {
 		in.Type = current.Type
 		if in.Type == domain.ChannelEmail && in.Recipients != nil {
-			_, _, recips, e := validateChannel(ChannelInput{Name: in.Name, Type: domain.ChannelEmail, Recipients: in.Recipients, Enabled: in.Enabled}, false)
+			_, _, recips, e := s.validateChannelInput(ChannelInput{Name: in.Name, Type: domain.ChannelEmail, Recipients: in.Recipients, Enabled: in.Enabled}, false)
 			if e != nil {
 				return domain.Channel{}, e
 			}
@@ -279,6 +289,11 @@ func (s *Service) updateChannel(ctx context.Context, actor string, id shared.ID,
 		}
 		if e = s.validateBinding(ctx, tenant, updated, rules); e != nil {
 			return domain.Channel{}, e
+		}
+	}
+	if updated.Type == domain.ChannelEmail {
+		if err = s.validateEmailRecipients(ctx, tenant, updated.Recipients); err != nil {
+			return domain.Channel{}, err
 		}
 	}
 	updated, err = s.repo.UpdateChannel(domain.WithActor(ctx, actor), updated, sealed, replace)
@@ -438,6 +453,11 @@ func (s *Service) testChannel(ctx context.Context, actor string, cid shared.ID) 
 	}
 	if err = s.refuseDisabled(channel.Type); err != nil {
 		return "", err
+	}
+	if channel.Type == domain.ChannelEmail {
+		if err = s.validateEmailRecipients(ctx, tenant, channel.Recipients); err != nil {
+			return "", err
+		}
 	}
 	now := s.clock.Now().UTC()
 	data, _ := json.Marshal(map[string]any{"title": "Synapse notification test"})
@@ -683,6 +703,9 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 		return err
 	}
 	work.Formatted, work.CustomWebhookBody, work.WebhookBody = render.Formatted, render.CustomBody, render.WebhookBody
+	if err := s.prepareSubjectThread(ctx, &work); err != nil {
+		return err
+	}
 	now := s.clock.Now().UTC()
 	aid := s.ids.NewID()
 	admission := ports.AttemptAdmission{TemplateRef: render.Message.TemplateRef, DataClass: render.Class,
@@ -695,7 +718,7 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	if err != nil {
 		finished := s.clock.Now().UTC()
 		// The vault key is the operator's, not the channel's, so this never counts towards a pause.
-		if finishErr := s.finishAttempt(ctx, attempt, finished, "failed", 0, "channel_secret_unavailable", nil, domain.AttemptIgnored); finishErr != nil {
+		if finishErr := s.finishAttempt(ctx, attempt, finished, "failed", 0, "channel_secret_unavailable", nil, "", domain.AttemptIgnored); finishErr != nil {
 			return finishErr
 		}
 		s.observeAttempt(work.Delivery.ChannelType, now, finished, false, false)
@@ -705,18 +728,22 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	cfg, configErr := decodeChannelConfig(work.Channel.Type, raw)
 	if configErr != "" {
 		finished := s.clock.Now().UTC()
-		if finishErr := s.finishAttempt(ctx, attempt, finished, "failed", 0, configErr, nil, domain.ClassifyAttempt(false, configErr, false)); finishErr != nil {
+		if finishErr := s.finishAttempt(ctx, attempt, finished, "failed", 0, configErr, nil, "", domain.ClassifyAttempt(false, configErr, false)); finishErr != nil {
 			return finishErr
 		}
 		s.observeAttempt(work.Delivery.ChannelType, now, finished, false, false)
 		s.observeDeadLetter(work.Delivery.ChannelType)
 		return &DeliveryError{terminal: true, cause: errors.New(configErr)}
 	}
-	result := s.sender.Send(ctx, work, cfg)
+	cfg, emailCode := s.EmailChannelConfig(ctx, work, cfg)
+	result := ports.NotificationSendResult{ErrorCode: emailCode, Retryable: emailCode == "email_settings_unavailable"}
+	if emailCode == "" {
+		result = s.sender.Send(ctx, work, cfg)
+	}
 	result.TemplateFallback = result.TemplateFallback || render.Fallback
 	finished := s.clock.Now().UTC()
 	if result.ErrorCode == "" && result.StatusCode >= 200 && result.StatusCode < 300 {
-		if err = s.finishAttempt(ctx, attempt, finished, "delivered", result.StatusCode, "", nil, domain.AttemptDelivered); err != nil {
+		if err = s.finishAttempt(ctx, attempt, finished, "delivered", result.StatusCode, "", nil, result.RemoteRef, domain.AttemptDelivered); err != nil {
 			return err
 		}
 		s.observeAttempt(work.Delivery.ChannelType, now, finished, true, result.TemplateFallback)
@@ -743,7 +770,7 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	}
 	// The health class reads the sender's own Retryable flag, so a retry that finally exhausts
 	// its attempts (a 5xx eight times) still never counts towards a pause.
-	if err = s.finishAttempt(ctx, attempt, finished, outcome, result.StatusCode, code, nextPtr, domain.ClassifyAttempt(false, code, result.Retryable)); err != nil {
+	if err = s.finishAttempt(ctx, attempt, finished, outcome, result.StatusCode, code, nextPtr, "", domain.ClassifyAttempt(false, code, result.Retryable)); err != nil {
 		return err
 	}
 	s.observeAttempt(work.Delivery.ChannelType, now, finished, false, result.TemplateFallback)

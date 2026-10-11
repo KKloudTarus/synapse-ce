@@ -27,6 +27,7 @@ export { type DastProposal, type DastScanResult, type DastScanInput, type DastRu
 export type * from './ownership'
 
 import { authApi, teamApi } from './auth'
+import { notificationEmailApi } from './notification-email'
 import { auditApi } from './audit'
 import { engagementsApi } from './engagements'
 import { findingsApi } from './findings'
@@ -80,6 +81,7 @@ export const downloadReportDoc = evidenceApi.downloadReportDoc
 
 // Unified api object — same shape as before
 export const api = {
+  ...notificationEmailApi,
   ...ownershipApi,
   ...userContactsApi,
   ...inboxApi,
