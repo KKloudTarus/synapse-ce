@@ -32,7 +32,7 @@ func (pgSlackWorkspace) Conversations(context.Context, string) ([]ports.SlackCon
 	return nil, false, nil
 }
 
-// Slack bot channels (#1383, migration 0223) over PostgreSQL: the row holds only the masked
+// Slack bot channels (#1383, migration 0228) over PostgreSQL: the row holds only the masked
 // destination, GetChannelSealedConfig returns the current version's sealed configuration for the
 // tenant that owns the channel and nobody else, and the family guard binds a chat template to it.
 func TestNotificationSlackBotChannelPostgres(t *testing.T) {
