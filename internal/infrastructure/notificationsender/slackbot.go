@@ -91,3 +91,18 @@ func slackResult(err error) ports.NotificationSendResult {
 	}
 	return ports.NotificationSendResult{ErrorCode: code, StatusCode: slackErr.Status, Retryable: slackErr.Retryable, RetryAfter: slackErr.RetryAfter}
 }
+
+var _ ports.SlackDirectSender = (*Sender)(nil)
+
+// SendSlackDirect posts a personal message as the Slack app's direct message to one member (#1419).
+// conversations.open returns the app's DM with the member; the message ts is the RemoteRef.
+func (s *Sender) SendSlackDirect(ctx context.Context, token, member string, formatted []byte) ports.NotificationSendResult {
+	if token == "" || member == "" || len(formatted) == 0 {
+		return ports.NotificationSendResult{ErrorCode: "channel_config_invalid"}
+	}
+	dm, err := s.slack.OpenDM(ctx, token, member)
+	if err != nil {
+		return slackResult(err)
+	}
+	return s.postSlack(ctx, token, dm, "", formatted)
+}

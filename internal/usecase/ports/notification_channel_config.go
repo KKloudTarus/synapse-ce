@@ -103,9 +103,11 @@ func (DiscordChannelConfig) NotificationChannelType() notification.ChannelType {
 // channel. AllowShared is an administrator's decision to post into a Slack Connect or
 // organisation-shared conversation, which the driver otherwise refuses.
 type SlackBotChannelConfig struct {
-	BotToken    string `json:"bot_token,omitempty"`
-	ChannelID   string `json:"channel_id,omitempty"`
-	TeamID      string `json:"team_id,omitempty"`
+	BotToken  string `json:"bot_token,omitempty"`
+	ChannelID string `json:"channel_id,omitempty"`
+	TeamID    string `json:"team_id,omitempty"`
+	// TeamName is the workspace name auth.test reported, shown when a person links Slack (#1419).
+	TeamName    string `json:"team_name,omitempty"`
 	AllowShared bool   `json:"allow_shared,omitempty"`
 }
 

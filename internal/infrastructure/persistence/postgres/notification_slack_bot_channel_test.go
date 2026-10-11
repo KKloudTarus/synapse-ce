@@ -92,7 +92,7 @@ func TestNotificationSlackBotChannelPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	var cfg ports.SlackBotChannelConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil || cfg != (ports.SlackBotChannelConfig{BotToken: pgSlackToken, ChannelID: "C0123456789", TeamID: "T0PG"}) {
+	if err := json.Unmarshal(raw, &cfg); err != nil || cfg != (ports.SlackBotChannelConfig{BotToken: pgSlackToken, ChannelID: "C0123456789", TeamID: "T0PG", TeamName: "Acme"}) {
 		t.Fatalf("sealed config = %s %v", raw, err)
 	}
 	if _, _, err := repo.GetChannelSealedConfig(shared.WithTenant(context.Background(), "slack-b"), "slack-b", channel.ID); err == nil {

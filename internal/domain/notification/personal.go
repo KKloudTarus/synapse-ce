@@ -58,33 +58,17 @@ func InAppMandatory(event EventType) bool {
 	return event == EventDestinationChanged || event == EventChannelPaused
 }
 
-// PersonalRoleSupported reports whether a shipped event can grant that role.
-// Mention, approver and engagement-lead producers are not in this baseline, so
-// those roles stay unsupported instead of matching free text.
+// PersonalRoleSupported reports whether a shipped event can grant that role. Tenant administrators
+// receive the administrator notices; every other role follows RuleRoleSupported, so mention and
+// approver roles stay unsupported until a producer records a verified identity.
 func PersonalRoleSupported(event EventType, role string) error {
-	switch role {
-	case RoleMentionedUser, RoleApprover, RoleEngagementLead:
-		return fmt.Errorf("%w: recipient role %s has no verified producer", shared.ErrValidation, role)
+	if role == RoleTenantAdmin {
+		if event == EventDestinationChanged || event == EventChannelPaused {
+			return nil
+		}
+		return fmt.Errorf("%w: recipient role %s is not supported for %s", shared.ErrValidation, role, event)
 	}
-	switch event {
-	case EventOwnershipChanged:
-		if role == RoleAssignee || role == RoleTeamMember {
-			return nil
-		}
-	case EventSLAApproaching:
-		if role == RoleAssignee {
-			return nil
-		}
-	case EventDestinationChanged, EventChannelPaused:
-		if role == RoleTenantAdmin {
-			return nil
-		}
-	default:
-		if event.Valid() && event != EventTest {
-			return fmt.Errorf("%w: %s has no personal recipients", shared.ErrValidation, event)
-		}
-	}
-	return fmt.Errorf("%w: recipient role %s is not supported for %s", shared.ErrValidation, role, event)
+	return RuleRoleSupported(event, role)
 }
 
 type PersonalSubject struct {
@@ -314,13 +298,9 @@ func ConfigurableEvents() []EventType {
 	return []EventType{EventVulnerabilityAction, EventScanCompleted, EventQualityGateFailed, EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged}
 }
 
-// Personal delivery is available only where an event has a structured
-// recipient and a safe subject. Other framework events keep their tenant rules.
+// PersonalDeliveryAvailable reports whether an event can reach a person. Ownership changes and SLA
+// deadlines name their people; the administrator notices go to tenant administrators; every other
+// routable event reaches the people a rule's recipient roles name (#1415).
 func PersonalDeliveryAvailable(event EventType) bool {
-	switch event {
-	case EventOwnershipChanged, EventSLAApproaching, EventDestinationChanged, EventChannelPaused:
-		return true
-	default:
-		return false
-	}
+	return PersonalEventConfigurable(event)
 }

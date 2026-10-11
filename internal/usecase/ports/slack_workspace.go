@@ -39,3 +39,23 @@ type SlackConversation struct {
 type SlackErrorCoder interface {
 	SlackCode() string
 }
+
+// SlackMember is the part of a Slack user the personal link (#1419) checks: the member exists in
+// the bot's workspace, is a person, and has not been deactivated.
+type SlackMember struct {
+	ID      string
+	TeamID  string
+	Deleted bool
+	Bot     bool
+}
+
+// SlackMemberReader reads one member of a bot's workspace (users.info).
+type SlackMemberReader interface {
+	Member(ctx context.Context, token, member string) (SlackMember, error)
+}
+
+// SlackDirectSender posts a formatted Block Kit message into the direct-message conversation of
+// a Slack app with one member (#1419): conversations.open, then chat.postMessage.
+type SlackDirectSender interface {
+	SendSlackDirect(ctx context.Context, token, member string, formatted []byte) NotificationSendResult
+}
