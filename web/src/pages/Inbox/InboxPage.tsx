@@ -63,7 +63,9 @@ export function InboxPage() {
     setError('')
     try {
       const saved = await api.saveInboxPreference({ event_type: item.event_type, channel: item.channel, state, revision: item.revision })
-      setPreferences((current) => current.map((row) => row.event_type === item.event_type && row.channel === item.channel ? { ...row, ...saved } : row))
+      // Only the choice and its revision come from the save; the default, availability and reason
+      // stay as the list read them, so a partial reply cannot flip "Use the default (on)" to off.
+      setPreferences((current) => current.map((row) => row.event_type === item.event_type && row.channel === item.channel ? { ...row, state: saved.state, revision: saved.revision } : row))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save preference')
       await load()

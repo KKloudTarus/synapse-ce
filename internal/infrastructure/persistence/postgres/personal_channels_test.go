@@ -396,3 +396,35 @@ func TestQueuedPersonalMessageFollowsTheEngagementClass(t *testing.T) {
 		t.Fatal("a message was released after the engagement turned external notifications off")
 	}
 }
+
+// A saved preference reports the effective default itself, read in the save's own transaction, so
+// a caller that cannot reload the list does not show "Use the default (off)" for a default that is
+// on: the built-in in_app default, a tenant default switched on, and an email default left off.
+func TestSavedPreferenceCarriesTheEffectiveDefault(t *testing.T) {
+	p := newPersonalChannels(t, "personal-pref-save")
+	if _, err := p.store.SavePersonalDefault(p.ctx, p.tenant, "admin", notification.EventOwnershipChanged, notification.PersonalSlack, true, 0, p.now); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := p.store.ListInboxPreferences(p.ctx, p.tenant, "member-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := map[string]int{}
+	for _, item := range listed {
+		if item.EventType == string(notification.EventOwnershipChanged) {
+			revision[item.Channel] = item.Revision
+		}
+	}
+	for _, tc := range []struct {
+		channel string
+		want    bool
+	}{{notification.PersonalInApp, true}, {notification.PersonalSlack, true}, {notification.PersonalEmail, false}} {
+		saved, err := p.store.SaveInboxPreference(p.ctx, p.tenant, "member-1", notification.EventOwnershipChanged, tc.channel, notification.PreferenceInherit, revision[tc.channel], p.now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if saved.Default != tc.want || saved.Revision != revision[tc.channel]+1 {
+			t.Fatalf("%s saved = %+v, want default %v", tc.channel, saved, tc.want)
+		}
+	}
+}

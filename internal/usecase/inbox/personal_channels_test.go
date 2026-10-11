@@ -203,3 +203,35 @@ func TestSavedPreferenceKeepsTheEffectiveDefault(t *testing.T) {
 		t.Fatalf("teams: saved = %+v %v", saved, err)
 	}
 }
+
+// failingList saves like the store, resolving the default in the save, but cannot read the list
+// back: the metadata reload after a successful write fails.
+type failingList struct {
+	fakeInbox
+	saved ports.InboxPreference
+}
+
+func (f *failingList) ListInboxPreferences(context.Context, shared.ID, shared.ID) ([]ports.InboxPreference, error) {
+	return nil, errors.New("metadata read failed")
+}
+
+func (f *failingList) SaveInboxPreference(_ context.Context, _ shared.ID, _ shared.ID, event notification.EventType, channel string, state notification.Preference, revision int, _ time.Time) (ports.InboxPreference, error) {
+	f.saved = ports.InboxPreference{EventType: string(event), Channel: channel, State: state, Revision: revision + 1,
+		Default: notification.BuiltinPersonalDefault(channel), Available: true}
+	return f.saved, nil
+}
+
+// A successful write followed by a failed metadata read still answers with the default the store
+// resolved, never "off" for a default that is on, and with the operator's channel availability.
+func TestSavedPreferenceSurvivesAFailedMetadataRead(t *testing.T) {
+	store := &failingList{}
+	svc, _ := NewService(store, fixedClock{})
+	saved, err := svc.SavePreference(context.Background(), "tenant", "user", notification.EventOwnershipChanged, notification.PersonalInApp, notification.PreferenceInherit, 1)
+	if err != nil || !saved.Default || saved.Revision != 2 || saved.State != notification.PreferenceInherit {
+		t.Fatalf("in_app: saved = %+v %v", saved, err)
+	}
+	saved, err = svc.SavePreference(context.Background(), "tenant", "user", notification.EventOwnershipChanged, notification.PersonalTeams, notification.PreferenceDisabled, 1)
+	if err != nil || saved.Available || saved.Reason == "" {
+		t.Fatalf("teams: saved = %+v %v", saved, err)
+	}
+}

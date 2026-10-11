@@ -166,14 +166,21 @@ var personalContactHint = map[string]string{
 func (s *InboxStore) SaveInboxPreference(ctx context.Context, tenant, user shared.ID, event notification.EventType, channel string, state notification.Preference, revision int, at time.Time) (ports.InboxPreference, error) {
 	item := ports.InboxPreference{EventType: string(event), Channel: channel, State: state, Mandatory: notification.InAppMandatory(event) && channel == notification.PersonalInApp, Available: true}
 	err := WithTenant(ctx, s.pool, tenant.String(), func(tx pgx.Tx) error {
+		// The saved row carries the effective default read in the same transaction, so even a caller
+		// that cannot reload the list never reports inherit as the opposite of what is delivered.
+		defaults, err := loadPersonalDefaults(ctx, tx, tenant, event)
+		if err != nil {
+			return err
+		}
+		item.Default = defaults.Enabled(event, channel)
 		if revision < 1 {
-			err := tx.QueryRow(ctx, `INSERT INTO user_notification_preferences(tenant_id,user_id,event_type,channel,state,revision,updated_at) VALUES($1,$2,$3,$4,$5,1,$6) ON CONFLICT DO NOTHING RETURNING revision`, tenant, user, event, channel, state, at).Scan(&item.Revision)
+			err = tx.QueryRow(ctx, `INSERT INTO user_notification_preferences(tenant_id,user_id,event_type,channel,state,revision,updated_at) VALUES($1,$2,$3,$4,$5,1,$6) ON CONFLICT DO NOTHING RETURNING revision`, tenant, user, event, channel, state, at).Scan(&item.Revision)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("%w: preference revision is stale", shared.ErrConflict)
 			}
 			return err
 		}
-		err := tx.QueryRow(ctx, `UPDATE user_notification_preferences SET state=$5, revision=revision+1, updated_at=$6 WHERE tenant_id=$1 AND user_id=$2 AND event_type=$3 AND channel=$4 AND revision=$7 RETURNING revision`, tenant, user, event, channel, state, at, revision).Scan(&item.Revision)
+		err = tx.QueryRow(ctx, `UPDATE user_notification_preferences SET state=$5, revision=revision+1, updated_at=$6 WHERE tenant_id=$1 AND user_id=$2 AND event_type=$3 AND channel=$4 AND revision=$7 RETURNING revision`, tenant, user, event, channel, state, at, revision).Scan(&item.Revision)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: preference revision is stale", shared.ErrConflict)
 		}

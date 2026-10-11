@@ -103,15 +103,19 @@ func (s *Service) SavePreference(ctx context.Context, tenant, user shared.ID, ev
 		return ports.InboxPreference{}, err
 	}
 	// The response is the row as the preference list shows it, with the effective default and the
-	// availability, so a client that merges it into its list does not lose them.
+	// availability, so a client that merges it into its list does not lose them. When the list
+	// cannot be read the store's row still carries the default it resolved in the save's own
+	// transaction, and the operator's channel availability is applied here.
 	items, err := s.Preferences(ctx, tenant, user)
-	if err != nil {
-		return saved, nil
-	}
-	for _, item := range items {
-		if item.EventType == string(event) && item.Channel == channel {
-			return item, nil
+	if err == nil {
+		for _, item := range items {
+			if item.EventType == string(event) && item.Channel == channel {
+				return item, nil
+			}
 		}
+	}
+	if ok, reason := s.channelAvailable(channel); !ok {
+		saved.Available, saved.Reason = false, reason
 	}
 	return saved, nil
 }
