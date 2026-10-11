@@ -657,10 +657,14 @@ Upgrade in this order:
    channel early.
    Do not set it on the older workers: they do not know the type and refuse to start.
 
-To roll back, first set `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack_bot` on the API and the
-workers of this release: queued Slack app deliveries are cancelled with `provider_disabled` instead of
-reaching an older worker. Then downgrade the API, then the workers. Existing Slack app channels stay
-stored; migration `0228` down only restores the template family guard.
+To roll back, follow [Rolling out personal Slack and Teams delivery](#rolling-out-personal-slack-and-teams-delivery):
+stop this release's workers first, then downgrade the API, then start the older workers. Do not
+switch `slack_bot` off on running workers of this release: they also send personal Slack messages,
+and with the type off they end those jobs for good with `slack_workspace_unavailable`. Slack app
+channel deliveries still queued when the older workers start are dead-lettered with
+`unsupported_channel`, which does not count towards a channel pause; after a later upgrade an
+administrator can redrive them from the delivery history. Existing Slack app channels stay stored;
+migration `0228` down only restores the template family guard.
 
 ## Retry and cutover behavior
 
