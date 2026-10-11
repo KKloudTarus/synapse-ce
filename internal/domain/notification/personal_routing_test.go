@@ -183,3 +183,18 @@ func TestSlackContactValue(t *testing.T) {
 		t.Error("an email parsed as a Slack contact")
 	}
 }
+
+func TestPersonalTextAtKeepsOnlyTheLabelAtSignal(t *testing.T) {
+	title, summary := PersonalTextAt(EventIncidentCreated, "Breach on payroll-db", "Attacker used svc-backup", DataClassSummary)
+	if title != "Breach on payroll-db" || summary != "Attacker used svc-backup" {
+		t.Fatalf("summary class = %q / %q", title, summary)
+	}
+	spec, _ := LookupEvent(EventIncidentCreated)
+	title, summary = PersonalTextAt(EventIncidentCreated, "Breach on payroll-db", "Attacker used svc-backup", DataClassSignal)
+	if title != spec.Label || summary != "" {
+		t.Fatalf("signal class = %q / %q", title, summary)
+	}
+	if title, summary = PersonalTextAt("unknown.event", "secret", "secret", DataClassSignal); title != "Synapse notification" || summary != "" {
+		t.Fatalf("unknown event at signal = %q / %q", title, summary)
+	}
+}

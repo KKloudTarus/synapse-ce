@@ -21,9 +21,9 @@ var (
 
 // LoadPersonalDelivery rechecks a queued personal message at send time (#1418): the inbox row
 // still exists, the person is enabled with a human role, their preference or the tenant default
-// still allows the channel, the engagement still lets messages leave Synapse (#1360, read under the
-// lock its setting writes take), and the exact contact version the job was queued for is still
-// verified. Any change returns ok=false; a job is never re-pointed at another contact.
+// still allows the channel, the engagement still lets messages leave Synapse and at which data
+// class (#1360, read under the lock its setting writes take), and the exact contact version the
+// job was queued for is still verified. Any change returns ok=false; a job is never re-pointed at another contact.
 func (s *InboxStore) LoadPersonalDelivery(ctx context.Context, tenant, user, event, contact shared.ID, version int, channel string) (ports.PersonalMessage, bool, error) {
 	if channel != notification.PersonalEmail && channel != notification.PersonalSlack && channel != notification.PersonalTeams {
 		return ports.PersonalMessage{}, false, fmt.Errorf("%w: unknown personal channel", shared.ErrValidation)
@@ -70,9 +70,18 @@ func (s *InboxStore) LoadPersonalDelivery(ctx context.Context, tenant, user, eve
 		if scanErr = tx.QueryRow(ctx, `SELECT engagement_id FROM notification_events WHERE tenant_id=$1 AND id=$2`, tenant, event).Scan(&engagement); scanErr != nil && !errors.Is(scanErr, pgx.ErrNoRows) {
 			return scanErr
 		}
-		if suppressed, err := engagementSuppressed(ctx, tx, tenant, engagement); err != nil || suppressed {
+		// The engagement's setting caps what leaves Synapse as it stands now, not as it stood when
+		// the job was queued: none sends nothing, signal sends only the event label and link.
+		// Personal messages otherwise go at summary, the most an inbox row holds.
+		override, err := engagementOverride(ctx, tx, tenant, engagement)
+		if err != nil {
 			return err
 		}
+		class, deliver := notification.EffectiveDataClass(notification.DataClassSummary, override)
+		if !deliver {
+			return nil
+		}
+		out.Title, out.Summary = notification.PersonalTextAt(out.EventType, out.Title, out.Summary, class)
 		scanErr = tx.QueryRow(ctx, `SELECT value FROM user_contacts WHERE tenant_id=$1 AND user_id=$2 AND id=$3 AND version=$4 AND kind=$5 AND verified_at IS NOT NULL`, tenant, user, contact, version, channel).Scan(&out.Recipient)
 		if errors.Is(scanErr, pgx.ErrNoRows) {
 			return nil

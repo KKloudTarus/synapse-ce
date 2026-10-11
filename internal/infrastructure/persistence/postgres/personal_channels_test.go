@@ -327,3 +327,72 @@ func TestPersonalTextComesFromTheScrubbedSnapshot(t *testing.T) {
 		t.Fatalf("personal message = %q / %q", message.Title, message.Summary)
 	}
 }
+
+// The engagement's external setting caps a queued personal message as it stands at send time: at
+// inherit the inbox text leaves, at signal only the event label and the link, at none nothing. The
+// inbox row keeps the full text throughout (#1360, #1415).
+func TestQueuedPersonalMessageFollowsTheEngagementClass(t *testing.T) {
+	p := newPersonalChannels(t, "personal-class")
+	p.repo.SetEventProjector(notificationuc.NewEventBuilders())
+	at := p.now
+	setting, err := p.repo.PutEngagementNotificationSetting(p.ctx, notification.EngagementNotificationSetting{TenantID: p.tenant, EngagementID: p.engagement(),
+		ExternalNotifications: notification.EngagementNotificationsInherit, LeadUserID: "lead-1", Revision: 1, UpdatedAt: &at, UpdatedBy: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	personalExec(t, p.ctx, p.pool, p.tenant, `INSERT INTO user_contacts(tenant_id,id,user_id,kind,source,value,verified_at,version,created_at,updated_at)
+		VALUES($1,'lead-slack','lead-1','slack','manual','T0123:U0LEAD',$2,1,$2,$2)`, p.tenant, p.now)
+	if _, err := p.store.SavePersonalDefault(p.ctx, p.tenant, "admin", notification.EventScanCompleted, notification.PersonalSlack, true, 0, p.now); err != nil {
+		t.Fatal(err)
+	}
+	rule := notification.Rule{TenantID: p.tenant, ID: "rule-class", Name: "Leads", Enabled: true, EventType: notification.EventScanCompleted,
+		RecipientRoles: []string{notification.RoleEngagementLead}, Revision: 1, CreatedAt: p.now, UpdatedAt: p.now}
+	if _, err := p.repo.CreateRule(p.ctx, rule); err != nil {
+		t.Fatal(err)
+	}
+	const private = "payments-api release candidate"
+	data, _ := json.Marshal(map[string]string{"title": "Nightly scan of " + private, "summary": "Scan of " + private + " finished", "scan_kind": "sast"})
+	event := notification.Event{TenantID: p.tenant, ID: "event-class", Type: notification.EventScanCompleted, SourceKind: "scan_job", SourceID: "scan-class",
+		EngagementID: p.engagement(), SchemaVersion: 1, OccurredAt: p.now, Data: data}
+	if _, err := p.repo.Publish(p.ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	load := func() (ports.PersonalMessage, bool) {
+		t.Helper()
+		message, ok, err := p.store.LoadPersonalDelivery(p.ctx, p.tenant, "lead-1", event.ID, "lead-slack", 1, notification.PersonalSlack)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return message, ok
+	}
+	lower := func(to notification.EngagementNotifications) {
+		t.Helper()
+		at := p.now.Add(time.Minute)
+		setting, err = p.repo.PutEngagementNotificationSetting(p.ctx, notification.EngagementNotificationSetting{TenantID: p.tenant, EngagementID: p.engagement(),
+			ExternalNotifications: to, LeadUserID: "lead-1", Revision: setting.Revision + 1, UpdatedAt: &at, UpdatedBy: "admin"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if message, ok := load(); !ok || !strings.Contains(message.Title, private) {
+		t.Fatalf("inherit: ok=%v message=%q / %q", ok, message.Title, message.Summary)
+	}
+	lower(notification.EngagementNotificationsSignal)
+	message, ok := load()
+	if !ok || message.Title != "Scan completed" || message.Summary != "" || message.LinkPath == "" {
+		t.Fatalf("signal: ok=%v message=%q / %q link=%q", ok, message.Title, message.Summary, message.LinkPath)
+	}
+	if strings.Contains(message.Title+message.Summary, private) {
+		t.Fatalf("signal message carries summary text: %q / %q", message.Title, message.Summary)
+	}
+	var inbox string
+	if err := WithTenant(p.ctx, p.pool, p.tenant.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(p.ctx, `SELECT title FROM user_notifications WHERE tenant_id=$1 AND user_id='lead-1' AND event_id=$2`, p.tenant, event.ID).Scan(&inbox)
+	}); err != nil || !strings.Contains(inbox, private) {
+		t.Fatalf("inbox row title = %q, %v", inbox, err)
+	}
+	lower(notification.EngagementNotificationsNone)
+	if _, ok := load(); ok {
+		t.Fatal("a message was released after the engagement turned external notifications off")
+	}
+}

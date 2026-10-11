@@ -194,6 +194,19 @@ func GenericPersonalSubject(e Event) PersonalSubject {
 	return PersonalSubject{EngagementID: e.EngagementID, Title: title, Summary: ScrubPersonalText(vars["summary"], 500), Link: link}
 }
 
+// PersonalTextAt is the title and summary a personal message may carry outside Synapse at class.
+// The inbox row keeps the full text, which can hold summary-class facts such as a finding or
+// incident title; at signal only the event type's label leaves, and the link stays.
+func PersonalTextAt(t EventType, title, summary string, class DataClass) (string, string) {
+	if class.Rank() > DataClassSignal.Rank() {
+		return title, summary
+	}
+	if spec, ok := LookupEvent(t); ok {
+		return spec.Label, ""
+	}
+	return "Synapse notification", ""
+}
+
 // ScrubPersonalText is the text of a personal notice as it may be stored and sent: one line,
 // without invisible characters, with keyed secrets, bearer tokens, access keys and private keys
 // removed twice (once before and once after the invisible characters that could split a key are
