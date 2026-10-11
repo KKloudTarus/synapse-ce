@@ -439,10 +439,24 @@ API (see [Slack app channels](#slack-app-channels-bot-token)): with the type swi
 workspace is offered for linking and no personal Slack message is queued. A Slack code an older
 worker swallowed is not lost for good; the person asks for a new code.
 
-To roll back, first switch `slack_bot` off and unset `SYNAPSE_TEAMS_BOT_*` on the API and on the
-workers of this release, then downgrade the API, then the workers. Personal Slack and Teams jobs still
-queued stay unclaimed by older workers and run, with their send-time checks, after a later upgrade.
-Migration `0229` down deletes Slack and Teams contacts and preferences.
+To roll back without losing queued personal messages, stop this release's workers before changing
+any configuration:
+
+1. Stop every `synapse-worker` of this release (scale it to zero). From here nothing claims a
+   `personal.slack` or `personal.teams` job; the API can still queue them.
+2. Downgrade the API.
+3. Start the older workers. They never register the personal Slack and Teams job kinds, so those
+   jobs stay `queued` and run, with their send-time checks, after a later upgrade.
+4. Keep migration `0229` applied. Its down step deletes Slack and Teams contacts and preferences.
+
+Do not switch `slack_bot` off or unset `SYNAPSE_TEAMS_BOT_*` on workers of this release while they
+run: such a worker still claims personal jobs, and a claimed job then ends for good with
+`slack_workspace_unavailable` or `teams_not_configured` instead of waiting. To see what is waiting:
+
+```sql
+SELECT kind, status, count(*) FROM jobs
+WHERE kind IN ('personal.slack', 'personal.teams') GROUP BY kind, status;
+```
 
 Events created before the framework first
 activates for a tenant are not replayed automatically.

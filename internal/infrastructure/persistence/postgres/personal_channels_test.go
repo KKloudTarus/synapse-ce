@@ -11,6 +11,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -426,5 +427,40 @@ func TestSavedPreferenceCarriesTheEffectiveDefault(t *testing.T) {
 		if saved.Default != tc.want || saved.Revision != revision[tc.channel]+1 {
 			t.Fatalf("%s saved = %+v, want default %v", tc.channel, saved, tc.want)
 		}
+	}
+}
+
+// The documented rollback stops this release's workers before anything else, so the workers that
+// then run are older ones that never registered the personal Slack and Teams kinds. Claiming with
+// that older set leaves a queued personal Slack job queued, to run after a later upgrade.
+func TestOlderWorkerLeavesQueuedPersonalSlackJobs(t *testing.T) {
+	p := newPersonalChannels(t, "personal-rollback")
+	if _, err := p.store.SavePersonalDefault(p.ctx, p.tenant, "admin", notification.EventOwnershipChanged, notification.PersonalSlack, true, 0, p.now); err != nil {
+		t.Fatal(err)
+	}
+	p.publish(t, "rollback")
+	jobs := personalJobs(t, p, "personal.slack")
+	if len(jobs) != 1 {
+		t.Fatalf("slack jobs = %v", jobs)
+	}
+	queue := NewJobQueue(p.pool, idgen.RandomID{})
+	// What a worker from before #1419/#1420 claims for personal delivery.
+	for i := 0; i < 100; i++ {
+		job, err := queue.Claim(p.ctx, time.Minute, "personal.email", "user_contact_verification")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job == nil {
+			break
+		}
+		if job.ID == jobs[0] {
+			t.Fatalf("an older worker claimed %s", job.ID)
+		}
+	}
+	var status string
+	if err := WithTenant(p.ctx, p.pool, p.tenant.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(p.ctx, `SELECT status FROM jobs WHERE tenant_id=$1 AND id=$2`, p.tenant, jobs[0]).Scan(&status)
+	}); err != nil || status != "queued" {
+		t.Fatalf("personal Slack job status = %q, %v", status, err)
 	}
 }
