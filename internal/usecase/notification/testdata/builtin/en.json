@@ -550,17 +550,17 @@
   },
   "scan.completed/pager/detail": {
     "fields": {
-      "summary": "Scan completed: Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example\n- [detail\\-high] detail\\-finding (detail\\-new)"
+      "summary": "Scan completed: Changes: 2 new, 1 fixed, 9 unchanged; Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)"
     }
   },
   "scan.completed/pager/signal": {
     "fields": {
-      "summary": "Scan completed: Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+      "summary": "Scan completed: Changes: 2 new, 1 fixed, 9 unchanged; Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)"
     }
   },
   "scan.completed/pager/summary": {
     "fields": {
-      "summary": "Scan completed: Scan type: sast\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nChanges: 2 new, 1 fixed, 9 unchanged\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example"
+      "summary": "Scan completed: Changes: 2 new, 1 fixed, 9 unchanged; Findings: 12 (critical 1, high 2, medium 3, low 4, info 2)"
     }
   },
   "scan.completed/webhook/detail": {

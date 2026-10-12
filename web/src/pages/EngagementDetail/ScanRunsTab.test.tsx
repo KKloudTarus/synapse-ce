@@ -1,8 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../lib/api'
-import type { ScanRun } from '../../lib/types'
+import type { ScanDrift, ScanRun } from '../../lib/types'
 import { ScanRunsTab } from './ScanRunsTab'
 
 vi.mock('../../lib/api', () => ({
@@ -35,6 +35,16 @@ function run(id: string, createdAt: string, repro: number, keys: string[], grype
     laneCount: 1,
     completeCoverage: true,
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve
+    reject = onReject
+  })
+  return { promise, resolve, reject }
 }
 
 describe('ScanRunsTab', () => {
@@ -107,5 +117,96 @@ describe('ScanRunsTab', () => {
     expect(await screen.findByText('Source metadata unavailable')).toBeVisible()
     expect(screen.getByText('git target · https://example.test/repo')).toBeVisible()
     expect(screen.getByText('image target · example/image@sha256:abc')).toBeVisible()
+  })
+
+  it('selects the scan addressed by a console link after its history loads', async () => {
+    let resolveRuns: (runs: ScanRun[]) => void
+    vi.mocked(api.scanRuns).mockImplementation(() => new Promise((resolve) => { resolveRuns = resolve }))
+
+    render(<ScanRunsTab engagementId="eng-001" focusedScanRunId="run-feb" />)
+    expect(screen.getByText('Loading scan runs…')).toBeVisible()
+
+    resolveRuns!([
+      run('run-jan', '2026-01-20T00:00:00Z', 82, ['k1']),
+      run('run-feb', '2026-02-20T00:00:00Z', 82, ['k1', 'k2']),
+    ])
+
+    const target = await screen.findByRole('button', { name: 'Scan run run-feb, selected as comparison run A' })
+    expect(target).toHaveAttribute('id', 'scan-run-feb')
+    expect(target).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Scan run run-jan' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('ignores a console link to a scan absent from this engagement', async () => {
+    vi.mocked(api.scanRuns).mockResolvedValue([run('run-feb', '2026-02-20T00:00:00Z', 82, ['k1'])])
+
+    render(<ScanRunsTab engagementId="eng-001" focusedScanRunId="missing-run" />)
+
+    const row = await screen.findByRole('button', { name: 'Scan run run-feb' })
+    expect(row).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('changes the selected scan when a different console-link fragment arrives', async () => {
+    vi.mocked(api.scanRuns).mockResolvedValue([
+      run('run-jan', '2026-01-20T00:00:00Z', 82, ['k1']),
+      run('run-feb', '2026-02-20T00:00:00Z', 82, ['k1', 'k2']),
+    ])
+    const view = render(<ScanRunsTab engagementId="eng-001" focusedScanRunId="run-feb" />)
+    await screen.findByRole('button', { name: 'Scan run run-feb, selected as comparison run A' })
+
+    view.rerender(<ScanRunsTab engagementId="eng-001" focusedScanRunId="run-jan" />)
+
+    expect(await screen.findByRole('button', { name: 'Scan run run-jan, selected as comparison run A' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Scan run run-feb' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('does not restore a completed comparison after a console link selects another scan', async () => {
+    const comparison = deferred<ScanDrift>()
+    vi.mocked(api.scanRuns).mockResolvedValue([
+      run('run-a', '2026-01-20T00:00:00Z', 82, ['a']),
+      run('run-b', '2026-02-20T00:00:00Z', 82, ['b']),
+      run('run-c', '2026-03-20T00:00:00Z', 82, ['c']),
+    ])
+    vi.mocked(api.compareScanRuns).mockReturnValue(comparison.promise)
+    const view = render(<ScanRunsTab engagementId="eng-001" />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Scan run run-b' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Scan run run-a' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Compare A and B' }))
+    await waitFor(() => expect(api.compareScanRuns).toHaveBeenCalledWith('eng-001', 'run-b', 'run-a'))
+
+    view.rerender(<ScanRunsTab engagementId="eng-001" focusedScanRunId="run-c" />)
+    expect(await screen.findByRole('button', { name: 'Scan run run-c, selected as comparison run A' })).toHaveAttribute('aria-pressed', 'true')
+
+    await act(async () => comparison.resolve({
+      runA: run('run-b', '2026-02-20T00:00:00Z', 82, ['b']), runB: run('run-a', '2026-01-20T00:00:00Z', 82, ['a']),
+      added: ['b'], removed: ['a'], unchanged: 0, explanation: ['stale'],
+    }))
+
+    expect(screen.queryByText('1 added')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Scan run run-c, selected as comparison run A' })).toBeEnabled()
+  })
+
+  it('does not show a stale comparison failure after a console link selects another scan', async () => {
+    const comparison = deferred<ScanDrift>()
+    vi.mocked(api.scanRuns).mockResolvedValue([
+      run('run-a', '2026-01-20T00:00:00Z', 82, ['a']),
+      run('run-b', '2026-02-20T00:00:00Z', 82, ['b']),
+      run('run-c', '2026-03-20T00:00:00Z', 82, ['c']),
+    ])
+    vi.mocked(api.compareScanRuns).mockReturnValue(comparison.promise)
+    const view = render(<ScanRunsTab engagementId="eng-001" />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Scan run run-b' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Scan run run-a' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Compare A and B' }))
+    await waitFor(() => expect(api.compareScanRuns).toHaveBeenCalled())
+
+    view.rerender(<ScanRunsTab engagementId="eng-001" focusedScanRunId="run-c" />)
+    await screen.findByRole('button', { name: 'Scan run run-c, selected as comparison run A' })
+    await act(async () => comparison.reject(new Error('stale comparison failed')))
+
+    expect(screen.queryByText('stale comparison failed')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Scan run run-c, selected as comparison run A' })).toBeEnabled()
   })
 })

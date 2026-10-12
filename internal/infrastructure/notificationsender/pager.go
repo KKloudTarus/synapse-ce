@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -103,7 +104,7 @@ func (d jsmDriver) Send(ctx context.Context, w ports.NotificationWork, config po
 		return ports.NotificationSendResult{ErrorCode: "pager_resolve_unpaired", TemplateFallback: fallback}
 	}
 	target := jsmAlertsURL
-	payload := map[string]any{"message": summary, "alias": alias, "source": "synapse", "details": jsmLinkDetails(links)}
+	payload := map[string]any{"message": summary, "alias": alias, "source": "synapse", "priority": jsmPriority(w.Event.Severity), "details": jsmLinkDetails(links)}
 	if w.SubjectResolved {
 		target += "/" + url.PathEscape(alias) + "/close?identifierType=alias"
 		payload = map[string]any{"source": "synapse"}
@@ -185,6 +186,23 @@ func (d jsmDriver) confirmJSMRequest(ctx context.Context, apiKey, requestID, ali
 		return ports.NotificationSendResult{StatusCode: status.StatusCode, ErrorCode: "jsm_request_failed", TemplateFallback: fallback}
 	}
 	return ports.NotificationSendResult{StatusCode: http.StatusAccepted, TemplateFallback: fallback, RemoteRef: alias}
+}
+
+// jsmPriority maps the event's authoritative normalized severity to JSM's alert priority.
+// Template fields are operator-editable presentation and cannot change provider routing.
+func jsmPriority(severity shared.Severity) string {
+	switch severity {
+	case shared.SeverityCritical:
+		return "P1"
+	case shared.SeverityHigh:
+		return "P2"
+	case shared.SeverityLow:
+		return "P4"
+	case shared.SeverityInfo:
+		return "P5"
+	default:
+		return "P3"
+	}
 }
 
 func jsmUnconfirmed(statusCode int, fallback bool, requestID string) ports.NotificationSendResult {

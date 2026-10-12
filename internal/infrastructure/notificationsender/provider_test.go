@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -544,5 +545,80 @@ func TestJSMPayloadUsesStringDetailsAndBoundsUnicodeMessage(t *testing.T) {
 				t.Fatalf("string link details=%v", payload.Details)
 			}
 		})
+	}
+}
+
+func TestJSMPayloadPriorityComesFromEventSeverity(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		severity shared.Severity
+		want     string
+	}{
+		{name: "critical", severity: shared.SeverityCritical, want: "P1"},
+		{name: "high", severity: shared.SeverityHigh, want: "P2"},
+		{name: "medium", severity: shared.SeverityMedium, want: "P3"},
+		{name: "low", severity: shared.SeverityLow, want: "P4"},
+		{name: "info", severity: shared.SeverityInfo, want: "P5"},
+		{name: "unknown", severity: shared.SeverityUnknown, want: "P3"},
+		{name: "invalid", severity: shared.Severity("untrusted-P1"), want: "P3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := New(SMTPConfig{}, 0)
+			s.pagerKey = []byte("pager-master-key-for-test")
+			var createBody []byte
+			s.http = &http.Client{Transport: providerRoundTrip(func(r *http.Request) (*http.Response, error) {
+				createBody, _ = io.ReadAll(r.Body)
+				return providerResponse(http.StatusAccepted, `{"requestId":"request-create"}`), nil
+			})}
+			formatted, err := (messageformat.JSMFormatter{}).Format(ports.RenderedMessage{Fields: map[string]string{"summary": "operator text says P1"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			work := testWork(notification.ChannelJSM)
+			work.Event.SubjectKind, work.Event.SubjectID, work.Event.Severity = "finding", "finding-priority", tc.severity
+			work.Formatted = &formatted
+			if got := s.Send(context.Background(), work, ports.JSMChannelConfig{APIKey: "jsm-api-key-secret"}); got.ErrorCode != "jsm_request_unconfirmed" {
+				t.Fatalf("result=%+v", got)
+			}
+			var payload struct {
+				Priority string `json:"priority"`
+			}
+			if err := json.Unmarshal(createBody, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Priority != tc.want {
+				t.Fatalf("priority=%q, want %q", payload.Priority, tc.want)
+			}
+		})
+	}
+}
+
+func TestJSMClosePayloadDoesNotIncludeTriggerPriority(t *testing.T) {
+	s := New(SMTPConfig{}, 0)
+	s.pagerKey = []byte("pager-master-key-for-test")
+	var closeBody []byte
+	s.http = &http.Client{Transport: providerRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if !strings.Contains(r.URL.Path, "/close") {
+			t.Fatalf("target=%s", r.URL)
+		}
+		closeBody, _ = io.ReadAll(r.Body)
+		return providerResponse(http.StatusAccepted, `{"requestId":"request-close"}`), nil
+	})}
+	formatted, err := (messageformat.JSMFormatter{}).Format(ports.RenderedMessage{Fields: map[string]string{"summary": "closed alert"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := testWork(notification.ChannelJSM)
+	work.Event.SubjectKind, work.Event.SubjectID, work.Event.Severity = "finding", "finding-close", shared.SeverityCritical
+	work.SubjectResolved, work.SubjectAnchor, work.Formatted = true, "acknowledged-alias", &formatted
+	if got := s.Send(context.Background(), work, ports.JSMChannelConfig{APIKey: "jsm-api-key-secret"}); got.ErrorCode != "jsm_request_unconfirmed" {
+		t.Fatalf("result=%+v", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(closeBody, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 1 || payload["source"] != "synapse" {
+		t.Fatalf("close payload=%s", closeBody)
 	}
 }

@@ -64,7 +64,7 @@ Some entries carry more than a switch:
 
 OIDC sign-in never creates a user. An administrator approves each subject with `POST /api/v1/users/{id}/oidc-links` and body `{"issuer": "...", "subject": "..."}`; `GET` on the same path lists a user's links. The issuer must equal the normalized `SYNAPSE_OIDC_ISSUER` exactly, the user must belong to `SYNAPSE_OIDC_TENANT_ID` and be enabled, and the bootstrap operator cannot be linked. The link and its audit record commit together. Links created by earlier releases keep working. A callback for an unlinked subject answers `403 access_denied`. The user's role is the one set in Synapse. Disabling a user revokes its browser sessions and API key permanently; after re-enabling, rotate the key and sign in again.
 
-The console link builder routes to engagements, incidents, the Findings tab (`#finding-<id>`) and the Scan Runs tab (`#scan-<id>`). The latter opens scan history and preserves the scan ID in its fragment; the current UI does not yet auto-select a scan from that fragment. If neither public URL nor OIDC frontend is configured, link generation is unavailable until an HTTPS base is supplied.
+The console link builder routes to engagements, incidents, the Findings tab (`#finding-<id>`) and the Scan Runs tab (`#scan-<id>`). A Scan Runs link opens scan history, selects the identified scan and scrolls it into view after the history loads. If neither public URL nor OIDC frontend is configured, link generation is unavailable until an HTTPS base is supplied.
 
 ## Core and server
 
