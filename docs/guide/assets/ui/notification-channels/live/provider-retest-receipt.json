@@ -203,5 +203,36 @@
     "Deleted Slack parent was accepted by provider; explicit missing-parent fallback was not observed live.",
     "Teams and PagerDuty live testing deferred; Microsoft SMTP blocked by tenant administration prerequisites.",
     "No exhaustive theme/device matrix or production latency claim."
-  ]
+  ],
+  "latest_main_reconciliation": {
+    "main_commit": "ad218ef8",
+    "tested_source_tree": "a7d8b6f3e4d85d05945e82afe5bd1b6997fddb02",
+    "b02_migrations": "0231-0234",
+    "main_ticketing_migration": "0230",
+    "sql_contents_unchanged": true,
+    "rehearsal_assertions": 71,
+    "sequence": [
+      227,
+      228,
+      229,
+      230,
+      231,
+      232,
+      233,
+      234,
+      230,
+      234,
+      227,
+      234
+    ],
+    "postgres_seconds": 86.191,
+    "checks": [
+      "full Go build",
+      "full Go vet",
+      "affected lint",
+      "ticketing/writeintent/usecase/memory unit tests",
+      "focused PostgreSQL notification/ticketing/migration tests"
+    ],
+    "note": "Live provider captures retain original tested commits; renumbering introduces no provider runtime changes. No production lock-duration or crash-durability claim."
+  }
 }

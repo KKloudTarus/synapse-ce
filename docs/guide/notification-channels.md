@@ -195,9 +195,9 @@ operators must approve only relay hosts they trust. Self-hosted chat uses the
 public-only tenant HTTP policy even when its hostname is allowlisted.
 
 Main already includes migration `0228` for Slack bot channels and `0229` for
-personal delivery. This branch's unshipped migrations use `0230–0233` for subject
-threads, email settings, channel families and pending provider requests, respectively.
-Apply the complete sequence in order; the two migrations already on main remain
+personal delivery, plus `0230` for ticketing. This branch's unshipped migrations use
+`0231–0234` for subject threads, email settings, channel families and pending provider
+requests, respectively. Apply the complete sequence in order; migrations on main remain
 unchanged. Databases used for earlier branch rehearsals need an isolated rebuild
 because their unpublished migration numbers differ from this sequence.
 
@@ -225,7 +225,7 @@ flow passed.
 | Teams personal delivery | Bot, one-time link-code/contact flow and personal delivery are present from merged PR #1571. Local contracts do not establish a real Teams delivery. | A dedicated Microsoft 365 test tenant/Azure Bot is not available yet. Capture the real 1:1 link flow, verified Synapse contact, personal notification and correlated delivery history, then follow Open in Synapse to its expected console destination. Record the tested commit/environment and have the reviewer inspect the evidence before closing #1420. Mobile and an exhaustive theme/locale matrix are not required by the updated reviewer criterion. |
 | PagerDuty | Local trigger/paired-resolve, HMAC dedup and signal-only contracts pass. | Live testing deferred at the operator's request and tracked in #1385, WS3 #1331 and EPIC #1327. A dedicated test service/key and trusted closure producer are still required. |
 | JSM | Commit `a8e2d1b9` created twelve synthetic alerts via fourteen POSTs and fourteen fresh-Sender GET resumes; twelve paired closes used twelve POSTs and twelve GETs. Real UI shows incident deduplication, literal direct-formatter probe and API close. Notifications were suppressed and integration is now Off. | No live delayed-404 or queue/crash recovery proof. Priority stayed P3; the VI scan summary truncates a count label. Signal-only built-ins omit the hostile finding title, so its literal evidence is a separate formatter probe. Trusted closure producer, working console links and recovery after key-version replacement remain pending. |
-| Migrations | The reconciled PostgreSQL 17 rehearsal passed 68 assertions through `227→228→229→230→231→232→233→229→233→227→233`, preserving the Teams contact, conversation and personal preference on B02 rollback. The complete PostgreSQL run took 1279.158 seconds; seven old migration tests exceeded their database-cleanup deadlines on Docker disk. Those seven tests passed unchanged on an isolated tmpfs PostgreSQL instance in 24.390 seconds, with default fsync settings. | Representative lock/latency budgets and production rollout/rollback rehearsal remain pending. Hosted CI currently has a shorter default timeout than the local PostgreSQL run. Local transaction tests and tmpfs cleanup do not establish crash durability or production timing. |
+| Migrations | The historical reconciliation with main `1c2e55f2` passed 68 PostgreSQL 17 assertions through `227→228→229→230→231→232→233→229→233→227→233`, preserving the Teams contact, conversation and personal preference on B02 rollback. The complete PostgreSQL run took 1279.158 seconds; seven old migration tests exceeded their database-cleanup deadlines on Docker disk. Those seven tests passed unchanged on an isolated tmpfs PostgreSQL instance in 24.390 seconds, with default fsync settings. | Representative lock/latency budgets and production rollout/rollback rehearsal remain pending. Hosted CI currently has a shorter default timeout than the local PostgreSQL run. Local transaction tests and tmpfs cleanup do not establish crash durability or production timing. |
 | Recipient policy | Same-tenant active verified contacts, exact DNS-proven domains, send-time revocation and five tests/channel/hour have memory and PostgreSQL coverage. | Live operator DNS/domain workflow and representative production history/RLS latency. |
 
 Prepare disposable Telegram and Google Chat destinations, a dedicated PagerDuty
@@ -239,3 +239,12 @@ device actually shown. Fixture color glyphs are test inputs and do not prove aut
 severity-to-color mapping in the production event flow.
 
 The current provider retest is recorded in [the evidence receipt](assets/ui/notification-channels/live/provider-retest-receipt.json). JSM and Gmail used source tree `498f50b9ef10d576bc38011b723d87a95df7bdec`, now commit `a8e2d1b9`; chat and relay captures used `eae4c40c`. New screenshots are native captures, with Gmail body-only crops labeled explicitly. The initial JSM batch was closed separately before the fixed-source replay. JSM configuration remains recoverable but disabled; its local key was removed. Teams evidence is deferred in #1420 and WS4 #1332; reviewer inspection remains required before closing the issue.
+
+After main `ad218ef8` added ticketing migration `0230`, B02's four SQL files were
+renumbered without changing their contents. A new PostgreSQL 17 rehearsal passed
+71 assertions through `227→228→229→230→231→232→233→234→230→234→227→234`.
+Rollback to `230` preserved a populated ticket link, Teams contact, conversation and
+personal preference. The combined notification/ticketing PostgreSQL tests passed in
+86.191 seconds; full Go build/vet, affected lint and ticketing/memory tests also passed.
+This supplemental evidence supersedes the old numbering, not its production timing
+limitations. Earlier unpublished B02 databases still require an isolated rebuild.
