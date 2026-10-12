@@ -1,0 +1,207 @@
+{
+  "tested_commits": {
+    "chat_and_relays": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+    "jsm_and_gmail": "a8e2d1b912bcac763ae50650c4228d769149dd69"
+  },
+  "jsm_tested_tree": "498f50b9ef10d576bc38011b723d87a95df7bdec",
+  "builtins": {
+    "events": [
+      "vulnerability_action.created",
+      "scan.completed",
+      "sla.approaching_deadline",
+      "incident.created",
+      "hostile-title via SLA"
+    ],
+    "locales": [
+      "en",
+      "vi"
+    ],
+    "final_chat_relay_acceptances": 54,
+    "gmail_acceptances": 10
+  },
+  "jsm": {
+    "create_posts": 14,
+    "create_status_gets": 14,
+    "close_posts": 12,
+    "close_status_gets": 12,
+    "alerts_in_final_batch": 12,
+    "initial_batch_alerts_cleaned": 12,
+    "integration_enabled_after_test": false,
+    "notifications_suppressed": true,
+    "server_configuration_retained": true
+  },
+  "gmail_cleanup": {
+    "scope": "Synthetic Gmail SMTP acceptance cleanup",
+    "revoke_http_status": 200,
+    "refresh_after_revoke_http_status": 400,
+    "refresh_rejected_invalid_grant": true,
+    "mailbox_grant_revoked": true
+  },
+  "smtp_storage": {
+    "current_source_commit": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+    "final_batch": {
+      "starttls_stored": 10,
+      "implicit_tls_stored": 10,
+      "vietnamese_per_transport": 5,
+      "hostile_literal_per_transport": 2,
+      "scan_delta_per_transport": 2
+    },
+    "mime_assertions": [
+      "Date and Message-ID",
+      "multipart alternative",
+      "decoded UTF-8 plain and HTML",
+      "only synthetic sender/recipient",
+      "no credential bytes in stored messages",
+      "hostile title never becomes an HTML link"
+    ],
+    "total_fixture_mail_per_transport": 20,
+    "batch_note": "Initial batch lacked hostile title because the risk-action schema omits it. Corrected final batch uses the SLA finding-title field; earlier synthetic messages remain isolated."
+  },
+  "slack_thread_probe": {
+    "commit": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+    "concurrent_replies_with_same_parent": 2,
+    "interpretation": "Only an explicit terminal Slack thread-not-found response triggers the top-level replacement. Provider acceptance without that response does not establish the live fallback branch. No history-read permission added.",
+    "own_synthetic_parent_deleted": true,
+    "post_deleted_parent_status": 200,
+    "post_request_count_after_delete": 1,
+    "terminal_missing_parent_fallback_observed": false
+  },
+  "screenshots": [
+    {
+      "file": "mattermost-builtins-vi-dark-desktop.jpg",
+      "caption": "Mattermost built-ins, VI, dark desktop",
+      "tested_commit": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+      "sha256": "815d27b87787234afec275c98791939c9fe5a78f2768a8327a924897ed53fb46",
+      "native_capture": true
+    },
+    {
+      "file": "mattermost-builtins-en-vi-dark-desktop.jpg",
+      "caption": "Mattermost built-ins, EN/VI, dark desktop",
+      "tested_commit": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+      "sha256": "1fbd97608b94cf2512acae94f4e20e4c9f1254048af442cadf862e21945bf509",
+      "native_capture": true
+    },
+    {
+      "file": "rocketchat-builtins-vi-light-desktop.jpg",
+      "caption": "Rocket.Chat built-ins, VI, light desktop",
+      "tested_commit": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+      "sha256": "1df41b0244e595123f90f75a4ff4a1c7ffa8cc44b8e0e805557a177529ff650e",
+      "native_capture": true
+    },
+    {
+      "file": "rocketchat-builtins-vi-dark-desktop.jpg",
+      "caption": "Rocket.Chat built-ins, VI, dark desktop",
+      "tested_commit": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+      "sha256": "2a08cbb7c4cd25d59ae644eb25d39c0cfd0914478b32c5187108135b3f01d270",
+      "native_capture": true
+    },
+    {
+      "file": "smtp-builtins-en-desktop.jpg",
+      "caption": "SMTP built-ins, EN, Mailpit desktop",
+      "tested_commit": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+      "sha256": "9de4c63abdec8324cfa08c08c4812635f440eac856e190af31bae6ac469904ac",
+      "native_capture": true
+    },
+    {
+      "file": "smtp-builtins-vi-desktop.jpg",
+      "caption": "SMTP built-ins, VI, Mailpit desktop",
+      "tested_commit": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+      "sha256": "54f8bfca97416dee903027757924fd24e6b06ddca4034624d6cb4f4d734719fe",
+      "native_capture": true
+    },
+    {
+      "file": "slack-builtins-vi-thread-desktop.jpg",
+      "caption": "Slack built-ins and incident replies, VI desktop",
+      "tested_commit": "eae4c40caa53588be0e17d4ca8ea559b6ea9db9f",
+      "sha256": "df8009e2568fa33ef2674b2af0e38e11a73cabac165811311e4419ff3ee20904",
+      "native_capture": true
+    },
+    {
+      "file": "jsm-free-plan-desktop.jpg",
+      "caption": "JSM Free plan, one user",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "905e9d345466f1a2adf4191a7f126e5286795d5b101f88e8c32233a9569a915d",
+      "native_capture": true
+    },
+    {
+      "file": "jsm-integration-on-notifications-off-desktop.jpg",
+      "caption": "JSM integration enabled with notifications suppressed",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "f8529a4b4a3add163077372974bb2208598319866897d1d0af846459fe35d044",
+      "native_capture": true
+    },
+    {
+      "file": "jsm-builtins-vi-open-desktop.jpg",
+      "caption": "JSM built-ins, VI; incident occurrence count two",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "bc0f0bebee10fe2dea2618a4e1c11d5c61ccb4873f8490f9ed7788f39dd14865",
+      "native_capture": true
+    },
+    {
+      "file": "jsm-literal-vi-activity-desktop.jpg",
+      "caption": "JSM direct literal probe; create notification suppression",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "dcb0a5601a985b0986821b763047e93855a5c19b16b3ee987370420f7e04d34d",
+      "native_capture": true
+    },
+    {
+      "file": "jsm-paired-close-activity-desktop.jpg",
+      "caption": "JSM Closed status and API close activity",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "89d7b53d949116fe2c90e9f921137946c8673e38eef9a35be8e12b9c94bbd9a4",
+      "native_capture": true
+    },
+    {
+      "file": "jsm-integration-off-desktop.jpg",
+      "caption": "JSM integration disabled after cleanup",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "e5bad3dca1b344c913da3bff64d4ea21de9af56f476f63c1fa47399545cbe3cf",
+      "native_capture": true
+    },
+    {
+      "file": "gmail-no-billing-desktop.jpg",
+      "caption": "Google test project has no billing account",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "98d799f312a65c847570f37a3619b4cedcbf335183d299d589d0ebe2348e15a9",
+      "native_capture": true
+    },
+    {
+      "file": "gmail-builtins-ten-messages-desktop.jpg",
+      "caption": "Gmail ten built-in self-test messages, EN/VI desktop",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "7c3c0d882a1478bec119ad52aab4bfe4d7290535c3e0347c5ab338c1118997ca",
+      "native_capture": true
+    },
+    {
+      "file": "gmail-builtins-vi-scan-body.jpg",
+      "caption": "Gmail VI scan body detail; native crop excludes private sender",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "2d076275ffeb0f7080fba49965acd4e5e9f7a95d1f6c92ba0d8c83d95f4f4660",
+      "native_capture": true
+    },
+    {
+      "file": "gmail-builtins-vi-hostile-body.jpg",
+      "caption": "Gmail VI hostile body detail; provider auto-links visible URL",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "5810853279597b39aadf66bd1207007a9aa866fe0030f2cf318a11781ee28241",
+      "native_capture": true
+    },
+    {
+      "file": "gmail-project-retest-cleanup.jpg",
+      "caption": "Google test project shut down; recoverable until November 11",
+      "tested_commit": "a8e2d1b912bcac763ae50650c4228d769149dd69",
+      "sha256": "6cb94eb78b7da8620e063256acda63d9d96be3b403dee6c875d8780b2377d26c",
+      "native_capture": true
+    }
+  ],
+  "limitations": [
+    "Adapter-level live replay; no producer/queue end-to-end or crash durability claim.",
+    "Console links use synapse.invalid.",
+    "JSM priority remained P3; VI scan summary truncates a count label.",
+    "JSM signal policy omits hostile finding title; literal probe is a separate direct-formatter test.",
+    "Gmail auto-links a literal visible URL even though generated HTML has no hostile anchor.",
+    "Deleted Slack parent was accepted by provider; explicit missing-parent fallback was not observed live.",
+    "Teams and PagerDuty live testing deferred; Microsoft SMTP blocked by tenant administration prerequisites.",
+    "No exhaustive theme/device matrix or production latency claim."
+  ]
+}
