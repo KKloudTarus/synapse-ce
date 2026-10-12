@@ -7,6 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -19,6 +20,33 @@ func TestPagerFormattersExposeOnlySummaryAndTrustedLinks(t *testing.T) {
 		}
 		if !bytes.Contains(out.Body, []byte(`"summary":"critical"`)) || bytes.Contains(out.Body, []byte("secret")) || !bytes.Contains(out.Body, []byte("console.example")) {
 			t.Errorf("%T unsafe pager output: %s", formatter, out.Body)
+		}
+	}
+}
+
+func TestPagerFormattersShowCanonicalSummaryAsPlainText(t *testing.T) {
+	for _, value := range []string{
+		"request-review",
+		"Cảnh báo: 2 mới, 1 đã sửa",
+		"[Reset password](https://evil.example) @everyone <!channel> **bold**",
+		`C:\synthetic\report.json`,
+	} {
+		for _, formatter := range []ports.NotificationFormatter{PagerDutyFormatter{}, JSMFormatter{}} {
+			out, err := formatter.Format(ports.RenderedMessage{Fields: map[string]string{
+				"summary": "**Alert:** " + msgtemplate.EscapeMarkdown(msgtemplate.Sanitize(value)),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload struct {
+				Summary string `json:"summary"`
+			}
+			if err := json.Unmarshal(out.Body, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if want := "Alert: " + value; payload.Summary != want {
+				t.Errorf("%T summary = %q, want %q", formatter, payload.Summary, want)
+			}
 		}
 	}
 }

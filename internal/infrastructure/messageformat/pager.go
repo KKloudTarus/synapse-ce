@@ -2,8 +2,8 @@ package messageformat
 
 import (
 	"encoding/json"
-	"strings"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/msgmarkdown"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -42,7 +42,7 @@ func pagerMessage(message ports.RenderedMessage, summaryRunes int) (ports.Format
 	if err != nil {
 		return ports.FormattedMessage{}, err
 	}
-	summary := truncateRunes(strings.TrimSpace(msgtemplate.Sanitize(message.Fields["summary"])), summaryRunes)
+	summary := truncateRunes(headerText(msgmarkdown.Parse(msgtemplate.Sanitize(message.Fields["summary"]))), summaryRunes)
 	if summary == "" {
 		return ports.FormattedMessage{}, nil
 	}
