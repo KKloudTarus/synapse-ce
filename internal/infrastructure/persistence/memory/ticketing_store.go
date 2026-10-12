@@ -17,20 +17,27 @@ import (
 // TicketStore is an in-memory conformance adapter. PostgreSQL is the durable production store.
 // Every map is tenant partitioned and every returned composite value is cloned.
 type TicketStore struct {
-	mu       sync.RWMutex
-	mappings map[shared.ID]map[shared.ID]ticketing.Mapping
-	links    map[shared.ID]map[shared.ID]ticketing.Link
-	intents  map[shared.ID]map[shared.ID]ticketing.Intent
+	mu          sync.RWMutex
+	engagements *EngagementRepository
+	findings    *FindingRepository
+	mappings    map[shared.ID]map[shared.ID]ticketing.Mapping
+	links       map[shared.ID]map[shared.ID]ticketing.Link
+	intents     map[shared.ID]map[shared.ID]ticketing.Intent
 }
 
 var _ ports.TicketStore = (*TicketStore)(nil)
 
-func NewTicketStore() *TicketStore {
-	return &TicketStore{
-		mappings: make(map[shared.ID]map[shared.ID]ticketing.Mapping),
-		links:    make(map[shared.ID]map[shared.ID]ticketing.Link),
-		intents:  make(map[shared.ID]map[shared.ID]ticketing.Intent),
+func NewTicketStore(engagements *EngagementRepository, findings *FindingRepository) (*TicketStore, error) {
+	if engagements == nil || findings == nil {
+		return nil, fmt.Errorf("%w: ticket store requires engagement and finding repositories", shared.ErrValidation)
 	}
+	return &TicketStore{
+		engagements: engagements,
+		findings:    findings,
+		mappings:    make(map[shared.ID]map[shared.ID]ticketing.Mapping),
+		links:       make(map[shared.ID]map[shared.ID]ticketing.Link),
+		intents:     make(map[shared.ID]map[shared.ID]ticketing.Intent),
+	}, nil
 }
 func (s *TicketStore) CreateMapping(ctx context.Context, tenant shared.ID, m ticketing.Mapping) error {
 	if err := ctx.Err(); err != nil {
@@ -79,6 +86,9 @@ func (s *TicketStore) CreateLink(ctx context.Context, tenant shared.ID, link tic
 	}
 	if tenant.IsZero() || tenant != link.TenantID {
 		return ticketing.Link{}, false, shared.ErrValidation
+	}
+	if err := s.validateFindingReference(ctx, tenant, link.EngagementID, link.FindingID); err != nil {
+		return ticketing.Link{}, false, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -143,6 +153,56 @@ func sameCommand(a, b ticketing.Intent) bool {
 		a.FindingID == b.FindingID && a.EngagementID == b.EngagementID && a.Action == b.Action && a.RequestKey == b.RequestKey &&
 		a.PayloadDigest == b.PayloadDigest
 }
+
+// validateFindingReference uses the concrete parent stores so the memory adapter
+// matches the durable composite finding reference. It intentionally reads the
+// tenant-owned engagement directly: GetByIDInTenant hides internal project contexts,
+// which are valid ticketing parents, while this adapter still must not expose or
+// accept another tenant's context.
+func (s *TicketStore) validateFindingReference(ctx context.Context, tenant, engagementID, findingID shared.ID) error {
+	tenantCtx := shared.WithTenant(ctx, tenant)
+	if _, err := s.findings.GetByEngagementAndID(tenantCtx, engagementID, findingID); err != nil {
+		return err
+	}
+	s.engagements.mu.RLock()
+	engagement, ok := s.engagements.data[engagementID]
+	owned := ok && engagement.TenantID == tenant
+	s.engagements.mu.RUnlock()
+	if !owned {
+		return shared.ErrNotFound
+	}
+	return nil
+}
+
+// validateIntentReferences mirrors the durable adapter's foreign-key boundary before
+// the in-memory adapter accepts a command. Project contexts are intentionally loaded
+// through GetByProjectID because they are internal and cannot be reached through the
+// ordinary tenant-scoped engagement read.
+func (s *TicketStore) validateIntentReferences(ctx context.Context, tenant shared.ID, intent ticketing.Intent, mapping ticketing.Mapping) error {
+	tenantCtx := shared.WithTenant(ctx, tenant)
+	if err := s.validateFindingReference(tenantCtx, tenant, intent.EngagementID, intent.FindingID); err != nil {
+		return err
+	}
+	switch mapping.Scope {
+	case ticketing.Engagement:
+		if mapping.ScopeID != intent.EngagementID {
+			return shared.ErrValidation
+		}
+		return nil
+	case ticketing.Project:
+		projectContext, err := s.engagements.GetByProjectID(tenantCtx, tenant, mapping.ScopeID)
+		if err != nil {
+			return err
+		}
+		if projectContext.ID != intent.EngagementID {
+			return shared.ErrValidation
+		}
+		return nil
+	default:
+		return shared.ErrValidation
+	}
+}
+
 func (s *TicketStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, intent ticketing.Intent) (ticketing.Intent, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return ticketing.Intent{}, false, err
@@ -171,8 +231,8 @@ func (s *TicketStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, i
 	if !ok || mapping.IntegrationID != intent.IntegrationID {
 		return ticketing.Intent{}, false, shared.ErrNotFound
 	}
-	if mapping.Scope == ticketing.Engagement && mapping.ScopeID != intent.EngagementID {
-		return ticketing.Intent{}, false, shared.ErrValidation
+	if err := s.validateIntentReferences(ctx, tenant, intent, mapping); err != nil {
+		return ticketing.Intent{}, false, err
 	}
 	if s.intents[tenant] == nil {
 		s.intents[tenant] = make(map[shared.ID]ticketing.Intent)
@@ -194,7 +254,7 @@ func (s *TicketStore) GetIntent(ctx context.Context, tenant, id shared.ID) (tick
 	}
 	return ticketing.Intent{}, shared.ErrNotFound
 }
-func (s *TicketStore) TransitionIntent(ctx context.Context, tenant, id shared.ID, expectedVersion int, event writeintent.Event, leaseUntil *time.Time, at time.Time) (ticketing.Intent, error) {
+func (s *TicketStore) TransitionIntent(ctx context.Context, tenant, id shared.ID, expectedVersion int, change ticketing.IntentTransition, at time.Time) (ticketing.Intent, error) {
 	if err := ctx.Err(); err != nil {
 		return ticketing.Intent{}, err
 	}
@@ -210,32 +270,41 @@ func (s *TicketStore) TransitionIntent(ctx context.Context, tenant, id shared.ID
 	if current.Version != expectedVersion {
 		return ticketing.Intent{}, shared.ErrConflict
 	}
-	if at.Before(current.UpdatedAt) {
-		return ticketing.Intent{}, shared.ErrValidation
-	}
-	next, err := writeintent.Next(current.State, event)
+	next, err := current.Apply(change, at)
 	if err != nil {
 		return ticketing.Intent{}, err
 	}
-	if event == writeintent.LeaseExpired &&
-		(current.LeaseUntil == nil || at.Before(*current.LeaseUntil)) {
-		return ticketing.Intent{}, shared.ErrConflict
-	}
-	if event == writeintent.Claim {
-		if leaseUntil == nil || !leaseUntil.After(at) {
-			return ticketing.Intent{}, shared.ErrValidation
+	var replacement *ticketing.Link
+	if next.State == writeintent.Done {
+		desired, completionErr := next.CompletionLink()
+		if completionErr != nil {
+			return ticketing.Intent{}, completionErr
 		}
-		nextLease := *leaseUntil
-		current.LeaseUntil = &nextLease
-		current.Attempts++
-	} else if leaseUntil != nil {
-		return ticketing.Intent{}, fmt.Errorf("%w: only a claim may set a lease", shared.ErrValidation)
-	} else {
-		current.LeaseUntil = nil
+		for _, existing := range s.links[tenant] {
+			if existing.FindingID != desired.FindingID || existing.ExternalURL != desired.ExternalURL {
+				continue
+			}
+			reconciled, reconcileErr := ticketing.ReconcileLink(existing, desired)
+			if reconcileErr != nil {
+				return ticketing.Intent{}, reconcileErr
+			}
+			replacement = &reconciled
+			break
+		}
+		if replacement == nil {
+			if existing, exists := s.links[tenant][desired.ID]; exists &&
+				(existing.FindingID != desired.FindingID || existing.ExternalURL != desired.ExternalURL) {
+				return ticketing.Intent{}, shared.ErrConflict
+			}
+			replacement = &desired
+		}
 	}
-	current.State = next
-	current.Version++
-	current.UpdatedAt = at.UTC()
-	s.intents[tenant][id] = current.Clone()
-	return current.Clone(), nil
+	if replacement != nil {
+		if s.links[tenant] == nil {
+			s.links[tenant] = make(map[shared.ID]ticketing.Link)
+		}
+		s.links[tenant][replacement.ID] = *replacement
+	}
+	s.intents[tenant][id] = next.Clone()
+	return next.Clone(), nil
 }

@@ -74,6 +74,8 @@ var integrationRoutePermissions = map[string]string{
 	"DELETE /api/v1/notifications/rules/{nid}":                     "PermManageIntegrations",
 	"POST /api/v1/notifications/deliveries/{nid}/redrive":          "PermAdminister",
 	"POST /api/v1/notifications/slack/conversations":               "PermAdminister",
+	"GET /api/v1/notifications/personal-defaults":                  "PermManageIntegrations",
+	"PUT /api/v1/notifications/personal-defaults":                  "PermManageIntegrations",
 	"GET /api/v1/notifications/deliveries":                         "PermManageIntegrations",
 	"GET /api/v1/notifications/quarantined-sources":                "PermManageIntegrations",
 	"GET /api/v1/notifications/deliveries/{nid}":                   "PermManageIntegrations",

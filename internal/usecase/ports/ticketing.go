@@ -6,7 +6,6 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/writeintent"
 )
 
 // TicketStore is independent of the CI scheduler and integration_operations.
@@ -19,5 +18,5 @@ type TicketStore interface {
 	DeleteLink(context.Context, shared.ID, shared.ID) error
 	CreateOrGetIntent(context.Context, shared.ID, ticketing.Intent) (ticketing.Intent, bool, error)
 	GetIntent(context.Context, shared.ID, shared.ID) (ticketing.Intent, error)
-	TransitionIntent(context.Context, shared.ID, shared.ID, int, writeintent.Event, *time.Time, time.Time) (ticketing.Intent, error)
+	TransitionIntent(context.Context, shared.ID, shared.ID, int, ticketing.IntentTransition, time.Time) (ticketing.Intent, error)
 }

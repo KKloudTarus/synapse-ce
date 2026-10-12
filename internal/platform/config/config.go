@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -259,6 +260,11 @@ type Config struct {
 	// test or deliver to. Parsed trimmed, lowercased and deduplicated; the API and the worker check
 	// each name against the notification driver registry at startup.
 	NotificationProvidersDisabled []string
+	// TeamsBotAppID, TeamsBotAppPassword and TeamsBotTenantID register the operator's Microsoft Teams
+	// bot for personal delivery (#1420). The password is secret. All empty leaves Teams off.
+	TeamsBotAppID       string
+	TeamsBotAppPassword string
+	TeamsBotTenantID    string
 	// NotificationChannelPauseThreshold is how many consecutive permanent delivery failures pause
 	// a notification channel (#1464). Zero keeps counting but never pauses. Read by the worker.
 	NotificationChannelPauseThreshold int
@@ -973,6 +979,9 @@ func Load() Config {
 		NotificationSMTPUsername:   getenv("SYNAPSE_NOTIFICATION_SMTP_USERNAME", ""),
 		NotificationSMTPPassword:   getenv("SYNAPSE_NOTIFICATION_SMTP_PASSWORD", ""),
 		NotificationSMTPRequireTLS: getbool("SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS", true),
+		TeamsBotAppID:              strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_APP_ID", "")),
+		TeamsBotAppPassword:        getenv("SYNAPSE_TEAMS_BOT_APP_PASSWORD", ""),
+		TeamsBotTenantID:           strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_TENANT_ID", "")),
 		NotificationUnsubscribeURL: getenv("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL", ""),
 		ReconViaWorker:             getbool("SYNAPSE_RECON_VIA_WORKER", false),
 		EgressBrokerSocket:         getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
@@ -990,38 +999,38 @@ func Load() Config {
 		// absent. Set the flag to false to opt out. Capabilities that need external setup or would be
 		// unsafe unsandboxed stay OFF by default (sandbox, agent/LLM, taint, maven/gradle resolvers,
 		// jarhash egress) – see their fields below.
-		JudgmentsEnabled:                  getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
-		SASTEnabled:                       getbool("SYNAPSE_SAST_ENABLED", true),
-		SecretScanEnabled:                 getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
-		SecretHistoryEnabled:              getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
-		SecretVerifyEnabled:               getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
-		SecretVerifyRPS:                   getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
-		SecretVerifyVaultAddr:             strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
-		MisconfigEnabled:                  getbool("SYNAPSE_MISCONFIG_ENABLED", true),
-		SuppressionEnabled:                getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
-		VEXEnabled:                        getbool("SYNAPSE_VEX_ENABLED", true),
-		ComplianceEnabled:                 getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
-		DetectionPriority:                 os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
-		DBMaxAgeDays:                      getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
-		ScanCacheEnabled:                  getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
-		ScanCacheDir:                      os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
-		ImageRootFSEnabled:                getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
-		OwnedAdvisoryEnabled:              getbool("SYNAPSE_OWNED_ADVISORY", true),
-		SymbolOverlayDir:                  getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
-		ReachabilityEnabled:               getbool("SYNAPSE_REACHABILITY_ENABLED", true),
-		PyReachabilityEnabled:             getbool("SYNAPSE_PYREACH_ENABLED", true),
-		PySemanticReachabilityEnabled:     getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
-		ASTBin:                            os.Getenv("SYNAPSE_AST_BIN"),
-		PythonTaintEnabled:                getbool("SYNAPSE_PYTAINT_ENABLED", true),
-		TaintRulesFile:                    strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
-		JsTaintEnabled:                    getbool("SYNAPSE_JSTAINT_ENABLED", false),
-		JavaTaintEnabled:                  getbool("SYNAPSE_JAVATAINT_ENABLED", false),
-		TriScoreReassessEnabled:           getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
-		FleetCorrelationEnabled:           getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
-		FleetCorrelationWindow:            getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
-		FleetCorrelationMaxPerIncident:    getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
-		FleetCorrelationPageSize:          getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
-		FleetCorrelationMaxActiveSessions: getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
+		JudgmentsEnabled:                            getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
+		SASTEnabled:                                 getbool("SYNAPSE_SAST_ENABLED", true),
+		SecretScanEnabled:                           getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
+		SecretHistoryEnabled:                        getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
+		SecretVerifyEnabled:                         getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
+		SecretVerifyRPS:                             getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
+		SecretVerifyVaultAddr:                       strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
+		MisconfigEnabled:                            getbool("SYNAPSE_MISCONFIG_ENABLED", true),
+		SuppressionEnabled:                          getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
+		VEXEnabled:                                  getbool("SYNAPSE_VEX_ENABLED", true),
+		ComplianceEnabled:                           getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
+		DetectionPriority:                           os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
+		DBMaxAgeDays:                                getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
+		ScanCacheEnabled:                            getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
+		ScanCacheDir:                                os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
+		ImageRootFSEnabled:                          getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
+		OwnedAdvisoryEnabled:                        getbool("SYNAPSE_OWNED_ADVISORY", true),
+		SymbolOverlayDir:                            getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
+		ReachabilityEnabled:                         getbool("SYNAPSE_REACHABILITY_ENABLED", true),
+		PyReachabilityEnabled:                       getbool("SYNAPSE_PYREACH_ENABLED", true),
+		PySemanticReachabilityEnabled:               getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
+		ASTBin:                                      os.Getenv("SYNAPSE_AST_BIN"),
+		PythonTaintEnabled:                          getbool("SYNAPSE_PYTAINT_ENABLED", true),
+		TaintRulesFile:                              strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
+		JsTaintEnabled:                              getbool("SYNAPSE_JSTAINT_ENABLED", false),
+		JavaTaintEnabled:                            getbool("SYNAPSE_JAVATAINT_ENABLED", false),
+		TriScoreReassessEnabled:                     getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
+		FleetCorrelationEnabled:                     getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
+		FleetCorrelationWindow:                      getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
+		FleetCorrelationMaxPerIncident:              getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
+		FleetCorrelationPageSize:                    getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
+		FleetCorrelationMaxActiveSessions:           getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
 		FleetCorrelationMaxTimelineRefsPerDetection: getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION", 32),
 		FleetCorrelationMaxTimelineRefsPerPage:      getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE", 500),
 		JSReachabilityEnabled:                       getbool("SYNAPSE_JSREACH_ENABLED", true),
@@ -2035,4 +2044,30 @@ func getint64(key string, def int64) int64 {
 		}
 	}
 	return def
+}
+
+var teamsBotGUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// TeamsBotEnabled reports whether the operator registered a Microsoft Teams bot (#1420).
+func (c Config) TeamsBotEnabled() bool { return c.TeamsBotAppID != "" }
+
+// ValidateTeamsBot checks the Teams bot registration: the app ID is a GUID, the password is set
+// with it, and the tenant, when given, is a GUID. Errors never echo the password.
+func (c Config) ValidateTeamsBot() error {
+	if c.TeamsBotAppID == "" {
+		if c.TeamsBotAppPassword != "" || c.TeamsBotTenantID != "" {
+			return fmt.Errorf("SYNAPSE_TEAMS_BOT_APP_ID is required when the Teams bot password or tenant is set")
+		}
+		return nil
+	}
+	if !teamsBotGUID.MatchString(c.TeamsBotAppID) {
+		return fmt.Errorf("SYNAPSE_TEAMS_BOT_APP_ID must be the bot's Microsoft app ID (a GUID)")
+	}
+	if c.TeamsBotAppPassword == "" {
+		return fmt.Errorf("SYNAPSE_TEAMS_BOT_APP_PASSWORD is required with SYNAPSE_TEAMS_BOT_APP_ID")
+	}
+	if c.TeamsBotTenantID != "" && !teamsBotGUID.MatchString(c.TeamsBotTenantID) {
+		return fmt.Errorf("SYNAPSE_TEAMS_BOT_TENANT_ID must be a Microsoft Entra tenant ID (a GUID)")
+	}
+	return nil
 }

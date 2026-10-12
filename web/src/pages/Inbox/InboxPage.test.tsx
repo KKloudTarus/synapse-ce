@@ -60,6 +60,20 @@ describe('InboxPage', () => {
     expect(api.saveInboxPreference).toHaveBeenCalledWith(expect.objectContaining({ channel: 'email', state: 'disabled', revision: 2 }))
   })
 
+  it('keeps the listed default when a save reply carries other metadata', async () => {
+    vi.mocked(api.inboxPage).mockResolvedValue({ items: [] })
+    vi.mocked(api.inboxPreferences).mockResolvedValue({ items: [
+      { event_type: 'finding.ownership_changed', channel: 'in_app', state: 'enabled', revision: 1, mandatory: false, default: true, available: true },
+    ] })
+    // A reply whose metadata could not be reloaded must not turn the default off.
+    vi.mocked(api.saveInboxPreference).mockResolvedValue({ event_type: 'finding.ownership_changed', channel: 'in_app', state: 'inherit', revision: 2, mandatory: false, default: false, available: true })
+    render(<MemoryRouter><InboxPage /></MemoryRouter>)
+    const select = await screen.findByRole('combobox', { name: 'finding.ownership_changed in_app' })
+    fireEvent.change(select, { target: { value: 'inherit' } })
+    expect(await screen.findByDisplayValue('Use the default (on)')).toBeInTheDocument()
+    expect(screen.queryByText('Use the default (off)')).not.toBeInTheDocument()
+  })
+
   it('keeps the newest page when an older request finishes last', async () => {
     let resolveOlder: (value: { items: typeof item[] }) => void = () => {}
     vi.mocked(api.inboxPage)

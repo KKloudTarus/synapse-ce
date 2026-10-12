@@ -160,16 +160,21 @@ export interface NotificationChannelInput {
   /** Omitted keeps the channel class on update; new channels use their channel-type default. */
   data_class?: NotificationDataClass
 }
+/** An engagement's notification settings (#1360, #1415). */
 export interface NotificationEngagementSetting {
   engagement_id: string
   external_notifications: EngagementExternalNotifications
   revision: number
+  /** The engagement lead rules can notify (#1415). */
+  lead_user_id?: string
   updated_at?: string
   updated_by?: string
 }
 export interface NotificationEngagementSettingInput {
   external_notifications: EngagementExternalNotifications
   revision: number
+  /** A user ID, '' to clear, omitted to keep the current lead (#1415). */
+  lead_user_id?: string
 }
 /** A Slack conversation a bot token can post to (#1383). */
 export interface SlackConversation {
@@ -202,6 +207,8 @@ export interface NotificationRule {
   team_ids?: string[]
   all_teams?: boolean
   channel_ids: string[]
+  /** People to notify personally (#1415): assignee, team_member or engagement_lead. */
+  recipient_roles?: string[]
   lead_time_seconds?: number
   revision: number
   created_at: string
@@ -211,6 +218,16 @@ export type NotificationRuleInput = Omit<
   NotificationRule,
   'id' | 'created_at' | 'updated_at'
 >
+/** A tenant default of one external personal channel (#1418). */
+export interface NotificationPersonalDefault {
+  event_type: string
+  channel: 'email' | 'slack' | 'teams'
+  enabled: boolean
+  /** The tenant never changed it; revision is then 0. */
+  builtin: boolean
+  revision: number
+}
+
 export interface NotificationDelivery {
   id: string
   event_id: string
@@ -293,6 +310,13 @@ export const notificationsApi = {
       `/notifications/channels/${encodeURIComponent(id)}?revision=${revision}`,
       { method: 'DELETE' },
     ),
+  // Tenant defaults of personal email, Slack and Teams delivery (#1418).
+  listPersonalDefaults: async (): Promise<NotificationPersonalDefault[]> =>
+    ((await req('/notifications/personal-defaults')) as { items?: NotificationPersonalDefault[] }).items ?? [],
+  savePersonalDefault: (
+    input: Pick<NotificationPersonalDefault, 'event_type' | 'channel' | 'enabled' | 'revision'>,
+  ): Promise<NotificationPersonalDefault> =>
+    req('/notifications/personal-defaults', { method: 'PUT', body: JSON.stringify(input) }),
   // The Slack bot channel form's conversation picker (#1383): a token being entered, or an existing
   // channel's sealed token. Administrators only; the token is never returned.
   listSlackConversations: (
@@ -382,6 +406,8 @@ export const notificationsApi = {
         team_ids: input.team_ids,
         all_teams: input.all_teams,
         channel_ids: input.channel_ids,
+        // Omitted would clear them: a toggle or an edit must keep the rule's people (#1415).
+        recipient_roles: input.recipient_roles ?? [],
         lead_time_seconds: input.lead_time_seconds,
         revision: input.revision,
       }),

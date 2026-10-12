@@ -29,17 +29,19 @@ func (s State) Terminal() bool { return s == Done }
 // Event names describe evidence, not arbitrary assignments of a desired state.
 // ReconcileAbsent is legal only after a provider search has proven zero matching markers;
 // ReconcileFound is legal only after exactly one matching remote object is identified.
+// ReconcileMultiple records that a provider search found more than one marker match.
 type Event string
 
 const (
-	Claim           Event = "claim"
-	Acknowledge     Event = "acknowledge"
-	Reject          Event = "reject"
-	Ambiguous       Event = "ambiguous"
-	LeaseExpired    Event = "lease_expired"
-	RetryFailed     Event = "retry_failed"
-	ReconcileAbsent Event = "reconcile_absent"
-	ReconcileFound  Event = "reconcile_found"
+	Claim             Event = "claim"
+	Acknowledge       Event = "acknowledge"
+	Reject            Event = "reject"
+	Ambiguous         Event = "ambiguous"
+	LeaseExpired      Event = "lease_expired"
+	RetryFailed       Event = "retry_failed"
+	ReconcileAbsent   Event = "reconcile_absent"
+	ReconcileFound    Event = "reconcile_found"
+	ReconcileMultiple Event = "reconcile_multiple"
 )
 
 func Next(from State, event Event) (State, error) {
@@ -60,6 +62,8 @@ func Next(from State, event Event) (State, error) {
 		to = Pending
 	case from == Uncertain && event == ReconcileFound:
 		to = Done
+	case from == Uncertain && event == ReconcileMultiple:
+		to = Uncertain
 	default:
 		return "", fmt.Errorf("%w: invalid write intent transition", shared.ErrConflict)
 	}

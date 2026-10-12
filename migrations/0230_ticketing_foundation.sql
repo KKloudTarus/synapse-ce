@@ -22,7 +22,8 @@ CREATE TABLE ticket_mappings (
     UNIQUE (tenant_id,id), UNIQUE (tenant_id,integration_id,id),
     FOREIGN KEY (tenant_id,integration_id) REFERENCES integrations(tenant_id,id),
     FOREIGN KEY (tenant_id,project_id) REFERENCES projects(tenant_id,id),
-    FOREIGN KEY (tenant_id,engagement_id) REFERENCES engagements(tenant_id,id),
+    CONSTRAINT ticket_mappings_engagement_fk FOREIGN KEY (tenant_id,engagement_id)
+        REFERENCES engagements(tenant_id,id) ON DELETE RESTRICT,
     CHECK ((project_id IS NOT NULL) <> (engagement_id IS NOT NULL)),
     CHECK (updated_at>=created_at)
 );
@@ -65,13 +66,21 @@ CREATE TABLE ticket_intents (
     version INT NOT NULL DEFAULT 1 CHECK (version > 0),
     attempts INT NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     lease_until TIMESTAMPTZ,
+    remote_id TEXT NOT NULL DEFAULT '' CHECK (remote_id='' OR (btrim(remote_id)<>'' AND octet_length(remote_id)<=512)),
+    remote_url TEXT NOT NULL DEFAULT '' CHECK (remote_url='' OR (octet_length(remote_url)<=2048 AND remote_url ~ '^https://[^/?#@]+(/[^?#]*)?$')),
     error_code TEXT NOT NULL DEFAULT '' CHECK (error_code='' OR error_code ~ '^[a-z][a-z0-9_]{0,63}$'),
     created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
     UNIQUE (tenant_id,id), UNIQUE (tenant_id,integration_id,request_key),
     UNIQUE (tenant_id,integration_id,correlation_marker),
     FOREIGN KEY (tenant_id,integration_id,mapping_id) REFERENCES ticket_mappings(tenant_id,integration_id,id),
-    FOREIGN KEY (tenant_id,engagement_id,finding_id) REFERENCES findings(tenant_id,engagement_id,id),
+    CONSTRAINT ticket_intents_finding_fk FOREIGN KEY (tenant_id,engagement_id,finding_id)
+        REFERENCES findings(tenant_id,engagement_id,id) ON DELETE RESTRICT,
     CHECK ((state='in_flight') = (lease_until IS NOT NULL)),
+    CHECK ((state='done' AND remote_id<>'' AND remote_url<>'') OR
+           (state<>'done' AND remote_id='' AND remote_url='')),
+    CHECK (state<>'failed' OR error_code<>''),
+    CHECK (state IN ('failed','uncertain') OR error_code=''),
+    CHECK (state<>'uncertain' OR error_code IN ('','multiple_matches')),
     CHECK (lease_until IS NULL OR lease_until>updated_at),
     CHECK (updated_at>=created_at)
 );
@@ -85,8 +94,8 @@ CALL synapse_enable_tenant_rls('ticket_intents');
 -- the guard fails, Goose rolls the policy changes back with this transaction.
 -- +goose StatementBegin
 LOCK TABLE ticket_mappings IN ACCESS EXCLUSIVE MODE;
-LOCK TABLE ticket_links IN ACCESS EXCLUSIVE MODE;
 LOCK TABLE ticket_intents IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE ticket_links IN ACCESS EXCLUSIVE MODE;
 ALTER TABLE ticket_mappings NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE ticket_links NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE ticket_intents NO FORCE ROW LEVEL SECURITY;

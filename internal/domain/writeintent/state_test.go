@@ -11,10 +11,10 @@ func TestAllTransitionsAndNoBlindRetry(t *testing.T) {
 		Pending:   {Claim: InFlight},
 		InFlight:  {Acknowledge: Done, Reject: Failed, Ambiguous: Uncertain, LeaseExpired: Uncertain},
 		Failed:    {RetryFailed: Pending},
-		Uncertain: {ReconcileAbsent: Pending, ReconcileFound: Done},
+		Uncertain: {ReconcileAbsent: Pending, ReconcileFound: Done, ReconcileMultiple: Uncertain},
 		Done:      {},
 	}
-	events := []Event{Claim, Acknowledge, Reject, Ambiguous, LeaseExpired, RetryFailed, ReconcileAbsent, ReconcileFound, Event("unknown")}
+	events := []Event{Claim, Acknowledge, Reject, Ambiguous, LeaseExpired, RetryFailed, ReconcileAbsent, ReconcileFound, ReconcileMultiple, Event("unknown")}
 	for _, state := range []State{Pending, InFlight, Failed, Uncertain, Done, State("unknown")} {
 		for _, event := range events {
 			got, err := Next(state, event)

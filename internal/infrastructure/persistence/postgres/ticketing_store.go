@@ -75,6 +75,9 @@ func scanTicketMapping(row rowScanner) (ticketing.Mapping, error) {
 	return m, nil
 }
 func (s *TicketStore) CreateMapping(ctx context.Context, tenant shared.ID, m ticketing.Mapping) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := m.Validate(); err != nil {
 		return err
 	}
@@ -113,6 +116,9 @@ func (s *TicketStore) CreateMapping(ctx context.Context, tenant shared.ID, m tic
 	}))
 }
 func (s *TicketStore) GetMapping(ctx context.Context, tenant, id shared.ID) (ticketing.Mapping, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Mapping{}, err
+	}
 	if tenant.IsZero() || id.IsZero() {
 		return ticketing.Mapping{}, shared.ErrValidation
 	}
@@ -140,6 +146,9 @@ func scanTicketLink(row rowScanner) (ticketing.Link, error) {
 	return link, err
 }
 func (s *TicketStore) CreateLink(ctx context.Context, tenant shared.ID, link ticketing.Link) (ticketing.Link, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Link{}, false, err
+	}
 	if err := link.Validate(); err != nil {
 		return ticketing.Link{}, false, err
 	}
@@ -181,10 +190,13 @@ func (s *TicketStore) CreateLink(ctx context.Context, tenant shared.ID, link tic
 	return persisted, created, nil
 }
 func (s *TicketStore) ListLinks(ctx context.Context, tenant, finding shared.ID) ([]ticketing.Link, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if tenant.IsZero() || finding.IsZero() {
 		return nil, shared.ErrValidation
 	}
-	var out []ticketing.Link
+	out := make([]ticketing.Link, 0)
 	err := requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
 		rows, e := tx.Query(ctx, `SELECT `+linkCols+` FROM ticket_links
             WHERE tenant_id=$1 AND finding_id=$2 ORDER BY created_at DESC,id DESC`,
@@ -205,6 +217,9 @@ func (s *TicketStore) ListLinks(ctx context.Context, tenant, finding shared.ID) 
 	return out, err
 }
 func (s *TicketStore) DeleteLink(ctx context.Context, tenant, id shared.ID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if tenant.IsZero() || id.IsZero() {
 		return shared.ErrValidation
 	}
@@ -221,13 +236,13 @@ func (s *TicketStore) DeleteLink(ctx context.Context, tenant, id shared.ID) erro
 }
 
 const intentCols = `id,tenant_id,integration_id,mapping_id,finding_id,engagement_id,action,request_key,
-    payload_digest,correlation_marker,state,version,attempts,lease_until,error_code,created_at,updated_at`
+    payload_digest,correlation_marker,state,version,attempts,lease_until,remote_id,remote_url,error_code,created_at,updated_at`
 
 func scanTicketIntent(row rowScanner) (ticketing.Intent, error) {
 	var i ticketing.Intent
 	err := row.Scan(&i.ID, &i.TenantID, &i.IntegrationID, &i.MappingID, &i.FindingID, &i.EngagementID,
 		&i.Action, &i.RequestKey, &i.PayloadDigest, &i.Marker, &i.State, &i.Version, &i.Attempts,
-		&i.LeaseUntil, &i.ErrorCode, &i.CreatedAt, &i.UpdatedAt)
+		&i.LeaseUntil, &i.RemoteID, &i.RemoteURL, &i.ErrorCode, &i.CreatedAt, &i.UpdatedAt)
 	return i, err
 }
 func sameTicketCommand(a, b ticketing.Intent) bool {
@@ -236,6 +251,9 @@ func sameTicketCommand(a, b ticketing.Intent) bool {
 		a.PayloadDigest == b.PayloadDigest
 }
 func (s *TicketStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, i ticketing.Intent) (ticketing.Intent, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Intent{}, false, err
+	}
 	if err := i.Validate(); err != nil {
 		return ticketing.Intent{}, false, err
 	}
@@ -246,10 +264,15 @@ func (s *TicketStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, i
 	var saved ticketing.Intent
 	created := false
 	err := ticketWriteError(requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
-		var requiredEngagement string
-		e := tx.QueryRow(ctx, `SELECT COALESCE(engagement_id,'') FROM ticket_mappings
-            WHERE tenant_id=$1 AND integration_id=$2 AND id=$3 FOR KEY SHARE`,
-			tenant.String(), i.IntegrationID.String(), i.MappingID.String()).Scan(&requiredEngagement)
+		var requiredEngagement, requiredProject, engagementProject string
+		e := tx.QueryRow(ctx, `SELECT COALESCE(m.engagement_id,''), COALESCE(m.project_id,''), COALESCE(e.project_id,'')
+			FROM ticket_mappings m
+			JOIN findings f ON f.tenant_id=m.tenant_id AND f.id=$4 AND f.engagement_id=$5
+			JOIN engagements e ON e.tenant_id=f.tenant_id AND e.id=f.engagement_id
+			WHERE m.tenant_id=$1 AND m.integration_id=$2 AND m.id=$3
+			FOR KEY SHARE OF m,e`,
+			tenant.String(), i.IntegrationID.String(), i.MappingID.String(), i.FindingID.String(), i.EngagementID.String()).
+			Scan(&requiredEngagement, &requiredProject, &engagementProject)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return shared.ErrNotFound
 		}
@@ -259,14 +282,17 @@ func (s *TicketStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, i
 		if requiredEngagement != "" && requiredEngagement != i.EngagementID.String() {
 			return shared.ErrValidation
 		}
+		if requiredProject != "" && requiredProject != engagementProject {
+			return shared.ErrValidation
+		}
 		tag, e := tx.Exec(ctx, `INSERT INTO ticket_intents
             (id,tenant_id,integration_id,mapping_id,finding_id,engagement_id,action,request_key,
-             payload_digest,correlation_marker,state,version,attempts,lease_until,error_code,created_at,updated_at)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+             payload_digest,correlation_marker,state,version,attempts,lease_until,remote_id,remote_url,error_code,created_at,updated_at)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
             ON CONFLICT (tenant_id,integration_id,request_key) DO NOTHING`,
 			i.ID.String(), tenant.String(), i.IntegrationID.String(), i.MappingID.String(), i.FindingID.String(),
 			i.EngagementID.String(), string(i.Action), i.RequestKey, i.PayloadDigest, i.Marker, string(i.State),
-			i.Version, i.Attempts, nil, i.ErrorCode, i.CreatedAt.UTC(), i.UpdatedAt.UTC())
+			i.Version, i.Attempts, nil, i.RemoteID, i.RemoteURL, i.ErrorCode, i.CreatedAt.UTC(), i.UpdatedAt.UTC())
 		if e != nil {
 			return e
 		}
@@ -288,6 +314,9 @@ func (s *TicketStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, i
 	return saved, created, nil
 }
 func (s *TicketStore) GetIntent(ctx context.Context, tenant, id shared.ID) (ticketing.Intent, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Intent{}, err
+	}
 	if tenant.IsZero() || id.IsZero() {
 		return ticketing.Intent{}, shared.ErrValidation
 	}
@@ -306,7 +335,10 @@ func (s *TicketStore) GetIntent(ctx context.Context, tenant, id shared.ID) (tick
 	}
 	return i, nil
 }
-func (s *TicketStore) TransitionIntent(ctx context.Context, tenant, id shared.ID, expected int, event writeintent.Event, lease *time.Time, at time.Time) (ticketing.Intent, error) {
+func (s *TicketStore) TransitionIntent(ctx context.Context, tenant, id shared.ID, expected int, change ticketing.IntentTransition, at time.Time) (ticketing.Intent, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Intent{}, err
+	}
 	if tenant.IsZero() || id.IsZero() || expected < 1 || at.IsZero() {
 		return ticketing.Intent{}, shared.ErrValidation
 	}
@@ -324,37 +356,47 @@ func (s *TicketStore) TransitionIntent(ctx context.Context, tenant, id shared.ID
 		if result.Version != expected {
 			return shared.ErrConflict
 		}
-		if at.Before(result.UpdatedAt) {
-			return shared.ErrValidation
-		}
-		next, e := writeintent.Next(result.State, event)
+		next, e := result.Apply(change, at)
 		if e != nil {
 			return e
 		}
-		if event == writeintent.LeaseExpired &&
-			(result.LeaseUntil == nil || at.Before(*result.LeaseUntil)) {
-			return shared.ErrConflict
-		}
-		if event == writeintent.Claim {
-			if lease == nil || !lease.After(at) {
-				return shared.ErrValidation
+		if next.State == writeintent.Done {
+			desired, linkErr := next.CompletionLink()
+			if linkErr != nil {
+				return linkErr
 			}
-			expiration := *lease
-			result.LeaseUntil = &expiration
-			result.Attempts++
-		} else if lease != nil {
-			return shared.ErrValidation
-		} else {
-			result.LeaseUntil = nil
+			if _, linkErr = tx.Exec(ctx, `INSERT INTO ticket_links
+                (id,tenant_id,finding_id,engagement_id,integration_id,external_id,external_url,created_at)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+                ON CONFLICT (tenant_id,finding_id,external_url) DO NOTHING`,
+				desired.ID.String(), tenant.String(), desired.FindingID.String(), desired.EngagementID.String(),
+				desired.IntegrationID.String(), desired.ExternalID, desired.ExternalURL, desired.CreatedAt.UTC()); linkErr != nil {
+				return linkErr
+			}
+			existing, linkErr := scanTicketLink(tx.QueryRow(ctx, `SELECT `+linkCols+` FROM ticket_links
+                WHERE tenant_id=$1 AND finding_id=$2 AND external_url=$3 FOR UPDATE`,
+				tenant.String(), desired.FindingID.String(), desired.ExternalURL))
+			if linkErr != nil {
+				return linkErr
+			}
+			reconciled, linkErr := ticketing.ReconcileLink(existing, desired)
+			if linkErr != nil {
+				return linkErr
+			}
+			if reconciled.IntegrationID != existing.IntegrationID || reconciled.ExternalID != existing.ExternalID {
+				if _, linkErr = tx.Exec(ctx, `UPDATE ticket_links
+                    SET integration_id=$3, external_id=$4
+                    WHERE tenant_id=$1 AND id=$2`, tenant.String(), reconciled.ID.String(),
+					reconciled.IntegrationID.String(), reconciled.ExternalID); linkErr != nil {
+					return linkErr
+				}
+			}
 		}
-		result.State = next
-		result.Version++
-		result.UpdatedAt = at.UTC()
 		result, e = scanTicketIntent(tx.QueryRow(ctx, `UPDATE ticket_intents
-            SET state=$3,version=$4,attempts=$5,lease_until=$6,updated_at=$7
-            WHERE tenant_id=$1 AND id=$2 AND version=$8 RETURNING `+intentCols,
-			tenant.String(), id.String(), string(result.State), result.Version, result.Attempts,
-			result.LeaseUntil, result.UpdatedAt, expected))
+            SET state=$3,version=$4,attempts=$5,lease_until=$6,remote_id=$7,remote_url=$8,error_code=$9,updated_at=$10
+			WHERE tenant_id=$1 AND id=$2 AND version=$11 RETURNING `+intentCols,
+			tenant.String(), id.String(), string(next.State), next.Version, next.Attempts,
+			next.LeaseUntil, next.RemoteID, next.RemoteURL, next.ErrorCode, next.UpdatedAt, expected))
 		if errors.Is(e, pgx.ErrNoRows) {
 			return shared.ErrConflict
 		}

@@ -45,3 +45,14 @@ func (w Workspace) Conversations(ctx context.Context, token string) ([]ports.Sla
 func portConversation(c Conversation) ports.SlackConversation {
 	return ports.SlackConversation{ID: c.ID, Name: c.Name, Private: c.Private, Shared: c.SharedAnyway(), Archived: c.Archived, Member: c.Member}
 }
+
+var _ ports.SlackMemberReader = Workspace{}
+
+// Member implements ports.SlackMemberReader.
+func (w Workspace) Member(ctx context.Context, token, member string) (ports.SlackMember, error) {
+	u, err := w.Client.UserInfo(ctx, token, member)
+	if err != nil {
+		return ports.SlackMember{}, AsError(err)
+	}
+	return ports.SlackMember{ID: u.ID, TeamID: u.TeamID, Deleted: u.Deleted, Bot: u.IsBot || u.IsAppBot}, nil
+}

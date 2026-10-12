@@ -71,63 +71,116 @@ func (s *InboxStore) MarkInboxAllRead(ctx context.Context, tenant, user shared.I
 
 func (s *InboxStore) ListInboxPreferences(ctx context.Context, tenant, user shared.ID) ([]ports.InboxPreference, error) {
 	saved := map[string]ports.InboxPreference{}
+	defaults := notification.PersonalDefaults{}
+	verified := map[string]bool{}
+	slackApp := false
 	err := WithTenant(ctx, s.pool, tenant.String(), func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT event_type, channel, state, revision FROM user_notification_preferences WHERE tenant_id=$1 AND user_id=$2`, tenant, user)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var item ports.InboxPreference
 			if err := rows.Scan(&item.EventType, &item.Channel, &item.State, &item.Revision); err != nil {
+				rows.Close()
 				return err
 			}
 			saved[item.EventType+"|"+item.Channel] = item
 		}
-		return rows.Err()
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows, err = tx.Query(ctx, `SELECT event_type, channel, enabled FROM notification_personal_defaults WHERE tenant_id=$1`, tenant)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var event, channel string
+			var enabled bool
+			if err := rows.Scan(&event, &channel, &enabled); err != nil {
+				rows.Close()
+				return err
+			}
+			defaults[notification.PersonalDefaultKey{Event: notification.EventType(event), Channel: channel}] = enabled
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows, err = tx.Query(ctx, `SELECT DISTINCT kind FROM user_contacts WHERE tenant_id=$1 AND user_id=$2 AND verified_at IS NOT NULL`, tenant, user)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var kind string
+			if err := rows.Scan(&kind); err != nil {
+				rows.Close()
+				return err
+			}
+			verified[kind] = true
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM notification_channels WHERE tenant_id=$1 AND channel_type='slack_bot' AND enabled AND deleted_at IS NULL)`, tenant).Scan(&slackApp)
 	})
 	if err != nil {
 		return nil, err
 	}
 	var out []ports.InboxPreference
-	add := func(event notification.EventType, channel string, mandatory bool, reason string) {
+	add := func(event notification.EventType, channel string) {
 		item := saved[string(event)+"|"+channel]
 		if item.EventType == "" {
 			item = ports.InboxPreference{EventType: string(event), Channel: channel, State: notification.PreferenceInherit}
 		}
-		item.Mandatory = mandatory
-		item.Available = reason == ""
-		item.Reason = reason
+		item.Mandatory = channel == notification.PersonalInApp && notification.InAppMandatory(event)
+		item.Default = defaults.Enabled(event, channel)
+		item.Available = true
+		switch {
+		case channel == notification.PersonalSlack && !slackApp:
+			item.Available, item.Reason = false, "No Slack app is set up for this workspace yet."
+		case channel != notification.PersonalInApp && !verified[channel]:
+			item.Reason = personalContactHint[channel]
+		}
 		out = append(out, item)
 	}
-	for _, event := range notification.ConfigurableEvents() {
-		reason := ""
-		if !notification.PersonalDeliveryAvailable(event) {
-			reason = "Personal delivery is not available for this event yet."
+	events := notification.ConfigurableEvents()
+	events = append(events, notification.EventDestinationChanged, notification.EventChannelPaused)
+	for _, event := range events {
+		for _, channel := range notification.PersonalChannels() {
+			add(event, channel)
 		}
-		add(event, notification.PersonalInApp, false, reason)
-		add(event, notification.PersonalEmail, false, reason)
 	}
-	add(notification.EventDestinationChanged, notification.PersonalInApp, true, "")
-	add(notification.EventDestinationChanged, notification.PersonalEmail, false, "")
-	add(notification.EventChannelPaused, notification.PersonalInApp, true, "")
-	add(notification.EventChannelPaused, notification.PersonalEmail, false, "")
-	out = append(out, ports.InboxPreference{EventType: string(notification.EventOwnershipChanged), Channel: "slack", State: notification.PreferenceDisabled, Available: false, Reason: "Slack direct messages are not available yet."})
-	out = append(out, ports.InboxPreference{EventType: string(notification.EventOwnershipChanged), Channel: "teams", State: notification.PreferenceDisabled, Available: false, Reason: "Teams personal delivery is not available yet."})
 	return out, nil
+}
+
+// personalContactHint tells a person what to do before a channel can reach them.
+var personalContactHint = map[string]string{
+	notification.PersonalEmail: "Add and verify an email address in My profile to receive these.",
+	notification.PersonalSlack: "Link your Slack account in My profile to receive these.",
+	notification.PersonalTeams: "Link your Microsoft Teams account in My profile to receive these.",
 }
 
 func (s *InboxStore) SaveInboxPreference(ctx context.Context, tenant, user shared.ID, event notification.EventType, channel string, state notification.Preference, revision int, at time.Time) (ports.InboxPreference, error) {
 	item := ports.InboxPreference{EventType: string(event), Channel: channel, State: state, Mandatory: notification.InAppMandatory(event) && channel == notification.PersonalInApp, Available: true}
 	err := WithTenant(ctx, s.pool, tenant.String(), func(tx pgx.Tx) error {
+		// The saved row carries the effective default read in the same transaction, so even a caller
+		// that cannot reload the list never reports inherit as the opposite of what is delivered.
+		defaults, err := loadPersonalDefaults(ctx, tx, tenant, event)
+		if err != nil {
+			return err
+		}
+		item.Default = defaults.Enabled(event, channel)
 		if revision < 1 {
-			err := tx.QueryRow(ctx, `INSERT INTO user_notification_preferences(tenant_id,user_id,event_type,channel,state,revision,updated_at) VALUES($1,$2,$3,$4,$5,1,$6) ON CONFLICT DO NOTHING RETURNING revision`, tenant, user, event, channel, state, at).Scan(&item.Revision)
+			err = tx.QueryRow(ctx, `INSERT INTO user_notification_preferences(tenant_id,user_id,event_type,channel,state,revision,updated_at) VALUES($1,$2,$3,$4,$5,1,$6) ON CONFLICT DO NOTHING RETURNING revision`, tenant, user, event, channel, state, at).Scan(&item.Revision)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("%w: preference revision is stale", shared.ErrConflict)
 			}
 			return err
 		}
-		err := tx.QueryRow(ctx, `UPDATE user_notification_preferences SET state=$5, revision=revision+1, updated_at=$6 WHERE tenant_id=$1 AND user_id=$2 AND event_type=$3 AND channel=$4 AND revision=$7 RETURNING revision`, tenant, user, event, channel, state, at, revision).Scan(&item.Revision)
+		err = tx.QueryRow(ctx, `UPDATE user_notification_preferences SET state=$5, revision=revision+1, updated_at=$6 WHERE tenant_id=$1 AND user_id=$2 AND event_type=$3 AND channel=$4 AND revision=$7 RETURNING revision`, tenant, user, event, channel, state, at, revision).Scan(&item.Revision)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: preference revision is stale", shared.ErrConflict)
 		}

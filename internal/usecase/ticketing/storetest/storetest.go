@@ -16,7 +16,7 @@ import (
 )
 
 type Fixture struct {
-	Tenant, Other, Integration, Engagement, Finding shared.ID
+	Tenant, Other, Integration, Project, Engagement, Finding shared.ID
 }
 
 // Run exercises identical tenant isolation, copy safety, idempotency and CAS in both adapters.
@@ -78,8 +78,22 @@ func Run(t *testing.T, store ports.TicketStore, f Fixture) {
 	if _, _, err = store.CreateLink(ctx, f.Tenant, repeated); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("link identity mismatch: %v", err)
 	}
+	missingFindingLink := link
+	missingFindingLink.ID = "ticket-link-missing-finding"
+	missingFindingLink.FindingID = "ticket-finding-missing"
+	missingFindingLink.ExternalURL = "https://jira.example/browse/MISSING"
+	if _, _, err = store.CreateLink(ctx, f.Tenant, missingFindingLink); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("link accepted missing finding: %v", err)
+	}
+	wrongEngagementLink := link
+	wrongEngagementLink.ID = "ticket-link-wrong-engagement"
+	wrongEngagementLink.EngagementID = "ticket-engagement-wrong"
+	wrongEngagementLink.ExternalURL = "https://jira.example/browse/WRONG-ENGAGEMENT"
+	if _, _, err = store.CreateLink(ctx, f.Tenant, wrongEngagementLink); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("link accepted finding for another engagement: %v", err)
+	}
 	links, err := store.ListLinks(ctx, f.Other, f.Finding)
-	if err != nil || len(links) != 0 {
+	if err != nil || links == nil || len(links) != 0 {
 		t.Fatalf("cross-tenant links: %+v %v", links, err)
 	}
 	if err = store.DeleteLink(ctx, f.Other, link.ID); !errors.Is(err, shared.ErrNotFound) {
@@ -112,11 +126,17 @@ func Run(t *testing.T, store ports.TicketStore, f Fixture) {
 
 	started := now.Add(time.Second)
 	expires := started.Add(time.Minute)
-	active, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, writeintent.Claim, &expires, started)
+	active, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &expires}, started)
 	if err != nil || active.State != writeintent.InFlight || active.Attempts != 1 || active.Version != 2 {
 		t.Fatalf("claim: %+v %v", active, err)
 	}
-	if _, err := store.TransitionIntent(ctx, f.Other, intent.ID, 2, writeintent.Acknowledge, nil, started); !errors.Is(err, shared.ErrNotFound) {
+	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 2, ticketing.IntentTransition{Event: writeintent.Acknowledge}, started.Add(500*time.Millisecond)); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("accepted completion without remote ticket: %v", err)
+	}
+	if unchanged, getErr := store.GetIntent(ctx, f.Tenant, intent.ID); getErr != nil || unchanged.Version != 2 || unchanged.State != writeintent.InFlight {
+		t.Fatalf("invalid completion changed intent: %+v %v", unchanged, getErr)
+	}
+	if _, err := store.TransitionIntent(ctx, f.Other, intent.ID, 2, ticketing.IntentTransition{Event: writeintent.Acknowledge, Remote: &ticketing.RemoteTicket{ID: "SEC-12", URL: link.ExternalURL}}, started); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("cross-tenant transition: %v", err)
 	}
 	*active.LeaseUntil = started
@@ -124,39 +144,43 @@ func Run(t *testing.T, store ports.TicketStore, f Fixture) {
 	if err != nil || snapshot.LeaseUntil == nil || !snapshot.LeaseUntil.Equal(expires) {
 		t.Fatalf("intent clone isolation: %+v %v", snapshot, err)
 	}
-	if _, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 2, writeintent.Acknowledge, nil, now); !errors.Is(err, shared.ErrValidation) {
+	if _, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 2, ticketing.IntentTransition{Event: writeintent.Acknowledge, Remote: &ticketing.RemoteTicket{ID: "SEC-12", URL: link.ExternalURL}}, now); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("nonmonotonic transition: %v", err)
 	}
-	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, writeintent.Claim, &expires, started); !errors.Is(err, shared.ErrConflict) {
+	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &expires}, started); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("stale CAS: %v", err)
 	}
-	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 2, writeintent.LeaseExpired, nil, started.Add(time.Second)); !errors.Is(err, shared.ErrConflict) {
+	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 2, ticketing.IntentTransition{Event: writeintent.LeaseExpired}, started.Add(time.Second)); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("premature lease expiry: %v", err)
 	}
-	uncertain, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 2, writeintent.LeaseExpired, nil, expires)
+	uncertain, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 2, ticketing.IntentTransition{Event: writeintent.LeaseExpired}, expires)
 	if err != nil || uncertain.State != writeintent.Uncertain || uncertain.LeaseUntil != nil {
 		t.Fatalf("expired lease must become uncertain: %+v %v", uncertain, err)
 	}
-	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 3, writeintent.Claim, &expires, expires.Add(time.Second)); !errors.Is(err, shared.ErrConflict) {
+	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 3, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &expires}, expires.Add(time.Second)); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("blind POST retry accepted: %v", err)
 	}
-	pending, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 3, writeintent.ReconcileAbsent, nil, expires.Add(time.Second))
+	pending, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 3, ticketing.IntentTransition{Event: writeintent.ReconcileAbsent}, expires.Add(time.Second))
 	if err != nil || pending.State != writeintent.Pending {
 		t.Fatalf("reconcile absent: %+v %v", pending, err)
 	}
-	if _, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 4, writeintent.Claim, nil, expires.Add(2*time.Second)); !errors.Is(err, shared.ErrValidation) {
+	if _, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 4, ticketing.IntentTransition{Event: writeintent.Claim}, expires.Add(2*time.Second)); !errors.Is(err, shared.ErrValidation) {
 		t.Fatalf("claim without lease: %v", err)
 	}
 	expires2 := expires.Add(2 * time.Minute)
-	active, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 4, writeintent.Claim, &expires2, expires.Add(2*time.Second))
+	active, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 4, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &expires2}, expires.Add(2*time.Second))
 	if err != nil || active.Attempts != 2 {
 		t.Fatalf("reconciled retry: %+v %v", active, err)
 	}
-	done, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 5, writeintent.Acknowledge, nil, expires.Add(3*time.Second))
+	done, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 5, ticketing.IntentTransition{Event: writeintent.Acknowledge, Remote: &ticketing.RemoteTicket{ID: "SEC-12", URL: link.ExternalURL}}, expires.Add(3*time.Second))
 	if err != nil || done.State != writeintent.Done {
 		t.Fatalf("acknowledge: %+v %v", done, err)
 	}
-	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 6, writeintent.Claim, &expires2, expires.Add(4*time.Second)); !errors.Is(err, shared.ErrConflict) {
+	links, err = store.ListLinks(ctx, f.Tenant, f.Finding)
+	if err != nil || len(links) != 1 || links[0].ID != link.ID || links[0].IntegrationID != f.Integration || links[0].ExternalID != "SEC-12" || !links[0].CreatedAt.Equal(link.CreatedAt) {
+		t.Fatalf("completion did not atomically promote manual link: %+v %v", links, err)
+	}
+	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 6, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &expires2}, expires.Add(4*time.Second)); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("terminal command was retried: %v", err)
 	}
 
@@ -168,23 +192,60 @@ func Run(t *testing.T, store ports.TicketStore, f Fixture) {
 	if err != nil || !created {
 		t.Fatalf("create second intent: %v", err)
 	}
-	active, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, writeintent.Claim, &expires, started)
+	active, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &expires}, started)
 	if err != nil {
 		t.Fatalf("claim second: %v", err)
 	}
-	uncertain, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 2, writeintent.Ambiguous, nil, started.Add(time.Second))
+	uncertain, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 2, ticketing.IntentTransition{Event: writeintent.Ambiguous}, started.Add(time.Second))
 	if err != nil || uncertain.State != writeintent.Uncertain {
 		t.Fatalf("mark ambiguous: %+v %v", uncertain, err)
 	}
-	done, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 3, writeintent.ReconcileFound, nil, started.Add(2*time.Second))
+	multiple, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 3, ticketing.IntentTransition{Event: writeintent.ReconcileMultiple}, started.Add(2*time.Second))
+	if err != nil || multiple.State != writeintent.Uncertain || multiple.ErrorCode != "multiple_matches" || multiple.Version != 4 {
+		t.Fatalf("multiple reconciliation: %+v %v", multiple, err)
+	}
+	if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 4, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &expires}, started.Add(3*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("multiple matches allowed a blind retry: %v", err)
+	}
+	done, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, 4, ticketing.IntentTransition{Event: writeintent.ReconcileFound, Remote: &ticketing.RemoteTicket{ID: "SEC-12", URL: link.ExternalURL}}, started.Add(3*time.Second))
 	if err != nil || done.State != writeintent.Done {
 		t.Fatalf("reconcile found: %+v %v", done, err)
+	}
+	links, err = store.ListLinks(ctx, f.Tenant, f.Finding)
+	if err != nil || len(links) != 1 || links[0].ID != link.ID {
+		t.Fatalf("reconciliation duplicated completion link: %+v %v", links, err)
 	}
 	if err = store.DeleteLink(ctx, f.Tenant, link.ID); err != nil {
 		t.Fatalf("delete link: %v", err)
 	}
-	if remaining, listErr := store.ListLinks(ctx, f.Tenant, f.Finding); listErr != nil || len(remaining) != 0 {
+	if remaining, listErr := store.ListLinks(ctx, f.Tenant, f.Finding); listErr != nil || remaining == nil || len(remaining) != 0 {
 		t.Fatalf("deleted links: %+v %v", remaining, listErr)
+	}
+
+	rejected := ticketing.Intent{ID: "ticket-intent-rejected", TenantID: f.Tenant, IntegrationID: f.Integration,
+		MappingID: mapping.ID, FindingID: f.Finding, EngagementID: f.Engagement, Action: ticketing.Create,
+		RequestKey: "provider-rejected", PayloadDigest: strings.Repeat("c", 64), Marker: "synapse-intent-ticket-intent-rejected",
+		State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}
+	if _, _, err = store.CreateOrGetIntent(ctx, f.Tenant, rejected); err != nil {
+		t.Fatalf("create rejected intent: %v", err)
+	}
+	active, err = store.TransitionIntent(ctx, f.Tenant, rejected.ID, 1, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &expires}, started)
+	if err != nil {
+		t.Fatalf("claim rejected intent: %v", err)
+	}
+	if _, err = store.TransitionIntent(ctx, f.Tenant, rejected.ID, active.Version, ticketing.IntentTransition{Event: writeintent.Reject}, started.Add(time.Second)); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("accepted rejection without stable error code: %v", err)
+	}
+	failed, err := store.TransitionIntent(ctx, f.Tenant, rejected.ID, active.Version, ticketing.IntentTransition{Event: writeintent.Reject, ErrorCode: "provider_rejected"}, started.Add(time.Second))
+	if err != nil || failed.State != writeintent.Failed || failed.ErrorCode != "provider_rejected" {
+		t.Fatalf("rejection classification: %+v %v", failed, err)
+	}
+	if _, err = store.TransitionIntent(ctx, f.Tenant, rejected.ID, failed.Version, ticketing.IntentTransition{Event: writeintent.RetryFailed, ErrorCode: "provider_rejected"}, started.Add(2*time.Second)); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("accepted retry failure classification: %v", err)
+	}
+	pending, err = store.TransitionIntent(ctx, f.Tenant, rejected.ID, failed.Version, ticketing.IntentTransition{Event: writeintent.RetryFailed}, started.Add(2*time.Second))
+	if err != nil || pending.State != writeintent.Pending || pending.ErrorCode != "" {
+		t.Fatalf("retry failed did not clear classification: %+v %v", pending, err)
 	}
 }
 
@@ -261,7 +322,7 @@ func ConcurrentClaim(t *testing.T, store ports.TicketStore, f Fixture) {
 		wg.Go(func() {
 			<-start
 			lease := now.Add(time.Minute)
-			_, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, writeintent.Claim, &lease, now)
+			_, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now)
 			results <- err
 		})
 	}
@@ -279,6 +340,86 @@ func ConcurrentClaim(t *testing.T, store ports.TicketStore, f Fixture) {
 	got, err := store.GetIntent(ctx, f.Tenant, intent.ID)
 	if err != nil || winners != 1 || got.Attempts != 1 || got.Version != 2 || got.State != writeintent.InFlight {
 		t.Fatalf("claim race winners=%d intent=%+v error=%v", winners, got, err)
+	}
+}
+
+// ConcurrentCompletionConflict proves that a provider-link identity conflict leaves
+// the losing intent uncertain: the intent transition and its completion link form one
+// atomic unit in both adapters.
+func ConcurrentCompletionConflict(t *testing.T, store ports.TicketStore, f Fixture) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	lease := now.Add(time.Minute)
+	for _, id := range []shared.ID{"ticket-completion-a", "ticket-completion-b"} {
+		intent := ticketing.Intent{ID: id, TenantID: f.Tenant, IntegrationID: f.Integration,
+			MappingID: "ticket-map-a", FindingID: f.Finding, EngagementID: f.Engagement, Action: ticketing.Create,
+			RequestKey: "completion-" + id.String(), PayloadDigest: strings.Repeat("d", 63) + id.String()[len(id)-1:],
+			Marker: "synapse-intent-" + id.String(), State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}
+		if _, _, err := store.CreateOrGetIntent(ctx, f.Tenant, intent); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+		if _, err := store.TransitionIntent(ctx, f.Tenant, id, 1, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now.Add(time.Second)); err != nil {
+			t.Fatalf("claim %s: %v", id, err)
+		}
+		if _, err := store.TransitionIntent(ctx, f.Tenant, id, 2, ticketing.IntentTransition{Event: writeintent.Ambiguous}, now.Add(2*time.Second)); err != nil {
+			t.Fatalf("mark %s uncertain: %v", id, err)
+		}
+	}
+
+	results := make(chan error, 2)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, id := range []shared.ID{"ticket-completion-a", "ticket-completion-b"} {
+		wg.Add(1)
+		go func(id shared.ID) {
+			defer wg.Done()
+			<-start
+			_, err := store.TransitionIntent(ctx, f.Tenant, id, 3, ticketing.IntentTransition{
+				Event:  writeintent.ReconcileFound,
+				Remote: &ticketing.RemoteTicket{ID: "remote-" + id.String(), URL: "https://jira.example/browse/CONFLICT"},
+			}, now.Add(3*time.Second))
+			results <- err
+		}(id)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	winners := 0
+	for err := range results {
+		if err == nil {
+			winners++
+		} else if !errors.Is(err, shared.ErrConflict) {
+			t.Fatalf("conflicting completion: %v", err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("conflicting completions had %d winners", winners)
+	}
+	links, err := store.ListLinks(ctx, f.Tenant, f.Finding)
+	if err != nil || len(links) != 1 || links[0].ExternalURL != "https://jira.example/browse/CONFLICT" {
+		t.Fatalf("conflicting completion links: %+v %v", links, err)
+	}
+	done, uncertain := 0, 0
+	for _, id := range []shared.ID{"ticket-completion-a", "ticket-completion-b"} {
+		intent, getErr := store.GetIntent(ctx, f.Tenant, id)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		switch intent.State {
+		case writeintent.Done:
+			done++
+		case writeintent.Uncertain:
+			if intent.Version != 3 {
+				t.Fatalf("conflicted intent was partially updated: %+v", intent)
+			}
+			uncertain++
+		default:
+			t.Fatalf("unexpected completion state: %+v", intent)
+		}
+	}
+	if done != 1 || uncertain != 1 {
+		t.Fatalf("completion states done=%d uncertain=%d", done, uncertain)
 	}
 }
 
@@ -309,8 +450,7 @@ func CanceledContext(t *testing.T, store ports.TicketStore, f Fixture) {
 		{"create intent", func() error { _, _, err := store.CreateOrGetIntent(ctx, f.Tenant, intent); return err }},
 		{"get intent", func() error { _, err := store.GetIntent(ctx, f.Tenant, intent.ID); return err }},
 		{"transition intent", func() error {
-			lease := mapping.CreatedAt.Add(time.Minute)
-			_, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, writeintent.Claim, &lease, mapping.CreatedAt)
+			_, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, ticketing.IntentTransition{Event: writeintent.Acknowledge}, mapping.CreatedAt)
 			return err
 		}},
 	}
