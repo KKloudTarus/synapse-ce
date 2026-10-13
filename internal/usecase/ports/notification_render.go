@@ -1,6 +1,9 @@
 package ports
 
-import "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+import (
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+)
 
 // RenderedMessage is the channel-neutral content of one notification after its template has been
 // rendered (EPIC #1327 D5). A driver receives it and never sees a template; a formatter turns it
@@ -16,6 +19,9 @@ type RenderedMessage struct {
 	// TemplateRef identifies the template that produced Fields, recorded on the attempt, for
 	// example "builtin:scan.completed:chat:en@<build>".
 	TemplateRef string
+	// Severity is the event's immutable normalized severity when its EventSpec declares one.
+	// Formatters may use it for presentation metadata; it never comes from rendered text.
+	Severity shared.Severity
 }
 
 // RenderedLink is one typed link of a RenderedMessage.

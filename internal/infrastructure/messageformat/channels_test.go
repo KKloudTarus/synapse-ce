@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -119,6 +120,51 @@ func TestDiscordInjectionValuesStayLiteral(t *testing.T) {
 			t.Errorf("%q: allowed_mentions does not suppress every mention: %s", value, out.Body)
 		}
 		assertEscaped(t, "discord "+value, payload.Embeds[0]["description"], asciiPunctuation)
+	}
+}
+
+func TestDiscordSeverityColorUsesTypedMetadata(t *testing.T) {
+	known := map[shared.Severity]int{
+		shared.SeverityCritical: 0xdc2945,
+		shared.SeverityHigh:     0xe7661d,
+		shared.SeverityMedium:   0xb97a0f,
+		shared.SeverityLow:      0x1570ef,
+		shared.SeverityInfo:     0x64748b,
+	}
+	for severity, want := range known {
+		t.Run(string(severity), func(t *testing.T) {
+			out, err := Discord(ports.RenderedMessage{Severity: severity, Fields: map[string]string{"body": "ordinary text"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload struct {
+				Embeds []map[string]json.RawMessage `json:"embeds"`
+			}
+			if err := json.Unmarshal(out.Body, &payload); err != nil {
+				t.Fatal(err)
+			}
+			var got int
+			if len(payload.Embeds) != 1 || json.Unmarshal(payload.Embeds[0]["color"], &got) != nil || got != want {
+				t.Fatalf("embed color = %d, payload %s, want %d", got, out.Body, want)
+			}
+		})
+	}
+	for _, severity := range []shared.Severity{"", shared.SeverityUnknown, "unrecognized"} {
+		t.Run("omits_"+string(severity), func(t *testing.T) {
+			out, err := Discord(ports.RenderedMessage{Severity: severity, Fields: map[string]string{"body": "ordinary text"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload struct {
+				Embeds []map[string]json.RawMessage `json:"embeds"`
+			}
+			if err := json.Unmarshal(out.Body, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if len(payload.Embeds) != 1 || payload.Embeds[0]["color"] != nil {
+				t.Fatalf("unexpected severity color: %s", out.Body)
+			}
+		})
 	}
 }
 
@@ -281,7 +327,9 @@ func TestLimitsHoldForPunctuationHeavyContent(t *testing.T) {
 		t.Error("discord dropped the link to fit")
 	}
 
-	tg, err := Telegram(message)
+	telegramMessage := message
+	telegramMessage.Severity = shared.SeverityHigh
+	tg, err := Telegram(telegramMessage)
 	if err != nil {
 		t.Fatal(err)
 	}

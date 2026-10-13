@@ -2,7 +2,6 @@ package messageformat
 
 import (
 	"encoding/json"
-	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgmarkdown"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
@@ -26,8 +25,8 @@ func Teams(message ports.RenderedMessage) (ports.FormattedMessage, error) {
 		return ports.FormattedMessage{}, err
 	}
 	var body []any
-	if title := strings.TrimSpace(msgtemplate.Sanitize(message.Fields["title"])); title != "" {
-		body = append(body, teamsRichText([]map[string]any{{"type": "TextRun", "text": truncateRunes(title, teamsTitleRunes), "weight": "Bolder", "size": "Medium"}}))
+	if title := severityTitle(message.Severity, msgtemplate.Sanitize(message.Fields["title"]), teamsTitleRunes); title != "" {
+		body = append(body, teamsRichText([]map[string]any{{"type": "TextRun", "text": title, "weight": "Bolder", "size": "Medium"}}))
 	}
 	for _, block := range truncateDocument(msgmarkdown.Parse(message.Fields["body"]), teamsBodyRunes).Blocks {
 		switch v := block.(type) {

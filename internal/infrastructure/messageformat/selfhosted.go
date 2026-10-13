@@ -52,7 +52,7 @@ func selfHostedChatWithLiteral(message ports.RenderedMessage, literal func(strin
 		return ports.FormattedMessage{}, err
 	}
 	parts := make([]string, 0, 2+len(links))
-	if title := selfHostedBlocks(msgmarkdown.Parse(message.Fields["title"]), literal); title != "" {
+	if title := severityTitle(message.Severity, selfHostedBlocks(msgmarkdown.Parse(message.Fields["title"]), literal), 0); title != "" {
 		parts = append(parts, "**"+title+"**")
 	}
 	if body := selfHostedBlocks(msgmarkdown.Parse(message.Fields["body"]), literal); body != "" {

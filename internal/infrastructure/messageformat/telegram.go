@@ -22,7 +22,7 @@ func Telegram(message ports.RenderedMessage) (ports.FormattedMessage, error) {
 	if err != nil {
 		return ports.FormattedMessage{}, err
 	}
-	title := truncateRunes(strings.TrimSpace(msgtemplate.Sanitize(message.Fields["title"])), telegramTitleRunes)
+	title := severityTitle(message.Severity, msgtemplate.Sanitize(message.Fields["title"]), telegramTitleRunes)
 	// Room left for the body after the title, the links and the blank lines between them.
 	room := telegramTextRunes - utf8.RuneCountInString(title) - linksRunes(links) - 4
 	doc := msgmarkdown.Parse(message.Fields["body"])
