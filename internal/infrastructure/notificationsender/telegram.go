@@ -28,15 +28,39 @@ const telegramAPIBase = "https://api.telegram.org"
 // answers with the new chat ID, and an administrator has to re-enter the channel with it.
 const codeTelegramChatMigrated = "telegram_chat_migrated"
 
+// A 2xx whose reply cannot be read is final, not retried: Telegram answers 2xx only for a message it
+// posted, so a retry would post it again (#1553). The delivery fails without a remote reference.
+const (
+	// codeTelegramResponseTooLarge is a 2xx reply longer than telegramMaxResponseBytes, or one the
+	// connection cut off before its end.
+	codeTelegramResponseTooLarge = "telegram_response_too_large"
+	// codeTelegramResponseInvalid is a whole 2xx reply that is not a Bot API JSON object.
+	codeTelegramResponseInvalid = "telegram_response_invalid"
+)
+
+// telegramMaxResponseBytes bounds a sendMessage reply. A successful reply echoes the sent Message:
+// up to 4096 UTF-16 code units of text, which the Bot API may escape to six bytes each, its entities,
+// and, for a follow-up, the message it replies to. That is well over maxResponseBytes, so a valid
+// reply to a long or non-Latin message would be cut short; 1 MiB holds the largest with a wide margin
+// and is still never an unbounded download.
+const telegramMaxResponseBytes = 1 << 20
+
+// telegramReply is the Bot API envelope. ok is a pointer so a missing or null ok is told apart from
+// an explicit false. result and parameters stay raw and are decoded on their own, so an optional
+// field of an unexpected type (a string message_id) never hides an ok:true.
 type telegramReply struct {
-	OK     bool `json:"ok"`
-	Result struct {
-		MessageID int64 `json:"message_id"`
-	} `json:"result"`
-	Parameters struct {
-		RetryAfter      int   `json:"retry_after"`
-		MigrateToChatID int64 `json:"migrate_to_chat_id"`
-	} `json:"parameters"`
+	OK         *bool           `json:"ok"`
+	Result     json.RawMessage `json:"result"`
+	Parameters json.RawMessage `json:"parameters"`
+}
+
+type telegramMessage struct {
+	MessageID int64 `json:"message_id"`
+}
+
+type telegramParameters struct {
+	RetryAfter      int   `json:"retry_after"`
+	MigrateToChatID int64 `json:"migrate_to_chat_id"`
 }
 
 func (d telegramDriver) Send(ctx context.Context, w ports.NotificationWork, config ports.NotificationChannelConfig) ports.NotificationSendResult {
@@ -69,23 +93,34 @@ func (d telegramDriver) Send(ctx context.Context, w ports.NotificationWork, conf
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "encode_failed", TemplateFallback: fallback}
 	}
-	result, raw := d.s.postChat(ctx, d.s.telegramAPI+"/bot"+cfg.BotToken+"/sendMessage", body)
+	result, raw, truncated := d.s.postChatLimit(ctx, d.s.telegramAPI+"/bot"+cfg.BotToken+"/sendMessage", body, telegramMaxResponseBytes)
 	result.TemplateFallback = fallback
 	var reply telegramReply
-	_ = json.Unmarshal(raw, &reply)
+	decodeErr := json.Unmarshal(raw, &reply)
+	var params telegramParameters
+	_ = json.Unmarshal(reply.Parameters, &params)
 	switch {
-	case result.ErrorCode == "" && !reply.OK:
-		// A 2xx without ok:true is not a delivered message; retrying is the safe reading.
+	case result.ErrorCode == "" && truncated:
+		// Only part of the reply was read, so ok and message_id are unknown, not false.
+		result.ErrorCode, result.Retryable = codeTelegramResponseTooLarge, false
+	case result.ErrorCode == "" && (decodeErr != nil || reply.OK == nil):
+		// Not a Bot API envelope: null, {}, an ok that is missing, null or not a boolean.
+		result.ErrorCode, result.Retryable = codeTelegramResponseInvalid, false
+	case result.ErrorCode == "" && !*reply.OK:
+		// A 2xx with an explicit ok:false is not a delivered message; retrying is the safe reading.
 		result.ErrorCode, result.Retryable = "telegram_not_ok", true
 	case result.ErrorCode == "":
-		if reply.Result.MessageID > 0 {
-			result.RemoteRef = strconv.FormatInt(reply.Result.MessageID, 10)
+		// ok:true is the delivery. The message ID is only a threading reference (#1384), so one that
+		// is missing, not a positive integer or out of range leaves the delivery without it.
+		var message telegramMessage
+		if json.Unmarshal(reply.Result, &message) == nil && message.MessageID > 0 {
+			result.RemoteRef = strconv.FormatInt(message.MessageID, 10)
 		}
-	case reply.Parameters.MigrateToChatID != 0:
+	case params.MigrateToChatID != 0:
 		result.ErrorCode, result.Retryable = codeTelegramChatMigrated, false
-	case result.StatusCode == http.StatusTooManyRequests && reply.Parameters.RetryAfter > 0:
+	case result.StatusCode == http.StatusTooManyRequests && params.RetryAfter > 0:
 		// Telegram sends the wait in the body, not in a Retry-After header.
-		result.RetryAfter = time.Duration(min(reply.Parameters.RetryAfter, 3600)) * time.Second
+		result.RetryAfter = time.Duration(min(params.RetryAfter, 3600)) * time.Second
 	}
 	return result
 }

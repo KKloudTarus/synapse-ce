@@ -41,14 +41,21 @@ func chatMessage(w ports.NotificationWork) (ports.RenderedMessage, bool) {
 // postChat formats the message for the channel and POSTs it to target. read is true when the
 // driver needs the response body (a message ID, a provider error).
 func (s *Sender) postChat(ctx context.Context, target string, payload []byte) (ports.NotificationSendResult, []byte) {
+	result, body, _ := s.postChatLimit(ctx, target, payload, maxResponseBytes)
+	return result, body
+}
+
+// postChatLimit is postChat for a driver whose provider answers with more than maxResponseBytes: it
+// reads up to limit bytes and reports, as doReadLimit does, whether the reply was cut short.
+func (s *Sender) postChatLimit(ctx context.Context, target string, payload []byte, limit int64) (ports.NotificationSendResult, []byte, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
 	if err != nil {
 		// err holds the URL, which is the credential; only the code leaves the driver.
-		return ports.NotificationSendResult{ErrorCode: "request_invalid"}, nil
+		return ports.NotificationSendResult{ErrorCode: "request_invalid"}, nil, false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "synapse-notifications/1")
-	return s.doRead(req)
+	return s.doReadLimit(req, limit)
 }
 
 // formatChat returns the wire payload of the work item: the one a template rendered (#1365), or
