@@ -244,14 +244,16 @@ type Config struct {
 	NotificationEnabled bool
 	// InboundWebhooksEnabled mounts a separate authenticated ingress plane; off by default.
 	// PostgreSQL, a durable vault key, and an RLS-enforcing runtime role are mandatory.
-	InboundWebhooksEnabled     bool
-	OwnershipMode              string // off (default), observe, enforce; PostgreSQL only
-	NotificationSMTPHost       string
-	NotificationSMTPPort       int
-	NotificationSMTPFrom       string
-	NotificationSMTPUsername   string
-	NotificationSMTPPassword   string
-	NotificationSMTPRequireTLS bool
+	InboundWebhooksEnabled       bool
+	OwnershipMode                string // off (default), observe, enforce; PostgreSQL only
+	NotificationSMTPHost         string
+	NotificationSMTPPort         int
+	NotificationSMTPFrom         string
+	NotificationSMTPUsername     string
+	NotificationSMTPPassword     string
+	NotificationSMTPRequireTLS   bool
+	NotificationSMTPAllowedHosts []string
+	NotificationChatAllowedHosts []string
 	// NotificationUnsubscribeURL is an operator-owned receiver endpoint for tenant-channel email.
 	// It must remove the recipient using receiver-side state; Synapse never interpolates a recipient.
 	NotificationUnsubscribeURL string
@@ -956,81 +958,83 @@ func Load() Config {
 
 		NotificationProvidersDisabled: parseLowerSet(getenv("SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED", "")),
 
-		EvidenceSigningSeed:        getenv("SYNAPSE_EVIDENCE_SIGNING_SEED", ""),
-		TSAURL:                     getenv("SYNAPSE_TSA_URL", ""),
-		SandboxEnabled:             getbool("SYNAPSE_SANDBOX_ENABLED", false),
-		SandboxMemMax:              int64(getint("SYNAPSE_SANDBOX_MEM_MAX", 512<<20)),
-		SandboxPidsMax:             getint("SYNAPSE_SANDBOX_PIDS_MAX", 256),
-		DASTHelperBin:              getenv("SYNAPSE_DAST_HELPER_BIN", "synapse-dast-helper"),
-		DASTMaxReauth:              maxReauth,
-		DASTRatePerSec:             ratePerSec,
-		DASTConcurrency:            concurrency,
-		DASTMaxDepth:               maxDepth,
-		DASTMaxPages:               maxPages,
-		DASTMaxRequests:            maxRequests,
-		DASTMaxWallClock:           maxWallClock,
-		VaultMasterKey:             getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
-		NotificationEnabled:        getbool("SYNAPSE_NOTIFICATIONS_ENABLED", false),
-		InboundWebhooksEnabled:     getbool("SYNAPSE_INBOUND_WEBHOOKS_ENABLED", false),
-		OwnershipMode:              getenv("SYNAPSE_OWNERSHIP_MODE", "off"),
-		NotificationSMTPHost:       getenv("SYNAPSE_NOTIFICATION_SMTP_HOST", ""),
-		NotificationSMTPPort:       getint("SYNAPSE_NOTIFICATION_SMTP_PORT", 587),
-		NotificationSMTPFrom:       getenv("SYNAPSE_NOTIFICATION_SMTP_FROM", ""),
-		NotificationSMTPUsername:   getenv("SYNAPSE_NOTIFICATION_SMTP_USERNAME", ""),
-		NotificationSMTPPassword:   getenv("SYNAPSE_NOTIFICATION_SMTP_PASSWORD", ""),
-		NotificationSMTPRequireTLS: getbool("SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS", true),
-		TeamsBotAppID:              strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_APP_ID", "")),
-		TeamsBotAppPassword:        getenv("SYNAPSE_TEAMS_BOT_APP_PASSWORD", ""),
-		TeamsBotTenantID:           strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_TENANT_ID", "")),
-		NotificationUnsubscribeURL: getenv("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL", ""),
-		ReconViaWorker:             getbool("SYNAPSE_RECON_VIA_WORKER", false),
-		EgressBrokerSocket:         getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
-		EgressGrantAuthorityAddr:   getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR", ""),
-		EgressGrantAuthorityURL:    getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_URL", ""),
-		EgressGrantAuthorityToken:  getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN", ""),
-		EgressGrantIssuerToken:     getenv("SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN", ""),
-		EgressGrantSigningSeed:     getenv("SYNAPSE_EGRESS_GRANT_SIGNING_SEED", ""),
-		ToolExecutionMode:          getenv("SYNAPSE_TOOL_EXECUTION_MODE", ""),
-		ToolHashes:                 parsePins(getenv("SYNAPSE_TOOL_HASHES", "")),
-		AgentEnabled:               getbool("SYNAPSE_AGENT_ENABLED", false), // needs LLM creds → stays opt-in
+		EvidenceSigningSeed:          getenv("SYNAPSE_EVIDENCE_SIGNING_SEED", ""),
+		TSAURL:                       getenv("SYNAPSE_TSA_URL", ""),
+		SandboxEnabled:               getbool("SYNAPSE_SANDBOX_ENABLED", false),
+		SandboxMemMax:                int64(getint("SYNAPSE_SANDBOX_MEM_MAX", 512<<20)),
+		SandboxPidsMax:               getint("SYNAPSE_SANDBOX_PIDS_MAX", 256),
+		DASTHelperBin:                getenv("SYNAPSE_DAST_HELPER_BIN", "synapse-dast-helper"),
+		DASTMaxReauth:                maxReauth,
+		DASTRatePerSec:               ratePerSec,
+		DASTConcurrency:              concurrency,
+		DASTMaxDepth:                 maxDepth,
+		DASTMaxPages:                 maxPages,
+		DASTMaxRequests:              maxRequests,
+		DASTMaxWallClock:             maxWallClock,
+		VaultMasterKey:               getenv("SYNAPSE_VAULT_MASTER_KEY", ""),
+		NotificationEnabled:          getbool("SYNAPSE_NOTIFICATIONS_ENABLED", false),
+		InboundWebhooksEnabled:       getbool("SYNAPSE_INBOUND_WEBHOOKS_ENABLED", false),
+		OwnershipMode:                getenv("SYNAPSE_OWNERSHIP_MODE", "off"),
+		NotificationSMTPHost:         getenv("SYNAPSE_NOTIFICATION_SMTP_HOST", ""),
+		NotificationSMTPPort:         getint("SYNAPSE_NOTIFICATION_SMTP_PORT", 587),
+		NotificationSMTPFrom:         getenv("SYNAPSE_NOTIFICATION_SMTP_FROM", ""),
+		NotificationSMTPUsername:     getenv("SYNAPSE_NOTIFICATION_SMTP_USERNAME", ""),
+		NotificationSMTPPassword:     getenv("SYNAPSE_NOTIFICATION_SMTP_PASSWORD", ""),
+		NotificationSMTPRequireTLS:   getbool("SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS", true),
+		NotificationSMTPAllowedHosts: parseLowerSet(getenv("SYNAPSE_NOTIFICATION_SMTP_ALLOWED_HOSTS", "")),
+		NotificationChatAllowedHosts: parseLowerSet(getenv("SYNAPSE_NOTIFICATION_CHAT_ALLOWED_HOSTS", "")),
+		TeamsBotAppID:                strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_APP_ID", "")),
+		TeamsBotAppPassword:          getenv("SYNAPSE_TEAMS_BOT_APP_PASSWORD", ""),
+		TeamsBotTenantID:             strings.TrimSpace(getenv("SYNAPSE_TEAMS_BOT_TENANT_ID", "")),
+		NotificationUnsubscribeURL:   getenv("SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL", ""),
+		ReconViaWorker:               getbool("SYNAPSE_RECON_VIA_WORKER", false),
+		EgressBrokerSocket:           getenv("SYNAPSE_EGRESS_BROKER_SOCKET", "/run/synapse-egress-broker/egress-broker.sock"),
+		EgressGrantAuthorityAddr:     getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_ADDR", ""),
+		EgressGrantAuthorityURL:      getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_URL", ""),
+		EgressGrantAuthorityToken:    getenv("SYNAPSE_EGRESS_GRANT_AUTHORITY_TOKEN", ""),
+		EgressGrantIssuerToken:       getenv("SYNAPSE_EGRESS_GRANT_ISSUER_TOKEN", ""),
+		EgressGrantSigningSeed:       getenv("SYNAPSE_EGRESS_GRANT_SIGNING_SEED", ""),
+		ToolExecutionMode:            getenv("SYNAPSE_TOOL_EXECUTION_MODE", ""),
+		ToolHashes:                   parsePins(getenv("SYNAPSE_TOOL_HASHES", "")),
+		AgentEnabled:                 getbool("SYNAPSE_AGENT_ENABLED", false), // needs LLM creds → stays opt-in
 		// Analysis capabilities default ON so the tool is fully effective out of the box (the UI and a
 		// bare scan get every deterministic, best-effort feature without hunting env flags). Each is
 		// safe to default on: file/compute-based, no external service, and a no-op when its input is
 		// absent. Set the flag to false to opt out. Capabilities that need external setup or would be
 		// unsafe unsandboxed stay OFF by default (sandbox, agent/LLM, taint, maven/gradle resolvers,
 		// jarhash egress) – see their fields below.
-		JudgmentsEnabled:                            getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
-		SASTEnabled:                                 getbool("SYNAPSE_SAST_ENABLED", true),
-		SecretScanEnabled:                           getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
-		SecretHistoryEnabled:                        getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
-		SecretVerifyEnabled:                         getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
-		SecretVerifyRPS:                             getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
-		SecretVerifyVaultAddr:                       strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
-		MisconfigEnabled:                            getbool("SYNAPSE_MISCONFIG_ENABLED", true),
-		SuppressionEnabled:                          getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
-		VEXEnabled:                                  getbool("SYNAPSE_VEX_ENABLED", true),
-		ComplianceEnabled:                           getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
-		DetectionPriority:                           os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
-		DBMaxAgeDays:                                getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
-		ScanCacheEnabled:                            getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
-		ScanCacheDir:                                os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
-		ImageRootFSEnabled:                          getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
-		OwnedAdvisoryEnabled:                        getbool("SYNAPSE_OWNED_ADVISORY", true),
-		SymbolOverlayDir:                            getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
-		ReachabilityEnabled:                         getbool("SYNAPSE_REACHABILITY_ENABLED", true),
-		PyReachabilityEnabled:                       getbool("SYNAPSE_PYREACH_ENABLED", true),
-		PySemanticReachabilityEnabled:               getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
-		ASTBin:                                      os.Getenv("SYNAPSE_AST_BIN"),
-		PythonTaintEnabled:                          getbool("SYNAPSE_PYTAINT_ENABLED", true),
-		TaintRulesFile:                              strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
-		JsTaintEnabled:                              getbool("SYNAPSE_JSTAINT_ENABLED", false),
-		JavaTaintEnabled:                            getbool("SYNAPSE_JAVATAINT_ENABLED", false),
-		TriScoreReassessEnabled:                     getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
-		FleetCorrelationEnabled:                     getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
-		FleetCorrelationWindow:                      getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
-		FleetCorrelationMaxPerIncident:              getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
-		FleetCorrelationPageSize:                    getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
-		FleetCorrelationMaxActiveSessions:           getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
+		JudgmentsEnabled:                  getbool("SYNAPSE_JUDGMENTS_ENABLED", true),
+		SASTEnabled:                       getbool("SYNAPSE_SAST_ENABLED", true),
+		SecretScanEnabled:                 getbool("SYNAPSE_SECRET_SCAN_ENABLED", true),
+		SecretHistoryEnabled:              getbool("SYNAPSE_SECRET_HISTORY_ENABLED", false),
+		SecretVerifyEnabled:               getbool("SYNAPSE_SECRET_VERIFY_ENABLED", false),
+		SecretVerifyRPS:                   getint("SYNAPSE_SECRET_VERIFY_RPS", 5),
+		SecretVerifyVaultAddr:             strings.TrimSpace(getenv("SYNAPSE_SECRET_VERIFY_VAULT_ADDR", "")),
+		MisconfigEnabled:                  getbool("SYNAPSE_MISCONFIG_ENABLED", true),
+		SuppressionEnabled:                getbool("SYNAPSE_SUPPRESSION_ENABLED", true),
+		VEXEnabled:                        getbool("SYNAPSE_VEX_ENABLED", true),
+		ComplianceEnabled:                 getbool("SYNAPSE_COMPLIANCE_ENABLED", true),
+		DetectionPriority:                 os.Getenv("SYNAPSE_DETECTION_PRIORITY"),
+		DBMaxAgeDays:                      getint("SYNAPSE_DB_MAX_AGE_DAYS", 30),
+		ScanCacheEnabled:                  getbool("SYNAPSE_SCAN_CACHE_ENABLED", true),
+		ScanCacheDir:                      os.Getenv("SYNAPSE_SCAN_CACHE_DIR"),
+		ImageRootFSEnabled:                getbool("SYNAPSE_IMAGE_ROOTFS_ENABLED", true),
+		OwnedAdvisoryEnabled:              getbool("SYNAPSE_OWNED_ADVISORY", true),
+		SymbolOverlayDir:                  getenv("SYNAPSE_SYMBOL_OVERLAY_DIR", ""),
+		ReachabilityEnabled:               getbool("SYNAPSE_REACHABILITY_ENABLED", true),
+		PyReachabilityEnabled:             getbool("SYNAPSE_PYREACH_ENABLED", true),
+		PySemanticReachabilityEnabled:     getbool("SYNAPSE_PYREACH_TIER2_ENABLED", false),
+		ASTBin:                            os.Getenv("SYNAPSE_AST_BIN"),
+		PythonTaintEnabled:                getbool("SYNAPSE_PYTAINT_ENABLED", true),
+		TaintRulesFile:                    strings.TrimSpace(getenv("SYNAPSE_TAINT_RULES_FILE", "")),
+		JsTaintEnabled:                    getbool("SYNAPSE_JSTAINT_ENABLED", false),
+		JavaTaintEnabled:                  getbool("SYNAPSE_JAVATAINT_ENABLED", false),
+		TriScoreReassessEnabled:           getbool("SYNAPSE_TRISCORE_REASSESS_ENABLED", false),
+		FleetCorrelationEnabled:           getbool("SYNAPSE_FLEET_CORRELATION_ENABLED", false),
+		FleetCorrelationWindow:            getduration("SYNAPSE_FLEET_CORRELATION_WINDOW", 30*time.Minute),
+		FleetCorrelationMaxPerIncident:    getint("SYNAPSE_FLEET_CORRELATION_MAX_PER_INCIDENT", 100),
+		FleetCorrelationPageSize:          getint("SYNAPSE_FLEET_CORRELATION_PAGE_SIZE", 100),
+		FleetCorrelationMaxActiveSessions: getint("SYNAPSE_FLEET_CORRELATION_MAX_ACTIVE_SESSIONS", 500),
 		FleetCorrelationMaxTimelineRefsPerDetection: getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_DETECTION", 32),
 		FleetCorrelationMaxTimelineRefsPerPage:      getint("SYNAPSE_FLEET_CORRELATION_MAX_TIMELINE_REFS_PER_PAGE", 500),
 		JSReachabilityEnabled:                       getbool("SYNAPSE_JSREACH_ENABLED", true),

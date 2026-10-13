@@ -46,7 +46,13 @@ func (d slackBotDriver) Send(ctx context.Context, w ports.NotificationWork, conf
 			return ports.NotificationSendResult{ErrorCode: codeSlackShared, TemplateFallback: fallback}
 		}
 	}
-	result := d.s.postSlack(ctx, cfg.BotToken, cfg.ChannelID, "", formatted)
+	result := d.s.postSlack(ctx, cfg.BotToken, cfg.ChannelID, w.SubjectAnchor, formatted)
+	// Slack's thread-not-found response is the only confirmed indication that the stored parent
+	// can no longer accept a reply. In that case, make one top-level replacement; every other
+	// failure stays visible to the retry and channel-health policy.
+	if w.SubjectAnchor != "" && result.ErrorCode == "slack_thread_not_found" && !result.Retryable {
+		result = d.s.postSlack(ctx, cfg.BotToken, cfg.ChannelID, "", formatted)
+	}
 	result.TemplateFallback = fallback
 	return result
 }

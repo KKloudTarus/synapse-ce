@@ -9,7 +9,7 @@ import (
 func TestChatChannelTypesAreValidHTTPEndpoints(t *testing.T) {
 	// The shape the channel_type CHECK has enforced since #1341, so a new type needs no migration.
 	shape := regexp.MustCompile(`^[a-z_]+$`)
-	for _, kind := range []ChannelType{ChannelWebhook, ChannelSlack, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord, ChannelSlackBot} {
+	for _, kind := range []ChannelType{ChannelWebhook, ChannelSlack, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord, ChannelMattermost, ChannelRocketChat, ChannelPagerDuty, ChannelJSM, ChannelSlackBot} {
 		if !kind.Valid() || !kind.HTTPEndpoint() || !shape.MatchString(string(kind)) {
 			t.Errorf("%s: valid=%v http=%v", kind, kind.Valid(), kind.HTTPEndpoint())
 		}

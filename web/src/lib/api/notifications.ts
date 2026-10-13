@@ -10,6 +10,10 @@ export type NotificationChannelType =
   | 'telegram'
   | 'google_chat'
   | 'discord'
+  | 'mattermost'
+  | 'rocket_chat'
+  | 'pagerduty'
+  | 'jsm'
   | 'slack_bot'
 // The server's event catalog is the source of truth for event types, so the console accepts any
 // type it declares instead of a hard-coded union.
@@ -241,6 +245,7 @@ export interface NotificationDelivery {
   last_error?: string
   next_attempt_at?: string
   delivered_at?: string
+  remote_ref?: string
   created_at: string
   updated_at: string
 }

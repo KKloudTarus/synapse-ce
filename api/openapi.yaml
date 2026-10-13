@@ -3111,6 +3111,36 @@ paths:
         '200': {description: Bounded review page, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/AssigneeReviewItem'}}, next: {type: object, nullable: true, properties: {engagement_id: {type: string}, finding_id: {type: string}}}}}}}}
         '403': {$ref: '#/components/responses/Forbidden'}
 
+  /api/v1/notifications/email-settings:
+    get:
+      tags: [Notifications]
+      summary: Read safe tenant relay metadata and verified domains (administer)
+      responses:
+        '200':
+          description: Credentials are never returned
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationEmailSettings'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    put:
+      tags: [Notifications]
+      summary: Replace tenant relay or verified domain set (administer)
+      description: New exact domains require DNS TXT proof. SMTP hosts require operator approval, ports 465 or 587, and verified TLS. Omitted relay preserves it; clear_relay explicitly restores the operator fallback. Revision fences concurrent settings changes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NotificationEmailSettingsInput'}
+      responses:
+        '200':
+          description: Saved metadata
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationEmailSettings'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409':
+          description: Stale settings revision
   /api/v1/notifications/event-types:
     get:
       tags: [notifications]
@@ -13496,6 +13526,47 @@ components:
       type: string
       enum: [pending, retrying, delivered, dead_letter, cancelled]
 
+    NotificationEmailSettings:
+      type: object
+      required: [revision, relay_configured, domains, dns_txt_value]
+      properties:
+        revision: {type: integer, minimum: 0}
+        relay_configured: {type: boolean}
+        relay_host: {type: string}
+        relay_port: {type: integer, enum: [465, 587]}
+        relay_from: {type: string, format: email}
+        auth_mode: {type: string, enum: [none, password, google_oauth, microsoft_oauth]}
+        domains: {type: array, maxItems: 50, items: {type: string}}
+        dns_txt_value: {type: string, description: Public TXT proof value for the current tenant at _synapse-email.<domain>}
+    NotificationEmailSettingsInput:
+      type: object
+      required: [revision]
+      additionalProperties: false
+      properties:
+        revision: {type: integer, minimum: 0}
+        clear_relay: {type: boolean, description: Clear the tenant relay while retaining its revision history; mutually exclusive with relay}
+        domains: {type: array, maxItems: 50, items: {type: string}, description: Exact domain set; omission preserves it and an empty list removes all domains}
+        relay:
+          type: object
+          writeOnly: true
+          required: [host, port, from, username]
+          additionalProperties: false
+          properties:
+            host: {type: string, description: Exact operator-approved DNS host}
+            port: {type: integer, enum: [465, 587]}
+            from: {type: string, format: email}
+            username: {type: string}
+            password: {type: string, writeOnly: true}
+            oauth:
+              type: object
+              required: [provider, client_id, client_secret]
+              additionalProperties: false
+              properties:
+                provider: {type: string, enum: [google, microsoft]}
+                client_id: {type: string, writeOnly: true}
+                client_secret: {type: string, writeOnly: true}
+                refresh_token: {type: string, writeOnly: true, description: Google offline refresh token}
+                directory_id: {type: string, format: uuid, description: Microsoft Entra directory ID}
     SlackConversationsInput:
       type: object
       additionalProperties: false
@@ -13542,7 +13613,7 @@ components:
       required: [name, type, enabled]
       properties:
         name: {type: string, maxLength: 200}
-        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot, mattermost, rocket_chat, pagerduty, jsm]}
         enabled: {type: boolean}
         url:
           type: string
@@ -13597,7 +13668,7 @@ components:
       properties:
         id: {type: string}
         name: {type: string}
-        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]}
+        type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot, mattermost, rocket_chat, pagerduty, jsm]}
         enabled: {type: boolean}
         destination: {type: string, description: Redacted destination metadata}
         recipients: {type: array, items: {type: string, format: email}}
@@ -13920,10 +13991,11 @@ components:
       type: object
       required: [id, event_id, channel_id, channel_type, redrive_fence, matched_rule_ids, state, attempts, created_at, updated_at]
       properties:
+        remote_ref: {type: string, readOnly: true, description: 'Provider acknowledgement stored after a successful fenced completion; scoped to this channel destination version.'}
         id: {type: string}
         event_id: {type: string}
         channel_id: {type: string}
-        channel_type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot]}
+        channel_type: {type: string, enum: [webhook, slack, email, teams, telegram, google_chat, discord, slack_bot, mattermost, rocket_chat, pagerduty, jsm]}
         redrive_fence: {type: integer, format: int64, minimum: 0, description: Current durable queue claim fence; submit it as expected_fence to prevent a stale redrive.}
         recipient: {type: string}
         matched_rule_ids: {type: array, items: {type: string}}

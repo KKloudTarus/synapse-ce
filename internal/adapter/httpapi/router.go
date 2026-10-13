@@ -555,6 +555,8 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/alerts/test", rt.authz(userdom.PermManageIntegrations, rt.testAlert))
 	}
 	if rt.notifications != nil {
+		mux.HandleFunc("GET /api/v1/notifications/email-settings", rt.authz(userdom.PermAdminister, rt.getNotificationEmailSettings))
+		mux.HandleFunc("PUT /api/v1/notifications/email-settings", rt.authz(userdom.PermAdminister, rt.putNotificationEmailSettings))
 		// manage_integrations runs existing channels, rules and delivery history (#1358). Creating a
 		// channel stays on administer, and so does a PATCH that changes a destination (URL, secret
 		// or email recipients): the handler refuses it with 403 for a caller without administer.

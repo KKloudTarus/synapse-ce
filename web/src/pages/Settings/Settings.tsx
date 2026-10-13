@@ -12,6 +12,7 @@ const TABS = [
   { label: 'SLA policy', to: '/settings/sla' },
   { label: 'Offensive policy', to: '/settings/offensive-policy' },
   { label: 'Alerting', to: '/settings/alerting' },
+  { label: 'Email delivery', to: '/settings/email' },
   { label: 'Templates', to: '/settings/templates' },
   { label: 'SIEM', to: '/settings/siem' },
   { label: 'Language & time zone', to: '/settings/regional' },

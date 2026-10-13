@@ -3,13 +3,13 @@ package notification
 import (
 	"encoding/json"
 	"fmt"
-	"net/mail"
 	"net/url"
 	"strconv"
 	"strings"
 
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -33,6 +33,10 @@ var channelSchemas = map[domain.ChannelType]channelSchema{
 	domain.ChannelTelegram:   {validate: validateTelegramChannel, decode: decodeConfig[ports.TelegramChannelConfig]},
 	domain.ChannelGoogleChat: {validate: validateGoogleChatChannel, decode: decodeConfig[ports.GoogleChatChannelConfig]},
 	domain.ChannelDiscord:    {validate: validateDiscordChannel, decode: decodeConfig[ports.DiscordChannelConfig]},
+	domain.ChannelMattermost: {validate: validateMattermostChannel, decode: decodeConfig[ports.MattermostChannelConfig]},
+	domain.ChannelRocketChat: {validate: validateRocketChatChannel, decode: decodeConfig[ports.RocketChatChannelConfig]},
+	domain.ChannelPagerDuty:  {validate: validatePagerDutyChannel, decode: decodeConfig[ports.PagerDutyChannelConfig]},
+	domain.ChannelJSM:        {validate: validateJSMChannel, decode: decodeConfig[ports.JSMChannelConfig]},
 	// Slack bot mode (#1383), validated in slack_bot_channel.go and checked against Slack on save.
 	domain.ChannelSlackBot: {validate: validateSlackBotChannel, decode: decodeConfig[ports.SlackBotChannelConfig]},
 }
@@ -98,11 +102,10 @@ func validateEmailChannel(in ChannelInput, _ bool) (ports.NotificationChannelCon
 	recipients := make([]string, 0, len(in.Recipients))
 	seen := map[string]bool{}
 	for _, v := range in.Recipients {
-		a, err := mail.ParseAddress(strings.TrimSpace(v))
-		if err != nil || strings.ContainsAny(a.Address, "\r\n") {
+		normalized, err := userdom.NormalizeContactEmail(v)
+		if err != nil {
 			return nil, "", nil, fmt.Errorf("%w: invalid email recipient", shared.ErrValidation)
 		}
-		normalized := strings.ToLower(a.Address)
 		if !seen[normalized] {
 			seen[normalized] = true
 			recipients = append(recipients, normalized)

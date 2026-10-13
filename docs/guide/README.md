@@ -29,6 +29,7 @@ architectural boundaries that keep execution auditable.
 | [AI triage review](ai-triage-review.md) | Propose/verify/review flow, evidence requirements, independence, and promotion |
 | [Remediation SLA governance](sla-governance.md) | Risk scoring, immutable deadlines, lifecycle transitions, and reassessment |
 | [Notifications and webhooks](notifications.md) | Tenant routing rules, signed webhooks, Slack, email, retry, and delivery history |
+| [Notification channels](notification-channels.md) | Chat and pager providers, tenant SMTP OAuth, recipient policy and rollout |
 
 ## Operate and integrate
 

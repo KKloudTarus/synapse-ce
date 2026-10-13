@@ -239,6 +239,40 @@ func TestTelegramAddsTheChatAndTopic(t *testing.T) {
 	}
 }
 
+func TestTelegramRepliesToSubjectAnchorWithFallback(t *testing.T) {
+	server := newChatServer(t, func(w http.ResponseWriter) { _, _ = io.WriteString(w, chatCases[1].success) })
+	work := testWork(notification.ChannelTelegram)
+	work.SubjectAnchor = "777"
+	chatSender(server).Send(context.Background(), work, chatCases[1].config(server.URL))
+	var payload struct {
+		ReplyParameters struct {
+			MessageID                int64 `json:"message_id"`
+			AllowSendingWithoutReply bool  `json:"allow_sending_without_reply"`
+		} `json:"reply_parameters"`
+	}
+	if err := json.Unmarshal(server.body, &payload); err != nil || payload.ReplyParameters.MessageID != 777 || !payload.ReplyParameters.AllowSendingWithoutReply {
+		t.Fatalf("reply parameters = %s err=%v", server.body, err)
+	}
+}
+
+func TestGoogleChatUsesStableSubjectThreadKeyAndFallback(t *testing.T) {
+	server := newChatServer(t, func(w http.ResponseWriter) { _, _ = io.WriteString(w, chatCases[2].success) })
+	work := testWork(notification.ChannelGoogleChat)
+	work.Event.SubjectKind, work.Event.SubjectID = "finding", "finding-1"
+	chatSender(server).Send(context.Background(), work, chatCases[2].config(server.URL))
+	if !strings.Contains(server.query, "messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD") {
+		t.Fatalf("reply fallback query = %q", server.query)
+	}
+	var payload struct {
+		Thread struct {
+			ThreadKey string `json:"threadKey"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal(server.body, &payload); err != nil || payload.Thread.ThreadKey != googleChatThreadKey(work) {
+		t.Fatalf("thread key=%q payload=%s err=%v", payload.Thread.ThreadKey, server.body, err)
+	}
+}
+
 func TestDiscordWaitsAndNeverMentions(t *testing.T) {
 	server := newChatServer(t, func(w http.ResponseWriter) { _, _ = io.WriteString(w, chatCases[3].success) })
 	cfg := ports.DiscordChannelConfig{URL: server.URL + "/api/webhooks/1/" + testChatSecret + "?thread_id=99"}

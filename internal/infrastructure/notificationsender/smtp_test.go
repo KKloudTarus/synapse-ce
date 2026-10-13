@@ -3,11 +3,16 @@ package notificationsender
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"io"
+	"math/big"
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -19,7 +24,305 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
+
+type smtpFixtureMode uint8
+
+const (
+	smtpFixturePlain smtpFixtureMode = iota
+	smtpFixtureImplicitTLS
+	smtpFixtureStartTLS
+)
+
+type smtpFixture struct {
+	listener *net.TCPListener
+	mode     smtpFixtureMode
+	wantAuth bool
+	done     chan struct{}
+
+	implicitTLSBeforeBanner bool
+	startTLS                bool
+	authenticated           bool
+	authPayload             string
+	accepted                bool
+}
+
+func newSMTPFixture(t *testing.T, mode smtpFixtureMode, certificate tls.Certificate, wantAuth bool) *smtpFixture {
+	t.Helper()
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &smtpFixture{listener: listener, mode: mode, wantAuth: wantAuth, done: make(chan struct{})}
+	go fixture.serve(certificate)
+	t.Cleanup(func() {
+		_ = listener.Close()
+		fixture.wait(t)
+	})
+	return fixture
+}
+
+func (f *smtpFixture) serve(certificate tls.Certificate) {
+	defer close(f.done)
+	conn, err := f.listener.Accept()
+	if err != nil {
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	secured := false
+	if f.mode == smtpFixtureImplicitTLS {
+		tlsConn := tls.Server(conn, &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12})
+		if err := tlsConn.Handshake(); err != nil {
+			return
+		}
+		f.implicitTLSBeforeBanner = true
+		conn, secured = tlsConn, true
+	}
+	if _, err := fmt.Fprint(conn, "220 test relay\r\n"); err != nil {
+		return
+	}
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		command := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(command, "EHLO ") || strings.HasPrefix(command, "HELO "):
+			if f.mode == smtpFixtureStartTLS && !secured {
+				if _, err := fmt.Fprint(conn, "250-test relay\r\n250 STARTTLS\r\n"); err != nil {
+					return
+				}
+			} else if f.wantAuth {
+				if _, err := fmt.Fprint(conn, "250-test relay\r\n250-AUTH XOAUTH2\r\n250 OK\r\n"); err != nil {
+					return
+				}
+			} else if _, err := fmt.Fprint(conn, "250 test relay\r\n"); err != nil {
+				return
+			}
+		case command == "STARTTLS":
+			if f.mode != smtpFixtureStartTLS || secured {
+				return
+			}
+			if _, err := fmt.Fprint(conn, "220 ready for TLS\r\n"); err != nil {
+				return
+			}
+			tlsConn := tls.Server(conn, &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12})
+			if err := tlsConn.Handshake(); err != nil {
+				return
+			}
+			conn, reader, secured, f.startTLS = tlsConn, bufio.NewReader(tlsConn), true, true
+		case strings.HasPrefix(command, "AUTH XOAUTH2 "):
+			if !secured || !f.wantAuth {
+				return
+			}
+			payload, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(command, "AUTH XOAUTH2 "))
+			if err != nil {
+				return
+			}
+			f.authenticated, f.authPayload = true, string(payload)
+			if _, err := fmt.Fprint(conn, "235 authenticated\r\n"); err != nil {
+				return
+			}
+		case strings.HasPrefix(command, "MAIL FROM:"), strings.HasPrefix(command, "RCPT TO:"):
+			if f.wantAuth && !f.authenticated {
+				return
+			}
+			if _, err := fmt.Fprint(conn, "250 accepted\r\n"); err != nil {
+				return
+			}
+		case command == "DATA":
+			if _, err := fmt.Fprint(conn, "354 send data\r\n"); err != nil {
+				return
+			}
+			for {
+				line, err = reader.ReadString('\n')
+				if err != nil {
+					return
+				}
+				if line == ".\r\n" {
+					break
+				}
+			}
+			f.accepted = true
+			_, _ = fmt.Fprint(conn, "250 accepted\r\n")
+		case command == "QUIT":
+			_, _ = fmt.Fprint(conn, "221 bye\r\n")
+			return
+		default:
+			return
+		}
+	}
+}
+
+func (f *smtpFixture) wait(t *testing.T) {
+	t.Helper()
+	select {
+	case <-f.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("SMTP fixture did not finish")
+	}
+}
+
+func smtpTestCertificate(t *testing.T, names ...string) (tls.Certificate, *x509.CertPool) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	template := x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: names[0]},
+		DNSNames:              names,
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	certificate, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(certPEM) {
+		t.Fatal("add generated SMTP test certificate to root pool")
+	}
+	return certificate, roots
+}
+
+func smtpFixtureSender(config SMTPConfig, fixture *smtpFixture, roots *x509.CertPool) *Sender {
+	sender := New(config, time.Second)
+	sender.dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", fixture.listener.Addr().String())
+	}
+	sender.tlsConfig = func(host string) *tls.Config {
+		return &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12, RootCAs: roots}
+	}
+	return sender
+}
+
+func smtpTenantRelay(host string, port int) ports.EmailChannelConfig {
+	return ports.EmailChannelConfig{Relay: &ports.SMTPRelayConfig{Host: host, Port: port, From: "sender@example.test"}}
+}
+
+func smtpEmailWork() ports.NotificationWork {
+	work := testWork(notification.ChannelEmail)
+	work.Delivery.Recipient = "recipient@example.test"
+	return work
+}
+
+func TestSMTPTenantRelayTLS465AndSTARTTLS587(t *testing.T) {
+	certificate, roots := smtpTestCertificate(t, "smtp.test")
+	for _, tc := range []struct {
+		name string
+		mode smtpFixtureMode
+		port int
+	}{
+		{name: "implicit_tls_465", mode: smtpFixtureImplicitTLS, port: 465},
+		{name: "starttls_587", mode: smtpFixtureStartTLS, port: 587},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newSMTPFixture(t, tc.mode, certificate, false)
+			sender := smtpFixtureSender(SMTPConfig{AllowedHosts: []string{"smtp.test"}}, fixture, roots)
+			result := sender.Send(context.Background(), smtpEmailWork(), smtpTenantRelay("smtp.test", tc.port))
+			fixture.wait(t)
+			if result.StatusCode != 250 || result.ErrorCode != "" || !fixture.accepted {
+				t.Fatalf("SMTP result = %+v, accepted=%t", result, fixture.accepted)
+			}
+			if tc.port == 465 && !fixture.implicitTLSBeforeBanner {
+				t.Fatal("465 relay sent a banner before TLS completed")
+			}
+			if tc.port == 587 && !fixture.startTLS {
+				t.Fatal("587 relay did not issue STARTTLS before SMTP delivery")
+			}
+		})
+	}
+}
+
+func TestSMTPTenantRelayRejectsUntrustedAndWrongHostnameCertificates(t *testing.T) {
+	certificate, roots := smtpTestCertificate(t, "smtp.test")
+	for _, tc := range []struct {
+		name  string
+		host  string
+		roots *x509.CertPool
+	}{
+		{name: "untrusted", host: "smtp.test", roots: x509.NewCertPool()},
+		{name: "wrong_hostname", host: "wrong.test", roots: roots},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newSMTPFixture(t, smtpFixtureImplicitTLS, certificate, false)
+			sender := smtpFixtureSender(SMTPConfig{AllowedHosts: []string{tc.host}}, fixture, tc.roots)
+			result := sender.Send(context.Background(), smtpEmailWork(), smtpTenantRelay(tc.host, 465))
+			fixture.wait(t)
+			if result.ErrorCode != "smtp_tls" || !result.Retryable || fixture.accepted {
+				t.Fatalf("certificate failure = %+v, accepted=%t", result, fixture.accepted)
+			}
+		})
+	}
+}
+
+func TestSMTPXOAUTH2OverSTARTTLS(t *testing.T) {
+	certificate, roots := smtpTestCertificate(t, "smtp.gmail.com", "smtp.office365.com")
+	for _, tc := range []struct {
+		name      string
+		host      string
+		provider  string
+		directory string
+		endpoint  string
+		token     string
+	}{
+		{name: "google", host: "smtp.gmail.com", provider: "google", endpoint: googleSMTPTokenURL, token: "test-google-access"},
+		{name: "microsoft", host: "smtp.office365.com", provider: "microsoft", directory: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", endpoint: "https://login.microsoftonline.com/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/oauth2/v2.0/token", token: "test-microsoft-access"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newSMTPFixture(t, smtpFixtureStartTLS, certificate, true)
+			sender := smtpFixtureSender(SMTPConfig{AllowedHosts: []string{tc.host}}, fixture, roots)
+			tokenTransport := &smtpTokenTransport{endpoint: tc.endpoint, token: tc.token}
+			sender.http = &http.Client{Transport: tokenTransport}
+			config := smtpTenantRelay(tc.host, 587)
+			config.Relay.Username = "mailer"
+			config.Relay.OAuthProvider = tc.provider
+			config.Relay.OAuthClientID = "test-client"
+			config.Relay.OAuthClientSecret = "test-client-secret"
+			config.Relay.OAuthRefreshToken = "test-refresh-token"
+			config.Relay.OAuthDirectoryID = tc.directory
+			config.Relay.CacheKey = "tenant:1"
+			result := sender.Send(context.Background(), smtpEmailWork(), config)
+			fixture.wait(t)
+			if result.StatusCode != 250 || !fixture.startTLS || !fixture.authenticated || !fixture.accepted || tokenTransport.calls != 1 {
+				t.Fatalf("XOAUTH2 delivery failed: result=%+v starttls=%t authenticated=%t accepted=%t calls=%d", result, fixture.startTLS, fixture.authenticated, fixture.accepted, tokenTransport.calls)
+			}
+			if !strings.Contains(fixture.authPayload, "auth=Bearer "+tc.token+"\x01") {
+				t.Fatal("SMTP AUTH did not carry the refreshed access token")
+			}
+		})
+	}
+}
+
+func TestSMTPOperatorRelayIgnoresTenantAllowlist(t *testing.T) {
+	certificate, roots := smtpTestCertificate(t, "operator.test")
+	fixture := newSMTPFixture(t, smtpFixturePlain, certificate, false)
+	sender := smtpFixtureSender(SMTPConfig{Host: "operator.test", Port: 2525, From: "sender@example.test", AllowedHosts: []string{"tenant-only.test"}}, fixture, roots)
+	result := sender.Send(context.Background(), smtpEmailWork(), ports.EmailChannelConfig{})
+	fixture.wait(t)
+	if result.StatusCode != 250 || result.ErrorCode != "" || !fixture.accepted {
+		t.Fatalf("operator relay was constrained by tenant allowlist: result=%+v accepted=%t", result, fixture.accepted)
+	}
+}
 
 func TestSMTPControlledRelay(t *testing.T) {
 	for _, tc := range []struct {
@@ -83,6 +386,8 @@ func TestSMTPControlledRelay(t *testing.T) {
 			host, port, _ := net.SplitHostPort(listener.Addr().String())
 			number, _ := strconv.Atoi(port)
 			sender := New(SMTPConfig{Host: host, Port: number, From: "synapse@example.com", UnsubscribeURL: "https://mail.example/unsubscribe"}, time.Second)
+			sentAt := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+			sender.now = func() time.Time { return sentAt }
 			work := testWork(notification.ChannelEmail)
 			work.Delivery.Recipient = "recipient@example.com"
 			if tc.formatted {
@@ -94,7 +399,7 @@ func TestSMTPControlledRelay(t *testing.T) {
 					t.Fatalf("%+v", result)
 				}
 				body := <-messages
-				if !strings.Contains(body, "Message-ID: <delivery@synapse.local>") || !strings.Contains(body, "To: recipient@example.com") || !strings.Contains(body, "List-Unsubscribe: <https://mail.example/unsubscribe>") {
+				if !strings.Contains(body, "Message-ID: <delivery@synapse.local>") || !strings.Contains(body, "To: recipient@example.com") || !strings.Contains(body, "Date: "+sentAt.Format(time.RFC1123Z)) || !strings.Contains(body, "List-Unsubscribe: <https://mail.example/unsubscribe>") {
 					t.Fatalf("missing headers: %s", body)
 				}
 			} else if result.Retryable != (tc.code == 450) || result.StatusCode != tc.code {
@@ -105,7 +410,8 @@ func TestSMTPControlledRelay(t *testing.T) {
 }
 
 func TestSMTPMultipartAlternativeUsesSafeHeaders(t *testing.T) {
-	raw, err := smtpMessage("sender@example.com", "recipient@example.com", "Cảnh báo\r\nBcc: attacker@example.com", "plain <text>", "<p>safe &amp; escaped</p>", "https://mail.example/unsubscribe", "<delivery@synapse.local>")
+	sentAt := time.Date(2026, 10, 11, 7, 0, 0, 0, time.FixedZone("UTC+7", 7*60*60))
+	raw, err := smtpMessage("sender@example.com", "recipient@example.com", "Cảnh báo\r\nBcc: attacker@example.com", "plain <text>", "<p>safe &amp; escaped</p>", "https://mail.example/unsubscribe", "<delivery@synapse.local>", sentAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +427,9 @@ func TestSMTPMultipartAlternativeUsesSafeHeaders(t *testing.T) {
 	}
 	if !strings.HasPrefix(message.Header.Get("Subject"), "=?UTF-8?q?") {
 		t.Fatalf("subject was not encoded: %q", message.Header.Get("Subject"))
+	}
+	if got, err := message.Header.Date(); err != nil || !got.Equal(sentAt) {
+		t.Fatalf("Date = %v, %v", got, err)
 	}
 	mediaType, params, err := mime.ParseMediaType(message.Header.Get("Content-Type"))
 	if err != nil || mediaType != "multipart/alternative" || params["boundary"] == "" {
@@ -148,7 +457,7 @@ func TestSMTPMultipartAlternativeUsesSafeHeaders(t *testing.T) {
 }
 
 func TestSMTPPlainTextUsesQuotedPrintableUTF8(t *testing.T) {
-	raw, err := smtpMessage("sender@example.com", "recipient@example.com", "Thông báo", "Cảnh báo: đã hoàn tất", "", "", "<delivery@synapse.local>")
+	raw, err := smtpMessage("sender@example.com", "recipient@example.com", "Thông báo", "Cảnh báo: đã hoàn tất", "", "", "<delivery@synapse.local>", time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +479,7 @@ func TestSMTPPlainTextUsesQuotedPrintableUTF8(t *testing.T) {
 
 func TestSMTPFoldsLongUnicodeSubject(t *testing.T) {
 	title := strings.Repeat("🚨 cảnh báo bảo mật ", 20)
-	raw, err := smtpMessage("sender@example.com", "recipient@example.com", title, "body", "", "", "<delivery@synapse.local>")
+	raw, err := smtpMessage("sender@example.com", "recipient@example.com", title, "body", "", "", "<delivery@synapse.local>", time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}

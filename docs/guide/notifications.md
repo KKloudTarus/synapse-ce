@@ -3,7 +3,8 @@
 [Documentation home](README.md)
 
 Synapse can route tenant events to signed HTTP webhooks, Slack incoming webhooks, a Slack app,
-Microsoft Teams, Telegram, Google Chat and Discord channels, and email recipients. Delivery runs in `synapse-worker`; API requests and scans do
+Microsoft Teams, Telegram, Google Chat, Discord, Mattermost and Rocket.Chat channels,
+PagerDuty and Jira Service Management alerts, and email recipients. Delivery runs in `synapse-worker`; API requests and scans do
 not wait for a remote service.
 
 ## Personal email contacts
@@ -52,11 +53,14 @@ The feature refuses to start without a stable vault key. Full webhook and Slack
 URLs are encrypted because their paths may contain credentials. List and history
 responses show only redacted destinations.
 
-Email uses one relay controlled by the deployment operator. Configure
+Email defaults to a relay controlled by the deployment operator. Configure
 `SYNAPSE_NOTIFICATION_SMTP_HOST`, `SYNAPSE_NOTIFICATION_SMTP_PORT`,
 `SYNAPSE_NOTIFICATION_SMTP_FROM`, and optional username/password. STARTTLS is
-required by default. Tenant administrators choose recipients but cannot redirect
-SMTP traffic to another relay.
+required by default. Tenant administrators can set a sealed relay on an exact
+operator-approved host and verified TLS port 465 or 587. Email channels accept
+active verified same-tenant contacts or addresses in a DNS-proven tenant domain.
+See [Notification channel setup](notification-channels.md) for provider credentials,
+SMTP OAuth, recipient authorization, subject threading and the five-per-hour test quota.
 
 Use the `all` worker profile; the specialized `lifecycle` and `integrations`
 profiles do not consume notifications. The framework requires PostgreSQL and is
@@ -75,8 +79,7 @@ SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED=slack,email
 
 Set the same value on `synapse-api` and `synapse-worker` and restart both. The
 list is comma-separated, case-insensitive, and ignores blanks and repeats. Each
-entry must name a type in the notification driver registry (`webhook`, `slack`,
-`email` in this build); an unknown name stops startup, so a typo cannot leave
+entry must name a type in the notification driver registry; an unknown name stops startup, so a typo cannot leave
 the type you meant to disable switched on.
 
 While a type is disabled:
@@ -682,7 +685,7 @@ are committed with results and retried independently of transport delivery.
 Limits per tenant are 50 channels, 200 rules, and 10,000 pending/retrying deliveries
 before another event fan-out is admitted (one admitted fan-out can add up to 2,500).
 Sending is limited to ten attempts/second per tenant and one/second per channel,
-across workers. Channel tests are limited to ten/minute/channel. API bodies are
+across workers. Channel tests are limited to five requests per hour per channel. API bodies are
 limited to 32 KiB, event data to 16 KiB, email recipients to 50/channel, and history
 pages to 200. Queue saturation rolls back source handoff for a later poll.
 

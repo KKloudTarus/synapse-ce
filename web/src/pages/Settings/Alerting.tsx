@@ -555,7 +555,15 @@ function ChannelCreate({
             onValueChange={(v) => {
               const next = v as NotificationChannelType
               setType(next)
-              if (!initial) {
+              if (!initial && next !== type) {
+                setURL('')
+                setSecret('')
+                setChatId('')
+                setThreadId('')
+                setConversationId('')
+                setAllowShared(false)
+                setRecipients('')
+                setError(null)
                 setDataClass(defaultDataClass(next))
                 setRawEvent(false)
               }
@@ -654,6 +662,7 @@ function ChannelCreate({
           >
             <Input
               id="notification-url"
+              aria-describedby="notification-url-hint"
               type="password"
               disabled={destinationLocked}
               value={url}
@@ -666,14 +675,15 @@ function ChannelCreate({
         {(spec.kind === 'telegram' || spec.kind === 'slack_bot') && spec.hint && (
           <p className="text-sm text-tertiary md:col-span-2">{spec.hint}</p>
         )}
-        {type === 'webhook' && (
+        {spec.kind === 'signed_url' && (
           <Field
-            label="HMAC secret"
+            label={type === 'pagerduty' ? 'Routing key' : type === 'jsm' ? 'Integration API key' : 'HMAC secret'}
             htmlFor="notification-secret"
-            hint="At least 16 characters; write-only after save."
+            hint={type === 'webhook' ? 'At least 16 characters; write-only after save.' : 'Write-only after save. Re-enter the full key to replace it.'}
           >
             <Input
               id="notification-secret"
+              aria-describedby="notification-secret-hint"
               type="password"
               disabled={destinationLocked}
               value={secret}
@@ -748,9 +758,9 @@ function ChannelCreate({
                   : spec.kind === 'slack_bot'
                     ? !slackBotValid
                     : !initial && !url.trim()) ||
-              (type === 'webhook' &&
+              (spec.kind === 'signed_url' &&
                 (!initial || !!url || !!secret) &&
-                (secret.length < 16 || !url.trim()))
+                ((type === 'webhook' ? secret.length < 16 : !secret.trim()) || !url.trim()))
             }
           >
             <Plus className="size-4" />
@@ -858,7 +868,7 @@ export function ChannelList({
     try {
       await fn()
     } catch (e) {
-      notify(e instanceof Error ? e.message : 'Channel action failed', 'error')
+      notify(e instanceof ApiError && e.code ? `${e.message} (${e.code})` : e instanceof Error ? e.message : 'Channel action failed', 'error')
     }
   }
   if (channels.length === 0)
@@ -866,7 +876,7 @@ export function ChannelList({
       <EmptyState
         icon={BellRinging01}
         title="No notification channels"
-        hint="Add a signed webhook, Slack, Microsoft Teams, Telegram, Google Chat, Discord or email destination."
+        hint="Add a chat, email, pager or signed webhook destination."
       />
     )
   async function toggle(c: NotificationChannel) {

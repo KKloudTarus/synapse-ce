@@ -1,0 +1,97 @@
+{
+  "tested_commit": "993fc7128dcab902e4f7a9367a96266e32144b35",
+  "tested_code_tree": "516d1c90d3d749ad3f19facaccd45c11bc5f4807",
+  "jsm": {
+    "alerts": 12,
+    "create_posts": 14,
+    "create_status_gets": 14,
+    "close_posts": 12,
+    "close_status_gets": 12,
+    "priority_values": [
+      "P1",
+      "P2",
+      "P3",
+      "P4",
+      "P5"
+    ],
+    "scan_vi_summary": "Quét đã hoàn tất: Thay đổi: 2 mới, 1 đã xử lý, 9 không đổi; Tổng: 12 (nghiêm trọng 1, cao 2, TB 3, thấp 4, TT 2)",
+    "notifications_suppressed": true,
+    "all_test_alerts_closed": true,
+    "scope": "Built-in RenderMessage -> formatter -> production Sender, plus two direct formatter hostile probes. HTTPS provider calls, fresh Sender GET-only resume. No producer/queue/crash recovery proof.",
+    "integration_removed": true,
+    "local_credential_removed": true,
+    "cleanup": "After all synthetic alerts closed, user-approved permanent removal confirmed the empty integrations page. Temporary integration key is retired."
+  },
+  "gmail": {
+    "scope": "Production Email.Format HTML pasted into Gmail compose, self-sent, received DOM inspected. Client-rendering proof only; not a new SMTP/XOAUTH2 replay.",
+    "checked_links": [
+      {
+        "href": "https://synapse.invalid/engagements/synthetic/findings#finding-proof",
+        "text": "Open in Synapse"
+      }
+    ],
+    "new_oauth_grant": false,
+    "limitations": "Not a new SMTP replay. Prior SMTP/XOAUTH2 receipt remains on a8e2d1b9. This native client test covers explicit URL forms in the shown sample, not arbitrary bare domains or split HTML nodes."
+  },
+  "console": {
+    "scope": "Native Edge clicks from labeled local route fixture into MSW demo data; builder route paths/fragments retained, localhost HTTP origin substituted. No deployed HTTPS or live backend/provider navigation claim.",
+    "targets": {
+      "scan": "run-2026-01",
+      "finding": "finding-001",
+      "engagement": "eng-001",
+      "incident": "inc-001"
+    }
+  },
+  "ci": {
+    "github_actions_enabled": false,
+    "hosted_check": "GitGuardian Security Checks SUCCESS at pre-push head; recheck after push",
+    "local": "Go1.27.1 build/vet, six affected packages race, affected golangci-lint2.13.2; Node22 pnpm build/typecheck/lint and 34 tests passed; 10 existing lint warnings."
+  },
+  "deferred": [
+    "Teams live tenant acceptance",
+    "PagerDuty live service acceptance",
+    "Microsoft SMTP work-tenant acceptance"
+  ],
+  "screenshots": [
+    {
+      "file": "jsm-priorities-native.jpg",
+      "sha256": "80aa24d89196ba138bde149ad1e197907cf902e6516e5d0364d130da697cb075",
+      "caption": "JSM Free live priority mapping P1/P3/P4/P5; P2 is visible in the scan detail below"
+    },
+    {
+      "file": "jsm-scan-vi-complete-native.jpg",
+      "sha256": "8d613ed1950ac13de1ee78d1c1bc08be856f2710ceee8c0d9ef3a854c75906db",
+      "caption": "JSM Free live VI scan: P2 and all delta/count labels within 130 characters"
+    },
+    {
+      "file": "gmail-defang-native.jpg",
+      "sha256": "6364654f07b5e8099275a02434b82fb1b3614af757f73711e609ec0b1d987b95",
+      "caption": "Gmail received synthetic body crop; production HTML pasted and self-sent through Gmail UI; only checked console anchor remains"
+    },
+    {
+      "file": "console-scan-selected.jpg",
+      "sha256": "0ba4d0e4c7e85f97904976fecaab2cfcc987b3afd17f9d372ddf058f24a2145e",
+      "caption": "Local MSW demo: clicked scan route selects run-2026-01 as A"
+    },
+    {
+      "file": "console-finding-selected.jpg",
+      "sha256": "f356a6a01f81385104e8339eb798774295aaa7a21990ad801ec051d0122b6f2d",
+      "caption": "Local MSW demo: clicked finding route expands finding-001"
+    },
+    {
+      "file": "console-engagement-target.jpg",
+      "sha256": "e7a111f6111887ba4b3c2d94bd2b86919d4765517a0b6bf8da2266b68ccf7544",
+      "caption": "Local MSW demo: clicked engagement route opens eng-001"
+    },
+    {
+      "file": "console-incident-target.jpg",
+      "sha256": "7bd535c7d218d59176fb084c53c9504dcbc0549401ec9f731cb0a296334fb57e",
+      "caption": "Local MSW demo: clicked incident route opens inc-001"
+    },
+    {
+      "file": "jsm-removed-native.jpg",
+      "sha256": "0b89dd5bd7a0de09d2b4862179f2745aa2215db2390823738a9ea6d94d8fbc50",
+      "caption": "JSM test integration permanently removed after all alerts were closed"
+    }
+  ]
+}

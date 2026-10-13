@@ -222,7 +222,8 @@ func TestNotificationPostgresAdmissionRevalidatesRenderedDataClass(t *testing.T)
 		{"invalid rendered class", "unknown", notification.DataClassSummary, notification.EngagementNotificationsInherit, shared.ErrValidation},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// Space publications past the targeted-channel test rate limit and admission budgets.
+			// Age synthetic publications out of the hourly test quota; this case checks admission budgets.
+			personalExec(t, a.ctx, a.pool, a.tenant, "UPDATE notification_deliveries SET created_at=now()-interval '2 hours' WHERE channel_id='channel'")
 			a.now = a.now.Add(time.Minute)
 			did, job := a.claimed(t, fmt.Sprintf("class-%d", i), "admission-class-eng")
 			channel, err := a.repo.GetChannel(a.ctx, a.tenant, "channel")

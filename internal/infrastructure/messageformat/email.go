@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"html"
 	"html/template"
+	"regexp"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgmarkdown"
@@ -22,6 +23,8 @@ var _ ports.NotificationFormatter = Email{}
 const emailSubjectRunes = 180
 
 var emailLayout = template.Must(template.New("email").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><main>{{.Body}}</main></body></html>`))
+
+var emailURL = regexp.MustCompile(`(?i)\b(?:https?://|www\.)[^\s<>(){}]*`)
 
 func (Email) ChannelType() notification.ChannelType { return notification.ChannelEmail }
 
@@ -57,11 +60,11 @@ func emailText(doc msgmarkdown.Document, links []link) string {
 	for _, block := range doc.Blocks {
 		switch v := block.(type) {
 		case msgmarkdown.Paragraph:
-			parts = append(parts, plainText(v.Inlines))
+			parts = append(parts, emailPlainText(v.Inlines))
 		case msgmarkdown.List:
 			lines := make([]string, 0, len(v.Items))
 			for _, item := range v.Items {
-				lines = append(lines, "- "+plainText(item))
+				lines = append(lines, "- "+emailPlainText(item))
 			}
 			parts = append(parts, strings.Join(lines, "\n"))
 		}
@@ -74,6 +77,24 @@ func emailText(doc msgmarkdown.Document, links []link) string {
 		parts = append(parts, strings.Join(lines, "\n"))
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// defangEmailURLs makes explicit URL forms in message body data visibly inert. Email clients
+// routinely linkify text after receiving a MIME part, so HTML escaping alone does not prevent an
+// event-originated URL from becoming actionable. Checked RenderedMessage.Links are added later as
+// code-owned anchors and are deliberately left unchanged.
+func defangEmailURLs(value string) string {
+	return emailURL.ReplaceAllStringFunc(value, defangEmailURL)
+}
+
+func defangEmailURL(value string) string {
+	urlPart := strings.TrimRight(value, ".,!?;:")
+	trailing := value[len(urlPart):]
+	return strings.ReplaceAll(strings.ReplaceAll(urlPart, "://", "[:]//"), ".", "[.]") + trailing
+}
+
+func emailPlainText(inlines []msgmarkdown.Inline) string {
+	return defangEmailURLs(plainText(inlines))
 }
 
 func plainText(inlines []msgmarkdown.Inline) string {
@@ -153,7 +174,7 @@ func htmlInlines(b *strings.Builder, inlines []msgmarkdown.Inline) {
 	for _, n := range inlines {
 		switch v := n.(type) {
 		case msgmarkdown.Text:
-			b.WriteString(html.EscapeString(v.Value))
+			b.WriteString(html.EscapeString(defangEmailURLs(v.Value)))
 		case msgmarkdown.Strong:
 			b.WriteString("<strong>")
 			htmlInlines(b, v.Children)
@@ -163,7 +184,7 @@ func htmlInlines(b *strings.Builder, inlines []msgmarkdown.Inline) {
 			htmlInlines(b, v.Children)
 			b.WriteString("</em>")
 		case msgmarkdown.Code:
-			b.WriteString("<code>" + html.EscapeString(v.Value) + "</code>")
+			b.WriteString("<code>" + html.EscapeString(defangEmailURLs(v.Value)) + "</code>")
 		case msgmarkdown.LineBreak:
 			b.WriteString("<br>\n")
 		}

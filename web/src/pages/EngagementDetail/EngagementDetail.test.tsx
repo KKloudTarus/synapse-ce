@@ -23,6 +23,7 @@ vi.mock('../../lib/api', () => ({
     createRetest: vi.fn(),
     previewAssessmentRelationshipChange: vi.fn(),
     commitAssessmentRelationshipChange: vi.fn(),
+    scanRuns: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     status: number
@@ -103,6 +104,7 @@ describe('EngagementDetail Page Shell', () => {
     vi.mocked(api.assessmentLifecycle).mockResolvedValue(mockLifecycle)
     vi.mocked(api.listAssessmentClosureManifests).mockResolvedValue([])
     vi.mocked(api.me).mockResolvedValue({ id: 'operator', name: 'Operator', role: 'member' })
+    vi.mocked(api.scanRuns).mockResolvedValue([])
   })
 
   it('renders breadcrumb, engagement name, and status pill', async () => {
@@ -273,6 +275,47 @@ describe('EngagementDetail Page Shell', () => {
     await waitFor(() => {
       expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'tab-supply-chain')
     })
+  })
+
+  it('opens and selects the scan identified by a console link', async () => {
+    vi.mocked(api.scanRuns).mockResolvedValue([{
+      id: 'scan-console-1', engagementId: 'eng-123456', createdAt: '2026-10-01T00:00:00Z',
+      manifest: {
+        toolVersions: {}, vulnDBSnapshot: '', grypeDBVersion: '', correlationVersion: 1, sbomSha256: '', reproScore: 100,
+        pinnedInputs: [], unpinnedInputs: [],
+      },
+      findingKeys: [], provenance: 'native', terminalStatus: 'succeeded', sealedAt: '2026-10-01T00:00:00Z',
+      manifestHash: '', laneCount: 0, completeCoverage: true,
+    }] as never)
+
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456/scanruns#scan-scan-console-1']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+          <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const run = await screen.findByRole('button', { name: 'Scan run scan-con…, selected as comparison run A' })
+    expect(run).toHaveAttribute('id', 'scan-scan-console-1')
+    expect(run).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'tab-supply-chain')
+    expect(screen.getByRole('tab', { name: 'Supply Chain' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('ignores a malformed encoded scan fragment', async () => {
+    render(
+      <MemoryRouter initialEntries={['/engagements/eng-123456/scanruns#scan-%E0%A4%A']}>
+        <Routes>
+          <Route path="/engagements/:id" element={<EngagementDetail />} />
+          <Route path="/engagements/:id/:tabSlug" element={<EngagementDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('No scan runs yet')).toBeVisible()
+    expect(screen.getByRole('tab', { name: 'Supply Chain' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('moves between tabs with the arrow keys and keeps one tab stop', async () => {

@@ -1,0 +1,175 @@
+{
+  "source": "Synthetic local console fixtures; no live provider delivery.",
+  "findings": [
+    {
+      "state": "channels-create",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "channels-create-rocket_chat",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "channels-create-pagerduty",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "channels-create-jsm",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "channels-edit",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "channels-edit-pagerduty",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "channels-edit-jsm",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "channels-test-success",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "channels-test-error",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "email-empty",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "email-create",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "email-create-google",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "email-create-microsoft",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "email-edit",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "email-loading",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "email-error",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "email-permission",
+      "theme": "light",
+      "errors": []
+    },
+    {
+      "state": "channels-create",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "channels-create-rocket_chat",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "channels-create-pagerduty",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "channels-create-jsm",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "channels-edit",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "channels-edit-pagerduty",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "channels-edit-jsm",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "channels-test-success",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "channels-test-error",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "email-empty",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "email-create",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "email-create-google",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "email-create-microsoft",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "email-edit",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "email-loading",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "email-error",
+      "theme": "dark",
+      "errors": []
+    },
+    {
+      "state": "email-permission",
+      "theme": "dark",
+      "errors": []
+    }
+  ]
+}

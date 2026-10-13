@@ -9,7 +9,7 @@ import (
 // its body is a versioned contract (EPIC #1327 D5), not rendered content.
 func Formatters() map[notification.ChannelType]ports.NotificationFormatter {
 	out := map[notification.ChannelType]ports.NotificationFormatter{}
-	for _, f := range []ports.NotificationFormatter{Slack{}, Email{}, TeamsFormatter{}, TelegramFormatter{}, GoogleChatFormatter{}, DiscordFormatter{}, SlackBot{}} {
+	for _, f := range []ports.NotificationFormatter{Slack{}, Email{}, TeamsFormatter{}, TelegramFormatter{}, GoogleChatFormatter{}, DiscordFormatter{}, MattermostFormatter{}, RocketChatFormatter{}, PagerDutyFormatter{}, JSMFormatter{}, SlackBot{}} {
 		out[f.ChannelType()] = f
 	}
 	return out

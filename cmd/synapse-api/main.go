@@ -391,10 +391,16 @@ func main() {
 	// The notification driver registry is the one list of channel types this build delivers to. The
 	// capability catalog advertises it and the operator kill switch is checked against it, so it is
 	// built whether or not tenant notifications are enabled: a typo in the switch always stops startup.
+	if err := cfg.ValidateNotificationHosts(); err != nil {
+		log.Error("notification host policy invalid", "err", err)
+		os.Exit(1)
+	}
 	notificationSender := notificationsender.New(notificationsender.SMTPConfig{
 		Host: cfg.NotificationSMTPHost, Port: cfg.NotificationSMTPPort, From: cfg.NotificationSMTPFrom,
-		Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS, UnsubscribeURL: cfg.NotificationUnsubscribeURL,
+		Username: cfg.NotificationSMTPUsername, Password: cfg.NotificationSMTPPassword, RequireTLS: cfg.NotificationSMTPRequireTLS, UnsubscribeURL: cfg.NotificationUnsubscribeURL, AllowedHosts: cfg.NotificationSMTPAllowedHosts,
 	}, 10*time.Second)
+	notificationSender.SetSelfHostedChannelHosts(cfg.NotificationChatAllowedHosts)
+	notificationSender.SetPagerKey(cfg.VaultMasterKey)
 	disabledNotificationTypes, err := notificationSender.ResolveDisabled(cfg.NotificationProvidersDisabled)
 	if err != nil {
 		log.Error("notification kill switch invalid", "err", err)
@@ -1629,6 +1635,10 @@ func main() {
 			os.Exit(1)
 		}
 		notificationService.SetTransactionRunner(postgres.NewTenantTransactionRunner(databasePool))
+		notificationService.SetSelfHostedChannelHosts(cfg.NotificationChatAllowedHosts)
+		notificationService.SetSMTPAllowedHosts(cfg.NotificationSMTPAllowedHosts)
+		notificationService.SetEmailSettingsStore(postgres.NewNotificationEmailSettingsStore(databasePool))
+		notificationService.SetNotificationTXTResolver(net.DefaultResolver)
 		notificationService.SetDisabledChannelTypes(disabledNotificationTypes)
 		notificationService.SetTemplateStore(postgres.NewNotificationTemplateStore(databasePool))
 		notificationService.SetTenantSettings(tenantSettingsStore)

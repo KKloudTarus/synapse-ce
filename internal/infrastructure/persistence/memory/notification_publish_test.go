@@ -75,15 +75,34 @@ func TestPublishToChannelLimitsChannelTests(t *testing.T) {
 	ctx := context.Background()
 	repo := newTestNotificationRepository()
 	mustCreateChannel(t, repo, testChannel("ch-1", notification.ChannelWebhook))
-	for i := range maxChannelTestsPerMinute {
+	for i := range maxChannelTestsPerHour {
 		if _, err := repo.PublishToChannel(ctx, testEvent(fmt.Sprintf("test-%d", i), notification.EventTest), "ch-1"); err != nil {
 			t.Fatalf("test %d: %v", i, err)
 		}
 	}
 	if _, err := repo.PublishToChannel(ctx, testEvent("test-over", notification.EventTest), "ch-1"); !errors.Is(err, shared.ErrSaturated) {
-		t.Fatalf("eleventh test err = %v", err)
+		t.Fatalf("sixth test err = %v", err)
 	}
 	if _, err := repo.PublishToChannel(ctx, testEvent("test-x", notification.EventTest), "ch-missing"); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("test to a missing channel err = %v", err)
+	}
+}
+
+func TestPublishToChannelTestLimitCountsEventsAndExpires(t *testing.T) {
+	ctx := context.Background()
+	now := notificationTestNow
+	repo := NewNotificationRepository(nil, func() time.Time { return now })
+	mustCreateChannel(t, repo, testChannel("ch-mail", notification.ChannelEmail, "one@example.test", "two@example.test"))
+	for i := range maxChannelTestsPerHour {
+		if _, err := repo.PublishToChannel(ctx, testEvent(fmt.Sprintf("mail-%d", i), notification.EventTest), "ch-mail"); err != nil {
+			t.Fatalf("test %d: %v", i, err)
+		}
+	}
+	if _, err := repo.PublishToChannel(ctx, testEvent("mail-over", notification.EventTest), "ch-mail"); !errors.Is(err, shared.ErrSaturated) {
+		t.Fatalf("sixth email test = %v, want ErrSaturated", err)
+	}
+	now = now.Add(time.Hour + time.Nanosecond)
+	if _, err := repo.PublishToChannel(ctx, testEvent("mail-after-window", notification.EventTest), "ch-mail"); err != nil {
+		t.Fatalf("test after one-hour window: %v", err)
 	}
 }
