@@ -25,16 +25,13 @@ import (
 	// database keeps that independent of whether the runtime image ships /usr/share/zoneinfo.
 	_ "time/tzdata"
 
-	"github.com/KKloudTarus/synapse-ce/internal/adapter/notificationbuiltin"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/consolelink"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
 	integrationdom "github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/vulnerabilityreconcile"
@@ -47,12 +44,10 @@ import (
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	elastic "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/elastic"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
@@ -63,7 +58,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/signing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceartifact"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
-	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/teamsbot"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/timestamp"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/toolrunner"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/tools/enry"
@@ -82,7 +76,6 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/accuracyeval"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/agenttools"
-	alertinguc "github.com/KKloudTarus/synapse-ce/internal/usecase/alerting"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/approval"
 	comparisonuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcomparison"
@@ -115,7 +108,6 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
-	"github.com/KKloudTarus/synapse-ce/internal/usecase/teamslink"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitycorrelation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityevaluation"
@@ -281,6 +273,27 @@ func main() {
 	evidenceStore := postgres.NewEvidenceStore(pool)
 	auditLog := postgres.NewAuditLog(pool)
 	queue := postgres.NewJobQueue(pool, ids)
+	if cfg.WorkerProfile == config.WorkerProfileNotifications {
+		// ValidateWorkerProfile already requires an enabled notification plane and a
+		// configured shared vault key. Decode it before starting any claim loop so a
+		// malformed key cannot leave a data-only worker consuming durable jobs.
+		vaultCipher, vaultErr := notificationWorkerVaultCipher(cfg)
+		if vaultErr != nil {
+			log.Error("notification worker vault configuration invalid", "err", vaultErr)
+			os.Exit(1)
+		}
+		notificationRuntime, notificationErr := configureNotificationWorkerRuntime(
+			ctx, stop, cfg, pool, vaultCipher, notificationSender, disabledNotificationTypes, auditLog, clock, ids, log,
+		)
+		if notificationErr != nil {
+			log.Error("notification worker init failed", "err", notificationErr)
+			os.Exit(1)
+		}
+		defer notificationRuntime.close()
+		log.Info("durable notification delivery ENABLED", "profile", cfg.WorkerProfile)
+		runWorkerRuntime(ctx, cfg, queue, notificationRuntime.handlers, notificationRuntime.maintenance, postgres.NewLeaderStore(pool), auditLog, clock, ids, 6*time.Minute, log)
+		return
+	}
 	var ownershipRepo *postgres.OwnershipRepository
 	var ownershipWorker *ownershipuc.Worker
 	if cfg.OwnershipMode != "off" {
@@ -713,148 +726,19 @@ func main() {
 	}
 	var workerMetricsRegistry *prometheus.Registry
 	if cfg.NotificationEnabled {
-		if cfg.VaultMasterKey == "" {
-			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires SYNAPSE_VAULT_MASTER_KEY shared by API and worker")
-			os.Exit(1)
-		}
-		sender := notificationSender
-		notificationService, notificationErr := notificationuc.NewService(newNotificationRepository(pool), vaultCipher, sender, auditLog, clock, ids)
+		notificationRuntime, notificationErr := configureNotificationWorkerRuntime(
+			ctx, stop, cfg, pool, vaultCipher, notificationSender, disabledNotificationTypes, auditLog, clock, ids, log,
+		)
 		if notificationErr != nil {
-			log.Error("notification service init failed", "err", notificationErr)
+			log.Error("notification worker init failed", "err", notificationErr)
 			os.Exit(1)
 		}
-		notificationService.SetDisabledChannelTypes(disabledNotificationTypes)
-		if len(disabledNotificationTypes) > 0 {
-			log.Warn("notification channel types disabled by the operator; their deliveries are cancelled with provider_disabled", "types", cfg.NotificationProvidersDisabled)
+		defer notificationRuntime.close()
+		for kind, handler := range notificationRuntime.handlers {
+			handlers[kind] = handler
 		}
-		// Channel health (#1464): the attempt result, the failure count, an automatic pause and its
-		// admin notice commit in one tenant transaction.
-		if err := notificationService.SetPauseThreshold(cfg.NotificationChannelPauseThreshold); err != nil {
-			log.Error("notification channel pause threshold invalid", "err", err)
-			os.Exit(1)
-		}
-		notificationService.SetTransactionRunner(postgres.NewTenantTransactionRunner(pool))
-		notificationService.SetSelfHostedChannelHosts(cfg.NotificationChatAllowedHosts)
-		notificationService.SetSMTPAllowedHosts(cfg.NotificationSMTPAllowedHosts)
-		notificationService.SetEmailSettingsStore(postgres.NewNotificationEmailSettingsStore(pool))
-		notificationService.SetNotificationTXTResolver(net.DefaultResolver)
-		// Send-time rendering (#1365): tenant templates, the tenant's locale and time zone, and the
-		// channel formatters.
-		notificationService.SetTemplateStore(postgres.NewNotificationTemplateStore(pool))
-		notificationService.SetTenantSettings(postgres.NewTenantSettingsStore(pool))
-		notificationService.SetFormatters(messageformat.Formatters())
-		// Personal Slack direct messages (#1419) go out as the tenant's Slack app and link back to the
-		// console.
-		notificationService.SetSlackDirect(sender)
-		notificationService.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
-		notificationService.SetBuiltinTemplates(notificationbuiltin.New())
-		if base := cfg.EffectivePublicBaseURL(); base != "" {
-			builder, linkErr := consolelink.NewBuilder(base)
-			if linkErr != nil {
-				log.Error("notification console link configuration invalid", "err", linkErr)
-				os.Exit(1)
-			}
-			notificationService.SetConsoleLinkBuilder(builder)
-		}
-		// Delivery metrics are emitted by this worker only: the API exposes
-		// aggregate queue health but never observes worker transport outcomes.
-		if cfg.MetricsEnabled {
-			workerMetrics := observability.NewWorkerNotificationMetrics(postgres.NewNotificationRepository(pool))
-			workerMetricsRegistry = workerMetrics.Registry()
-			notificationService.SetDeliveryObserver(workerMetrics)
-			mux := http.NewServeMux()
-			mux.Handle("GET /metrics", workerMetrics.Handler())
-			listener, listenErr := net.Listen("tcp", cfg.MetricsAddr)
-			if listenErr != nil {
-				log.Error("worker metrics listener failed", "err", listenErr)
-				os.Exit(1)
-			}
-			metricsServer := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-			go func() {
-				if serveErr := metricsServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && ctx.Err() == nil {
-					log.Error("worker metrics listener stopped", "err", serveErr)
-					stop()
-				}
-			}()
-			defer func() {
-				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer shutdownCancel()
-				if shutdownErr := metricsServer.Shutdown(shutdownCtx); shutdownErr != nil {
-					log.Warn("worker metrics shutdown failed", "err", shutdownErr)
-				}
-			}()
-			log.Info("private worker notification metrics enabled", "addr", cfg.MetricsAddr)
-		}
-		handlers[notificationuc.JobKind] = notificationJobHandler{svc: notificationService}
-		contactService, contactErr := usercontacts.NewService(postgres.NewUserContactStore(pool), postgres.NewUserRepository(pool), vaultCipher, sender, ids, clock, usercontacts.DeriveVerifierKey(cfg.VaultMasterKey), cfg.NotificationSMTPHost != "" && cfg.NotificationSMTPFrom != "")
-		if contactErr != nil {
-			log.Error("user contact worker init failed", "err", contactErr)
-			os.Exit(1)
-		}
-		// A Slack contact's code is sent as the Slack app's direct message (#1419).
-		contactService.SetSlack(notificationService)
-		handlers[usercontacts.JobKind] = contactVerificationJobHandler{svc: contactService}
-		inboxStore := postgres.NewInboxStore(pool)
-		personalInbox, inboxErr := inbox.NewService(inboxStore, clock)
-		if inboxErr != nil {
-			log.Error("personal inbox worker init failed", "err", inboxErr)
-			os.Exit(1)
-		}
-		personalInbox.SetMailer(sender)
-		// Personal Slack (#1419) and Teams (#1420) messages are reloaded at send time like email.
-		personalInbox.SetPersonalDelivery(inboxStore)
-		personalInbox.SetPersonalSender(notification.PersonalSlack, notificationService.PersonalSlack())
-		if err := cfg.ValidateTeamsBot(); err != nil {
-			log.Error("Microsoft Teams bot configuration invalid", "err", err)
-			os.Exit(1)
-		}
-		if cfg.TeamsBotEnabled() {
-			teamsService, teamsErr := teamslink.NewService(teamslink.Config{
-				Bot:      teamsbot.New(teamsbot.Config{AppID: cfg.TeamsBotAppID, AppPassword: cfg.TeamsBotAppPassword, TenantID: cfg.TeamsBotTenantID}, safehttp.New(10*time.Second, false)),
-				Offers:   postgres.NewTeamsLinkOffers(pool),
-				Contacts: postgres.NewUserContactStore(pool), Protector: vaultCipher, IDs: ids, Clock: clock,
-				Key: teamslink.DeriveKey(cfg.VaultMasterKey), AcceptsServiceURL: teamsbot.ValidServiceURL,
-				Formatter: messageformat.TeamsFormatter{}, PublicBaseURL: cfg.EffectivePublicBaseURL(),
-			})
-			if teamsErr != nil {
-				log.Error("Microsoft Teams bot init failed", "err", teamsErr)
-				os.Exit(1)
-			}
-			personalInbox.SetPersonalSender(notification.PersonalTeams, teamsService)
-			personalInbox.SetTeamsAvailable(true)
-		}
-		for _, kind := range inbox.JobKinds() {
-			handlers[kind] = personalMailJobHandler{svc: personalInbox}
-		}
-		// #1347: incident.created is always projected onto the framework. Before this, a set
-		// SYNAPSE_ALERT_WEBHOOK_URL made the worker mark captured incidents processed without
-		// publishing them, silently discarding every tenant incident.created rule. The legacy webhook
-		// runs in the API and delivers to its own deployment-wide URL; rules deliver to tenant channels,
-		// so both paths run side by side until the legacy one is removed. Each path is idempotent on
-		// its own (the framework keys events by a stable id), and the rule form warns about the overlap.
-		alertinguc.WarnLegacyWebhookDeprecated(log, cfg.AlertWebhookURL != "")
-		notificationSource := postgres.NewNotificationSource(pool, newNotificationRepository(pool), cfg.FleetAgentStaleAfter)
-		if err := notificationSource.SetSLABreachMaxReminders(cfg.NotificationSLABreachMaxReminders); err != nil {
-			log.Error("notification SLA reminders invalid", "err", err)
-			os.Exit(1)
-		}
-		notificationSource.SetVulnerabilityEnabled(cfg.VulnerabilityNotificationsEnabled && !cfg.VulnerabilityDryRunEnabled)
-		maintenanceTasks = append(maintenanceTasks, func(taskCtx context.Context) {
-			ticker := time.NewTicker(time.Minute)
-			defer ticker.Stop()
-			for {
-				if n, pollErr := notificationSource.Poll(taskCtx, clock.Now().UTC(), 200); pollErr != nil && taskCtx.Err() == nil {
-					log.Warn("notification source poll failed", "err", pollErr)
-				} else if n > 0 {
-					log.Info("notification source events projected", "count", n)
-				}
-				select {
-				case <-taskCtx.Done():
-					return
-				case <-ticker.C:
-				}
-			}
-		})
+		maintenanceTasks = append(maintenanceTasks, notificationRuntime.maintenance...)
+		workerMetricsRegistry = notificationRuntime.metricsRegistry
 		log.Info("durable notification delivery ENABLED")
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
@@ -1450,6 +1334,9 @@ func runWorkerRuntime(
 ) {
 	if cfg.LeaderElectionEnabled {
 		resource := cfg.LeaderResource + "-worker-maintenance"
+		if cfg.WorkerProfile == config.WorkerProfileNotifications {
+			resource = notificationMaintenanceResource(cfg)
+		}
 		elector, err := leaderuc.NewElector(leaderStore, auditLog, clock, resource, ids.NewID().String(), cfg.LeaderTerm, cfg.LeaderRenew)
 		if err != nil {
 			log.Error("worker leader election configuration invalid", "err", err)

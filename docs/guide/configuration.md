@@ -126,7 +126,7 @@ Request logs and metrics contain no raw path IDs, credentials or tenant IDs.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_METRICS_ENABLED` | `false` | Expose Prometheus metrics on a SEPARATE listener (`SYNAPSE_METRICS_ADDR`). Off by default; the listener is never bearer-protected and is never itself instrumented. On an `all` profile worker with notifications enabled, it also exposes worker-owned delivery metrics. |
+| `SYNAPSE_METRICS_ENABLED` | `false` | Expose Prometheus metrics on a SEPARATE listener (`SYNAPSE_METRICS_ADDR`). Off by default; the listener is never bearer-protected and is never itself instrumented. On an `all` or `notifications` profile worker with notifications enabled, it also exposes worker-owned delivery metrics. |
 | `SYNAPSE_METRICS_ADDR` | `127.0.0.1:9090` | Metrics listener address. Loopback-only by default; widen it only onto a private scrape network, never a public interface. |
 | `SYNAPSE_ACCESS_LOG_ENABLED` | `true` | Emit one structured `http access` log event per request (method, matched route, status, latency, request id, and (once authenticated) the resolved principal id). Never logs raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or secrets. |
 
@@ -171,7 +171,7 @@ scrape_configs:
       - targets: ["127.0.0.1:9090"]
 ```
 
-The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord`, `slack_bot/slack` or `other/other`, never tenant or destination data.
+The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled in the `all` or `notifications` profile when notifications are enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord`, `slack_bot/slack` or `other/other`, never tenant or destination data.
 
 ## Persistence
 
@@ -446,7 +446,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_LEADER_TERM` | `15s` | Lease term. |
 | `SYNAPSE_LEADER_RENEW` | `5s` | Renew interval. |
 | `SYNAPSE_WORKER_CONCURRENCY` | `1` | Durable queue claim loops per `synapse-worker` process; must be from 1 through 64. Jobs remain active on every worker, while maintenance sweepers are leader-gated when election is enabled. |
-| `SYNAPSE_WORKER_PROFILE` | `all` | `all` initializes hardened scanner handlers, captures ownership source evidence and requires the production sandbox. `integrations` claims only external-integration jobs. `lifecycle` claims Assessment comparison and closure-report jobs and, when ownership is enabled, also dispatches and consumes data-only ownership routing jobs. The two data-only profiles do not construct executable-tool handlers or require sandbox support. |
+| `SYNAPSE_WORKER_PROFILE` | `all` | `all` initializes hardened scanner handlers, captures ownership source evidence and requires the production sandbox. `integrations` claims only external-integration jobs. `lifecycle` claims Assessment comparison and closure-report jobs and, when ownership is enabled, also dispatches and consumes data-only ownership routing jobs. `notifications` claims only notification delivery, contact verification, and personal email/Slack/Teams jobs. It requires `SYNAPSE_NOTIFICATIONS_ENABLED=true` and the stable `SYNAPSE_VAULT_MASTER_KEY` shared with the API before it claims work. The three data-only profiles do not construct executable-tool handlers or require sandbox support. Notification maintenance uses its own leader lease; delivery and source idempotency remain in the shared tenant-scoped stores. |
 | `SYNAPSE_INTEGRATION_SCHEDULER_ENABLED` | `false` | Dispatch due external-integration polls. Requires PostgreSQL and `SYNAPSE_LEADER_ENABLED=true`; startup fails closed otherwise. |
 | `SYNAPSE_INTEGRATION_SCHEDULER_POLL` | `1m` | Interval for checking enabled integrations whose provider poll is due. |
 | `SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT` | `10` | Maximum integration poll operations created per scheduler tick. |
@@ -617,7 +617,7 @@ Provider receivers receive only the authenticated tenant/owner context and the b
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SYNAPSE_METRICS_ENABLED` | `false` | Expose Prometheus metrics on a SEPARATE listener (`SYNAPSE_METRICS_ADDR`). Off by default; the listener is never bearer-protected and is never itself instrumented. On an `all` profile worker with notifications enabled, it also exposes worker-owned delivery metrics. |
+| `SYNAPSE_METRICS_ENABLED` | `false` | Expose Prometheus metrics on a SEPARATE listener (`SYNAPSE_METRICS_ADDR`). Off by default; the listener is never bearer-protected and is never itself instrumented. On an `all` or `notifications` profile worker with notifications enabled, it also exposes worker-owned delivery metrics. |
 | `SYNAPSE_METRICS_ADDR` | `127.0.0.1:9090` | Metrics listener address. Loopback-only by default; widen it only onto a private scrape network, never a public interface. |
 | `SYNAPSE_ACCESS_LOG_ENABLED` | `true` | Emit one structured `http access` log event per request (method, matched route, status, latency, request id, and (once authenticated) the resolved principal id). Never logs raw paths, query strings, headers, bodies, tenant ids, remote addresses, user agents, or secrets. |
 
@@ -662,7 +662,7 @@ scrape_configs:
       - targets: ["127.0.0.1:9090"]
 ```
 
-The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled only in the `all` profile with notifications enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord`, `slack_bot/slack` or `other/other`, never tenant or destination data.
+The metrics listener has no authentication of its own. Keep `SYNAPSE_METRICS_ADDR` on loopback or a private network reachable only by your scrape infrastructure; do not put it behind the same reverse-proxy path as the bearer-protected API, and do not widen it to a public interface. The API warns when a configured metrics listener is non-loopback. A co-located `synapse-worker` must use a different metrics port (for example `127.0.0.1:9091`); its listener is enabled in the `all` or `notifications` profile when notifications are enabled. Worker delivery metric labels are fixed to `webhook/generic`, `slack/slack`, `email/smtp`, `teams/teams`, `telegram/telegram`, `google_chat/google_chat`, `discord/discord`, `slack_bot/slack` or `other/other`, never tenant or destination data.
 
 ## Persistence
 

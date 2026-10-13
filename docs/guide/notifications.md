@@ -62,9 +62,11 @@ active verified same-tenant contacts or addresses in a DNS-proven tenant domain.
 See [Notification channel setup](notification-channels.md) for provider credentials,
 SMTP OAuth, recipient authorization, subject threading and the five-per-hour test quota.
 
-Use the `all` worker profile; the specialized `lifecycle` and `integrations`
-profiles do not consume notifications. The framework requires PostgreSQL and is
-disabled by default. The development memory store does not emulate durable delivery.
+Use the `all` or `notifications` worker profile; the specialized `lifecycle` and
+`integrations` profiles do not consume notifications. The `notifications` profile
+requires notifications enabled and the same stable vault key as the API before it
+can claim a job. The framework requires PostgreSQL and is disabled by default. The
+development memory store does not emulate durable delivery.
 `SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS=false` is intended only for a controlled
 development relay. Production relays must support verified STARTTLS.
 
@@ -736,7 +738,9 @@ enable notifications via `extraEnv`, and scrape the worker-only ClusterIP
 Service from `worker.metrics.monitoringNamespace`. The chart creates a
 matching ingress NetworkPolicy; the default remains disabled. The
 `integrations` and `lifecycle` worker profiles do not process channel deliveries
-and do not serve these metrics. The API never duplicates worker delivery counters.
+and do not serve these metrics. The `notifications` profile serves the same metrics
+while claiming only notification, contact-verification, and personal inbox jobs. The
+API never duplicates worker delivery counters.
 
 Worker metric names all start with `synapse_notification_worker_`:
 - `sent_total` and `failed_total` count **committed delivery attempts**. Failed

@@ -10,6 +10,7 @@ node_modules/
 .env
 .env.local
 data/
-docs/
+docs/**
+!docs/guide/schemas/events/**
 assets/
 *.md

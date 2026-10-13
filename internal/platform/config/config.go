@@ -1473,14 +1473,25 @@ const (
 	WorkerProfileAll          WorkerProfile = "all"
 	WorkerProfileIntegrations WorkerProfile = "integrations"
 	WorkerProfileLifecycle    WorkerProfile = "lifecycle"
+	// WorkerProfileNotifications claims only notification delivery, contact verification,
+	// and personal inbox jobs. It never constructs an executable-tool handler.
+	WorkerProfileNotifications WorkerProfile = "notifications"
 )
 
 func (c Config) ValidateWorkerProfile() error {
 	switch c.WorkerProfile {
 	case WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle:
 		return nil
+	case WorkerProfileNotifications:
+		if !c.NotificationEnabled {
+			return errors.New("SYNAPSE_WORKER_PROFILE=notifications requires SYNAPSE_NOTIFICATIONS_ENABLED=true")
+		}
+		if strings.TrimSpace(c.VaultMasterKey) == "" {
+			return errors.New("SYNAPSE_WORKER_PROFILE=notifications requires SYNAPSE_VAULT_MASTER_KEY shared by API and worker")
+		}
+		return nil
 	default:
-		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q, %q, or %q (got %q)", WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle, c.WorkerProfile)
+		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q, %q, %q, or %q (got %q)", WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle, WorkerProfileNotifications, c.WorkerProfile)
 	}
 }
 
@@ -1488,7 +1499,7 @@ func (c Config) ValidateWorkerProfile() error {
 // sandbox gate while allowing data-only workers, which never construct or claim an
 // executable-tool handler.
 func (c Config) ValidateWorkerSandboxPosture() error {
-	if c.WorkerProfile == WorkerProfileIntegrations || c.WorkerProfile == WorkerProfileLifecycle {
+	if c.WorkerProfile == WorkerProfileIntegrations || c.WorkerProfile == WorkerProfileLifecycle || c.WorkerProfile == WorkerProfileNotifications {
 		return nil
 	}
 	return c.ValidateSandboxPosture()
@@ -1511,7 +1522,7 @@ func (c Config) ResolveToolExecution(role ProcessRole) (ToolExecution, error) {
 		if c.DBDSN == "" {
 			return "", errors.New("synapse-worker requires SYNAPSE_DB_DSN: queued execution cannot use process-local persistence")
 		}
-		if c.IsProduction() && !c.SandboxEnabled && c.WorkerProfile != WorkerProfileIntegrations && c.WorkerProfile != WorkerProfileLifecycle {
+		if c.IsProduction() && !c.SandboxEnabled && c.WorkerProfile != WorkerProfileIntegrations && c.WorkerProfile != WorkerProfileLifecycle && c.WorkerProfile != WorkerProfileNotifications {
 			return "", errors.New("production synapse-worker requires SYNAPSE_SANDBOX_ENABLED=true")
 		}
 		return ToolExecutionWorker, nil
