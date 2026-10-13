@@ -18,6 +18,10 @@ var channelFamilies = map[ChannelType]TemplateFamily{
 	ChannelTelegram:   FamilyChat,
 	ChannelGoogleChat: FamilyChat,
 	ChannelDiscord:    FamilyChat,
+	ChannelMattermost: FamilyChat,
+	ChannelRocketChat: FamilyChat,
+	ChannelPagerDuty:  FamilyPager,
+	ChannelJSM:        FamilyPager,
 	ChannelSlackBot:   FamilyChat,
 }
 

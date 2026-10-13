@@ -8,7 +8,7 @@ import (
 
 func TestFormattersCoverChatAndEmail(t *testing.T) {
 	formatters := Formatters()
-	for _, kind := range []notification.ChannelType{notification.ChannelSlack, notification.ChannelEmail, notification.ChannelTeams, notification.ChannelTelegram, notification.ChannelGoogleChat, notification.ChannelDiscord, notification.ChannelSlackBot} {
+	for _, kind := range []notification.ChannelType{notification.ChannelSlack, notification.ChannelEmail, notification.ChannelTeams, notification.ChannelTelegram, notification.ChannelGoogleChat, notification.ChannelDiscord, notification.ChannelMattermost, notification.ChannelRocketChat, notification.ChannelPagerDuty, notification.ChannelJSM, notification.ChannelSlackBot} {
 		if f, ok := formatters[kind]; !ok || f.ChannelType() != kind {
 			t.Errorf("no formatter for %s", kind)
 		}

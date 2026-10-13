@@ -25,7 +25,7 @@ vi.mock('../../lib/api', async (original) => ({
   },
 }))
 
-const ALL_TYPES = ['webhook', 'slack', 'email', 'teams', 'telegram', 'google_chat', 'discord']
+const ALL_TYPES = ['webhook', 'slack', 'slack_bot', 'email', 'teams', 'telegram', 'google_chat', 'discord', 'mattermost', 'rocket_chat', 'pagerduty', 'jsm']
 
 function capabilities(channelTypes: string[]): Capability[] {
   return [
@@ -55,7 +55,7 @@ function addForm() {
   return within(form)
 }
 
-describe('chat notification channels (#1378 to #1381)', () => {
+describe('chat and pager notification channels', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     resetCapabilityCache()
@@ -75,15 +75,65 @@ describe('chat notification channels (#1378 to #1381)', () => {
   it('offers every advertised chat type', async () => {
     render(<Alerting />)
     fireEvent.click(await screen.findByRole('combobox', { name: 'Type' }))
-    for (const label of ['Microsoft Teams (Workflows)', 'Telegram bot', 'Google Chat incoming webhook', 'Discord webhook']) {
+    for (const label of ['Slack app (bot token)', 'Microsoft Teams (Workflows)', 'Telegram bot', 'Google Chat incoming webhook', 'Discord webhook', 'Mattermost', 'Rocket.Chat', 'PagerDuty', 'Jira Service Management']) {
       expect(await screen.findByRole('option', { name: label })).toBeInTheDocument()
     }
+  })
+
+  it.each([
+    ['Slack app (bot token)', 'Bot token', 'PagerDuty', 'Routing key', 'https://events.pagerduty.com/v2/enqueue'],
+    ['Slack app (bot token)', 'Bot token', 'Jira Service Management', 'Integration API key', 'https://api.atlassian.com/jsm/ops/integration/v2/alerts'],
+    ['Telegram bot', 'Bot token', 'PagerDuty', 'Routing key', 'https://events.pagerduty.com/v2/enqueue'],
+    ['PagerDuty', 'Routing key', 'Jira Service Management', 'Integration API key', 'https://api.atlassian.com/jsm/ops/integration/v2/alerts'],
+    ['Jira Service Management', 'Integration API key', 'PagerDuty', 'Routing key', 'https://events.pagerduty.com/v2/enqueue'],
+  ])('requires a fresh credential when switching %s credentials (%s) to %s', async (source, sourceKey, target, targetKey, endpoint) => {
+    render(<Alerting />)
+    await chooseType(source)
+    const form = addForm()
+    fireEvent.change(form.getByLabelText('Name'), { target: { value: 'Synthetic channel' } })
+    fireEvent.change(form.getByLabelText(sourceKey), { target: { value: 'xoxb-synthetic-previous-token' } })
+    if (source === 'Slack app (bot token)') {
+      fireEvent.change(form.getByLabelText('Conversation ID'), { target: { value: 'C0123456789' } })
+      fireEvent.click(form.getByRole('checkbox', { name: /Allow Slack Connect/ }))
+    } else if (source === 'Telegram bot') {
+      fireEvent.change(form.getByLabelText('Chat ID'), { target: { value: '-1001234567890' } })
+      fireEvent.change(form.getByLabelText('Topic ID (optional)'), { target: { value: '12' } })
+    } else {
+      fireEvent.change(form.getByLabelText(/Events API endpoint/), { target: { value: 'https://provider.example.test/synthetic' } })
+    }
+
+    await chooseType(target)
+    expect(form.getByLabelText('Name')).toHaveValue('Synthetic channel')
+    expect(form.getByLabelText(/Events API endpoint/)).toHaveValue('')
+    expect(form.getByLabelText(targetKey)).toHaveValue('')
+    fireEvent.change(form.getByLabelText(/Events API endpoint/), { target: { value: endpoint } })
+    expect(form.getByRole('button', { name: 'Add channel' })).toBeDisabled()
+
+    await chooseType(source)
+    expect(form.getByLabelText(sourceKey)).toHaveValue('')
+    if (source === 'Slack app (bot token)') {
+      expect(form.getByLabelText('Conversation ID')).toHaveValue('')
+      expect(form.getByRole('checkbox', { name: /Allow Slack Connect/ })).not.toBeChecked()
+    } else if (source === 'Telegram bot') {
+      expect(form.getByLabelText('Chat ID')).toHaveValue('')
+      expect(form.getByLabelText('Topic ID (optional)')).toHaveValue('')
+    }
+    await chooseType(target)
+    fireEvent.change(form.getByLabelText(/Events API endpoint/), { target: { value: endpoint } })
+    fireEvent.change(form.getByLabelText(targetKey), { target: { value: 'synthetic-fresh-provider-key' } })
+    fireEvent.click(form.getByRole('button', { name: 'Add channel' }))
+    await waitFor(() => expect(api.createNotificationChannel).toHaveBeenCalled())
+    expect(vi.mocked(api.createNotificationChannel).mock.calls[0][0]).toMatchObject({
+      secret: 'synthetic-fresh-provider-key', conversation_id: undefined, chat_id: undefined,
+    })
   })
 
   it.each([
     ['Microsoft Teams (Workflows)', 'teams', 'Teams Workflows webhook URL', 'https://prod-1.westus.logic.azure.com/workflows/a?sig=s'],
     ['Google Chat incoming webhook', 'google_chat', 'Google Chat webhook URL', 'https://chat.googleapis.com/v1/spaces/A/messages?key=k&token=t'],
     ['Discord webhook', 'discord', 'Discord webhook URL', 'https://discord.com/api/webhooks/1/tok'],
+    ['Mattermost', 'mattermost', 'Mattermost webhook URL', 'https://mattermost.example/hooks/test-token'],
+    ['Rocket.Chat', 'rocket_chat', 'Rocket.Chat webhook URL', 'https://rocket.example/hooks/test-token'],
   ])('creates a %s channel from its full URL', async (label, type, urlLabel, url) => {
     render(<Alerting />)
     await chooseType(label)
@@ -100,6 +150,25 @@ describe('chat notification channels (#1378 to #1381)', () => {
     expect(sent).toMatchObject({ name: 'Security chat', type, url })
     expect(sent.secret).toBeUndefined()
     expect(sent.chat_id).toBeUndefined()
+  })
+
+  it.each([
+    ['PagerDuty', 'pagerduty', 'Events API endpoint', 'Routing key', 'https://events.pagerduty.com/v2/enqueue'],
+    ['Jira Service Management', 'jsm', 'Integration Events API endpoint', 'Integration API key', 'https://api.atlassian.com/jsm/ops/integration/v2/alerts'],
+  ])('requires a write-only credential for %s', async (label, type, endpointLabel, keyLabel, url) => {
+    render(<Alerting />)
+    await chooseType(label)
+    const form = addForm()
+    fireEvent.change(form.getByLabelText('Name'), { target: { value: 'Test on-call' } })
+    fireEvent.change(form.getByLabelText(endpointLabel), { target: { value: url } })
+    expect(form.getByRole('button', { name: 'Add channel' })).toBeDisabled()
+    const key = form.getByLabelText(keyLabel)
+    expect(key).toHaveAttribute('type', 'password')
+    fireEvent.change(key, { target: { value: 'test-routing-credential' } })
+    fireEvent.click(form.getByRole('button', { name: 'Add channel' }))
+    await waitFor(() => expect(api.createNotificationChannel).toHaveBeenCalled())
+    expect(vi.mocked(api.createNotificationChannel).mock.calls[0][0]).toMatchObject({ type, url, secret: 'test-routing-credential' })
+    expect(key).toHaveValue('')
   })
 
   it('creates a Telegram channel from a bot token, chat and topic', async () => {
@@ -236,6 +305,11 @@ describe('chat notification channels (#1378 to #1381)', () => {
     expect(form.getByRole('checkbox', { name: /Send the raw event envelope/ })).not.toBeChecked()
     expect(form.getByRole('combobox', { name: 'Data class' })).toHaveTextContent(/Summary — signal/)
     expect(form.getByRole('combobox', { name: 'Data class' })).toBeEnabled()
+    expect(form.getByLabelText('Webhook URL')).toHaveValue('')
+    expect(form.getByLabelText('HMAC secret')).toHaveValue('')
+    expect(form.getByRole('button', { name: 'Add channel' })).toBeDisabled()
+    fireEvent.change(form.getByLabelText('Webhook URL'), { target: { value: 'https://hooks.example.test/in' } })
+    fireEvent.change(form.getByLabelText('HMAC secret'), { target: { value: '0123456789abcdef' } })
     fireEvent.click(form.getByRole('button', { name: 'Add channel' }))
     await waitFor(() =>
       expect(api.createNotificationChannel).toHaveBeenCalledWith(

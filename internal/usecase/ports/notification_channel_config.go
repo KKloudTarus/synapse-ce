@@ -42,6 +42,9 @@ func (SlackChannelConfig) NotificationChannelType() notification.ChannelType {
 // configuration and is not part of a channel.
 type EmailChannelConfig struct {
 	Recipients []string `json:"recipients,omitempty"`
+	// Relay is supplied at send time from the tenant email settings. It is not
+	// sealed in a channel version and never reaches an API response.
+	Relay *SMTPRelayConfig `json:"-"`
 }
 
 // NotificationChannelType implements NotificationChannelConfig.

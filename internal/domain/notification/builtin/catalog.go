@@ -9,9 +9,11 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/tenancy"
 )
 
-// contentVersion changes only when shipped message content changes. Delivery attempts retain
-// this reference for pin resolution and audit history.
+// contentVersion is the version for unchanged shipped assets. Delivery attempts retain their
+// exact asset reference for pin resolution and audit history.
 const contentVersion = "v1"
+
+const scanPagerContentVersion = "v2"
 
 // Catalog is an immutable built-in template catalog. It returns copies because callers may use a
 // returned field map while rendering and must not be able to mutate the catalog for other sends.
@@ -66,12 +68,19 @@ func New() *Catalog {
 func (c *Catalog) add(event notification.EventType, family notification.TemplateFamily, locale tenancy.Locale, content map[string]string) {
 	key := notification.TemplateKey{EventType: event, Family: family, Locale: locale}
 	template := Template{
-		Ref:         fmt.Sprintf("builtin:%s:%s:%s@%s", event, family, locale, contentVersion),
+		Ref:         fmt.Sprintf("builtin:%s:%s:%s@%s", event, family, locale, assetVersion(event, family)),
 		TemplateKey: key,
 		Fields:      cloneFields(content),
 	}
 	c.byKey[key] = template
 	c.list = append(c.list, template)
+}
+
+func assetVersion(event notification.EventType, family notification.TemplateFamily) string {
+	if event == notification.EventScanCompleted && family == notification.FamilyPager {
+		return scanPagerContentVersion
+	}
+	return contentVersion
 }
 
 // Builtin returns the exact key the resolver requests; wildcard and locale fallbacks belong to
@@ -197,6 +206,12 @@ func copyFor(event notification.EventType, locale tenancy.Locale) (string, strin
 }
 
 func pagerDetail(event notification.EventType, locale tenancy.Locale) string {
+	if event == notification.EventScanCompleted {
+		if locale == tenancy.LocaleVietnamese {
+			return `Thay đổi: {{if and (eq .delta_available "true") .new_count .fixed_count .unchanged_count}}{{.new_count}} mới, {{.fixed_count}} đã xử lý, {{.unchanged_count}} không đổi{{else}}chưa có dữ liệu so sánh{{end}}; Tổng: {{if .total_count}}{{.total_count}}{{if .critical_count}} (nghiêm trọng {{.critical_count}}, cao {{.high_count}}, TB {{.medium_count}}, thấp {{.low_count}}, TT {{.info_count}}){{end}}{{else}}chưa có dữ liệu{{end}}`
+		}
+		return `Changes: {{if and (eq .delta_available "true") .new_count .fixed_count .unchanged_count}}{{.new_count}} new, {{.fixed_count}} fixed, {{.unchanged_count}} unchanged{{else}}comparison unavailable{{end}}; Findings: {{if .total_count}}{{.total_count}}{{if .critical_count}} (critical {{.critical_count}}, high {{.high_count}}, medium {{.medium_count}}, low {{.low_count}}, info {{.info_count}}){{end}}{{else}}unavailable{{end}}`
+	}
 	_, body := copyFor(event, locale)
 	return body
 }

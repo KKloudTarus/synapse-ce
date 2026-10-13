@@ -65,13 +65,16 @@ type NotificationRepository struct {
 }
 
 var _ ports.NotificationRepository = (*NotificationRepository)(nil)
+var _ ports.NotificationSubjectAnchorReader = (*NotificationRepository)(nil)
+var _ ports.NotificationRemoteRefFinisher = (*NotificationRepository)(nil)
+var _ ports.NotificationProviderRequestFinisher = (*NotificationRepository)(nil)
 
 // Admission caps match postgres.notificationAdmission.
 const (
 	maxNotificationChannels   = 50
 	maxNotificationRules      = 200
 	maxOpenDeliveries         = 10000
-	maxChannelTestsPerMinute  = 10
+	maxChannelTestsPerHour    = 5
 	notificationDeliverJobKey = "notification.deliver"
 	// Delivery rate limits, as postgres.NotificationRepository.BeginAttempt applies them.
 	tenantAttemptInterval  = 100 * time.Millisecond

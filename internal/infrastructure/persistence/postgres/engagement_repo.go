@@ -154,9 +154,13 @@ func (r *EngagementRepository) Delete(ctx context.Context, id shared.ID) error {
 	return WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM engagements WHERE id=$1`, id.String()); err != nil {
 			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23503" &&
-				(pgErr.ConstraintName == "fk_scan_runs_engagement" || pgErr.ConstraintName == "fk_scan_run_lanes_engagement") {
-				return fmt.Errorf("%w: engagement has retained scan-run provenance", shared.ErrConflict)
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				switch pgErr.ConstraintName {
+				case "fk_scan_runs_engagement", "fk_scan_run_lanes_engagement":
+					return fmt.Errorf("%w: engagement has retained scan-run provenance", shared.ErrConflict)
+				case "ticket_mappings_engagement_fk", "ticket_intents_finding_fk":
+					return fmt.Errorf("%w: engagement has retained durable ticket intents", shared.ErrConflict)
+				}
 			}
 			return fmt.Errorf("delete engagement: %w", err)
 		}

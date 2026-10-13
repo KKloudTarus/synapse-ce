@@ -625,13 +625,13 @@ func channelPublicationIsListedPagedAndLoaded(t *testing.T, f *fixture) {
 func channelTestsAreRateLimited(t *testing.T, f *fixture) {
 	channel := f.channel(t, f.tenant, "hook")
 	other := f.channel(t, f.tenant, "other")
-	for n := range 10 {
+	for n := range 5 {
 		f.publishTest(t, channel.ID, n)
 	}
 	e := notification.Event{TenantID: f.tenant, ID: "test-event-over", Type: notification.EventTest, SourceKind: "notification_test",
 		SourceID: "test-over", SchemaVersion: 1, OccurredAt: f.base, Data: json.RawMessage(`{"title":"Test notification"}`)}
 	if _, err := f.Repository.PublishToChannel(f.ctx, e, channel.ID); !errors.Is(err, shared.ErrSaturated) {
-		t.Fatalf("eleventh test within a minute = %v, want ErrSaturated", err)
+		t.Fatalf("sixth test within an hour = %v, want ErrSaturated", err)
 	}
 	// The limit is per channel.
 	if _, err := f.Repository.PublishToChannel(f.ctx, e, other.ID); err != nil {

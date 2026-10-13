@@ -24,10 +24,12 @@ const testSlackBotToken = "xoxb" + "-1111111111-2222222222-slackBOTsecretValue"
 // post. It records the methods called and the last posted body.
 type slackServer struct {
 	*httptest.Server
-	mu      sync.Mutex
-	methods []string
-	posted  []byte
-	auth    string
+	mu        sync.Mutex
+	methods   []string
+	posted    []byte
+	posts     [][]byte
+	auth      string
+	postAuths []string
 }
 
 func newSlackServer(t *testing.T, info, post func(w http.ResponseWriter)) *slackServer {
@@ -41,6 +43,8 @@ func newSlackServer(t *testing.T, info, post func(w http.ResponseWriter)) *slack
 		s.auth = r.Header.Get("Authorization")
 		if method == "chat.postMessage" {
 			s.posted = body
+			s.posts = append(s.posts, body)
+			s.postAuths = append(s.postAuths, s.auth)
 		}
 		s.mu.Unlock()
 		switch method {
@@ -103,6 +107,71 @@ func TestSlackBotPostsToTheConversationWithoutUnfurling(t *testing.T) {
 	}
 	if strings.Contains(string(server.posted), testSlackBotToken) {
 		t.Fatal("the token is in the message body")
+	}
+}
+
+func TestSlackBotRepliesToItsPinnedSubjectAnchor(t *testing.T) {
+	server := newSlackServer(t, replyJSON(slackInfoPrivate), replyJSON(`{"ok":true,"channel":"C0123456789","ts":"1700000001.000200"}`))
+	work := testWork(notification.ChannelSlackBot)
+	work.SubjectAnchor = "1700000000.000100"
+	result := slackSender(server).Send(context.Background(), work, slackBotConfig())
+	if result.ErrorCode != "" || result.RemoteRef != "1700000001.000200" {
+		t.Fatalf("result = %+v", result)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(server.posted, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["thread_ts"] != work.SubjectAnchor || payload["channel"] != "C0123456789" {
+		t.Fatalf("threaded payload = %s", server.posted)
+	}
+	if server.auth != "Bearer "+testSlackBotToken {
+		t.Fatalf("authorization = %q", server.auth)
+	}
+}
+
+func TestSlackBotReplacesOnlyADeletedThreadParentOnItsPinnedDestination(t *testing.T) {
+	posts := 0
+	server := newSlackServer(t, replyJSON(slackInfoPrivate), func(w http.ResponseWriter) {
+		posts++
+		if posts == 1 {
+			_, _ = io.WriteString(w, `{"ok":false,"error":"thread_not_found"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"channel":"C0123456789","ts":"1700000002.000300"}`)
+	})
+	work := testWork(notification.ChannelSlackBot)
+	work.SubjectAnchor = "1700000000.000100"
+	result := slackSender(server).Send(context.Background(), work, slackBotConfig())
+	if result.ErrorCode != "" || result.RemoteRef != "1700000002.000300" || len(server.posts) != 2 {
+		t.Fatalf("result = %+v posts = %d", result, len(server.posts))
+	}
+	for i, body := range server.posts {
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["channel"] != "C0123456789" || server.postAuths[i] != "Bearer "+testSlackBotToken {
+			t.Fatalf("post %d left pinned destination: payload=%s auth=%q", i, body, server.postAuths[i])
+		}
+		if i == 0 && payload["thread_ts"] != work.SubjectAnchor {
+			t.Fatalf("first post = %s", body)
+		}
+		if i == 1 {
+			if _, ok := payload["thread_ts"]; ok {
+				t.Fatalf("replacement must be top-level: %s", body)
+			}
+		}
+	}
+}
+
+func TestSlackBotDoesNotReplaceAThreadForOtherSlackFailures(t *testing.T) {
+	server := newSlackServer(t, replyJSON(slackInfoPrivate), replyJSON(`{"ok":false,"error":"channel_not_found"}`))
+	work := testWork(notification.ChannelSlackBot)
+	work.SubjectAnchor = "1700000000.000100"
+	result := slackSender(server).Send(context.Background(), work, slackBotConfig())
+	if result.ErrorCode != "slack_channel_not_found" || len(server.posts) != 1 {
+		t.Fatalf("result = %+v posts = %d", result, len(server.posts))
 	}
 }
 

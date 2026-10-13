@@ -66,6 +66,7 @@ nav:
   - Operate:
       - Configuration: configuration.md
       - Notifications and webhooks: notifications.md
+      - Notification channels: notification-channels.md
       - Notification content and capture rollout: notification-content.md
       - SIEM streams: siem-stream.md
       - Finding ownership and routing: finding-ownership.md
@@ -97,6 +98,7 @@ nav:
       - Scan coverage: scan-coverage.md
       - MCP integration: mcp-integration.md
       - CI/CD integrations: integrations.md
+      - Ticketing foundation: ticketing-foundation.md
       - Bitbucket webhook review evidence: bitbucket-webhook-evidence.md
       - Notification event schemas: schemas/events/README.md
       - Code quality rule authoring: code-quality-rules.md

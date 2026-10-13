@@ -37,6 +37,9 @@ func (r *NotificationRepository) SetEventProjector(projector ports.NotificationE
 }
 
 var _ ports.NotificationRepository = (*NotificationRepository)(nil)
+var _ ports.NotificationSubjectAnchorReader = (*NotificationRepository)(nil)
+var _ ports.NotificationRemoteRefFinisher = (*NotificationRepository)(nil)
+var _ ports.NotificationProviderRequestFinisher = (*NotificationRepository)(nil)
 
 func (r *NotificationRepository) CreateChannel(ctx context.Context, c notification.Channel, sealed string) (notification.Channel, error) {
 	if err := c.Validate(); err != nil {
@@ -388,10 +391,10 @@ func (r *NotificationRepository) PublishToChannel(ctx context.Context, e notific
 				return fmt.Errorf("notification channel is paused; resume it before sending a test: %w", shared.ErrConflict)
 			}
 			var recent int
-			if err := tx.QueryRow(ctx, `SELECT count(DISTINCT d.event_id) FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id WHERE d.tenant_id=$1 AND d.channel_id=$2 AND e.event_type='notification.test' AND d.created_at >= now()-interval '1 minute'`, e.TenantID, cid).Scan(&recent); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT count(DISTINCT d.event_id) FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id WHERE d.tenant_id=$1 AND d.channel_id=$2 AND e.event_type='notification.test' AND d.created_at >= now()-interval '1 hour'`, e.TenantID, cid).Scan(&recent); err != nil {
 				return err
 			}
-			if recent >= 10 {
+			if recent >= 5 {
 				return fmt.Errorf("notification channel test rate limit exceeded: %w", shared.ErrSaturated)
 			}
 		}
@@ -685,14 +688,14 @@ func (r *NotificationRepository) ListSourceFailures(ctx context.Context, f ports
 	return out, err
 }
 
-const deliverySelect = `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,
+const deliverySelect = `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,d.remote_ref,d.provider_request_ref,
 COALESCE((SELECT j.claim_fence FROM jobs j WHERE j.tenant_id=d.tenant_id AND j.id='notification-'||d.id AND j.kind='notification.deliver'),0)
 FROM notification_deliveries d`
 
 func scanDelivery(row scanner, d *notification.Delivery) error {
 	var rules []byte
 	var typ, state string
-	if err := row.Scan(&d.TenantID, &d.ID, &d.EventID, &d.ChannelID, &typ, &d.Recipient, &rules, &state, &d.Attempts, &d.LastError, &d.NextAttemptAt, &d.DeliveredAt, &d.CreatedAt, &d.UpdatedAt, &d.TemplateRef, &d.RedriveFence); err != nil {
+	if err := row.Scan(&d.TenantID, &d.ID, &d.EventID, &d.ChannelID, &typ, &d.Recipient, &rules, &state, &d.Attempts, &d.LastError, &d.NextAttemptAt, &d.DeliveredAt, &d.CreatedAt, &d.UpdatedAt, &d.TemplateRef, &d.RemoteRef, &d.ProviderRequestRef, &d.RedriveFence); err != nil {
 		return err
 	}
 	d.ChannelType = notification.ChannelType(typ)
@@ -727,7 +730,7 @@ func (r *NotificationRepository) LoadWork(ctx context.Context, tenant, did share
 	var rules, eventData, eventContext, recipients []byte
 	var ctyp, state, etype string
 	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,e.event_type,e.source_kind,e.source_id,e.engagement_id,e.severity,e.schema_version,e.occurred_at,e.data,e.subject_kind,e.subject_id,e.context,c.name,c.enabled,c.destination,c.recipients,c.revision,d.channel_version,c.created_at,c.updated_at,v.sealed_config,c.consecutive_permanent_failures,c.last_failure_code,c.last_failure_at,c.paused_at,COALESCE(c.paused_reason,''),COALESCE(c.template_id,''),COALESCE(c.locale,''),c.custom_body,c.data_class,c.raw_event,COALESCE((SELECT s.external_notifications FROM notification_engagement_settings s WHERE s.tenant_id=d.tenant_id AND s.engagement_id=e.engagement_id),'inherit') FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id JOIN notification_channels c ON c.tenant_id=d.tenant_id AND c.id=d.channel_id JOIN notification_channel_versions v ON v.tenant_id=d.tenant_id AND v.channel_id=d.channel_id AND v.version=d.channel_version WHERE d.tenant_id=$1 AND d.id=$2`, tenant, did).Scan(&w.Delivery.TenantID, &w.Delivery.ID, &w.Delivery.EventID, &w.Delivery.ChannelID, &ctyp, &w.Delivery.Recipient, &rules, &state, &w.Delivery.Attempts, &w.Delivery.LastError, &w.Delivery.NextAttemptAt, &w.Delivery.DeliveredAt, &w.Delivery.CreatedAt, &w.Delivery.UpdatedAt, &w.Delivery.TemplateRef, &etype, &w.Event.SourceKind, &w.Event.SourceID, &w.Event.EngagementID, &w.Event.Severity, &w.Event.SchemaVersion, &w.Event.OccurredAt, &eventData, &w.Event.SubjectKind, &w.Event.SubjectID, &eventContext, &w.Channel.Name, &w.Channel.Enabled, &w.Channel.Destination, &recipients, &w.Channel.Revision, &w.Channel.SecretVersion, &w.Channel.CreatedAt, &w.Channel.UpdatedAt, &w.Sealed, &w.Channel.Health.ConsecutiveFailures, &w.Channel.Health.LastFailureCode, &w.Channel.Health.LastFailureAt, &w.Channel.Health.PausedAt, &w.Channel.Health.PausedReason, &w.Channel.TemplateID, &w.Channel.Locale, &w.Channel.CustomBody, &w.Channel.DataClass, &w.Channel.RawEvent, &w.Engagement)
+		return tx.QueryRow(ctx, `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,d.remote_ref,d.provider_request_ref,e.event_type,e.source_kind,e.source_id,e.engagement_id,e.severity,e.schema_version,e.occurred_at,e.data,e.subject_kind,e.subject_id,e.context,c.name,c.enabled,c.destination,c.recipients,c.revision,d.channel_version,c.created_at,c.updated_at,v.sealed_config,c.consecutive_permanent_failures,c.last_failure_code,c.last_failure_at,c.paused_at,COALESCE(c.paused_reason,''),COALESCE(c.template_id,''),COALESCE(c.locale,''),c.custom_body,c.data_class,c.raw_event,COALESCE((SELECT s.external_notifications FROM notification_engagement_settings s WHERE s.tenant_id=d.tenant_id AND s.engagement_id=e.engagement_id),'inherit') FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id JOIN notification_channels c ON c.tenant_id=d.tenant_id AND c.id=d.channel_id JOIN notification_channel_versions v ON v.tenant_id=d.tenant_id AND v.channel_id=d.channel_id AND v.version=d.channel_version WHERE d.tenant_id=$1 AND d.id=$2`, tenant, did).Scan(&w.Delivery.TenantID, &w.Delivery.ID, &w.Delivery.EventID, &w.Delivery.ChannelID, &ctyp, &w.Delivery.Recipient, &rules, &state, &w.Delivery.Attempts, &w.Delivery.LastError, &w.Delivery.NextAttemptAt, &w.Delivery.DeliveredAt, &w.Delivery.CreatedAt, &w.Delivery.UpdatedAt, &w.Delivery.TemplateRef, &w.Delivery.RemoteRef, &w.Delivery.ProviderRequestRef, &etype, &w.Event.SourceKind, &w.Event.SourceID, &w.Event.EngagementID, &w.Event.Severity, &w.Event.SchemaVersion, &w.Event.OccurredAt, &eventData, &w.Event.SubjectKind, &w.Event.SubjectID, &eventContext, &w.Channel.Name, &w.Channel.Enabled, &w.Channel.Destination, &recipients, &w.Channel.Revision, &w.Channel.SecretVersion, &w.Channel.CreatedAt, &w.Channel.UpdatedAt, &w.Sealed, &w.Channel.Health.ConsecutiveFailures, &w.Channel.Health.LastFailureCode, &w.Channel.Health.LastFailureAt, &w.Channel.Health.PausedAt, &w.Channel.Health.PausedReason, &w.Channel.TemplateID, &w.Channel.Locale, &w.Channel.CustomBody, &w.Channel.DataClass, &w.Channel.RawEvent, &w.Engagement)
 	})
 	w.Channel.Health.State = healthState(w.Channel.Health.PausedAt)
 	w.Delivery.ChannelType = notification.ChannelType(ctyp)
@@ -827,6 +830,27 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 }
 
 func (r *NotificationRepository) FinishAttempt(ctx context.Context, tenant, did shared.ID, jobID string, fence int64, aid shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time) error {
+	return r.finishAttempt(ctx, tenant, did, jobID, fence, aid, at, outcome, status, errorCode, next, "", "")
+}
+
+// FinishAttemptWithRemoteRef stores the provider handle in the same fenced transaction that
+// records an acknowledged delivery. A later subject lookup can therefore only observe committed
+// successful sends.
+func (r *NotificationRepository) FinishAttemptWithRemoteRef(ctx context.Context, tenant, did shared.ID, jobID string, fence int64, aid shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time, remoteRef string) error {
+	if len(remoteRef) > 512 {
+		return fmt.Errorf("%w: notification remote reference is too long", shared.ErrValidation)
+	}
+	return r.finishAttempt(ctx, tenant, did, jobID, fence, aid, at, outcome, status, errorCode, next, remoteRef, "")
+}
+
+func (r *NotificationRepository) FinishAttemptWithProviderRefs(ctx context.Context, tenant, did shared.ID, jobID string, fence int64, aid shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time, remoteRef, providerRequestRef string) error {
+	return r.finishAttempt(ctx, tenant, did, jobID, fence, aid, at, outcome, status, errorCode, next, remoteRef, providerRequestRef)
+}
+
+func (r *NotificationRepository) finishAttempt(ctx context.Context, tenant, did shared.ID, jobID string, fence int64, aid shared.ID, at time.Time, outcome string, status int, errorCode string, next *time.Time, remoteRef, providerRequestRef string) error {
+	if len(remoteRef) > 512 || len(providerRequestRef) > 512 || outcome == "delivered" && providerRequestRef != "" {
+		return fmt.Errorf("%w: invalid notification provider references", shared.ErrValidation)
+	}
 	if outcome != "delivered" && outcome != "retrying" && outcome != "failed" && outcome != "cancelled" {
 		return fmt.Errorf("%w: invalid notification attempt outcome", shared.ErrValidation)
 	}
@@ -858,7 +882,7 @@ func (r *NotificationRepository) FinishAttempt(ctx context.Context, tenant, did 
 		if outcome == "delivered" {
 			last = ""
 		}
-		tag, err = tx.Exec(ctx, `UPDATE notification_deliveries SET state=$3,last_error=$4,next_attempt_at=$5,delivered_at=$6,updated_at=$7 WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying')`, tenant, did, state, last, next, delivered, at)
+		tag, err = tx.Exec(ctx, `UPDATE notification_deliveries SET state=$3,last_error=$4,next_attempt_at=$5,delivered_at=$6,remote_ref=CASE WHEN $3='delivered' THEN $7 ELSE remote_ref END,updated_at=$8,provider_request_ref=$9 WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying')`, tenant, did, state, last, next, delivered, remoteRef, at, providerRequestRef)
 		if err != nil {
 			return err
 		}
@@ -868,6 +892,32 @@ func (r *NotificationRepository) FinishAttempt(ctx context.Context, tenant, did 
 		_, err = tx.Exec(ctx, `INSERT INTO notification_audit_intents(tenant_id,id,delivery_id,action,error_code,occurred_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, tenant, aid, did, "notification.delivery_"+outcome, errorCode, at)
 		return err
 	})
+}
+
+// SubjectAnchor reads only successfully delivered provider references for the exact channel and
+// configuration version. It deliberately performs no locking: concurrent initial deliveries can
+// both create root messages, while later ones converge on the earliest acknowledged reference.
+func (r *NotificationRepository) SubjectAnchor(ctx context.Context, tenant, channel shared.ID, version int, subjectKind, subjectID string) (string, error) {
+	if subjectKind == "" || subjectID == "" || version < 1 {
+		return "", nil
+	}
+	var anchor string
+	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `WITH candidate_anchors AS MATERIALIZED (
+			SELECT d.remote_ref,d.delivered_at,d.id
+			FROM notification_events e
+			JOIN notification_deliveries d ON d.tenant_id=e.tenant_id AND d.event_id=e.id
+			WHERE e.tenant_id=$1 AND e.subject_kind=$2 AND e.subject_id=$3
+			  AND d.channel_id=$4 AND d.channel_version=$5 AND d.state='delivered' AND d.delivered_at IS NOT NULL AND d.remote_ref<>''
+			)
+			SELECT remote_ref FROM candidate_anchors
+			ORDER BY delivered_at ASC,id ASC LIMIT 1`, tenant, subjectKind, subjectID, channel, version).Scan(&anchor)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	return anchor, err
 }
 
 func (r *NotificationRepository) CancelDelivery(ctx context.Context, tenant, did shared.ID, jobID string, fence int64, reason string) error {

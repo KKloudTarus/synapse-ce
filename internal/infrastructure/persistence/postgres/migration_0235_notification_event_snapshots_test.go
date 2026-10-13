@@ -8,10 +8,10 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func TestMigration0234SnapshotGuardsAndRollback(t *testing.T) {
-	isolate := newIsolatedMigrationDB(t, 234, 229)
+func TestMigration0235SnapshotGuardsAndRollback(t *testing.T) {
+	isolate := newIsolatedMigrationDB(t, 235, 234)
 	db := isolate.db
-	if err := goose.UpTo(db, ".", 234); err != nil {
+	if err := goose.UpTo(db, ".", 235); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO tenants(id,name) VALUES('snapshot-migration','Snapshots')`); err != nil {
@@ -49,7 +49,7 @@ func TestMigration0234SnapshotGuardsAndRollback(t *testing.T) {
 			t.Fatalf("guard accepted %s", query)
 		}
 	}
-	if err := goose.DownTo(db, ".", 229); err == nil || !strings.Contains(err.Error(), "drain snapshot captures") {
+	if err := goose.DownTo(db, ".", 234); err == nil || !strings.Contains(err.Error(), "drain snapshot captures") {
 		t.Fatalf("pending intent rollback=%v", err)
 	}
 	if err := withTenant(func(tx *sql.Tx) error {
@@ -61,10 +61,15 @@ func TestMigration0234SnapshotGuardsAndRollback(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.DownTo(db, ".", 229); err != nil {
+	if err := goose.DownTo(db, ".", 234); err != nil {
 		t.Fatalf("rollback consumed snapshot: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 234); err != nil {
+	var providerRequests bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public' AND table_name='notification_deliveries' AND column_name='provider_request_ref')`).Scan(&providerRequests); err != nil || !providerRequests {
+		t.Fatalf("snapshot rollback removed provider request storage: exists=%v err=%v", providerRequests, err)
+	}
+	if err := goose.UpTo(db, ".", 235); err != nil {
 		t.Fatalf("reapply populated migration: %v", err)
 	}
 	if err := withTenant(func(tx *sql.Tx) error {

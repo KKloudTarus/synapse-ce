@@ -30,8 +30,8 @@ type builtinGoldenOutput struct {
 }
 
 // TestBuiltinRendererGoldenMatrix fixes the English output for every shipped event, family and
-// data class. Pager has no delivery channel in this build, so its rows call the same Service
-// context filter and renderFields path directly; the other families call Service.RenderMessage.
+// data class. Pager rows exercise declared template classes directly; production
+// pager delivery enforces its signal ceiling in the separate rendering tests.
 func TestBuiltinRendererGoldenMatrix(t *testing.T) {
 	h := newRenderHarness(t)
 	h.svc.SetBuiltinTemplates(notificationbuiltin.New())
@@ -66,6 +66,8 @@ func TestBuiltinRendererGoldenMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read English builtin golden (run UPDATE_GOLDEN=1 after a deliberate content change): %v", err)
 	}
+	// Git may check this JSON fixture out with CRLF on Windows.
+	want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(want, encoded) {
 		t.Fatalf("English builtin matrix differs from golden; rerun with UPDATE_GOLDEN=1 only after review\n%s", diffBuiltinGolden(want, encoded))
 	}
@@ -116,8 +118,8 @@ func TestBuiltinRendererVietnameseMatrix(t *testing.T) {
 }
 
 // TestBuiltinCopiedFieldsRenderEquivalently proves an administrator can copy a shipped template
-// into a same-locale custom draft without changing the renderer output. Pager has no transport in
-// this build, so its equivalent draft path is renderFields with the filtered Service context.
+// into a same-locale custom draft without changing the renderer output. Pager
+// template equivalence uses renderFields with the filtered Service context.
 func TestBuiltinCopiedFieldsRenderEquivalently(t *testing.T) {
 	h := newRenderHarness(t)
 	h.svc.SetBuiltinTemplates(notificationbuiltin.New())

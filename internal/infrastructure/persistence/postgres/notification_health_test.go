@@ -58,6 +58,8 @@ func TestNotificationChannelAutoPauseEndToEnd(t *testing.T) {
 	seq := 0
 	publish := func() shared.ID {
 		t.Helper()
+		// Keep hourly test-send admission separate from the health state-machine scenario.
+		personalExec(t, ctx, pool, tenant, "UPDATE notification_deliveries SET created_at=now()-interval '2 hours' WHERE channel_id=$1", channel.ID)
 		seq++
 		source := fmt.Sprintf("health-%d", seq)
 		id, err := repo.PublishToChannel(ctx, notification.Event{TenantID: tenant, ID: shared.ID(source), Type: notification.EventTest, SourceKind: "test", SourceID: source, SchemaVersion: 1, OccurredAt: now, Data: json.RawMessage(`{"title":"test"}`)}, channel.ID)

@@ -44,6 +44,15 @@ import { useEngagementTab } from './useEngagementTab'
 import { AssessmentLifecyclePanel } from './AssessmentLifecyclePanel'
 import { VulnerabilityIntelligenceBadge } from '../../components/synapse/VulnerabilityIntelligenceBadge'
 
+function hashTarget(hash: string, prefix: string): string {
+  if (!hash.startsWith(prefix)) return ''
+  try {
+    return decodeURIComponent(hash.slice(prefix.length))
+  } catch {
+    return ''
+  }
+}
+
 // Only one tab renders at a time, so every tab except the two opened first (Overview and
 // Findings) is a separate chunk. Statically importing all 27 put every tab in the initial
 // bundle, which a user pays for on first paint no matter which tab they open. VulnsTab stays
@@ -55,7 +64,8 @@ export function EngagementDetail() {
   const scanStartError = typeof (location.state as { scanStartError?: unknown } | null)?.scanStartError === 'string'
     ? (location.state as { scanStartError: string }).scanStartError
     : undefined
-  const focusedFindingId = hash.startsWith('#finding-') ? decodeURIComponent(hash.slice(9)) : ''
+  const focusedFindingId = hashTarget(hash, '#finding-')
+  const focusedScanRunId = hashTarget(hash, '#scan-')
   const { tab, setTab } = useEngagementTab(id, tabSlug, hash)
   const [findingsFilter, setFindingsFilter] = useState<Severity | 'all'>('all')
 
@@ -69,6 +79,10 @@ export function EngagementDetail() {
   useEffect(() => {
     if (focusedFindingId) setTab('findings')
   }, [focusedFindingId, setTab])
+
+  useEffect(() => {
+    if (focusedScanRunId) setTab('scanruns')
+  }, [focusedScanRunId, setTab])
 
   useEffect(() => {
     if (!eng || engLoading || !(location.state as { focusEngagementViews?: boolean } | null)?.focusEngagementViews || focusedFindingId) return
@@ -216,7 +230,7 @@ export function EngagementDetail() {
         {tab === 'vulns' && <VulnsTab scan={scan} />}
         {tab === 'graph' && <DependencyGraphTab scan={scan} />}
         {tab === 'licenses' && <LicensesTab scan={scan} />}
-        {tab === 'scanruns' && <ScanRunsTab key={id} engagementId={id} />}
+        {tab === 'scanruns' && <ScanRunsTab key={id} engagementId={id} focusedScanRunId={focusedScanRunId} />}
         {tab === 'threats' && <ThreatModelTab engagementId={id} />}
         {tab === 'quality' && <CodeQualityTab engagementId={id} />}
         {tab === 'recon' && <ReconTab eng={eng} onGoTab={setTab} />}

@@ -1864,17 +1864,17 @@
   },
   "scan.completed/pager/detail": {
     "fields": {
-      "summary": "Quét đã hoàn tất: Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example\n- [detail\\-high] detail\\-finding (detail\\-new)"
+      "summary": "Quét đã hoàn tất: Thay đổi: 2 mới, 1 đã xử lý, 9 không đổi; Tổng: 12 (nghiêm trọng 1, cao 2, TB 3, thấp 4, TT 2)"
     }
   },
   "scan.completed/pager/signal": {
     "fields": {
-      "summary": "Quét đã hoàn tất: Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC"
+      "summary": "Quét đã hoàn tất: Thay đổi: 2 mới, 1 đã xử lý, 9 không đổi; Tổng: 12 (nghiêm trọng 1, cao 2, TB 3, thấp 4, TT 2)"
     }
   },
   "scan.completed/pager/summary": {
     "fields": {
-      "summary": "Quét đã hoàn tất: Loại quét: sast\nTổng phát hiện: 12 (nghiêm trọng 1, cao 2, trung bình 3, thấp 4, thông tin 2)\nThay đổi: 2 mới, 1 đã xử lý, 9 không đổi\nThời gian: 2026\\-10\\-02 09\\:00 UTC\nĐợt đánh giá: summary\\-engagement\nMục tiêu: summary\\-target\\.example"
+      "summary": "Quét đã hoàn tất: Thay đổi: 2 mới, 1 đã xử lý, 9 không đổi; Tổng: 12 (nghiêm trọng 1, cao 2, TB 3, thấp 4, TT 2)"
     }
   },
   "scan.completed/webhook/detail": {

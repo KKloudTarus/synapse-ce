@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   Clock,
@@ -52,6 +52,7 @@ function RunRow({
   const role = order === 1 ? 'A' : order === 2 ? 'B' : null
   return (
     <button
+      id={`scan-${run.id}`}
       type="button"
       onClick={onToggle}
       disabled={disabled}
@@ -194,7 +195,7 @@ function DriftPanel({ drift }: { drift: ScanDrift }) {
   )
 }
 
-export function ScanRunsTab({ engagementId }: { engagementId: string }) {
+export function ScanRunsTab({ engagementId, focusedScanRunId = '' }: { engagementId: string; focusedScanRunId?: string }) {
   const { data, loading, error } = useParallelFetch<[ScanRun[]]>(
     () => Promise.all([api.scanRuns(engagementId)]),
     { deps: [engagementId] },
@@ -209,6 +210,28 @@ export function ScanRunsTab({ engagementId }: { engagementId: string }) {
   const [drift, setDrift] = useState<ScanDrift | null>(null)
   const [comparing, setComparing] = useState(false)
   const [compareErr, setCompareErr] = useState('')
+  const appliedFocus = useRef('')
+  const comparisonGeneration = useRef(0)
+
+  useEffect(() => {
+    if (!focusedScanRunId) {
+      appliedFocus.current = ''
+      return
+    }
+    if (appliedFocus.current === focusedScanRunId || !runs.some((run) => run.id === focusedScanRunId)) return
+
+    appliedFocus.current = focusedScanRunId
+    comparisonGeneration.current += 1
+    setDrift(null)
+    setCompareErr('')
+    setComparing(false)
+    setSelected([focusedScanRunId])
+    const frame = requestAnimationFrame(() => {
+      const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+      document.getElementById(`scan-${focusedScanRunId}`)?.scrollIntoView?.({ block: 'center', behavior })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [focusedScanRunId, runs])
 
   function toggle(id: string) {
     setDrift(null)
@@ -222,14 +245,16 @@ export function ScanRunsTab({ engagementId }: { engagementId: string }) {
 
   async function compare() {
     if (selected.length !== 2) return
+    const generation = ++comparisonGeneration.current
     setComparing(true)
     setCompareErr('')
     try {
-      setDrift(await api.compareScanRuns(engagementId, selected[0], selected[1]))
+      const nextDrift = await api.compareScanRuns(engagementId, selected[0], selected[1])
+      if (generation === comparisonGeneration.current) setDrift(nextDrift)
     } catch (e) {
-      setCompareErr(e instanceof Error ? e.message : 'comparison failed')
+      if (generation === comparisonGeneration.current) setCompareErr(e instanceof Error ? e.message : 'comparison failed')
     } finally {
-      setComparing(false)
+      if (generation === comparisonGeneration.current) setComparing(false)
     }
   }
 

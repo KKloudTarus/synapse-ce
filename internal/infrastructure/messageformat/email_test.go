@@ -35,28 +35,103 @@ func TestEmailGolden(t *testing.T) {
 }
 
 // In HTML every value must be escaped text: no tag, attribute or entity from a value survives. In
-// text/plain the value is shown as is, which is safe for a text/plain part.
+// text/plain the value is shown as literal text. URL-looking values are visibly defanged so email
+// clients cannot turn event data into an actionable link.
 func TestEmailInjectionValuesStayLiteral(t *testing.T) {
 	for _, value := range injectionValues {
 		clean := msgtemplate.Sanitize(value)
+		want := clean
+		if strings.Contains(want, "https://evil.test") {
+			want = strings.ReplaceAll(want, "https://evil.test", "https[:]//evil[.]test")
+		}
 		message := ports.RenderedMessage{Fields: map[string]string{"subject": clean, "body": "Value: " + msgtemplate.EscapeMarkdown(clean)}}
 		fragment, err := EmailHTML(message)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(fragment, "<script") || strings.Contains(fragment, "<img") || !strings.Contains(fragment, "Value: "+html.EscapeString(clean)) {
+		if strings.Contains(fragment, "<script") || strings.Contains(fragment, "<img") || !strings.Contains(fragment, "Value: "+html.EscapeString(want)) {
 			t.Errorf("%q: HTML fragment %q", value, fragment)
 		}
 		out, err := Email{}.Format(message)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(out.Body) != "Value: "+clean {
+		if string(out.Body) != "Value: "+want {
 			t.Errorf("%q: text body %q", value, out.Body)
 		}
 		if strings.ContainsAny(out.Subject, "\r\n") {
 			t.Errorf("%q: subject %q breaks the header", value, out.Subject)
 		}
+	}
+}
+
+func TestEmailDefangsLiteralURLsButKeepsCheckedLinksActionable(t *testing.T) {
+	message := ports.RenderedMessage{
+		Fields: map[string]string{
+			"subject": "Synthetic notification",
+			"body": "Values: " + msgtemplate.EscapeMarkdown("https://evil.com/path?x=1, http://bad.example). www.attacker.example/next!") +
+				"\n\nCode `https://code.example/a`; **https://strong.example/** and _www.emphasis.example_.",
+		},
+		Links: []ports.RenderedLink{{Label: "Open finding", URL: "https://synapse.example.com/engagements/e1/findings/f1"}},
+	}
+
+	out, err := Email{}.Format(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"https[:]//evil[.]com/path?x=1, http[:]//bad[.]example). www[.]attacker[.]example/next!",
+		"https[:]//code[.]example/a",
+		"https[:]//strong[.]example/",
+		"www[.]emphasis[.]example",
+		"Open finding: https://synapse.example.com/engagements/e1/findings/f1",
+	} {
+		if !strings.Contains(string(out.Body), want) {
+			t.Errorf("text body missing %q: %q", want, out.Body)
+		}
+	}
+	for _, forbidden := range []string{"https://evil.com", "http://bad.example", "www.attacker.example", "https://code.example", "https://strong.example", "www.emphasis.example"} {
+		if strings.Contains(string(out.Body), forbidden) {
+			t.Errorf("text body left literal URL %q: %q", forbidden, out.Body)
+		}
+	}
+
+	fragment, err := EmailHTML(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"https[:]//evil[.]com/path?x=1, http[:]//bad[.]example). www[.]attacker[.]example/next!",
+		"<code>https[:]//code[.]example/a</code>",
+		"<strong>https[:]//strong[.]example/</strong>",
+		"<em>www[.]emphasis[.]example</em>",
+		`<a href="https://synapse.example.com/engagements/e1/findings/f1" rel="noopener noreferrer">Open finding</a>`,
+	} {
+		if !strings.Contains(fragment, want) {
+			t.Errorf("HTML fragment missing %q: %q", want, fragment)
+		}
+	}
+}
+
+func TestEmailDefangsExplicitURLVariants(t *testing.T) {
+	message := ports.RenderedMessage{Fields: map[string]string{
+		"body": msgtemplate.EscapeMarkdown("https://user:secret@evil.com/redirect?next=https://nested.evil.com/x; http://[2001:db8::1]/route, https://localhost:8443/payload! https://tést.example/path. www.evil.com/nested?redirect=http://nested.example/"),
+	}}
+
+	out, err := (Email{}).Format(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https[:]//user:secret@evil[.]com/redirect?next=https[:]//nested[.]evil[.]com/x; http[:]//[2001:db8::1]/route, https[:]//localhost:8443/payload! https[:]//tést[.]example/path. www[.]evil[.]com/nested?redirect=http[:]//nested[.]example/"
+	if got := string(out.Body); got != want {
+		t.Errorf("text body = %q, want %q", got, want)
+	}
+	fragment, err := EmailHTML(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fragment, want) {
+		t.Errorf("HTML fragment missing defanged variants: %q", fragment)
 	}
 }
 

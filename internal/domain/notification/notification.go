@@ -22,6 +22,10 @@ const (
 	ChannelTelegram   ChannelType = "telegram"
 	ChannelGoogleChat ChannelType = "google_chat"
 	ChannelDiscord    ChannelType = "discord"
+	ChannelMattermost ChannelType = "mattermost"
+	ChannelRocketChat ChannelType = "rocket_chat"
+	ChannelPagerDuty  ChannelType = "pagerduty"
+	ChannelJSM        ChannelType = "jsm"
 	// ChannelSlackBot posts as a Slack app with a bot token through chat.postMessage (#1383),
 	// unlike ChannelSlack, which posts to an incoming webhook.
 	ChannelSlackBot ChannelType = "slack_bot"
@@ -29,7 +33,7 @@ const (
 
 func (v ChannelType) Valid() bool {
 	switch v {
-	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord, ChannelSlackBot:
+	case ChannelWebhook, ChannelSlack, ChannelEmail, ChannelTeams, ChannelTelegram, ChannelGoogleChat, ChannelDiscord, ChannelMattermost, ChannelRocketChat, ChannelPagerDuty, ChannelJSM, ChannelSlackBot:
 		return true
 	}
 	return false
@@ -334,6 +338,12 @@ type Delivery struct {
 	UpdatedAt      time.Time     `json:"updated_at"`
 	// TemplateRef is the template pinned by the first attempt (#1365); retries render with it.
 	TemplateRef string `json:"template_ref,omitempty"`
+	// RemoteRef is the acknowledged provider message handle. It is used only to
+	// anchor later deliveries of the same subject to this channel configuration.
+	RemoteRef string `json:"remote_ref,omitempty"`
+	// ProviderRequestRef resumes an accepted asynchronous operation. It is not an
+	// acknowledgement or subject anchor and is never exposed through delivery APIs.
+	ProviderRequestRef string `json:"-"`
 }
 
 type Attempt struct {

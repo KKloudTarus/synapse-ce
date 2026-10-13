@@ -25,7 +25,7 @@ func (r *NotificationRepository) Publish(ctx context.Context, e notification.Eve
 }
 
 // PublishToChannel publishes to one channel regardless of rules. Channel tests are limited to
-// ten per channel per minute.
+// five per tenant and channel per hour.
 func (r *NotificationRepository) PublishToChannel(ctx context.Context, e notification.Event, channel shared.ID) (shared.ID, error) {
 	if err := e.Validate(); err != nil {
 		return "", err
@@ -40,7 +40,7 @@ func (r *NotificationRepository) PublishToChannel(ctx context.Context, e notific
 		if c.Health.Paused() {
 			return "", fmt.Errorf("notification channel is paused; resume it before sending a test: %w", shared.ErrConflict)
 		}
-		if r.recentChannelTests(e.TenantID, channel) >= maxChannelTestsPerMinute {
+		if r.recentChannelTests(e.TenantID, channel) >= maxChannelTestsPerHour {
 			return "", fmt.Errorf("notification channel test rate limit exceeded: %w", shared.ErrSaturated)
 		}
 	}
@@ -206,9 +206,10 @@ func (r *NotificationRepository) countOpenDeliveries(tenant shared.ID) int {
 	return n
 }
 
-// recentChannelTests counts test events delivered to the channel in the last minute.
+// recentChannelTests counts test events delivered to the channel in the last hour. It counts
+// source events, not recipient deliveries, so one email fan-out uses one admission slot.
 func (r *NotificationRepository) recentChannelTests(tenant, channel shared.ID) int {
-	since := r.now().UTC().Add(-time.Minute)
+	since := r.now().UTC().Add(-time.Hour)
 	events := map[shared.ID]bool{}
 	for key, stored := range r.deliveries {
 		d := stored.delivery

@@ -130,8 +130,7 @@ func (b Builder) Finding(engagementID, findingID shared.ID) (Link, error) {
 	return b.link(KindFinding, findingID, "/engagements/"+e+"/findings#finding-"+f)
 }
 
-// Scan opens the scan history and preserves scan identity in the URL fragment.
-// The current console does not automatically select a run from this fragment.
+// Scan opens the scan history and identifies the selected run in the URL fragment.
 func (b Builder) Scan(engagementID, scanID shared.ID) (Link, error) {
 	e, err := escapeID(engagementID)
 	if err != nil {

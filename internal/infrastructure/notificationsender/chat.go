@@ -70,5 +70,7 @@ var (
 	telegramFormatter   ports.NotificationFormatter = messageformat.TelegramFormatter{}
 	googleChatFormatter ports.NotificationFormatter = messageformat.GoogleChatFormatter{}
 	discordFormatter    ports.NotificationFormatter = messageformat.DiscordFormatter{}
+	mattermostFormatter ports.NotificationFormatter = messageformat.MattermostFormatter{}
+	rocketChatFormatter ports.NotificationFormatter = messageformat.RocketChatFormatter{}
 	slackBotFormatter   ports.NotificationFormatter = messageformat.SlackBot{}
 )
