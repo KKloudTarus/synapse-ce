@@ -1,0 +1,17 @@
+{
+  "disabled": {
+    "exit_code": 1,
+    "expected_guard": "requires SYNAPSE_NOTIFICATIONS_ENABLED=true",
+    "passed": true
+  },
+  "missing-key": {
+    "exit_code": 1,
+    "expected_guard": "requires SYNAPSE_VAULT_MASTER_KEY",
+    "passed": true
+  },
+  "invalid-key": {
+    "exit_code": 1,
+    "expected_guard": "decode notification worker vault master key",
+    "passed": true
+  }
+}

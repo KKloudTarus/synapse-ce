@@ -1,0 +1,8 @@
+{
+  "cross_tenant_reads": {
+    "channel": 404,
+    "engagement": 404
+  },
+  "other_tenant_channel_count": 0,
+  "tenant_context_verified": true
+}

@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "hmac_sha256_valid": true,
+  "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+  "delivery_id": "51e05af1d1187619e727347723c3235f",
+  "body_type": "risk_acceptance.expired",
+  "checked_against": "raw received body and receiver headers",
+  "secret_omitted": true
+}

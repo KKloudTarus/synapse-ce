@@ -27,7 +27,8 @@ time zone; webhook timestamps remain UTC.
 Delivery uses the existing EventSpec, builder, data-class filter, template catalog
 and channel adapters. Each event has English and Vietnamese defaults, schemas,
 fixtures, context and render goldens. Client evidence is a separate acceptance
-step: this implementation does not claim live provider/client validation.
+step. The [live validation ledger](../guide/notification-events-e2e.md) records
+the tested providers and the remaining acceptance prerequisites.
 
 Run migrations first. Quiesce every old notification delivery worker and wait
 for its in-flight jobs to finish before starting the upgraded worker fleet. Then
@@ -49,3 +50,16 @@ uses set-based state writes while locking lifecycle rows against human transitio
 Acceptance closes a breach episode; its expiration starts another at expiry.
 Human revocation resumes the original deadline and its elapsed reminder backoff.
 Queued alerts from an episode closed by acceptance or remediation remain stale.
+
+The `notifications` worker profile wires only notification delivery and personal
+contact/inbox handlers. Its fixed claim set excludes scanner jobs. It validates
+the shared vault key before claiming work, keeps migration and database-role
+guards, and retains production network/egress validation. Scanner profiles still
+require their sandbox. Notification maintenance uses its own leader resource;
+tenant serialization and durable source identities also protect overlapping
+`all` and `notifications` workers. The runtime owns metrics and connection cleanup
+until shutdown rather than closing them when composition returns.
+
+Presentation receives typed severity from the immutable event envelope only when
+the event catalog declares severity. Channel formatters never infer severity from
+message text. Empty and unrecognized values carry no severity styling.
