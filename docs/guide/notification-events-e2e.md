@@ -124,9 +124,47 @@ cloud credentials. Their producer, schema and recovery tests are present, but
 this notification worker does not execute those jobs and this run does not claim
 live scanner completion for them.
 
-`SYNAPSE_PUBLIC_BASE_URL` is unset in this local stack. Messages consequently omit
-console links. Full deep-link acceptance needs a configured trusted HTTPS console
-origin and the correct destination page opened from each client. Remaining client
-themes, locales, classes, event types and that link-click matrix keep external
-acceptance open. The PR stays draft and references the event issues without
-closing them.
+The initial run left `SYNAPSE_PUBLIC_BASE_URL` unset and omitted console links.
+The follow-up below supplies HTTPS and verifies one real client-to-finding path.
+Remaining client themes, locales, classes, event types and the rest of the
+link-click matrix keep external acceptance open. The PR stays draft and references
+the event issues without closing them.
+
+## Ready-gate follow-up
+
+On 2026-10-13, the branch still contained the current main commit. The local
+worktree-bound technical gate validated. GitHub's Actions permissions endpoint
+reported `enabled: false`; no Actions run existed for this branch, and the PR
+reported only GitGuardian success. The absence of CI runs is not a CI pass.
+
+Docker initially refused startup with a WSL-update precondition. `wsl --update`
+reported the installed version current; restarting Docker Desktop and running the
+private stack launcher restored all five services to healthy without resetting
+volumes or database state.
+
+A tailnet-only Tailscale Serve HTTPS origin now proxies the console. Both API and
+worker use that origin as `SYNAPSE_PUBLIC_BASE_URL`. Browser certificate validation
+remained enabled. A fresh manual finding through the API produced 16 successful
+deliveries across Slack, Google Chat, Telegram and Discord, with both locales and
+both data classes. These are additional to the earlier 260-row receipt, not a
+replacement for it. See the [follow-up receipt](assets/ui/notification-events/live/https-link-receipt.json).
+
+The real Discord message exposed an Open finding link. Clicking it and accepting
+Discord's ordinary leaving-site prompt opened the HTTPS console at the exact
+engagement and finding fragment. Development-token login in the new tab preserved
+the destination; the matching finding row expanded automatically. The captures
+show the [message link](assets/ui/notification-events/live/discord-finding-https-link.png)
+and the [expanded destination](assets/ui/notification-events/live/console-finding-https-destination.png).
+This proves that finding path from Discord; it does not establish clicks from the
+other clients or links for every event type.
+
+| Remaining condition | Evidence needed to clear it |
+| --- | --- |
+| Repository CI | GitHub Actions enabled under the repository's intended policy, then applicable checks passing on the PR head. Local checks remain recorded separately. |
+| Missing provider destinations | Working dedicated Teams, Gmail/Outlook, PagerDuty and JSM test configuration; trusted HTTPS for the local Mattermost/Rocket.Chat fixtures. |
+| Scanner operations | Hardened Linux execution for DAST/recon and authorized cloud test credentials for CSPM. |
+| Rendered acceptance | Per-event, client, EN/VI, signal/detail and applicable theme captures, with the required link clicks and reviewer inspection. |
+
+The implementation gate passes, but the plan's full acceptance gate remains open.
+No issue is closed and the PR is not marked ready on the strength of partial client
+evidence.
