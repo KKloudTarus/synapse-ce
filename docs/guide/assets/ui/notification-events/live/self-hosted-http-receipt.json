@@ -1,0 +1,655 @@
+{
+  "accepted_posts": 88,
+  "data_classes": [
+    "signal",
+    "detail"
+  ],
+  "events": [
+    "finding.created",
+    "finding.status_changed",
+    "finding.retest_completed",
+    "scan.failed",
+    "dast.run_finished",
+    "recon.run_finished",
+    "cspm.run_finished",
+    "sla.breached",
+    "risk_acceptance.created",
+    "risk_acceptance.expiring",
+    "risk_acceptance.expired"
+  ],
+  "locales": [
+    "en",
+    "vi"
+  ],
+  "providers": [
+    "mattermost",
+    "rocket_chat"
+  ],
+  "scope": "Controlled current-tree RenderMessage -> built-in EventSpec snapshot -> formatter -> sender -> dedicated Mattermost/Rocket.Chat incoming webhooks. URLs, credentials, message bodies, and provider references intentionally omitted.",
+  "statuses": [
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "finding.created",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "finding.status_changed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "finding.retest_completed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "scan.failed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "dast.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "recon.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "cspm.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "sla.breached",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "risk_acceptance.created",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "risk_acceptance.expiring",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "risk_acceptance.expired",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "finding.created",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "finding.status_changed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "finding.retest_completed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "scan.failed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "dast.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "recon.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "cspm.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "sla.breached",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "risk_acceptance.created",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "risk_acceptance.expiring",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "risk_acceptance.expired",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "finding.created",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "finding.status_changed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "finding.retest_completed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "scan.failed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "dast.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "recon.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "cspm.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "sla.breached",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "risk_acceptance.created",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "risk_acceptance.expiring",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "risk_acceptance.expired",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "finding.created",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "finding.status_changed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "finding.retest_completed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "scan.failed",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "dast.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "recon.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "cspm.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "sla.breached",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "risk_acceptance.created",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "risk_acceptance.expiring",
+      "status": 200
+    },
+    {
+      "provider": "mattermost",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "risk_acceptance.expired",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "finding.created",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "finding.status_changed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "finding.retest_completed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "scan.failed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "dast.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "recon.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "cspm.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "sla.breached",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "risk_acceptance.created",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "risk_acceptance.expiring",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "event": "risk_acceptance.expired",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "finding.created",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "finding.status_changed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "finding.retest_completed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "scan.failed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "dast.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "recon.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "cspm.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "sla.breached",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "risk_acceptance.created",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "risk_acceptance.expiring",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "event": "risk_acceptance.expired",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "finding.created",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "finding.status_changed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "finding.retest_completed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "scan.failed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "dast.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "recon.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "cspm.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "sla.breached",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "risk_acceptance.created",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "risk_acceptance.expiring",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "event": "risk_acceptance.expired",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "finding.created",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "finding.status_changed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "finding.retest_completed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "scan.failed",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "dast.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "recon.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "cspm.run_finished",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "sla.breached",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "risk_acceptance.created",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "risk_acceptance.expiring",
+      "status": 200
+    },
+    {
+      "provider": "rocket_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "event": "risk_acceptance.expired",
+      "status": 200
+    }
+  ],
+  "transport": "Exact HTTPS test-host allowlist mapped only inside this test to owned local HTTP fixtures; production self-hosted transport remains HTTPS-only.",
+  "code_commit": "a775c3601a06b1a89b7c5a443dfabfd2512ec74a",
+  "harness_sha256": "0c884636e53225ca8ed1404d13b54d381d780d5d432576720b9f5da95797074c",
+  "source_operation_proof": false,
+  "native_capture_scope": "Mattermost English finding and Vietnamese risk lifecycle; Rocket.Chat Vietnamese expiration. Other combinations have HTTP acceptance only.",
+  "fixture_clock": "2026-10-13T09:50:00Z",
+  "attempt_scope": "Final complete replay of 88 posts. Two earlier 88-post exploratory runs are excluded; the fixture channel retains their messages.",
+  "deep_link_click_proof": false
+}

@@ -110,13 +110,22 @@ mobile layout claim.
 
 ## Remaining acceptance prerequisites
 
-Teams needs a dedicated Microsoft test destination and working Workflows or bot
-credentials. Gmail and Outlook need working SMTP/OAuth test credentials; earlier
-provider proofs are not evidence for this run. PagerDuty needs a test service and
-routing key. The dedicated JSM test team has no current integration key.
-Mattermost and Rocket.Chat local HTTP fixtures need a trusted HTTPS origin before
-the production sender can use them. No transport or certificate guard was relaxed
-to turn a local fixture into a provider proof.
+The maintainer deferred Teams and PagerDuty live acceptance to
+[the EPIC](https://github.com/KKloudTarus/synapse-ce/issues/1327); they no longer
+block code-review readiness for this PR. The EPIC retains unchecked follow-up items.
+
+Gmail has real receipt evidence from the earlier channel acceptance run: ten
+SMTP/XOAUTH2 self-mail acceptances and native inbox/body inspection, recorded in
+[the provider receipt](assets/ui/notification-channels/live/provider-retest-receipt.json)
+and [Gmail capture](assets/ui/notification-channels/live/gmail-builtins-ten-messages-desktop.jpg).
+Its coverage is the five earlier scenarios in that receipt, not all eleven new
+events. The grant was revoked after that run. A fresh B03 email replay still needs
+an active sender configuration; Outlook remains unverified.
+
+The existing JSM test team has been reused with a dedicated events integration
+and on-call notifications disabled. Current source-operation evidence is recorded
+below. The maintainer also accepts HTTP for the dedicated Mattermost/Rocket.Chat
+fixtures. That test exception does not change production HTTPS/SSRF policies.
 
 DAST and recon execution need a hardened Linux scanner environment with the
 required kernel/sandbox capabilities. CSPM additionally needs authorized test
@@ -127,8 +136,8 @@ live scanner completion for them.
 The initial run left `SYNAPSE_PUBLIC_BASE_URL` unset and omitted console links.
 The follow-up below supplies HTTPS and verifies one real client-to-finding path.
 Remaining client themes, locales, classes, event types and the rest of the
-link-click matrix keep external acceptance open. The PR stays draft and references
-the event issues without closing them.
+link-click matrix keep external acceptance open. The PR references the event
+issues without closing them.
 
 ## Ready-gate follow-up
 
@@ -161,10 +170,57 @@ other clients or links for every event type.
 | Remaining condition | Evidence needed to clear it |
 | --- | --- |
 | Repository CI | GitHub Actions enabled under the repository's intended policy, then applicable checks passing on the PR head. Local checks remain recorded separately. |
-| Missing provider destinations | Working dedicated Teams, Gmail/Outlook, PagerDuty and JSM test configuration; trusted HTTPS for the local Mattermost/Rocket.Chat fixtures. |
+| Provider acceptance | Teams/PagerDuty deferred to the EPIC; Gmail prior receipt linked with its recorded coverage; current JSM and HTTP fixture checks below. Fresh B03 email replay and Outlook remain unverified. |
 | Scanner operations | Hardened Linux execution for DAST/recon and authorized cloud test credentials for CSPM. |
 | Rendered acceptance | Per-event, client, EN/VI, signal/detail and applicable theme captures, with the required link clicks and reviewer inspection. |
 
-The implementation gate passes, but the plan's full acceptance gate remains open.
-No issue is closed and the PR is not marked ready on the strength of partial client
-evidence.
+The technical gate establishes readiness for code review. Full leaf/EPIC
+acceptance remains separate, following the disposition used in PR #1572. The
+referenced issues remain open where their full client matrix is incomplete.
+
+## JSM source-operation follow-up
+
+The existing Synapse Notification Test team now has a dedicated events integration.
+On-call notifications are disabled; the native activity log confirms suppression.
+One real API finding creation, two status changes and a retest produced 16 logical
+deliveries across four EN/VI and configured signal/detail channels. JSM caps both
+configured classes at signal. All deliveries completed with provider references;
+the four subject/channel aliases retained four alerts, each receiving four event
+occurrences. Replaying the completed operation harness left 16 logical deliveries.
+
+Each mutation's accepted request is persisted and confirmed on a later attempt;
+32 recorded attempts returned HTTP 202 across the 16 completed deliveries. The
+[receipt](assets/ui/notification-events/live/jsm-source-delivery-receipt.json)
+records logical identities, references and status codes without credentials.
+
+Native JSM captures show [English](assets/ui/notification-events/live/jsm-finding-created-en-light.png),
+[Vietnamese](assets/ui/notification-events/live/jsm-finding-created-vi-light.png)
+and [follow-up activity](assets/ui/notification-events/live/jsm-finding-followups-vi-light.png).
+High severity maps to P2. Clicking the alert's console link, then signing in with
+the local development token, preserves the exact finding fragment and expands
+[the matching finding](assets/ui/notification-events/live/jsm-finding-console-destination.png).
+These checks establish the three finding event types; other JSM event types and
+the complete client-theme matrix remain separate acceptance work.
+
+## Self-hosted HTTP fixture follow-up
+
+The final controlled replay accepted 88 posts with HTTP 200: all eleven event
+contracts, EN/VI, signal/detail and both Mattermost/Rocket.Chat. It uses the
+current built-in renderer, formatter and sender with synthetic EventSpec
+snapshots. An exact-host test transport maps the two approved HTTPS fixture
+origins to the existing local HTTP services. Production code and its HTTPS/SSRF
+validation are unchanged. Existing incoming webhooks are reused.
+
+The [receipt](assets/ui/notification-events/live/self-hosted-http-receipt.json)
+identifies the source commit, harness digest and every accepted combination.
+It records only the final replay; two earlier exploratory batches remain in the
+test channels but are excluded from its 88-post count. This is renderer/sender
+acceptance, not source-operation, outbox, worker, idempotency or deep-link proof.
+The fixed fixture clock and synthetic destinations do not establish real
+lifecycle timing or clickable console navigation.
+
+Native captures show [English findings](assets/ui/notification-events/live/mattermost-finding-en-dark.png)
+and [Vietnamese risk lifecycle](assets/ui/notification-events/live/mattermost-risk-lifecycle-vi-dark.png)
+in Mattermost, and [Vietnamese expiration](assets/ui/notification-events/live/rocket-chat-risk-expired-vi-light.png)
+in Rocket.Chat. The screenshots establish those views; the other combinations
+have transport receipts, not a complete native theme/locale capture matrix.
