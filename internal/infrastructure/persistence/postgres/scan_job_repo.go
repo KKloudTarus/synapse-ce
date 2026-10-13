@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -397,48 +398,68 @@ func predecessorAtOrBefore(left, right scanPredecessorPosition) bool {
 	return left.finishedAt.Before(right.finishedAt) || (left.finishedAt.Equal(right.finishedAt) && left.id <= right.id)
 }
 
-// ListStaleRunning returns scan jobs still 'running' that started before olderThan (≤ limit),
-// oldest first – the stale-scan sweeper's input.
-func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]ports.ScanJob, error) {
+// ListStaleRunning visits every tenant under RLS and returns the globally oldest
+// bounded set of running jobs. scan_jobs predates tenant ownership, so this
+// avoids a privileged join and ignores jobs whose engagement was deleted.
+func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]ports.StaleScanJob, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot
-		 FROM scan_jobs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`,
-		olderThan, limit)
+	tenants, err := listTenantIDs(ctx, r.pool, "stale scan jobs")
 	if err != nil {
-		return nil, fmt.Errorf("list stale scan jobs: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-	out := []ports.ScanJob{}
-	for rows.Next() {
-		var (
-			j        ports.ScanJob
-			status   string
-			finished *time.Time
-		)
-		var debugEvents, sourcePackage, outcomes, snapshot []byte
-		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes, &snapshot); err != nil {
-			return nil, fmt.Errorf("scan scan job: %w", err)
+	out := []ports.StaleScanJob{}
+	for _, tenantID := range tenants {
+		err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx,
+				`SELECT j.id, j.engagement_id, j.target, j.kind, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.debug_events, j.source_package, j.engine_outcomes, j.notification_snapshot
+				 FROM scan_jobs j JOIN engagements e ON e.id=j.engagement_id
+				 WHERE e.tenant_id=$1 AND j.status='running' AND j.started_at < $2
+				 ORDER BY j.started_at, j.id COLLATE "C" LIMIT $3`, tenantID.String(), olderThan, limit)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var (
+					item     ports.StaleScanJob
+					status   string
+					finished *time.Time
+				)
+				var debugEvents, sourcePackage, outcomes, snapshot []byte
+				if err := rows.Scan(&item.Job.ID, &item.Job.EngagementID, &item.Job.Target, &item.Job.Kind, &status, &item.Job.Stage, &item.Job.Progress, &item.Job.Error, &item.Job.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes, &snapshot); err != nil {
+					return fmt.Errorf("scan stale scan job: %w", err)
+				}
+				item.TenantID = tenantID
+				item.Job.Status, item.Job.FinishedAt = ports.ScanStatus(status), finished
+				if err := decodeScanJobEngineOutcomes(outcomes, &item.Job); err != nil {
+					return err
+				}
+				if err := decodeScanDebugEvents(debugEvents, &item.Job); err != nil {
+					return err
+				}
+				if err := decodeScanJobSource(sourcePackage, &item.Job); err != nil {
+					return err
+				}
+				if err := decodeScanJobNotificationSnapshot(snapshot, &item.Job); err != nil {
+					return err
+				}
+				out = append(out, item)
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list stale scan jobs for tenant %s: %w", tenantID, err)
 		}
-		j.Status = ports.ScanStatus(status)
-		j.FinishedAt = finished
-		if err := decodeScanJobEngineOutcomes(outcomes, &j); err != nil {
-			return nil, err
+		sort.Slice(out, func(i, j int) bool {
+			return out[i].Job.StartedAt.Before(out[j].Job.StartedAt) || (out[i].Job.StartedAt.Equal(out[j].Job.StartedAt) && out[i].Job.ID < out[j].Job.ID)
+		})
+		if len(out) > limit {
+			out = out[:limit]
 		}
-		if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
-			return nil, err
-		}
-		if err := decodeScanJobSource(sourcePackage, &j); err != nil {
-			return nil, err
-		}
-		if err := decodeScanJobNotificationSnapshot(snapshot, &j); err != nil {
-			return nil, err
-		}
-		out = append(out, j)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // GetJob returns a scan job by its own id, or ErrNotFound.

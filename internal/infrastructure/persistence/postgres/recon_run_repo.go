@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -118,27 +119,54 @@ func (r *ReconRunStore) ListByEngagement(ctx context.Context, engagementID share
 }
 
 // ListStaleRunning returns runs still 'running' that started before olderThan (≤ limit),
-// oldest first – the stale-run sweeper's input.
-func (r *ReconRunStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]recon.Run, error) {
+// oldest first. Each tenant is queried under RLS, then the bounded per-tenant candidates are
+// merged so an orphaned legacy row cannot starve later, resolvable runs.
+func (r *ReconRunStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]ports.StaleReconRun, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+reconRunCols+` FROM recon_runs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`,
-		olderThan, limit)
+	tenants, err := listTenantIDs(ctx, r.pool, "stale recon runs")
 	if err != nil {
-		return nil, fmt.Errorf("list stale recon runs: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-	out := []recon.Run{}
-	for rows.Next() {
-		run, err := scanReconRun(rows)
+	candidates := make([]ports.StaleReconRun, 0)
+	for _, tenantID := range tenants {
+		err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx,
+				`SELECT r.id, r.engagement_id, r.tool, r.target, r.status, r.stage, r.error, r.result_count, r.evidence_id, r.started_at, r.finished_at, r.containment
+				 FROM recon_runs r
+				 JOIN engagements e ON e.id = r.engagement_id AND e.tenant_id = $3
+				 WHERE r.status = 'running' AND r.started_at < $1
+				 ORDER BY r.started_at, r.id COLLATE "C" LIMIT $2`,
+				olderThan, limit, tenantID.String())
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				run, err := scanReconRun(rows)
+				if err != nil {
+					return fmt.Errorf("scan recon run: %w", err)
+				}
+				candidates = append(candidates, ports.StaleReconRun{Run: run, TenantID: tenantID})
+			}
+			return rows.Err()
+		})
 		if err != nil {
-			return nil, fmt.Errorf("scan recon run: %w", err)
+			return nil, fmt.Errorf("list stale recon runs for tenant %s: %w", tenantID, err)
 		}
-		out = append(out, run)
+		sort.Slice(candidates, func(i, j int) bool {
+			left, right := candidates[i].Run, candidates[j].Run
+			if left.StartedAt.Equal(right.StartedAt) {
+				return left.ID < right.ID
+			}
+			return left.StartedAt.Before(right.StartedAt)
+		})
+		if len(candidates) > limit {
+			candidates = candidates[:limit]
+		}
 	}
-	return out, rows.Err()
+	return candidates, nil
 }
 
 func scanReconRun(row rowScanner) (recon.Run, error) {

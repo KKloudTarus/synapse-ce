@@ -156,7 +156,10 @@ accepts.
 Finding and run events keep the committed source facts, including presentation names
 and validated user identities, in a transactional outbox. Editing a finding or renaming
 an engagement later does not rewrite an older notification. Bulk imports do not emit a
-separate `finding.created` notification for every imported item. Terminal run replay
+separate `finding.created` notification for every imported item. `finding.status_changed`
+captures explicit changes through the findings service. Bulk VEX application updates
+finding statuses directly and does not emit a separate status notification per item.
+Terminal run replay
 keeps the first captured outcome; a failed run includes a stable error code rather than
 the tool's raw error text. Built-in templates cover chat, email, pager and webhook
 families in English and Vietnamese.
@@ -172,7 +175,10 @@ An acceptance warning is due when the remaining time is at most the rule's lead 
 and greater than zero. At the exact expiry instant, only `risk_acceptance.expired`
 is due. Acceptance identity stays stable when the finding's assessment refreshes.
 Activation suppresses thresholds that already passed, while future thresholds remain
-eligible. Instants are stored in UTC; human-readable templates use the tenant's time
+eligible. Creating or enabling a rule after activation can warn immediately for an
+acceptance already within its lead-time window, provided that threshold was not
+suppressed at activation. The rule's creation time is not a new activation boundary.
+Instants are stored in UTC; human-readable templates use the tenant's time
 zone, including daylight-saving offsets. See the [event capture design](../architecture/notification-events.md)
 for transaction, recovery and rollback behavior.
 

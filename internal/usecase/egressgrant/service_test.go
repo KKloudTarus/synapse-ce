@@ -109,7 +109,7 @@ func newFixture(t *testing.T) *fixture {
 		Status:       recon.StatusRunning,
 		StartedAt:    now,
 	}
-	if err := runs.Save(context.Background(), run); err != nil {
+	if err := runs.Save(shared.WithTenant(context.Background(), tenantID), run); err != nil {
 		t.Fatal(err)
 	}
 	audit := &auditRecorder{}

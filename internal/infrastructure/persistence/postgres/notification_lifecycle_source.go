@@ -162,7 +162,6 @@ func (s *NotificationSource) pollSLABreaches(ctx context.Context, tx pgx.Tx, ten
 	for _, item := range items {
 		f, status := item.fact, item.status
 		f.breachedAt = f.deadline
-		active := status == "open" || status == "mitigating" || (status == "accepted_risk" && !now.Before(f.expiry))
 		if status == "accepted_risk" && f.expiry.After(f.breachedAt) {
 			f.breachedAt = f.expiry
 		}
@@ -170,12 +169,6 @@ func (s *NotificationSource) pollSLABreaches(ctx context.Context, tx pgx.Tx, ten
 		oldFingerprint, oldActive, found, err := lifecycleState(ctx, tx, tenant, slaBreachStateKind, key)
 		if err != nil {
 			return count, err
-		}
-		if !active {
-			if err := upsertLifecycleState(ctx, tx, tenant, slaBreachStateKind, key, oldFingerprint, false, now); err != nil {
-				return count, err
-			}
-			continue
 		}
 		due := latestSLABreachReminder(f.breachedAt, now, s.slaBreachMaxReminders)
 		if due < 0 {

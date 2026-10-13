@@ -11,6 +11,16 @@ notification facts. Producers store allowlisted, bounded display facts and trust
 subject/user identities before commit. Projection never reads mutable finding,
 engagement or run rows to reconstruct these events.
 
+Stale scan and recon maintenance lists carry the owning tenant alongside each
+candidate. Each tenant's RLS-scoped query selects its oldest candidates with an
+engagement join, excluding orphan rows before the limit. Merging these batches
+retains the globally oldest bounded set; orphan scans cannot consume that quota.
+After acquiring the run lease and rechecking terminal state, the sweeper verifies
+the engagement within that tenant before persisting failure. Candidate errors are
+collected while independent candidates continue; cancellation stops the pass.
+Failed writes are reported and are not counted as reclaimed runs. Recovery therefore
+uses the same tenant transaction and immutable terminal snapshot as normal execution.
+
 Capture version 3 stores a complete immutable snapshot in the existing source
 outbox. Versions 1 and 2 retain their deployed behavior. New workers drain version
 3 with a transaction-local capability; source facts cannot be changed by marking

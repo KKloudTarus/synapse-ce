@@ -308,7 +308,7 @@ func (s *SLAStore) SaveTransition(ctx context.Context, next sla.Lifecycle, event
 		}
 		if event.To == sla.RemediationAcceptedRisk || event.To == sla.RemediationRemediated {
 			if _, err := tx.Exec(ctx, `UPDATE notification_source_state SET active=false,observed_at=$3
-				WHERE tenant_id=$1 AND source_kind='sla_breach' AND source_id LIKE $2`, tenantID.String(), event.FindingID.String()+":%", event.At.UTC()); err != nil {
+				WHERE tenant_id=$1 AND source_kind='sla_breach' AND starts_with(source_id,$2)`, tenantID.String(), event.FindingID.String()+":", event.At.UTC()); err != nil {
 				return fmt.Errorf("deactivate sla breach notification episode: %w", err)
 			}
 		}

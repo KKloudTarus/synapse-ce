@@ -1003,6 +1003,14 @@ type ScanJob struct {
 	NotificationSnapshot notification.ScanSummary `json:"-"`
 }
 
+// StaleScanJob is the daemon-only view of a running scan job. TenantID comes
+// from the engagement owner during stale enumeration and is intentionally not
+// part of the scan-job API representation or persisted job payload.
+type StaleScanJob struct {
+	TenantID shared.ID
+	Job      ScanJob
+}
+
 // ScanJobStore persists scan-job status (upserted as the pipeline progresses).
 type ScanJobStore interface {
 	CreateRunning(ctx context.Context, job ScanJob) error
@@ -1013,10 +1021,10 @@ type ScanJobStore interface {
 	// finalize a SPECIFIC dead-lettered job rather than the engagement's latest, so a newer
 	// scan for the same engagement cannot mislead the dead-letter terminal-guard.
 	GetJob(ctx context.Context, id string) (ScanJob, error)
-	// ListStaleRunning returns scan jobs still in status 'running' that started before
-	// olderThan (bounded by limit) – the input to the stale-scan sweeper, which reclaims scans
-	// a crashed worker stranded `running` without a dead-letter event.
-	ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]ScanJob, error)
+	// ListStaleRunning returns running jobs with their authoritative engagement
+	// tenant that started before olderThan (bounded by limit). It is the input to
+	// the cross-tenant stale-scan sweeper.
+	ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]StaleScanJob, error)
 }
 
 // ScanResultStore caches the latest full scan result (JSON) per engagement so the

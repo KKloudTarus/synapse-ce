@@ -123,9 +123,17 @@ type ReconRunStore interface {
 	Get(ctx context.Context, id shared.ID) (recon.Run, error)
 	ListByEngagement(ctx context.Context, engagementID shared.ID) ([]recon.Run, error)
 	// ListStaleRunning returns runs still in status 'running' that started before olderThan
-	// (bounded by limit) – the input to the stale-run sweeper, which reclaims runs a crashed
-	// worker stranded `running` without a dead-letter event (no live owner holds their lease).
-	ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]recon.Run, error)
+	// (bounded by limit), including each run's authoritative tenant. The maintenance sweeper
+	// uses that tenant to bind its terminal write; it must never infer ownership from its
+	// tenantless process context.
+	ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]StaleReconRun, error)
+}
+
+// StaleReconRun is the maintenance-only stale-sweep view of a recon run. TenantID is selected
+// from the run's engagement by the persistence adapter and is not exposed as part of the run API.
+type StaleReconRun struct {
+	Run      recon.Run
+	TenantID shared.ID
 }
 
 // LogEvent is one line on a run's live log stream. ID is a per-run monotonic

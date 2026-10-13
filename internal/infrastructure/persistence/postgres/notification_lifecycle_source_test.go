@@ -172,6 +172,51 @@ func TestSLAStoreAcceptedRiskCapturesSnapshotAndUsesCAS(t *testing.T) {
 	assertPublishedEventSchema(t, events[0])
 }
 
+func TestSLAStoreClosesOnlyLiteralFindingEpisodes(t *testing.T) {
+	pool := notificationTestPool(t)
+	base := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+	tenant := shared.ID("literal-episode")
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES($1,$1)`, tenant); err != nil {
+		t.Fatal(err)
+	}
+	seedOpenLifecycle(t, pool, ctx, tenant.String(), "a_%", base)
+	wanted := "finding-a_%:123"
+	other := "finding-a_X:123"
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		for _, key := range []string{wanted, other} {
+			if err := upsertLifecycleState(ctx, tx, tenant, slaBreachStateKind, key, "0", true, base); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	current := sla.Lifecycle{TenantID: tenant, EngagementID: "eng-a_%", FindingID: "finding-a_%", AssessmentID: "assessment-a_%", Status: sla.RemediationOpen, Version: 1, UpdatedBy: "operator", UpdatedAt: base}
+	next, event, err := sla.ApplyTransition(current, "literal-close", sla.TransitionCommand{To: sla.RemediationRemediated, Reason: "fixed", Actor: "operator", ExpectedVersion: 1}, base.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := NewSLAStore(pool).SaveTransition(ctx, next, event); err != nil {
+		t.Fatal(err)
+	}
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		for key, wantActive := range map[string]bool{wanted: false, other: true} {
+			var active bool
+			if err := tx.QueryRow(ctx, `SELECT active FROM notification_source_state WHERE tenant_id=$1 AND source_kind='sla_breach' AND source_id=$2`, tenant, key).Scan(&active); err != nil {
+				return err
+			}
+			if active != wantActive {
+				t.Errorf("episode %q active=%v, want %v", key, active, wantActive)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNotificationLifecycleRiskThresholdSkipsObservedRowsBeforeLimit(t *testing.T) {
 	pool := notificationTestPool(t)
 	base := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
