@@ -51,8 +51,12 @@ func TestNotificationCapturedSourceQuarantineDoesNotBlockNextSource(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := source.Poll(ctx, now.Add(3*time.Second), 2); err != nil || n != 2 {
-		t.Fatalf("poll processed %d records: %v", n, err)
+	// Tiny batches reserve capacity for other source categories. The bad row
+	// is quarantined first and the good row must progress on the next tick.
+	for _, at := range []time.Time{now.Add(3 * time.Second), now.Add(4 * time.Second)} {
+		if n, err := source.Poll(ctx, at, 2); err != nil || n != 1 {
+			t.Fatalf("poll processed %d records: %v; want one", n, err)
+		}
 	}
 	page, err := repo.ListDeliveries(ctx, ports.NotificationDeliveryFilter{TenantID: tenant})
 	if err != nil || len(page.Items) != 1 {
@@ -68,7 +72,7 @@ func TestNotificationCapturedSourceQuarantineDoesNotBlockNextSource(t *testing.T
 	if other, err := repo.ListSourceFailures(shared.WithTenant(context.Background(), "quarantine-b"), ports.NotificationSourceFailureFilter{TenantID: "quarantine-b"}); err != nil || len(other.Items) != 0 {
 		t.Fatalf("other tenant can see failures: %+v, %v", other, err)
 	}
-	if n, err := source.Poll(ctx, now.Add(4*time.Second), 2); err != nil || n != 0 {
+	if n, err := source.Poll(ctx, now.Add(5*time.Second), 2); err != nil || n != 0 {
 		t.Fatalf("replay processed %d records: %v", n, err)
 	}
 }

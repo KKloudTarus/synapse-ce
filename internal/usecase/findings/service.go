@@ -9,12 +9,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/asset"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -27,19 +30,22 @@ var _ ports.AITriageFindingDecision = (*Service)(nil)
 
 // Service lists findings and applies authoring/triage/assignment/comment/retest changes.
 type Service struct {
-	repo           ports.FindingRepository
-	claimer        ports.FindingProjectionClaimer
-	engagements    ports.EngagementTenantResolver
-	comments       ports.CommentRepository
-	retests        ports.RetestRepository
-	audit          ports.AuditLogger
-	clock          ports.Clock
-	ids            ports.IDGenerator
-	attributor     ports.FindingAttributor
-	assigneeWriter ports.FindingAssigneeWriter
-	shadowTx       ports.TenantTransactionRunner
-	shadow         CreatedFindingProjector
-	shadowOn       func(string) bool
+	repo              ports.FindingRepository
+	claimer           ports.FindingProjectionClaimer
+	engagements       ports.EngagementTenantResolver
+	comments          ports.CommentRepository
+	retests           ports.RetestRepository
+	audit             ports.AuditLogger
+	clock             ports.Clock
+	ids               ports.IDGenerator
+	attributor        ports.FindingAttributor
+	assigneeWriter    ports.FindingAssigneeWriter
+	shadowTx          ports.TenantTransactionRunner
+	shadow            CreatedFindingProjector
+	shadowOn          func(string) bool
+	notificationTx    ports.TenantTransactionRunner
+	notifications     ports.NotificationOutbox
+	notificationFacts ports.NotificationFindingFactsReader
 }
 
 type CreatedFindingProjector interface {
@@ -59,6 +65,18 @@ func (s *Service) SetEngagementTenantResolver(r ports.EngagementTenantResolver) 
 func (s *Service) SetAttributor(a ports.FindingAttributor) { s.attributor = a }
 
 func (s *Service) SetAssigneeWriter(writer ports.FindingAssigneeWriter) { s.assigneeWriter = writer }
+
+// SetNotifications enables finding event capture. The caller must supply the same
+// tenant transaction runner used by the repositories, so the finding, audit and
+// source record commit together. Engagement ownership is resolved authoritatively
+// before the transaction is opened; an ambient tenant cannot select another tenant.
+func (s *Service) SetNotifications(tx ports.TenantTransactionRunner, outbox ports.NotificationOutbox, facts ports.NotificationFindingFactsReader) error {
+	if tx == nil || outbox == nil || facts == nil || s.engagements == nil {
+		return fmt.Errorf("%w: finding notification dependencies are required", shared.ErrValidation)
+	}
+	s.notificationTx, s.notifications, s.notificationFacts = tx, outbox, facts
+	return nil
+}
 
 // SetLifecycleShadow makes a newly-authored Finding, its audit/attribution, and
 // its shadow lineage Observation one tenant-local transaction.
@@ -111,6 +129,9 @@ func (s *Service) CreateAttributed(ctx context.Context, actor string, engagement
 			if err := s.record(writeCtx, actor, "finding.created", engagementID, f.ID, map[string]string{"severity": string(f.Severity), "kind": string(f.Kind)}); err != nil {
 				return creationFollowupError(project, f.ID, err)
 			}
+			if err := s.appendFindingCreated(writeCtx, tenantID, f, "", actor); err != nil {
+				return creationFollowupError(project, f.ID, err)
+			}
 		}
 		if err := s.attributor.Record(writeCtx, engagementID, assetID, "manual:"+f.ID, "manual:"+f.ID, asset.EdgeObserved, []shared.ID{f.ID}); err != nil {
 			err = fmt.Errorf("record finding attribution: %w", err)
@@ -140,6 +161,16 @@ func attributedManualKey(actor string, engagementID, assetID shared.ID, in findi
 }
 
 func (s *Service) findByDedupKey(ctx context.Context, engagementID shared.ID, key string) (finding.Finding, error) {
+	if reader, ok := s.repo.(ports.FindingDedupReader); ok {
+		stored, err := reader.GetByEngagementAndDedupKey(ctx, engagementID, key)
+		if errors.Is(err, shared.ErrNotFound) {
+			return finding.Finding{}, nil
+		}
+		if err != nil {
+			return finding.Finding{}, fmt.Errorf("read finding dedup identity: %w", err)
+		}
+		return stored, nil
+	}
 	all, err := s.repo.ListByEngagement(ctx, engagementID)
 	if err != nil {
 		return finding.Finding{}, fmt.Errorf("list findings: %w", err)
@@ -185,24 +216,37 @@ func (s *Service) RecordConfirmedThreat(ctx context.Context, verifier string, j 
 	if err != nil {
 		return err
 	}
-	if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
-		return fmt.Errorf("persist threat finding: %w", err)
-	}
-	candidateID := f.ID
-	f, err = s.canonicalProjection(ctx, j.EngagementID, f.DedupKey)
-	if err != nil {
-		return &ports.PartialWriteError{Operation: "threat finding", IDs: []shared.ID{candidateID}, Err: err}
-	}
-	if err := s.recordAttribution(ctx, j.EngagementID, assetID, shared.ID("threat:"+j.ID.String()), f.ID); err != nil {
-		return &ports.PartialWriteError{Operation: "threat finding", IDs: []shared.ID{f.ID}, Err: err}
-	}
-	// Attribute the promotion to the human VERIFIER who ratified the threat (the trigger), not the agent
-	// that originally proposed the judgment – the judgment's own verdict audit already records the proposer.
-	if err := s.record(ctx, verifier, "finding.threat_promoted", j.EngagementID, f.ID,
-		map[string]string{"judgment": j.ID.String(), "category": string(tc.Category), "element": j.SubjectID.String()}); err != nil {
-		return &ports.PartialWriteError{Operation: "threat finding", IDs: []shared.ID{f.ID}, Err: err}
-	}
-	return nil
+	return s.withFindingBoundary(ctx, j.EngagementID, func(writeCtx context.Context, tenantID shared.ID) error {
+		created := s.notifications != nil
+		if created {
+			stored, err := s.findByDedupKey(writeCtx, j.EngagementID, f.DedupKey)
+			if err != nil {
+				return err
+			}
+			created = stored.ID.IsZero()
+		}
+		if err := s.repo.Upsert(writeCtx, []finding.Finding{f}); err != nil {
+			return fmt.Errorf("persist threat finding: %w", err)
+		}
+		candidateID := f.ID
+		f, err = s.canonicalProjection(writeCtx, j.EngagementID, f.DedupKey)
+		if err != nil {
+			return &ports.PartialWriteError{Operation: "threat finding", IDs: []shared.ID{candidateID}, Err: err}
+		}
+		if err := s.recordAttribution(writeCtx, j.EngagementID, assetID, shared.ID("threat:"+j.ID.String()), f.ID); err != nil {
+			return &ports.PartialWriteError{Operation: "threat finding", IDs: []shared.ID{f.ID}, Err: err}
+		}
+		// Attribute the promotion to the human VERIFIER who ratified the threat (the trigger), not the agent
+		// that originally proposed the judgment – the judgment's own verdict audit already records the proposer.
+		if err := s.record(writeCtx, verifier, "finding.threat_promoted", j.EngagementID, f.ID,
+			map[string]string{"judgment": j.ID.String(), "category": string(tc.Category), "element": j.SubjectID.String()}); err != nil {
+			return &ports.PartialWriteError{Operation: "threat finding", IDs: []shared.ID{f.ID}, Err: err}
+		}
+		if created {
+			return s.appendFindingCreated(writeCtx, tenantID, f, "", verifier)
+		}
+		return nil
+	})
 }
 
 // RecordConfirmedSAST promotes a verifier-confirmed CapSAST (taint) judgment to a persisted Kind=sast
@@ -234,27 +278,40 @@ func (s *Service) RecordConfirmedSAST(ctx context.Context, verifier string, j ju
 	if err != nil {
 		return err
 	}
-	if err := s.claimProjection(ctx, j.EngagementID, j.ID, ports.FindingProjectionSAST); err != nil {
-		return fmt.Errorf("claim sast finding projection: %w", err)
-	}
-	if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
-		return fmt.Errorf("persist sast finding: %w", err)
-	}
-	candidateID := f.ID
-	f, err = s.canonicalProjection(ctx, j.EngagementID, f.DedupKey)
-	if err != nil {
-		return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{candidateID}, Err: err}
-	}
-	if err := s.recordAttribution(ctx, j.EngagementID, assetID, shared.ID("sast:"+j.ID.String()), f.ID); err != nil {
-		return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{f.ID}, Err: err}
-	}
-	// Attribute the promotion to the VERIFIER who confirmed the taint judgment (the trigger), not the
-	// system proposer – the judgment's own verdict audit already records the proposer.
-	if err := s.record(ctx, verifier, "finding.sast_promoted", j.EngagementID, f.ID,
-		map[string]string{"judgment": j.ID.String(), "cwe": sc.CWE, "rule": sc.Rule, "location": sc.Location}); err != nil {
-		return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{f.ID}, Err: err}
-	}
-	return nil
+	return s.withFindingBoundary(ctx, j.EngagementID, func(writeCtx context.Context, tenantID shared.ID) error {
+		if err := s.claimProjection(writeCtx, j.EngagementID, j.ID, ports.FindingProjectionSAST); err != nil {
+			return fmt.Errorf("claim sast finding projection: %w", err)
+		}
+		created := s.notifications != nil
+		if created {
+			stored, err := s.findByDedupKey(writeCtx, j.EngagementID, f.DedupKey)
+			if err != nil {
+				return err
+			}
+			created = stored.ID.IsZero()
+		}
+		if err := s.repo.Upsert(writeCtx, []finding.Finding{f}); err != nil {
+			return fmt.Errorf("persist sast finding: %w", err)
+		}
+		candidateID := f.ID
+		f, err = s.canonicalProjection(writeCtx, j.EngagementID, f.DedupKey)
+		if err != nil {
+			return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{candidateID}, Err: err}
+		}
+		if err := s.recordAttribution(writeCtx, j.EngagementID, assetID, shared.ID("sast:"+j.ID.String()), f.ID); err != nil {
+			return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{f.ID}, Err: err}
+		}
+		// Attribute the promotion to the VERIFIER who confirmed the taint judgment (the trigger), not the
+		// system proposer – the judgment's own verdict audit already records the proposer.
+		if err := s.record(writeCtx, verifier, "finding.sast_promoted", j.EngagementID, f.ID,
+			map[string]string{"judgment": j.ID.String(), "cwe": sc.CWE, "rule": sc.Rule, "location": sc.Location}); err != nil {
+			return &ports.PartialWriteError{Operation: "sast finding", IDs: []shared.ID{f.ID}, Err: err}
+		}
+		if created {
+			return s.appendFindingCreated(writeCtx, tenantID, f, "", verifier)
+		}
+		return nil
+	})
 }
 
 func findingDataFlowFromClaim(claim *judgment.SASTDataFlow) *finding.DataFlowTrace {
@@ -287,6 +344,7 @@ func findingDataFlowFromClaim(claim *judgment.SASTDataFlow) *finding.DataFlowTra
 func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j judgment.Judgment) error {
 	in := finding.DASTInput{JudgmentID: j.ID.String()}
 	var assetID shared.ID
+	claimProjection := false
 	switch claim := j.Claim.(type) {
 	case judgment.DASTClaim:
 		if j.Capability != judgment.CapDAST {
@@ -307,9 +365,7 @@ func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j ju
 		if err != nil {
 			return err
 		}
-		if err := s.claimProjection(ctx, j.EngagementID, j.ID, ports.FindingProjectionDAST); err != nil {
-			return fmt.Errorf("claim dast finding projection: %w", err)
-		}
+		claimProjection = true
 	default:
 		return fmt.Errorf("%w: DAST judgment %s carries no supported DAST claim", shared.ErrValidation, j.ID)
 	}
@@ -318,22 +374,40 @@ func (s *Service) RecordConfirmedDAST(ctx context.Context, verifier string, j ju
 	if err != nil {
 		return err
 	}
-	if err := s.repo.Upsert(ctx, []finding.Finding{f}); err != nil {
-		return fmt.Errorf("persist dast finding: %w", err)
-	}
-	candidateID := f.ID
-	f, err = s.canonicalProjection(ctx, j.EngagementID, f.DedupKey)
-	if err != nil {
-		return &ports.PartialWriteError{Operation: "dast finding", IDs: []shared.ID{candidateID}, Err: err}
-	}
-	if err := s.recordAttribution(ctx, j.EngagementID, assetID, shared.ID("dast:"+j.ID.String()), f.ID); err != nil {
-		return &ports.PartialWriteError{Operation: "dast finding", IDs: []shared.ID{f.ID}, Err: err}
-	}
-	if err := s.record(ctx, verifier, "finding.dast_promoted", j.EngagementID, f.ID,
-		map[string]string{"judgment": j.ID.String(), "cwe": in.CWE, "rule": in.Rule, "location": in.Location}); err != nil {
-		return &ports.PartialWriteError{Operation: "dast finding", IDs: []shared.ID{f.ID}, Err: err}
-	}
-	return nil
+	return s.withFindingBoundary(ctx, j.EngagementID, func(writeCtx context.Context, tenantID shared.ID) error {
+		if claimProjection {
+			if err := s.claimProjection(writeCtx, j.EngagementID, j.ID, ports.FindingProjectionDAST); err != nil {
+				return fmt.Errorf("claim dast finding projection: %w", err)
+			}
+		}
+		created := s.notifications != nil
+		if created {
+			stored, err := s.findByDedupKey(writeCtx, j.EngagementID, f.DedupKey)
+			if err != nil {
+				return err
+			}
+			created = stored.ID.IsZero()
+		}
+		if err := s.repo.Upsert(writeCtx, []finding.Finding{f}); err != nil {
+			return fmt.Errorf("persist dast finding: %w", err)
+		}
+		candidateID := f.ID
+		f, err = s.canonicalProjection(writeCtx, j.EngagementID, f.DedupKey)
+		if err != nil {
+			return &ports.PartialWriteError{Operation: "dast finding", IDs: []shared.ID{candidateID}, Err: err}
+		}
+		if err := s.recordAttribution(writeCtx, j.EngagementID, assetID, shared.ID("dast:"+j.ID.String()), f.ID); err != nil {
+			return &ports.PartialWriteError{Operation: "dast finding", IDs: []shared.ID{f.ID}, Err: err}
+		}
+		if err := s.record(writeCtx, verifier, "finding.dast_promoted", j.EngagementID, f.ID,
+			map[string]string{"judgment": j.ID.String(), "cwe": in.CWE, "rule": in.Rule, "location": in.Location}); err != nil {
+			return &ports.PartialWriteError{Operation: "dast finding", IDs: []shared.ID{f.ID}, Err: err}
+		}
+		if created {
+			return s.appendFindingCreated(writeCtx, tenantID, f, "", verifier)
+		}
+		return nil
+	})
 }
 
 func (s *Service) claimProjection(ctx context.Context, engagementID, judgmentID shared.ID, mode ports.FindingProjectionMode) error {
@@ -454,6 +528,9 @@ func (s *Service) Create(ctx context.Context, actor string, engagementID shared.
 			map[string]string{"severity": string(f.Severity), "kind": string(f.Kind)}); err != nil {
 			return err
 		}
+		if err := s.appendFindingCreated(writeCtx, tenantID, f, "", actor); err != nil {
+			return err
+		}
 		if project {
 			return s.shadow.ProjectCreatedFinding(writeCtx, tenantID, f, actor)
 		}
@@ -463,20 +540,138 @@ func (s *Service) Create(ctx context.Context, actor string, engagementID shared.
 }
 
 func (s *Service) withCreationBoundary(ctx context.Context, engagementID shared.ID, write func(context.Context, shared.ID, bool) error) error {
-	if s.shadowTx == nil || s.shadow == nil || s.shadowOn == nil {
+	needsShadow := s.shadowTx != nil && s.shadow != nil && s.shadowOn != nil
+	if !needsShadow && s.notificationTx == nil {
 		return write(ctx, "", false)
 	}
-	engagement, err := s.engagements.GetByID(ctx, engagementID)
+	tenantID, err := s.findingTenant(ctx, engagementID)
 	if err != nil {
 		return err
 	}
-	tenantID := shared.TenantOrDefault(engagement.TenantID)
-	if !s.shadowOn(tenantID.String()) {
+	project := needsShadow && s.shadowOn(tenantID.String())
+	if !project && s.notificationTx == nil {
 		return write(ctx, tenantID, false)
 	}
-	return s.shadowTx.Run(ctx, tenantID, func(txCtx context.Context) error {
-		return write(txCtx, tenantID, true)
+	runner := s.notificationTx
+	if runner == nil {
+		runner = s.shadowTx
+	}
+	return runner.Run(ctx, tenantID, func(txCtx context.Context) error {
+		return write(txCtx, tenantID, project)
 	})
+}
+
+// withFindingBoundary wraps mutations that can emit a finding source record. It
+// deliberately keeps legacy callers unmodified until notification capture is
+// wired, while capture-enabled writes always share one tenant transaction.
+func (s *Service) withFindingBoundary(ctx context.Context, engagementID shared.ID, write func(context.Context, shared.ID) error) error {
+	if s.notificationTx == nil || s.notifications == nil {
+		return write(ctx, "")
+	}
+	tenantID, err := s.findingTenant(ctx, engagementID)
+	if err != nil {
+		return err
+	}
+	return s.notificationTx.Run(ctx, tenantID, func(txCtx context.Context) error {
+		return write(txCtx, tenantID)
+	})
+}
+
+func (s *Service) findingTenant(ctx context.Context, engagementID shared.ID) (shared.ID, error) {
+	if s.engagements == nil {
+		return "", fmt.Errorf("%w: engagement tenant resolver is required", shared.ErrValidation)
+	}
+	engagement, err := s.engagements.GetByID(ctx, engagementID)
+	if err != nil {
+		return "", err
+	}
+	tenantID := shared.TenantOrDefault(engagement.TenantID)
+	if current, ok := shared.TenantFrom(ctx); ok && shared.TenantOrDefault(current) != tenantID {
+		return "", fmt.Errorf("%w: finding engagement belongs to another tenant", shared.ErrValidation)
+	}
+	return tenantID, nil
+}
+
+func (s *Service) appendFindingCreated(ctx context.Context, tenantID shared.ID, f finding.Finding, engagementName, actor string) error {
+	return s.appendFindingEvent(ctx, tenantID, notification.EventFindingCreated, "finding_created", f.ID.String(), f, engagementName, actor, map[string]any{
+		"title": "Finding created", "summary": "A finding was created.",
+		"finding_id": f.ID, "engagement_id": f.EngagementID, "finding_kind": f.Kind,
+		"status": f.Status, "finding_version": f.Version,
+	})
+}
+
+func (s *Service) appendFindingStatusChanged(ctx context.Context, tenantID shared.ID, f finding.Finding, from finding.Status, engagementName, actor string) error {
+	return s.appendFindingEvent(ctx, tenantID, notification.EventFindingStatusChanged, "finding_status", f.ID.String()+":"+fmt.Sprint(f.Version), f, engagementName, actor, map[string]any{
+		"title": "Finding status changed", "summary": "A finding status changed.",
+		"finding_id": f.ID, "engagement_id": f.EngagementID, "finding_kind": f.Kind,
+		"from_status": from, "to_status": f.Status, "status": f.Status, "finding_version": f.Version,
+	})
+}
+
+func (s *Service) appendFindingRetestCompleted(ctx context.Context, tenantID shared.ID, rt finding.Retest, f finding.Finding, from finding.Status, engagementName, actor string) error {
+	return s.appendFindingEvent(ctx, tenantID, notification.EventFindingRetestCompleted, "finding_retest", rt.ID.String(), f, engagementName, actor, map[string]any{
+		"title": "Finding retest completed", "summary": "A finding retest was completed.",
+		"finding_id": f.ID, "engagement_id": f.EngagementID, "finding_kind": f.Kind,
+		"from_status": from, "to_status": f.Status, "status": f.Status, "retest_id": rt.ID,
+		"result": rt.Outcome, "finding_version": f.Version,
+	})
+}
+
+func (s *Service) appendFindingEvent(ctx context.Context, tenantID shared.ID, eventType notification.EventType, sourceKind, sourceID string, f finding.Finding, engagementName, actor string, data map[string]any) error {
+	if s.notifications == nil {
+		return nil
+	}
+	if engagementName == "" {
+		engagement, err := s.engagements.GetByID(ctx, f.EngagementID)
+		if err != nil {
+			return fmt.Errorf("load finding notification engagement: %w", err)
+		}
+		if shared.TenantOrDefault(engagement.TenantID) != tenantID {
+			return fmt.Errorf("%w: finding notification engagement belongs to another tenant", shared.ErrValidation)
+		}
+		engagementName = engagement.Name
+	}
+	facts, err := s.notificationFacts.SnapshotFindingNotificationFacts(ctx, tenantID, f.EngagementID, f.ID, f.AssigneeUserID, actor)
+	if err != nil {
+		return fmt.Errorf("snapshot finding notification identities: %w", err)
+	}
+	if !facts.ActorUserID.IsZero() {
+		data["actor_user_id"] = facts.ActorUserID
+	}
+	if !facts.AssigneeUserID.IsZero() {
+		data["assignee_user_id"] = facts.AssigneeUserID
+	}
+	if !facts.TeamID.IsZero() {
+		data["team_id"] = facts.TeamID
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("encode finding notification data: %w", err)
+	}
+	vars := map[string]string{
+		"finding_title": f.Title, "engagement_name": engagementName, "severity": string(f.Severity),
+		"finding_kind": string(f.Kind), "status": string(f.Status),
+	}
+	if facts.ActorName != "" {
+		vars["actor"] = facts.ActorName
+	}
+	for _, name := range []string{"from_status", "to_status", "result"} {
+		if value, ok := data[name]; ok {
+			vars[name] = fmt.Sprint(value)
+		}
+	}
+	record, err := notification.SnapshotSourceRecord(notification.SourceRecord{
+		TenantID: tenantID, SourceKind: sourceKind, SourceID: sourceID, EventType: eventType,
+		EngagementID: f.EngagementID, Severity: f.Severity, OccurredAt: s.clock.Now(), Data: raw,
+		SubjectKind: "finding", SubjectID: f.ID.String(),
+	}, vars)
+	if err != nil {
+		return fmt.Errorf("snapshot finding notification: %w", err)
+	}
+	if err := s.notifications.Append(ctx, record); err != nil {
+		return fmt.Errorf("append finding notification: %w", err)
+	}
+	return nil
 }
 
 // UpdateStatus validates and applies a triage status change with optimistic
@@ -488,31 +683,42 @@ func (s *Service) UpdateStatus(ctx context.Context, engagementID, findingID shar
 	if !status.Valid() {
 		return finding.Finding{}, fmt.Errorf("%w: unknown finding status %q", shared.ErrValidation, status)
 	}
-	// Evidence gate: an exploitation/AI finding may not be promoted to
-	// CONFIRMED until its claim clears the evidence bar (>= 75). SCA/recon/manual
-	// findings are not gated (CanPromote returns true for them), so this is a no-op for
-	// the existing kinds and the enforcement is in place for when P4 produces
-	// exploitation findings. Wires the previously-dead Finding.CanPromote.
-	if status == finding.StatusConfirmed {
-		// Engage the gate only when the finding loads cleanly; otherwise defer to
-		// repo.UpdateStatus's authoritative not-found/conflict result.
-		if cur, err := s.loadFinding(ctx, engagementID, findingID); err == nil && !cur.CanPromote() {
-			return finding.Finding{}, fmt.Errorf("%w: %s finding cannot be confirmed below the evidence bar (score %d < %d)",
-				shared.ErrValidation, cur.Kind, cur.EvidenceScore, finding.EvidenceThreshold)
+	var updated finding.Finding
+	err := s.withFindingBoundary(ctx, engagementID, func(writeCtx context.Context, tenantID shared.ID) error {
+		// Evidence gate: an exploitation/AI finding may not be promoted to
+		// CONFIRMED until its claim clears the evidence bar (>= 75). SCA/recon/manual
+		// findings are not gated (CanPromote returns true for them).
+		current, loadErr := s.loadFinding(writeCtx, engagementID, findingID)
+		if loadErr != nil && s.notifications != nil {
+			return fmt.Errorf("read finding status notification facts: %w", loadErr)
 		}
-	}
-	f, err := s.repo.UpdateStatus(ctx, engagementID, findingID, status, expectedVersion)
+		if loadErr == nil && status == finding.StatusConfirmed && !current.CanPromote() {
+			return fmt.Errorf("%w: %s finding cannot be confirmed below the evidence bar (score %d < %d)",
+				shared.ErrValidation, current.Kind, current.EvidenceScore, finding.EvidenceThreshold)
+		}
+		var err error
+		updated, err = s.repo.UpdateStatus(writeCtx, engagementID, findingID, status, expectedVersion)
+		if err != nil {
+			return err
+		}
+		meta := map[string]string{"status": string(status)}
+		if note != "" {
+			meta["note"] = note
+		}
+		if err := s.record(writeCtx, actor, "finding.status", engagementID, findingID, meta); err != nil {
+			return err
+		}
+		if loadErr == nil && current.Status != updated.Status {
+			if err := s.appendFindingStatusChanged(writeCtx, tenantID, updated, current.Status, "", actor); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return finding.Finding{}, err
 	}
-	meta := map[string]string{"status": string(status)}
-	if note != "" {
-		meta["note"] = note
-	}
-	if err := s.record(ctx, actor, "finding.status", engagementID, findingID, meta); err != nil {
-		return finding.Finding{}, err
-	}
-	return f, nil
+	return updated, nil
 }
 
 // ApplyAITriageReview applies the human's decision to the authoritative finding.
@@ -595,18 +801,42 @@ func (s *Service) RecordRetest(ctx context.Context, engagementID, findingID shar
 	if err != nil {
 		return finding.Retest{}, finding.Finding{}, err
 	}
-	f, err := s.repo.UpdateStatus(ctx, engagementID, findingID, outcome.ResultingStatus(), expectedVersion)
+	var updated finding.Finding
+	err = s.withFindingBoundary(ctx, engagementID, func(writeCtx context.Context, tenantID shared.ID) error {
+		var current finding.Finding
+		if s.notifications != nil {
+			var err error
+			current, err = s.loadFinding(writeCtx, engagementID, findingID)
+			if err != nil {
+				return err
+			}
+		}
+		var err error
+		updated, err = s.repo.UpdateStatus(writeCtx, engagementID, findingID, outcome.ResultingStatus(), expectedVersion)
+		if err != nil {
+			return err
+		}
+		if err := s.retests.Add(writeCtx, rt); err != nil {
+			return fmt.Errorf("persist retest: %w", err)
+		}
+		if err := s.record(writeCtx, actor, "finding.retest", engagementID, findingID,
+			map[string]string{"outcome": string(outcome), "status": string(outcome.ResultingStatus())}); err != nil {
+			return err
+		}
+		if s.notifications != nil && current.Status != updated.Status {
+			if err := s.appendFindingStatusChanged(writeCtx, tenantID, updated, current.Status, "", actor); err != nil {
+				return err
+			}
+		}
+		if s.notifications != nil {
+			return s.appendFindingRetestCompleted(writeCtx, tenantID, rt, updated, current.Status, "", actor)
+		}
+		return nil
+	})
 	if err != nil {
 		return finding.Retest{}, finding.Finding{}, err
 	}
-	if err := s.retests.Add(ctx, rt); err != nil {
-		return finding.Retest{}, finding.Finding{}, fmt.Errorf("persist retest: %w", err)
-	}
-	if err := s.record(ctx, actor, "finding.retest", engagementID, findingID,
-		map[string]string{"outcome": string(outcome), "status": string(outcome.ResultingStatus())}); err != nil {
-		return finding.Retest{}, finding.Finding{}, err
-	}
-	return rt, f, nil
+	return rt, updated, nil
 }
 
 // Retests returns a finding's retest history (oldest first), scoped to the engagement.
@@ -629,20 +859,9 @@ func (s *Service) findingInEngagement(ctx context.Context, engagementID, finding
 	return false, nil
 }
 
-// loadFinding returns one finding scoped to its engagement (ErrNotFound otherwise),
-// for the evidence-gate check. Reuses the engagement-scoped list (no cross-engagement
-// read); the repository has no single-Get and findings-per-engagement are bounded.
+// loadFinding reads the indexed, engagement-scoped canonical finding.
 func (s *Service) loadFinding(ctx context.Context, engagementID, findingID shared.ID) (finding.Finding, error) {
-	list, err := s.repo.ListByEngagement(ctx, engagementID)
-	if err != nil {
-		return finding.Finding{}, err
-	}
-	for _, f := range list {
-		if f.ID == findingID {
-			return f, nil
-		}
-	}
-	return finding.Finding{}, fmt.Errorf("finding %s: %w", findingID, shared.ErrNotFound)
+	return s.repo.GetByEngagementAndID(ctx, engagementID, findingID)
 }
 
 // record writes an attributable, append-only audit entry; a failed write is

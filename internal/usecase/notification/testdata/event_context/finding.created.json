@@ -1,0 +1,14 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "event_label": "Finding created",
+    "event_type": "finding.created",
+    "finding_kind": "sast",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "severity": "high",
+    "status": "open",
+    "summary": "A new finding was recorded.",
+    "title": "Finding created"
+  }
+}

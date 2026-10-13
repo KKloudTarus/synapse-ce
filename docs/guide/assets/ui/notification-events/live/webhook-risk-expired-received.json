@@ -1,0 +1,23 @@
+{
+  "data": {
+    "vars": {
+      "accepted_at": "2026-10-13T04:14:28Z",
+      "deadline": "2026-10-13T04:05:26Z",
+      "event_label": "Risk acceptance expired",
+      "event_type": "risk_acceptance.expired",
+      "expires_at": "2026-10-13T04:18:28Z",
+      "occurred_at": "2026-10-13T04:18:28Z",
+      "reminder": "0",
+      "severity": "high",
+      "tier": "high"
+    }
+  },
+  "event": {
+    "id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+    "occurred_at": "2026-10-13T04:18:28Z",
+    "schema_version": 1,
+    "severity": "high",
+    "type": "risk_acceptance.expired"
+  },
+  "version": "synapse.notification.v1"
+}

@@ -41,6 +41,17 @@ type discardRenderAudit struct{}
 
 func (discardRenderAudit) Record(context.Context, ports.AuditEntry) error { return nil }
 
+type captureRenderFormatter struct {
+	message ports.RenderedMessage
+}
+
+func (*captureRenderFormatter) ChannelType() domain.ChannelType { return domain.ChannelSlack }
+
+func (f *captureRenderFormatter) Format(message ports.RenderedMessage) (ports.FormattedMessage, error) {
+	f.message = message
+	return ports.FormattedMessage{ContentType: "application/json", Body: []byte(`{}`)}, nil
+}
+
 type renderHarness struct {
 	ctx       context.Context
 	clock     *stepClock
@@ -475,5 +486,40 @@ func TestRenderMessageHumanChannelsPresentTenantTime(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRenderMessagePassesSeverityOnlyWhenEventSpecDeclaresIt(t *testing.T) {
+	h := newRenderHarness(t)
+	formatter := &captureRenderFormatter{}
+	h.svc.SetFormatters(map[domain.ChannelType]ports.NotificationFormatter{domain.ChannelSlack: formatter})
+
+	for _, tc := range []struct {
+		name     string
+		event    domain.Event
+		draft    *domain.TemplateVersion
+		severity shared.Severity
+	}{
+		{
+			name: "severity event", severity: shared.SeverityHigh,
+			event: domain.Event{Type: domain.EventFindingCreated, Severity: shared.SeverityHigh, Context: json.RawMessage(`{"vars":{"severity":"high","finding_kind":"sca","status":"open"}}`)},
+			draft: &domain.TemplateVersion{TemplateID: "finding", Version: 1, Fields: map[string]string{"body": "{{.severity}}"}},
+		},
+		{
+			name: "event without severity", severity: "",
+			event: domain.Event{Type: domain.EventScanCompleted, Severity: shared.SeverityHigh, Context: json.RawMessage(`{"vars":{"scan_kind":"sca"}}`)},
+			draft: &domain.TemplateVersion{TemplateID: "scan", Version: 1, Fields: map[string]string{"body": "{{.scan_kind}}"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			formatter.message = ports.RenderedMessage{}
+			out, err := h.svc.RenderMessage(h.ctx, RenderInput{Channel: h.channel, Event: tc.event, Draft: tc.draft})
+			if err != nil || out.Formatted == nil {
+				t.Fatalf("render = %+v, %v", out, err)
+			}
+			if formatter.message.Severity != tc.severity || out.Message.Severity != tc.severity {
+				t.Fatalf("formatter severity = %q, rendered severity = %q, want %q", formatter.message.Severity, out.Message.Severity, tc.severity)
+			}
+		})
 	}
 }

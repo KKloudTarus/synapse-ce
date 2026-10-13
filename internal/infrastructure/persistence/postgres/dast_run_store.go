@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/dastrun"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -30,7 +31,15 @@ func (s *DASTRunStore) SaveDASTRun(ctx context.Context, run dastrun.Run) error {
 		return err
 	}
 	return WithTenant(ctx, s.pool, run.TenantID.String(), func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO dast_runs
+		var prior, storedEngagement string
+		err := tx.QueryRow(ctx, `SELECT status,engagement_id FROM dast_runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, run.TenantID.String(), run.ID.String()).Scan(&prior, &storedEngagement)
+		if err != nil && err != pgx.ErrNoRows {
+			return err
+		}
+		if err == nil && storedEngagement != run.EngagementID.String() {
+			return fmt.Errorf("%w: DAST run engagement does not match stored run", shared.ErrValidation)
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO dast_runs
 			(tenant_id,id,engagement_id,action_id,actor,status,verdict,http_status,evidence_id,error_code,started_at,finished_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 			ON CONFLICT (tenant_id,id) DO UPDATE SET status=EXCLUDED.status, verdict=EXCLUDED.verdict,
@@ -39,7 +48,13 @@ func (s *DASTRunStore) SaveDASTRun(ctx context.Context, run dastrun.Run) error {
 			WHERE dast_runs.status NOT IN ('succeeded','failed')`,
 			run.TenantID.String(), run.ID.String(), run.EngagementID.String(), run.ActionID.String(), run.Actor,
 			string(run.Status), run.Verdict, run.HTTPStatus, run.EvidenceID.String(), run.ErrorCode, run.StartedAt, run.FinishedAt)
-		return err
+		if err != nil {
+			return err
+		}
+		if run.Status.Terminal() && prior != string(dastrun.RunSucceeded) && prior != string(dastrun.RunFailed) {
+			return appendDASTRunNotification(ctx, tx, run)
+		}
+		return nil
 	})
 }
 
@@ -84,6 +99,11 @@ func (s *DASTRunStore) StartRun(ctx context.Context, tenantID shared.ID, run das
 	return won, nil
 }
 
+func appendDASTRunNotification(ctx context.Context, tx pgx.Tx, run dastrun.Run) error {
+	return appendRunFinishedNotification(ctx, tx, run.TenantID, run.EngagementID, notification.EventDASTRunFinished,
+		"dast_run", run.ID.String(), "dast", string(run.Status), []string{"dast"}, "", run.ErrorCode, -1, *run.FinishedAt)
+}
+
 // FinishRun writes the terminal run only if the stored row is still 'running' (compare-and-set), and
 // reports whether the row was updated. A redelivered or lease-overlapping worker that lost the race
 // changes nothing.
@@ -94,15 +114,21 @@ func (s *DASTRunStore) FinishRun(ctx context.Context, tenantID shared.ID, run da
 	if !run.Status.Terminal() {
 		return false, fmt.Errorf("%w: FinishRun needs a terminal run, got %s", shared.ErrValidation, run.Status)
 	}
+	if run.TenantID != tenantID {
+		return false, fmt.Errorf("%w: DAST run tenant does not match transaction tenant", shared.ErrValidation)
+	}
 	err = WithTenant(ctx, s.pool, tenantID.String(), func(tx pgx.Tx) error {
 		tag, e := tx.Exec(ctx, `UPDATE dast_runs SET status=$3, verdict=$4, http_status=$5, evidence_id=$6, error_code=$7, finished_at=$8
-			WHERE tenant_id=$1 AND id=$2 AND status='running'`,
-			tenantID.String(), run.ID.String(), string(run.Status), run.Verdict, run.HTTPStatus, run.EvidenceID.String(), run.ErrorCode, run.FinishedAt)
+			WHERE tenant_id=$1 AND id=$2 AND status='running' AND engagement_id=$9`,
+			tenantID.String(), run.ID.String(), string(run.Status), run.Verdict, run.HTTPStatus, run.EvidenceID.String(), run.ErrorCode, run.FinishedAt, run.EngagementID.String())
 		if e != nil {
 			return e
 		}
 		won = tag.RowsAffected() == 1
-		return nil
+		if !won {
+			return nil
+		}
+		return appendDASTRunNotification(ctx, tx, run)
 	})
 	if err != nil {
 		return false, fmt.Errorf("finish DAST run: %w", err)

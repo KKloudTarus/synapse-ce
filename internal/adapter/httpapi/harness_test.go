@@ -23,6 +23,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetrollout"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/importedfinding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	projectdom "github.com/KKloudTarus/synapse-ce/internal/domain/project"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/purplecoverage"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
@@ -315,6 +316,25 @@ func (fakeRules) Get(context.Context, rule.Key) (rule.Rule, error)        { retu
 // handler runs, so they need no downstream service. This is deliberate – the security-critical
 // assertions are the denials.
 func TestHostileHarness(t *testing.T) {
+	t.Run("notification event rules reject foreign tenants", func(t *testing.T) {
+		for _, eventType := range []notification.EventType{
+			notification.EventFindingCreated, notification.EventFindingStatusChanged, notification.EventFindingRetestCompleted,
+			notification.EventScanFailed, notification.EventDASTRunFinished, notification.EventReconRunFinished, notification.EventCSPMRunFinished,
+			notification.EventSLABreached, notification.EventRiskAcceptanceCreated, notification.EventRiskAcceptanceExpiring, notification.EventRiskAcceptanceExpired,
+		} {
+			t.Run(string(eventType), func(t *testing.T) {
+				rule := notification.Rule{TenantID: "tenantA", Enabled: true, EventType: eventType, AllTeams: true, LeadTimeSecs: 86400}
+				event := notification.Event{TenantID: "tenantA", Type: eventType, Data: []byte(`{"lead_time_seconds":86400}`)}
+				if !rule.Matches(event) {
+					t.Fatal("same-tenant control must match before checking isolation")
+				}
+				event.TenantID = "tenantB"
+				if rule.Matches(event) {
+					t.Fatal("tenant A rule matched tenant B event")
+				}
+			})
+		}
+	})
 	engRepo := memory.NewEngagementRepository()
 	promotionFindings := memory.NewFindingRepository()
 	promotionJudgments := memory.NewJudgmentStore()

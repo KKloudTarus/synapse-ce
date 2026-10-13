@@ -100,12 +100,52 @@ func (r *FindingRepository) ClaimFindingProjection(_ context.Context, _ shared.I
 
 // Upsert inserts or updates findings, deduped by (engagement, dedup key). On
 // update it preserves the existing triage status + created timestamp.
-func (r *FindingRepository) Upsert(_ context.Context, findings []finding.Finding) error {
+func (r *FindingRepository) Upsert(ctx context.Context, findings []finding.Finding) error {
 	if err := validateFindingBatch(findings); err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Preserve only the records this call can change. The in-memory transaction
+	// runner serializes transactions, so restoring these pre-images on a later
+	// audit/outbox failure gives the same all-or-nothing behavior as Postgres.
+	// Capture before the first mutation: a batch can contain the same dedup key.
+	before := make(map[shared.ID]map[string]*finding.Finding)
+	for _, candidate := range findings {
+		key := candidate.DedupKey
+		if key == "" {
+			key = candidate.ID.String()
+		}
+		if _, seen := before[candidate.EngagementID]; !seen {
+			before[candidate.EngagementID] = map[string]*finding.Finding{}
+		}
+		if _, seen := before[candidate.EngagementID][key]; seen {
+			continue
+		}
+		if stored, ok := r.data[candidate.EngagementID][key]; ok {
+			copy := cloneFinding(stored)
+			before[candidate.EngagementID][key] = &copy
+		} else {
+			before[candidate.EngagementID][key] = nil
+		}
+	}
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		for engagementID, records := range before {
+			byKey := r.data[engagementID]
+			for key, previous := range records {
+				if previous == nil {
+					delete(byKey, key)
+					continue
+				}
+				byKey[key] = cloneFinding(*previous)
+			}
+			if len(byKey) == 0 {
+				delete(r.data, engagementID)
+			}
+		}
+	})
 	for _, f := range findings {
 		f = cloneFinding(f)
 		byKey := r.data[f.EngagementID]
@@ -233,7 +273,7 @@ func sameStrings(left, right []string) bool {
 // UpdateStatus sets a finding's triage status with optimistic concurrency
 // (expectedVersion must match the stored version), bumping the version. Returns
 // shared.ErrConflict on a version mismatch, shared.ErrNotFound if absent.
-func (r *FindingRepository) UpdateStatus(_ context.Context, engagementID, findingID shared.ID, status finding.Status, expectedVersion int) (finding.Finding, error) {
+func (r *FindingRepository) UpdateStatus(ctx context.Context, engagementID, findingID shared.ID, status finding.Status, expectedVersion int) (finding.Finding, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for key, f := range r.data[engagementID] {
@@ -241,9 +281,17 @@ func (r *FindingRepository) UpdateStatus(_ context.Context, engagementID, findin
 			if f.Version != expectedVersion {
 				return finding.Finding{}, fmt.Errorf("finding %s changed since you loaded it: %w", findingID, shared.ErrConflict)
 			}
+			before := cloneFinding(f)
 			f.Status = status
 			f.Version++
 			r.data[engagementID][key] = cloneFinding(f)
+			registerTenantRollback(ctx, func() {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				if byKey := r.data[engagementID]; byKey != nil {
+					byKey[key] = cloneFinding(before)
+				}
+			})
 			return cloneFinding(f), nil
 		}
 	}

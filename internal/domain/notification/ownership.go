@@ -45,19 +45,31 @@ func (r *Rule) normalizeTeamScope(spec EventSpec) error {
 	return nil
 }
 
-// matchesTeams applies the team scope. Only ownership events carry teams today; any other event
-// type that allows a team filter fails closed until its payload is mapped here.
+// matchesTeams applies the team scope. Ownership keeps its old/new semantics;
+// lifecycle and finding events carry the event-time team_id source fact.
 func (r Rule) matchesTeams(e Event) bool {
-	if e.Type != EventOwnershipChanged {
-		return false
-	}
-	var data OwnershipChanged
-	if json.Unmarshal(e.Data, &data) != nil || data.DecisionID.IsZero() || data.FindingID.IsZero() || data.EngagementID != e.EngagementID {
-		return false
+	if e.Type == EventOwnershipChanged {
+		var data OwnershipChanged
+		if json.Unmarshal(e.Data, &data) != nil || data.DecisionID.IsZero() || data.FindingID.IsZero() || data.EngagementID != e.EngagementID {
+			return false
+		}
+		if r.AllTeams {
+			return len(r.TeamIDs) == 0
+		}
+		return !data.OldTeamID.IsZero() && containsID(r.TeamIDs, data.OldTeamID) ||
+			!data.NewTeamID.IsZero() && containsID(r.TeamIDs, data.NewTeamID)
 	}
 	if r.AllTeams {
-		return len(r.TeamIDs) == 0
+		if len(r.TeamIDs) != 0 {
+			return false
+		}
+		var data struct {
+			TeamID shared.ID `json:"team_id"`
+		}
+		return json.Unmarshal(e.Data, &data) == nil
 	}
-	return !data.OldTeamID.IsZero() && containsID(r.TeamIDs, data.OldTeamID) ||
-		!data.NewTeamID.IsZero() && containsID(r.TeamIDs, data.NewTeamID)
+	var data struct {
+		TeamID shared.ID `json:"team_id"`
+	}
+	return json.Unmarshal(e.Data, &data) == nil && !data.TeamID.IsZero() && containsID(r.TeamIDs, data.TeamID)
 }

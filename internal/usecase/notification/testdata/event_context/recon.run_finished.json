@@ -1,0 +1,16 @@
+{
+  "subject_kind": "recon_run",
+  "subject_id": "recon-42",
+  "vars": {
+    "counts_available": "false",
+    "event_label": "Reconnaissance run finished",
+    "event_type": "recon.run_finished",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "outcome": "succeeded",
+    "provider": "subfinder",
+    "scan_kind": "recon",
+    "severity_counts_available": "false",
+    "summary": "A recon run completed.",
+    "title": "Recon run finished"
+  }
+}

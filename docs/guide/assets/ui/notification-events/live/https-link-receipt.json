@@ -1,0 +1,27 @@
+{
+  "event_type": "finding.created",
+  "engagement_id": "5d59cab975c1701844de37ea1d8e151e",
+  "finding_id": "e6cd53403800f728d6ba4510737b335b",
+  "delivery_count": 16,
+  "delivered": 16,
+  "providers": [
+    "slack",
+    "google_chat",
+    "telegram",
+    "discord"
+  ],
+  "locales": [
+    "en",
+    "vi"
+  ],
+  "data_classes": [
+    "signal",
+    "detail"
+  ],
+  "console_https": true,
+  "certificate_validation_bypassed": false,
+  "discord_link_clicked": true,
+  "destination_finding_expanded": true,
+  "authentication_preserves_deep_link": true,
+  "full_matrix_complete": false
+}

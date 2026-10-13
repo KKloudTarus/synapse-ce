@@ -1,0 +1,15 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "event_label": "Finding retest completed",
+    "event_type": "finding.retest_completed",
+    "finding_kind": "sast",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "result": "remediated",
+    "severity": "high",
+    "status": "remediated",
+    "summary": "A finding was retested.",
+    "title": "Finding retest completed"
+  }
+}

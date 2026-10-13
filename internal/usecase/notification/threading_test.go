@@ -97,3 +97,33 @@ func TestSubjectThreadDoesNotReadAnchorsForOtherChannels(t *testing.T) {
 		t.Fatalf("unnecessary anchor reads: %d", repo.anchorCalls)
 	}
 }
+
+func TestHistoricalFindingEventsDoNotResolvePagerSubjects(t *testing.T) {
+	for _, kind := range []domain.ChannelType{domain.ChannelPagerDuty, domain.ChannelJSM} {
+		for _, tc := range []struct {
+			event domain.EventType
+			data  string
+		}{
+			{domain.EventFindingStatusChanged, `{"finding_version":2,"from_status":"open","to_status":"remediated"}`},
+			{domain.EventFindingRetestCompleted, `{"finding_version":2,"result":"remediated","status":"remediated"}`},
+		} {
+			t.Run(string(kind)+"/"+string(tc.event), func(t *testing.T) {
+				repo := &threadingRepo{anchor: "acknowledged-trigger"}
+				svc, err := NewService(repo, fakeProtector{}, nil, fakeAudit{}, fakeClock{}, &fakeIDs{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				work := ports.NotificationWork{
+					Event:   domain.Event{TenantID: "tenant", Type: tc.event, SubjectKind: "finding", SubjectID: "finding-1", Data: json.RawMessage(tc.data)},
+					Channel: domain.Channel{ID: "channel", Type: kind, SecretVersion: 1},
+				}
+				if err := svc.prepareSubjectThread(context.Background(), &work); err != nil {
+					t.Fatal(err)
+				}
+				if work.SubjectAnchor != repo.anchor || work.SubjectResolved {
+					t.Fatalf("historical notification became a pager closure: %+v", work)
+				}
+			})
+		}
+	}
+}

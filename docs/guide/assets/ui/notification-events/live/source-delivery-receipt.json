@@ -1,0 +1,5580 @@
+{
+  "attempts": [
+    {
+      "attempt_number": 1,
+      "delivery_id": "00dbc2a607546cf261fcf3efe82aa1e2",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "018316e5092ec3f8beecb4c701556ad4",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0192812fb5b2b2a5cafd66a57d29e55e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "025cb5b6753c14716f1d2b3410415b86",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0329c58fabb6302ef63364944cb93c67",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "03c5da0ac0069c76820447428060c207",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0471260f0f88a21b18e80a8d3111d110",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "051506d008fc590a57e4be106f224f6d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "057f588894929ec83d06c7b14e84519f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "05ce2e852f384bc78fa21df409c71128",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0752cfe0d5f0f24cdfa274e0d3c73719",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0771821a12a938c3210e1dbcc706a541",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0aabc73631906d765df7d110a142f861",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0b2e83e3dcfec2c16caf2e58e9464898",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0b64ecbb6b5365322bac0e3da73964ec",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0bebae7b782d410c04f3e12c430b6d0e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0cb4145568260053294429748d983ab6",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0cc4d52ed6c7202a09dbdf6ee9f96aab",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0cd4e52b9884188a742dabd7a5aded9a",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0d21124c84b0891870f89e34f784eb44",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0e50de58ba03d26ead2c6df88d81c413",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0f97b1d7bf31a97aca5cc489dfdaec5d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "0fe8c1f2c154c778c631819e6360025a",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "11927ba49c42adb622430c69eab027e1",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "15361d8b64a1376ac6430d2e96060364",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "1542ffba0ed889d7f21e4b61b239a94b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "17a11e635020e719b27ff546f794fdbb",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "1871a4d40eb3c77a86a0de9f9e3ac30a",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "18e8786e22e4526d09b41683beb23901",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "19eb6569c500da64d755c6774c78f721",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "19f02dc0575d1dab2d45357cd0768122",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "19f707bcfc431ec9de82d5e68d6bca1e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "1c0c6e4075f8f2f59436f52ed2482246",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "1c58a4d7279c8792f98cf74aa6a2fb1e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "1f3c580839640b45800d3faa29e6f4ed",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "1fdd9b482e952f0a7900b65732ac7b4d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "2237e2d18271e78bfe8055276edf769c",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "22b1ddf2fe4dc2ba0de4b56152409261",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "23714756afd8641d8e388fa2d18a7e13",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "2376557c0614d8fc57dea39ab3a552a5",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "24f20a327a41d7b3aaa9bb006b217155",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "276c7f510ce29f24b075d7e9e1be6cd4",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "28181cbcc89719cca2de86f9b30bf7d0",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "283cfce7bbfd5dd6830ea434b30a34fe",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "293edcabd7fcd82894acc785cfc3e3d2",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "299df7a2031fb9942f3b4bde3329c1f7",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "2a42452fe440ad36502e52099250711f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "2e6fdaddd699651a6324a308c2ec4d41",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "319091b8099b533431b74c8df95753d3",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "33d034e1485fd704c8b49328be1be7da",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "34e6f2e9953f0d4b8e68f4b2b757f00d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "364489b395ab524d0fd0a69ea7e018c1",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "367df301b9d9659f8ad07f8efdd58b01",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "36c787f1ed66fe934c7a3c70219a53ad",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "384a8f4c6da1138833d43e6d75c1d6d8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "38ac0a5f55132bf0b26192fd48975f5d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "3cf9ef3cfe35db0f894171a404df3b46",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "3e027c21d17f3f52de504e2b2cb3f589",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "402202e9c5fe88b60cec54624d86a86a",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "409c4211096e2bc433e2900c054fa80a",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "43c26c959841a55f93d6613993fc203d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "45332777090966c0ef9a356664babf25",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "459a6152bae9805bb2f85a0fa64c4635",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "468543a2b749e37ee7c97ca58c182eab",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "46cd23426fb554eaaebaed832f1b09f2",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "46f3a5e85cfb952f56aa8baf00e0cb39",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "481a9e30bb65359d105e370aa4b717de",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "48f1f5803ea08faaa392f2bc53767314",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "4a7a100250cd72c5f398145fe2b42ba0",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "4b79c2d10f42f5ef2df43985124f64d7",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "4c8e66a341af518f0cd22aba59e6bf92",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "4f0b9206618e16d0c46e015c149887e2",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "4f17a323758fffecaaec55d569a439b4",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "50350d2c23ca0e4c0ae9727967a8f9b1",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "507281b2375e998344e0c335ecce54c8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "50a8b8007f5354d6f0c298b69f01da58",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "51c7b464b5f9b9f09d77485b1b35db54",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "51e05af1d1187619e727347723c3235f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "51e7359956e08ca982f65f2fe275d684",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5287bfc186a64427327fe282c2cbc978",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5485d4fd168716f604b6e363cced4a8c",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "548de56b5d2585a8c6d3e90a043ac270",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "54ba0c98a4551f1c5590996e2df67fac",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "54d641b35076aa91830f1b4d5ad958a6",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "550d481ab9bf3b51dd866542c7e2b91c",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "55d7ca820cc999a227c9bd4cba265b00",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "565d67b99858801f0e2da2c26d9a82da",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "567e133b0b0e522a311c6b90d3c363e6",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "57bed70042225b65a6678f3bb006db3b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5a3e44ba17200f5007777553d5cd42e1",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5a5f9e858454293b9699661404451417",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5a64b19f2903e41983d710bb5db990c8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5ac6224aae71a0d77b5d45aca68c99bd",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5b25d3b52966e9939c18158b21cb98a2",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5b7a90c38ae3c4c0f9e2755da209bdf0",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5ccda90aae1474a2ae109cb2d213f86c",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5d47242d0a475e90aec381c3af8683fd",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5ddfbe75b7e75e952c8b2f37a46ff89b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "5e213cd2d2b9dc324a413086c743367e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "610d1d63fcb59c6db3754c6714f645aa",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "612b295ef262d116cc4cb904221eb81d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "637c28104340a696ebf12e2b71acf0c3",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "638f4b66ab5a20d6389caaf1279dff53",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "65164915d6c709be0c6927b775215153",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "656526c2858a5a8558910e3bc5db1e98",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "65fac60bd3db064841e76c9005832ea2",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "66fd2c3de4f13fb07a00a12cdf8f0f2b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "67b037b61a81791b55b5c3028fe02868",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "67d87a54059051f9568d1b9b9d83a303",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "694bed8fa1bce9f4b1358ec8c28d3081",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "69c6f3e15f8e586f7f1ec16fa266bc7d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "6b4d2018b80d15a34efc3573f7cd58ff",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "6c7100e073c4bc9c2b5706fdc94414b2",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "6cf4a906e3dddc1935c8531c17339f34",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "6d76e7d52d21570926bede8c953a9583",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "6e963fe169511a9593d88d1714cf9d7b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "6f8497c8e9230be0f34b86524f76ea59",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "6fabca2df972e1364fc457c9e65c22a6",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "6fe3a2df99c164e95f031e6364327384",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "7110a0e83ce5eca4ef7db52c6999255b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "72edc9605f7b9c3379158089c0dd927e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "72ff4ba7f877ca77a895d1a2dd29de58",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "7317134d2203e824ba221ed4a4b0e333",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "7426f36bd630b34a266b873fe41e40fc",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "742851827b05269d7c3fc70575fdb880",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "772657a35ba003ad0425c070d028945c",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "794912056665a1fe3621c7bcd9e5753b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "799af4f680bce2c621ce163a4d992fc8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "7a4951a101e442bb906fcb6bf2a74ac2",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "7cc891aa606419a6aa982a642faa9e21",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "7dd715e0ee987e53a827e870d121daaa",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "810722a0200bd46cec8913b554fbc843",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8150916a3afd76cc5ea576cca323b9cc",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "82452239951311d0963c14278208ae98",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "835aa66b986bb91ae1ed3a9a6beaa108",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "86afbfed8c6f6c0b5df781b53d72283b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "887932adaac19cb7be3b70dcf78b01df",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "88cd3e5e5fafce38f2f7ae81da43bfd8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "88d3bb6ed8bca47de059e76b3c0dee43",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8a0dcbe519fa29aceabf72bf821c7790",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8b132922c31f98ee1ee0a4777c1bea2d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8b3a56e20a1024533edcee689ab83509",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8bce5879ac6f86214441d148b6168696",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8d1b4f0f5bdbd54bfa6e403a51697873",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8df9c1dc483613d4b7fb25e91f5cee6a",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8e16a2de893958648ffbce3f939f792f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8ee88001e90fca1211c2d2a871b98c7b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "8f56b3352c9bf7266efa0a6ab6309c7e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "903f79a593de12847422dfd67873e9ed",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "9076d4b896b5d8dd15a8e0e9c48bee33",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "908e5cb5e22fca631dc024959d963806",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "93ac93d7fb2053380c271ec86a2d229f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "943d2703ed97c81bcc4041c74d095bd5",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "94ccad1d1cb596e10ec31edc53c340b0",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "96809b2ac01d6194623661652579ef3e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "9812ca91deb23edececc44075447c71a",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "98fc15963a770309c39a1f3d31a4a0c0",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "998dc88cd8de5bbbbf65625fb778bc8a",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "99d94910531c9f6e88e20fc3108d9ff9",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "9bdecf9b9cb4377209680f98e9815a44",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "9fcac998ad31726980d0e768c3ca9ab9",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "a0afc0ec190b4c961e7fd55f54d0d342",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "a276c8e7291f53e91f0183a71a01f8e5",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "a45604e855973d7c38d7195f724dae6f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "a4d14540f68e197f1248335947d6147b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "a4e93cb1feddd89756e353b464d2ab61",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "a8f18a062906c120e986a050e0a91ded",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "a90dc761664e68040c4950155cdcbd20",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "aa5e2808d10d050eeeef27cda2d4b69b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "aae2108542a1e5a9c1f071397e3b76ab",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ab5eec2c0b9adee4d658ee9238ba7805",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ac633580a78dcc8023522455cd397143",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "adab5f0cef51018a048e1963456245f8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "b053d6bda2953a163228412ce6a7cdf6",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "b28d199c7106a55394c6510e3465e4d5",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "b28e52ef2af6052f2750baf253754546",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "b98544e8e29ef49e85ef053e9038e44d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "b9c493de361c725217a96d63b3003e58",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ba4e61c48ecc988a5e3c301f6373603d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ba59f3d916126cb196552648afd6d023",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "baaeeda5bd44481f69a5c4d8ec9400ec",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "bc71c4b692ae5fa454414e479d03ded8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "bce89255407a6b9dc83c61dd0b324429",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "be4162c145726f8514188e3c525ada6e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "bea84377853664bcc8da0d3a34bf9a69",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "bf1f53593cd4d31033e958a60f3ba33e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "bf32e1ac690f9a32755e129e86fdf4f4",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "bf86120953446e892de86ddf11ab65bd",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c0fec57236764fe332e2266b3d286e7f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c28b7ba4f114678136d20c4e6170b907",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c33ebd58b445b52594fc6848ea93d2af",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c3a2db263187aade668389aae2fadb54",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c3f9b8548c1a8bdf5199dcce1c98c7ff",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c46d7de1d5cd094c47dac9f4b36ffbb4",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c6ce73d3ab4cf91c9264f2584bb3364f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c6fae45b64eebedd7ea670c1541e3235",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c77b52d21c1d2a40efaa91527b87a635",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c8429d4138500a25ff060e32db261421",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c8d34479409daa1050d2d84ad0cab811",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "c94d4424438cf78c22c361e8de2e5b3e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "caf468830142fe330b5114ad5d6de9bd",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "cba78e442fa8deff8178a0ea1cd876a3",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ce713ec075f88a654116e5c911c049c9",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "cf0f78873303372fa56a12b968fc28c3",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "cf73be99e07761f5a7ec3512600a16ae",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "cf7729b34489bb0c4ff692e71b72a26f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d1949146a3ac201685711ac9621e8625",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d1b6b864d404a7815d5e7caf1dfa680f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d2110253dc4cbaa44181c7ebd2255e20",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d22893e9f5e735813eb95eb0bf081480",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d24899ad69555969485d66b9b8a44bb0",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d3e577dce5bce3e143b928a54b855846",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d47f21e7e1e411513af84606b41027e4",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d5c666c42feece0435c6a28ab6f6dc97",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d62cacbec79e49715d3c638da0cde24e",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d7617715fc13e5c47822ed7130605b9c",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d77296e162ae7e588e3ce0fc9f84311f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "d8a897ff7abb5744d493e9f2b730e8f8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "da0f9dc6546249998b0d9f6df8eac2c7",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "db0a761aaab24fb150d59b91cedb6d13",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "db8f988eabd705c15736cf4d34d09cbc",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "dbf97280a4d57f13ca25dad537be37ad",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "dcf0de2eb9f0cbede176215d9fa9878d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "de026c29521bd853a421733a6b8393a8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ded385e63e8017534d7e14d12e0ac8b5",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "e001aa7af9e1bf4ccd229f9db1e6ba41",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "e18eed632b8d4b764a94ffe69d3e18ef",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "e1fa791f37b620a207b1b5d493ef2b36",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "e22eefd8426623c0d63cf40d18450f3d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "e573ed52834844271e65f00d1cfe6365",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "e74c78fc9ad23b7ec4dc3bfa4f40259b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "e7c61e4b605a9a76775d75b69fd5169f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "e7ef7201f911ec8f1159e9b3124d90fc",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "eaadc42bebb7827379e392b094c68ae8",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ec5ddf5d9b0316b507406e33ee554a34",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ec98c2848ed648d3de702f1d5197692d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ed46ac18667456f48f57678b5c73c04b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ef1f7f47863dc14b1bb2098ff07d9f95",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "ef81aba3aa84ea4163d9d990bb1a78fc",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "efa16a4c01109b8b5ce4f65fbb637a0f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "f1b042da1ea8c1a0c776941168a2d742",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "f20c195e843cd798f11a4ece0a2b8d9f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "f4b5b5cd3cd83d0a7e6557d87d089bd3",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "f58944884784d1733768841b85244180",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "fa146afaea5ffa94305b68c17126acb3",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "fa3d364b66276cece55dd6b867bf8d0f",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "fb28874091cfdc0a266ec54aa917f30b",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "fbf0b7a96f9072cea27047253952d427",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "fc5afd8ce1762af0a80a19da4284137d",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "fe2aebff7739c2438b21b0dc174a37cd",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    },
+    {
+      "attempt_number": 1,
+      "delivery_id": "fedde7e58002f641cfb7084043ece7af",
+      "error_code": "",
+      "outcome": "delivered",
+      "response_code": 200
+    }
+  ],
+  "captured_at": "2026-10-13T04:47:04.446605+00:00",
+  "deliveries": [
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:20.181631+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "794912056665a1fe3621c7bcd9e5753b",
+      "last_error": "",
+      "matched_rules": [
+        "a0d51c6e0350ea25ee8e42cd9770a83d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:20.970816+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "fb28874091cfdc0a266ec54aa917f30b",
+      "last_error": "",
+      "matched_rules": [
+        "fdc0edabb8646a65c069aa5abab6d9f9"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/le1XxZKB8yE.MBesCMRGPm8",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:21.54849+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "c94d4424438cf78c22c361e8de2e5b3e",
+      "last_error": "",
+      "matched_rules": [
+        "1618642d404cc4c266dca55bf2d2f9b5"
+      ],
+      "remote_ref": "1559413471769268278",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:21.943449+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "fa3d364b66276cece55dd6b867bf8d0f",
+      "last_error": "",
+      "matched_rules": [
+        "1618642d404cc4c266dca55bf2d2f9b5"
+      ],
+      "remote_ref": "1559413473874550845",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:22.848169+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "a0afc0ec190b4c961e7fd55f54d0d342",
+      "last_error": "",
+      "matched_rules": [
+        "a0d51c6e0350ea25ee8e42cd9770a83d"
+      ],
+      "remote_ref": "189",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:23.091432+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "98fc15963a770309c39a1f3d31a4a0c0",
+      "last_error": "",
+      "matched_rules": [
+        "a0d51c6e0350ea25ee8e42cd9770a83d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:23.848866+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "565d67b99858801f0e2da2c26d9a82da",
+      "last_error": "",
+      "matched_rules": [
+        "fdc0edabb8646a65c069aa5abab6d9f9"
+      ],
+      "remote_ref": "1791863546.587019",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:24.325385+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "6f8497c8e9230be0f34b86524f76ea59",
+      "last_error": "",
+      "matched_rules": [
+        "1618642d404cc4c266dca55bf2d2f9b5"
+      ],
+      "remote_ref": "1559413483445948419",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:24.769441+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "bea84377853664bcc8da0d3a34bf9a69",
+      "last_error": "",
+      "matched_rules": [
+        "a0d51c6e0350ea25ee8e42cd9770a83d"
+      ],
+      "remote_ref": "190",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:25.401662+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "a4e93cb1feddd89756e353b464d2ab61",
+      "last_error": "",
+      "matched_rules": [
+        "fdc0edabb8646a65c069aa5abab6d9f9"
+      ],
+      "remote_ref": "1791863548.146869",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:26.020643+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "548de56b5d2585a8c6d3e90a043ac270",
+      "last_error": "",
+      "matched_rules": [
+        "fdc0edabb8646a65c069aa5abab6d9f9"
+      ],
+      "remote_ref": "1791863548.776699",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:26.666861+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "c3a2db263187aade668389aae2fadb54",
+      "last_error": "",
+      "matched_rules": [
+        "fdc0edabb8646a65c069aa5abab6d9f9"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/AMH2rR3H5IA.AVHg2zDd0Uw",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:27.087648+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "0bebae7b782d410c04f3e12c430b6d0e",
+      "last_error": "",
+      "matched_rules": [
+        "1618642d404cc4c266dca55bf2d2f9b5"
+      ],
+      "remote_ref": "1559413495429210133",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:27.5461+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "7dd715e0ee987e53a827e870d121daaa",
+      "last_error": "",
+      "matched_rules": [
+        "a0d51c6e0350ea25ee8e42cd9770a83d"
+      ],
+      "remote_ref": "191",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:27.798501+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "51e7359956e08ca982f65f2fe275d684",
+      "last_error": "",
+      "matched_rules": [
+        "a0d51c6e0350ea25ee8e42cd9770a83d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:28.440662+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "db0a761aaab24fb150d59b91cedb6d13",
+      "last_error": "",
+      "matched_rules": [
+        "fdc0edabb8646a65c069aa5abab6d9f9"
+      ],
+      "remote_ref": "1791863551.203849",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:29.107425+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "638f4b66ab5a20d6389caaf1279dff53",
+      "last_error": "",
+      "matched_rules": [
+        "fdc0edabb8646a65c069aa5abab6d9f9"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/iVhGnl85QA8.fvpUYXJzrxE",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:29.928228+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "0b64ecbb6b5365322bac0e3da73964ec",
+      "last_error": "",
+      "matched_rules": [
+        "fdc0edabb8646a65c069aa5abab6d9f9"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/62MF7LstooE.2qvi4AdQXA8",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:30.167613+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "15361d8b64a1376ac6430d2e96060364",
+      "last_error": "",
+      "matched_rules": [
+        "a0d51c6e0350ea25ee8e42cd9770a83d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:30.607366+00:00",
+      "event_id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "id": "d2110253dc4cbaa44181c7ebd2255e20",
+      "last_error": "",
+      "matched_rules": [
+        "a0d51c6e0350ea25ee8e42cd9770a83d"
+      ],
+      "remote_ref": "192",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:30.846192+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "8e16a2de893958648ffbce3f939f792f",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:31.091316+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "1871a4d40eb3c77a86a0de9f9e3ac30a",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:31.76874+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "a45604e855973d7c38d7195f724dae6f",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "1791863554.499349",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:32.444926+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "c8d34479409daa1050d2d84ad0cab811",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "1791863555.183909",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:32.912366+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "ef81aba3aa84ea4163d9d990bb1a78fc",
+      "last_error": "",
+      "matched_rules": [
+        "0c207b03b20ddce88b07bdd5a1e9619b"
+      ],
+      "remote_ref": "1559413519416295516",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:33.384078+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "e7ef7201f911ec8f1159e9b3124d90fc",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "193",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:33.835547+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "8a0dcbe519fa29aceabf72bf821c7790",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "194",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:34.448614+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "f1b042da1ea8c1a0c776941168a2d742",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/le1XxZKB8yE.8Cic92nHcQI",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:34.82934+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "6fabca2df972e1364fc457c9e65c22a6",
+      "last_error": "",
+      "matched_rules": [
+        "0c207b03b20ddce88b07bdd5a1e9619b"
+      ],
+      "remote_ref": "1559413527976869930",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:35.188736+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "1542ffba0ed889d7f21e4b61b239a94b",
+      "last_error": "",
+      "matched_rules": [
+        "0c207b03b20ddce88b07bdd5a1e9619b"
+      ],
+      "remote_ref": "1559413529314988114",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:35.645251+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "319091b8099b533431b74c8df95753d3",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "195",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:36.199251+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "c46d7de1d5cd094c47dac9f4b36ffbb4",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/62MF7LstooE.YhzcP-Ll7yA",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:36.658075+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "384a8f4c6da1138833d43e6d75c1d6d8",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "196",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:37.139987+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "025cb5b6753c14716f1d2b3410415b86",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/iVhGnl85QA8.8ReJsug45n4",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:37.786805+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "e22eefd8426623c0d63cf40d18450f3d",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "1791863560.521049",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:38.444048+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "0752cfe0d5f0f24cdfa274e0d3c73719",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "1791863561.184249",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:39.007779+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "3e027c21d17f3f52de504e2b2cb3f589",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/AMH2rR3H5IA.I6XinENoGfg",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:39.346967+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "6cf4a906e3dddc1935c8531c17339f34",
+      "last_error": "",
+      "matched_rules": [
+        "0c207b03b20ddce88b07bdd5a1e9619b"
+      ],
+      "remote_ref": "1559413546985721857",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:40.031952+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "903f79a593de12847422dfd67873e9ed",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:40.267248+00:00",
+      "event_id": "00386e2e63eb4148627ffab4772e1503",
+      "id": "7a4951a101e442bb906fcb6bf2a74ac2",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:59.711052+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "d5c666c42feece0435c6a28ab6f6dc97",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:40.733285+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "45332777090966c0ef9a356664babf25",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "197",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:40.967507+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "ec5ddf5d9b0316b507406e33ee554a34",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:41.603528+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "d8a897ff7abb5744d493e9f2b730e8f8",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "1791863564.349659",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:42.218351+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "ed46ac18667456f48f57678b5c73c04b",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/le1XxZKB8yE.8Ur5GtfKYnY",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:42.859919+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "4b79c2d10f42f5ef2df43985124f64d7",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "1791863565.597949",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:43.552282+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "0329c58fabb6302ef63364944cb93c67",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "1791863566.289529",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:44.251618+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "468543a2b749e37ee7c97ca58c182eab",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/62MF7LstooE.ahBeYnPAKCs",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:44.652676+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "1c0c6e4075f8f2f59436f52ed2482246",
+      "last_error": "",
+      "matched_rules": [
+        "0c207b03b20ddce88b07bdd5a1e9619b"
+      ],
+      "remote_ref": "1559413569127317565",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:45.092037+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "c6fae45b64eebedd7ea670c1541e3235",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "198",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:45.328559+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "887932adaac19cb7be3b70dcf78b01df",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:46.004984+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "7110a0e83ce5eca4ef7db52c6999255b",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/iVhGnl85QA8.yOrB2vvyu8Y",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:46.428313+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "33d034e1485fd704c8b49328be1be7da",
+      "last_error": "",
+      "matched_rules": [
+        "0c207b03b20ddce88b07bdd5a1e9619b"
+      ],
+      "remote_ref": "1559413576215699481",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:46.803615+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "03c5da0ac0069c76820447428060c207",
+      "last_error": "",
+      "matched_rules": [
+        "0c207b03b20ddce88b07bdd5a1e9619b"
+      ],
+      "remote_ref": "1559413578119909438",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:47.465189+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "367df301b9d9659f8ad07f8efdd58b01",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "1791863570.206119",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:48.101332+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "402202e9c5fe88b60cec54624d86a86a",
+      "last_error": "",
+      "matched_rules": [
+        "76a553f5c108f0564fdc1340221728d6"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/AMH2rR3H5IA.hYPt5-MVuI8",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:48.537355+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "88cd3e5e5fafce38f2f7ae81da43bfd8",
+      "last_error": "",
+      "matched_rules": [
+        "0c207b03b20ddce88b07bdd5a1e9619b"
+      ],
+      "remote_ref": "1559413585384570911",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:48.808106+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "a8f18a062906c120e986a050e0a91ded",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:49.309139+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "24f20a327a41d7b3aaa9bb006b217155",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "199",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:49.790444+00:00",
+      "event_id": "141917fa878c06e20d00c3b83001588a",
+      "id": "72edc9605f7b9c3379158089c0dd927e",
+      "last_error": "",
+      "matched_rules": [
+        "2ee095081441f8b8ed3bbfc50d94151f"
+      ],
+      "remote_ref": "200",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:50.033147+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "fe2aebff7739c2438b21b0dc174a37cd",
+      "last_error": "",
+      "matched_rules": [
+        "6571c8143dd309fd0fdfed1cdaf09346"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:50.482228+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "57bed70042225b65a6678f3bb006db3b",
+      "last_error": "",
+      "matched_rules": [
+        "6571c8143dd309fd0fdfed1cdaf09346"
+      ],
+      "remote_ref": "201",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:50.936001+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "5a5f9e858454293b9699661404451417",
+      "last_error": "",
+      "matched_rules": [
+        "6571c8143dd309fd0fdfed1cdaf09346"
+      ],
+      "remote_ref": "202",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:51.513828+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "17a11e635020e719b27ff546f794fdbb",
+      "last_error": "",
+      "matched_rules": [
+        "d49b464688fbf5a7e4389d90507431b9"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/iVhGnl85QA8.dJifJ1JHfQc",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:52.295986+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "8ee88001e90fca1211c2d2a871b98c7b",
+      "last_error": "",
+      "matched_rules": [
+        "d49b464688fbf5a7e4389d90507431b9"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/AMH2rR3H5IA.2CSk9f9Zfgw",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:52.910324+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "46cd23426fb554eaaebaed832f1b09f2",
+      "last_error": "",
+      "matched_rules": [
+        "d49b464688fbf5a7e4389d90507431b9"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/62MF7LstooE.6pRnQx6CtUM",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:53.318365+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "8b132922c31f98ee1ee0a4777c1bea2d",
+      "last_error": "",
+      "matched_rules": [
+        "382495ede110fa732ca20213ec26e173"
+      ],
+      "remote_ref": "1559413605458387075",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:53.688216+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "364489b395ab524d0fd0a69ea7e018c1",
+      "last_error": "",
+      "matched_rules": [
+        "382495ede110fa732ca20213ec26e173"
+      ],
+      "remote_ref": "1559413607090094193",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:54.142761+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "65fac60bd3db064841e76c9005832ea2",
+      "last_error": "",
+      "matched_rules": [
+        "382495ede110fa732ca20213ec26e173"
+      ],
+      "remote_ref": "1559413608751038565",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:54.582053+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "da0f9dc6546249998b0d9f6df8eac2c7",
+      "last_error": "",
+      "matched_rules": [
+        "6571c8143dd309fd0fdfed1cdaf09346"
+      ],
+      "remote_ref": "203",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:54.843177+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "6b4d2018b80d15a34efc3573f7cd58ff",
+      "last_error": "",
+      "matched_rules": [
+        "6571c8143dd309fd0fdfed1cdaf09346"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:55.464754+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "d47f21e7e1e411513af84606b41027e4",
+      "last_error": "",
+      "matched_rules": [
+        "d49b464688fbf5a7e4389d90507431b9"
+      ],
+      "remote_ref": "1791863578.215089",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:52:56.085954+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "5287bfc186a64427327fe282c2cbc978",
+      "last_error": "",
+      "matched_rules": [
+        "d49b464688fbf5a7e4389d90507431b9"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/le1XxZKB8yE.ngcOG72CwkI",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:56.723154+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "d22893e9f5e735813eb95eb0bf081480",
+      "last_error": "",
+      "matched_rules": [
+        "d49b464688fbf5a7e4389d90507431b9"
+      ],
+      "remote_ref": "1791863579.470799",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:52:57.106269+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "0471260f0f88a21b18e80a8d3111d110",
+      "last_error": "",
+      "matched_rules": [
+        "382495ede110fa732ca20213ec26e173"
+      ],
+      "remote_ref": "1559413621342208072",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:57.336768+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "bf86120953446e892de86ddf11ab65bd",
+      "last_error": "",
+      "matched_rules": [
+        "6571c8143dd309fd0fdfed1cdaf09346"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:52:57.924169+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "0e50de58ba03d26ead2c6df88d81c413",
+      "last_error": "",
+      "matched_rules": [
+        "6571c8143dd309fd0fdfed1cdaf09346"
+      ],
+      "remote_ref": "204",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:52:58.157966+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "8150916a3afd76cc5ea576cca323b9cc",
+      "last_error": "",
+      "matched_rules": [
+        "6571c8143dd309fd0fdfed1cdaf09346"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:58.78419+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "dcf0de2eb9f0cbede176215d9fa9878d",
+      "last_error": "",
+      "matched_rules": [
+        "d49b464688fbf5a7e4389d90507431b9"
+      ],
+      "remote_ref": "1791863581.535779",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:52:59.429888+00:00",
+      "event_id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "id": "6d76e7d52d21570926bede8c953a9583",
+      "last_error": "",
+      "matched_rules": [
+        "d49b464688fbf5a7e4389d90507431b9"
+      ],
+      "remote_ref": "1791863582.168919",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:53:19.1676+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "86afbfed8c6f6c0b5df781b53d72283b",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "1559413713834868757",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:53:19.74418+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "5e213cd2d2b9dc324a413086c743367e",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/tZDwx8RY19o._x3NNa6aRx0",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:53:20.385142+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "93ac93d7fb2053380c271ec86a2d229f",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "1791863603.137439",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:53:20.957119+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "43c26c959841a55f93d6613993fc203d",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/cppsy29abHw.Po0-iza0flY",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:53:21.641613+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "cba78e442fa8deff8178a0ea1cd876a3",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:53:22.262731+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "7426f36bd630b34a266b873fe41e40fc",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "1791863605.022069",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:53:22.675331+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "5d47242d0a475e90aec381c3af8683fd",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "1559413728527654964",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:53:23.294115+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "998dc88cd8de5bbbbf65625fb778bc8a",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "1791863606.053329",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:53:23.540996+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "38ac0a5f55132bf0b26192fd48975f5d",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:53:24.560039+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "0d21124c84b0891870f89e34f784eb44",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "205",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:53:25.0051+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "908e5cb5e22fca631dc024959d963806",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "206",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:53:25.379683+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "d1949146a3ac201685711ac9621e8625",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "1559413739982299137",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:53:25.982001+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "ba59f3d916126cb196552648afd6d023",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/2rwqfwg7Mmk.02AQGJEf4zU",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:53:26.249897+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "d24899ad69555969485d66b9b8a44bb0",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T03:53:26.605173+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "2237e2d18271e78bfe8055276edf769c",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "1559413745170653206",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:53:27.065834+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "67b037b61a81791b55b5c3028fe02868",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "207",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T03:53:27.699188+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "018316e5092ec3f8beecb4c701556ad4",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "1791863610.456309",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T03:53:28.195158+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "c3f9b8548c1a8bdf5199dcce1c98c7ff",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "208",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T03:53:28.450796+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "a90dc761664e68040c4950155cdcbd20",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T03:53:29.089259+00:00",
+      "event_id": "2e8aec04977975040e0037f11e096014",
+      "id": "637c28104340a696ebf12e2b71acf0c3",
+      "last_error": "",
+      "matched_rules": [
+        "de324de082adbaa7ad242b5a7dfb5eba"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/e4VKXBYZDB0.wthl66Z7mzw",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:19.355345+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "88d3bb6ed8bca47de059e76b3c0dee43",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559416985899761758",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:19.773331+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "bf32e1ac690f9a32755e129e86fdf4f4",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559416988110028822",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:20.633272+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "5ccda90aae1474a2ae109cb2d213f86c",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864383.389589",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:21.586345+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "0cd4e52b9884188a742dabd7a5aded9a",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "212",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:22.41883+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "de026c29521bd853a421733a6b8393a8",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:22.694393+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "c77b52d21c1d2a40efaa91527b87a635",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:23.361746+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "cf73be99e07761f5a7ec3512600a16ae",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864386.105929",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:24.001401+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "e573ed52834844271e65f00d1cfe6365",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864386.774979",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:24.957023+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "72ff4ba7f877ca77a895d1a2dd29de58",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/Tq7_eUID7UY.ycgQ3mGQDck",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:25.726697+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "ce713ec075f88a654116e5c911c049c9",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/gl67Cl7JmHQ.jgcUzdygazE",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:26.37479+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "299df7a2031fb9942f3b4bde3329c1f7",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864389.135039",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:27.176648+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "e001aa7af9e1bf4ccd229f9db1e6ba41",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/r6yb-hy4HLQ.zmRcJ8FInhM",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:28.11387+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "36c787f1ed66fe934c7a3c70219a53ad",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/XxcUQHWMz18.azu0Jp2_RNg",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:28.570324+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "943d2703ed97c81bcc4041c74d095bd5",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "213",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:29.042559+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "612b295ef262d116cc4cb904221eb81d",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "214",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:29.700873+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "d3e577dce5bce3e143b928a54b855846",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417029277253754",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:30.394095+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "ac633580a78dcc8023522455cd397143",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:30.639993+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "694bed8fa1bce9f4b1358ec8c28d3081",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:31.043717+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "4c8e66a341af518f0cd22aba59e6bf92",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417035325448193",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:31.484245+00:00",
+      "event_id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "id": "0771821a12a938c3210e1dbcc706a541",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "215",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:31.74012+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "adab5f0cef51018a048e1963456245f8",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:32.614939+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "656526c2858a5a8558910e3bc5db1e98",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/ymRYOKmeL8U.ghMf4BVEj7Y",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:32.874573+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "057f588894929ec83d06c7b14e84519f",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:33.319285+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "efa16a4c01109b8b5ce4f65fbb637a0f",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "216",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:33.560912+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "0cc4d52ed6c7202a09dbdf6ee9f96aab",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:34.287309+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "051506d008fc590a57e4be106f224f6d",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/JDLuiNCR9Lc.g_Z97UMYpSI",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:34.853771+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "f58944884784d1733768841b85244180",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417050923794493",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:35.491906+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "96809b2ac01d6194623661652579ef3e",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864398.263619",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:35.934121+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "8b3a56e20a1024533edcee689ab83509",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "217",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:36.580797+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "8f56b3352c9bf7266efa0a6ab6309c7e",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864399.352119",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:36.954033+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "c8429d4138500a25ff060e32db261421",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417060168048711",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:37.414211+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "caf468830142fe330b5114ad5d6de9bd",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "218",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:38.747693+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "550d481ab9bf3b51dd866542c7e2b91c",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417064538640416",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:39.260891+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "4f17a323758fffecaaec55d569a439b4",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417069513216021",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:40.087156+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "5a3e44ba17200f5007777553d5cd42e1",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/y1534LljbHM.CqUD9zLUJ40",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:40.735561+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "05ce2e852f384bc78fa21df409c71128",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864403.489489",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:41.393861+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "bce89255407a6b9dc83c61dd0b324429",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864404.161479",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:41.851081+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "5b7a90c38ae3c4c0f9e2755da209bdf0",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "219",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:42.5193+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "b053d6bda2953a163228412ce6a7cdf6",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:43.256859+00:00",
+      "event_id": "d356ebd70bf931edfd3067c10125e8ac",
+      "id": "54ba0c98a4551f1c5590996e2df67fac",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/_DiUPEawt9I.eM0dIKfvuFE",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:44.000907+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "22b1ddf2fe4dc2ba0de4b56152409261",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/E-ft1vV5wmA.sSiSILGOslM",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:44.468681+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "b9c493de361c725217a96d63b3003e58",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "220",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:44.859548+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "810722a0200bd46cec8913b554fbc843",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417093227548743",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:45.477491+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "11927ba49c42adb622430c69eab027e1",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864408.240939",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:46.307174+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "c6ce73d3ab4cf91c9264f2584bb3364f",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/iS3sFLxJOvI.UA2w5OK_Vn8",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:46.901508+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "fa146afaea5ffa94305b68c17126acb3",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417101171560570",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:47.212121+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "8df9c1dc483613d4b7fb25e91f5cee6a",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:47.650097+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "d77296e162ae7e588e3ce0fc9f84311f",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "221",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:48.447843+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "e7c61e4b605a9a76775d75b69fd5169f",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/diL0h4SiT6s.EAYFv0EI8v0",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:48.810492+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "507281b2375e998344e0c335ecce54c8",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417109514158144",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:06:49.529601+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "db8f988eabd705c15736cf4d34d09cbc",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/yqyN9AHAo5I.12osE83daSc",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:50.151653+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "f4b5b5cd3cd83d0a7e6557d87d089bd3",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864412.924729",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:50.529387+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "6c7100e073c4bc9c2b5706fdc94414b2",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:50.777345+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "0aabc73631906d765df7d110a142f861",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:51.218974+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "d62cacbec79e49715d3c638da0cde24e",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "222",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:06:51.644978+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "e74c78fc9ad23b7ec4dc3bfa4f40259b",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "223",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:52.263989+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "67d87a54059051f9568d1b9b9d83a303",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864415.038239",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:06:52.501979+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "293edcabd7fcd82894acc785cfc3e3d2",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:06:53.135375+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "ef1f7f47863dc14b1bb2098ff07d9f95",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791864415.887379",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:06:53.579454+00:00",
+      "event_id": "a519d77ed1498e79b4423c09457f35be",
+      "id": "28181cbcc89719cca2de86f9b30bf7d0",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559417129579581494",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:15:22.607793+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "cf0f78873303372fa56a12b968fc28c3",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "1791864922.441219",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:15:23.093136+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "0f97b1d7bf31a97aca5cc489dfdaec5d",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "1559419254682681426",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:15:23.749745+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "5485d4fd168716f604b6e363cced4a8c",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "1791864923.566269",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:15:24.460559+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "772657a35ba003ad0425c070d028945c",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/Tq7_eUID7UY.SHvUnmpAF6o",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:15:25.100011+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "d1b6b864d404a7815d5e7caf1dfa680f",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "1791864924.921639",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:15:25.784434+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "eaadc42bebb7827379e392b094c68ae8",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:15:26.023769+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "54d641b35076aa91830f1b4d5ad958a6",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:15:26.252593+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "69c6f3e15f8e586f7f1ec16fa266bc7d",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:15:27.136161+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "8bce5879ac6f86214441d148b6168696",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "224",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:15:27.783687+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "bf1f53593cd4d31033e958a60f3ba33e",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "1791864927.610059",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:15:28.1553+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "a276c8e7291f53e91f0183a71a01f8e5",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "1559419275905732639",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:15:28.69292+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "19eb6569c500da64d755c6774c78f721",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/XxcUQHWMz18._oPB3KHfGy4",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:15:28.925678+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "1fdd9b482e952f0a7900b65732ac7b4d",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:15:29.38376+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "fc5afd8ce1762af0a80a19da4284137d",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "225",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:15:29.822874+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "b98544e8e29ef49e85ef053e9038e44d",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "226",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:15:30.189042+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "6fe3a2df99c164e95f031e6364327384",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "1559419284424368269",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:15:30.690081+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "6e963fe169511a9593d88d1714cf9d7b",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "1559419285699432474",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:15:31.130915+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "18e8786e22e4526d09b41683beb23901",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "227",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:15:31.885042+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "46f3a5e85cfb952f56aa8baf00e0cb39",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/r6yb-hy4HLQ.EZmhbqo04Qk",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:15:32.499451+00:00",
+      "event_id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "id": "19f02dc0575d1dab2d45357cd0768122",
+      "last_error": "",
+      "matched_rules": [
+        "e2704cb82bf7b55178fb2669dd18345d"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/gl67Cl7JmHQ.rn4Y8G6Ybpo",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:18:22.62169+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "82452239951311d0963c14278208ae98",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "1791865102.457189",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:18:23.253806+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "aa5e2808d10d050eeeef27cda2d4b69b",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "1791865103.088229",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:18:23.902198+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "baaeeda5bd44481f69a5c4d8ec9400ec",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "1791865103.731309",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:18:24.557178+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "9076d4b896b5d8dd15a8e0e9c48bee33",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:18:25.487452+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "fedde7e58002f641cfb7084043ece7af",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "228",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:18:25.725718+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "c33ebd58b445b52594fc6848ea93d2af",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:18:26.172366+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "d7617715fc13e5c47822ed7130605b9c",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "1559420022630252575",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:18:26.636221+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "5b25d3b52966e9939c18158b21cb98a2",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "229",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:18:27.095508+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "19f707bcfc431ec9de82d5e68d6bca1e",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "230",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:18:27.765206+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "00dbc2a607546cf261fcf3efe82aa1e2",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/r6yb-hy4HLQ.uvFjaLvvZ1I",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:18:28.261849+00:00",
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "276c7f510ce29f24b075d7e9e1be6cd4",
+      "last_error": "",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/Tq7_eUID7UY.dCxPcyI3QMk",
+      "state": "delivered"
+    },
+    {
+      "attempts": 0,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": null,
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "4946a8d24aae2fefe83a085c808397dc",
+      "last_error": "source_no_longer_relevant",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "cancelled"
+    },
+    {
+      "attempts": 0,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": null,
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "b28210512e88bea32f17cec325c91cbe",
+      "last_error": "source_no_longer_relevant",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "cancelled"
+    },
+    {
+      "attempts": 0,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": null,
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "68076f68f28ff54942dac9ad11cdb41d",
+      "last_error": "source_no_longer_relevant",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "cancelled"
+    },
+    {
+      "attempts": 0,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": null,
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "f78974a8ea03fe7de854bb2d48234ce6",
+      "last_error": "source_no_longer_relevant",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "cancelled"
+    },
+    {
+      "attempts": 0,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": null,
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "f3216844f97cdc691c179a094a5901bd",
+      "last_error": "source_no_longer_relevant",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "cancelled"
+    },
+    {
+      "attempts": 0,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": null,
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "05c71c5a926e1262e64e3333ea179c1a",
+      "last_error": "source_no_longer_relevant",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "cancelled"
+    },
+    {
+      "attempts": 0,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": null,
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "e49a4cdee653ccae5e2d38a662952196",
+      "last_error": "source_no_longer_relevant",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "cancelled"
+    },
+    {
+      "attempts": 0,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": null,
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "6c4151f94ae82f4dc0243cc0b659b65d",
+      "last_error": "source_no_longer_relevant",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "cancelled"
+    },
+    {
+      "attempts": 0,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": null,
+      "event_id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "id": "f092920a8bb1f68a30aedceefce46de6",
+      "last_error": "source_no_longer_relevant",
+      "matched_rules": [
+        "9944253bc7ed0f3aa8aff8ddda87ba48"
+      ],
+      "remote_ref": "",
+      "state": "cancelled"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:19:22.305384+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "481a9e30bb65359d105e370aa4b717de",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:19:23.236659+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "9fcac998ad31726980d0e768c3ca9ab9",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/XxcUQHWMz18.LvV3-Ykx2uU",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:19:24.857076+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "51e05af1d1187619e727347723c3235f",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:19:25.821065+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "9812ca91deb23edececc44075447c71a",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "1791865165.618759",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:19:26.608987+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "55d7ca820cc999a227c9bd4cba265b00",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "1791865166.427539",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:19:27.174262+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "cf7729b34489bb0c4ff692e71b72a26f",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "1559420278357106700",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:19:28.186458+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "799af4f680bce2c621ce163a4d992fc8",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "231",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:19:28.67054+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "bc71c4b692ae5fa454414e479d03ded8",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "232",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:19:29.242775+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "459a6152bae9805bb2f85a0fa64c4635",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/Tq7_eUID7UY.mYZUuNfqUPI",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:19:29.818808+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "7317134d2203e824ba221ed4a4b0e333",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "233",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:19:30.50619+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "5ac6224aae71a0d77b5d45aca68c99bd",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "1791865170.335979",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:19:30.889238+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "ba4e61c48ecc988a5e3c301f6373603d",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "1559420294031089735",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:19:31.551916+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "99d94910531c9f6e88e20fc3108d9ff9",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:19:32.024262+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "b28e52ef2af6052f2750baf253754546",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "1559420298489499672",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:19:32.651329+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "ab5eec2c0b9adee4d658ee9238ba7805",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/r6yb-hy4HLQ.kCtUHoaHDfE",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:19:33.008955+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "4f0b9206618e16d0c46e015c149887e2",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "1559420302981726280",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:19:33.638987+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "dbf97280a4d57f13ca25dad537be37ad",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/gl67Cl7JmHQ.ubL8W8FFg_Y",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:19:34.115898+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "51c7b464b5f9b9f09d77485b1b35db54",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "234",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:19:34.841775+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "c0fec57236764fe332e2266b3d286e7f",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "1791865174.665679",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:19:35.174517+00:00",
+      "event_id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "id": "be4162c145726f8514188e3c525ada6e",
+      "last_error": "",
+      "matched_rules": [
+        "abed02720ca9ece962ab216cc1728e2d"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:19:35.652969+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "2a42452fe440ad36502e52099250711f",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "235",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:19:36.23712+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "5a64b19f2903e41983d710bb5db990c8",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/gl67Cl7JmHQ.BcCiHENeAqM",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:19:36.941515+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "835aa66b986bb91ae1ed3a9a6beaa108",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/r6yb-hy4HLQ.iApOHh0Zlqs",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:19:37.562598+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "5ddfbe75b7e75e952c8b2f37a46ff89b",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559420321587531847",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:19:37.999366+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "c28b7ba4f114678136d20c4e6170b907",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559420323932405781",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:19:38.73974+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "e1fa791f37b620a207b1b5d493ef2b36",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791865178.582099",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d64aa052bca3385a7e263cc12a338712",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:19:39.053712+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "65164915d6c709be0c6927b775215153",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:19:39.491985+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "e18eed632b8d4b764a94ffe69d3e18ef",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559420329972211784",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:19:40.181293+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "fbf0b7a96f9072cea27047253952d427",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791865180.013359",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:19:40.64824+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "9bdecf9b9cb4377209680f98e9815a44",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1559420334762102796",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:19:41.092341+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "283cfce7bbfd5dd6830ea434b30a34fe",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "236",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:19:41.735574+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "610d1d63fcb59c6db3754c6714f645aa",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791865181.573559",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:19:42.632895+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "50350d2c23ca0e4c0ae9727967a8f9b1",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/XxcUQHWMz18.9_A4teYodQ8",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:19:43.697912+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "8d1b4f0f5bdbd54bfa6e403a51697873",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/Tq7_eUID7UY.2HxIoe7cHOU",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:19:44.255103+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "1c58a4d7279c8792f98cf74aa6a2fb1e",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "237",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:19:44.717427+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "23714756afd8641d8e388fa2d18a7e13",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "238",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "de8b8ba5ac2b892b19d3765049c65b3a",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:19:45.365156+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "4a7a100250cd72c5f398145fe2b42ba0",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:19:46.029796+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "0192812fb5b2b2a5cafd66a57d29e55e",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "1791865185.861059",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7e0e94d7157583d6f53e1fec45e8f740",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:19:46.276676+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "66fd2c3de4f13fb07a00a12cdf8f0f2b",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1365519c30579d14e74a480b2836228c",
+      "channel_type": "webhook",
+      "delivered_at": "2026-10-13T04:19:46.520773+00:00",
+      "event_id": "32d39d87f14f2d6af9e14aaef900506f",
+      "id": "48f1f5803ea08faaa392f2bc53767314",
+      "last_error": "",
+      "matched_rules": [
+        "e0bdc9b9edd406a4b0edac283b0e9319"
+      ],
+      "remote_ref": "",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:24:27.147374+00:00",
+      "event_id": "73e1566ad1a790479e0981e00872e816",
+      "id": "b28d199c7106a55394c6510e3465e4d5",
+      "last_error": "",
+      "matched_rules": [
+        "462f7e5d439012a56db643235ac36f7a"
+      ],
+      "remote_ref": "1559421536522473483",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:24:27.615193+00:00",
+      "event_id": "73e1566ad1a790479e0981e00872e816",
+      "id": "567e133b0b0e522a311c6b90d3c363e6",
+      "last_error": "",
+      "matched_rules": [
+        "462f7e5d439012a56db643235ac36f7a"
+      ],
+      "remote_ref": "1559421538573230172",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:24:28.025035+00:00",
+      "event_id": "73e1566ad1a790479e0981e00872e816",
+      "id": "34e6f2e9953f0d4b8e68f4b2b757f00d",
+      "last_error": "",
+      "matched_rules": [
+        "462f7e5d439012a56db643235ac36f7a"
+      ],
+      "remote_ref": "1559421540326580345",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:24:28.580379+00:00",
+      "event_id": "73e1566ad1a790479e0981e00872e816",
+      "id": "2376557c0614d8fc57dea39ab3a552a5",
+      "last_error": "",
+      "matched_rules": [
+        "462f7e5d439012a56db643235ac36f7a"
+      ],
+      "remote_ref": "1559421542193172532",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2aeb9e6df3754b6f719dd7c7f5a15152",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:40:51.276627+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "0fe8c1f2c154c778c631819e6360025a",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "239",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43adca05d41a2028856e02b4b76bfd8a",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:40:51.70359+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "94ccad1d1cb596e10ec31edc53c340b0",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "1559425666049507362",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2a8324db1e2cd6d287bb38479843c256",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:40:52.229304+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "f20c195e843cd798f11a4ece0a2b8d9f",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "1559425667991601234",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "4fc233e7f775e49bf5518aaef2b9e170",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:40:53.055477+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "742851827b05269d7c3fc70575fdb880",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/XyeLIG61G0w.UMlTj2KbIFc",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "02ed01ed2000409d9c31349117af2b91",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:40:53.455436+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "7cc891aa606419a6aa982a642faa9e21",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "1559425673573961779",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "1e9a4838a843acb9f17fb715fa6b8b9e",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:40:54.16151+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "1f3c580839640b45800d3faa29e6f4ed",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "1791866454.030749",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "2e0067a8c8b15915b4dcd942810ff520",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:40:54.957531+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "409c4211096e2bc433e2900c054fa80a",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/7bJNGlpdrEw.JbsEulQdVuI",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "43ed4f37cb70e9c89606e559e96543e0",
+      "channel_type": "discord",
+      "delivered_at": "2026-10-13T04:40:55.346215+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "a4d14540f68e197f1248335947d6147b",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "1559425681450860625",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "7254353a8b324bde4d862a51db00dc72",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:40:55.960482+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "2e6fdaddd699651a6324a308c2ec4d41",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "1791866455.835249",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "cd4f4b9d8588076358cc97e22188dd81",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:40:56.396692+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "3cf9ef3cfe35db0f894171a404df3b46",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "240",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "d935d8b4373d199ce384412952b9570b",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:40:56.82901+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "ded385e63e8017534d7e14d12e0ac8b5",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "241",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "e5340e338f3753bdf56495ff182b509d",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:40:57.62962+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "ec98c2848ed648d3de702f1d5197692d",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/eKtiqBqmZ5k.qn31wrliDZg",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "194dcf5e0db9e31ac6c1a744c668c987",
+      "channel_type": "telegram",
+      "delivered_at": "2026-10-13T04:40:58.073566+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "50a8b8007f5354d6f0c298b69f01da58",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "242",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "30b58da5de47f5dfb794311f44004596",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:40:58.71899+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "0cb4145568260053294429748d983ab6",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "1791866458.584099",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "77d92ba925952e6d9e1c57c74f0edc95",
+      "channel_type": "slack_bot",
+      "delivered_at": "2026-10-13T04:40:59.355703+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "0b2e83e3dcfec2c16caf2e58e9464898",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "1791866459.219649",
+      "state": "delivered"
+    },
+    {
+      "attempts": 1,
+      "channel_id": "c3b88bac9e21806b70eb20ecb5290c0b",
+      "channel_type": "google_chat",
+      "delivered_at": "2026-10-13T04:41:00.023239+00:00",
+      "event_id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "id": "aae2108542a1e5a9c1f071397e3b76ab",
+      "last_error": "",
+      "matched_rules": [
+        "112f0e072c08b742ef232196aed59fd3"
+      ],
+      "remote_ref": "spaces/AAQAypJNJKI/messages/_71ppqcMorE.yTEGuJXOy1U",
+      "state": "delivered"
+    }
+  ],
+  "destinations_omitted": true,
+  "duplicate_deliveries": 0,
+  "duplicate_sources": 0,
+  "events": [
+    {
+      "event_type": "finding.created",
+      "facts_identical": true,
+      "id": "67bd0cd57b4087e3d3e55144d17bf556",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T03:50:19.385989+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "07a0652af4811ba568db5579b6cb9cf3",
+      "source_kind": "finding_created",
+      "source_processed_at": "2026-10-13T03:52:18.353865+00:00"
+    },
+    {
+      "event_type": "finding.status_changed",
+      "facts_identical": true,
+      "id": "00386e2e63eb4148627ffab4772e1503",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T03:50:23.483459+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "07a0652af4811ba568db5579b6cb9cf3:2",
+      "source_kind": "finding_status",
+      "source_processed_at": "2026-10-13T03:52:18.353865+00:00"
+    },
+    {
+      "event_type": "finding.status_changed",
+      "facts_identical": true,
+      "id": "141917fa878c06e20d00c3b83001588a",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T03:50:27.617699+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "07a0652af4811ba568db5579b6cb9cf3:3",
+      "source_kind": "finding_status",
+      "source_processed_at": "2026-10-13T03:52:18.353865+00:00"
+    },
+    {
+      "event_type": "finding.retest_completed",
+      "facts_identical": true,
+      "id": "5b82bc45ab9a0f14166ee8bc1f27381e",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T03:50:27.621049+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "1ff1fe35c58f2c29a59e730c72fad74d",
+      "source_kind": "finding_retest",
+      "source_processed_at": "2026-10-13T03:52:18.353865+00:00"
+    },
+    {
+      "event_type": "scan.failed",
+      "facts_identical": true,
+      "id": "2e8aec04977975040e0037f11e096014",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T03:52:34.979075+00:00",
+      "severity": "info",
+      "source_capture_version": 3,
+      "source_id": "e995bdaf8fb36eac6a224c8146c309f9",
+      "source_kind": "scan_job",
+      "source_processed_at": "2026-10-13T03:53:18.350942+00:00"
+    },
+    {
+      "event_type": "sla.breached",
+      "facts_identical": true,
+      "id": "1d514b6ad2c7c235e5a16e495541bd00",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T04:05:26.996862+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "bbdfbc5f84447fc96b10c1100f4d3769:1791864326996862:1:0",
+      "source_kind": "sla_breach_episode",
+      "source_processed_at": "2026-10-13T04:06:18.310548+00:00"
+    },
+    {
+      "event_type": "sla.breached",
+      "facts_identical": true,
+      "id": "d356ebd70bf931edfd3067c10125e8ac",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T04:05:27.009656+00:00",
+      "severity": "medium",
+      "source_capture_version": 3,
+      "source_id": "5fc3e5e1723fc88edaa05ec8c7e50f18:1791864327009656:1:0",
+      "source_kind": "sla_breach_episode",
+      "source_processed_at": "2026-10-13T04:06:18.310548+00:00"
+    },
+    {
+      "event_type": "sla.breached",
+      "facts_identical": true,
+      "id": "a519d77ed1498e79b4423c09457f35be",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T04:05:27.016733+00:00",
+      "severity": "medium",
+      "source_capture_version": 3,
+      "source_id": "aab22aefaa4ccbdf1b89294ea9a394b7:1791864327016733:1:0",
+      "source_kind": "sla_breach_episode",
+      "source_processed_at": "2026-10-13T04:06:18.310548+00:00"
+    },
+    {
+      "event_type": "risk_acceptance.created",
+      "facts_identical": true,
+      "id": "d4d24c7abfa7a8b6810e1f02d3358bfb",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T04:14:28.946291+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "aaf7a2059dab3cf496073a48c97d68a4",
+      "source_kind": "risk_acceptance_created",
+      "source_processed_at": "2026-10-13T04:15:21.215178+00:00"
+    },
+    {
+      "event_type": "risk_acceptance.expiring",
+      "facts_identical": true,
+      "id": "00aa00a88999ac3d2dd2c5bbce189283",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T04:17:28+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "aaf7a2059dab3cf496073a48c97d68a4:60",
+      "source_kind": "risk_acceptance_expiring",
+      "source_processed_at": "2026-10-13T04:18:21.206747+00:00"
+    },
+    {
+      "event_type": "sla.breached",
+      "facts_identical": true,
+      "id": "32d39d87f14f2d6af9e14aaef900506f",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T04:18:28+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "bbdfbc5f84447fc96b10c1100f4d3769:1791864326996862:2:0",
+      "source_kind": "sla_breach_episode",
+      "source_processed_at": "2026-10-13T04:19:21.204098+00:00"
+    },
+    {
+      "event_type": "risk_acceptance.expired",
+      "facts_identical": true,
+      "id": "83b7fd9baeeb0e5e99dd3c384d3e8a5d",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T04:18:28+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "aaf7a2059dab3cf496073a48c97d68a4",
+      "source_kind": "risk_acceptance_expired",
+      "source_processed_at": "2026-10-13T04:19:21.204098+00:00"
+    },
+    {
+      "event_type": "finding.created",
+      "facts_identical": true,
+      "id": "73e1566ad1a790479e0981e00872e816",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T04:23:50.447086+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "956363cc173dc6fd8607e3ab91a16f89",
+      "source_kind": "finding_created",
+      "source_processed_at": "2026-10-13T04:24:26.395199+00:00"
+    },
+    {
+      "event_type": "finding.created",
+      "facts_identical": true,
+      "id": "9b73523a9794fe0eb8ad84d59cf07e67",
+      "metadata_identical": true,
+      "occurred_at": "2026-10-13T04:39:56.565552+00:00",
+      "severity": "high",
+      "source_capture_version": 3,
+      "source_id": "bf18d4a00eed68c49fbf3f2758161826",
+      "source_kind": "finding_created",
+      "source_processed_at": "2026-10-13T04:40:50.194782+00:00"
+    }
+  ],
+  "external_matrix_complete": false,
+  "foreign_tenant_delivery_read": 404,
+  "schema": 1
+}

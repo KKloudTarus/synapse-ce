@@ -10,6 +10,7 @@ package recon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -270,7 +271,7 @@ func (s *Service) FailStrandedJob(ctx context.Context, payload []byte, cause err
 		// this file's error sinks (the cause is Go-internal today, but never persist raw).
 		msg = redact.String(cause.Error(), nil)
 	}
-	s.finishFailed(ctx, &run, "dead-letter", msg)
+	_ = s.finishFailed(ctx, &run, "dead-letter", msg)
 	return nil
 }
 
@@ -293,22 +294,54 @@ func (s *Service) SweepStaleRuns(ctx context.Context, staleFor time.Duration) (i
 		return 0, fmt.Errorf("list stale runs: %w", err)
 	}
 	n := 0
+	var candidateErrs []error
 	for i := range runs {
-		run := runs[i]
+		if err := ctx.Err(); err != nil {
+			return n, errors.Join(append(candidateErrs, err)...)
+		}
+		stale := runs[i]
+		run := stale.Run
 		release, ok, lerr := s.runLock.TryLock(ctx, run.ID.String())
 		if lerr != nil || !ok {
+			if err := ctx.Err(); err != nil {
+				return n, errors.Join(append(candidateErrs, err)...)
+			}
 			continue // can't acquire (DB hiccup) or a live owner holds it → leave for next pass
 		}
-		// Re-read under the lock: a final delivery may have just finished it.
-		if fresh, gerr := s.runs.Get(ctx, run.ID); gerr == nil && fresh.Status.Terminal() {
-			release()
+		reclaimed, candidateErr := func() (bool, error) {
+			defer release()
+			// Re-read under the lock: a final delivery may have just finished it.
+			if fresh, gerr := s.runs.Get(ctx, run.ID); gerr == nil && fresh.Status.Terminal() {
+				return false, nil
+			}
+			if stale.TenantID.IsZero() {
+				return false, fmt.Errorf("stranded run %s has no authoritative tenant", run.ID)
+			}
+			// The maintenance loop has no request tenant. ListStaleRunning obtained the
+			// tenant from the owning engagement; verify that binding before its terminal
+			// write so the run cannot move across tenants.
+			runCtx := shared.WithTenant(ctx, stale.TenantID)
+			eng, gerr := s.engagements.GetByID(runCtx, run.EngagementID)
+			if gerr != nil {
+				return false, fmt.Errorf("load engagement for stranded run %s: %w", run.ID, gerr)
+			}
+			if eng == nil || eng.TenantID != stale.TenantID {
+				return false, fmt.Errorf("stranded run %s engagement tenant mismatch", run.ID)
+			}
+			if err := s.finishFailed(runCtx, &run, "swept", "run stranded running past staleFor with no live owner – reclaimed by sweeper"); err != nil {
+				return false, fmt.Errorf("persist stranded run %s: %w", run.ID, err)
+			}
+			return true, nil
+		}()
+		if candidateErr != nil {
+			candidateErrs = append(candidateErrs, candidateErr)
 			continue
 		}
-		s.finishFailed(ctx, &run, "swept", "run stranded running past staleFor with no live owner – reclaimed by sweeper")
-		release()
-		n++
+		if reclaimed {
+			n++
+		}
 	}
-	return n, nil
+	return n, errors.Join(candidateErrs...)
 }
 
 // SetSandboxEnforcement marks recon as running on the egress-capable sandbox:
@@ -428,11 +461,11 @@ func (s *Service) Start(ctx context.Context, actor string, engagementID shared.I
 		tenant := tenantID.String()
 		payload, err := json.Marshal(reconJob{Actor: actor, TenantID: &tenant, RunID: run.ID.String(), Tool: toolName, Target: target.Value})
 		if err != nil {
-			s.finishFailed(ctx, &run, "queue", "marshal job: "+err.Error())
+			_ = s.finishFailed(ctx, &run, "queue", "marshal job: "+err.Error())
 			return run, fmt.Errorf("marshal recon job: %w", err)
 		}
 		if _, err := s.jobQueue.Enqueue(ctx, JobKind, payload); err != nil {
-			s.finishFailed(ctx, &run, "queue", "enqueue: "+err.Error())
+			_ = s.finishFailed(ctx, &run, "queue", "enqueue: "+err.Error())
 			return run, fmt.Errorf("enqueue recon run: %w", err)
 		}
 		return run, nil
@@ -451,7 +484,7 @@ func (s *Service) Start(ctx context.Context, actor string, engagementID shared.I
 		}
 		s.execute(runCtx, actor, run.ID, toolName, target)
 	}); err != nil {
-		s.finishFailed(ctx, &run, "queue", "could not queue run: "+err.Error())
+		_ = s.finishFailed(ctx, &run, "queue", "could not queue run: "+err.Error())
 		return run, fmt.Errorf("enqueue run: %w", err)
 	}
 	return run, nil
@@ -491,22 +524,22 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 
 	run.Status = recon.StatusRunning
 	run.Stage = "authorizing"
-	s.saveRun(ctx, &run)
+	_ = s.saveRun(ctx, &run)
 	s.logs.Publish(rid, fmt.Sprintf("recon %s on %s", tool.Name(), target.Value))
 
 	// Defense-in-depth: re-check capability-sensitivity + the lab-only flag against
 	// the live engagement before any process starts.
 	if err := s.checkCapability(tool); err != nil {
-		s.finishFailed(ctx, &run, "authorize", err.Error())
+		_ = s.finishFailed(ctx, &run, "authorize", err.Error())
 		return
 	}
 	eng, err := s.engagements.GetByID(ctx, run.EngagementID)
 	if err != nil {
-		s.finishFailed(ctx, &run, "authorize", "load engagement: "+err.Error())
+		_ = s.finishFailed(ctx, &run, "authorize", "load engagement: "+err.Error())
 		return
 	}
 	if !eng.LiveReconEnabled {
-		s.finishFailed(ctx, &run, "authorize", "live recon disabled for this engagement")
+		_ = s.finishFailed(ctx, &run, "authorize", "live recon disabled for this engagement")
 		return
 	}
 
@@ -518,13 +551,13 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 		Target:       target,
 		Metadata:     map[string]string{"tool": tool.Name(), "kind": string(target.Kind)},
 	}); err != nil {
-		s.finishFailed(ctx, &run, "authorize", err.Error())
+		_ = s.finishFailed(ctx, &run, "authorize", err.Error())
 		return
 	}
 
 	spec, err := tool.BuildArgs(target)
 	if err != nil {
-		s.finishFailed(ctx, &run, "build-args", err.Error())
+		_ = s.finishFailed(ctx, &run, "build-args", err.Error())
 		return
 	}
 	spec.Timeout = s.timeout
@@ -549,7 +582,7 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 	}
 
 	run.Stage = "running " + tool.Binary()
-	s.saveRun(ctx, &run)
+	_ = s.saveRun(ctx, &run)
 	s.logs.Publish(rid, "$ "+spec.Name+" "+strings.Join(spec.Args, " "))
 
 	res, runErr := s.runner.Run(ctx, spec)
@@ -596,13 +629,13 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 	}
 
 	if runErr != nil {
-		s.finishFailed(ctx, &run, "run", runErr.Error())
+		_ = s.finishFailed(ctx, &run, "run", runErr.Error())
 		return
 	}
 
 	results, err := tool.Parse(res.Stdout)
 	if err != nil {
-		s.finishFailed(ctx, &run, "parse", err.Error())
+		_ = s.finishFailed(ctx, &run, "parse", err.Error())
 		return
 	}
 
@@ -627,28 +660,32 @@ func (s *Service) execute(ctx context.Context, actor string, runID shared.ID, to
 	run.Stage = "done"
 	fin := s.clock.Now()
 	run.FinishedAt = &fin
-	s.saveRun(ctx, &run)
+	_ = s.saveRun(ctx, &run)
 	s.logs.Publish(rid, fmt.Sprintf("done – %d in-scope result(s)", inScope))
 }
 
 // finishFailed marks a run failed, persists it, and reports the error on the log
-// stream (the stream is closed by execute's deferred Close).
-func (s *Service) finishFailed(ctx context.Context, run *recon.Run, stage, msg string) {
+// stream (the stream is closed by execute's deferred Close). Callers that can make
+// a recovery decision must handle the persistence error.
+func (s *Service) finishFailed(ctx context.Context, run *recon.Run, stage, msg string) error {
 	run.Status = recon.StatusFailed
 	run.Stage = stage
 	run.Error = msg
 	fin := s.clock.Now()
 	run.FinishedAt = &fin
-	s.saveRun(ctx, run)
+	err := s.saveRun(ctx, run)
 	s.logs.Publish(run.ID.String(), "ERROR ("+stage+"): "+msg)
+	return err
 }
 
 // saveRun persists a run and surfaces a persistence failure on the log stream so a
 // dropped write is not invisible (the run record + audit could otherwise diverge).
-func (s *Service) saveRun(ctx context.Context, run *recon.Run) {
+func (s *Service) saveRun(ctx context.Context, run *recon.Run) error {
 	if err := s.runs.Save(ctx, *run); err != nil {
 		s.logs.Publish(run.ID.String(), "WARN: failed to persist run state: "+err.Error())
+		return err
 	}
+	return nil
 }
 
 // denySubmit audits a submit-time recon denial through the one gate (append-only

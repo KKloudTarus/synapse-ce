@@ -62,9 +62,11 @@ active verified same-tenant contacts or addresses in a DNS-proven tenant domain.
 See [Notification channel setup](notification-channels.md) for provider credentials,
 SMTP OAuth, recipient authorization, subject threading and the five-per-hour test quota.
 
-Use the `all` worker profile; the specialized `lifecycle` and `integrations`
-profiles do not consume notifications. The framework requires PostgreSQL and is
-disabled by default. The development memory store does not emulate durable delivery.
+Use the `all` or `notifications` worker profile; the specialized `lifecycle` and
+`integrations` profiles do not consume notifications. The `notifications` profile
+requires notifications enabled and the same stable vault key as the API before it
+can claim a job. The framework requires PostgreSQL and is disabled by default. The
+development memory store does not emulate durable delivery.
 `SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS=false` is intended only for a controlled
 development relay. Production relays must support verified STARTTLS.
 
@@ -113,6 +115,9 @@ of these events:
 - `fleet.agent.offline`
 - `incident.created`
 - `finding.ownership_changed` (requires explicit `team_ids` or `all_teams` scope)
+- `finding.created`, `finding.status_changed`, `finding.retest_completed`
+- `scan.failed`, `dast.run_finished`, `recon.run_finished`, `cspm.run_finished`
+- `sla.breached`, `risk_acceptance.created`, `risk_acceptance.expiring`, `risk_acceptance.expired`
 
 Each event type accepts only the rule filters its producer can satisfy, and a rule
 with any other filter is rejected when it is saved:
@@ -126,6 +131,13 @@ with any other filter is rejected when it is saved:
 | `fleet.agent.offline` | none |
 | `incident.created` | severity floor, engagements (when the incident has one) |
 | `finding.ownership_changed` | engagements, teams (required) |
+| `finding.created` | severity floor, finding kinds, engagements |
+| `finding.status_changed` | severity floor, finding kinds, previous and new statuses, engagements |
+| `finding.retest_completed` | severity floor, finding kinds, retest results, engagements |
+| `scan.failed`, `dast.run_finished`, `recon.run_finished` | scan kinds, outcomes, engagements |
+| `cspm.run_finished` | provider, outcome, engagements |
+| `sla.breached`, `risk_acceptance.created`, `risk_acceptance.expired` | severity floor, engagements, teams (required) |
+| `risk_acceptance.expiring` | severity floor, engagements, teams (required), lead time (24 hours by default) |
 | `notification.destination_changed` | none; operator-driven, and a rule cannot target it |
 | `notification.channel_paused` | none; sent in-app to tenant administrators when a channel pauses, and a rule cannot target it |
 
@@ -140,6 +152,35 @@ each type's label, accepted filters, maximum data class, template variables and 
 it is mandatory or operator-only. The rule form in **Settings → Alerting** is built from
 it, so it offers only rule-eligible types and shows only the filters the selected type
 accepts.
+
+Finding and run events keep the committed source facts, including presentation names
+and validated user identities, in a transactional outbox. Editing a finding or renaming
+an engagement later does not rewrite an older notification. Bulk imports do not emit a
+separate `finding.created` notification for every imported item. `finding.status_changed`
+captures explicit changes through the findings service. Bulk VEX application updates
+finding statuses directly and does not emit a separate status notification per item.
+Terminal run replay
+keeps the first captured outcome; a failed run includes a stable error code rather than
+the tool's raw error text. Built-in templates cover chat, email, pager and webhook
+families in English and Vietnamese.
+
+The worker checks SLA and acceptance thresholds each minute. A remediation deadline
+is breached at the deadline itself. The initial breach is followed by reminders at
+1, 2, 4 and 8 days by default; set `SYNAPSE_NOTIFICATION_SLA_BREACH_MAX_REMINDERS`
+to cap or disable those reminders. A delayed worker emits the latest due reminder
+instead of sending all missed reminders together. Resolution or risk acceptance stops
+the breach episode. Reassessment with the same deadline preserves the episode.
+
+An acceptance warning is due when the remaining time is at most the rule's lead time
+and greater than zero. At the exact expiry instant, only `risk_acceptance.expired`
+is due. Acceptance identity stays stable when the finding's assessment refreshes.
+Activation suppresses thresholds that already passed, while future thresholds remain
+eligible. Creating or enabling a rule after activation can warn immediately for an
+acceptance already within its lead-time window, provided that threshold was not
+suppressed at activation. The rule's creation time is not a new activation boundary.
+Instants are stored in UTC; human-readable templates use the tenant's time
+zone, including daylight-saving offsets. See the [event capture design](../architecture/notification-events.md)
+for transaction, recovery and rollback behavior.
 
 An incident carries the engagement its fleet correlation was scoped to. Incidents recorded
 before correlation was scoped to an engagement may carry none, and an engagement-scoped
@@ -703,7 +744,9 @@ enable notifications via `extraEnv`, and scrape the worker-only ClusterIP
 Service from `worker.metrics.monitoringNamespace`. The chart creates a
 matching ingress NetworkPolicy; the default remains disabled. The
 `integrations` and `lifecycle` worker profiles do not process channel deliveries
-and do not serve these metrics. The API never duplicates worker delivery counters.
+and do not serve these metrics. The `notifications` profile serves the same metrics
+while claiming only notification, contact-verification, and personal inbox jobs. The
+API never duplicates worker delivery counters.
 
 Worker metric names all start with `synapse_notification_worker_`:
 - `sent_total` and `failed_total` count **committed delivery attempts**. Failed
@@ -875,3 +918,26 @@ the vault master key with database backups. Replacing the master key directly
 makes existing ciphertext unreadable; master-key rotation requires an
 operator-controlled offline decrypt/re-encrypt migration of every retained
 channel version using the same tenant/channel/version associated data.
+
+### Recovering snapshot sources
+
+A source-projector failure logs `notification source poll failed` with its error and
+leaves the source pending for the next worker tick. Delivery-age telemetry covers
+already projected jobs; inspect the source backlog separately. With the normal
+application database role, run the following in a transaction for the affected
+tenant, replacing the tenant ID with the authoritative identity:
+
+```sql
+BEGIN;
+SELECT set_config('app.current_tenant', '<tenant-id>', true);
+SELECT count(*) AS pending_snapshots, min(occurred_at) AS oldest_pending_at
+FROM notification_source_records
+WHERE tenant_id=current_setting('app.current_tenant')
+  AND capture_version=3 AND processed_at IS NULL;
+COMMIT;
+```
+
+Check that the migrated schema and a capable notification worker are running,
+then fix the reported projector/configuration error and allow the next poll to
+retry. Do not manually acknowledge, edit or delete snapshot facts. Confirm that
+the pending count falls and the expected event/delivery identities appear once.

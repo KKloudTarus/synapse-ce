@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/netip"
 	"strings"
 	"sync"
@@ -105,6 +106,51 @@ type harness struct {
 	audit *recordingAudit
 	ev    *evidenceuc.Service
 	tool  fakeTool
+}
+
+// tenantCheckingReconRuns models the PostgreSQL store's tenant requirement so the
+// maintenance sweep is exercised with its production persistence boundary.
+type tenantCheckingReconRuns struct {
+	ports.ReconRunStore
+	tenant   shared.ID
+	failSave error
+}
+
+type selectiveFailingReconRuns struct {
+	ports.ReconRunStore
+	tenant   shared.ID
+	failures map[shared.ID]error
+}
+
+func (r selectiveFailingReconRuns) Save(ctx context.Context, run recon.Run) error {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID != r.tenant {
+		return fmt.Errorf("tenant context mismatch: got %q, want %q", tenantID, r.tenant)
+	}
+	if err := r.failures[run.ID]; err != nil {
+		return err
+	}
+	return r.ReconRunStore.Save(ctx, run)
+}
+
+func (r tenantCheckingReconRuns) Save(ctx context.Context, run recon.Run) error {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID != r.tenant {
+		return fmt.Errorf("tenant context mismatch: got %q, want %q", tenantID, r.tenant)
+	}
+	if r.failSave != nil {
+		return r.failSave
+	}
+	return r.ReconRunStore.Save(ctx, run)
+}
+
+type staleReconRuns struct {
+	ports.ReconRunStore
+	stale []ports.StaleReconRun
+}
+
+func (r staleReconRuns) ListStaleRunning(context.Context, time.Time, int) ([]ports.StaleReconRun, error) {
+	return r.stale, nil
 }
 
 func newHarness(t *testing.T, runner ports.ToolRunner, tool fakeTool, allowCap bool) *harness {
@@ -449,6 +495,7 @@ func TestSweepStaleRunsReclaims(t *testing.T) {
 	h := newHarness(t, fakeRunner{}, subfinderTool(), false)
 	h.svc.SetRunLock(memory.NewRunLock())
 	ctx := shared.WithTenant(context.Background(), shared.DefaultTenant)
+	h.seedEngagement(t, false)
 	// clock Now() = 2026-06-21 12:00; staleFor 5m ⇒ olderThan = 11:55.
 	stale := recon.Run{ID: "run-stale", EngagementID: "e1", Tool: "subfinder", Target: "x", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 0, 0, 0, time.UTC)}
 	fresh := recon.Run{ID: "run-fresh", EngagementID: "e1", Tool: "subfinder", Target: "y", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 59, 30, 0, time.UTC)}
@@ -470,6 +517,190 @@ func TestSweepStaleRunsReclaims(t *testing.T) {
 	}
 	if got, _ := h.runs.Get(ctx, "run-fresh"); got.Status != recon.StatusRunning {
 		t.Fatalf("a fresh running run must NOT be swept, got %q", got.Status)
+	}
+}
+
+func TestSweepStaleRunsBindsAuthoritativeEngagementTenant(t *testing.T) {
+	h := newHarness(t, fakeRunner{}, subfinderTool(), false)
+	h.svc.SetRunLock(memory.NewRunLock())
+	const ownerTenant shared.ID = "tenant-owner"
+	if err := h.eng.Create(context.Background(), &engagement.Engagement{ID: "e1", TenantID: ownerTenant, Name: "owner", Status: engagement.StatusActive}); err != nil {
+		t.Fatalf("seed engagement: %v", err)
+	}
+	h.svc.runs = tenantCheckingReconRuns{ReconRunStore: h.runs, tenant: ownerTenant}
+	stale := recon.Run{ID: "run-owned", EngagementID: "e1", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 0, 0, 0, time.UTC)}
+	if err := h.runs.Save(shared.WithTenant(context.Background(), ownerTenant), stale); err != nil {
+		t.Fatal(err)
+	}
+
+	// A cross-tenant maintenance context must not select the persistence tenant.
+	n, err := h.svc.SweepStaleRuns(shared.WithTenant(context.Background(), "tenant-other"), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("SweepStaleRuns: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected owned stale run reclaimed, got %d", n)
+	}
+	if got, _ := h.runs.Get(context.Background(), stale.ID); got.Status != recon.StatusFailed {
+		t.Fatalf("stale run must be persisted failed under its owner's tenant, got %q", got.Status)
+	}
+}
+
+func TestSweepStaleRunsMissingTenantDoesNotClaimReclaimed(t *testing.T) {
+	h := newHarness(t, fakeRunner{}, subfinderTool(), false)
+	lock := memory.NewRunLock()
+	h.svc.SetRunLock(lock)
+	stale := recon.Run{ID: "run-without-tenant", EngagementID: "e1", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 0, 0, 0, time.UTC)}
+	if err := h.runs.Save(context.Background(), stale); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.runs = staleReconRuns{ReconRunStore: h.runs, stale: []ports.StaleReconRun{{Run: stale}}}
+
+	n, err := h.svc.SweepStaleRuns(context.Background(), 5*time.Minute)
+	if err == nil {
+		t.Fatal("a stale row without an authoritative tenant must not be reclaimed")
+	}
+	if n != 0 {
+		t.Fatalf("missing tenant must not count reclaimed runs, got %d", n)
+	}
+	if got, _ := h.runs.Get(context.Background(), stale.ID); got.Status != recon.StatusRunning {
+		t.Fatalf("run without a tenant must stay running, got %q", got.Status)
+	}
+	if release, ok, err := lock.TryLock(context.Background(), stale.ID.String()); err != nil || !ok {
+		t.Fatalf("sweep must release the run lock after missing tenant: ok=%v err=%v", ok, err)
+	} else {
+		release()
+	}
+}
+
+func TestSweepStaleRunsMissingEngagementDoesNotClaimReclaimed(t *testing.T) {
+	h := newHarness(t, fakeRunner{}, subfinderTool(), false)
+	lock := memory.NewRunLock()
+	h.svc.SetRunLock(lock)
+	stale := recon.Run{ID: "run-orphaned", EngagementID: "missing", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 0, 0, 0, time.UTC)}
+	if err := h.runs.Save(context.Background(), stale); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := h.svc.SweepStaleRuns(context.Background(), 5*time.Minute)
+	if err == nil {
+		t.Fatal("missing engagement must prevent claiming a stale run")
+	}
+	if n != 0 {
+		t.Fatalf("missing engagement must not count reclaimed runs, got %d", n)
+	}
+	if got, _ := h.runs.Get(context.Background(), stale.ID); got.Status != recon.StatusRunning {
+		t.Fatalf("run without an authoritative tenant must stay running, got %q", got.Status)
+	}
+	if release, ok, err := lock.TryLock(context.Background(), stale.ID.String()); err != nil || !ok {
+		t.Fatalf("sweep must release the run lock after owner lookup failure: ok=%v err=%v", ok, err)
+	} else {
+		release()
+	}
+}
+
+func TestSweepStaleRunsSaveFailureDoesNotClaimReclaimed(t *testing.T) {
+	h := newHarness(t, fakeRunner{}, subfinderTool(), false)
+	lock := memory.NewRunLock()
+	h.svc.SetRunLock(lock)
+	h.seedEngagement(t, false)
+	persistErr := errors.New("database unavailable")
+	h.svc.runs = tenantCheckingReconRuns{ReconRunStore: h.runs, tenant: shared.DefaultTenant, failSave: persistErr}
+	stale := recon.Run{ID: "run-save-fails", EngagementID: "e1", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 0, 0, 0, time.UTC)}
+	if err := h.runs.Save(context.Background(), stale); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := h.svc.SweepStaleRuns(context.Background(), 5*time.Minute)
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("save failure must be returned, got %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("failed persistence must not count reclaimed runs, got %d", n)
+	}
+	if got, _ := h.runs.Get(context.Background(), stale.ID); got.Status != recon.StatusRunning {
+		t.Fatalf("save failure must leave the persisted run running, got %q", got.Status)
+	}
+	if release, ok, err := lock.TryLock(context.Background(), stale.ID.String()); err != nil || !ok {
+		t.Fatalf("sweep must release the run lock after save failure: ok=%v err=%v", ok, err)
+	} else {
+		release()
+	}
+}
+
+func TestSweepStaleRunsContinuesAfterCandidateSaveFailure(t *testing.T) {
+	h := newHarness(t, fakeRunner{}, subfinderTool(), false)
+	lock := memory.NewRunLock()
+	h.svc.SetRunLock(lock)
+	h.seedEngagement(t, false)
+	persistErr := errors.New("database unavailable")
+	h.svc.runs = selectiveFailingReconRuns{
+		ReconRunStore: h.runs,
+		tenant:        shared.DefaultTenant,
+		failures:      map[shared.ID]error{"run-first-fails": persistErr},
+	}
+	first := recon.Run{ID: "run-first-fails", EngagementID: "e1", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 0, 0, 0, time.UTC)}
+	second := recon.Run{ID: "run-second-succeeds", EngagementID: "e1", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 1, 0, 0, time.UTC)}
+	for _, run := range []recon.Run{first, second} {
+		if err := h.runs.Save(context.Background(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := h.svc.SweepStaleRuns(context.Background(), 5*time.Minute)
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("candidate persistence failure must be retained, got %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("later successful candidate must be reclaimed, got %d", n)
+	}
+	if got, _ := h.runs.Get(context.Background(), first.ID); got.Status != recon.StatusRunning {
+		t.Fatalf("failed candidate must remain running, got %q", got.Status)
+	}
+	if got, _ := h.runs.Get(context.Background(), second.ID); got.Status != recon.StatusFailed {
+		t.Fatalf("later candidate must be persisted failed, got %q", got.Status)
+	}
+	for _, runID := range []shared.ID{first.ID, second.ID} {
+		release, ok, lockErr := lock.TryLock(context.Background(), runID.String())
+		if lockErr != nil || !ok {
+			t.Fatalf("sweep must release %s after processing: ok=%v err=%v", runID, ok, lockErr)
+		}
+		release()
+	}
+}
+
+func TestSweepStaleRunsContinuesAfterCandidateOwnerLookupFailure(t *testing.T) {
+	h := newHarness(t, fakeRunner{}, subfinderTool(), false)
+	lock := memory.NewRunLock()
+	h.svc.SetRunLock(lock)
+	h.seedEngagement(t, false)
+	first := recon.Run{ID: "run-first-orphaned", EngagementID: "missing", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 0, 0, 0, time.UTC)}
+	second := recon.Run{ID: "run-second-owned", EngagementID: "e1", Status: recon.StatusRunning, StartedAt: time.Date(2026, 6, 21, 11, 1, 0, 0, time.UTC)}
+	for _, run := range []recon.Run{first, second} {
+		if err := h.runs.Save(context.Background(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := h.svc.SweepStaleRuns(context.Background(), 5*time.Minute)
+	if !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("candidate owner lookup failure must be retained, got %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("later owned candidate must be reclaimed, got %d", n)
+	}
+	if got, _ := h.runs.Get(context.Background(), first.ID); got.Status != recon.StatusRunning {
+		t.Fatalf("orphaned candidate must remain running, got %q", got.Status)
+	}
+	if got, _ := h.runs.Get(context.Background(), second.ID); got.Status != recon.StatusFailed {
+		t.Fatalf("later owned candidate must be persisted failed, got %q", got.Status)
+	}
+	for _, runID := range []shared.ID{first.ID, second.ID} {
+		release, ok, lockErr := lock.TryLock(context.Background(), runID.String())
+		if lockErr != nil || !ok {
+			t.Fatalf("sweep must release %s after processing: ok=%v err=%v", runID, ok, lockErr)
+		}
+		release()
 	}
 }
 

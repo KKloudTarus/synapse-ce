@@ -133,6 +133,19 @@ func SubjectFromEvent(e Event) (PersonalSubject, error) {
 			Summary:       "A finding is approaching its remediation deadline.",
 			Link:          FindingLink(data.EngagementID, data.FindingID),
 		}, nil
+	case EventFindingCreated, EventFindingStatusChanged, EventFindingRetestCompleted, EventSLABreached, EventRiskAcceptanceCreated, EventRiskAcceptanceExpiring, EventRiskAcceptanceExpired:
+		var data struct {
+			EngagementID shared.ID `json:"engagement_id"`
+			FindingID    shared.ID `json:"finding_id"`
+			AssigneeID   shared.ID `json:"assignee_user_id"`
+			TeamID       shared.ID `json:"team_id"`
+			Title        string    `json:"title"`
+			Summary      string    `json:"summary"`
+		}
+		if json.Unmarshal(e.Data, &data) != nil || !safeID(data.EngagementID) || !safeID(data.FindingID) {
+			return PersonalSubject{}, nil
+		}
+		return PersonalSubject{AssigneeIDs: compactIDs(data.AssigneeID), TeamIDs: compactIDs(data.TeamID), EngagementID: data.EngagementID, FindingID: data.FindingID, Title: data.Title, Summary: data.Summary, Link: FindingLink(data.EngagementID, data.FindingID)}, nil
 	case EventDestinationChanged:
 		var data DestinationNotice
 		if json.Unmarshal(e.Data, &data) != nil || (data.Action != "created" && data.Action != "host_changed") {
@@ -295,7 +308,9 @@ func MergePersonalRecipients(assignees, members, admins []shared.ID) []ResolvedR
 }
 
 func ConfigurableEvents() []EventType {
-	return []EventType{EventVulnerabilityAction, EventScanCompleted, EventQualityGateFailed, EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged}
+	return []EventType{EventVulnerabilityAction, EventScanCompleted, EventQualityGateFailed, EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged,
+		EventFindingCreated, EventFindingStatusChanged, EventFindingRetestCompleted, EventScanFailed, EventDASTRunFinished, EventReconRunFinished, EventCSPMRunFinished,
+		EventSLABreached, EventRiskAcceptanceCreated, EventRiskAcceptanceExpiring, EventRiskAcceptanceExpired}
 }
 
 // PersonalDeliveryAvailable reports whether an event can reach a person. Ownership changes and SLA

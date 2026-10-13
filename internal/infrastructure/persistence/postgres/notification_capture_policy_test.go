@@ -124,8 +124,11 @@ func TestNotificationCaptureCutoverProtectsLegacyWorkers(t *testing.T) {
 	if pending, err := SetNotificationCaptureMode(ctx, captureTestAdminDSN(t, pool), "legacy", true); err != nil || pending != 1 {
 		t.Fatalf("explicit rollback pending=%d err=%v", pending, err)
 	}
-	if _, err := source.Poll(ctx, now.Add(3*time.Second), 100); err != nil {
-		t.Fatal(err)
+	// A bounded category share may leave a legacy record for the next tick.
+	for _, at := range []time.Time{now.Add(3 * time.Second), now.Add(4 * time.Second)} {
+		if _, err := source.Poll(ctx, at, 100); err != nil {
+			t.Fatal(err)
+		}
 	}
 	page, err := repo.ListDeliveries(ctx, ports.NotificationDeliveryFilter{TenantID: tenant})
 	if err != nil || len(page.Items) != 3 {

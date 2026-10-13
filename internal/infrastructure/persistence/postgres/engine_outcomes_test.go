@@ -97,7 +97,11 @@ func TestPostgresScanJobStoreRoundTripsEngineOutcomesAcrossReadPaths(t *testing.
 	ctx, pool := setupScanRunTestDB(t)
 	store := NewScanJobStore(pool)
 	started := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
-	job := ports.ScanJob{ID: "engine-outcomes-job-" + randHex(t), EngagementID: "engine-outcomes-engagement-" + randHex(t), Target: "repo", Kind: ports.TargetGit, Status: ports.ScanRunning, StartedAt: started,
+	tenantID := shared.ID("engine-outcomes-tenant-" + randHex(t))
+	engagementID := shared.ID("engine-outcomes-engagement-" + randHex(t))
+	ensureScanRunTenantAndEngagement(t, ctx, pool, tenantID, engagementID)
+	ctx = shared.WithTenant(ctx, tenantID)
+	job := ports.ScanJob{ID: "engine-outcomes-job-" + randHex(t), EngagementID: engagementID.String(), Target: "repo", Kind: ports.TargetGit, Status: ports.ScanRunning, StartedAt: started,
 		EngineOutcomes: []scanrun.EngineOutcome{{Engine: "sast", Execution: scanrun.EngineCompleted, Coverage: scanrun.CoverageComplete, Required: true, Counts: map[scanrun.EngineMeasure]int64{scanrun.MeasureFindings: 0}}}}
 	if err := store.CreateRunning(ctx, job); err != nil {
 		t.Fatalf("create job: %v", err)
@@ -133,7 +137,7 @@ func TestPostgresScanJobStoreRoundTripsEngineOutcomesAcrossReadPaths(t *testing.
 	if err != nil || len(stale) != 1 {
 		t.Fatalf("stale jobs = %+v, %v", stale, err)
 	}
-	assertPostgresEngineJob(t, stale[0], nil)
+	assertPostgresEngineJob(t, stale[0].Job, nil)
 
 	historical := ports.ScanJob{ID: "historic-engine-outcomes-job-" + randHex(t), EngagementID: "historic-engine-outcomes-engagement-" + randHex(t), Target: "repo", Kind: ports.TargetGit, Status: ports.ScanSucceeded, StartedAt: started}
 	if err := store.Save(ctx, historical); err != nil {

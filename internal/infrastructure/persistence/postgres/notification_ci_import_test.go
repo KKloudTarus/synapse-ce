@@ -143,9 +143,16 @@ func TestNotificationCIImportCapture(t *testing.T) {
 	}
 	var captured int
 	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, "SELECT count(*) FROM notification_source_records WHERE tenant_id=$1 AND source_kind='scan_job'", tenant).Scan(&captured)
+		return tx.QueryRow(ctx, "SELECT count(*) FROM notification_source_records WHERE tenant_id=$1 AND source_kind='scan_job' AND event_type='scan.completed'", tenant).Scan(&captured)
 	}); err != nil || captured != 0 {
 		t.Fatalf("rejected import captured sources = %d, err = %v; want zero", captured, err)
+	}
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM notification_source_records
+			WHERE tenant_id=$1 AND source_kind='scan_job' AND event_type='scan.failed'
+			AND capture_version=3 AND data->>'outcome'='failed'`, tenant).Scan(&captured)
+	}); err != nil || captured != 1 {
+		t.Fatalf("rejected import failure snapshots = %d, err = %v; want one", captured, err)
 	}
 
 	accepted, err := svc.ImportAnalysis(ctx, tenant, "ci-project", projectuc.ImportAnalysisInput{
@@ -195,7 +202,7 @@ func TestNotificationCIImportCapture(t *testing.T) {
 		t.Fatalf("rejected queued delivery relevant = %v, err = %v; want false", relevant, err)
 	}
 	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, "SELECT count(*) FROM notification_source_records WHERE tenant_id=$1 AND source_kind='scan_job'", tenant).Scan(&captured)
+		return tx.QueryRow(ctx, "SELECT count(*) FROM notification_source_records WHERE tenant_id=$1 AND source_kind='scan_job' AND event_type='scan.completed'", tenant).Scan(&captured)
 	}); err != nil || captured != 1 {
 		t.Fatalf("accepted import captured sources = %d, err = %v; want one", captured, err)
 	}

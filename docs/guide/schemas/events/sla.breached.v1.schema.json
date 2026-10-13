@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/sla.breached.v1.schema.json",
+  "title": "sla.breached event (v1)",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "sla.breached"
+    },
+    "source_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "engagement_id": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "finding_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "engagement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "assessment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deadline": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "breached_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "tier": {
+          "type": "string",
+          "minLength": 1
+        },
+        "team_id": {
+          "type": "string"
+        },
+        "assignee_user_id": {
+          "type": "string"
+        },
+        "actor_user_id": {
+          "type": "string"
+        },
+        "reminder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "episode_version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "finding_id",
+        "engagement_id",
+        "assessment_id",
+        "deadline",
+        "breached_at",
+        "tier"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "source_kind",
+    "source_id",
+    "schema_version",
+    "occurred_at",
+    "data"
+  ],
+  "additionalProperties": true
+}

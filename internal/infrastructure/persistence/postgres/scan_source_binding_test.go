@@ -80,7 +80,10 @@ func TestPostgresScanSourceJobRoundTripAndStatusUpdates(t *testing.T) {
 			if len(jobs) != 1 {
 				t.Fatalf("stale running count = %d, want 1", len(jobs))
 			}
-			return jobs[0], nil
+			if jobs[0].TenantID != item.TenantID {
+				t.Fatalf("stale job tenant = %q, want %q", jobs[0].TenantID, item.TenantID)
+			}
+			return jobs[0].Job, nil
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

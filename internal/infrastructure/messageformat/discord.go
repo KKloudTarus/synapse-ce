@@ -7,6 +7,7 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgmarkdown"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -42,6 +43,9 @@ func Discord(message ports.RenderedMessage) (ports.FormattedMessage, error) {
 	if title != "" {
 		embed["title"] = escapeDiscord(title)
 	}
+	if color, ok := discordSeverityColor(message.Severity); ok {
+		embed["color"] = color
+	}
 	body, err := json.Marshal(map[string]any{
 		"embeds":           []any{embed},
 		"allowed_mentions": map[string]any{"parse": []string{}},
@@ -56,6 +60,25 @@ const (
 	discordTitleRunes       = 256
 	discordDescriptionRunes = 4096
 )
+
+// discordSeverityColor uses the product's stable severity palette. Unknown and absent severities
+// intentionally have no color: they are not a claim about the event's risk.
+func discordSeverityColor(severity shared.Severity) (int, bool) {
+	switch severity {
+	case shared.SeverityCritical:
+		return 0xdc2945, true
+	case shared.SeverityHigh:
+		return 0xe7661d, true
+	case shared.SeverityMedium:
+		return 0xb97a0f, true
+	case shared.SeverityLow:
+		return 0x1570ef, true
+	case shared.SeverityInfo:
+		return 0x64748b, true
+	default:
+		return 0, false
+	}
+}
 
 // discordURL percent-encodes parentheses so a URL cannot end the masked link early.
 func discordURL(value string) string {

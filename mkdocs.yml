@@ -68,6 +68,7 @@ nav:
       - Notifications and webhooks: notifications.md
       - Notification channels: notification-channels.md
       - Notification content and capture rollout: notification-content.md
+      - Notification event live validation: notification-events-e2e.md
       - SIEM streams: siem-stream.md
       - Finding ownership and routing: finding-ownership.md
       - Assessment lifecycle rollout: assessment-lifecycle-operations.md

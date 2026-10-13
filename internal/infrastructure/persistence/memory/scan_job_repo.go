@@ -17,17 +17,18 @@ import (
 type ScanJobStore struct {
 	mu     sync.RWMutex
 	byID   map[string]ports.ScanJob
+	owners map[string]shared.ID // job id -> immutable admission tenant
 	latest map[shared.ID]string // engagement -> latest job id
 }
 
 // NewScanJobStore returns an empty in-memory scan-job store.
 func NewScanJobStore() *ScanJobStore {
-	return &ScanJobStore{byID: map[string]ports.ScanJob{}, latest: map[shared.ID]string{}}
+	return &ScanJobStore{byID: map[string]ports.ScanJob{}, owners: map[string]shared.ID{}, latest: map[shared.ID]string{}}
 }
 
 var _ ports.ScanJobStore = (*ScanJobStore)(nil)
 
-func (s *ScanJobStore) CreateRunning(_ context.Context, j ports.ScanJob) error {
+func (s *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error {
 	if _, err := scanrun.CanonicalEngineOutcomes(j.EngineOutcomes); err != nil {
 		return err
 	}
@@ -44,12 +45,13 @@ func (s *ScanJobStore) CreateRunning(_ context.Context, j ports.ScanJob) error {
 		}
 	}
 	s.byID[j.ID] = cloneScanJobSource(j)
+	s.owners[j.ID] = scanJobOwnerTenant(ctx, j)
 	s.latest[shared.ID(j.EngagementID)] = j.ID
 	return nil
 }
 
 // Save upserts a job; a newly-seen id becomes the latest for its engagement.
-func (s *ScanJobStore) Save(_ context.Context, j ports.ScanJob) error {
+func (s *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 	if _, err := scanrun.CanonicalEngineOutcomes(j.EngineOutcomes); err != nil {
 		return err
 	}
@@ -88,6 +90,7 @@ func (s *ScanJobStore) Save(_ context.Context, j ports.ScanJob) error {
 		j = withMemoryScanBaseline(s.byID, j)
 	}
 	if !existed {
+		s.owners[j.ID] = scanJobOwnerTenant(ctx, j)
 		s.latest[shared.ID(j.EngagementID)] = j.ID
 	}
 	s.byID[j.ID] = cloneScanJobSource(j)
@@ -143,21 +146,32 @@ func withMemoryScanBaseline(jobs map[string]ports.ScanJob, current ports.ScanJob
 }
 
 // ListStaleRunning returns jobs still 'running' that started before olderThan (≤ limit),
-// oldest first.
-func (s *ScanJobStore) ListStaleRunning(_ context.Context, olderThan time.Time, limit int) ([]ports.ScanJob, error) {
+// oldest first. Owners are frozen at admission because the in-memory store has
+// no engagement table to join during global daemon recovery.
+func (s *ScanJobStore) ListStaleRunning(_ context.Context, olderThan time.Time, limit int) ([]ports.StaleScanJob, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := []ports.ScanJob{}
+	out := []ports.StaleScanJob{}
 	for _, j := range s.byID {
 		if j.Status == ports.ScanRunning && j.StartedAt.Before(olderThan) {
-			out = append(out, cloneScanJobSource(j))
+			out = append(out, ports.StaleScanJob{TenantID: s.owners[j.ID], Job: cloneScanJobSource(j)})
 		}
 	}
-	sort.Slice(out, func(i, k int) bool { return out[i].StartedAt.Before(out[k].StartedAt) })
+	sort.Slice(out, func(i, k int) bool { return out[i].Job.StartedAt.Before(out[k].Job.StartedAt) })
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+func scanJobOwnerTenant(ctx context.Context, job ports.ScanJob) shared.ID {
+	if job.SourcePackage != nil && !job.SourcePackage.TenantID.IsZero() {
+		return job.SourcePackage.TenantID
+	}
+	if tenantID, ok := shared.TenantFrom(ctx); ok {
+		return tenantID
+	}
+	return shared.DefaultTenant
 }
 
 // GetJob returns a job by its own id, or ErrNotFound.

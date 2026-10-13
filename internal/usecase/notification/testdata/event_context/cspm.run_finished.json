@@ -1,0 +1,17 @@
+{
+  "subject_kind": "cspm_run",
+  "subject_id": "cspm-42",
+  "vars": {
+    "counts_available": "true",
+    "event_label": "Cloud posture run finished",
+    "event_type": "cspm.run_finished",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "outcome": "succeeded",
+    "provider": "aws",
+    "scan_kind": "cspm",
+    "severity_counts_available": "false",
+    "summary": "A cloud posture run completed.",
+    "title": "Cloud posture run finished",
+    "total_count": "2"
+  }
+}

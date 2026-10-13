@@ -7,11 +7,18 @@ package notification
 type Filter string
 
 const (
-	FilterMinSeverity Filter = "min_severity"
-	FilterActionTypes Filter = "action_types"
-	FilterEngagements Filter = "engagement_ids"
-	FilterTeams       Filter = "team_ids"
-	FilterLeadTime    Filter = "lead_time_seconds"
+	FilterMinSeverity   Filter = "min_severity"
+	FilterActionTypes   Filter = "action_types"
+	FilterEngagements   Filter = "engagement_ids"
+	FilterTeams         Filter = "team_ids"
+	FilterLeadTime      Filter = "lead_time_seconds"
+	FilterFindingKinds  Filter = "finding_kinds"
+	FilterFromStatuses  Filter = "from_statuses"
+	FilterToStatuses    Filter = "to_statuses"
+	FilterRetestResults Filter = "retest_results"
+	FilterScanKinds     Filter = "scan_kinds"
+	FilterOutcomes      Filter = "outcomes"
+	FilterProviders     Filter = "providers"
 )
 
 // DataClass is the most sensitive content a payload may carry (EPIC #1327 D7). signal is the event

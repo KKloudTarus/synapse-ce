@@ -1,0 +1,25 @@
+{
+  "id": "event-sla-breached",
+  "type": "sla.breached",
+  "source_kind": "sla_breach_episode",
+  "source_id": "assessment-42:deadline",
+  "schema_version": 1,
+  "occurred_at": "2026-10-10T08:00:00.123456789Z",
+  "engagement_id": "eng-42",
+  "severity": "high",
+  "data": {
+    "title": "Remediation SLA breached",
+    "summary": "A finding passed its remediation deadline.",
+    "finding_id": "finding-42",
+    "engagement_id": "eng-42",
+    "assessment_id": "assessment-42",
+    "deadline": "2026-10-10T08:00:00.000000000Z",
+    "breached_at": "2026-10-10T08:00:00.000000000Z",
+    "tier": "high",
+    "team_id": "team-42",
+    "assignee_user_id": "user-42",
+    "actor_user_id": "system",
+    "reminder": 0,
+    "episode_version": 1
+  }
+}

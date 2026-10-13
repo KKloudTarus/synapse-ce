@@ -38,7 +38,7 @@ func (s scanJobsFake) GetJob(_ context.Context, id string) (ports.ScanJob, error
 	return job, nil
 }
 
-func (s scanJobsFake) ListStaleRunning(context.Context, time.Time, int) ([]ports.ScanJob, error) {
+func (s scanJobsFake) ListStaleRunning(context.Context, time.Time, int) ([]ports.StaleScanJob, error) {
 	return nil, nil
 }
 

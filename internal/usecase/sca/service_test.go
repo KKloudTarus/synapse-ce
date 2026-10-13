@@ -1430,13 +1430,13 @@ func (f *fakeJobStore) GetJob(_ context.Context, id string) (ports.ScanJob, erro
 	return ports.ScanJob{}, shared.ErrNotFound
 }
 
-func (f *fakeJobStore) ListStaleRunning(_ context.Context, olderThan time.Time, _ int) ([]ports.ScanJob, error) {
+func (f *fakeJobStore) ListStaleRunning(_ context.Context, olderThan time.Time, _ int) ([]ports.StaleScanJob, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := []ports.ScanJob{}
+	out := []ports.StaleScanJob{}
 	for _, j := range f.jobs {
 		if j.Status == ports.ScanRunning && j.StartedAt.Before(olderThan) {
-			out = append(out, j)
+			out = append(out, ports.StaleScanJob{TenantID: shared.DefaultTenant, Job: j})
 		}
 	}
 	return out, nil

@@ -376,7 +376,8 @@ type RuleInput struct {
 	EngagementIDs []shared.ID      `json:"engagement_ids,omitempty"`
 	TeamIDs       []shared.ID      `json:"team_ids,omitempty"`
 	AllTeams      bool             `json:"all_teams,omitempty"`
-	ChannelIDs    []shared.ID      `json:"channel_ids"`
+	domain.EventFilters
+	ChannelIDs []shared.ID `json:"channel_ids"`
 	// RecipientRoles address people by their relation to the event (#1415): assignee, team_member
 	// or engagement_lead.
 	RecipientRoles  []string `json:"recipient_roles,omitempty"`
@@ -397,7 +398,7 @@ func (s *Service) createRule(ctx context.Context, actor string, in RuleInput) (d
 		return domain.Rule{}, fmt.Errorf("notification rule limit reached: %w", shared.ErrSaturated)
 	}
 	now := s.clock.Now().UTC()
-	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}
@@ -425,7 +426,7 @@ func (s *Service) updateRule(ctx context.Context, actor string, id shared.ID, in
 	if current.Revision != in.Revision {
 		return domain.Rule{}, fmt.Errorf("notification rule revision is stale: %w", shared.ErrConflict)
 	}
-	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
+	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}

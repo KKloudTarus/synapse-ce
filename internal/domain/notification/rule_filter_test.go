@@ -24,19 +24,33 @@ func ruleWithFilter(eventType EventType, filter Filter) Rule {
 		r.TeamIDs = []shared.ID{"team"}
 	case FilterLeadTime:
 		r.LeadTimeSecs = 3600
+	case FilterFindingKinds:
+		r.FindingKinds = []string{"sast"}
+	case FilterFromStatuses:
+		r.FromStatuses = []string{"triage"}
+	case FilterToStatuses:
+		r.ToStatuses = []string{"confirmed"}
+	case FilterRetestResults:
+		r.RetestResults = []string{"remediated"}
+	case FilterScanKinds:
+		r.ScanKinds = []string{"dast"}
+	case FilterOutcomes:
+		r.Outcomes = []string{"failed"}
+	case FilterProviders:
+		r.Providers = []string{"native"}
 	}
 	return r
 }
 
 func TestRuleAcceptsOnlyDeclaredFilters(t *testing.T) {
-	filters := []Filter{FilterMinSeverity, FilterActionTypes, FilterEngagements, FilterTeams, FilterLeadTime}
+	filters := []Filter{FilterMinSeverity, FilterActionTypes, FilterEngagements, FilterTeams, FilterLeadTime, FilterFindingKinds, FilterFromStatuses, FilterToStatuses, FilterRetestResults, FilterScanKinds, FilterOutcomes, FilterProviders}
 	for _, spec := range EventCatalog() {
 		if spec.OperatorOnly {
 			continue
 		}
 		for _, filter := range filters {
 			r := ruleWithFilter(spec.Type, filter)
-			if spec.Type == EventOwnershipChanged && filter != FilterTeams {
+			if spec.HasTeam && filter != FilterTeams {
 				r.AllTeams = true
 			}
 			err := r.Normalize()
@@ -128,6 +142,63 @@ func TestExistingRuleFixturesStillMatch(t *testing.T) {
 			}
 			if tc.rule.Matches(tc.miss) {
 				t.Fatal("unexpected match")
+			}
+		})
+	}
+}
+
+func TestEventFiltersValidateAndMatchImmutableEventData(t *testing.T) {
+	now := time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)
+	rule := Rule{TenantID: "tenant", ID: "rule", Name: "finding status", Enabled: true, EventType: EventFindingStatusChanged, ChannelIDs: []shared.ID{"channel"}, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		EventFilters: EventFilters{FindingKinds: []string{"sast", "sast"}, FromStatuses: []string{"triage"}, ToStatuses: []string{"confirmed"}}}
+	if err := rule.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if len(rule.FindingKinds) != 1 || rule.FindingKinds[0] != "sast" {
+		t.Fatalf("finding kinds = %#v", rule.FindingKinds)
+	}
+	data := json.RawMessage(`{"finding_kind":"sast","from_status":"triage","to_status":"confirmed"}`)
+	event := Event{TenantID: "tenant", Type: EventFindingStatusChanged, Data: data}
+	if !rule.Matches(event) {
+		t.Fatal("matching immutable event data did not match")
+	}
+	event.TenantID = "other"
+	if rule.Matches(event) {
+		t.Fatal("cross-tenant event matched")
+	}
+	rule.FindingKinds = []string{"not_a_kind"}
+	if err := rule.Normalize(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("unknown finding kind = %v, want validation error", err)
+	}
+	rule = Rule{TenantID: "tenant", ID: "rule2", Name: "run", Enabled: true, EventType: EventCSPMRunFinished, ChannelIDs: []shared.ID{"channel"}, Revision: 1, CreatedAt: now, UpdatedAt: now, EventFilters: EventFilters{ScanKinds: []string{"cspm"}}}
+	if err := rule.Normalize(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("CSPM scan-kind selector = %v, want validation error", err)
+	}
+	rule = Rule{TenantID: "tenant", ID: "rule3", Name: "provider", Enabled: true, EventType: EventCSPMRunFinished, ChannelIDs: []shared.ID{"channel"}, Revision: 1, CreatedAt: now, UpdatedAt: now, EventFilters: EventFilters{Providers: []string{"aws"}}}
+	if err := rule.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	event = Event{TenantID: "tenant", Type: EventCSPMRunFinished, Data: json.RawMessage(`{"provider":"multiple","providers":["aws","azure"]}`)}
+	if !rule.Matches(event) {
+		t.Fatal("provider array did not match captured provider")
+	}
+}
+
+func TestLifecycleAllTeamsIncludesUnassignedFindings(t *testing.T) {
+	for _, eventType := range []EventType{EventSLABreached, EventRiskAcceptanceCreated, EventRiskAcceptanceExpiring, EventRiskAcceptanceExpired} {
+		t.Run(string(eventType), func(t *testing.T) {
+			rule := ruleWithFilter(eventType, FilterTeams)
+			rule.TeamIDs, rule.AllTeams = nil, true
+			if err := rule.Normalize(); err != nil {
+				t.Fatal(err)
+			}
+			event := Event{TenantID: "tenant", Type: eventType, Data: json.RawMessage(`{"finding_id":"finding","lead_time_seconds":86400}`)}
+			if !rule.Matches(event) {
+				t.Fatal("tenant-wide lifecycle rule excluded an unassigned finding")
+			}
+			rule.TeamIDs, rule.AllTeams = []shared.ID{"team"}, false
+			if rule.Matches(event) {
+				t.Fatal("team-specific lifecycle rule included an unassigned finding")
 			}
 		})
 	}

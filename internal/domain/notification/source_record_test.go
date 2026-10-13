@@ -70,3 +70,36 @@ func TestSourceRecordDataIsNotSizeBounded(t *testing.T) {
 		t.Fatalf("large data refused: %v", err)
 	}
 }
+
+func TestSnapshotSourceRecordSealsDeclaredFactsAtCapture(t *testing.T) {
+	record := validSourceRecord()
+	record.EventType = EventFindingCreated
+	record.Data = json.RawMessage(`{"title":"Finding created","summary":"A finding was recorded.","finding_id":"finding-1","engagement_id":"engagement-1","finding_kind":"sast","status":"open","finding_version":1}`)
+	snapshot, err := SnapshotSourceRecord(record, map[string]string{
+		"finding_title": "SQL injection", "engagement_name": "Q4 review", "finding_kind": "sast", "status": "open", "secret": "must-not-survive",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.CaptureVersion != 3 {
+		t.Fatalf("capture version = %d, want 3", snapshot.CaptureVersion)
+	}
+	context, err := DecodeTemplateContext(snapshot.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if context.Vars["finding_title"] != "SQL injection" || context.Vars["engagement_name"] != "Q4 review" || context.Vars["secret"] != "" {
+		t.Fatalf("sealed context = %#v", context.Vars)
+	}
+	if err := snapshot.Normalize(); err != nil {
+		t.Fatalf("sealed record no longer validates: %v", err)
+	}
+}
+
+func TestSourceRecordRejectsUnknownCaptureVersion(t *testing.T) {
+	record := validSourceRecord()
+	record.CaptureVersion = 4
+	if err := record.Normalize(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("capture version 4 = %v, want validation error", err)
+	}
+}

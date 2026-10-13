@@ -29,7 +29,15 @@ func (r *RetestRepository) Add(ctx context.Context, rt finding.Retest) error {
 	defer r.mu.Unlock()
 	tenantID, _ := shared.TenantFrom(ctx)
 	tenantID = shared.TenantOrDefault(tenantID)
+	previousLen := len(r.rows[tenantID])
 	r.rows[tenantID] = append(r.rows[tenantID], rt)
+	registerTenantRollback(ctx, func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if rows := r.rows[tenantID]; len(rows) > previousLen {
+			r.rows[tenantID] = rows[:previousLen]
+		}
+	})
 	return nil
 }
 

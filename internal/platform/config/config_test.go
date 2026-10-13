@@ -131,6 +131,7 @@ func TestResolveToolExecution(t *testing.T) {
 		{name: "production worker accepts sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", SandboxEnabled: true}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "production integration worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileIntegrations}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "production lifecycle worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileLifecycle}, role: ProcessRoleWorker, want: ToolExecutionWorker},
+		{name: "production notification worker needs no tool sandbox", cfg: Config{Environment: "production", DBDSN: "postgres://runtime", WorkerProfile: WorkerProfileNotifications, NotificationEnabled: true, VaultMasterKey: "configured"}, role: ProcessRoleWorker, want: ToolExecutionWorker},
 		{name: "worker refuses other mode", cfg: Config{Environment: "development", DBDSN: "postgres://runtime", ToolExecutionMode: "dispatch-only"}, role: ProcessRoleWorker, wantErr: true},
 		{name: "CLI defaults in process", cfg: Config{}, role: ProcessRoleCLI, want: ToolExecutionInProcess},
 		{name: "CLI refuses other mode", cfg: Config{ToolExecutionMode: "worker"}, role: ProcessRoleCLI, wantErr: true},
@@ -159,6 +160,7 @@ func TestWorkerProfileValidation(t *testing.T) {
 		{value: "all", valid: true},
 		{value: " INTEGRATIONS ", valid: true},
 		{value: " LIFECYCLE ", valid: true},
+		{value: " NOTIFICATIONS ", valid: false},
 		{value: "scanner", valid: false},
 	} {
 		t.Run(test.value, func(t *testing.T) {
@@ -171,12 +173,43 @@ func TestWorkerProfileValidation(t *testing.T) {
 	}
 }
 
+func TestNotificationWorkerProfileRequiresNotificationsAndSharedVault(t *testing.T) {
+	base := Config{WorkerProfile: WorkerProfileNotifications}
+	if err := base.ValidateWorkerProfile(); err == nil {
+		t.Fatal("notification profile without notifications enabled must be refused")
+	}
+	base.NotificationEnabled = true
+	if err := base.ValidateWorkerProfile(); err == nil {
+		t.Fatal("notification profile without a shared vault key must be refused")
+	}
+	base.VaultMasterKey = "configured"
+	if err := base.ValidateWorkerProfile(); err != nil {
+		t.Fatalf("notification profile with notification delivery and vault key = %v", err)
+	}
+}
+
+func TestLoadNotificationWorkerProfile(t *testing.T) {
+	t.Setenv("SYNAPSE_WORKER_PROFILE", " notifications ")
+	t.Setenv("SYNAPSE_NOTIFICATIONS_ENABLED", "true")
+	t.Setenv("SYNAPSE_VAULT_MASTER_KEY", "configured")
+	cfg := Load()
+	if cfg.WorkerProfile != WorkerProfileNotifications {
+		t.Fatalf("Load().WorkerProfile = %q, want %q", cfg.WorkerProfile, WorkerProfileNotifications)
+	}
+	if err := cfg.ValidateWorkerProfile(); err != nil {
+		t.Fatalf("loaded notification profile validation = %v", err)
+	}
+}
+
 func TestValidateWorkerSandboxPosture(t *testing.T) {
 	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileIntegrations}).ValidateWorkerSandboxPosture(); err != nil {
 		t.Fatalf("integration-only worker must not require executable-tool sandbox: %v", err)
 	}
 	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileLifecycle}).ValidateWorkerSandboxPosture(); err != nil {
 		t.Fatalf("lifecycle-only worker must not require executable-tool sandbox: %v", err)
+	}
+	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileNotifications, NotificationEnabled: true, VaultMasterKey: "configured"}).ValidateWorkerSandboxPosture(); err != nil {
+		t.Fatalf("notification-only worker must not require executable-tool sandbox: %v", err)
 	}
 	if err := (Config{Environment: "production", WorkerProfile: WorkerProfileAll}).ValidateWorkerSandboxPosture(); err == nil {
 		t.Fatal("full production worker must still require the sandbox")

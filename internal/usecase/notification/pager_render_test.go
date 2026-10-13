@@ -67,6 +67,37 @@ func TestBuiltinPagerScanSummaryKeepsDeltaAndCountsWithinJSMLimit(t *testing.T) 
 	}
 }
 
+func TestPagerCoreEventsKeepSignalCeiling(t *testing.T) {
+	h := newRenderHarness(t)
+	h.svc.SetBuiltinTemplates(notificationbuiltin.New())
+	for _, eventType := range []domain.EventType{
+		domain.EventFindingCreated, domain.EventFindingStatusChanged, domain.EventFindingRetestCompleted,
+		domain.EventScanFailed, domain.EventDASTRunFinished, domain.EventReconRunFinished, domain.EventCSPMRunFinished,
+		domain.EventSLABreached, domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired,
+	} {
+		_, event, snapshot := builtinMatrixEvent(t, eventType)
+		for _, kind := range []domain.ChannelType{domain.ChannelPagerDuty, domain.ChannelJSM} {
+			for _, locale := range []tenancy.Locale{tenancy.LocaleEnglish, tenancy.LocaleVietnamese} {
+				for _, class := range builtinMatrixClasses() {
+					t.Run(string(eventType)+"/"+string(kind)+"/"+string(locale)+"/"+string(class), func(t *testing.T) {
+						channel := h.channel
+						channel.Type, channel.DataClass, channel.Locale = kind, class, locale
+						out, err := h.svc.RenderMessage(h.ctx, RenderInput{Channel: channel, Event: event})
+						if err != nil || out.Class != domain.DataClassSignal || out.Resolution.Tier != TierBuiltin {
+							t.Fatalf("pager signal rendering: %+v, %v", out, err)
+						}
+						assertBuiltinMatrixSafety(t, t.Name(), builtinGoldenOutput{Fields: out.Message.Fields}, eventType, domain.DataClassSignal, snapshot)
+						out, err = h.svc.RenderMessage(h.ctx, RenderInput{Channel: channel, Event: event, Engagement: domain.EngagementNotificationsNone})
+						if err != nil || !out.Suppressed {
+							t.Fatalf("pager bypassed engagement suppression: %+v, %v", out, err)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
 func TestBuiltinPagerScanSummaryDoesNotInventDelta(t *testing.T) {
 	h := newRenderHarness(t)
 	h.svc.SetBuiltinTemplates(notificationbuiltin.New())

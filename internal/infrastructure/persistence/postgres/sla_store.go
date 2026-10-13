@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sla"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -305,7 +306,62 @@ func (s *SLAStore) SaveTransition(ctx context.Context, next sla.Lifecycle, event
 			event.BeforeVersion, event.AfterVersion, event.At); err != nil {
 			return wrapPostgresSLAWriteError("insert sla lifecycle event", err)
 		}
+		if event.To == sla.RemediationAcceptedRisk || event.To == sla.RemediationRemediated {
+			if _, err := tx.Exec(ctx, `UPDATE notification_source_state SET active=false,observed_at=$3
+				WHERE tenant_id=$1 AND source_kind='sla_breach' AND starts_with(source_id,$2)`, tenantID.String(), event.FindingID.String()+":", event.At.UTC()); err != nil {
+				return fmt.Errorf("deactivate sla breach notification episode: %w", err)
+			}
+		}
+		if event.To == sla.RemediationAcceptedRisk {
+			if err := appendRiskAcceptanceCreated(ctx, tx, next, event); err != nil {
+				return err
+			}
+		}
 		return nil
+	})
+}
+
+// appendRiskAcceptanceCreated records the accepted-risk transition while the lifecycle write is
+// still atomic. The transition id, rather than the mutable current assessment id, is the durable
+// acceptance identity across assessment refreshes.
+func appendRiskAcceptanceCreated(ctx context.Context, tx pgx.Tx, next sla.Lifecycle, event sla.LifecycleEvent) error {
+	var findingTitle, engagementName, severity, teamID, assigneeID, actorID, actorName, tier string
+	var deadline time.Time
+	err := tx.QueryRow(ctx, `SELECT f.title,eg.name,COALESCE(NULLIF(f.severity,''),ra.severity,''),COALESCE(oa.team_id,''),COALESCE(assignee.id,''),COALESCE(actor.id,''),COALESCE(actor.name,''),a.tier,a.remediate_by
+		FROM findings f
+		JOIN engagements eg ON eg.tenant_id=f.tenant_id AND eg.id=f.engagement_id
+		JOIN sla_assessments a ON a.tenant_id=f.tenant_id AND a.id=$4
+		LEFT JOIN vulnerability_risk_assessments ra ON ra.tenant_id=f.tenant_id AND ra.id=f.risk_assessment_id
+		LEFT JOIN ownership_assignments oa ON oa.tenant_id=f.tenant_id AND oa.engagement_id=f.engagement_id AND oa.finding_id=f.id
+		LEFT JOIN users assignee ON assignee.ownership_tenant_id=oa.tenant_id AND assignee.id=oa.assignee_id AND NOT assignee.disabled
+		LEFT JOIN users actor ON actor.ownership_tenant_id=f.tenant_id AND actor.id=$5 AND NOT actor.disabled
+		WHERE f.tenant_id=$1 AND f.engagement_id=$2 AND f.id=$3`,
+		next.TenantID, next.EngagementID, next.FindingID, event.AssessmentID, event.Actor).Scan(&findingTitle, &engagementName, &severity, &teamID, &assigneeID, &actorID, &actorName, &tier, &deadline)
+	if err != nil {
+		return fmt.Errorf("read risk acceptance notification facts: %w", err)
+	}
+	if event.AcceptanceExpiresAt == nil {
+		return fmt.Errorf("risk acceptance notification expiry: %w", shared.ErrValidation)
+	}
+	data, err := json.Marshal(map[string]any{
+		"title": "Risk acceptance created", "summary": "Risk was accepted for a finding.",
+		"finding_id": next.FindingID, "engagement_id": next.EngagementID, "assessment_id": event.AssessmentID,
+		"acceptance_id": event.ID, "acceptance_version": event.AfterVersion, "accepted_at": event.At.UTC(),
+		"expires_at": event.AcceptanceExpiresAt.UTC(), "deadline": deadline.UTC(), "tier": tier,
+		"team_id": teamID, "assignee_user_id": assigneeID, "actor_user_id": actorID,
+	})
+	if err != nil {
+		return fmt.Errorf("encode risk acceptance notification facts: %w", err)
+	}
+	return appendNotificationSnapshotTx(ctx, tx, notification.SourceRecord{
+		TenantID: next.TenantID, SourceKind: "risk_acceptance_created", SourceID: event.ID.String(),
+		EventType: notification.EventRiskAcceptanceCreated, EngagementID: next.EngagementID,
+		Severity: shared.Severity(severity), OccurredAt: event.At.UTC(), Data: data, SchemaVersion: 1,
+		SubjectKind: "finding", SubjectID: next.FindingID.String(),
+	}, map[string]string{
+		"severity": severity, "tier": tier, "accepted_at": event.At.UTC().Format(time.RFC3339),
+		"expires_at": event.AcceptanceExpiresAt.UTC().Format(time.RFC3339), "deadline": deadline.UTC().Format(time.RFC3339),
+		"engagement_name": engagementName, "finding_title": findingTitle, "actor": actorName,
 	})
 }
 

@@ -2520,42 +2520,63 @@ func (s *Service) SweepStaleScans(ctx context.Context, staleFor time.Duration) (
 		return 0, fmt.Errorf("list stale scans: %w", err)
 	}
 	n := 0
-	for _, job := range stale {
-		release, ok, lerr := s.runLock.TryLock(ctx, job.ID)
-		if lerr != nil || !ok {
-			continue // can't acquire or a live owner holds it → leave for next pass
+	var failures []error
+	for _, staleJob := range stale {
+		if err := ctx.Err(); err != nil {
+			return n, errors.Join(append(failures, err)...)
 		}
-		if fresh, gerr := s.jobs.GetJob(ctx, job.ID); gerr == nil && (fresh.Status == ports.ScanSucceeded || fresh.Status == ports.ScanFailed) {
-			release()
+		job := staleJob.Job
+		release, ok, lerr := s.runLock.TryLock(ctx, job.ID)
+		if lerr != nil {
+			if err := ctx.Err(); err != nil {
+				return n, errors.Join(append(failures, err)...)
+			}
 			continue
 		}
-		jobCtx := ctx
-		if source := job.SourcePackage; source != nil {
-			if source.TenantID.IsZero() || source.EngagementID.String() != job.EngagementID || job.Kind != ports.TargetUpload || job.Target != source.Target() {
-				release()
-				return n, fmt.Errorf("%w: stranded scan source ownership is invalid", shared.ErrValidation)
-			}
-			// The daemon sweeps across tenants. Derive each write's tenant from
-			// the frozen source binding, then verify its engagement owner before
-			// using tenant-scoped persistence; do not weaken the store's checks.
-			jobCtx = shared.WithTenant(ctx, source.TenantID)
-			if _, err := s.engagements.GetByIDInTenant(jobCtx, source.TenantID, source.EngagementID); err != nil {
-				release()
-				return n, fmt.Errorf("verify stranded scan source owner: %w", err)
-			}
+		if !ok {
+			continue // can't acquire or a live owner holds it → leave for next pass
 		}
-		fin := s.clock.Now()
-		job.FinishedAt, job.Progress = &fin, 100
-		job.Status, job.Stage, job.Error = ports.ScanFailed, "swept", "scan stranded running past staleFor with no live owner – reclaimed by sweeper"
-		if err := s.jobs.Save(jobCtx, job); err != nil {
-			release()
-			return n, fmt.Errorf("save swept scan job %s: %w", job.ID, err)
+		reclaimed, candidateErr := func() (bool, error) {
+			defer release()
+			if fresh, gerr := s.jobs.GetJob(ctx, job.ID); gerr == nil && (fresh.Status == ports.ScanSucceeded || fresh.Status == ports.ScanFailed) {
+				return false, nil
+			}
+			if staleJob.TenantID.IsZero() {
+				return false, fmt.Errorf("%w: stranded scan owner tenant is missing", shared.ErrValidation)
+			}
+			jobCtx := shared.WithTenant(ctx, staleJob.TenantID)
+			if source := job.SourcePackage; source != nil {
+				if source.TenantID.IsZero() || source.TenantID != staleJob.TenantID || source.EngagementID.String() != job.EngagementID || job.Kind != ports.TargetUpload || job.Target != source.Target() {
+					return false, fmt.Errorf("%w: stranded scan source ownership is invalid", shared.ErrValidation)
+				}
+			}
+			// Maintenance also recovers hidden project analysis contexts. GetByID
+			// preserves tenant RLS without the public engagement visibility filter.
+			owner, err := s.engagements.GetByID(jobCtx, shared.ID(job.EngagementID))
+			if err != nil {
+				return false, fmt.Errorf("verify stranded scan owner: %w", err)
+			}
+			if owner == nil || shared.TenantOrDefault(owner.TenantID) != staleJob.TenantID {
+				return false, fmt.Errorf("%w: stranded scan engagement tenant mismatch", shared.ErrNotFound)
+			}
+			fin := s.clock.Now()
+			job.FinishedAt, job.Progress = &fin, 100
+			job.Status, job.Stage, job.Error = ports.ScanFailed, "swept", "scan stranded running past staleFor with no live owner – reclaimed by sweeper"
+			if err := s.jobs.Save(jobCtx, job); err != nil {
+				return false, fmt.Errorf("save swept scan job %s: %w", job.ID, err)
+			}
+			return true, nil
+		}()
+		if candidateErr != nil {
+			failures = append(failures, candidateErr)
+			continue
 		}
-		release()
-		s.observeOutcome("failed")
-		n++
+		if reclaimed {
+			s.observeOutcome("failed")
+			n++
+		}
 	}
-	return n, nil
+	return n, errors.Join(failures...)
 }
 
 // LatestJob returns the engagement's most recent scan job (for the status poll).

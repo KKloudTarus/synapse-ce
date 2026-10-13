@@ -35,7 +35,7 @@ func GoogleChat(message ports.RenderedMessage) (ports.FormattedMessage, error) {
 		widgets = append(widgets, map[string]any{"buttonList": map[string]any{"buttons": buttons}})
 	}
 	card := map[string]any{"sections": []any{map[string]any{"widgets": widgets}}}
-	if title := truncateRunes(strings.TrimSpace(msgtemplate.Sanitize(message.Fields["title"])), googleChatTitleRunes); title != "" {
+	if title := severityTitle(message.Severity, msgtemplate.Sanitize(message.Fields["title"]), googleChatTitleRunes); title != "" {
 		card["header"] = map[string]any{"title": title}
 	}
 	payload, err := json.Marshal(map[string]any{"cardsV2": []any{map[string]any{"cardId": "synapse-notification", "card": card}}})

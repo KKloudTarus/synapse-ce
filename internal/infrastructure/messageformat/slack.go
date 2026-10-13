@@ -31,7 +31,7 @@ func (Slack) Format(message ports.RenderedMessage) (ports.FormattedMessage, erro
 	if err != nil {
 		return ports.FormattedMessage{}, err
 	}
-	title := truncateRunes(strings.TrimSpace(headerText(msgmarkdown.Parse(msgtemplate.Sanitize(message.Fields["title"])))), slackHeaderRunes)
+	title := severityTitle(message.Severity, headerText(msgmarkdown.Parse(msgtemplate.Sanitize(message.Fields["title"]))), slackHeaderRunes)
 	blocks := []any{}
 	if title != "" {
 		blocks = append(blocks, map[string]any{"type": "header", "text": map[string]any{"type": "plain_text", "text": title, "emoji": false}})

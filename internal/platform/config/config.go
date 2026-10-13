@@ -270,6 +270,8 @@ type Config struct {
 	// NotificationChannelPauseThreshold is how many consecutive permanent delivery failures pause
 	// a notification channel (#1464). Zero keeps counting but never pauses. Read by the worker.
 	NotificationChannelPauseThreshold int
+	// NotificationSLABreachMaxReminders caps reminders after the initial breach.
+	NotificationSLABreachMaxReminders int
 	// ReconViaWorker routes recon runs through the durable queue: the API enqueues
 	// and the non-root synapse-worker claims and executes them. Scoped egress is
 	// configured by a separate root-owned broker. Requires Postgres. Default false
@@ -1229,6 +1231,7 @@ func Load() Config {
 		MCPEngagementID: getenv("SYNAPSE_MCP_ENGAGEMENT_ID", ""),
 
 		NotificationChannelPauseThreshold: getint("SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD", 5),
+		NotificationSLABreachMaxReminders: getint("SYNAPSE_NOTIFICATION_SLA_BREACH_MAX_REMINDERS", 4),
 	}
 }
 
@@ -1470,14 +1473,25 @@ const (
 	WorkerProfileAll          WorkerProfile = "all"
 	WorkerProfileIntegrations WorkerProfile = "integrations"
 	WorkerProfileLifecycle    WorkerProfile = "lifecycle"
+	// WorkerProfileNotifications claims only notification delivery, contact verification,
+	// and personal inbox jobs. It never constructs an executable-tool handler.
+	WorkerProfileNotifications WorkerProfile = "notifications"
 )
 
 func (c Config) ValidateWorkerProfile() error {
 	switch c.WorkerProfile {
 	case WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle:
 		return nil
+	case WorkerProfileNotifications:
+		if !c.NotificationEnabled {
+			return errors.New("SYNAPSE_WORKER_PROFILE=notifications requires SYNAPSE_NOTIFICATIONS_ENABLED=true")
+		}
+		if strings.TrimSpace(c.VaultMasterKey) == "" {
+			return errors.New("SYNAPSE_WORKER_PROFILE=notifications requires SYNAPSE_VAULT_MASTER_KEY shared by API and worker")
+		}
+		return nil
 	default:
-		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q, %q, or %q (got %q)", WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle, c.WorkerProfile)
+		return fmt.Errorf("SYNAPSE_WORKER_PROFILE must be %q, %q, %q, or %q (got %q)", WorkerProfileAll, WorkerProfileIntegrations, WorkerProfileLifecycle, WorkerProfileNotifications, c.WorkerProfile)
 	}
 }
 
@@ -1485,7 +1499,7 @@ func (c Config) ValidateWorkerProfile() error {
 // sandbox gate while allowing data-only workers, which never construct or claim an
 // executable-tool handler.
 func (c Config) ValidateWorkerSandboxPosture() error {
-	if c.WorkerProfile == WorkerProfileIntegrations || c.WorkerProfile == WorkerProfileLifecycle {
+	if c.WorkerProfile == WorkerProfileIntegrations || c.WorkerProfile == WorkerProfileLifecycle || c.WorkerProfile == WorkerProfileNotifications {
 		return nil
 	}
 	return c.ValidateSandboxPosture()
@@ -1508,7 +1522,7 @@ func (c Config) ResolveToolExecution(role ProcessRole) (ToolExecution, error) {
 		if c.DBDSN == "" {
 			return "", errors.New("synapse-worker requires SYNAPSE_DB_DSN: queued execution cannot use process-local persistence")
 		}
-		if c.IsProduction() && !c.SandboxEnabled && c.WorkerProfile != WorkerProfileIntegrations && c.WorkerProfile != WorkerProfileLifecycle {
+		if c.IsProduction() && !c.SandboxEnabled && c.WorkerProfile != WorkerProfileIntegrations && c.WorkerProfile != WorkerProfileLifecycle && c.WorkerProfile != WorkerProfileNotifications {
 			return "", errors.New("production synapse-worker requires SYNAPSE_SANDBOX_ENABLED=true")
 		}
 		return ToolExecutionWorker, nil
@@ -1649,6 +1663,14 @@ func (c Config) ValidateWorkerConcurrency() error {
 func (c Config) ValidateNotificationChannelHealth() error {
 	if c.NotificationChannelPauseThreshold < 0 || c.NotificationChannelPauseThreshold > 100 {
 		return fmt.Errorf("SYNAPSE_NOTIFICATION_CHANNEL_PAUSE_THRESHOLD must be between 0 and 100 (got %d)", c.NotificationChannelPauseThreshold)
+	}
+	return nil
+}
+
+// ValidateNotificationEvents bounds the exponentially spaced SLA reminders.
+func (c Config) ValidateNotificationEvents() error {
+	if c.NotificationSLABreachMaxReminders < 0 || c.NotificationSLABreachMaxReminders > 8 {
+		return fmt.Errorf("SYNAPSE_NOTIFICATION_SLA_BREACH_MAX_REMINDERS must be between 0 and 8 (got %d)", c.NotificationSLABreachMaxReminders)
 	}
 	return nil
 }

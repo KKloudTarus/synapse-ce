@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/recon"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -24,21 +26,66 @@ func NewReconRunStore(pool *pgxpool.Pool) *ReconRunStore { return &ReconRunStore
 
 var _ ports.ReconRunStore = (*ReconRunStore)(nil)
 
-// Save upserts a run (used on create and on every stage/status update).
+// Save upserts a run (used on create and on every stage/status update). The
+// recon table predates tenant columns, so the engagement binding is checked in
+// the same tenant transaction before the write. This closes the old raw-pool
+// path that could write a run for an engagement outside the caller's tenant.
 func (r *ReconRunStore) Save(ctx context.Context, run recon.Run) error {
-	_, err := r.pool.Exec(ctx,
-		`INSERT INTO recon_runs (`+reconRunCols+`)
+	if !run.Status.Valid() {
+		return fmt.Errorf("%w: invalid recon run status", shared.ErrValidation)
+	}
+	if run.Status.Terminal() && run.FinishedAt == nil {
+		return fmt.Errorf("%w: terminal recon run requires finished_at", shared.ErrValidation)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok {
+		return fmt.Errorf("%w: tenant context is required for recon run", shared.ErrValidation)
+	}
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		var engagementName string
+		if err := tx.QueryRow(ctx, `SELECT name FROM engagements WHERE id=$1 AND tenant_id=$2`, run.EngagementID, tenantID).Scan(&engagementName); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("recon engagement %s: %w", run.EngagementID, shared.ErrNotFound)
+			}
+			return err
+		}
+		var prior, priorEngagement string
+		err := tx.QueryRow(ctx, `SELECT status,engagement_id FROM recon_runs WHERE id=$1 FOR UPDATE`, run.ID.String()).Scan(&prior, &priorEngagement)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil && priorEngagement != run.EngagementID.String() {
+			return fmt.Errorf("%w: recon run engagement does not match stored run", shared.ErrValidation)
+		}
+		_, err = tx.Exec(ctx,
+			`INSERT INTO recon_runs (`+reconRunCols+`)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		 ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
 		     error=EXCLUDED.error, result_count=EXCLUDED.result_count,
 		     evidence_id=EXCLUDED.evidence_id, finished_at=EXCLUDED.finished_at,
 		     containment=EXCLUDED.containment`,
-		run.ID.String(), run.EngagementID.String(), run.Tool, run.Target, string(run.Status),
-		run.Stage, run.Error, run.ResultCount, run.EvidenceID.String(), run.StartedAt, run.FinishedAt, run.Containment)
+			run.ID.String(), run.EngagementID.String(), run.Tool, run.Target, string(run.Status),
+			run.Stage, run.Error, run.ResultCount, run.EvidenceID.String(), run.StartedAt, run.FinishedAt, run.Containment)
+		if err != nil {
+			return err
+		}
+		if run.Status.Terminal() && !recon.Status(prior).Terminal() {
+			return appendRunFinishedNotification(ctx, tx, tenantID, run.EngagementID, notification.EventReconRunFinished,
+				"recon_run", run.ID.String(), "recon", string(run.Status), []string{run.Tool}, run.Target, stableReconErrorCode(run.Status, run.Stage), -1, *run.FinishedAt)
+		}
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("save recon run: %w", err)
 	}
 	return nil
+}
+
+func stableReconErrorCode(status recon.Status, stage string) string {
+	if status != recon.StatusFailed {
+		return ""
+	}
+	return "recon_failed"
 }
 
 // Get returns a run by id, or shared.ErrNotFound.
@@ -72,27 +119,54 @@ func (r *ReconRunStore) ListByEngagement(ctx context.Context, engagementID share
 }
 
 // ListStaleRunning returns runs still 'running' that started before olderThan (≤ limit),
-// oldest first – the stale-run sweeper's input.
-func (r *ReconRunStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]recon.Run, error) {
+// oldest first. Each tenant is queried under RLS, then the bounded per-tenant candidates are
+// merged so an orphaned legacy row cannot starve later, resolvable runs.
+func (r *ReconRunStore) ListStaleRunning(ctx context.Context, olderThan time.Time, limit int) ([]ports.StaleReconRun, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := r.pool.Query(ctx,
-		`SELECT `+reconRunCols+` FROM recon_runs WHERE status='running' AND started_at < $1 ORDER BY started_at LIMIT $2`,
-		olderThan, limit)
+	tenants, err := listTenantIDs(ctx, r.pool, "stale recon runs")
 	if err != nil {
-		return nil, fmt.Errorf("list stale recon runs: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-	out := []recon.Run{}
-	for rows.Next() {
-		run, err := scanReconRun(rows)
+	candidates := make([]ports.StaleReconRun, 0)
+	for _, tenantID := range tenants {
+		err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx,
+				`SELECT r.id, r.engagement_id, r.tool, r.target, r.status, r.stage, r.error, r.result_count, r.evidence_id, r.started_at, r.finished_at, r.containment
+				 FROM recon_runs r
+				 JOIN engagements e ON e.id = r.engagement_id AND e.tenant_id = $3
+				 WHERE r.status = 'running' AND r.started_at < $1
+				 ORDER BY r.started_at, r.id COLLATE "C" LIMIT $2`,
+				olderThan, limit, tenantID.String())
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				run, err := scanReconRun(rows)
+				if err != nil {
+					return fmt.Errorf("scan recon run: %w", err)
+				}
+				candidates = append(candidates, ports.StaleReconRun{Run: run, TenantID: tenantID})
+			}
+			return rows.Err()
+		})
 		if err != nil {
-			return nil, fmt.Errorf("scan recon run: %w", err)
+			return nil, fmt.Errorf("list stale recon runs for tenant %s: %w", tenantID, err)
 		}
-		out = append(out, run)
+		sort.Slice(candidates, func(i, j int) bool {
+			left, right := candidates[i].Run, candidates[j].Run
+			if left.StartedAt.Equal(right.StartedAt) {
+				return left.ID < right.ID
+			}
+			return left.StartedAt.Before(right.StartedAt)
+		})
+		if len(candidates) > limit {
+			candidates = candidates[:limit]
+		}
 	}
-	return out, rows.Err()
+	return candidates, nil
 }
 
 func scanReconRun(row rowScanner) (recon.Run, error) {

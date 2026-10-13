@@ -102,7 +102,11 @@ func (s *Service) renderAt(ctx context.Context, in RenderInput, class domain.Dat
 	if err != nil {
 		return RenderResult{}, err
 	}
-	out := RenderResult{Resolution: resolution, Message: ports.RenderedMessage{TemplateRef: templateRef(resolution)}}
+	message := ports.RenderedMessage{TemplateRef: templateRef(resolution)}
+	if spec.HasSeverity {
+		message.Severity = in.Event.Severity
+	}
+	out := RenderResult{Resolution: resolution, Message: message}
 	fields := templateFields(resolution)
 	if len(fields) == 0 {
 		out.Message.TemplateRef = refFallback

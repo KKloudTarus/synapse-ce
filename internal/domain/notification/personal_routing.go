@@ -129,17 +129,25 @@ func RuleRoleSupported(event EventType, role string) error {
 			return nil
 		}
 	case RoleAssignee:
-		if event == EventOwnershipChanged || event == EventSLAApproaching {
+		if event == EventOwnershipChanged || event == EventSLAApproaching || findingSubjectEvent(event) {
 			return nil
 		}
 	case RoleTeamMember:
-		if event == EventOwnershipChanged {
+		if event == EventOwnershipChanged || findingSubjectEvent(event) {
 			return nil
 		}
 	default:
 		return fmt.Errorf("%w: unknown recipient role %q", shared.ErrValidation, role)
 	}
 	return fmt.Errorf("%w: recipient role %s is not available for %s events", shared.ErrValidation, role, event)
+}
+
+func findingSubjectEvent(event EventType) bool {
+	switch event {
+	case EventFindingCreated, EventFindingStatusChanged, EventFindingRetestCompleted, EventSLABreached, EventRiskAcceptanceCreated, EventRiskAcceptanceExpiring, EventRiskAcceptanceExpired:
+		return true
+	}
+	return false
 }
 
 // normalizeRecipientRoles dedupes and checks a rule's roles.

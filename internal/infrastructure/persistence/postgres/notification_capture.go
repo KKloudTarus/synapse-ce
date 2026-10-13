@@ -12,7 +12,7 @@ import (
 )
 
 func (s *NotificationSource) pollCaptured(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind string, now time.Time, limit int) (int, error) {
-	rows, err := tx.Query(ctx, `SELECT source_id,event_type,engagement_id,severity,occurred_at,data,subject_kind,subject_id,context,capture_version FROM notification_source_records WHERE tenant_id=$1 AND source_kind=$2 AND processed_at IS NULL ORDER BY occurred_at,source_id LIMIT $3 FOR UPDATE SKIP LOCKED`, tenant, kind, limit)
+	rows, err := tx.Query(ctx, `SELECT source_id,event_type,engagement_id,severity,occurred_at,data,subject_kind,subject_id,context,capture_version,schema_version FROM notification_source_records WHERE tenant_id=$1 AND source_kind=$2 AND processed_at IS NULL ORDER BY occurred_at,source_id LIMIT $3 FOR UPDATE SKIP LOCKED`, tenant, kind, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -24,7 +24,7 @@ func (s *NotificationSource) pollCaptured(ctx context.Context, tx pgx.Tx, tenant
 	for rows.Next() {
 		e := notification.Event{TenantID: tenant, SourceKind: kind, SchemaVersion: 1}
 		var version int
-		if err := rows.Scan(&e.SourceID, &e.Type, &e.EngagementID, &e.Severity, &e.OccurredAt, &e.Data, &e.SubjectKind, &e.SubjectID, &e.Context, &version); err != nil {
+		if err := rows.Scan(&e.SourceID, &e.Type, &e.EngagementID, &e.Severity, &e.OccurredAt, &e.Data, &e.SubjectKind, &e.SubjectID, &e.Context, &version, &e.SchemaVersion); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -109,6 +109,16 @@ func (s *NotificationSource) quarantineMissingIdentitySource(ctx context.Context
 // publishCaptured reads the record's source facts and publishes it. The event builder fills the
 // variables from them, and composes the data from them when the record carries only its identity.
 func (s *NotificationSource) publishCaptured(ctx context.Context, tx pgx.Tx, tenant shared.ID, kind string, e notification.Event, captureVersion int) error {
+	if captureVersion == 3 {
+		if s.repo.projector == nil {
+			return fmt.Errorf("notification snapshot requires an event projector")
+		}
+		if _, err := tx.Exec(ctx, `SELECT set_config('synapse.notification_source_capability','snapshot-v1',true)`); err != nil {
+			return err
+		}
+		_, err := s.repo.publishTx(ctx, tx, e, "")
+		return err
+	}
 	if captureVersion >= 2 && s.repo.projector == nil {
 		return fmt.Errorf("identity notification source requires an event projector")
 	}

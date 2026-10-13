@@ -1,0 +1,17 @@
+{
+  "subject_kind": "scan_job",
+  "subject_id": "scan-42",
+  "vars": {
+    "counts_available": "false",
+    "error_code": "timeout",
+    "event_label": "Scan failed",
+    "event_type": "scan.failed",
+    "occurred_at": "2026-10-10T08:00:00Z",
+    "outcome": "failed",
+    "provider": "native",
+    "scan_kind": "sast",
+    "severity_counts_available": "false",
+    "summary": "A scan did not finish.",
+    "title": "Scan failed"
+  }
+}

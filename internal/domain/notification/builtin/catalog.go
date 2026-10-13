@@ -41,6 +41,9 @@ func New() *Catalog {
 		notification.EventFleetAgentOffline,
 		notification.EventIncidentCreated,
 		notification.EventOwnershipChanged,
+		notification.EventFindingCreated, notification.EventFindingStatusChanged, notification.EventFindingRetestCompleted,
+		notification.EventScanFailed, notification.EventDASTRunFinished, notification.EventReconRunFinished, notification.EventCSPMRunFinished,
+		notification.EventSLABreached, notification.EventRiskAcceptanceCreated, notification.EventRiskAcceptanceExpiring, notification.EventRiskAcceptanceExpired,
 	}
 	families := []notification.TemplateFamily{
 		notification.FamilyChat,
@@ -142,6 +145,24 @@ func copyFor(event notification.EventType, locale tenancy.Locale) (string, strin
 			return "Sự cố mới", "Mức độ: {{.severity}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .asset_name}}\nTài sản: {{.asset_name}}{{end}}"
 		case notification.EventOwnershipChanged:
 			return "Thay đổi người phụ trách phát hiện", "Sự kiện: {{.event_type}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .finding_title}}\nPhát hiện: {{.finding_title}}{{end}}{{if .old_team}}\nNhóm cũ: {{.old_team}}{{end}}{{if .new_team}}\nNhóm mới: {{.new_team}}{{end}}{{if .old_assignee}}\nNgười phụ trách cũ: {{.old_assignee}}{{end}}{{if .new_assignee}}\nNgười phụ trách mới: {{.new_assignee}}{{end}}{{if .actor}}\nNgười thay đổi: {{.actor}}{{end}}{{if .reason}}\nLý do: {{.reason}}{{end}}"
+		case notification.EventFindingCreated:
+			return "Phát hiện mới", "Mức độ: {{.severity}}\nLoại: {{.finding_kind}}\nTrạng thái: {{.status}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .finding_title}}\nPhát hiện: {{.finding_title}}{{end}}"
+		case notification.EventFindingStatusChanged:
+			return "Trạng thái phát hiện đã đổi", "Mức độ: {{.severity}}\n{{.from_status}} → {{.to_status}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .finding_title}}\nPhát hiện: {{.finding_title}}{{end}}"
+		case notification.EventFindingRetestCompleted:
+			return "Kiểm tra lại hoàn tất", "Mức độ: {{.severity}}\nKết quả: {{.result}}\nTrạng thái: {{.status}}\nThời gian: {{.occurred_at}}{{if .finding_title}}\nPhát hiện: {{.finding_title}}{{end}}"
+		case notification.EventScanFailed, notification.EventDASTRunFinished, notification.EventReconRunFinished, notification.EventCSPMRunFinished:
+			return "Lần quét đã hoàn tất", "Loại: {{.scan_kind}}\nKết quả: {{.outcome}}\nNhà cung cấp: {{.provider}}{{if .error_code}}\nMã lỗi: {{.error_code}}{{end}}{{if eq .counts_available \"true\"}}\nTổng phát hiện: {{.total_count}}{{if eq .severity_counts_available \"true\"}} (nghiêm trọng {{.critical_count}}, cao {{.high_count}}, trung bình {{.medium_count}}, thấp {{.low_count}}, thông tin {{.info_count}}){{end}}{{else}}\nTổng phát hiện: chưa có dữ liệu{{end}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .target}}\nMục tiêu: {{.target}}{{end}}"
+		case notification.EventSLABreached:
+			return "SLA đã quá hạn", "Mức độ: {{.severity}}\nMức SLA: {{.tier}}\nHạn xử lý: {{.deadline}}\nThời gian: {{.occurred_at}}{{if .finding_title}}\nPhát hiện: {{.finding_title}}{{end}}"
+		case notification.EventRiskAcceptanceCreated, notification.EventRiskAcceptanceExpiring, notification.EventRiskAcceptanceExpired:
+			title := "Chấp nhận rủi ro mới"
+			if event == notification.EventRiskAcceptanceExpiring {
+				title = "Chấp nhận rủi ro sắp hết hạn"
+			} else if event == notification.EventRiskAcceptanceExpired {
+				title = "Chấp nhận rủi ro đã hết hạn"
+			}
+			return title, "Mức độ: {{.severity}}\nMức: {{.tier}}\nHết hạn: {{.expires_at}}{{if .lead_time_hours}}\nCòn lại: {{.lead_time_hours}} giờ{{end}}\nThời gian: {{.occurred_at}}{{if .finding_title}}\nPhát hiện: {{.finding_title}}{{end}}"
 		default:
 			return "Thông báo Synapse", "Sự kiện: {{.event_label}}\nThời gian: {{.occurred_at}}"
 		}
@@ -161,6 +182,24 @@ func copyFor(event notification.EventType, locale tenancy.Locale) (string, strin
 		return "Incident created", "Severity: {{.severity}}\nOccurred: {{.occurred_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .asset_name}}\nAsset: {{.asset_name}}{{end}}"
 	case notification.EventOwnershipChanged:
 		return "Finding ownership changed", "Event: {{.event_type}}\nOccurred: {{.occurred_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .finding_title}}\nFinding: {{.finding_title}}{{end}}{{if .old_team}}\nPrevious team: {{.old_team}}{{end}}{{if .new_team}}\nNew team: {{.new_team}}{{end}}{{if .old_assignee}}\nPrevious assignee: {{.old_assignee}}{{end}}{{if .new_assignee}}\nNew assignee: {{.new_assignee}}{{end}}{{if .actor}}\nChanged by: {{.actor}}{{end}}{{if .reason}}\nReason: {{.reason}}{{end}}"
+	case notification.EventFindingCreated:
+		return "Finding created", "Severity: {{.severity}}\nKind: {{.finding_kind}}\nStatus: {{.status}}\nOccurred: {{.occurred_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .finding_title}}\nFinding: {{.finding_title}}{{end}}"
+	case notification.EventFindingStatusChanged:
+		return "Finding status changed", "Severity: {{.severity}}\n{{.from_status}} → {{.to_status}}\nOccurred: {{.occurred_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .finding_title}}\nFinding: {{.finding_title}}{{end}}"
+	case notification.EventFindingRetestCompleted:
+		return "Finding retest completed", "Severity: {{.severity}}\nResult: {{.result}}\nStatus: {{.status}}\nOccurred: {{.occurred_at}}{{if .finding_title}}\nFinding: {{.finding_title}}{{end}}"
+	case notification.EventScanFailed, notification.EventDASTRunFinished, notification.EventReconRunFinished, notification.EventCSPMRunFinished:
+		return "Scan run finished", "Kind: {{.scan_kind}}\nOutcome: {{.outcome}}\nProvider: {{.provider}}{{if .error_code}}\nError: {{.error_code}}{{end}}{{if eq .counts_available \"true\"}}\nFindings: {{.total_count}}{{if eq .severity_counts_available \"true\"}} (critical {{.critical_count}}, high {{.high_count}}, medium {{.medium_count}}, low {{.low_count}}, info {{.info_count}}){{end}}{{else}}\nFindings: unavailable{{end}}\nOccurred: {{.occurred_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .target}}\nTarget: {{.target}}{{end}}"
+	case notification.EventSLABreached:
+		return "Remediation SLA breached", "Severity: {{.severity}}\nSLA tier: {{.tier}}\nDeadline: {{.deadline}}\nOccurred: {{.occurred_at}}{{if .finding_title}}\nFinding: {{.finding_title}}{{end}}"
+	case notification.EventRiskAcceptanceCreated, notification.EventRiskAcceptanceExpiring, notification.EventRiskAcceptanceExpired:
+		title := "Risk acceptance created"
+		if event == notification.EventRiskAcceptanceExpiring {
+			title = "Risk acceptance expiring"
+		} else if event == notification.EventRiskAcceptanceExpired {
+			title = "Risk acceptance expired"
+		}
+		return title, "Severity: {{.severity}}\nTier: {{.tier}}\nExpires: {{.expires_at}}{{if .lead_time_hours}}\nTime remaining: {{.lead_time_hours}} hours{{end}}\nOccurred: {{.occurred_at}}{{if .finding_title}}\nFinding: {{.finding_title}}{{end}}"
 	default:
 		return "Synapse notification", "Event: {{.event_label}}\nOccurred: {{.occurred_at}}"
 	}

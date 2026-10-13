@@ -60,7 +60,7 @@ func TestScanJobStoreEngineOutcomesAreIsolatedAcrossReads(t *testing.T) {
 				}
 				return ports.ScanJob{}, err
 			}
-			return jobs[0], nil
+			return jobs[0].Job, nil
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
