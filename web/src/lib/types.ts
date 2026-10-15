@@ -2871,6 +2871,10 @@ export type IntegrationOperationState = 'queued' | 'running' | 'succeeded' | 'pa
 export interface IntegrationOperation {
   id: string
   integrationId: string
+  /** Undefined only while connected to a server that predates operation revision responses. */
+  connectionRevision?: number
+  /** Undefined only while connected to a server that predates operation revision responses. */
+  credentialRevision?: number
   type: IntegrationOperationType
   state: IntegrationOperationState
   checkpoint: string

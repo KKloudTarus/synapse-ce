@@ -96,12 +96,7 @@ export function IntegrationsHub() {
       <CiCdGroup key={`ci-${generation}`} canAdmin={canAdmin} />
       <SourceControlGroup key={`scm-${generation}`} canAdmin={canAdmin} />
       <MessagingGroup key={`msg-${generation}`} canAdmin={canAdmin} capabilities={capabilities} />
-      <UnavailableGroup
-        title="Ticketing"
-        icon={CheckDone01}
-        info="Push confirmed findings to Jira and other trackers, with a link back on the finding."
-        capability={capabilities?.get('ticketing') ?? null}
-      />
+      <TicketingGroup key={`tickets-${generation}`} canAdmin={canAdmin} capability={capabilities?.get('ticketing') ?? null} />
       <UnavailableGroup
         title="Documentation"
         icon={BookOpen01}
@@ -494,6 +489,25 @@ function SourceControlGroup({ canAdmin }: { canAdmin: boolean }) {
       )}
     </Group>
   )
+}
+
+function TicketingGroup({ canAdmin, capability }: { canAdmin: boolean; capability: Capability | null }) {
+  const [integrations, setIntegrations] = useState<Integration[] | undefined>(undefined)
+  const [error, setError] = useState<string | null>(null)
+  const available = capability?.enabled === true
+  useEffect(() => {
+    if (!available || !canAdmin) return
+    let live = true
+    Promise.all([api.listIntegrationProviders(), api.listIntegrations()]).then(([providers, values]) => {
+      if (!live) return
+      const jira = new Set(providers.filter((provider) => provider.provider === 'jira-cloud' || provider.provider === 'jira-dc').map((provider) => provider.provider))
+      setIntegrations(values.filter((integration) => jira.has(integration.provider) && !integration.archived))
+    }, (cause) => { if (live) { setError(message(cause)); setIntegrations([]) } })
+    return () => { live = false }
+  }, [available, canAdmin])
+  return <Group title="Ticketing" icon={CheckDone01} info="Push confirmed findings to Jira with a required preview, durable intent, and a recoverable uncertain-create state." status={!available ? (capability?.planned || capability === null ? 'planned' : 'off') : !canAdmin ? 'restricted' : 'on'} manage={available && canAdmin ? { to: '/settings/integrations/jira', label: 'Manage Jira' } : undefined}>
+    {!available ? <EmptyState icon={CheckDone01} title={capability?.switch ? 'Ticketing is off' : 'Ticketing is not available in this build yet'} hint={capability?.switch ? `Set ${capability.switch}=true, then refresh.` : 'Ticketing is not available in this build yet.'} /> : !canAdmin ? <EmptyState icon={Lock01} title="Administrator access required" hint="Only tenant administrators and integration administrators can view Jira connections." /> : integrations === undefined ? <Spinner label="Loading Jira connections…" /> : error ? <ErrorState message={error} /> : integrations.length === 0 ? <EmptyState icon={CheckDone01} title="No Jira connections yet" hint="Connect Jira Cloud or Jira Data Center to create finding tickets." /> : <CardGrid>{integrations.map((integration) => <IntegrationCard key={integration.id} name={integration.name} kind={integration.provider === 'jira-cloud' ? 'Jira Cloud' : 'Jira Data Center'} detail={integration.endpoint} health={integration.enabled ? { label: 'Configured', tone: 'good' } : { label: 'Disabled', tone: 'neutral' }} lastSuccess="unavailable" lastError="unavailable" test={<p className="text-xs text-tertiary">Preview a finding before creating a ticket.</p>} />)}</CardGrid>}
+  </Group>
 }
 
 // ---- Messaging ----

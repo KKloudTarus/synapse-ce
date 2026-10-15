@@ -53,7 +53,7 @@ func TestCatalogReportsSwitchPerSubsystem(t *testing.T) {
 		{"inbound_webhooks", "SYNAPSE_INBOUND_WEBHOOKS_ENABLED"},
 		{"notifications", "SYNAPSE_NOTIFICATIONS_ENABLED"},
 		{"notifications.channel_types", "SYNAPSE_NOTIFICATIONS_ENABLED"},
-		{"ticketing", ""},
+		{"ticketing", "SYNAPSE_TICKETING_ENABLED"},
 		{"docpublish", ""},
 		{"legacy_alert_webhook", "SYNAPSE_ALERT_WEBHOOK_URL"},
 	}
@@ -80,7 +80,7 @@ func TestEnabledFlagsResolve(t *testing.T) {
 		FleetTelemetryIngest: true, FleetDetectionIngest: true, CSPM: true, Agent: true,
 		FPTriage: true, SLA: true, Judgments: true, Sandbox: true, WriteupDrafts: true,
 		Taint: true, JSReachability: true, SingleTenant: true, OIDC: true,
-		Ownership: true, InboundWebhooks: true, Notifications: true, LegacyAlertWebhook: true,
+		Ownership: true, InboundWebhooks: true, Notifications: true, Ticketing:true, LegacyAlertWebhook: true,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -213,7 +213,7 @@ func TestPlannedSubsystemsNameNoSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	for _, key := range []string{"ticketing", "docpublish"} {
+	for _, key := range []string{"docpublish"} {
 		got := find(t, svc.List(), key)
 		if !got.Planned || got.Enabled || got.Switch != "" {
 			t.Errorf("%s = %+v, want planned, disabled and without a switch", key, got)

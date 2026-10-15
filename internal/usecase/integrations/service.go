@@ -803,6 +803,21 @@ func IsRetryable(err error) bool {
 // checkEndpointRules applies the operator's rules on save: the private-network switch to every
 // provider, and the host allowlist and private CIDRs to self-hosted ones.
 func checkEndpointRules(rules selfhosted.Rules, descriptor integration.ProviderDescriptor, endpoint string, requestPrivate bool) error {
+	if descriptor.Provider == "jira-dc" {
+		if err := rules.CheckPrivateRequest(requestPrivate); err != nil {
+			return err
+		}
+		return rules.CheckListedEndpoint(endpoint, requestPrivate)
+	}
+	if descriptor.Provider == "jira-cloud" {
+		u, err := url.Parse(endpoint)
+		if err != nil || u.Scheme != "https" || !strings.HasSuffix(strings.ToLower(u.Hostname()), ".atlassian.net") || u.Hostname() == ".atlassian.net" || (u.Port() != "" && u.Port() != "443") || (u.Path != "" && u.Path != "/") {
+			return fmt.Errorf("%w: Jira Cloud requires an HTTPS Atlassian site origin", shared.ErrValidation)
+		}
+		if requestPrivate {
+			return fmt.Errorf("%w: Jira Cloud cannot use private-network access", shared.ErrValidation)
+		}
+	}
 	if descriptor.SelfHosted {
 		return rules.CheckSave(endpoint, requestPrivate)
 	}

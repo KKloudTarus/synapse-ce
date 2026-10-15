@@ -29,6 +29,9 @@ func NewTicketStore(pool *pgxpool.Pool) (*TicketStore, error) {
 }
 
 var _ ports.TicketStore = (*TicketStore)(nil)
+var _ ports.TicketAuditStore = (*TicketStore)(nil)
+var _ ports.TicketIntentAuditStore = (*TicketStore)(nil)
+var _ ports.TicketDispatchStore = (*TicketStore)(nil)
 
 func ticketWriteError(err error) error {
 	if err == nil {
@@ -45,16 +48,28 @@ func ticketWriteError(err error) error {
 	}
 	return err
 }
+func nullableJSON(v []byte) any {
+	if len(v) == 0 {
+		return nil
+	}
+	return string(v)
+}
+func nullableInt(v int) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
 
 const mappingCols = `id,tenant_id,integration_id,COALESCE(project_id,''),COALESCE(engagement_id,''),
-    project_key,issue_type,component,labels,priority_map,security_level,version,created_at,updated_at`
+    project_key,issue_type,component,labels,priority_map,security_level,summary_template,description_template,field_values,transition_name,data_class,locale,waiver_reason,version,created_at,updated_at`
 
 func scanTicketMapping(row rowScanner) (ticketing.Mapping, error) {
 	var m ticketing.Mapping
 	var project, engagement string
-	var labels, priorities []byte
+	var labels, priorities, fields []byte
 	err := row.Scan(&m.ID, &m.TenantID, &m.IntegrationID, &project, &engagement,
-		&m.ProjectKey, &m.IssueType, &m.Component, &labels, &priorities, &m.SecurityLevel,
+		&m.ProjectKey, &m.IssueType, &m.Component, &labels, &priorities, &m.SecurityLevel, &m.SummaryTemplate, &m.DescriptionTemplate, &fields, &m.Transition, &m.DataClass, &m.Locale, &m.WaiverReason,
 		&m.Version, &m.CreatedAt, &m.UpdatedAt)
 	if err != nil {
 		return ticketing.Mapping{}, err
@@ -70,6 +85,9 @@ func scanTicketMapping(row rowScanner) (ticketing.Mapping, error) {
 		return ticketing.Mapping{}, err
 	}
 	if err = json.Unmarshal(priorities, &m.PriorityMap); err != nil {
+		return ticketing.Mapping{}, err
+	}
+	if err = json.Unmarshal(fields, &m.FieldValues); err != nil {
 		return ticketing.Mapping{}, err
 	}
 	return m, nil
@@ -96,6 +114,15 @@ func (s *TicketStore) CreateMapping(ctx context.Context, tenant shared.ID, m tic
 	if m.PriorityMap == nil {
 		m.PriorityMap = map[string]string{}
 	}
+	if m.FieldValues == nil {
+		m.FieldValues = map[string]string{}
+	}
+	if m.DataClass == "" {
+		m.DataClass = "summary"
+	}
+	if m.Locale == "" {
+		m.Locale = "en"
+	}
 	labels, err := json.Marshal(m.Labels)
 	if err != nil {
 		return shared.ErrValidation
@@ -104,16 +131,28 @@ func (s *TicketStore) CreateMapping(ctx context.Context, tenant shared.ID, m tic
 	if err != nil {
 		return shared.ErrValidation
 	}
+	fields, err := json.Marshal(m.FieldValues)
+	if err != nil {
+		return shared.ErrValidation
+	}
 	return ticketWriteError(requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO ticket_mappings
             (id,tenant_id,integration_id,project_id,engagement_id,project_key,issue_type,
-             component,labels,priority_map,security_level,version,created_at,updated_at)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14)`,
+			 component,labels,priority_map,security_level,summary_template,description_template,field_values,transition_name,data_class,locale,waiver_reason,version,created_at,updated_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19,$20,$21)`,
 			m.ID.String(), tenant.String(), m.IntegrationID.String(), project, engagement, m.ProjectKey,
-			m.IssueType, m.Component, string(labels), string(priorities), m.SecurityLevel, m.Version,
+			m.IssueType, m.Component, string(labels), string(priorities), m.SecurityLevel, m.SummaryTemplate, m.DescriptionTemplate, string(fields), m.Transition, string(m.DataClass), m.Locale, m.WaiverReason, m.Version,
 			m.CreatedAt.UTC(), m.UpdatedAt.UTC())
 		return err
 	}))
+}
+func (s *TicketStore) CreateMappingAudited(ctx context.Context, tenant shared.ID, m ticketing.Mapping, audit ports.AuditEntry) error {
+	return NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		if err := s.CreateMapping(txctx, tenant, m); err != nil {
+			return err
+		}
+		return NewAuditLog(s.pool).Record(txctx, audit)
+	})
 }
 func (s *TicketStore) GetMapping(ctx context.Context, tenant, id shared.ID) (ticketing.Mapping, error) {
 	if err := ctx.Err(); err != nil {
@@ -135,6 +174,157 @@ func (s *TicketStore) GetMapping(ctx context.Context, tenant, id shared.ID) (tic
 		return ticketing.Mapping{}, fmt.Errorf("get ticket mapping: %w", err)
 	}
 	return m, nil
+}
+func (s *TicketStore) ListMappings(ctx context.Context, tenant shared.ID, limit int, after shared.ID) (out []ticketing.Mapping, err error) {
+	if tenant.IsZero() || limit < 1 || limit > 200 {
+		return nil, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx, `SELECT `+mappingCols+` FROM ticket_mappings WHERE tenant_id=$1 AND id>$2 ORDER BY id LIMIT $3`, tenant.String(), after.String(), limit)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			m, e := scanTicketMapping(rows)
+			if e != nil {
+				return e
+			}
+			out = append(out, m)
+		}
+		return rows.Err()
+	})
+	return out, ticketWriteError(err)
+}
+func (s *TicketStore) ListScopedMappings(ctx context.Context, tenant shared.ID, scope ticketing.Scope, scopeID shared.ID, limit int) (out []ticketing.Mapping, err error) {
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	if tenant.IsZero() || limit < 1 || limit > 200 {
+		return nil, shared.ErrValidation
+	}
+	if scope == "" {
+		if !scopeID.IsZero() {
+			return nil, shared.ErrValidation
+		}
+		return s.ListMappings(ctx, tenant, limit, "")
+	}
+	if scopeID.IsZero() || (scope != ticketing.Project && scope != ticketing.Engagement) {
+		return nil, shared.ErrValidation
+	}
+	column := "engagement_id"
+	if scope == ticketing.Project {
+		column = "project_id"
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx, `SELECT `+mappingCols+` FROM ticket_mappings WHERE tenant_id=$1 AND `+column+`=$2 ORDER BY id LIMIT $3`, tenant.String(), scopeID.String(), limit)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			m, scanErr := scanTicketMapping(rows)
+			if scanErr != nil {
+				return scanErr
+			}
+			out = append(out, m)
+		}
+		return rows.Err()
+	})
+	return out, ticketWriteError(err)
+}
+func (s *TicketStore) ListFindingMappings(ctx context.Context, tenant, engagementID shared.ID, limit int) (out []ticketing.Mapping, err error) {
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	if tenant.IsZero() || engagementID.IsZero() || limit < 1 || limit > 200 {
+		return nil, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		var projectID string
+		if e := tx.QueryRow(ctx, `SELECT COALESCE(project_id,'') FROM engagements WHERE tenant_id=$1 AND id=$2`, tenant.String(), engagementID.String()).Scan(&projectID); errors.Is(e, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		} else if e != nil {
+			return e
+		}
+		rows, e := tx.Query(ctx, `SELECT `+mappingCols+` FROM ticket_mappings m
+			WHERE m.tenant_id=$1 AND (m.engagement_id=$2 OR ($3<>'' AND m.project_id=$3))
+			ORDER BY m.id LIMIT $4`, tenant.String(), engagementID.String(), projectID, limit)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			m, scanErr := scanTicketMapping(rows)
+			if scanErr != nil {
+				return scanErr
+			}
+			out = append(out, m)
+		}
+		return rows.Err()
+	})
+	return out, ticketWriteError(err)
+}
+func (s *TicketStore) UpdateMapping(ctx context.Context, tenant shared.ID, m ticketing.Mapping, expected int) (out ticketing.Mapping, err error) {
+	if err = m.Validate(); err != nil {
+		return out, err
+	}
+	if tenant.IsZero() || m.TenantID != tenant || expected < 1 {
+		return out, shared.ErrValidation
+	}
+	if m.DataClass == "" {
+		m.DataClass = "summary"
+	}
+	if m.Locale == "" {
+		m.Locale = "en"
+	}
+	labels, _ := json.Marshal(m.Labels)
+	priorities, _ := json.Marshal(m.PriorityMap)
+	fields, _ := json.Marshal(m.FieldValues)
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `UPDATE ticket_mappings SET project_key=$3,issue_type=$4,component=$5,labels=$6::jsonb,priority_map=$7::jsonb,security_level=$8,summary_template=$9,description_template=$10,field_values=$11::jsonb,transition_name=$12,data_class=$13,locale=$14,waiver_reason=$15,version=version+1,updated_at=$16 WHERE tenant_id=$1 AND id=$2 AND version=$17 RETURNING `+mappingCols, tenant.String(), m.ID.String(), m.ProjectKey, m.IssueType, m.Component, string(labels), string(priorities), m.SecurityLevel, m.SummaryTemplate, m.DescriptionTemplate, string(fields), m.Transition, string(m.DataClass), m.Locale, m.WaiverReason, m.UpdatedAt.UTC(), expected)
+		var e error
+		out, e = scanTicketMapping(row)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return shared.ErrConflict
+		}
+		return e
+	})
+	return out, ticketWriteError(err)
+}
+func (s *TicketStore) UpdateMappingAudited(ctx context.Context, tenant shared.ID, m ticketing.Mapping, expected int, audit ports.AuditEntry) (out ticketing.Mapping, err error) {
+	err = NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		var e error
+		out, e = s.UpdateMapping(txctx, tenant, m, expected)
+		if e != nil {
+			return e
+		}
+		return NewAuditLog(s.pool).Record(txctx, audit)
+	})
+	return out, err
+}
+func (s *TicketStore) DeleteMapping(ctx context.Context, tenant, id shared.ID, expected int) error {
+	if tenant.IsZero() || id.IsZero() || expected < 1 {
+		return shared.ErrValidation
+	}
+	return ticketWriteError(requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		tag, e := tx.Exec(ctx, `DELETE FROM ticket_mappings m WHERE tenant_id=$1 AND id=$2 AND version=$3 AND NOT EXISTS (SELECT 1 FROM ticket_intents i WHERE i.tenant_id=m.tenant_id AND i.mapping_id=m.id)`, tenant.String(), id.String(), expected)
+		if e != nil {
+			return e
+		}
+		if tag.RowsAffected() != 1 {
+			return shared.ErrConflict
+		}
+		return nil
+	}))
+}
+func (s *TicketStore) DeleteMappingAudited(ctx context.Context, tenant, id shared.ID, expected int, audit ports.AuditEntry) error {
+	return NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		if err := s.DeleteMapping(txctx, tenant, id, expected); err != nil {
+			return err
+		}
+		return NewAuditLog(s.pool).Record(txctx, audit)
+	})
 }
 
 const linkCols = `id,tenant_id,finding_id,engagement_id,COALESCE(integration_id,''),external_id,external_url,created_at`
@@ -199,7 +389,7 @@ func (s *TicketStore) ListLinks(ctx context.Context, tenant, finding shared.ID) 
 	out := make([]ticketing.Link, 0)
 	err := requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
 		rows, e := tx.Query(ctx, `SELECT `+linkCols+` FROM ticket_links
-            WHERE tenant_id=$1 AND finding_id=$2 ORDER BY created_at DESC,id DESC`,
+			WHERE tenant_id=$1 AND finding_id=$2 ORDER BY created_at DESC,id DESC LIMIT 100`,
 			tenant.String(), finding.String())
 		if e != nil {
 			return e
@@ -215,6 +405,27 @@ func (s *TicketStore) ListLinks(ctx context.Context, tenant, finding shared.ID) 
 		return rows.Err()
 	})
 	return out, err
+}
+func (s *TicketStore) GetLink(ctx context.Context, tenant, id shared.ID) (ticketing.Link, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Link{}, err
+	}
+	if tenant.IsZero() || id.IsZero() {
+		return ticketing.Link{}, shared.ErrValidation
+	}
+	var link ticketing.Link
+	err := requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		var e error
+		link, e = scanTicketLink(tx.QueryRow(ctx, `SELECT `+linkCols+` FROM ticket_links WHERE tenant_id=$1 AND id=$2`, tenant.String(), id.String()))
+		return e
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ticketing.Link{}, shared.ErrNotFound
+	}
+	if err != nil {
+		return ticketing.Link{}, fmt.Errorf("get ticket link: %w", err)
+	}
+	return link, nil
 }
 func (s *TicketStore) DeleteLink(ctx context.Context, tenant, id shared.ID) error {
 	if err := ctx.Err(); err != nil {
@@ -236,13 +447,16 @@ func (s *TicketStore) DeleteLink(ctx context.Context, tenant, id shared.ID) erro
 }
 
 const intentCols = `id,tenant_id,integration_id,mapping_id,finding_id,engagement_id,action,request_key,
-    payload_digest,correlation_marker,state,version,attempts,lease_until,remote_id,remote_url,error_code,created_at,updated_at`
+    payload_digest,correlation_marker,state,version,attempts,lease_until,remote_id,remote_url,error_code,COALESCE(payload_snapshot,'null'::jsonb),COALESCE(mapping_version,0),COALESCE(connection_revision,0),COALESCE(credential_revision,0),security_level,created_at,updated_at`
 
 func scanTicketIntent(row rowScanner) (ticketing.Intent, error) {
 	var i ticketing.Intent
 	err := row.Scan(&i.ID, &i.TenantID, &i.IntegrationID, &i.MappingID, &i.FindingID, &i.EngagementID,
 		&i.Action, &i.RequestKey, &i.PayloadDigest, &i.Marker, &i.State, &i.Version, &i.Attempts,
-		&i.LeaseUntil, &i.RemoteID, &i.RemoteURL, &i.ErrorCode, &i.CreatedAt, &i.UpdatedAt)
+		&i.LeaseUntil, &i.RemoteID, &i.RemoteURL, &i.ErrorCode, &i.Snapshot, &i.MappingVersion, &i.ConnectionRevision, &i.CredentialRevision, &i.SecurityLevel, &i.CreatedAt, &i.UpdatedAt)
+	if string(i.Snapshot) == "null" {
+		i.Snapshot = nil
+	}
 	return i, err
 }
 func sameTicketCommand(a, b ticketing.Intent) bool {
@@ -287,12 +501,12 @@ func (s *TicketStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, i
 		}
 		tag, e := tx.Exec(ctx, `INSERT INTO ticket_intents
             (id,tenant_id,integration_id,mapping_id,finding_id,engagement_id,action,request_key,
-             payload_digest,correlation_marker,state,version,attempts,lease_until,remote_id,remote_url,error_code,created_at,updated_at)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+             payload_digest,correlation_marker,state,version,attempts,lease_until,remote_id,remote_url,error_code,payload_snapshot,mapping_version,connection_revision,credential_revision,security_level,created_at,updated_at)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24)
             ON CONFLICT (tenant_id,integration_id,request_key) DO NOTHING`,
 			i.ID.String(), tenant.String(), i.IntegrationID.String(), i.MappingID.String(), i.FindingID.String(),
 			i.EngagementID.String(), string(i.Action), i.RequestKey, i.PayloadDigest, i.Marker, string(i.State),
-			i.Version, i.Attempts, nil, i.RemoteID, i.RemoteURL, i.ErrorCode, i.CreatedAt.UTC(), i.UpdatedAt.UTC())
+			i.Version, i.Attempts, nil, i.RemoteID, i.RemoteURL, i.ErrorCode, nullableJSON(i.Snapshot), nullableInt(i.MappingVersion), nullableInt(i.ConnectionRevision), nullableInt(i.CredentialRevision), i.SecurityLevel, i.CreatedAt.UTC(), i.UpdatedAt.UTC())
 		if e != nil {
 			return e
 		}
@@ -312,6 +526,71 @@ func (s *TicketStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID, i
 		return ticketing.Intent{}, false, err
 	}
 	return saved, created, nil
+}
+func (s *TicketStore) CreateOrGetIntentAudited(ctx context.Context, tenant shared.ID, i ticketing.Intent, audit ports.AuditEntry) (out ticketing.Intent, created bool, err error) {
+	if err = ctx.Err(); err != nil {
+		return out, false, err
+	}
+	if err = i.Validate(); err != nil {
+		return out, false, err
+	}
+	if tenant.IsZero() || tenant != i.TenantID || i.State != writeintent.Pending || i.Version != 1 || i.Attempts != 0 || i.LeaseUntil != nil {
+		return out, false, shared.ErrValidation
+	}
+	err = NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		if i.Action == ticketing.Create {
+			tx, e := ticketTx(txctx, tenant)
+			if e != nil {
+				return e
+			}
+			// Lock the canonical finding before looking for another active command.
+			// This serializes distinct request keys without imposing a global unique
+			// constraint on the foundation store.
+			var findingID string
+			e = tx.QueryRow(txctx, `SELECT id FROM findings WHERE tenant_id=$1 AND id=$2 AND engagement_id=$3 FOR NO KEY UPDATE`, tenant.String(), i.FindingID.String(), i.EngagementID.String()).Scan(&findingID)
+			if errors.Is(e, pgx.ErrNoRows) {
+				return shared.ErrNotFound
+			}
+			if e != nil {
+				return e
+			}
+			// A same-key replay is idempotent even if a later, distinct command is
+			// now active for the finding. Validate its immutable command facts
+			// before applying the no-blind-repeat gate, matching the memory store.
+			existing, queryErr := scanTicketIntent(tx.QueryRow(txctx, `SELECT `+intentCols+` FROM ticket_intents
+				WHERE tenant_id=$1 AND integration_id=$2 AND request_key=$3`, tenant.String(), i.IntegrationID.String(), i.RequestKey))
+			if queryErr == nil {
+				if !sameTicketCommand(existing, i) {
+					return shared.ErrConflict
+				}
+				out, created = existing, false
+				return nil
+			}
+			if !errors.Is(queryErr, pgx.ErrNoRows) {
+				return queryErr
+			}
+			var blocked bool
+			e = tx.QueryRow(txctx, `SELECT TRUE FROM ticket_intents
+				WHERE tenant_id=$1 AND integration_id=$2 AND finding_id=$3 AND action='create' AND request_key<>$4
+					AND state IN ('pending','in_flight','uncertain') LIMIT 1`, tenant.String(), i.IntegrationID.String(), i.FindingID.String(), i.RequestKey).Scan(&blocked)
+			if e == nil && blocked {
+				return shared.ErrConflict
+			}
+			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+				return e
+			}
+		}
+		var e error
+		out, created, e = s.CreateOrGetIntent(txctx, tenant, i)
+		if e != nil {
+			return e
+		}
+		if !created {
+			return nil
+		}
+		return NewAuditLog(s.pool).Record(txctx, audit)
+	})
+	return out, created, err
 }
 func (s *TicketStore) GetIntent(ctx context.Context, tenant, id shared.ID) (ticketing.Intent, error) {
 	if err := ctx.Err(); err != nil {
@@ -334,6 +613,61 @@ func (s *TicketStore) GetIntent(ctx context.Context, tenant, id shared.ID) (tick
 		return ticketing.Intent{}, fmt.Errorf("get ticket intent: %w", err)
 	}
 	return i, nil
+}
+func (s *TicketStore) ListFindingIntents(ctx context.Context, tenant, finding shared.ID, limit int) (out []ticketing.Intent, err error) {
+	if tenant.IsZero() || finding.IsZero() || limit < 1 || limit > 200 {
+		return nil, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx, `SELECT `+intentCols+` FROM ticket_intents WHERE tenant_id=$1 AND finding_id=$2 ORDER BY created_at DESC,id DESC LIMIT $3`, tenant.String(), finding.String(), limit)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			i, e := scanTicketIntent(rows)
+			if e != nil {
+				return e
+			}
+			out = append(out, i)
+		}
+		return rows.Err()
+	})
+	return out, ticketWriteError(err)
+}
+func (s *TicketStore) ListDueIntents(ctx context.Context, tenant shared.ID, now time.Time, limit int) (out []ticketing.Intent, err error) {
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	if tenant.IsZero() || now.IsZero() || limit < 1 || limit > 200 {
+		return nil, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx, `SELECT `+intentCols+` FROM ticket_intents i
+			WHERE i.tenant_id=$1 AND (
+				(i.state='in_flight' AND i.lease_until<=$2)
+				OR (i.state='pending' AND NOT EXISTS (
+					SELECT 1 FROM ticket_dispatch_breakers b
+					WHERE b.tenant_id=i.tenant_id AND b.integration_id=i.integration_id
+						AND b.project_key=i.payload_snapshot #>> '{fields,project,key}'
+						AND b.issue_type=i.payload_snapshot #>> '{fields,issuetype,id}'
+						AND ((b.gate_until IS NOT NULL AND b.gate_until>$2) OR (b.active_intent_id IS NOT NULL AND b.lease_until>$2))
+				))
+			) ORDER BY i.updated_at,i.id LIMIT $3`, tenant.String(), now.UTC(), limit)
+		if e != nil {
+			return e
+		}
+		defer rows.Close()
+		for rows.Next() {
+			i, e := scanTicketIntent(rows)
+			if e != nil {
+				return e
+			}
+			out = append(out, i)
+		}
+		return rows.Err()
+	})
+	return out, ticketWriteError(err)
 }
 func (s *TicketStore) TransitionIntent(ctx context.Context, tenant, id shared.ID, expected int, change ticketing.IntentTransition, at time.Time) (ticketing.Intent, error) {
 	if err := ctx.Err(); err != nil {
@@ -406,4 +740,243 @@ func (s *TicketStore) TransitionIntent(ctx context.Context, tenant, id shared.ID
 		return ticketing.Intent{}, ticketWriteError(err)
 	}
 	return result, nil
+}
+func (s *TicketStore) TransitionIntentAudited(ctx context.Context, tenant, id shared.ID, expected int, change ticketing.IntentTransition, at time.Time, audit ports.AuditEntry) (out ticketing.Intent, err error) {
+	err = NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		var e error
+		out, e = s.TransitionIntent(txctx, tenant, id, expected, change, at)
+		if e != nil {
+			return e
+		}
+		return NewAuditLog(s.pool).Record(txctx, audit)
+	})
+	return out, err
+}
+
+func validTicketAudit(entry ports.AuditEntry) bool {
+	return entry.Actor != "" && entry.Action != "" && entry.Target != "" && !entry.At.IsZero()
+}
+
+func isRateLimited(code string) bool { return code == "rate_limited" || code == "http_429" }
+
+// RetryIntentAudited atomically records an explicit duplicate-risk decision and
+// returns a failed or uncertain command to pending. A still-active Retry-After
+// gate is authoritative and cannot be cleared by a human retry.
+func (s *TicketStore) RetryIntentAudited(ctx context.Context, tenant, id shared.ID, expected int, at time.Time, audit ports.AuditEntry) (out ticketing.Intent, err error) {
+	if err = ctx.Err(); err != nil {
+		return out, err
+	}
+	if tenant.IsZero() || id.IsZero() || expected < 1 || at.IsZero() || !validTicketAudit(audit) {
+		return out, shared.ErrValidation
+	}
+	err = NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		current, e := s.GetIntent(txctx, tenant, id)
+		if e != nil {
+			return e
+		}
+		if current.Version != expected || (current.State != writeintent.Failed && current.State != writeintent.Uncertain) {
+			return shared.ErrConflict
+		}
+		tx, e := ticketTx(txctx, tenant)
+		if e != nil {
+			return e
+		}
+		var findingID string
+		e = tx.QueryRow(txctx, `SELECT id FROM findings WHERE tenant_id=$1 AND id=$2 AND engagement_id=$3 FOR NO KEY UPDATE`, tenant.String(), current.FindingID.String(), current.EngagementID.String()).Scan(&findingID)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if e != nil {
+			return e
+		}
+		var blocked bool
+		e = tx.QueryRow(txctx, `SELECT TRUE FROM ticket_intents
+			WHERE tenant_id=$1 AND integration_id=$2 AND finding_id=$3 AND action='create' AND id<>$4
+				AND state IN ('pending','in_flight','uncertain') LIMIT 1`, tenant.String(), current.IntegrationID.String(), current.FindingID.String(), current.ID.String()).Scan(&blocked)
+		if e == nil && blocked {
+			return shared.ErrConflict
+		}
+		if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+			return e
+		}
+		tuple, e := current.DispatchTarget()
+		if e != nil {
+			return e
+		}
+		br, e := lockBreaker(txctx, tx, tuple, at)
+		if e != nil {
+			return e
+		}
+		if isRateLimited(br.code) && br.gate != nil && at.Before(*br.gate) {
+			return shared.ErrConflict
+		}
+		event := writeintent.RetryFailed
+		if current.State == writeintent.Uncertain {
+			event = writeintent.ReconcileAbsent
+		}
+		out, e = s.TransitionIntent(txctx, tenant, id, expected, ticketing.IntentTransition{Event: event}, at)
+		if e != nil {
+			return e
+		}
+		// A separate command may be in flight for this tuple. Retry only clears
+		// the failure gate; it must never erase that command's dispatch fence.
+		if _, e = tx.Exec(txctx, `UPDATE ticket_dispatch_breakers SET gate_until=NULL,breaker_code='',version=version+1,updated_at=$5 WHERE tenant_id=$1 AND integration_id=$2 AND project_key=$3 AND issue_type=$4`, tuple.TenantID.String(), tuple.IntegrationID.String(), tuple.ProjectKey, tuple.IssueType, at.UTC()); e != nil {
+			return e
+		}
+		return NewAuditLog(s.pool).Record(txctx, audit)
+	})
+	return out, err
+}
+
+type breakerRow struct {
+	active      shared.ID
+	lease, gate *time.Time
+	code        string
+	version     int
+}
+
+func ticketTx(ctx context.Context, tenant shared.ID) (pgx.Tx, error) {
+	tx, ok, err := contextTenantTx(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("%w: ticket transaction required", shared.ErrValidation)
+	}
+	return tx, nil
+}
+func lockBreaker(ctx context.Context, tx pgx.Tx, t ticketing.DispatchTuple, now time.Time) (breakerRow, error) {
+	_, err := tx.Exec(ctx, `INSERT INTO ticket_dispatch_breakers(tenant_id,integration_id,project_key,issue_type,updated_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, t.TenantID.String(), t.IntegrationID.String(), t.ProjectKey, t.IssueType, now.UTC())
+	if err != nil {
+		return breakerRow{}, err
+	}
+	return readBreaker(ctx, tx, t)
+}
+func readBreaker(ctx context.Context, tx pgx.Tx, t ticketing.DispatchTuple) (breakerRow, error) {
+	var r breakerRow
+	err := tx.QueryRow(ctx, `SELECT COALESCE(active_intent_id,''),lease_until,gate_until,breaker_code,version FROM ticket_dispatch_breakers WHERE tenant_id=$1 AND integration_id=$2 AND project_key=$3 AND issue_type=$4 FOR UPDATE`, t.TenantID.String(), t.IntegrationID.String(), t.ProjectKey, t.IssueType).Scan(&r.active, &r.lease, &r.gate, &r.code, &r.version)
+	return r, err
+}
+func (s *TicketStore) AcquireDispatch(ctx context.Context, tenant, id shared.ID, expected int, now, leaseUntil time.Time) (out ticketing.Intent, claimed bool, err error) {
+	if tenant.IsZero() || id.IsZero() || expected < 1 || now.IsZero() || !leaseUntil.After(now) {
+		return out, false, shared.ErrValidation
+	}
+	err = NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		current, e := s.GetIntent(txctx, tenant, id)
+		if e != nil {
+			return e
+		}
+		if current.Version != expected || current.State != writeintent.Pending {
+			return shared.ErrConflict
+		}
+		tuple, e := current.DispatchTarget()
+		if e != nil {
+			return e
+		}
+		tx, e := ticketTx(txctx, tenant)
+		if e != nil {
+			return e
+		}
+		br, e := lockBreaker(txctx, tx, tuple, now)
+		if e != nil {
+			return e
+		}
+		if br.gate != nil && now.Before(*br.gate) {
+			return nil
+		}
+		if !br.active.IsZero() && br.lease != nil && now.Before(*br.lease) {
+			return nil
+		}
+		if !br.active.IsZero() && br.lease != nil && !now.Before(*br.lease) {
+			old, e := s.GetIntent(txctx, tenant, br.active)
+			if e == nil && old.State == writeintent.InFlight {
+				if _, e = s.TransitionIntent(txctx, tenant, old.ID, old.Version, ticketing.IntentTransition{Event: writeintent.LeaseExpired}, now); e != nil {
+					return e
+				}
+			}
+		}
+		out, e = s.TransitionIntent(txctx, tenant, id, expected, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &leaseUntil}, now)
+		if e != nil {
+			return e
+		}
+		_, e = tx.Exec(txctx, `UPDATE ticket_dispatch_breakers SET active_intent_id=$5,lease_until=$6,updated_at=$7,version=version+1 WHERE tenant_id=$1 AND integration_id=$2 AND project_key=$3 AND issue_type=$4`, tuple.TenantID.String(), tuple.IntegrationID.String(), tuple.ProjectKey, tuple.IssueType, id.String(), leaseUntil.UTC(), now.UTC())
+		claimed = e == nil
+		return e
+	})
+	return out, claimed, err
+}
+func (s *TicketStore) FinishDispatch(ctx context.Context, tenant, id shared.ID, expected int, change ticketing.IntentTransition, at time.Time, cooldown *time.Time, code string) (out ticketing.Intent, err error) {
+	if tenant.IsZero() || id.IsZero() || expected < 1 || at.IsZero() {
+		return out, shared.ErrValidation
+	}
+	err = NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		current, e := s.GetIntent(txctx, tenant, id)
+		if e != nil {
+			return e
+		}
+		if current.Version != expected || current.State != writeintent.InFlight {
+			return shared.ErrConflict
+		}
+		tuple, e := current.DispatchTarget()
+		if e != nil {
+			return e
+		}
+		tx, e := ticketTx(txctx, tenant)
+		if e != nil {
+			return e
+		}
+		br, e := lockBreaker(txctx, tx, tuple, at)
+		if e != nil {
+			return e
+		}
+		if br.active != id || br.lease == nil || !at.Before(*br.lease) {
+			return shared.ErrConflict
+		}
+		out, e = s.TransitionIntent(txctx, tenant, id, expected, change, at)
+		if e != nil {
+			return e
+		}
+		gate := cooldown
+		if change.Event == writeintent.Reject && (code == "http_400" || code == "http_401" || code == "http_403" || code == "http_404") {
+			far := at.AddDate(100, 0, 0)
+			gate = &far
+		}
+		if isRateLimited(code) {
+			code = "rate_limited"
+		}
+		if _, e = tx.Exec(txctx, `UPDATE ticket_dispatch_breakers SET active_intent_id=NULL,lease_until=NULL,gate_until=$5,breaker_code=$6,updated_at=$7,version=version+1 WHERE tenant_id=$1 AND integration_id=$2 AND project_key=$3 AND issue_type=$4`, tuple.TenantID.String(), tuple.IntegrationID.String(), tuple.ProjectKey, tuple.IssueType, gate, code, at.UTC()); e != nil {
+			return e
+		}
+		return nil
+	})
+	return out, err
+}
+func (s *TicketStore) ResetBreaker(ctx context.Context, tenant, integrationID shared.ID, project, issue string, audit ports.AuditEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if tenant.IsZero() || integrationID.IsZero() || project == "" || issue == "" || !validTicketAudit(audit) {
+		return shared.ErrValidation
+	}
+	return NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		tx, e := ticketTx(txctx, tenant)
+		if e != nil {
+			return e
+		}
+		tuple := ticketing.DispatchTuple{TenantID: tenant, IntegrationID: integrationID, ProjectKey: project, IssueType: issue}
+		br, e := readBreaker(txctx, tx, tuple)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		if e != nil {
+			return e
+		}
+		if isRateLimited(br.code) && br.gate != nil && audit.At.Before(*br.gate) {
+			return shared.ErrConflict
+		}
+		if _, e = tx.Exec(txctx, `UPDATE ticket_dispatch_breakers SET gate_until=NULL,breaker_code='',version=version+1,updated_at=$5 WHERE tenant_id=$1 AND integration_id=$2 AND project_key=$3 AND issue_type=$4`, tenant.String(), integrationID.String(), project, issue, audit.At.UTC()); e != nil {
+			return e
+		}
+		return NewAuditLog(s.pool).Record(txctx, audit)
+	})
 }

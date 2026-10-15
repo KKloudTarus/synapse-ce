@@ -8,6 +8,7 @@ import { ConfidenceBadge, DetectedBy, shortPkg } from '../VulnsTab'
 import { AssigneeControl, CommentsPanel, RetestPanel } from './FindingCollab'
 import { EVIDENCE_BAR, ExplainJudgments } from './FindingJudgments'
 import { FindingOwnership } from '../../Ownership/OwnershipPanel'
+import { TicketsPanel } from './TicketsPanel'
 
 export function frameworkShort(framework: string): string {
   switch (framework) {
@@ -324,6 +325,7 @@ export function FindingDetail({
         <div className="rounded-lg border border-secondary bg-primary p-3.5 shadow-2xs space-y-3">
           <CommentsPanel engagementId={engagementId} findingId={finding.id} />
         </div>
+        <TicketsPanel engagementId={engagementId} findingId={finding.id} />
       </div>
     </div>
   )

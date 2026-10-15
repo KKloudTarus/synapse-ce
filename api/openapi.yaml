@@ -46,6 +46,8 @@ tags:
   - name: assessment-comparisons
     description: Immutable ancestry-aware Snapshot comparisons and append-only match review
   - name: findings
+  - name: ticketing
+    description: Manual links and governed Jira Cloud or Data Center creation
   - name: sca
   - name: export
   - name: projects
@@ -73,6 +75,400 @@ tags:
     description: Separate HMAC-authenticated ingress, never human/OIDC authorization
 
 paths:
+  /api/v1/ticket-mappings:
+    parameters:
+      - name: scope
+        in: query
+        required: false
+        schema: {type: string}
+      - name: scope_id
+        in: query
+        required: false
+        schema: {type: string}
+    get:
+      tags: [ticketing]
+      summary: List ticket mappings
+      description: View permission. Scope is project or engagement; results are bounded to the tenant.
+      responses:
+        '200':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/TicketMapping"}}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+    post:
+      tags: [ticketing]
+      summary: Create Jira ticket mapping
+      description: Administrator only. Metadata selections are verified. Missing security level requires an audited waiver.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TicketMappingInput"}
+      responses:
+        '201':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TicketMapping"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+  /api/v1/ticket-mappings/{mappingID}:
+    parameters:
+      - name: mappingID
+        in: path
+        required: true
+        schema: {type: string}
+      - name: version
+        in: query
+        required: false
+        schema: {type: string}
+    put:
+      tags: [ticketing]
+      summary: Update Jira ticket mapping
+      description: Administrator only. Compare-and-swap version; submitted snapshots remain immutable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TicketMappingInput"}
+      responses:
+        '200':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TicketMapping"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+    delete:
+      tags: [ticketing]
+      summary: Delete Jira ticket mapping
+      description: Administrator only. Retained intent history prevents unsafe deletion.
+      responses:
+        '204':
+          description: Successful tenant-scoped ticket operation
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+  /api/v1/integrations/{integrationID}/jira-metadata:
+    parameters:
+      - name: integrationID
+        in: path
+        required: true
+        schema: {type: string}
+      - name: project_key
+        in: query
+        required: false
+        schema: {type: string}
+      - name: issue_type
+        in: query
+        required: false
+        schema: {type: string}
+      - name: issue_key
+        in: query
+        required: false
+        schema: {type: string}
+    get:
+      tags: [ticketing]
+      summary: Discover Jira ticket metadata
+      description: Integration administrator permission. Bounded synchronous discovery; cache keys include tenant and connection revisions.
+      responses:
+        '200':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TicketMetadata"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+  /api/v1/integrations/{integrationID}/jira-breaker/reset:
+    parameters:
+      - name: integrationID
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [ticketing]
+      summary: Reset a repaired Jira destination breaker
+      description: Human administrator only. Atomically audits and clears the tenant-owned project/type gate. Does not retry an intent, change its snapshot, release an active lease or bypass an active Retry-After cooldown.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TicketBreakerResetInput"}
+      responses:
+        '204':
+          description: Breaker reset and audit committed
+        '400':
+          description: Invalid destination tuple
+        '403':
+          description: Human administrator permission required
+        '404':
+          description: Tenant-owned integration or breaker not found
+        '409':
+          description: Retry-After cooldown remains active
+  /api/v1/engagements/{id}/findings/{fid}/tickets:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: fid
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [ticketing]
+      summary: Read finding ticket links and intents
+      description: View permission; finding and engagement must belong to the authenticated tenant.
+      responses:
+        '200':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FindingTickets"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+    post:
+      tags: [ticketing]
+      summary: Link an existing HTTPS ticket
+      description: Triage permission. Works without a provider. The URL is display-only and is never fetched; no credentials, query or fragment are allowed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ManualTicketLink"}
+      responses:
+        '201':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TicketLink"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+  /api/v1/engagements/{id}/findings/{fid}/tickets/{linkID}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: fid
+        in: path
+        required: true
+        schema: {type: string}
+      - name: linkID
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      tags: [ticketing]
+      summary: Unlink a finding ticket
+      description: Triage permission. The link must belong to this finding; completed intent history is retained.
+      responses:
+        '204':
+          description: Successful tenant-scoped ticket operation
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+  /api/v1/engagements/{id}/findings/{fid}/ticket-preview:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: fid
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [ticketing]
+      summary: Preview the exact filtered Jira fields
+      description: View permission. Sends no provider write. Effective data class, redaction, locale and mapping templates are applied. The generated marker label is declared separately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TicketPreviewInput"}
+      responses:
+        '200':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TicketPreview"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+  /api/v1/engagements/{id}/findings/{fid}/ticket-submit:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: fid
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [ticketing]
+      summary: Submit a previewed Jira ticket command
+      description: Human triage permission. Rechecks preview digest and creates a durable immutable intent before worker dispatch. Request keys are tenant/integration scoped.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TicketSubmitInput"}
+      responses:
+        '202':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TicketIntent"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+  /api/v1/engagements/{id}/tickets/bulk:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [ticketing]
+      summary: Submit up to fifty previewed finding tickets
+      description: Human triage permission. Returns one intent or stable error code per item; partial success is explicit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TicketBulkInput"}
+      responses:
+        '202':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {type: array, items: {type: object}}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+  /api/v1/ticket-intents/{intentID}/reconcile:
+    parameters:
+      - name: intentID
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [ticketing]
+      summary: Search an uncertain ticket marker
+      description: Human triage permission. Searches original destination; zero stays uncertain, one verified match links, multiple require a human decision. No POST is sent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TicketIntentVersion"}
+      responses:
+        '200':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TicketIntent"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
+  /api/v1/ticket-intents/{intentID}/retry:
+    parameters:
+      - name: intentID
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [ticketing]
+      summary: Authorize a risky human retry
+      description: Administrator only. Explicit duplicate-risk acknowledgment and audited reason are required. Jira indexing delay cannot prove the original create failed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TicketRetryInput"}
+      responses:
+        '202':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TicketIntent"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
   /api/v1/hooks/{public_id}:
     post:
       tags: [inbound-webhooks]
@@ -7327,6 +7723,39 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    TicketMappingInput: {"type":"object","additionalProperties":false,"required":["integration_id","scope","scope_id","project_key","issue_type"],"properties":{"integration_id":{"type":"string"},"scope":{"type":"string","enum":["project","engagement"]},"scope_id":{"type":"string"},"project_key":{"type":"string"},"issue_type":{"type":"string"},"component":{"type":"string"},"security_level":{"type":"string"},"summary_template":{"type":"string"},"description_template":{"type":"string"},"transition_id":{"type":"string"},"data_class":{"type":"string","enum":["signal","summary","detail"]},"locale":{"type":"string","enum":["en","vi"]},"waiver_reason":{"type":"string"},"labels":{"type":"array","maxItems":32,"items":{"type":"string"}},"priority_map":{"type":"object","additionalProperties":{"type":"string"}},"field_values":{"type":"object","additionalProperties":{"type":"string"}},"version":{"type":"integer","minimum":1}}}
+    TicketMapping: {"type":"object","properties":{"integration_id":{"type":"string"},"scope":{"type":"string","enum":["project","engagement"]},"scope_id":{"type":"string"},"project_key":{"type":"string"},"issue_type":{"type":"string"},"component":{"type":"string"},"security_level":{"type":"string"},"summary_template":{"type":"string"},"description_template":{"type":"string"},"transition_id":{"type":"string"},"data_class":{"type":"string","enum":["signal","summary","detail"]},"locale":{"type":"string","enum":["en","vi"]},"waiver_reason":{"type":"string"},"labels":{"type":"array","maxItems":32,"items":{"type":"string"}},"priority_map":{"type":"object","additionalProperties":{"type":"string"}},"field_values":{"type":"object","additionalProperties":{"type":"string"}},"version":{"type":"integer","minimum":1},"id":{"type":"string"}}}
+    ManualTicketLink: {"type":"object","additionalProperties":false,"required":["url"],"properties":{"url":{"type":"string","format":"uri","maxLength":2048}}}
+    TicketLink: {"type":"object","properties":{"id":{"type":"string"},"external_id":{"type":"string"},"external_url":{"type":"string"},"integration_id":{"type":"string"},"created_at":{"type":"string"}}}
+    TicketIntent: {"type":"object","properties":{"id":{"type":"string"},"finding_id":{"type":"string"},"mapping_id":{"type":"string"},"error_code":{"type":"string"},"remote_id":{"type":"string"},"remote_url":{"type":"string"},"created_at":{"type":"string"},"state":{"type":"string","enum":["pending","in_flight","done","failed","uncertain"]},"version":{"type":"integer"},"attempts":{"type":"integer"}}}
+    FindingTickets: {"type":"object","properties":{"links":{"type":"array","items":{"$ref":"#/components/schemas/TicketLink"}},"intents":{"type":"array","items":{"$ref":"#/components/schemas/TicketIntent"}},"mappings":{"type":"array","items":{"$ref":"#/components/schemas/TicketMapping"}}}}
+    TicketPreviewInput: {"type":"object","additionalProperties":false,"required":["mapping_id"],"properties":{"mapping_id":{"type":"string"}}}
+    TicketSubmitInput: {"type":"object","additionalProperties":false,"required":["mapping_id","preview_digest","request_key"],"properties":{"mapping_id":{"type":"string"},"preview_digest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"request_key":{"type":"string","minLength":1,"maxLength":128}}}
+    TicketPreview:
+      type: object
+      properties:
+        summary: {type: string}
+        description: {type: string}
+        links:
+          type: array
+          items:
+            type: object
+            properties:
+              label: {type: string}
+              url: {type: string, format: uri}
+        security_waived: {type: boolean}
+        data_class: {type: string, enum: [signal, summary, detail]}
+        digest: {type: string}
+        marker_format: {type: string}
+        fields: {type: object}
+        mapping_version: {type: integer}
+        marker_required: {type: boolean}
+    TicketChoice: {"type":"object","required":["id","name"],"properties":{"id":{"type":"string"},"name":{"type":"string"}}}
+    TicketMetadata: {"type":"object","properties":{"resolved_reporter":{"type":"string","maxLength":255,"description":"Authenticated Data Center user supplied in the immutable preview when Reporter is required and has no default."},"projects":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"issue_types":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"priorities":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"security_levels":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"components":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"transitions":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"fields":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"required":{"type":"boolean"},"type":{"type":"string"},"item_type":{"type":"string"},"has_default":{"type":"boolean"},"values":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}}}}}}}
+    TicketIntentVersion: {"type":"object","additionalProperties":false,"required":["version"],"properties":{"version":{"type":"integer","minimum":1}}}
+    TicketRetryInput: {"type":"object","additionalProperties":false,"required":["version","acknowledge_duplicate_risk","reason"],"properties":{"version":{"type":"integer","minimum":1},"acknowledge_duplicate_risk":{"type":"boolean","const":true},"reason":{"type":"string","minLength":1,"maxLength":1024}}}
+    TicketBreakerResetInput: {"type":"object","additionalProperties":false,"required":["project_key","issue_type"],"properties":{"project_key":{"type":"string","minLength":1,"maxLength":255},"issue_type":{"type":"string","minLength":1,"maxLength":255}}}
+    TicketBulkInput: {"type":"object","additionalProperties":false,"required":["mapping_id","items"],"properties":{"mapping_id":{"type":"string"},"items":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"object","required":["finding_id","preview_digest","request_key"],"properties":{"finding_id":{"type":"string"},"preview_digest":{"type":"string"},"request_key":{"type":"string"}}}}}}
     SIEMSink:
       type: object
       required: [id, tenant_id, name, provider, origin, target, data_class, ack_mode, version, generation, secret_version]
@@ -8448,7 +8877,7 @@ components:
     IntegrationOperation:
       type: object
       additionalProperties: false
-      required: [id, tenant_id, integration_id, type, state, counts, errors, job_id, actor, created_at, updated_at]
+      required: [id, tenant_id, integration_id, type, state, counts, errors, job_id, actor, connection_revision, credential_revision, created_at, updated_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
@@ -8461,6 +8890,8 @@ components:
         pipelines: {type: array, maxItems: 1000, items: {$ref: '#/components/schemas/IntegrationPipeline'}}
         job_id: {type: string}
         actor: {type: string}
+        connection_revision: {type: integer, minimum: 0, description: Connection revision tested by this operation; zero identifies a legacy operation.}
+        credential_revision: {type: integer, minimum: 0, description: Credential revision tested by this operation.}
         started_at: {type: [string, 'null'], format: date-time}
         finished_at: {type: [string, 'null'], format: date-time}
         created_at: {type: string, format: date-time}
@@ -9512,7 +9943,7 @@ components:
         planned:
           type: boolean
           description: >
-            True for a subsystem this build does not ship yet, such as `ticketing` and `docpublish`.
+            True for a subsystem this build does not ship yet, such as `docpublish`.
             It is always disabled and names no switch. Omitted when false.
 
     TenantLocale:

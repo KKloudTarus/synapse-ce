@@ -88,7 +88,7 @@ func TestCapabilitiesReportsNotificationChannelsAndPlannedSubsystems(t *testing.
 	if !types.Enabled || strings.Join(types.Values, ",") != "webhook,slack,email" {
 		t.Errorf("notifications.channel_types = %+v, want enabled with webhook, slack and email", types)
 	}
-	for _, key := range []string{"ticketing", "docpublish"} {
+	for _, key := range []string{"docpublish"} {
 		got, ok := byKey[key]
 		if !ok || !got.Planned || got.Enabled || got.Switch != "" {
 			t.Errorf("%s = %+v (present %v), want planned and disabled without a switch", key, got, ok)

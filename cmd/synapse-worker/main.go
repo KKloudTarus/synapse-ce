@@ -42,6 +42,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
 	azurepipelinesintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/azurepipelines"
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
+	jiraintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jira"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
@@ -71,6 +72,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/platform/buildinfo"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
 
+	"github.com/KKloudTarus/synapse-ce/internal/composition/ticketruntime"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/jobs"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/logging"
@@ -108,6 +110,7 @@ import (
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/slauc"
+	ticketuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilitycorrelation"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/vulnerabilityevaluation"
@@ -389,6 +392,10 @@ func main() {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
 	}
+	if err := jiraintegration.Register(integrationRegistry); err != nil {
+		log.Error("Jira provider registry init failed", "err", err)
+		os.Exit(1)
+	}
 	if err := azurepipelinesintegration.Register(integrationRegistry); err != nil {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
@@ -406,6 +413,25 @@ func main() {
 	}
 	integrationService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), time.Minute))
 	var integrationMaintenanceTasks []func(context.Context)
+	if cfg.TicketingEnabled {
+		store, ticketErr := postgres.NewTicketStore(pool)
+		if ticketErr != nil {
+			log.Error("ticket store init failed", "err", ticketErr)
+			os.Exit(1)
+		}
+		workflow, ticketErr := ticketuc.NewWorkflow(store, integrationStore, integrationService, postgres.NewFindingRepository(pool), repo, postgres.NewNotificationRepository(pool), auditLog, ids, clock)
+		if ticketErr != nil {
+			log.Error("ticket workflow init failed", "err", ticketErr)
+			os.Exit(1)
+		}
+		workflow.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
+		runner, ticketErr := ticketruntime.New(workflow, repo, log)
+		if ticketErr != nil {
+			log.Error("ticket polling init failed", "err", ticketErr)
+			os.Exit(1)
+		}
+		integrationMaintenanceTasks = append(integrationMaintenanceTasks, runner.Run)
+	}
 	if cfg.IntegrationSchedulerEnabled {
 		integrationScheduler, schedulerErr := integrationuc.NewScheduler(
 			integrationStore,

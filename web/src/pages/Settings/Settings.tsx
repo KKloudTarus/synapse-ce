@@ -8,6 +8,7 @@ const TABS = [
   { label: 'Finding ownership', to: '/settings/ownership' },
   { label: 'Assignee review', to: '/settings/assignee-review' },
   { label: 'Integrations', to: '/settings/integrations' },
+  { label: 'Jira', to: '/settings/integrations/jira' },
   { label: 'Connectors', to: '/settings/connectors' },
   { label: 'SLA policy', to: '/settings/sla' },
   { label: 'Offensive policy', to: '/settings/offensive-policy' },
