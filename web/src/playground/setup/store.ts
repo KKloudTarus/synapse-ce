@@ -9,7 +9,7 @@ export interface Connection {
   credential_configured: boolean; allow_private_network: boolean; poll_interval_seconds: number; created_at: string; updated_at: string
 }
 export interface Operation {
-  id: string; integration_id: string; connection_revision: number; type: string; state: string; errors: string[]; created_at: string; updated_at: string; started_at: string; finished_at: string | null
+  id: string; integration_id: string; connection_revision: number; credential_revision: number; type: string; state: string; errors: string[]; created_at: string; updated_at: string; started_at: string; finished_at: string | null
   counts: { pipelines: number; runs: number; linked: number; unlinked: number; errors: number }
   pipelines: { external_key: string; name: string; full_name: string; kind: string; url: string }[]
 }

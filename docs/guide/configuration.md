@@ -38,14 +38,15 @@ Some entries carry more than a switch:
   notification driver registry, minus any type named in
   `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`. The console offers only these types when creating a
   channel. When the operator disables every type, `values` is omitted and no channel can be created.
-- `ticketing` and `docpublish` report `planned: true`. They are not in this build yet, so they are
-  always disabled and their `switch` is empty.
+- `ticketing` follows `SYNAPSE_TICKETING_ENABLED` (default `true`), exposing manual ticket
+  links and governed Jira creation. See [Jira ticketing](jira-ticketing.md).
+- `docpublish` reports `planned: true`; it remains disabled and its `switch` is empty.
 
 ```json
 {"key": "notifications.channel_types", "name": "Notification channel types", "enabled": true,
  "switch": "SYNAPSE_NOTIFICATIONS_ENABLED", "requires": ["notifications"],
  "values": ["webhook", "slack", "email", "teams", "telegram", "google_chat", "discord", "slack_bot"]}
-{"key": "ticketing", "name": "Ticketing", "enabled": false, "switch": "", "planned": true}
+{"key": "ticketing", "name": "Ticketing", "enabled": true, "switch": "SYNAPSE_TICKETING_ENABLED"}
 ```
 
 ## Required

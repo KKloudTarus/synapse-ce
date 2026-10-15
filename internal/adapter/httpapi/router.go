@@ -88,6 +88,7 @@ type Router struct {
 	userPicker               ports.UserPickerReader
 	credentials              *credentialsuc.Service
 	integrations             *integrationuc.Service
+	ticketing                ticketWorkflow
 	dastVerifier             runtimeVerifierService
 	dastWorkflow             dastWorkflowService
 	dastRun                  dastRunService             // optional; nil ⇒ DAST verification runs execute synchronously in-process
@@ -450,6 +451,21 @@ func (rt *Router) withEngTenant(h http.HandlerFunc) http.HandlerFunc {
 // without the auth/AUP middleware (which are validated separately).
 func (rt *Router) routes() *http.ServeMux {
 	mux := http.NewServeMux()
+	if rt.ticketing != nil {
+		mux.HandleFunc("GET /api/v1/ticket-mappings", rt.authz(userdom.PermView, rt.listTicketMappings))
+		mux.HandleFunc("POST /api/v1/ticket-mappings", rt.authz(userdom.PermAdminister, rt.saveTicketMapping))
+		mux.HandleFunc("PUT /api/v1/ticket-mappings/{mappingID}", rt.authz(userdom.PermAdminister, rt.saveTicketMapping))
+		mux.HandleFunc("DELETE /api/v1/ticket-mappings/{mappingID}", rt.authz(userdom.PermAdminister, rt.deleteTicketMapping))
+		mux.HandleFunc("GET /api/v1/integrations/{integrationID}/jira-metadata", rt.authz(userdom.PermManageIntegrations, rt.jiraMetadata))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/findings/{fid}/tickets", rt.authz(userdom.PermView, rt.withEngTenant(rt.findingTickets)))
+		mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/tickets", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.linkTicket)))
+		mux.HandleFunc("DELETE /api/v1/engagements/{id}/findings/{fid}/tickets/{linkID}", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.unlinkTicket)))
+		mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/ticket-preview", rt.authz(userdom.PermView, rt.withEngTenant(rt.previewTicket)))
+		mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/ticket-submit", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.submitTicket)))
+		mux.HandleFunc("POST /api/v1/engagements/{id}/tickets/bulk", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.bulkSubmitTickets)))
+		mux.HandleFunc("POST /api/v1/ticket-intents/{intentID}/reconcile", rt.authz(userdom.PermTriage, rt.reconcileTicket))
+		mux.HandleFunc("POST /api/v1/ticket-intents/{intentID}/retry", rt.authz(userdom.PermAdminister, rt.retryTicket))
+	}
 	rt.registerOwnership(mux)
 	rt.registerEnterprise(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

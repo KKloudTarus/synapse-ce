@@ -1,0 +1,181 @@
+import { CheckDone01, Plus, RefreshCw01, Trash01 } from '@untitledui/icons'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Button, Card, EmptyState, ErrorState, Field, Input, Spinner } from '../../components/ui'
+import { api, type TicketMapping, type TicketMetadata } from '../../lib/api'
+import type { Integration, IntegrationOperation, IntegrationProviderDescriptor } from '../../lib/types'
+import { canManageIntegrations, isAdminRole } from '../../lib/roles'
+
+type MappingDraft = Omit<TicketMapping, 'id' | 'version'>
+const blankMapping = (scope: TicketMapping['scope'] = 'engagement', scopeId = '', integrationId = ''): MappingDraft => ({ integrationId, scope, scopeId, projectKey: '', issueType: '', component: '', labels: [], priorityMap: {}, securityLevel: '', waiverReason: '', dataClass: 'summary', locale: 'en', summaryTemplate: '', descriptionTemplate: '', fieldValues: {}, transitionId: '' })
+const message = (cause: unknown) => cause instanceof Error ? cause.message : 'The Jira request failed.'
+const severities = ['critical', 'high', 'medium', 'low', 'info']
+const coreJiraFields = new Set(['summary', 'description', 'project', 'issuetype', 'components', 'priority', 'security', 'labels'])
+const supportedFieldType = (type: string) => !type || ['string', 'number', 'boolean', 'date'].includes(type.toLowerCase())
+const supportedField = (field: TicketMetadata['fields'][number]) => field.values.length > 0 || supportedFieldType(field.type)
+const matchesCurrentOperationRevision = (operation: IntegrationOperation | undefined, integration: Integration) => operation?.connectionRevision === integration.connectionRevision && operation.credentialRevision === integration.credentialRevision
+
+/** Jira Cloud/DC connections and engagement mappings. Values for Jira-owned fields always come from metadata discovery. */
+export function JiraSettings() {
+  const [role, setRole] = useState<string>()
+  const [providers, setProviders] = useState<IntegrationProviderDescriptor[]>([])
+  const [integrations, setIntegrations] = useState<Integration[]>([])
+  const [engagements, setEngagements] = useState<Array<{ id: string; name: string }>>([])
+  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([])
+  const [mappingScope, setMappingScope] = useState<TicketMapping['scope']>('engagement')
+  const [selectedScope, setSelectedScope] = useState('')
+  const [mappings, setMappings] = useState<TicketMapping[]>([])
+  const [loadedScope, setLoadedScope] = useState('')
+  const [selected, setSelected] = useState<TicketMapping | null>(null)
+  const [draft, setDraft] = useState<MappingDraft>(blankMapping())
+  const [metadata, setMetadata] = useState<TicketMetadata | null>(null)
+  const [metadataLoading, setMetadataLoading] = useState(false)
+  const [metadataRevision, setMetadataRevision] = useState(0)
+  const metadataRequest = useRef(0)
+  const mappingRequest = useRef(0)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  const jiraProviders = useMemo(() => providers.filter((provider) => provider.provider === 'jira-cloud' || provider.provider === 'jira-dc'), [providers])
+  const jiraIntegrations = useMemo(() => integrations.filter((integration) => jiraProviders.some((provider) => provider.provider === integration.provider) && !integration.archived), [integrations, jiraProviders])
+  const defaultIntegrationId = jiraIntegrations[0]?.id ?? ''
+  const canManage = canManageIntegrations(role)
+  const canAdmin = isAdminRole(role)
+  const scopeTargets = mappingScope === 'project' ? projects : engagements
+  const scopeKey = `${mappingScope}:${selectedScope}`
+  const mappingReady = Boolean(selectedScope) && loadedScope === scopeKey
+  const invalidateMetadata = useCallback((loading: boolean) => {
+    metadataRequest.current++
+    setMetadata(null)
+    setMetadataLoading(loading)
+    setMetadataRevision((current) => current + 1)
+  }, [])
+
+  async function load() {
+    setLoading(true); setError(null)
+    try {
+      const [me, providerList, integrationList, engagementList, projectList] = await Promise.all([api.me(), api.listIntegrationProviders(), api.listIntegrations(), api.listEngagements(), api.listProjects()])
+      setRole(me?.role ?? ''); setProviders(providerList); setIntegrations(integrationList); setEngagements(engagementList.map((engagement) => ({ id: engagement.id, name: engagement.name }))); setProjects(projectList.map((project) => ({ id: project.id, name: project.name })))
+    } catch (cause) { setError(message(cause)) } finally { setLoading(false) }
+  }
+  useEffect(() => { void load() }, [])
+  useLayoutEffect(() => {
+    if (selectedScope || scopeTargets.length === 0) return
+    const scopeId = scopeTargets[0].id
+    mappingRequest.current++
+    setSelectedScope(scopeId); setMappings([]); setLoadedScope(''); setSelected(null); invalidateMetadata(Boolean(defaultIntegrationId)); setDraft(blankMapping(mappingScope, scopeId, defaultIntegrationId)); setNotice(null)
+  }, [defaultIntegrationId, invalidateMetadata, mappingScope, scopeTargets, selectedScope])
+  useEffect(() => {
+    if (!defaultIntegrationId || draft.integrationId) return
+    invalidateMetadata(true)
+    setDraft((current) => current.integrationId ? current : { ...current, integrationId: defaultIntegrationId })
+  }, [defaultIntegrationId, draft.integrationId, invalidateMetadata])
+  useEffect(() => {
+    if (!selectedScope) { setLoadedScope(''); return }
+    const request = ++mappingRequest.current
+    api.listTicketMappings(mappingScope, selectedScope).then((value) => {
+      if (request === mappingRequest.current) { setMappings(value); setLoadedScope(scopeKey) }
+    }, (cause) => { if (request === mappingRequest.current) setError(message(cause)) })
+  }, [mappingScope, selectedScope, scopeKey, invalidateMetadata])
+  useEffect(() => {
+    const request = ++metadataRequest.current
+    if (!draft.integrationId) { setMetadata(null); setMetadataLoading(false); return }
+    let live = true
+    setMetadataLoading(true)
+    api.jiraMetadata(draft.integrationId, draft.projectKey, draft.issueType).then((value) => { if (live && request === metadataRequest.current) setMetadata(value) }, (cause) => { if (live && request === metadataRequest.current) { setMetadata(null); setError(message(cause)) } }).finally(() => { if (live && request === metadataRequest.current) setMetadataLoading(false) })
+    return () => { live = false }
+  }, [draft.integrationId, draft.projectKey, draft.issueType, metadataRevision])
+
+  function update(next: Partial<MappingDraft>) { if ('integrationId' in next || 'projectKey' in next || 'issueType' in next) invalidateMetadata(Boolean(next.integrationId ?? draft.integrationId)); setDraft((current) => ({ ...current, ...next })) }
+  function resetScope(scope: TicketMapping['scope'], scopeId: string) { mappingRequest.current++; setMappingScope(scope); setSelectedScope(scopeId); setMappings([]); setLoadedScope(''); setSelected(null); invalidateMetadata(Boolean(defaultIntegrationId)); setDraft(blankMapping(scope, scopeId, defaultIntegrationId)); setNotice(null) }
+  function changeScope(scope: TicketMapping['scope']) { resetScope(scope, (scope === 'project' ? projects : engagements)[0]?.id ?? '') }
+  function changeScopeTarget(scopeId: string) { resetScope(mappingScope, scopeId) }
+  function chooseMapping(value: TicketMapping) { setSelected(value); setMappingScope(value.scope); setSelectedScope(value.scopeId); invalidateMetadata(Boolean(value.integrationId)); setDraft(({ ...value, transitionId: '', id: undefined, version: undefined }) as MappingDraft); setNotice(null) }
+  function newMapping() { setSelected(null); invalidateMetadata(Boolean(jiraIntegrations[0]?.id)); setDraft(blankMapping(mappingScope, selectedScope, jiraIntegrations[0]?.id ?? '')); setNotice(null) }
+  async function saveMapping() {
+    if (!canAdmin || !mappingReady) return
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const input = { ...draft, transitionId: '' }
+      const saved = selected ? await api.updateTicketMapping(selected, input) : await api.createTicketMapping(input)
+      setMappings((current) => selected ? current.map((item) => item.id === saved.id ? saved : item) : [...current, saved])
+      setSelected(saved); setDraft(({ ...saved, transitionId: '', id: undefined, version: undefined }) as MappingDraft); setNotice('Jira mapping saved.')
+    } catch (cause) { setError(message(cause)) } finally { setBusy(false) }
+  }
+  async function removeMapping(value: TicketMapping) {
+    setBusy(true); setError(null)
+    try { await api.deleteTicketMapping(value); setMappings((current) => current.filter((item) => item.id !== value.id)); newMapping(); setNotice('Jira mapping removed.') } catch (cause) { setError(message(cause)) } finally { setBusy(false) }
+  }
+  async function test(integration: Integration): Promise<IntegrationOperation> {
+    setBusy(true); setError(null); setNotice(null)
+    try { const operation = await api.startIntegrationOperation(integration.id, 'test'); setNotice(operation.state === 'succeeded' ? `Connection test succeeded for ${integration.name}.` : `Connection test ${operation.state} for ${integration.name}.`); return operation } catch (cause) { setError(message(cause)); throw cause } finally { setBusy(false) }
+  }
+
+  if (loading) return <Spinner label="Loading Jira settings…" />
+  if (error && !role) return <ErrorState message={error} />
+  return <div className="space-y-6">
+    <header className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold text-primary">Jira</h2><p className="mt-1 text-sm text-secondary">Connect Jira Cloud or Data Center, then define a project or engagement mapping before anyone previews or submits a ticket.</p></div><Button variant="secondary" disabled={busy} onClick={() => void load()}><RefreshCw01 className="size-4" /> Refresh</Button></header>
+    {error && <ErrorState message={error} />}{notice && <p role="status" className="text-sm text-success-primary">{notice}</p>}
+    {!canManage ? <EmptyState icon={CheckDone01} title="Jira settings require integration access" hint="Ask a tenant administrator or integration administrator to configure Jira." /> : <>
+      <Connections providers={jiraProviders} integrations={jiraIntegrations} canAdmin={canAdmin} busy={busy} onCreated={(integration) => setIntegrations((current) => [...current, integration])} onConfigured={(integration) => setIntegrations((current) => current.map((item) => item.id === integration.id ? integration : item))} onUpdated={(integration) => setIntegrations((current) => current.map((item) => item.id === integration.id ? integration : item))} onTest={test} onTestResult={() => setNotice(null)} />
+      {jiraIntegrations.length === 0 ? <EmptyState icon={CheckDone01} title="Connect Jira before creating a mapping" hint="A Jira Cloud or Jira Data Center connection is required." /> : <Card title="Jira ticket mappings" bodyClass="space-y-4">
+        <div className="grid gap-3 md:grid-cols-2"><Field label="Mapping scope"><select aria-label="Mapping scope" disabled={busy} value={mappingScope} onChange={(event) => changeScope(event.target.value === 'project' ? 'project' : 'engagement')} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="engagement">Engagement</option><option value="project">Project</option></select></Field><Field label={mappingScope === 'project' ? 'Project' : 'Engagement'}><select aria-label="Mapping scope target" disabled={busy} value={selectedScope} onChange={(event) => changeScopeTarget(event.target.value)} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="">Select {mappingScope}</option>{scopeTargets.map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}</select></Field></div>
+        {mappingScope === 'project' && <p className="text-sm text-tertiary">Project mappings can be configured here. Jira actions on Code Quality issues are pending.</p>}
+        {!mappingReady && selectedScope && <p role="status" className="text-sm text-tertiary">Loading Jira mappings…</p>}
+        {mappings.length > 0 && <div className="flex flex-wrap gap-2" aria-label="Saved Jira mappings">{mappings.map((item) => <button type="button" disabled={busy || !mappingReady} key={item.id} onClick={() => chooseMapping(item)} className="rounded-md border border-secondary px-2 py-1 text-xs text-primary hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50">{item.projectKey} · {item.issueType}</button>)}</div>}
+        {!canAdmin ? <p className="text-sm text-tertiary">Mappings are visible to integration administrators. Only tenant administrators can change a Jira destination or its security waiver.</p> : <MappingForm draft={draft} metadata={metadata} metadataLoading={metadataLoading} integrations={jiraIntegrations} busy={busy || !mappingReady} editing={!!selected} onChange={update} onSave={saveMapping} onNew={newMapping} onDelete={() => selected && void removeMapping(selected)} />}
+      </Card>}
+    </>}
+  </div>
+}
+
+function Connections({ providers, integrations, canAdmin, busy, onCreated, onConfigured, onUpdated, onTest, onTestResult }: { providers: IntegrationProviderDescriptor[]; integrations: Integration[]; canAdmin: boolean; busy: boolean; onCreated: (value: Integration) => void; onConfigured: (value: Integration) => void; onUpdated: (value: Integration) => void; onTest: (value: Integration) => Promise<IntegrationOperation>; onTestResult: (value: IntegrationOperation) => void }) {
+  const [open, setOpen] = useState(false); const [provider, setProvider] = useState('jira-cloud'); const [name, setName] = useState(''); const [endpoint, setEndpoint] = useState(''); const [error, setError] = useState<string | null>(null); const [tests, setTests] = useState<Record<string, IntegrationOperation>>({}); const [action, setAction] = useState<string | null>(null)
+  const refreshEpoch = useRef(0); const createPending = useRef(false)
+  async function refreshTest(integration: Integration, epoch = refreshEpoch.current) { setAction(integration.id); setError(null); try { const operations = await api.listIntegrationOperations(integration.id); let latest = operations.find((operation) => operation.type === 'test'); if (latest && !['succeeded', 'partial', 'failed', 'cancelled'].includes(latest.state)) latest = await api.getIntegrationOperation(latest.id); if (epoch === refreshEpoch.current && latest && matchesCurrentOperationRevision(latest, integration)) { setTests((current) => ({ ...current, [integration.id]: latest })); onTestResult(latest) } } catch (cause) { if (epoch === refreshEpoch.current) setError(message(cause)) } finally { setAction((current) => current === integration.id ? null : current) } }
+  useEffect(() => { const epoch = ++refreshEpoch.current; setTests((current) => Object.fromEntries(Object.entries(current).filter(([id, operation]) => { const integration = integrations.find((item) => item.id === id); return integration !== undefined && matchesCurrentOperationRevision(operation, integration) }))); integrations.forEach((integration) => { void api.listIntegrationOperations(integration.id).then((operations) => { const latest = operations.find((operation) => operation.type === 'test'); if (epoch === refreshEpoch.current && latest && matchesCurrentOperationRevision(latest, integration)) setTests((current) => ({ ...current, [integration.id]: latest })) }, (cause) => { if (epoch === refreshEpoch.current) setError(message(cause)) }) }) }, [integrations])
+  async function create() { if (createPending.current) return; createPending.current = true; setAction('create'); setError(null); try { const value = await api.createIntegration({ provider, name, endpoint, config: {}, allowPrivateNetwork: false, pollIntervalSeconds: 300 }); onCreated(value); setOpen(false); setName(''); setEndpoint('') } catch (cause) { setError(message(cause)) } finally { createPending.current = false; setAction(null) } }
+  async function test(integration: Integration) { setAction(integration.id); setError(null); try { const operation = await onTest(integration); if (matchesCurrentOperationRevision(operation, integration)) setTests((current) => ({ ...current, [integration.id]: operation })) } catch { /* the parent renders the safe request error */ } finally { setAction(null) } }
+  async function setEnabled(integration: Integration, enabled: boolean) { setAction(integration.id); setError(null); try { onUpdated(await api.setIntegrationEnabled(integration, enabled)) } catch (cause) { setError(message(cause)) } finally { setAction(null) } }
+  return <Card title="Connections" actions={canAdmin ? <Button variant="secondary" disabled={action !== null} onClick={() => setOpen((value) => !value)}><Plus className="size-4" /> Add Jira</Button> : undefined} bodyClass="space-y-4">
+    {integrations.length === 0 ? <p className="text-sm text-tertiary">No Jira connections configured.</p> : <ul className="space-y-2">{integrations.map((integration) => { const testRecord = tests[integration.id]; const current = matchesCurrentOperationRevision(testRecord, integration); const canEnable = current && testRecord?.state === 'succeeded'; const testSummary = current && testRecord ? ` · Last test: ${testRecord.state}${testRecord.state === 'failed' && testRecord.errors[0] ? ` (${testRecord.errors[0]})` : ''}` : ' · Test required before enabling'; const working = busy || action !== null; return <li key={integration.id} className="rounded-lg border border-secondary p-3"><div className="flex flex-wrap items-center justify-between gap-3"><span><span className="font-medium text-primary">{integration.name}</span><span className="ml-2 font-mono text-xs text-tertiary">{integration.endpoint}</span><span className="ml-2 text-xs text-tertiary">{integration.credentialConfigured ? 'Credentials configured' : 'Credentials required'} · {integration.enabled ? 'Enabled' : 'Disabled'}{testSummary}</span></span><span className="flex flex-wrap items-center gap-2">{canAdmin && <CredentialEditor integration={integration} fields={providers.find((provider) => provider.provider === integration.provider)?.secretFields ?? []} onConfigured={onConfigured} />}<Button variant="secondary" className="px-2 py-1 text-xs" disabled={!integration.credentialConfigured || working} onClick={() => void test(integration)}>Test connection</Button><Button variant="ghost" className="px-2 py-1 text-xs" disabled={working} onClick={() => void refreshTest(integration)}>Refresh test result</Button>{canAdmin && <Button variant={integration.enabled ? 'danger' : 'secondary'} className="px-2 py-1 text-xs" disabled={working || (!integration.enabled && !canEnable)} onClick={() => void setEnabled(integration, !integration.enabled)}>{integration.enabled ? 'Disable' : 'Enable'}</Button>}</span></div></li> })}</ul>}
+    {open && <div className="grid gap-3 rounded-lg border border-secondary bg-secondary/40 p-4 md:grid-cols-3"><Field label="Provider"><select aria-label="Jira provider" disabled={action !== null} value={provider} onChange={(event) => setProvider(event.target.value)} className="w-full rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary">{providers.map((item) => <option key={item.provider} value={item.provider}>{item.name}</option>)}</select></Field><Field label="Display name"><Input disabled={action !== null} value={name} onChange={(event) => setName(event.target.value)} /></Field><Field label="HTTPS endpoint"><Input disabled={action !== null} type="url" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></Field><div className="md:col-span-3 flex gap-2"><Button loading={action === 'create'} disabled={action !== null || !name.trim() || !endpoint.startsWith('https://')} onClick={() => void create()}>Create connection</Button><Button variant="ghost" disabled={action !== null} onClick={() => setOpen(false)}>Cancel</Button></div>{error && <div className="md:col-span-3"><ErrorState message={error} /></div>}</div>}
+  </Card>
+}
+
+function CredentialEditor({ integration, fields, onConfigured }: { integration: Integration; fields: IntegrationProviderDescriptor['secretFields']; onConfigured: (integration: Integration) => void }) {
+  const [open, setOpen] = useState(false); const [values, setValues] = useState<Record<string, string>>({}); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null)
+  async function save() { setBusy(true); setError(null); try { await api.setIntegrationCredential(integration, values); onConfigured(await api.getIntegration(integration.id)); setOpen(false) } catch (cause) { setError(message(cause)) } finally { setValues({}); setBusy(false) } }
+  if (!fields.length) return null
+  return <><Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setOpen((value) => !value)}>{integration.credentialConfigured ? 'Replace credentials' : 'Add credentials'}</Button>{open && <div className="mt-3 grid gap-2 border-t border-secondary pt-3 md:grid-cols-2">{fields.map((field) => <Field key={field.name} label={field.label} hint={field.description || undefined}><Input type={field.kind === 'password' ? 'password' : 'text'} autoComplete="off" value={values[field.name] ?? ''} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))} /></Field>)}<div className="md:col-span-2 flex gap-2"><Button loading={busy} disabled={fields.some((field) => field.required && !(values[field.name] ?? '').trim())} onClick={() => void save()}>Save credentials</Button><Button variant="ghost" disabled={busy} onClick={() => { setValues({}); setOpen(false) }}>Cancel</Button></div>{error && <div className="md:col-span-2"><ErrorState message={error} /></div>}</div>}</>
+}
+
+function MappingForm({ draft, metadata, metadataLoading, integrations, busy, editing, onChange, onSave, onNew, onDelete }: { draft: MappingDraft; metadata: TicketMetadata | null; metadataLoading: boolean; integrations: Integration[]; busy: boolean; editing: boolean; onChange: (value: Partial<MappingDraft>) => void; onSave: () => void; onNew: () => void; onDelete: () => void }) {
+  const option = (items: Array<{ id: string; name: string }>) => <>{items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</>
+  const resolvedReporter = metadata?.fields.some((field) => field.id === 'reporter' && field.required && !field.hasDefault && field.type === 'user') ? metadata.resolvedReporter : undefined
+  const jiraFields = (metadata?.fields ?? []).filter((field) => !(field.id === 'reporter' && resolvedReporter) && !coreJiraFields.has(field.id.toLowerCase()) && !coreJiraFields.has(field.name.toLowerCase()))
+  const unsupportedRequired = jiraFields.filter((field) => field.required && !field.hasDefault && !supportedField(field))
+  const missingRequired = jiraFields.filter((field) => field.required && supportedField(field) && !field.hasDefault && !draft.fieldValues[field.id])
+  const saveDisabled = metadataLoading || !draft.integrationId || !draft.scopeId || !draft.projectKey || !draft.issueType || (!draft.securityLevel && !draft.waiverReason.trim()) || unsupportedRequired.length > 0 || missingRequired.length > 0
+  return <div className="grid gap-3 md:grid-cols-2"><Field label="Jira connection"><select aria-label="Jira connection" disabled={busy} value={draft.integrationId} onChange={(event) => onChange({ integrationId: event.target.value, projectKey: '', issueType: '' })} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary">{integrations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><Field label="Output locale"><select aria-label="Output locale" disabled={busy} value={draft.locale} onChange={(event) => onChange({ locale: event.target.value === 'vi' ? 'vi' : 'en' })} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="en">English</option><option value="vi">Tiếng Việt</option></select></Field><Field label="Jira project"><select aria-label="Jira project" disabled={busy || metadataLoading} value={draft.projectKey} onChange={(event) => onChange({ projectKey: event.target.value, issueType: '' })} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="">Select project</option>{option(metadata?.projects ?? [])}</select></Field><Field label="Issue type"><select aria-label="Issue type" disabled={busy || metadataLoading} value={draft.issueType} onChange={(event) => onChange({ issueType: event.target.value })} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="">Select issue type</option>{option(metadata?.issueTypes ?? [])}</select></Field><Field label="Component"><select aria-label="Component" disabled={busy || metadataLoading} value={draft.component} onChange={(event) => onChange({ component: event.target.value })} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="">None</option>{option(metadata?.components ?? [])}</select></Field><Field label="Security level"><select aria-label="Security level" disabled={busy || metadataLoading} value={draft.securityLevel} onChange={(event) => onChange({ securityLevel: event.target.value })} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="">Provider default</option>{option(metadata?.securityLevels ?? [])}</select></Field><Field label="Data class"><select aria-label="Data class" disabled={busy} value={draft.dataClass} onChange={(event) => onChange({ dataClass: event.target.value === 'signal' || event.target.value === 'detail' ? event.target.value : 'summary' })} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="signal">Signal</option><option value="summary">Summary</option><option value="detail">Detail</option></select></Field><Field label="Security waiver reason" hint="Required when no Jira security level is selected."><Input disabled={busy} value={draft.waiverReason} onChange={(event) => onChange({ waiverReason: event.target.value })} /></Field><Field label="Labels (comma separated)"><Input disabled={busy} value={draft.labels.join(', ')} onChange={(event) => onChange({ labels: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) })} /></Field><PriorityMapping priorities={metadata?.priorities ?? []} values={draft.priorityMap} disabled={busy || metadataLoading} onChange={(priorityMap) => onChange({ priorityMap })} />{resolvedReporter && <p className="md:col-span-2 text-sm text-secondary">Reporter: {resolvedReporter} (authenticated Jira user).</p>}<CustomFields fields={jiraFields} values={draft.fieldValues} disabled={busy || metadataLoading} onChange={(fieldValues) => onChange({ fieldValues })} /><TransitionBrowser integrationId={draft.integrationId} projectKey={draft.projectKey} issueType={draft.issueType} disabled={busy || metadataLoading} /><Field label="Summary template" hint="Leave blank to use the governed built-in template."><Input disabled={busy} value={draft.summaryTemplate} onChange={(event) => onChange({ summaryTemplate: event.target.value })} /></Field><Field label="Description template" hint="Leave blank to use the governed built-in template."><textarea aria-label="Description template" disabled={busy} value={draft.descriptionTemplate} onChange={(event) => onChange({ descriptionTemplate: event.target.value })} rows={3} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary" /></Field>{unsupportedRequired.length > 0 && <p className="md:col-span-2 text-sm text-error-primary">Required Jira fields have unsupported types and cannot be mapped: {unsupportedRequired.map((field) => `${field.name} (${field.type || 'unknown'})`).join(', ')}.</p>}{missingRequired.length > 0 && <p className="md:col-span-2 text-sm text-error-primary">Provide values for required Jira fields: {missingRequired.map((field) => field.name).join(', ')}.</p>}<div className="md:col-span-2 flex flex-wrap gap-2"><Button loading={busy} disabled={saveDisabled} onClick={onSave}>{editing ? 'Save mapping' : 'Create mapping'}</Button>{editing && <><Button variant="secondary" disabled={busy} onClick={onNew}>New mapping</Button><Button variant="danger" disabled={busy} onClick={onDelete}><Trash01 className="size-4" /> Delete mapping</Button></>}</div></div>
+}
+
+function PriorityMapping({ priorities, values, disabled, onChange }: { priorities: TicketMetadata['priorities']; values: Record<string, string>; disabled: boolean; onChange: (value: Record<string, string>) => void }) {
+  if (!priorities.length) return null
+  const set = (severity: string, value: string) => { const next = { ...values }; if (value) next[severity] = value; else delete next[severity]; onChange(next) }
+  return <div className="md:col-span-2 space-y-2"><p className="text-xs font-medium text-secondary">Jira priority by finding severity</p><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">{severities.map((severity) => <Field key={severity} label={severity}><select aria-label={`Jira priority for ${severity}`} disabled={disabled} value={values[severity] ?? ''} onChange={(event) => set(severity, event.target.value)} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="">Provider default</option>{priorities.map((priority) => <option key={priority.id} value={priority.id}>{priority.name}</option>)}</select></Field>)}</div></div>
+}
+
+function CustomFields({ fields, values, disabled, onChange }: { fields: TicketMetadata['fields']; values: Record<string, string>; disabled: boolean; onChange: (value: Record<string, string>) => void }) {
+  if (!fields.length) return null
+  const set = (id: string, value: string) => { const next = { ...values }; if (value) next[id] = value; else delete next[id]; onChange(next) }
+  return <div className="md:col-span-2 space-y-2"><p className="text-xs font-medium text-secondary">Discovered Jira fields</p>{fields.map((field) => { const supported = supportedField(field); const hint = `${field.required ? 'Required' : 'Optional'}${field.hasDefault ? ' · Uses Jira default when omitted' : ''}${field.type ? ` · ${field.type}` : ''}`; if (!supported) return <p key={field.id} className={field.required ? 'text-sm text-error-primary' : 'text-xs text-tertiary'}>{field.name}: {field.required ? `required field type ${field.type || 'unknown'} is unsupported; this mapping cannot be saved.` : `type ${field.type || 'unknown'} is not configurable.`}</p>; const control = field.values.length ? <select aria-label={`Jira field ${field.name}`} disabled={disabled} value={values[field.id] ?? ''} onChange={(event) => set(field.id, event.target.value)} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="">{field.hasDefault ? 'Use Jira default' : 'Select value'}</option>{field.values.map((choice) => <option key={choice.id} value={choice.id}>{choice.name}</option>)}</select> : field.type.toLowerCase() === 'boolean' ? <select aria-label={`Jira field ${field.name}`} disabled={disabled} value={values[field.id] ?? ''} onChange={(event) => set(field.id, event.target.value)} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary"><option value="">{field.hasDefault ? 'Use Jira default' : 'Select value'}</option><option value="true">True</option><option value="false">False</option></select> : <Input aria-label={`Jira field ${field.name}`} type={field.type.toLowerCase() === 'number' ? 'number' : field.type.toLowerCase() === 'date' ? 'date' : 'text'} disabled={disabled} value={values[field.id] ?? ''} onChange={(event) => set(field.id, event.target.value)} />; return <Field key={field.id} label={field.name} hint={hint}>{control}</Field> })}</div>
+}
+
+function TransitionBrowser({ integrationId, projectKey, issueType, disabled }: { integrationId: string; projectKey: string; issueType: string; disabled: boolean }) {
+  const [issueKey, setIssueKey] = useState(''); const [transitions, setTransitions] = useState<TicketMetadata['transitions']>([]); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const request = useRef(0)
+  useEffect(() => { request.current++; setIssueKey(''); setTransitions([]); setError(null); setBusy(false) }, [integrationId, projectKey, issueType])
+  async function discover() { if (!integrationId || !projectKey || !issueType || !issueKey.trim()) return; const current = ++request.current; setBusy(true); setError(null); try { const value = await api.jiraMetadata(integrationId, projectKey, issueType, issueKey.trim()); if (current === request.current) setTransitions(value.transitions) } catch (cause) { if (current === request.current) setError(message(cause)) } finally { if (current === request.current) setBusy(false) } }
+  return <div className="space-y-2"><Field label="Existing Jira issue key" hint="Discovery is read-only; new tickets use Jira's initial workflow status."><div className="flex gap-2"><Input aria-label="Existing Jira issue key" disabled={disabled || busy} value={issueKey} placeholder="SEC-123" onChange={(event) => setIssueKey(event.target.value)} /><Button variant="secondary" loading={busy} disabled={disabled || !issueKey.trim() || !integrationId || !projectKey || !issueType} onClick={() => void discover()}>Discover transitions</Button></div></Field>{error && <ErrorState message={error} />}{transitions.length > 0 && <Field label="Discovered Jira transitions"><ul aria-label="Discovered Jira transitions" className="space-y-1 rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary">{transitions.map((transition) => <li key={transition.id}>{transition.name}</li>)}</ul></Field>}</div>
+}

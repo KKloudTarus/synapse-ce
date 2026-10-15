@@ -472,7 +472,9 @@ type Config struct {
 	VulnerabilitySchedulerRecovery     int
 	// IntegrationSchedulerEnabled dispatches polling operations for enabled external CI/CD
 	// integrations. The maintenance task is leader-gated by synapse-worker.
-	IntegrationSchedulerEnabled    bool
+	IntegrationSchedulerEnabled bool
+	// TicketingEnabled exposes manual links and governed Jira workflow.
+	TicketingEnabled               bool
 	IntegrationSchedulerInterval   time.Duration
 	IntegrationSchedulerDispatch   int
 	IntegrationSchedulerQueueDepth int
@@ -1088,6 +1090,7 @@ func Load() Config {
 		VulnerabilitySchedulerQueueDepth:            getint("SYNAPSE_VULNERABILITY_SCHEDULER_MAX_QUEUE_DEPTH", 100),
 		VulnerabilitySchedulerRecovery:              getint("SYNAPSE_VULNERABILITY_SCHEDULER_RECOVERY_LIMIT", 10),
 		IntegrationSchedulerEnabled:                 getbool("SYNAPSE_INTEGRATION_SCHEDULER_ENABLED", false),
+		TicketingEnabled:                            getbool("SYNAPSE_TICKETING_ENABLED", true),
 		IntegrationSchedulerInterval:                getduration("SYNAPSE_INTEGRATION_SCHEDULER_POLL", time.Minute),
 		AccuracyEvalInterval:                        getduration("SYNAPSE_ACCURACY_EVAL_INTERVAL", 0),
 		IntegrationSchedulerDispatch:                getint("SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT", 10),

@@ -101,6 +101,15 @@ describe('Setup scenarios and honest outputs', () => {
     expect((await ok(`${base}/external-runs`))[0].analysis_id).toBe('an-001')
     expect((await call(`${base}/operations`, 'POST', { type: 'poll' })).status).toBe(422)
   })
+  it('retains the synthetic Jira destination alongside SCM providers and requires a successful test before enable', async () => {
+    const providers = await ok('/integration-providers')
+    expect(providers.find((provider: { provider: string }) => provider.provider === 'jira-cloud')).toMatchObject({ name: 'Demo Jira Cloud', capabilities: ['test_connection'] })
+    const jira = (await ok('/integrations')).find((connection: { id: string }) => connection.id === 'demo-jira-cloud')
+    expect(jira).toMatchObject({ provider: 'jira-cloud', credential_configured: true, enabled: false })
+    expect((await call(`/integrations/${jira.id}/enable`, 'POST', {})).status).toBe(409)
+    await operation(jira.id, 'test')
+    expect((await ok(`/integrations/${jira.id}/enable`, 'POST', {})).enabled).toBe(true)
+  })
   it('clears setup data on restart without clearing another setup chapter', async () => {
     await ok('/playground/setup/ai-ready', 'POST', {})
     await connection()

@@ -66,6 +66,8 @@ function mapOperation(value: any): IntegrationOperation {
   return {
     id: value.id ?? '',
     integrationId: value.integration_id ?? '',
+    connectionRevision: typeof value.connection_revision === 'number' ? value.connection_revision : undefined,
+    credentialRevision: typeof value.credential_revision === 'number' ? value.credential_revision : undefined,
     type: value.type ?? 'test',
     state: value.state ?? 'queued',
     checkpoint: value.checkpoint ?? '',

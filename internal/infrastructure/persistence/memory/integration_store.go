@@ -242,10 +242,6 @@ func credentialKey(tenantID, integrationID shared.ID, credentialID string) strin
 	return tenantID.String() + "\x1f" + integrationID.String() + "\x1f" + credentialID
 }
 
-func credentialAAD(tenantID, integrationID shared.ID, credentialID string) []byte {
-	return []byte("synapse:integration-credential:" + tenantID.String() + ":" + integrationID.String() + ":" + credentialID)
-}
-
 func (store *IntegrationStore) PutIntegrationCredential(ctx context.Context, integrationID shared.ID, credentialID string, plaintext []byte, expectedVersion, expectedConnectionRevision int, audit ports.AuditEntry) error {
 	tenantID, err := integrationTenant(ctx)
 	if err != nil {
@@ -253,10 +249,6 @@ func (store *IntegrationStore) PutIntegrationCredential(ctx context.Context, int
 	}
 	if len(plaintext) == 0 || len(plaintext) > integration.MaxCredentialBytes || credentialID == "" {
 		return fmt.Errorf("%w: integration credential is invalid", shared.ErrValidation)
-	}
-	ciphertext, err := store.cipher.Seal(plaintext, credentialAAD(tenantID, integrationID, credentialID))
-	if err != nil {
-		return err
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -267,6 +259,10 @@ func (store *IntegrationStore) PutIntegrationCredential(ctx context.Context, int
 	}
 	if item.Archived || item.Version != expectedVersion || item.ConnectionRevision != expectedConnectionRevision {
 		return shared.ErrConflict
+	}
+	ciphertext, err := store.cipher.Seal(plaintext, integration.CredentialAAD(item, credentialID))
+	if err != nil {
+		return err
 	}
 	if err := store.invalidateActiveOperationsLocked(ctx, tenantID, integrationID, store.clock.Now().UTC()); err != nil {
 		return err
@@ -335,7 +331,7 @@ func (store *IntegrationStore) ResolveIntegrationCredential(ctx context.Context,
 	if !exists {
 		return nil, shared.ErrNotFound
 	}
-	return store.cipher.Open(ciphertext, credentialAAD(tenantID, integrationID, credentialID))
+	return store.cipher.Open(ciphertext, integration.CredentialAAD(item, credentialID))
 }
 
 func (store *IntegrationStore) IntegrationCredentialConfigured(ctx context.Context, integrationID shared.ID, credentialID string) (bool, error) {

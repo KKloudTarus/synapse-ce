@@ -1,0 +1,9 @@
+high finding: SQL injection
+---
+Finding: SQL injection
+ID: finding\-1
+Severity: high
+Status: open
+
+Description:
+Validate every input\.

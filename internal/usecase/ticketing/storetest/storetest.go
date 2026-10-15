@@ -57,6 +57,12 @@ func Run(t *testing.T, store ports.TicketStore, f Fixture) {
 	if err != nil || saved.Labels[0] != "synapse" || saved.PriorityMap["high"] != "Highest" {
 		t.Fatalf("mapping clone isolation: %+v, %v", saved, err)
 	}
+	if scoped, e := store.ListScopedMappings(ctx, f.Tenant, ticketing.Engagement, f.Engagement, 1); e != nil || len(scoped) != 1 || scoped[0].ID != mapping.ID {
+		t.Fatalf("scoped mappings=%+v err=%v", scoped, e)
+	}
+	if scoped, e := store.ListFindingMappings(ctx, f.Tenant, f.Engagement, 1); e != nil || len(scoped) != 1 || scoped[0].ID != mapping.ID {
+		t.Fatalf("finding mappings=%+v err=%v", scoped, e)
+	}
 	if _, err = store.GetMapping(ctx, f.Other, mapping.ID); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("cross-tenant mapping lookup: %v", err)
 	}
@@ -66,6 +72,9 @@ func Run(t *testing.T, store ports.TicketStore, f Fixture) {
 	got, created, err := store.CreateLink(ctx, f.Tenant, link)
 	if err != nil || !created || got.ID != link.ID {
 		t.Fatalf("create manual link: %+v %t %v", got, created, err)
+	}
+	if loaded, e := store.GetLink(ctx, f.Tenant, link.ID); e != nil || loaded.ID != link.ID {
+		t.Fatalf("get link: %+v %v", loaded, e)
 	}
 	repeated := link
 	repeated.ID = "ticket-link-replay"

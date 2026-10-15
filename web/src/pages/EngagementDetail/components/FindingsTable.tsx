@@ -170,6 +170,8 @@ export function FindingsTable({
   sortKey = null,
   sortDirection = 'asc',
   onSort,
+  ticketSelected,
+  onToggleTicket,
 }: {
   rows: Finding[]
   page: number
@@ -187,6 +189,9 @@ export function FindingsTable({
   sortKey?: FindingSortKey | null
   sortDirection?: SortDirection
   onSort?: (key: FindingSortKey) => void
+  /** Ticket creation is opt-in; row expansion and selection remain separate controls. */
+  ticketSelected?: Set<string>
+  onToggleTicket?: (id: string) => void
 }) {
   const header = (label: string, key: FindingSortKey, className: string) =>
     onSort ? (
@@ -234,6 +239,7 @@ export function FindingsTable({
                   )}
                 >
                   <td className="pl-3 py-3 align-top">
+                    {onToggleTicket && <input type="checkbox" aria-label={`Select ${f.title} for Jira ticket`} checked={ticketSelected?.has(f.id) ?? false} onClick={(event) => event.stopPropagation()} onChange={() => onToggleTicket(f.id)} className="mr-1.5 rounded border-secondary" />}
                     <button
                       type="button"
                       aria-expanded={isOpen}

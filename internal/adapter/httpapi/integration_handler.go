@@ -41,6 +41,16 @@ func integrationResponse(item integration.Integration) integrationDTO {
 	}
 }
 
+type integrationOperationDTO struct {
+	integration.Operation
+	ConnectionRevision int `json:"connection_revision"`
+	CredentialRevision int `json:"credential_revision"`
+}
+
+func integrationOperationResponse(operation integration.Operation) integrationOperationDTO {
+	return integrationOperationDTO{Operation: operation, ConnectionRevision: operation.ConnectionRevision, CredentialRevision: operation.CredentialRevision}
+}
+
 func (rt *Router) listIntegrationProviders(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, rt.integrations.ProviderDescriptors())
 }
@@ -213,7 +223,7 @@ func (rt *Router) startIntegrationOperation(w http.ResponseWriter, r *http.Reque
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, operation)
+	writeJSON(w, http.StatusAccepted, integrationOperationResponse(operation))
 }
 
 func (rt *Router) listIntegrationOperations(w http.ResponseWriter, r *http.Request) {
@@ -223,7 +233,11 @@ func (rt *Router) listIntegrationOperations(w http.ResponseWriter, r *http.Reque
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, operations)
+	response := make([]integrationOperationDTO, 0, len(operations))
+	for _, operation := range operations {
+		response = append(response, integrationOperationResponse(operation))
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (rt *Router) getIntegrationOperation(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +246,7 @@ func (rt *Router) getIntegrationOperation(w http.ResponseWriter, r *http.Request
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, operation)
+	writeJSON(w, http.StatusOK, integrationOperationResponse(operation))
 }
 
 func (rt *Router) cancelIntegrationOperation(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +255,7 @@ func (rt *Router) cancelIntegrationOperation(w http.ResponseWriter, r *http.Requ
 		writeError(w, rt.log, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, operation)
+	writeJSON(w, http.StatusOK, integrationOperationResponse(operation))
 }
 
 func (rt *Router) createIntegrationBinding(w http.ResponseWriter, r *http.Request) {

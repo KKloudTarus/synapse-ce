@@ -1,0 +1,494 @@
+[
+  {
+    "image": "cloud-clicked-deeplink-en-dark.png",
+    "sha256": "92d5148d69576fcd374eab0ed3076b8b14de656084ace1da4c9ca683333799b2",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-clicked-deeplink-vi-dark.png",
+    "sha256": "a638329cd768c626e091f73bea1a207c51d0cc871c653153f3cc77ccb68ddd95",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-bulk-first-body-en-dark.png",
+    "sha256": "6f62a18a824b6e0dce90297cd868b02f51174044627664a6508b56cdaf8eff2c",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-bulk-first-body-en-light.png",
+    "sha256": "c4d49bd14169f266c4729ef033d1d4d9efbb5691e008b3e1bda88f8eb364ff30",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-bulk-preview-en-dark.png",
+    "sha256": "89031a5f9fc19e71838dba4a67a90e9e8b9382e635baed306bef8012c08c5edb",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-bulk-preview-en-light.png",
+    "sha256": "1fba9cb1cddfa33d8e16a3a238b0eb557726c6b54b9fba912a7be5b972b77ed6",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-bulk-second-body-en-dark.png",
+    "sha256": "ad301dc080a5c0496d0b1887d8396a1ac4ab3fabd73949b449f414677069bfa5",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-bulk-second-body-en-light.png",
+    "sha256": "5cedd9121df61cb5009cd2d818610a37ae0748dcac7489fafd88457103e98e04",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-linked-en-dark.png",
+    "sha256": "54ad9f12fe9ecd557c7e107fc4c1ab7d5a1fe5e260dbb749679744471e7ce13b",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-linked-en-light.png",
+    "sha256": "f48be60df3af859043025345ce585db9e87ee50ce647944046d5481a804ea5e3",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-linked-vi-dark.png",
+    "sha256": "9c87b64571508f5c7c426b3a05c454ffa232489f4461095255fdf3c4d6a3928f",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-linked-vi-light.png",
+    "sha256": "6f88c65550fbfc195b61dea22efa81acbd06a311fbf43b46662928bee18c5e7b",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-preview-body-en-dark.png",
+    "sha256": "0ab25dd82d017d02b080cebbf7ea2eef90469958018451207f6ef1316157c9e5",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-preview-body-en-light.png",
+    "sha256": "a1221d69ad71e485d1e516b4d3be7e3556bd61c73e7556da274b9e07fc6b3609",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-preview-body-vi-dark.png",
+    "sha256": "30659c4291bdbd4ccba54662cd52b370543513b883d7319f6c6536f0901bf404",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-preview-body-vi-light.png",
+    "sha256": "ee7998b7c6657a9437a0641a248c923e4b24f50f70bf162aa03cd29648c1216e",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-preview-en-dark.png",
+    "sha256": "887b115f500c88f4b111ee08bc42dc17e7c1c306b4c6e4dcdfbdef88bfabe0b8",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-preview-en-light.png",
+    "sha256": "8840d995f312efeb479097de96c43cbe791dc697b2ffd0d726561f25926ffb76",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-preview-vi-dark.png",
+    "sha256": "dc87e1c89caeb6ebd112f9c279fbca192011953ead13983618f78f0327deee83",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-console-preview-vi-light.png",
+    "sha256": "a846d4bdbe6986f88f1f1bbb486b3aed44b82b8ef763d5a5bf21db45afae2710",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-ticket-en-light.png",
+    "sha256": "b533ce5fc7cdc16b9c5da48409a369e2b8947dfe741f612377b93e9efac916ba",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-ticket-labels-en-light.png",
+    "sha256": "05ab2d836df7e99b5c41d054a271f529b1574e189d5c1f73eaf8a2352daadc49",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-ticket-labels-vi-light.png",
+    "sha256": "6abafccc1af15634c1c03a32131b72a6c182f3de33c36e6d7518c110e84f50c6",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "cloud-ticket-vi-light.png",
+    "sha256": "d7aca33d540f046d1462b1edb994dc244d6db147c5e2911fc14e2b1885526c3c",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "console-bulk-empty-en-dark.png",
+    "sha256": "5c5210d31e285f78f2cf21e83ef68b4c8dc09f11ec3ee2612f024fe09e3c9457",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-bulk-empty-en-light.png",
+    "sha256": "bfdd8657b88674958a91fbf5e0d4101178dadd573d0d30ae3ca6c3c7964f21df",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-bulk-error-en-dark.png",
+    "sha256": "331b4560e7c2d4ffa877aa4575ed2d479ffd54429b9bfffb8ee8dd46f9680d58",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-bulk-error-en-light.png",
+    "sha256": "47628ba8a9ed54eb24349757960b664b97e6f9a3b75689a0bb757212c7294f25",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-bulk-loading-en-dark.png",
+    "sha256": "36175645fd7ae327ba3083f2a53f913155aa1faaef505d4c92440fa6c3965b96",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-bulk-loading-en-light.png",
+    "sha256": "66b312f93816e5eafedf27f812f07a421451c821591ade7a50f8ea648063313b",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-bulk-permission-denied-en-dark.png",
+    "sha256": "917d60e512271de992ea2c2a657b21448bdac11207d53af73c61feb058c776ea",
+    "pixels_unchanged": true,
+    "provenance": "actual_readonly_role"
+  },
+  {
+    "image": "console-bulk-permission-denied-en-light.png",
+    "sha256": "97a0e9dac3901e965507ac5a0434e990c02a086fd62d3fdf6f2fb992eb5b9cee",
+    "pixels_unchanged": true,
+    "provenance": "actual_readonly_role"
+  },
+  {
+    "image": "console-jira-connections-en-dark.png",
+    "sha256": "5914dfbd4b4ec02923a9fadd322d2664734333153c5d9e9bca69fd079d4ee3ff",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "console-jira-connections-en-light.png",
+    "sha256": "0db5b2df851e25e46ab1b1d6708862d6efd3c3a5f2c330e3d42083d138e6c5ae",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "console-jira-metadata-en-dark.png",
+    "sha256": "72c392055889ddb6410428d1d3294f516f2ddfc3abff87456659ef3427f67473",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "console-jira-metadata-en-light.png",
+    "sha256": "5ab931f2e0ac4e9fc153886bc06403c452af6ad2476ddc4a9dea147883cdf59d",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "console-jira-metadata-fields-en-dark.png",
+    "sha256": "4ba0facddb5936ac9de79dc394a5e5e3f60a4d9c9ce5ee950fc5cef782c02de4",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "console-jira-metadata-fields-en-light.png",
+    "sha256": "14dc58e7a2a31d48d03de9defd104cc0639c2af9c16d039f61c4a77ad12c9171",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "console-jira-settings-empty-en-dark.png",
+    "sha256": "10d46cb13080ffe52a5e2466f48bc3e17221fb4bc0146eb1e2cfd9d2fa61af83",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-jira-settings-empty-en-light.png",
+    "sha256": "b2428d790162451c9d5ff21db1eab9ecfc7579fd029cb5ed420fd2205841da8c",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-jira-settings-error-en-dark.png",
+    "sha256": "a171755c8041e11ca72e11b7cb5a4300985bc39976f59d09d1242994bcc110d6",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-jira-settings-error-en-light.png",
+    "sha256": "cc9a43d298fba4e6a70030d10a8e06110cdf25adb9db6774e87ff4317ba127f8",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-jira-settings-loading-en-dark.png",
+    "sha256": "92095c49082d6f0db9f030de0a279613d77109e1af69ac126397c887fe4e71cd",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-jira-settings-loading-en-light.png",
+    "sha256": "11e3c3181b347de16922b0fa3f8c9da5c066fd420c523f9e828c89e02a1245df",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-jira-settings-permission-denied-en-dark.png",
+    "sha256": "4c5f5fd89bbca57b703c1f5fd6b046380a1bc3f7d9ec11193a168636733625f0",
+    "pixels_unchanged": true,
+    "provenance": "actual_readonly_role"
+  },
+  {
+    "image": "console-jira-settings-permission-denied-en-light.png",
+    "sha256": "fce783dce143a882485f67dcc9d0e0c0c1865f3a6338afe1b57f5ab6c2f5b364",
+    "pixels_unchanged": true,
+    "provenance": "actual_readonly_role"
+  },
+  {
+    "image": "console-ticket-done-en-dark.png",
+    "sha256": "57be822db7a3d16fbf08b2f4a28105d735613af96f900d2c1524d4fce5fca5f1",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-done-en-light.png",
+    "sha256": "0217b80c86366a063e51cd74e78486bfecebd89e9a8b748741ceebc1925a64d0",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-failed-en-dark.png",
+    "sha256": "ef59e7dccb8a36caab3e07ecde9d1e6d7b297953fc1fa2d43a84d2e9010780ee",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-failed-en-light.png",
+    "sha256": "5841588ecc6308f7c38990e1ec10b02fac001b1cfbd4ac4e204040615ece0aaf",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-in-flight-en-dark.png",
+    "sha256": "00f97575ca3ab215e2203d6eb1dff9cfd787cbab44fd57a0bbd26db3ee0d51a1",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-in-flight-en-light.png",
+    "sha256": "8f25249f5d125ace724c1b96ab9c7254452f3d755b6f99d026e9cd934064c4c7",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-panel-empty-en-dark.png",
+    "sha256": "94cca2ca5f54751f707ddac2a00a227b38ff4339629e2e736152a467a0124754",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-ticket-panel-empty-en-light.png",
+    "sha256": "7eb4aefe1f7f971b91d421063191120bedbe5ba88731718d37415d0f3e0ab1ed",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-ticket-panel-error-en-dark.png",
+    "sha256": "8b1b55b77adade20b7f448f2c24d8b57997823e7990fb3aba3126123a7ffe4d5",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-ticket-panel-error-en-light.png",
+    "sha256": "d7a030d92dc6ad19e0d01ac9178e9d660de51e621c8e05594832ab92501b555c",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-ticket-panel-loading-en-dark.png",
+    "sha256": "cca5f52d643b544c3e26b5c2a21df9db20dc93af4b78cf9443f5700fc917f2cb",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-ticket-panel-loading-en-light.png",
+    "sha256": "35b1fb73864735ee3d62079ab02d4b0a1f4656dfb96d54074899cd7bea7ad42d",
+    "pixels_unchanged": true,
+    "provenance": "compiled_console_with_controlled_local_api_fault"
+  },
+  {
+    "image": "console-ticket-panel-permission-denied-en-dark.png",
+    "sha256": "2560df4151089644d324e1e4885d1836872ee5598d61b3dce81caea3268c167e",
+    "pixels_unchanged": true,
+    "provenance": "actual_readonly_role"
+  },
+  {
+    "image": "console-ticket-panel-permission-denied-en-light.png",
+    "sha256": "66c27340ac13d2035bb06dfdaf3177fbe59a60d87eb6e096b0cd468dc5e368da",
+    "pixels_unchanged": true,
+    "provenance": "actual_readonly_role"
+  },
+  {
+    "image": "console-ticket-pending-en-dark.png",
+    "sha256": "a4d3fc947664e2e0063fd197db92de9453d1af8965e4b9e4eb2db5eb311c2807",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-pending-en-light.png",
+    "sha256": "dcea27d8340169dd88caf9ec99cf6203458cacf218f20251596dee9dc02c7bd3",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-retry-ack-en-dark.png",
+    "sha256": "b7312da74917ac6c74128b542b8d3dc005e45126dff6d7d5c9751c6fecdada62",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-retry-ack-en-light.png",
+    "sha256": "3649cc90b6e6e891d8a0732cf801ccfe20a250a8fe44a70dbca88b004a2cabc3",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-uncertain-en-dark.png",
+    "sha256": "401fc16ab7dbed71711d72b61df64b0cc89e7617f84402b79c62fb295e773d0c",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "console-ticket-uncertain-en-light.png",
+    "sha256": "766eee216c2c4598f4e47dcc3c79b6d6c163950c66683b33a4537bed56e3abe4",
+    "pixels_unchanged": true,
+    "provenance": "playground_simulated_recovery"
+  },
+  {
+    "image": "dc-clicked-deeplink-en-light.png",
+    "sha256": "ae845ffae3c3da2104b2e15a5421852cf5bc5f8d1fa0c27c7958c71432428821",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-clicked-deeplink-vi-light.png",
+    "sha256": "8c1465120a3fffb7a9deaf7797eb38cae8a555917459bb9ddf464628389f90aa",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-linked-en-dark.png",
+    "sha256": "f23ead879cd7f243cb99705f84b532190d671d6cbc8209c822debb3b17794b8c",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-linked-en-light.png",
+    "sha256": "0079342ce9413e8c4b90db35c54288ae980f5cdb08b925e00491c2689658d62d",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-linked-vi-dark.png",
+    "sha256": "ad52ea6ce1ec50c6163764afa1b6f7aa95dca81aca894b669a55abb6fc874c3a",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-linked-vi-light.png",
+    "sha256": "67b1512d2a1f27869d0cff27345ea9375c996c38ea245806d17aed8d9ab91d5b",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-preview-body-en-dark.png",
+    "sha256": "ef760a865e6434198352366ed9cc958967e9ba082c47e8e351532dfb107104eb",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-preview-body-en-light.png",
+    "sha256": "448b688579e11c2bcaa45fb29d8017081ffeb3a44c4e19e72d1d6ec9926063c6",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-preview-body-vi-dark.png",
+    "sha256": "86b191d1a700d32f71dd37eed2ba229bcdac1b60f2529203ae2d1e0d88ecdd4c",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-preview-body-vi-light.png",
+    "sha256": "8b3d85566abe5b554bdd8ca2de087460396e4e7d07ba233afebfeb869ab2bd2d",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-preview-en-dark.png",
+    "sha256": "94635f6a857ca7172b51376381daaec021ac9b7616696083ff4febe2c5348df8",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-preview-en-light.png",
+    "sha256": "bd74a7f64ca6fba3f93ceb737d5c132da65af843fdfc30e744ae1aa3b33077f9",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-preview-vi-dark.png",
+    "sha256": "a1270d8d720b3b1a7640349e4fbbbe8ba972d15ca073bc9f2fb99c421583859e",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-console-preview-vi-light.png",
+    "sha256": "c00874c036e7637cbc4c6fa85f18e5d32cbf93c1a2e2d54703acd6716e20fb2d",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-ticket-en-light.png",
+    "sha256": "f99c8152faecc1ab5aae0355e9f940795d8d70c14b068437e440866191d55286",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  },
+  {
+    "image": "dc-ticket-vi-light.png",
+    "sha256": "db78c53a22dfd7ad5edb636a28f11e08d02f19759c671415010016779800fa89",
+    "pixels_unchanged": true,
+    "provenance": "actual"
+  }
+]

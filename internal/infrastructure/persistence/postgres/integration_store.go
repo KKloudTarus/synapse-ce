@@ -225,10 +225,6 @@ func (store *IntegrationStore) PutIntegrationCredential(ctx context.Context, int
 	if !ok || credentialID == "" || len(plaintext) == 0 || len(plaintext) > integration.MaxCredentialBytes {
 		return fmt.Errorf("%w: integration credential is invalid", shared.ErrValidation)
 	}
-	ciphertext, err := store.cipher.Seal(plaintext, integrationCredentialAAD(tenantID, integrationID, credentialID))
-	if err != nil {
-		return err
-	}
 	return WithContextTenant(ctx, store.pool, func(tx pgx.Tx) error {
 		item, lockErr := scanIntegration(tx.QueryRow(ctx, integrationSelect+` WHERE id=$1 FOR UPDATE`, integrationID.String()))
 		if errors.Is(lockErr, pgx.ErrNoRows) {
@@ -238,6 +234,10 @@ func (store *IntegrationStore) PutIntegrationCredential(ctx context.Context, int
 		}
 		if item.Archived || item.Version != expectedVersion || item.ConnectionRevision != expectedConnectionRevision {
 			return shared.ErrConflict
+		}
+		ciphertext, err := store.cipher.Seal(plaintext, integration.CredentialAAD(item, credentialID))
+		if err != nil {
+			return err
 		}
 		if err := invalidateIntegrationOperations(ctx, tx, integrationID, time.Now().UTC()); err != nil {
 			return err
@@ -296,24 +296,30 @@ func (store *IntegrationStore) ResolveIntegrationCredential(ctx context.Context,
 	if !ok {
 		return nil, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
 	}
-	var ciphertext string
-	var currentRevision int
 	err = WithContextTenant(ctx, store.pool, func(tx pgx.Tx) error {
-		queryErr := tx.QueryRow(ctx, `SELECT credential.ciphertext,target.credential_revision FROM integration_credentials credential
+		var ciphertext, endpoint string
+		var provider integration.Provider
+		var currentRevision int
+		queryErr := tx.QueryRow(ctx, `SELECT credential.ciphertext,target.credential_revision,target.provider,target.endpoint FROM integration_credentials credential
 			JOIN integrations target ON target.tenant_id=credential.tenant_id AND target.id=credential.integration_id
-			WHERE credential.integration_id=$1 AND credential.credential_id=$2`, integrationID.String(), credentialID).Scan(&ciphertext, &currentRevision)
+			WHERE credential.integration_id=$1 AND credential.credential_id=$2 AND credential.tenant_id=$3 FOR SHARE OF target`, integrationID.String(), credentialID, tenantID.String()).Scan(&ciphertext, &currentRevision, &provider, &endpoint)
 		if errors.Is(queryErr, pgx.ErrNoRows) {
 			return shared.ErrNotFound
 		}
-		return queryErr
+		if queryErr != nil {
+			return queryErr
+		}
+		if currentRevision != expectedRevision {
+			return shared.ErrConflict
+		}
+		var openErr error
+		plaintext, openErr = store.cipher.Open(ciphertext, integration.CredentialAAD(integration.Integration{TenantID: tenantID, ID: integrationID, Provider: provider, Endpoint: endpoint}, credentialID))
+		return openErr
 	})
 	if err != nil {
 		return nil, err
 	}
-	if currentRevision != expectedRevision {
-		return nil, shared.ErrConflict
-	}
-	return store.cipher.Open(ciphertext, integrationCredentialAAD(tenantID, integrationID, credentialID))
+	return plaintext, nil
 }
 
 func (store *IntegrationStore) IntegrationCredentialConfigured(ctx context.Context, integrationID shared.ID, credentialID string) (configured bool, err error) {
@@ -729,10 +735,6 @@ func classifyIntegrationMiss(ctx context.Context, tx pgx.Tx, id shared.ID, expec
 		return shared.ErrConflict
 	}
 	return shared.ErrConflict
-}
-
-func integrationCredentialAAD(tenantID, integrationID shared.ID, credentialID string) []byte {
-	return []byte("synapse:integration-credential:" + tenantID.String() + ":" + integrationID.String() + ":" + credentialID)
 }
 
 func invalidateIntegrationOperations(ctx context.Context, tx pgx.Tx, integrationID shared.ID, at time.Time) error {

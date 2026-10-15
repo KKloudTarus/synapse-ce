@@ -37,6 +37,7 @@ type Flags struct {
 	Ownership            bool // effective SYNAPSE_OWNERSHIP_MODE != off with PostgreSQL
 	InboundWebhooks      bool // SYNAPSE_INBOUND_WEBHOOKS_ENABLED
 	Notifications        bool // SYNAPSE_NOTIFICATIONS_ENABLED
+	Ticketing            bool // SYNAPSE_TICKETING_ENABLED
 	// NotificationChannelTypes is every channel type the notification driver registry holds, in
 	// registry order. The composition root reads it from the registry, so a new driver is
 	// advertised without editing this package.
@@ -208,7 +209,7 @@ func build(f Flags) []Capability {
 		},
 		// Ticketing (WS5) and documentation publishing (WS6) are not in this build yet. They are listed
 		// so a client can render them as planned instead of guessing from a 404.
-		{Key: "ticketing", Name: "Ticketing", Planned: true},
+		{Key: "ticketing", Name: "Ticketing", Enabled: f.Ticketing, Switch: "SYNAPSE_TICKETING_ENABLED"},
 		{Key: "docpublish", Name: "Documentation publishing", Planned: true},
 		{
 			// Deprecated compatibility path, removed in alerting.LegacyWebhookRemovalRelease. Enabled
