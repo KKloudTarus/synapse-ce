@@ -2,12 +2,15 @@ package incidenttriage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/riskassessment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -28,6 +31,26 @@ type captureAudit struct {
 	mu      sync.Mutex
 	entries []ports.AuditEntry
 	fail    bool
+}
+
+type lifecycleFacts struct {
+	ports.NotificationLifecycleFacts
+}
+
+func (f lifecycleFacts) SnapshotNotificationLifecycleFacts(context.Context, shared.ID, shared.ID, string) (ports.NotificationLifecycleFacts, error) {
+	return f.NotificationLifecycleFacts, nil
+}
+
+type appendThenFailOutbox struct {
+	next ports.NotificationOutbox
+	err  error
+}
+
+func (o appendThenFailOutbox) Append(ctx context.Context, record notification.SourceRecord) error {
+	if err := o.next.Append(ctx, record); err != nil {
+		return err
+	}
+	return o.err
 }
 
 func (c *captureAudit) Record(_ context.Context, e ports.AuditEntry) error {
@@ -164,5 +187,149 @@ func TestTriageFailsClosed(t *testing.T) {
 	}
 	if _, err := NewService(nil, &captureAudit{}, time.Now); !errors.Is(err, shared.ErrValidation) {
 		t.Fatal("nil store must be rejected")
+	}
+}
+
+func TestTriageNotificationCapturesCanonicalRevisionAndSafeImmutableFacts(t *testing.T) {
+	_, _, ctx, _ := setup(t)
+	engagementID := shared.ID("eng-notify")
+	// Re-seed with an engagement-bound incident because legacy incidents without an engagement
+	// intentionally cannot emit this engagement-scoped event.
+	store := memory.NewIncidentEventStore()
+	canonical, err := incidentuc.NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := incident.IncidentEvent{IncidentID: incID, Kind: incident.EventCreated, At: base, Actor: "correlator", AssetID: asset, EngagementID: engagementID, Severity: shared.SeverityHigh, Title: "Target https://alice:secret@example.test"}
+	if _, err := canonical.Append(ctx, incID, 0, []incident.IncidentEvent{created}); err != nil {
+		t.Fatal(err)
+	}
+	audit := &captureAudit{}
+	svc, err := NewService(canonical, audit, func() time.Time { return base.Add(time.Minute) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate(tenant, base.Add(-time.Second))
+	if err := svc.SetNotifications(memory.NewTenantTransactionRunner(), outbox, lifecycleFacts{NotificationLifecycleFacts: ports.NotificationLifecycleFacts{
+		EngagementName: "Assessment", ActorName: "Alice", ActorUserID: "user-alice", LeadUserID: "user-lead",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.ChangeStatus(ctx, "alice", incID, incident.StateInvestigating)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != incID || updated.Revision != 2 || updated.State != incident.StateInvestigating {
+		t.Fatalf("canonical update = %+v", updated)
+	}
+	records := outbox.Records(tenant)
+	if len(records) != 1 {
+		t.Fatalf("notification records = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record.SourceKind != "incident_update" || record.SourceID != "inc-t:2" || record.CaptureVersion != 3 {
+		t.Fatalf("source record = %+v", record)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(record.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["update_kind"] != "status" || data["status"] != string(incident.StateInvestigating) || data["actor"] != "Alice" {
+		t.Fatalf("notification data = %#v", data)
+	}
+	if title, _ := data["incident_title"].(string); title == "" || title == "Target https://alice:secret@example.test" || strings.Contains(title, "secret") {
+		t.Fatalf("incident title leaks a credential: %q", title)
+	}
+	if len(audit.entries) != 1 || audit.entries[0].Target != incID.String() {
+		t.Fatalf("audit = %+v", audit.entries)
+	}
+}
+
+func TestTriageNotificationOutboxFailureRollsBackIncidentRevision(t *testing.T) {
+	ctx := shared.WithTenant(context.Background(), tenant)
+	store := memory.NewIncidentEventStore()
+	inc, err := incidentuc.NewService(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := incident.IncidentEvent{IncidentID: incID, Kind: incident.EventCreated, At: base, Actor: "correlator", AssetID: asset, EngagementID: "eng-notify", Severity: shared.SeverityHigh}
+	if _, err := inc.Append(ctx, incID, 0, []incident.IncidentEvent{created}); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := NewService(inc, &captureAudit{}, func() time.Time { return base.Add(time.Minute) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate(tenant, base.Add(-time.Second))
+	injected := errors.New("outbox unavailable after append")
+	if err := svc.SetNotifications(memory.NewTenantTransactionRunner(), appendThenFailOutbox{next: outbox, err: injected}, lifecycleFacts{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ChangeStatus(ctx, "alice", incID, incident.StateInvestigating); !errors.Is(err, injected) {
+		t.Fatalf("change status error = %v, want injected outbox error", err)
+	}
+	stored, err := inc.Get(ctx, incID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Revision != 1 || stored.State != incident.StateNew {
+		t.Fatalf("incident must roll back after append failure: %+v", stored)
+	}
+	if records := outbox.Records(tenant); len(records) != 0 {
+		t.Fatalf("outbox must roll back after appended failure: %+v", records)
+	}
+}
+
+func TestTriageUnboundIncidentRemainsMutableWithNotifications(t *testing.T) {
+	svc, audit, ctx, _ := setup(t)
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate(tenant, base.Add(-time.Second))
+	if err := svc.SetNotifications(memory.NewTenantTransactionRunner(), outbox, lifecycleFacts{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AssignOwner(ctx, "alice", incID, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Comment(ctx, "alice", incID, "investigating"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ChangeStatus(ctx, "alice", incID, incident.StateInvestigating); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.SetDisposition(ctx, "alice", incID, incident.DispositionTruePositive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Revision != 5 || got.OwnerID != "alice" || got.State != incident.StateInvestigating || len(got.Comments) != 1 || got.Disposition != incident.DispositionTruePositive {
+		t.Fatalf("legacy triage projection = %+v", got)
+	}
+	if len(audit.entries) != 4 {
+		t.Fatalf("audit count = %d, want 4", len(audit.entries))
+	}
+	if len(outbox.Records(tenant)) != 0 {
+		t.Fatal("unbound incident cannot emit engagement-scoped facts")
+	}
+}
+
+func TestTriageBoundCommentDoesNotEmitLifecycleNotification(t *testing.T) {
+	svc, audit, ctx, canonical := setup(t)
+	boundID := shared.ID("bound-comment-incident")
+	if _, err := canonical.Append(ctx, boundID, 0, []incident.IncidentEvent{{IncidentID: boundID, Kind: incident.EventCreated, At: base, Actor: "correlator", AssetID: asset, EngagementID: "eng-notify", Severity: shared.SeverityHigh}}); err != nil {
+		t.Fatal(err)
+	}
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate(tenant, base.Add(-time.Second))
+	injected := errors.New("capture must not run for a comment")
+	if err := svc.SetNotifications(memory.NewTenantTransactionRunner(), appendThenFailOutbox{next: outbox, err: injected}, lifecycleFacts{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Comment(ctx, "alice", boundID, "analyst note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Comments) != 1 || len(audit.entries) != 1 || len(outbox.Records(tenant)) != 0 {
+		t.Fatalf("comment/audit/capture = %d/%d/%d", len(got.Comments), len(audit.entries), len(outbox.Records(tenant)))
 	}
 }

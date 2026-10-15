@@ -32,9 +32,41 @@ var catalog = map[EventType]EventSpec{
 		Filters: []Filter{FilterMinSeverity, FilterEngagements, FilterTeams}, MaxDataClass: DataClassSummary,
 		Variables: variables(signal("severity", "Severity of the finding"), signal("tier", "SLA tier of the finding"), instant("deadline", "Remediation deadline"), instant("breached_at", "When the SLA breach began"), signal("reminder", "Breach episode reminder state"), summary("engagement_name", "Name of the engagement"), summary("finding_title", "Title of the finding"), summary("actor", "Actor recorded with the event")),
 	},
-	EventRiskAcceptanceCreated:  riskAcceptanceSpec(EventRiskAcceptanceCreated, "Risk acceptance created", false),
-	EventRiskAcceptanceExpiring: riskAcceptanceSpec(EventRiskAcceptanceExpiring, "Risk acceptance expiring", true),
-	EventRiskAcceptanceExpired:  riskAcceptanceSpec(EventRiskAcceptanceExpired, "Risk acceptance expired", false),
+	EventRiskAcceptanceCreated:    riskAcceptanceSpec(EventRiskAcceptanceCreated, "Risk acceptance created", false),
+	EventRiskAcceptanceExpiring:   riskAcceptanceSpec(EventRiskAcceptanceExpiring, "Risk acceptance expiring", true),
+	EventRiskAcceptanceExpired:    riskAcceptanceSpec(EventRiskAcceptanceExpired, "Risk acceptance expired", false),
+	EventEngagementCreated:        engagementEventSpec(EventEngagementCreated, "Engagement created", false),
+	EventEngagementStatusChanged:  engagementEventSpec(EventEngagementStatusChanged, "Engagement status changed", false),
+	EventEngagementWindowStarting: engagementEventSpec(EventEngagementWindowStarting, "Engagement window starting", true),
+	EventEngagementWindowEnding:   engagementEventSpec(EventEngagementWindowEnding, "Engagement window ending", true),
+	EventFindingCommented: {
+		Type: EventFindingCommented, Label: "Finding commented", SchemaVersion: 1, SubjectKind: "finding", HasEngagement: true, HasSeverity: true,
+		Filters: []Filter{FilterMinSeverity, FilterEngagements}, MaxDataClass: DataClassDetail,
+		Variables: variables(signal("severity", "Severity of the finding"), signal("status", "Finding status when the comment was added"), summary("actor", "Who added the comment"), detail("comment_excerpt", "Sanitized excerpt of the comment, capped at 500 characters")),
+	},
+	EventFindingMentioned: {
+		Type: EventFindingMentioned, Label: "Finding mention", SchemaVersion: 1, SubjectKind: "finding", HasEngagement: true, HasSeverity: true,
+		Filters: []Filter{FilterMinSeverity, FilterEngagements}, MaxDataClass: DataClassSignal,
+		Variables: variables(signal("severity", "Severity of the finding"), signal("status", "Finding status when the mention was added")),
+	},
+	EventApprovalRequested: approvalEventSpec(EventApprovalRequested, "Approval requested"),
+	EventApprovalDecided:   approvalEventSpec(EventApprovalDecided, "Approval decided"),
+	EventApprovalTimedOut:  approvalEventSpec(EventApprovalTimedOut, "Approval timed out"),
+	EventIncidentUpdated: {
+		Type: EventIncidentUpdated, Label: "Incident updated", SchemaVersion: 1, SubjectKind: "incident", HasEngagement: true, HasSeverity: true,
+		Filters: []Filter{FilterMinSeverity, FilterEngagements}, MaxDataClass: DataClassSummary,
+		Variables: variables(signal("severity", "Severity of the incident"), signal("update_kind", "Kind of incident update"), signal("status", "Current incident status"), signal("disposition", "Current incident disposition"), summary("actor", "Who updated the incident"), summary("incident_title", "Title of the incident"), summary("owner", "Current incident owner")),
+	},
+	EventResponseFinished: {
+		Type: EventResponseFinished, Label: "Response finished", SchemaVersion: 1, SubjectKind: "response", HasEngagement: true,
+		Filters: []Filter{FilterEngagements, FilterOutcomes}, MaxDataClass: DataClassDetail,
+		Variables: variables(signal("outcome", "Terminal response outcome"), signal("action_kind", "Kind of governed response action"), summary("actor", "Actor recorded with the response"), summary("engagement_name", "Name of the associated engagement"), detail("target", "Sanitized response target")),
+	},
+	EventEvidenceChainBroken: {
+		Type: EventEvidenceChainBroken, Label: "Evidence chain broken", SchemaVersion: 1, SubjectKind: "evidence_chain", HasEngagement: true, HasSeverity: true,
+		MaxDataClass: DataClassSummary, Mandatory: true,
+		Variables: variables(signal("severity", "Severity of the custody failure"), signal("reason_code", "Stable reason the evidence chain failed verification"), summary("engagement_name", "Name of the associated engagement")),
+	},
 	EventVulnerabilityAction: {
 		Type: EventVulnerabilityAction, Label: "Vulnerability risk action", SchemaVersion: 1, SubjectKind: "vulnerability_action",
 		HasEngagement: true, HasSeverity: true,
@@ -188,6 +220,30 @@ func riskAcceptanceSpec(typ EventType, label string, expiring bool) EventSpec {
 			signal("severity", "Severity of the finding"), signal("tier", "Risk acceptance tier"), instant("accepted_at", "When risk was accepted"), instant("expires_at", "When risk acceptance expires"), instant("deadline", "Finding remediation deadline"), signal("reminder", "Reminder state"), signal("lead_time_hours", "Hours until expiry"),
 			summary("engagement_name", "Name of the engagement"), summary("finding_title", "Title of the finding"), summary("actor", "Actor recorded with the event"),
 		),
+	}
+}
+
+func engagementEventSpec(typ EventType, label string, leadTime bool) EventSpec {
+	filters := []Filter{FilterEngagements}
+	if leadTime {
+		filters = append(filters, FilterLeadTime)
+	}
+	return EventSpec{
+		Type: typ, Label: label, SchemaVersion: 1, SubjectKind: "engagement", HasEngagement: true, HasLeadTime: leadTime,
+		Filters: filters, MaxDataClass: DataClassSummary,
+		Variables: variables(
+			signal("status", "Current engagement status"), signal("from_status", "Previous engagement status"), signal("to_status", "New engagement status"),
+			instant("authorized_from", "Start of the engagement authorization window"), instant("authorized_to", "End of the engagement authorization window"), signal("timezone", "IANA time zone of the engagement"), signal("boundary", "Authorization boundary that triggered the reminder"), signal("lead_time_hours", "Hours before the authorization boundary"),
+			summary("engagement_name", "Name of the engagement"), summary("actor", "Actor recorded with the event"),
+		),
+	}
+}
+
+func approvalEventSpec(typ EventType, label string) EventSpec {
+	return EventSpec{
+		Type: typ, Label: label, SchemaVersion: 1, SubjectKind: "approval", HasEngagement: true,
+		Filters: []Filter{FilterEngagements, FilterKinds}, MaxDataClass: DataClassSummary,
+		Variables: variables(signal("kind", "Approval kind"), signal("status", "Approval status"), signal("decision", "Recorded approval decision"), instant("expires_at", "When the approval expires"), summary("actor", "Actor recorded with the approval"), summary("engagement_name", "Name of the engagement")),
 	}
 }
 

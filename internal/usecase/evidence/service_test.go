@@ -11,7 +11,9 @@ import (
 	"time"
 
 	evdom "github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -141,6 +143,27 @@ type capAudit struct{ entries []ports.AuditEntry }
 func (a *capAudit) Record(_ context.Context, e ports.AuditEntry) error {
 	a.entries = append(a.entries, e)
 	return nil
+}
+
+type evidenceLifecycleFacts struct {
+	ports.NotificationLifecycleFacts
+	err error
+}
+
+func (f evidenceLifecycleFacts) SnapshotNotificationLifecycleFacts(context.Context, shared.ID, shared.ID, string) (ports.NotificationLifecycleFacts, error) {
+	return f.NotificationLifecycleFacts, f.err
+}
+
+type appendThenFailEvidenceOutbox struct {
+	next ports.NotificationOutbox
+	err  error
+}
+
+func (o appendThenFailEvidenceOutbox) Append(ctx context.Context, record notification.SourceRecord) error {
+	if err := o.next.Append(ctx, record); err != nil {
+		return err
+	}
+	return o.err
 }
 func (a *capAudit) has(action string) bool {
 	for _, e := range a.entries {
@@ -701,5 +724,171 @@ func TestVerifyChainErrorReflectsIntactness(t *testing.T) {
 	store.items[eng] = chain
 	if err := svc.VerifyChainError(ctx, eng); !errors.Is(err, evdom.ErrChainBroken) {
 		t.Fatalf("a tampered chain must return an ErrChainBroken-wrapping error, got %v", err)
+	}
+}
+
+func TestVerifyChainBrokenCapturesMandatoryImmutableNotification(t *testing.T) {
+	svc, store, audit := newVault(t, nil)
+	tenant, engagementID := shared.ID("tenant-evidence-notify"), shared.ID("eng-evidence-notify")
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := svc.SealOnce(ctx, engagementID, "detection", "d1", []byte("body"), "agent:1"); err != nil {
+		t.Fatal(err)
+	}
+	chain := store.items[engagementID]
+	chain[0].CreatedBy = "attacker"
+	store.items[engagementID] = chain
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate(tenant, time.Unix(999, 0).UTC())
+	if err := svc.SetNotifications(memory.NewTenantTransactionRunner(), outbox, evidenceLifecycleFacts{NotificationLifecycleFacts: ports.NotificationLifecycleFacts{EngagementName: "October assessment", LeadUserID: "captured-lead"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.VerifyChainError(ctx, engagementID); !errors.Is(err, evdom.ErrChainBroken) {
+		t.Fatalf("VerifyChainError() = %v, want ErrChainBroken", err)
+	}
+	records := outbox.Records(tenant)
+	if len(records) != 1 {
+		t.Fatalf("mandatory evidence notification count = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record.EventType != notification.EventEvidenceChainBroken || record.CaptureVersion != 3 || record.Severity != shared.SeverityCritical {
+		t.Fatalf("evidence alert source record = %+v", record)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(record.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["reason_code"] != "chain_invalid" || data["evidence_chain_id"] != engagementID.String() || data["lead_user_id"] != "captured-lead" {
+		t.Fatalf("evidence alert data = %#v", data)
+	}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "attacker") || strings.Contains(string(encoded), "hash does not match") {
+		t.Fatalf("evidence alert leaked tamper details: %s", encoded)
+	}
+	if !audit.has("evidence.tampered") {
+		t.Fatalf("tamper alert audit missing: %+v", audit.entries)
+	}
+	// Changing the configured lead before replay and projection must not rewrite
+	// the lead captured when the chain failure was first observed.
+	if err := svc.SetNotifications(memory.NewTenantTransactionRunner(), outbox, evidenceLifecycleFacts{NotificationLifecycleFacts: ports.NotificationLifecycleFacts{LeadUserID: "replacement-lead"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Re-verification reuses the stable source key; the outbox retains one immutable
+	// first snapshot even when the detector is replayed.
+	if err := svc.VerifyChainError(ctx, engagementID); !errors.Is(err, evdom.ErrChainBroken) {
+		t.Fatalf("replayed VerifyChainError() = %v, want ErrChainBroken", err)
+	}
+	if records := outbox.Records(tenant); len(records) != 1 {
+		t.Fatalf("replay must not append a second mandatory alert: %+v", records)
+	}
+	repo := memory.NewNotificationRepository(nil, svc.clock.Now)
+	source := memory.NewNotificationSource(repo, outbox)
+	if count, err := source.Poll(ctx, svc.clock.Now(), 10); err != nil || count != 1 {
+		t.Fatalf("project captured custody alert: count=%d err=%v", count, err)
+	}
+	events, err := repo.ListRecentNotificationEvents(ctx, tenant, notification.EventEvidenceChainBroken, 10)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("projected custody events: count=%d err=%v", len(events), err)
+	}
+	subject, err := notification.SubjectFromEvent(events[0])
+	if err != nil || !subject.CapturedLead || subject.LeadID != "captured-lead" || !subject.Admins {
+		t.Fatalf("custody routing must retain captured lead and admin floor: subject=%+v err=%v", subject, err)
+	}
+}
+
+func TestVerifyChainBrokenOutboxFailureStillBlocksReporting(t *testing.T) {
+	svc, store, audit := newVault(t, nil)
+	tenant, engagementID := shared.ID("tenant-evidence-failure"), shared.ID("eng-evidence-failure")
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := svc.SealOnce(ctx, engagementID, "detection", "d1", []byte("body"), "agent:1"); err != nil {
+		t.Fatal(err)
+	}
+	chain := store.items[engagementID]
+	chain[0].CreatedBy = "attacker"
+	store.items[engagementID] = chain
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate(tenant, time.Unix(999, 0).UTC())
+	injected := errors.New("outbox failure after append")
+	if err := svc.SetNotifications(memory.NewTenantTransactionRunner(), appendThenFailEvidenceOutbox{next: outbox, err: injected}, evidenceLifecycleFacts{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.VerifyChainError(ctx, engagementID); !errors.Is(err, evdom.ErrChainBroken) {
+		t.Fatalf("outbox failure must preserve ErrChainBroken, got %v", err)
+	}
+	if records := outbox.Records(tenant); len(records) != 0 {
+		t.Fatalf("failed alert transaction must not retain source record: %+v", records)
+	}
+	if !audit.has("evidence.tampered") {
+		t.Fatal("notification append failure must not suppress the custody audit")
+	}
+	if report, err := svc.Verify(ctx, engagementID); err != nil || report.Intact {
+		t.Fatalf("failed alert must not make evidence reportable: report=%+v err=%v", report, err)
+	}
+}
+
+func TestVerifyChainBrokenNotificationFailurePreservesAudit(t *testing.T) {
+	for _, missingTenant := range []bool{false, true} {
+		t.Run(strconv.FormatBool(missingTenant), func(t *testing.T) {
+			svc, store, audit := newVault(t, nil)
+			tenant, engagementID := shared.ID("custody-audit-tenant"), shared.ID("custody-audit-engagement")
+			ctx := context.Background()
+			if !missingTenant {
+				ctx = shared.WithTenant(ctx, tenant)
+			}
+			if _, err := svc.SealOnce(ctx, engagementID, "detection", "first", []byte("body"), "agent"); err != nil {
+				t.Fatal(err)
+			}
+			store.items[engagementID][0].CreatedBy = "tampered"
+			outbox := memory.NewNotificationOutbox()
+			outbox.Activate(tenant, time.Unix(999, 0).UTC())
+			if err := svc.SetNotifications(memory.NewTenantTransactionRunner(), outbox, evidenceLifecycleFacts{err: shared.ErrNotFound}); err != nil {
+				t.Fatal(err)
+			}
+			if err := svc.VerifyChainError(ctx, engagementID); !errors.Is(err, evdom.ErrChainBroken) {
+				t.Fatalf("notification failure changed verification result: %v", err)
+			}
+			if !audit.has("evidence.tampered") {
+				t.Fatal("missing tenant or notification facts must not suppress the custody audit")
+			}
+			if len(outbox.Records(tenant)) != 0 {
+				t.Fatal("failed capture must not retain a notification source")
+			}
+		})
+	}
+}
+
+func TestVerifyChainBrokenAlertSurvivesOuterTransactionRollback(t *testing.T) {
+	svc, store, audit := newVault(t, nil)
+	tenant, engagementID := shared.ID("tenant-evidence-independent"), shared.ID("eng-evidence-independent")
+	ctx := shared.WithTenant(context.Background(), tenant)
+	if _, err := svc.SealOnce(ctx, engagementID, "detection", "d1", []byte("body"), "agent:1"); err != nil {
+		t.Fatal(err)
+	}
+	chain := store.items[engagementID]
+	chain[0].CreatedBy = "attacker"
+	store.items[engagementID] = chain
+	runner := memory.NewTenantTransactionRunner()
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate(tenant, time.Unix(999, 0).UTC())
+	if err := svc.SetNotifications(runner, outbox, evidenceLifecycleFacts{}); err != nil {
+		t.Fatal(err)
+	}
+	outerRollback := errors.New("roll back report transaction")
+	err := runner.Run(ctx, tenant, func(outerCtx context.Context) error {
+		if err := svc.VerifyChainError(outerCtx, engagementID); !errors.Is(err, evdom.ErrChainBroken) {
+			t.Fatalf("VerifyChainError() = %v, want ErrChainBroken", err)
+		}
+		return outerRollback
+	})
+	if !errors.Is(err, outerRollback) {
+		t.Fatalf("outer transaction error = %v, want %v", err, outerRollback)
+	}
+	if records := outbox.Records(tenant); len(records) != 1 {
+		t.Fatalf("independent tamper source was rolled back with report: %+v", records)
+	}
+	if !audit.has("evidence.tampered") {
+		t.Fatalf("independent tamper audit missing: %+v", audit.entries)
 	}
 }

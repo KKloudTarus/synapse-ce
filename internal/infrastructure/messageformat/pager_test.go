@@ -75,3 +75,31 @@ func TestPagerFormattersBoundUnicodeSummaryForTheirProvider(t *testing.T) {
 		}
 	}
 }
+
+func TestJSMNoteRetainsBoundedPlainClassFilteredSummary(t *testing.T) {
+	full := "Phê duyệt đã quyết định: approved " + strings.Repeat("Đợt đánh giá ", 30)
+	out, err := (JSMFormatter{}).Format(ports.RenderedMessage{Fields: map[string]string{"summary": full, "body": "private raw body"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Summary string `json:"summary"`
+		Note    string `json:"note"`
+	}
+	if err := json.Unmarshal(out.Body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if utf8.RuneCountInString(payload.Summary) > JSMMessageRunes || payload.Note != strings.TrimSpace(full) || strings.Contains(payload.Note, "private raw") {
+		t.Fatalf("payload=%+v", payload)
+	}
+	out, err = (JSMFormatter{}).Format(ports.RenderedMessage{Fields: map[string]string{"summary": strings.Repeat("ễ", JSMNoteRunes+1)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out.Body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(payload.Note) || utf8.RuneCountInString(payload.Note) != JSMNoteRunes {
+		t.Fatalf("note length=%d", utf8.RuneCountInString(payload.Note))
+	}
+}

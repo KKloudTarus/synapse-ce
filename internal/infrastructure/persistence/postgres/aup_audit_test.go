@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aup"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	aupuc "github.com/KKloudTarus/synapse-ce/internal/usecase/aup"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 type aupTestClock struct{ now time.Time }
@@ -36,6 +38,169 @@ func runtimeAUPPool(ctx context.Context, adminPool *pgxpool.Pool, dsn, role stri
 	runtimeConfig.ConnConfig.Password = "test-password"
 	runtimeConfig.MaxConns = 1
 	return pgxpool.NewWithConfig(ctx, runtimeConfig)
+}
+
+func freshAuditChainPool(t *testing.T) (*pgxpool.Pool, string) {
+	t.Helper()
+	sharedDSN := os.Getenv("SYNAPSE_TEST_DB_DSN")
+	if sharedDSN == "" {
+		t.Skip("set SYNAPSE_TEST_DB_DSN to run the postgres integration test")
+	}
+	ctx := context.Background()
+	dsn := isolatedIntegrationDatabase(t, ctx, sharedDSN)
+	if err := Migrate(ctx, dsn); err != nil {
+		t.Fatalf("migrate isolated audit database: %v", err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect isolated audit database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool, dsn
+}
+
+func TestAuditFirstObservationUsesGlobalV1ChainWhenRLSInactive(t *testing.T) {
+	pool, _ := freshAuditChainPool(t)
+	ctx := context.Background()
+	var rlsEnforced bool
+	if err := pool.QueryRow(ctx, `SELECT row_security_active('audit_log'::regclass)`).Scan(&rlsEnforced); err != nil {
+		t.Fatalf("inspect audit RLS: %v", err)
+	}
+	if rlsEnforced {
+		t.Fatal("isolated admin pool must exercise the RLS-bypassing global audit chain")
+	}
+
+	tenantA, tenantB := shared.ID("audit-global-a"), shared.ID("audit-global-b")
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES($1,$1),($2,$2)`, tenantA.String(), tenantB.String()); err != nil {
+		t.Fatalf("seed audit tenants: %v", err)
+	}
+	log := NewAuditLog(pool)
+	base := "audit-global-first-observation-" + randHex(t)
+	if err := log.Record(ctx, ports.AuditEntry{Actor: "system", Action: "test.global.before", Target: base + ":before", At: time.Unix(1000, 0).UTC()}); err != nil {
+		t.Fatalf("write ordinary global audit entry: %v", err)
+	}
+	first := ports.AuditEntry{
+		Actor: "system", Action: "evidence.tampered", Target: base + ":observation",
+		Metadata: map[string]string{"idempotency_key": "first-observation", "reason_code": "chain_invalid"},
+		At:       time.Unix(1001, 0).UTC(),
+	}
+	if err := log.RecordFirstObservation(shared.WithTenant(ctx, tenantA), first); err != nil {
+		t.Fatalf("write tenant A first observation on global chain: %v", err)
+	}
+	var firstHash string
+	if err := pool.QueryRow(ctx, `SELECT hash FROM audit_log WHERE tenant_id=$1 AND action=$2 AND target=$3`, tenantA.String(), first.Action, first.Target).Scan(&firstHash); err != nil {
+		t.Fatalf("read tenant A first observation hash: %v", err)
+	}
+	if err := log.Record(ctx, ports.AuditEntry{Actor: "system", Action: "test.global.after", Target: base + ":after", At: time.Unix(1002, 0).UTC()}); err != nil {
+		t.Fatalf("write ordinary global audit after first observation: %v", err)
+	}
+	later := first
+	later.At = first.At.Add(time.Hour)
+	if err := log.RecordFirstObservation(shared.WithTenant(ctx, tenantA), later); err != nil {
+		t.Fatalf("replay tenant A first observation with later clock: %v", err)
+	}
+	var retainedAt time.Time
+	var retainedHash string
+	if err := pool.QueryRow(ctx, `SELECT created_at, hash FROM audit_log WHERE tenant_id=$1 AND action=$2 AND target=$3`, tenantA.String(), first.Action, first.Target).Scan(&retainedAt, &retainedHash); err != nil {
+		t.Fatalf("read retained tenant A first observation: %v", err)
+	}
+	if !retainedAt.Equal(first.At) || retainedHash != firstHash {
+		t.Fatalf("later retry rewrote global first observation time/hash=%s/%q, want %s/%q", retainedAt, retainedHash, first.At, firstHash)
+	}
+	if err := log.RecordFirstObservation(shared.WithTenant(ctx, tenantB), later); err != nil {
+		t.Fatalf("write tenant B same key first observation: %v", err)
+	}
+	mismatch := later
+	mismatch.Metadata = map[string]string{"idempotency_key": "first-observation", "reason_code": "other"}
+	if err := log.RecordFirstObservation(shared.WithTenant(ctx, tenantA), mismatch); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("metadata mismatch error=%v, want conflict", err)
+	}
+
+	report, err := log.VerifyGlobal(ctx)
+	if err != nil || !report.Intact {
+		t.Fatalf("global chain report=%+v err=%v", report, err)
+	}
+	rows, err := pool.Query(ctx, `SELECT tenant_id, hash_version, created_at FROM audit_log ORDER BY id`)
+	if err != nil {
+		t.Fatalf("read global audit rows: %v", err)
+	}
+	defer rows.Close()
+	type row struct {
+		tenant  string
+		version int
+		at      time.Time
+	}
+	var got []row
+	for rows.Next() {
+		var current row
+		if err := rows.Scan(&current.tenant, &current.version, &current.at); err != nil {
+			t.Fatalf("scan global audit row: %v", err)
+		}
+		got = append(got, current)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate global audit rows: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("global audit rows=%+v, want four without duplicate retry", got)
+	}
+	for _, current := range got {
+		if current.version != 1 {
+			t.Fatalf("global-chain row=%+v, want hash version 1", current)
+		}
+	}
+	if got[1].tenant != tenantA.String() || !got[1].at.Equal(first.At) || got[3].tenant != tenantB.String() {
+		t.Fatalf("first-observation tenant/time scope=%+v", got)
+	}
+}
+
+func TestRuntimeFirstObservationUsesTenantV2AndRecordOnceKeepsExactTimestamp(t *testing.T) {
+	pool, dsn := freshAuditChainPool(t)
+	ctx := context.Background()
+	role := uniqueProbeRole(t, dsn, "audit_first_observation")
+	runtimePool, err := runtimeAUPPool(ctx, pool, dsn, role)
+	if err != nil {
+		t.Fatalf("set up runtime audit role: %v", err)
+	}
+	t.Cleanup(runtimePool.Close)
+	var rlsEnforced bool
+	if err := runtimePool.QueryRow(ctx, `SELECT row_security_active('audit_log'::regclass)`).Scan(&rlsEnforced); err != nil {
+		t.Fatalf("inspect runtime audit RLS: %v", err)
+	}
+	if !rlsEnforced {
+		t.Fatal("runtime audit role must exercise the tenant chain")
+	}
+
+	tenant := shared.ID("audit-runtime-tenant")
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(id,name) VALUES($1,$1)`, tenant.String()); err != nil {
+		t.Fatalf("seed runtime audit tenant: %v", err)
+	}
+	log := NewAuditLog(runtimePool)
+	first := ports.AuditEntry{
+		Actor: "system", Action: "evidence.tampered", Target: "runtime-first-observation",
+		Metadata: map[string]string{"idempotency_key": "runtime-observation", "reason_code": "chain_invalid"},
+		At:       time.Unix(1000, 0).UTC(),
+	}
+	tenantCtx := shared.WithTenant(ctx, tenant)
+	if err := log.RecordFirstObservation(tenantCtx, first); err != nil {
+		t.Fatalf("write runtime first observation: %v", err)
+	}
+	later := first
+	later.At = first.At.Add(time.Hour)
+	if err := log.RecordFirstObservation(tenantCtx, later); err != nil {
+		t.Fatalf("replay runtime first observation: %v", err)
+	}
+	if err := log.RecordOnce(tenantCtx, later); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("ordinary RecordOnce timestamp mismatch error=%v, want conflict", err)
+	}
+	var version int
+	var retainedAt time.Time
+	if err := pool.QueryRow(ctx, `SELECT hash_version, created_at FROM audit_log WHERE tenant_id=$1 AND action=$2`, tenant.String(), first.Action).Scan(&version, &retainedAt); err != nil {
+		t.Fatalf("read runtime first observation: %v", err)
+	}
+	if version != 2 || !retainedAt.Equal(first.At) {
+		t.Fatalf("runtime first observation version/time=%d/%s, want 2/%s", version, retainedAt, first.At)
+	}
 }
 
 func TestAUPStoreAndAuditLog(t *testing.T) {

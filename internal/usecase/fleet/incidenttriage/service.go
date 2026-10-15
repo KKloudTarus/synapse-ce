@@ -8,10 +8,14 @@ package incidenttriage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/incident"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -26,9 +30,12 @@ type IncidentAppender interface {
 
 // Service performs analyst triage mutations on incidents.
 type Service struct {
-	incidents IncidentAppender
-	audit     ports.AuditLogger
-	now       func() time.Time
+	incidents         IncidentAppender
+	audit             ports.AuditLogger
+	now               func() time.Time
+	notificationTx    ports.TenantTransactionRunner
+	notifications     ports.NotificationOutbox
+	notificationFacts ports.NotificationLifecycleFactsReader
 }
 
 // NewService constructs the triage service. now supplies event timestamps (injected for determinism).
@@ -43,6 +50,16 @@ func NewService(incidents IncidentAppender, audit ports.AuditLogger, now func() 
 		return nil, fmt.Errorf("%w: triage service requires a clock", shared.ErrValidation)
 	}
 	return &Service{incidents: incidents, audit: audit, now: now}, nil
+}
+
+// SetNotifications enables transactional incident-update capture. The incident revision,
+// audit entry, and source snapshot share the provided tenant transaction.
+func (s *Service) SetNotifications(tx ports.TenantTransactionRunner, outbox ports.NotificationOutbox, facts ports.NotificationLifecycleFactsReader) error {
+	if tx == nil || outbox == nil || facts == nil {
+		return fmt.Errorf("%w: incident notification dependencies are required", shared.ErrValidation)
+	}
+	s.notificationTx, s.notifications, s.notificationFacts = tx, outbox, facts
+	return nil
 }
 
 // AssignOwner sets the incident's owner. actor is the authenticated principal responsible (it MUST be the
@@ -100,10 +117,9 @@ func (s *Service) SetDisposition(ctx context.Context, actor string, id shared.ID
 // ports.AuditLogger is a SECONDARY, cross-cutting trail. Auditing AFTER a successful append means a failed
 // append never leaves a false audit record for a mutation that did not happen.
 //
-// Caller contract on an audit-failure error: the mutation IS already committed (the incident event is
-// durable and carries the attribution) — the error signals only that the secondary audit trail has a gap.
-// The caller MUST NOT blindly retry (the stores are not transactional and the append is not idempotent, so
-// a retry would append a DUPLICATE event); treat it as committed-but-unaudited and reconcile/alert.
+// Without notification capture, an audit-failure error means the incident event is already committed and
+// callers must treat it as committed-but-unaudited. With capture enabled, the incident event, source
+// snapshot, and audit record share the tenant transaction and roll back together on any write failure.
 func (s *Service) apply(ctx context.Context, actor string, id shared.ID, action string, build func(time.Time) incident.IncidentEvent, meta map[string]string) (incident.Incident, error) {
 	if id.IsZero() {
 		return incident.Incident{}, fmt.Errorf("%w: incident id is required", shared.ErrValidation)
@@ -111,21 +127,99 @@ func (s *Service) apply(ctx context.Context, actor string, id shared.ID, action 
 	if actor == "" {
 		return incident.Incident{}, fmt.Errorf("%w: triage mutation requires an actor", shared.ErrValidation)
 	}
-	cur, err := s.incidents.Get(ctx, id)
-	if err != nil {
+	var updated incident.Incident
+	write := func(writeCtx context.Context, tenant shared.ID) error {
+		cur, err := s.incidents.Get(writeCtx, id)
+		if err != nil {
+			return err
+		}
+		at := s.now().UTC()
+		updated, err = s.incidents.Append(writeCtx, cur.ID, cur.Revision, []incident.IncidentEvent{build(at)})
+		if err != nil {
+			return err
+		}
+		if s.notifications != nil && action != "incident.commented" && !updated.EngagementID.IsZero() {
+			if err := s.appendIncidentUpdated(writeCtx, tenant, updated, incidentUpdateKind(action), actor, at); err != nil {
+				return err
+			}
+		}
+		entry := ports.AuditEntry{Actor: actor, Action: action, Target: updated.ID.String(), At: at, Metadata: map[string]string{}}
+		for k, v := range meta {
+			entry.Metadata[k] = v
+		}
+		if err := s.audit.Record(writeCtx, entry); err != nil {
+			return fmt.Errorf("audit %s: %w", action, err)
+		}
+		return nil
+	}
+	if s.notifications == nil {
+		if err := write(ctx, ""); err != nil {
+			return incident.Incident{}, err
+		}
+		return updated, nil
+	}
+	tenant, ok := shared.TenantFrom(ctx)
+	if !ok || tenant.IsZero() {
+		return incident.Incident{}, fmt.Errorf("%w: incident notification requires a tenant", shared.ErrValidation)
+	}
+	if err := s.notificationTx.Run(ctx, tenant, func(txCtx context.Context) error { return write(txCtx, tenant) }); err != nil {
 		return incident.Incident{}, err
-	}
-	at := s.now().UTC()
-	updated, err := s.incidents.Append(ctx, id, cur.Revision, []incident.IncidentEvent{build(at)})
-	if err != nil {
-		return incident.Incident{}, err
-	}
-	entry := ports.AuditEntry{Actor: actor, Action: action, Target: id.String(), At: at, Metadata: map[string]string{}}
-	for k, v := range meta {
-		entry.Metadata[k] = v
-	}
-	if err := s.audit.Record(ctx, entry); err != nil {
-		return incident.Incident{}, fmt.Errorf("audit %s: %w", action, err)
 	}
 	return updated, nil
+}
+
+func incidentUpdateKind(action string) string {
+	switch action {
+	case "incident.owner_changed":
+		return "owner"
+	case "incident.status_changed":
+		return "status"
+	case "incident.disposition_set":
+		return "disposition"
+	default:
+		return "updated"
+	}
+}
+
+func (s *Service) appendIncidentUpdated(ctx context.Context, tenant shared.ID, item incident.Incident, updateKind, actor string, occurredAt time.Time) error {
+	if item.ID.IsZero() || item.EngagementID.IsZero() {
+		return fmt.Errorf("%w: incident notification requires canonical incident engagement", shared.ErrValidation)
+	}
+	facts, err := s.notificationFacts.SnapshotNotificationLifecycleFacts(ctx, tenant, item.EngagementID, actor)
+	if err != nil {
+		return fmt.Errorf("snapshot incident notification facts: %w", err)
+	}
+	safe := func(value string) string {
+		return privacy.ScrubURLCredentials(notification.ScrubPersonalText(strings.TrimSpace(value), 500))
+	}
+	actorName := safe(facts.ActorName)
+	data := map[string]any{
+		"title": "Incident updated", "summary": "An incident was updated.",
+		"incident_id": item.ID, "engagement_id": item.EngagementID, "lead_user_id": facts.LeadUserID.String(),
+		"severity": item.Severity, "update_kind": updateKind, "status": item.State, "disposition": item.Disposition,
+		"actor": actorName, "incident_title": safe(item.Title), "owner": safe(item.OwnerID),
+	}
+	if !facts.ActorUserID.IsZero() {
+		data["actor_user_id"] = facts.ActorUserID
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("encode incident notification data: %w", err)
+	}
+	vars := map[string]string{
+		"severity": string(item.Severity), "update_kind": updateKind, "status": string(item.State),
+		"disposition": string(item.Disposition), "actor": actorName, "incident_title": safe(item.Title), "owner": safe(item.OwnerID),
+	}
+	record, err := notification.SnapshotSourceRecord(notification.SourceRecord{
+		TenantID: tenant, SourceKind: "incident_update", SourceID: item.ID.String() + ":" + fmt.Sprint(item.Revision),
+		EventType: notification.EventIncidentUpdated, EngagementID: item.EngagementID, Severity: item.Severity,
+		OccurredAt: occurredAt, Data: raw, SubjectKind: "incident", SubjectID: item.ID.String(),
+	}, vars)
+	if err != nil {
+		return fmt.Errorf("snapshot incident notification: %w", err)
+	}
+	if err := s.notifications.Append(ctx, record); err != nil {
+		return fmt.Errorf("append incident notification: %w", err)
+	}
+	return nil
 }

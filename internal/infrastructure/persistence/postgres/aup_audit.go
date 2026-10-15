@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -60,9 +61,10 @@ type AuditLog struct{ pool *pgxpool.Pool }
 func NewAuditLog(pool *pgxpool.Pool) *AuditLog { return &AuditLog{pool: pool} }
 
 var (
-	_ ports.AuditLogger           = (*AuditLog)(nil)
-	_ ports.AuditReader           = (*AuditLog)(nil)
-	_ ports.IdempotentAuditLogger = (*AuditLog)(nil)
+	_ ports.AuditLogger                 = (*AuditLog)(nil)
+	_ ports.AuditReader                 = (*AuditLog)(nil)
+	_ ports.IdempotentAuditLogger       = (*AuditLog)(nil)
+	_ ports.FirstObservationAuditLogger = (*AuditLog)(nil)
 )
 
 // auditChainLock is a fixed key for the transaction-scoped advisory lock that
@@ -237,7 +239,7 @@ func (l *AuditLog) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
 	}
 	const maxAttempts = 8
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		err := l.recordOnce(ctx, e)
+		err := l.recordOnce(ctx, e, false)
 		if err == nil {
 			return nil
 		}
@@ -250,10 +252,37 @@ func (l *AuditLog) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
 	return fmt.Errorf("append idempotent audit entry: %w after %d attempts", shared.ErrConflict, maxAttempts)
 }
 
+// RecordFirstObservation preserves the first immutable custody observation when
+// a later delivery retry has a different wall-clock timestamp. It requires a
+// tenant and deterministic key so the dedupe remains inside the existing
+// tenant/action/key scope and its writer lock.
+func (l *AuditLog) RecordFirstObservation(ctx context.Context, e ports.AuditEntry) error {
+	if strings.TrimSpace(e.Metadata["idempotency_key"]) == "" {
+		return fmt.Errorf("%w: first audit observation requires idempotency key", shared.ErrValidation)
+	}
+	tenant, ok := shared.TenantFrom(ctx)
+	if !ok || tenant.IsZero() {
+		return fmt.Errorf("%w: first audit observation requires tenant context", shared.ErrValidation)
+	}
+	const maxAttempts = 8
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err := l.recordOnce(ctx, e, true)
+		if err == nil {
+			return nil
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			continue
+		}
+		return err
+	}
+	return fmt.Errorf("append first audit observation: %w after %d attempts", shared.ErrConflict, maxAttempts)
+}
+
 func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 	const maxAttempts = 8
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		err := l.recordOnce(ctx, e)
+		err := l.recordOnce(ctx, e, false)
 		if err == nil {
 			return nil
 		}
@@ -275,7 +304,7 @@ func (l *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 // longer leave a committed audit row claiming it happened, and a committed write can no longer
 // lose its record because a separate audit transaction failed afterwards. Outside a bound
 // transaction the audit log opens its own, as before.
-func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry) error {
+func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry, firstObservation bool) error {
 	tenantID, tenantBound := shared.TenantFrom(ctx)
 	if tenantBound {
 		bound, isBound, err := contextTenantTx(ctx, tenantID)
@@ -283,7 +312,7 @@ func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry) error {
 			return err
 		}
 		if isBound {
-			return appendOnNested(ctx, bound, tenantID, e)
+			return appendOnNestedWithFirstObservation(ctx, bound, tenantID, e, firstObservation)
 		}
 	}
 	tx, err := l.pool.Begin(ctx)
@@ -296,7 +325,7 @@ func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry) error {
 			return fmt.Errorf("audit tx: set tenant: %w", err)
 		}
 	}
-	if err := appendOn(ctx, tx, tenantID, tenantBound, e); err != nil {
+	if err := appendOnWithFirstObservation(ctx, tx, tenantID, tenantBound, e, firstObservation); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -315,11 +344,15 @@ func (l *AuditLog) recordOnce(ctx context.Context, e ports.AuditEntry) error {
 //
 // pgx models a nested Begin as a savepoint, so this costs one SAVEPOINT and one RELEASE.
 func appendOnNested(ctx context.Context, tx pgx.Tx, tenantID shared.ID, e ports.AuditEntry) error {
+	return appendOnNestedWithFirstObservation(ctx, tx, tenantID, e, false)
+}
+
+func appendOnNestedWithFirstObservation(ctx context.Context, tx pgx.Tx, tenantID shared.ID, e ports.AuditEntry, firstObservation bool) error {
 	nested, err := tx.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("audit savepoint: %w", err)
 	}
-	if err := appendOn(ctx, nested, tenantID, true, e); err != nil {
+	if err := appendOnWithFirstObservation(ctx, nested, tenantID, true, e, firstObservation); err != nil {
 		// Roll back to the savepoint so the enclosing transaction stays usable and Record can
 		// retry. The rollback error is deliberately not returned: the append error is the one the
 		// caller must see, and Record dispatches its retry on that error's code.
@@ -336,12 +369,19 @@ func appendOnNested(ctx context.Context, tx pgx.Tx, tenantID shared.ID, e ports.
 // global-chained form the same way whether the transaction was opened here or handed in by the
 // caller. It never commits: whoever owns the transaction does.
 func appendOn(ctx context.Context, tx pgx.Tx, tenantID shared.ID, tenantBound bool, e ports.AuditEntry) error {
+	return appendOnWithFirstObservation(ctx, tx, tenantID, tenantBound, e, false)
+}
+
+func appendOnWithFirstObservation(ctx context.Context, tx pgx.Tx, tenantID shared.ID, tenantBound bool, e ports.AuditEntry, firstObservation bool) error {
 	var rlsEnforced bool
 	if err := tx.QueryRow(ctx, "SELECT row_security_active('audit_log'::regclass)").Scan(&rlsEnforced); err != nil {
 		return fmt.Errorf("audit tx: inspect RLS: %w", err)
 	}
 	if tenantBound && rlsEnforced {
-		return appendTenantAudit(ctx, tx, tenantID.String(), e)
+		return appendTenantAuditWithFirstObservation(ctx, tx, tenantID.String(), e, firstObservation)
+	}
+	if firstObservation && tenantBound {
+		return appendGlobalAuditWithFirstObservation(ctx, tx, tenantID.String(), e)
 	}
 	return appendAudit(ctx, tx, e)
 }
@@ -374,6 +414,44 @@ func appendAudit(ctx context.Context, tx pgx.Tx, e ports.AuditEntry) error {
 	return nil
 }
 
+// appendGlobalAuditWithFirstObservation preserves first-observation dedupe when
+// a server-side role bypasses RLS. The row remains in the historical v1 global
+// chain; tenant_id only scopes the immutable idempotency key and is not a chain
+// selector in this mode.
+func appendGlobalAuditWithFirstObservation(ctx context.Context, tx pgx.Tx, tenantID string, e ports.AuditEntry) error {
+	meta, err := json.Marshal(e.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshal audit metadata: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(auditChainLock)); err != nil {
+		return fmt.Errorf("audit lock: %w", err)
+	}
+	matched, err := sameIdempotentAuditPayload(ctx, tx, tenantID, e, true)
+	if err != nil {
+		return err
+	}
+	if matched {
+		return nil
+	}
+	var prev *string
+	if err := tx.QueryRow(ctx,
+		`SELECT hash FROM audit_log WHERE hash IS NOT NULL ORDER BY id DESC LIMIT 1`).Scan(&prev); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("audit head: %w", err)
+	}
+	prevHash := ""
+	if prev != nil {
+		prevHash = *prev
+	}
+	hash := audit.ComputeHash(prevHash, e.Actor, e.Action, e.Target, e.Metadata, e.At)
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO audit_log (tenant_id, actor, action, target, metadata, idempotency_key, hash_version, created_at, hash, previous_hash)
+		 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), 1, $7, $8, $9)`,
+		tenantID, e.Actor, e.Action, e.Target, string(meta), e.Metadata["idempotency_key"], e.At, hash, prevHash); err != nil {
+		return fmt.Errorf("insert audit: %w", err)
+	}
+	return nil
+}
+
 // sameAuditPayload reports whether two entries would hash identically. It compares
 // exactly the fields audit.ComputeHash covers — Hash/PreviousHash are assigned by
 // the chain on append and are deliberately excluded.
@@ -384,7 +462,19 @@ func sameAuditPayload(left, right ports.AuditEntry) bool {
 		maps.Equal(left.Metadata, right.Metadata)
 }
 
+// sameFirstObservationPayload compares the immutable observation content while
+// deliberately excluding At. The first committed observation owns the timestamp
+// and chain hash; a retry must never rewrite either one.
+func sameFirstObservationPayload(left, right ports.AuditEntry) bool {
+	return left.Actor == right.Actor && left.Action == right.Action &&
+		left.Target == right.Target && maps.Equal(left.Metadata, right.Metadata)
+}
+
 func appendTenantAudit(ctx context.Context, tx pgx.Tx, tenantID string, e ports.AuditEntry) error {
+	return appendTenantAuditWithFirstObservation(ctx, tx, tenantID, e, false)
+}
+
+func appendTenantAuditWithFirstObservation(ctx context.Context, tx pgx.Tx, tenantID string, e ports.AuditEntry, firstObservation bool) error {
 	meta, err := json.Marshal(e.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal audit metadata: %w", err)
@@ -392,31 +482,12 @@ func appendTenantAudit(ctx context.Context, tx pgx.Tx, tenantID string, e ports.
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(auditChainLock)); err != nil {
 		return fmt.Errorf("audit lock: %w", err)
 	}
-	if key := e.Metadata["idempotency_key"]; key != "" {
-		// Collapse only a TRUE duplicate. Treating any pre-existing row under this
-		// idempotency key as success would let a caller (notably the fleet audit
-		// reconciler) acknowledge an obligation whose exact immutable payload was
-		// never written, leaving durable state with a chain entry that describes
-		// something else. Compare the full canonical payload and fail closed.
-		var stored ports.AuditEntry
-		var storedMeta []byte
-		err := tx.QueryRow(ctx,
-			`SELECT actor, target, metadata, created_at FROM audit_log
-			 WHERE tenant_id = $1 AND action = $2 AND idempotency_key = $3`,
-			tenantID, e.Action, key).Scan(&stored.Actor, &stored.Target, &storedMeta, &stored.At)
-		switch {
-		case err == nil:
-			if err := json.Unmarshal(storedMeta, &stored.Metadata); err != nil {
-				return fmt.Errorf("decode idempotent audit metadata: %w", err)
-			}
-			stored.Action = e.Action
-			if !sameAuditPayload(stored, e) {
-				return fmt.Errorf("%w: audit idempotency key %q is already committed to different content", shared.ErrConflict, key)
-			}
-			return nil
-		case !errors.Is(err, pgx.ErrNoRows):
-			return fmt.Errorf("check idempotent audit record: %w", err)
-		}
+	matched, err := sameIdempotentAuditPayload(ctx, tx, tenantID, e, firstObservation)
+	if err != nil {
+		return err
+	}
+	if matched {
+		return nil
 	}
 	var prev *string
 	if err := tx.QueryRow(ctx,
@@ -435,6 +506,37 @@ func appendTenantAudit(ctx context.Context, tx pgx.Tx, tenantID string, e ports.
 		return fmt.Errorf("insert audit: %w", err) // 23505 propagates for Record's retry
 	}
 	return nil
+}
+
+// sameIdempotentAuditPayload finds the single tenant-scoped first winner while
+// the caller holds auditChainLock. Ordinary RecordOnce keeps exact timestamp
+// comparison; only RecordFirstObservation accepts a later observation time.
+func sameIdempotentAuditPayload(ctx context.Context, tx pgx.Tx, tenantID string, e ports.AuditEntry, firstObservation bool) (bool, error) {
+	key := e.Metadata["idempotency_key"]
+	if key == "" {
+		return false, nil
+	}
+	var stored ports.AuditEntry
+	var storedMeta []byte
+	err := tx.QueryRow(ctx,
+		`SELECT actor, target, metadata, created_at FROM audit_log
+		 WHERE tenant_id = $1 AND action = $2 AND idempotency_key = $3`,
+		tenantID, e.Action, key).Scan(&stored.Actor, &stored.Target, &storedMeta, &stored.At)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(storedMeta, &stored.Metadata); err != nil {
+			return false, fmt.Errorf("decode idempotent audit metadata: %w", err)
+		}
+		stored.Action = e.Action
+		if !sameAuditPayload(stored, e) && (!firstObservation || !sameFirstObservationPayload(stored, e)) {
+			return false, fmt.Errorf("%w: audit idempotency key %q is already committed to different content", shared.ErrConflict, key)
+		}
+		return true, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return false, fmt.Errorf("check idempotent audit record: %w", err)
+	default:
+		return false, nil
+	}
 }
 
 // toRecords maps oldest-first audit entries to chain records for verification.

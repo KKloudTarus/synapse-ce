@@ -37,6 +37,18 @@ var v1DataFields = map[EventType]string{
 	"risk_acceptance.created":          "title summary finding_id engagement_id assessment_id acceptance_id acceptance_version accepted_at expires_at tier",
 	"risk_acceptance.expiring":         "title summary finding_id engagement_id assessment_id acceptance_id acceptance_version expires_at reminder lead_time_seconds tier",
 	"risk_acceptance.expired":          "title summary finding_id engagement_id assessment_id acceptance_id acceptance_version expires_at tier",
+	"engagement.created":               "title summary engagement_id",
+	"engagement.status_changed":        "title summary engagement_id",
+	"engagement.window_starting":       "title summary engagement_id authorized_from boundary lead_time_seconds",
+	"engagement.window_ending":         "title summary engagement_id authorized_to boundary lead_time_seconds",
+	"finding.commented":                "title summary finding_id engagement_id comment_id",
+	"finding.mentioned":                "title summary finding_id engagement_id comment_id mentioned_user_id",
+	"approval.requested":               "title summary approval_id engagement_id kind status",
+	"approval.decided":                 "title summary approval_id engagement_id kind status",
+	"approval.timed_out":               "title summary approval_id engagement_id kind status",
+	"incident.updated":                 "title summary incident_id engagement_id update_kind",
+	"response.finished":                "title summary response_id engagement_id outcome action_kind",
+	"evidence.chain_broken":            "title summary engagement_id evidence_chain_id reason_code",
 }
 
 func equalFieldSet(a, b []string) bool {
@@ -256,6 +268,18 @@ func TestPublishedV1FieldConstraints(t *testing.T) {
 		"risk_acceptance.created":          "engagement_id",
 		"risk_acceptance.expiring":         "engagement_id",
 		"risk_acceptance.expired":          "engagement_id",
+		"engagement.created":               "engagement_id",
+		"engagement.status_changed":        "engagement_id",
+		"engagement.window_starting":       "engagement_id",
+		"engagement.window_ending":         "engagement_id",
+		"finding.commented":                "engagement_id severity",
+		"finding.mentioned":                "engagement_id severity",
+		"approval.requested":               "engagement_id",
+		"approval.decided":                 "engagement_id",
+		"approval.timed_out":               "engagement_id",
+		"incident.updated":                 "engagement_id severity",
+		"response.finished":                "engagement_id",
+		"evidence.chain_broken":            "engagement_id severity",
 	}
 	closedEnums := map[EventType]map[string]string{
 		"vulnerability_action.created":     {"action_type": strings.Join(ActionTypes(), " ")},
@@ -283,6 +307,18 @@ func TestPublishedV1FieldConstraints(t *testing.T) {
 		"risk_acceptance.created":          "finding_id engagement_id assessment_id acceptance_id",
 		"risk_acceptance.expiring":         "finding_id engagement_id assessment_id acceptance_id",
 		"risk_acceptance.expired":          "finding_id engagement_id assessment_id acceptance_id",
+		"engagement.created":               "engagement_id",
+		"engagement.status_changed":        "engagement_id",
+		"engagement.window_starting":       "engagement_id",
+		"engagement.window_ending":         "engagement_id",
+		"finding.commented":                "finding_id engagement_id comment_id",
+		"finding.mentioned":                "finding_id engagement_id comment_id mentioned_user_id",
+		"approval.requested":               "approval_id engagement_id",
+		"approval.decided":                 "approval_id engagement_id",
+		"approval.timed_out":               "approval_id engagement_id",
+		"incident.updated":                 "incident_id engagement_id",
+		"response.finished":                "response_id engagement_id",
+		"evidence.chain_broken":            "engagement_id evidence_chain_id reason_code",
 	}
 	for _, spec := range EventCatalog() {
 		fields, ok := optionalEnvelope[spec.Type]

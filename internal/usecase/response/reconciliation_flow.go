@@ -258,26 +258,14 @@ func (s *Service) terminalizeAttempt(ctx context.Context, rec Record, attempt re
 	if actor == "" {
 		actor = "system"
 	}
-	intent := responseAuditIntent(
-		attempt.IdempotencyKey+":terminal:"+string(to), actor, "response.attempt_terminal",
-		attempt.ActionID.String(), attempt.DeadlineAt,
-		map[string]string{"from_state": string(from), "to_state": string(to), "reason": reason},
-	)
-	stored, transitioned, committed, err := s.store.TransitionAttemptWithAudit(ctx, attempt, from, intent)
+	stored, committed, err := s.commitAttemptOutcome(ctx, attempt, from, to, "response.attempt_terminal", actor, rec.Action,
+		map[string]string{"from_state": string(from), "to_state": string(to), "reason": reason})
 	if err != nil {
 		return err
 	}
-	if !transitioned {
-		if stored.State != to {
-			return fmt.Errorf("%w: response attempt %s changed from %s to %s", shared.ErrConflict, attempt.IdempotencyKey, from, stored.State)
-		}
-		attempt = stored
-	}
+	attempt = stored
 	projectionErr := s.projectTerminalAttempt(ctx, rec, attempt)
-	var auditErr error
-	if transitioned {
-		auditErr = s.deliverResponseAudit(ctx, committed)
-	}
+	auditErr := s.deliverResponseAudit(ctx, committed)
 	return errors.Join(projectionErr, auditErr)
 }
 

@@ -16,6 +16,7 @@ import (
 type NotificationOutbox struct{ pool *pgxpool.Pool }
 
 var _ ports.NotificationOutbox = (*NotificationOutbox)(nil)
+var _ ports.ApprovalNotificationOutbox = (*NotificationOutbox)(nil)
 
 func NewNotificationOutbox(pool *pgxpool.Pool) *NotificationOutbox {
 	return &NotificationOutbox{pool: pool}
@@ -54,6 +55,25 @@ func (o *NotificationOutbox) Append(ctx context.Context, record notification.Sou
 			return fmt.Errorf("append notification source record: %w", err)
 		}
 		return nil
+	})
+}
+
+// AppendApprovalSource preserves a private, unbounded recipient roster with the
+// approval source record. The source insert decides the winner; duplicate source
+// keys leave both the record and its recipient rows unchanged.
+func (o *NotificationOutbox) AppendApprovalSource(ctx context.Context, record notification.SourceRecord, recipients []shared.ID) error {
+	if err := record.Normalize(); err != nil {
+		return err
+	}
+	bound, ok := ctx.Value(tenantTransactionKey{}).(tenantTransaction)
+	if !ok {
+		return fmt.Errorf("%w: approval notification append requires a tenant transaction", shared.ErrValidation)
+	}
+	if bound.tenantID != record.TenantID.String() {
+		return fmt.Errorf("%w: approval notification record belongs to another tenant", shared.ErrValidation)
+	}
+	return WithTenant(ctx, o.pool, record.TenantID.String(), func(tx pgx.Tx) error {
+		return appendApprovalSourceTx(ctx, tx, record, recipients)
 	})
 }
 

@@ -20,6 +20,7 @@ import (
 var versionLocatorPattern = regexp.MustCompile(`^engagement-sources/v2/[0-9a-f]{64}/[0-9a-f]{64}/[0-9a-f]{32}$`)
 var versionObjectPattern = regexp.MustCompile(`^engagement-sources/(v1/[0-9a-f]{64}/[0-9a-f]{64}|v2/[0-9a-f]{64}/[0-9a-f]{64}/[0-9a-f]{32})/archive\.(zip|tar|tar\.gz|tgz)$`)
 
+var _ ports.EngagementSourcePreparer = (*Store)(nil)
 var _ ports.EngagementSourceReuser = (*Store)(nil)
 var _ ports.EngagementSourceVersionReader = (*Store)(nil)
 var _ ports.EngagementSourceCompensator = (*Store)(nil)
@@ -47,11 +48,18 @@ func validateStoredVersion(item sourcepackage.Package) error {
 	return nil
 }
 
-func (s *Store) saveVersioned(ctx context.Context, tenantID, engID shared.ID, filename, actor string, at time.Time, size int64, digest string, src io.Reader) (sourcepackage.Package, error) {
-	if s.objects == nil || src == nil {
+// Prepare stores and validates unique source bytes without creating source
+// metadata. It is intentionally safe to call before the engagement transaction.
+func (s *Store) Prepare(ctx context.Context, tenantID, engID shared.ID, filename, actor string, at time.Time, size int64, digest string, src io.Reader) (sourcepackage.Package, error) {
+	if s == nil || s.repository == nil || s.objects == nil || src == nil {
 		return sourcepackage.Package{}, fmt.Errorf("%w: source upload storage is unavailable", shared.ErrValidation)
 	}
-	item := sourcepackage.Package{TenantID: tenantID, EngagementID: engID, VersionID: idgen.RandomID{}.NewID(), Filename: sourcepackage.BaseFilename(filename), Size: size, SHA256: strings.ToLower(strings.TrimSpace(digest)), CreatedBy: strings.TrimSpace(actor), CreatedAt: at.UTC().Truncate(time.Microsecond), AssociatedBy: strings.TrimSpace(actor), AssociatedAt: at.UTC().Truncate(time.Microsecond)}
+	item := sourcepackage.Package{
+		TenantID: tenantID, EngagementID: engID, VersionID: idgen.RandomID{}.NewID(),
+		Filename: sourcepackage.BaseFilename(filename), Size: size, SHA256: strings.ToLower(strings.TrimSpace(digest)),
+		CreatedBy: strings.TrimSpace(actor), CreatedAt: at.UTC().Truncate(time.Microsecond),
+		AssociatedBy: strings.TrimSpace(actor), AssociatedAt: at.UTC().Truncate(time.Microsecond),
+	}
 	item.Locator = versionLocator(tenantID, engID, item.VersionID)
 	item.ObjectKey = item.Locator + "/archive" + sourcepackage.ArchiveExtension(item.Filename)
 	if err := validateStoredVersion(item); err != nil {
@@ -79,19 +87,51 @@ func (s *Store) saveVersioned(ctx context.Context, tenantID, engID shared.ID, fi
 		_ = s.objects.DeleteObject(context.WithoutCancel(ctx), item.ObjectKey)
 		return sourcepackage.Package{}, fmt.Errorf("%w: uploaded source content does not match size or SHA-256", shared.ErrValidation)
 	}
+	return item, nil
+}
+
+// Bind persists an already prepared package. It performs no object-store I/O so
+// callers can bind it with the engagement, audit record, and notification outbox
+// in one tenant transaction.
+func (s *Store) Bind(ctx context.Context, item sourcepackage.Package) (sourcepackage.Package, error) {
+	if s == nil || s.repository == nil {
+		return sourcepackage.Package{}, fmt.Errorf("%w: source package repository is unavailable", shared.ErrValidation)
+	}
+	if err := validateStoredVersion(item); err != nil {
+		return sourcepackage.Package{}, err
+	}
 	stored, _, err := s.repository.Create(ctx, item)
 	if err != nil {
-		// A failed COMMIT can still be durable. Only discard this unique staging
-		// object when a different immutable binding demonstrably won the race.
-		if errors.Is(err, shared.ErrConflict) && !stored.VersionID.IsZero() && stored.VersionID != item.VersionID {
-			_ = s.objects.DeleteObject(context.WithoutCancel(ctx), item.ObjectKey)
-			if samePackageContent(stored, item) {
-				return stored, nil
-			}
+		if errors.Is(err, shared.ErrConflict) && sameSourceBinding(stored, item) {
+			return stored, nil
 		}
-		return item, fmt.Errorf("persist uploaded source metadata: %w", err)
+		return stored, fmt.Errorf("persist uploaded source metadata: %w", err)
 	}
 	return stored, nil
+}
+
+func sameSourceBinding(left, right sourcepackage.Package) bool {
+	return left == right
+}
+
+func (s *Store) saveVersioned(ctx context.Context, tenantID, engID shared.ID, filename, actor string, at time.Time, size int64, digest string, src io.Reader) (sourcepackage.Package, error) {
+	item, err := s.Prepare(ctx, tenantID, engID, filename, actor, at, size, digest, src)
+	if err != nil {
+		return item, err
+	}
+	stored, err := s.Bind(ctx, item)
+	if err == nil {
+		return stored, nil
+	}
+	// Direct Save has no enclosing database transaction. A conflict that proves
+	// another immutable binding won can safely release only this private object.
+	if errors.Is(err, shared.ErrConflict) && !sameSourceBinding(stored, item) {
+		_ = s.DiscardUnpublished(context.WithoutCancel(ctx), item)
+		if samePackageContent(stored, item) {
+			return stored, nil
+		}
+	}
+	return item, err
 }
 
 // DiscardUnpublished is only for compensation after the enclosing transaction.
@@ -161,8 +201,11 @@ func (s *Store) GetByVersion(ctx context.Context, tenantID, engID, versionID sha
 	return item, err
 }
 
-func (s *Store) Reuse(ctx context.Context, tenantID, parentEngID, childEngID, expectedVersionID shared.ID, actor string, at time.Time) (sourcepackage.Package, error) {
-	if s == nil || s.repository == nil || tenantID.IsZero() || parentEngID.IsZero() || childEngID.IsZero() || parentEngID == childEngID || expectedVersionID.IsZero() {
+// PrepareReuse verifies the predecessor archive and returns a child binding
+// without mutating source metadata. Bind performs the tenant-transactional
+// association and repository validation of the immediate predecessor version.
+func (s *Store) PrepareReuse(ctx context.Context, tenantID, parentEngID, childEngID, expectedVersionID shared.ID, actor string, at time.Time) (sourcepackage.Package, error) {
+	if s == nil || s.repository == nil || s.objects == nil || tenantID.IsZero() || parentEngID.IsZero() || childEngID.IsZero() || parentEngID == childEngID || expectedVersionID.IsZero() {
 		return sourcepackage.Package{}, fmt.Errorf("%w: source reuse ownership and expected version are required", shared.ErrValidation)
 	}
 	parent, err := s.GetByVersion(ctx, tenantID, parentEngID, expectedVersionID)
@@ -188,13 +231,20 @@ func (s *Store) Reuse(ctx context.Context, tenantID, parentEngID, childEngID, ex
 	if err := validateStoredVersion(child); err != nil {
 		return sourcepackage.Package{}, err
 	}
-	stored, _, err := s.repository.Create(ctx, child)
-	if errors.Is(err, shared.ErrConflict) && stored.ReusedFromVersionID == parent.VersionID {
-		return stored, nil
-	}
-	return stored, err
+	return child, nil
 }
 
+func (s *Store) Reuse(ctx context.Context, tenantID, parentEngID, childEngID, expectedVersionID shared.ID, actor string, at time.Time) (sourcepackage.Package, error) {
+	item, err := s.PrepareReuse(ctx, tenantID, parentEngID, childEngID, expectedVersionID, actor, at)
+	if err != nil {
+		return item, err
+	}
+	stored, err := s.Bind(ctx, item)
+	if err != nil {
+		return stored, err
+	}
+	return stored, nil
+}
 func (s *Store) verifyObject(ctx context.Context, item sourcepackage.Package, key string) error {
 	reader, err := s.objects.OpenObject(ctx, key)
 	if err != nil {

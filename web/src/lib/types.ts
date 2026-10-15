@@ -960,6 +960,7 @@ export interface FindingComment {
   findingId: string
   author: string
   body: string
+  mentionUserIds?: string[]
   createdAt: string | null
 }
 

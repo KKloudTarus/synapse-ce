@@ -92,6 +92,7 @@ describe('notification API', () => {
       to_statuses: ['remediated'],
       retest_results: ['remediated'],
       scan_kinds: ['dast'],
+      kinds: ['response'],
       outcomes: ['failed'],
       providers: ['aws'],
       revision: 6,
@@ -102,6 +103,7 @@ describe('notification API', () => {
       to_statuses: ['remediated'],
       retest_results: ['remediated'],
       scan_kinds: ['dast'],
+      kinds: ['response'],
       outcomes: ['failed'],
       providers: ['aws'],
     })

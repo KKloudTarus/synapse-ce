@@ -118,6 +118,9 @@ func (r *NotificationRepository) fanoutTargets(e notification.Event, only shared
 		}
 		revisions[rule.ID] = rule.Revision
 		for _, channel := range rule.ChannelIDs {
+			if e.Type == notification.EventFindingMentioned {
+				continue
+			}
 			if targets[channel] == nil {
 				targets[channel] = &fanoutTarget{rules: []shared.ID{}}
 			}

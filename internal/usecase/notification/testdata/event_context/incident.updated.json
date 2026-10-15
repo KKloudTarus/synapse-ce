@@ -1,0 +1,18 @@
+{
+  "subject_kind": "incident",
+  "subject_id": "incident-42",
+  "vars": {
+    "actor": "analyst-42",
+    "disposition": "investigating",
+    "event_label": "Incident updated",
+    "event_type": "incident.updated",
+    "incident_title": "Suspicious network activity",
+    "occurred_at": "2026-10-14T08:00:00Z",
+    "owner": "team-response",
+    "severity": "critical",
+    "status": "contained",
+    "summary": "The incident status changed.",
+    "title": "Incident updated",
+    "update_kind": "status"
+  }
+}

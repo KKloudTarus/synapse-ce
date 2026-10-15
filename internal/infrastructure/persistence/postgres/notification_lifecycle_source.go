@@ -71,6 +71,7 @@ func (s *NotificationSource) pollLifecycle(ctx context.Context, tx pgx.Tx, tenan
 			return s.pollRiskThreshold(ctx, tx, tenant, activated, now, lead, false, budget)
 		})
 	}
+	categories = append(categories, func(budget int) (int, error) { return s.pollEngagementWindows(ctx, tx, tenant, activated, now, budget) })
 	return pollNotificationCategories(ctx, tx, tenant, "lifecycle_poll", now, limit, categories)
 }
 

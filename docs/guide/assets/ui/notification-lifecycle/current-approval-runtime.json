@@ -1,0 +1,112 @@
+{
+  "captured_at": "2026-10-14T06:31:08.947535+00:00",
+  "provenance": "Current real approval service Request/Decide/SweepExpired; synthetic proposals only; no agent or response execution",
+  "runtime_images": {
+    "api": "sha256:4857066bbd62be1d22ba57b7c120dfb2100ac2fe7f19e17dc154322964af1ce8",
+    "worker": "sha256:a11d47b9f9d9251676044d890f4c012da8be8a38f2da905e35e345fd34bfa7a4"
+  },
+  "base_head": "b403472974f5792d4348a9cb5fae2e6cb23a0872",
+  "migration_sha256": "637958398e4f694d9ebb7fa0e254da25ba1ce293805bf08e09fec8de873c6629",
+  "local_schema_note": "Existing unshipped draft test schema was completed additively; fresh migrate-first Up/Down is verified on separate PostgreSQL test databases",
+  "source_facts": [
+    {
+      "event_type": "approval.decided",
+      "public_approver_count": 1,
+      "public_contains_approver_user_ids": false,
+      "projected": true,
+      "private_snapshot_count": 1,
+      "public_data_bytes": 517
+    },
+    {
+      "event_type": "approval.requested",
+      "public_approver_count": 1,
+      "public_contains_approver_user_ids": false,
+      "projected": true,
+      "private_snapshot_count": 1,
+      "public_data_bytes": 460
+    },
+    {
+      "event_type": "approval.requested",
+      "public_approver_count": 1,
+      "public_contains_approver_user_ids": false,
+      "projected": true,
+      "private_snapshot_count": 1,
+      "public_data_bytes": 459
+    },
+    {
+      "event_type": "approval.timed_out",
+      "public_approver_count": 1,
+      "public_contains_approver_user_ids": false,
+      "projected": true,
+      "private_snapshot_count": 1,
+      "public_data_bytes": 460
+    }
+  ],
+  "projection": {
+    "sources": 4,
+    "missing_events": 0,
+    "changed_data": 0
+  },
+  "deliveries": [
+    {
+      "provider": "discord",
+      "state": "delivered",
+      "count": 16
+    },
+    {
+      "provider": "google_chat",
+      "state": "delivered",
+      "count": 16
+    },
+    {
+      "provider": "jsm",
+      "state": "delivered",
+      "count": 16
+    },
+    {
+      "provider": "slack_bot",
+      "state": "delivered",
+      "count": 16
+    },
+    {
+      "provider": "telegram",
+      "state": "delivered",
+      "count": 16
+    },
+    {
+      "provider": "webhook",
+      "state": "retrying",
+      "count": 16
+    }
+  ],
+  "in_app": [
+    {
+      "event_type": "approval.decided",
+      "captured_recipient_roles": [
+        "approver"
+      ],
+      "count": 1
+    },
+    {
+      "event_type": "approval.requested",
+      "captured_recipient_roles": [
+        "approver"
+      ],
+      "count": 2
+    },
+    {
+      "event_type": "approval.timed_out",
+      "captured_recipient_roles": [
+        "approver"
+      ],
+      "count": 1
+    }
+  ],
+  "native_client_acceptance": "Pending separate inspection; delivery receipt alone does not certify native client matrix",
+  "replay": {
+    "command": "same deterministic Request/Decide/SweepExpired helper repeated once",
+    "source_count": 4,
+    "private_recipient_rows": 4,
+    "source_context_data_digest_unchanged": true
+  }
+}

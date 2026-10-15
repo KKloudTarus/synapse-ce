@@ -27,6 +27,7 @@ func NewEngagementRepository() *EngagementRepository {
 
 // Compile-time assertion that we satisfy the port.
 var _ ports.EngagementRepository = (*EngagementRepository)(nil)
+var _ ports.EngagementMutationLocker = (*EngagementRepository)(nil)
 var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil)
 var _ ports.DetectionReconciliationTenantStore = (*EngagementRepository)(nil)
@@ -77,6 +78,14 @@ func (r *EngagementRepository) GetByIDInTenant(_ context.Context, tenantID, id s
 		return nil, shared.ErrNotFound // cross-tenant/internal access – do not reveal existence
 	}
 	return cloneMemoryEngagement(e), nil
+}
+
+// GetByIDInTenantForUpdate is the mutation read for the in-memory adapter.
+// TenantTransactionRunner serializes memory transactions, so returning a copy
+// after the tenant check has the same no-lost-update contract as Postgres's
+// SELECT ... FOR UPDATE implementation.
+func (r *EngagementRepository) GetByIDInTenantForUpdate(ctx context.Context, tenantID, id shared.ID) (*engagement.Engagement, error) {
+	return r.GetByIDInTenant(ctx, tenantID, id)
 }
 
 func (r *EngagementRepository) GetByHostAssetID(_ context.Context, tenantID, assetID shared.ID) (*engagement.Engagement, error) {

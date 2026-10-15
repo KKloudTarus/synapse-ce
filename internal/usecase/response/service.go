@@ -396,6 +396,9 @@ type Service struct {
 	receipts            receiptValidator
 	approvals           approvalDecider
 	verificationTimeout time.Duration
+	notificationTx      ports.TenantTransactionRunner
+	notifications       ports.NotificationOutbox
+	notificationFacts   ports.NotificationLifecycleFactsReader
 	// effectMu and inFlight close the local Apply/Halt race. Distributed production execution remains
 	// disabled until the agent-side claim protocol carries the same durable fence.
 	effectMu sync.Mutex
@@ -420,6 +423,16 @@ func (s *Service) SetHaltWriter(haltWriter ports.ResponseHaltWriter) error {
 // SetApprovalDecider installs the existing HITL service used to decide and resume response actions.
 func (s *Service) SetApprovalDecider(approvals approvalDecider) {
 	s.approvals = approvals
+}
+
+// SetNotifications enables response-finished source capture. The caller supplies
+// the same transaction runner used by the response store and notification outbox.
+func (s *Service) SetNotifications(tx ports.TenantTransactionRunner, outbox ports.NotificationOutbox, facts ports.NotificationLifecycleFactsReader) error {
+	if tx == nil || outbox == nil || facts == nil {
+		return fmt.Errorf("%w: response notification dependencies are required", shared.ErrValidation)
+	}
+	s.notificationTx, s.notifications, s.notificationFacts = tx, outbox, facts
+	return nil
 }
 
 // SetVerificationTimeout bounds command-outcome and telemetry-verification obligations.
@@ -657,7 +670,7 @@ func (s *Service) Decide(ctx context.Context, actionID shared.ID, reviewer strin
 		auditActor, "response.approval_denied", rec.ID.String(), rec.UpdatedAt,
 		map[string]string{"reason": decision.Reason, "operation": operation, "kind": string(rec.Action.Kind), "target": rec.Action.Target.String()},
 	)
-	transitioned, committed, err := s.store.TransitionWithAudit(ctx, rec, from, intent)
+	transitioned, committed, err := s.transitionWithAuditAndNotification(ctx, rec, from, intent, "failed", auditActor)
 	if err != nil {
 		return Record{}, fmt.Errorf("cancel denied response %s: %w", actionID, err)
 	}
@@ -1071,7 +1084,7 @@ func (s *Service) finishApplied(ctx, verifyCtx context.Context, rec Record, atte
 		actor = approver
 	}
 	appliedIntent := responseOutcomeAuditIntent("response.applied", actor, rec.Action, attempt, map[string]string{"command_outcome": attempt.CommandOutcome})
-	transitioned, committedApplied, err := s.store.TransitionWithAudit(ctx, rec, from, appliedIntent)
+	transitioned, committedApplied, err := s.transitionWithAuditAndNotification(ctx, rec, from, appliedIntent, "applied", actor)
 	if err != nil {
 		return Record{}, fmt.Errorf("persist applied response %s with audit intent: %w", rec.ID, err)
 	}

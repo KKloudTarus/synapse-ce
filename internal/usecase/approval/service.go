@@ -8,12 +8,16 @@ package approval
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -33,7 +37,11 @@ type Service struct {
 	resume  ResumeFunc // optional; set via SetResumeEnqueuer to re-drive on timeout
 	// transactions makes a decision and its audit record one unit. Optional: the in-memory and
 	// file stores have no transactions, and the Postgres composition roots set it.
-	transactions ports.TenantTransactionRunner
+	transactions   ports.TenantTransactionRunner
+	notifications  ports.NotificationOutbox
+	approvalOutbox ports.ApprovalNotificationOutbox
+	lifecycleFacts ports.NotificationLifecycleFactsReader
+	approverFacts  ports.NotificationApproverFactsReader
 }
 
 // SetTransactionRunner makes Decide atomic. Without it the decision commits first and the audit
@@ -42,6 +50,22 @@ type Service struct {
 // retry answers "already decided".
 func (s *Service) SetTransactionRunner(transactions ports.TenantTransactionRunner) {
 	s.transactions = transactions
+}
+
+// SetNotifications makes approval state, audit history and lifecycle source
+// records one tenant-local unit. The facts readers snapshot mutable names and
+// recipient identities before the transaction commits.
+func (s *Service) SetNotifications(tx ports.TenantTransactionRunner, outbox ports.NotificationOutbox, lifecycle ports.NotificationLifecycleFactsReader, approvers ports.NotificationApproverFactsReader) error {
+	if tx == nil || outbox == nil || lifecycle == nil || approvers == nil {
+		return fmt.Errorf("%w: approval notification dependencies are required", shared.ErrValidation)
+	}
+	approvalOutbox, ok := outbox.(ports.ApprovalNotificationOutbox)
+	if !ok {
+		return fmt.Errorf("%w: approval notification outbox must capture recipient snapshots", shared.ErrValidation)
+	}
+	s.transactions, s.notifications, s.lifecycleFacts, s.approverFacts = tx, outbox, lifecycle, approvers
+	s.approvalOutbox = approvalOutbox
+	return nil
 }
 
 // SetResumeEnqueuer installs the callback used to re-drive a session after a timeout deny, so
@@ -62,8 +86,13 @@ func NewService(store ports.ApprovalStore, audit ports.AuditLogger, clock ports.
 // (resume path), that decision is returned. Otherwise: auto-approvable → approved + audited;
 // else enqueued and returned PENDING (the orchestrator suspends; a human Decides).
 func (s *Service) Request(ctx context.Context, p agent.ProposedAction) (agent.ApprovalDecision, error) {
-	if _, dec, err := s.store.Get(ctx, p.ID); err == nil && dec.State != agent.ApprovalPending {
-		return dec, nil // already decided – idempotent resume
+	if s.notifications != nil {
+		return s.requestWithNotifications(ctx, p)
+	}
+	if _, dec, err := s.store.Get(ctx, p.ID); err == nil {
+		return dec, nil // action IDs are immutable idempotency keys, including pending requests
+	} else if !errors.Is(err, shared.ErrNotFound) {
+		return agent.ApprovalDecision{}, fmt.Errorf("load approval: %w", err)
 	}
 	if err := s.store.Enqueue(ctx, p); err != nil {
 		return agent.ApprovalDecision{}, fmt.Errorf("enqueue approval: %w", err)
@@ -86,6 +115,72 @@ func (s *Service) Request(ctx context.Context, p agent.ProposedAction) (agent.Ap
 	}
 	_, dec, err := s.store.Get(ctx, p.ID)
 	return dec, err // pending
+}
+
+func (s *Service) requestWithNotifications(ctx context.Context, p agent.ProposedAction) (agent.ApprovalDecision, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return agent.ApprovalDecision{}, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	var result agent.ApprovalDecision
+	err := s.transactions.Run(ctx, tenantID, func(txCtx context.Context) error {
+		_, current, err := s.store.Get(txCtx, p.ID)
+		if err == nil {
+			// Action IDs are immutable idempotency keys. A retry must retain the
+			// first proposal and its already-captured notification facts.
+			result = current
+			return nil
+		}
+		if !errors.Is(err, shared.ErrNotFound) {
+			return fmt.Errorf("load approval: %w", err)
+		}
+		if err := s.store.Enqueue(txCtx, p); err != nil {
+			return fmt.Errorf("enqueue approval: %w", err)
+		}
+		// Enqueue is idempotent. Another request may have inserted this action after
+		// our initial Get returned not-found, so re-read before deriving policy or
+		// capture facts. The stored proposal is the immutable action identity: using
+		// the caller's retry here could auto-approve a low-risk retry of a pending
+		// high-risk action.
+		stored, pending, err := s.store.Get(txCtx, p.ID)
+		if err != nil {
+			return fmt.Errorf("reload enqueued approval: %w", err)
+		}
+		if pending.State != agent.ApprovalPending {
+			// A concurrent decision won before this retry reloaded the row. It already
+			// owns the terminal source record and audit entry.
+			result = pending
+			return nil
+		}
+		p = stored
+		if err := s.appendNotification(txCtx, notification.EventApprovalRequested, "approval_requested", p, pending, ""); err != nil {
+			return err
+		}
+		if !s.mode.AutoApproves(p.Risk) {
+			// The source record is durable before the audit append. The transaction
+			// rolls both back on failure and keeps the shared audit lock last.
+			if err := s.record(txCtx, p, "agent.approval.requested", p.SessionID.String()); err != nil {
+				return fmt.Errorf("record approval request: %w", err)
+			}
+			result = pending
+			return nil
+		}
+		result = agent.ApprovalDecision{ActionID: p.ID, State: agent.ApprovalApproved, DecidedBy: "auto", Reason: fmt.Sprintf("auto-approved (mode %s, risk %s)", s.mode, p.Risk), DecidedAt: s.clock.Now()}
+		if err := s.store.Decide(txCtx, result); err != nil {
+			return fmt.Errorf("record auto-approval: %w", err)
+		}
+		if err := s.appendNotification(txCtx, notification.EventApprovalDecided, "approval_decided", p, result, result.DecidedBy); err != nil {
+			return err
+		}
+		if err := s.record(txCtx, p, "agent.approval.auto", result.DecidedBy); err != nil {
+			return fmt.Errorf("record auto-approval decision: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return agent.ApprovalDecision{}, err
+	}
+	return result, nil
 }
 
 // Get returns the immutable proposal and current decision for an existing approval request.
@@ -127,12 +222,114 @@ func (s *Service) decide(ctx context.Context, dec agent.ApprovalDecision, human 
 	if err := s.store.Decide(ctx, dec); err != nil {
 		return agent.ApprovalDecision{}, err // ErrConflict if already decided
 	}
-	if a, _, err := s.store.Get(ctx, dec.ActionID); err == nil {
-		if err := s.record(ctx, a, "agent.approval."+string(state), human); err != nil {
-			return agent.ApprovalDecision{}, fmt.Errorf("record approval decision: %w", err)
+	a, _, err := s.store.Get(ctx, dec.ActionID)
+	if err != nil {
+		return agent.ApprovalDecision{}, fmt.Errorf("load decided approval: %w", err)
+	}
+	if s.notifications != nil {
+		eventType, sourceKind := notification.EventApprovalDecided, "approval_decided"
+		if state == agent.ApprovalTimeout {
+			eventType, sourceKind = notification.EventApprovalTimedOut, "approval_timedout"
+		}
+		if err := s.appendNotification(ctx, eventType, sourceKind, a, dec, human); err != nil {
+			return agent.ApprovalDecision{}, err
 		}
 	}
+	auditAction := "agent.approval." + string(state)
+	if state == agent.ApprovalTimeout {
+		auditAction = "agent.approval.timeout"
+	}
+	if err := s.record(ctx, a, auditAction, human); err != nil {
+		return agent.ApprovalDecision{}, fmt.Errorf("record approval decision: %w", err)
+	}
 	return dec, nil
+}
+
+func (s *Service) appendNotification(ctx context.Context, eventType notification.EventType, sourceKind string, p agent.ProposedAction, decision agent.ApprovalDecision, actor string) error {
+	if s.notifications == nil {
+		return nil
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	facts, err := s.lifecycleFacts.SnapshotNotificationLifecycleFacts(ctx, tenantID, p.EngagementID, actor)
+	if err != nil {
+		return fmt.Errorf("snapshot approval notification facts: %w", err)
+	}
+	approvers, err := s.approverFacts.SnapshotNotificationApprovers(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("snapshot approval notification approvers: %w", err)
+	}
+	approvers = uniqueApprovalRecipients(approvers)
+	spec, ok := notification.LookupEvent(eventType)
+	if !ok {
+		return fmt.Errorf("%w: unknown approval notification event", shared.ErrValidation)
+	}
+	occurredAt := s.clock.Now().UTC()
+	title := scrubApprovalText("Approval "+string(decision.State), 200)
+	summary := scrubApprovalText("An approval lifecycle event occurred.", 500)
+	engagementName := scrubApprovalText(facts.EngagementName, 500)
+	actorName := scrubApprovalText(facts.ActorName, 500)
+	data := map[string]any{
+		"approval_id": p.ID, "engagement_id": p.EngagementID, "lead_user_id": facts.LeadUserID,
+		"kind": approvalKind(p), "status": decision.State, "decision": decision.State,
+		"actor": actorName, "engagement_name": engagementName,
+		"title": title, "summary": summary, "approver_count": len(approvers),
+	}
+	if !facts.ActorUserID.IsZero() {
+		data["actor_user_id"] = facts.ActorUserID
+	}
+	if s.timeout > 0 {
+		data["expires_at"] = p.ProposedAt.Add(s.timeout).UTC()
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("encode approval notification: %w", err)
+	}
+	vars := map[string]string{
+		"event_type": string(eventType), "event_label": spec.Label, "occurred_at": occurredAt.Format(time.RFC3339),
+		"title": title, "summary": summary, "kind": approvalKind(p), "status": string(decision.State),
+		"decision": string(decision.State), "engagement_name": engagementName, "actor": actorName,
+	}
+	if s.timeout > 0 {
+		vars["expires_at"] = p.ProposedAt.Add(s.timeout).UTC().Format(time.RFC3339)
+	}
+	record, err := notification.SnapshotSourceRecord(notification.SourceRecord{TenantID: tenantID, SourceKind: sourceKind, SourceID: p.ID.String(), EventType: eventType, EngagementID: p.EngagementID, OccurredAt: occurredAt, Data: raw, SubjectKind: "approval", SubjectID: p.ID.String()}, vars)
+	if err != nil {
+		return fmt.Errorf("snapshot approval notification: %w", err)
+	}
+	if err := s.approvalOutbox.AppendApprovalSource(ctx, record, approvers); err != nil {
+		return fmt.Errorf("append approval notification: %w", err)
+	}
+	return nil
+}
+
+func scrubApprovalText(value string, limit int) string {
+	return privacy.ScrubURLCredentials(notification.ScrubPersonalText(value, limit))
+}
+
+func approvalKind(p agent.ProposedAction) string {
+	if strings.HasPrefix(strings.TrimSpace(p.SessionID.String()), "response:") {
+		return "response"
+	}
+	return "agent"
+}
+
+func uniqueApprovalRecipients(ids []shared.ID) []shared.ID {
+	seen := make(map[shared.ID]struct{}, len(ids))
+	unique := make([]shared.ID, 0, len(ids))
+	for _, id := range ids {
+		if id.IsZero() {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	return unique
 }
 
 // SweepExpired flips pending actions for an engagement that have outlived the timeout to a
@@ -152,10 +349,7 @@ func (s *Service) SweepExpired(ctx context.Context, engagementID shared.ID) (int
 			continue
 		}
 		dec := agent.ApprovalDecision{ActionID: a.ID, State: agent.ApprovalTimeout, Reason: "approval timed out (fail-closed)", DecidedAt: now}
-		if err := s.store.Decide(ctx, dec); err == nil {
-			if rerr := s.record(ctx, a, "agent.approval.timeout", "system"); rerr != nil {
-				return n, fmt.Errorf("record approval timeout: %w", rerr)
-			}
+		if _, err := s.timeoutDecision(ctx, dec); err == nil {
 			n++
 			// Re-drive the suspended session so it sees the denial and fails fast (no hang).
 			// If the re-enqueue fails the action is already durably timeout-denied (safe); the
@@ -166,9 +360,31 @@ func (s *Service) SweepExpired(ctx context.Context, engagementID shared.ID) (int
 						"session", a.SessionID.String(), "action", a.ID.String(), "err", rerr)
 				}
 			}
+		} else if !errors.Is(err, shared.ErrConflict) {
+			return n, err
 		}
 	}
 	return n, nil
+}
+
+func (s *Service) timeoutDecision(ctx context.Context, dec agent.ApprovalDecision) (agent.ApprovalDecision, error) {
+	if s.transactions == nil {
+		return s.decide(ctx, dec, "system", agent.ApprovalTimeout)
+	}
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return agent.ApprovalDecision{}, fmt.Errorf("%w: tenant context is required", shared.ErrValidation)
+	}
+	var result agent.ApprovalDecision
+	err := s.transactions.Run(ctx, tenantID, func(txCtx context.Context) error {
+		var err error
+		result, err = s.decide(txCtx, dec, "system", agent.ApprovalTimeout)
+		return err
+	})
+	if err != nil {
+		return agent.ApprovalDecision{}, err
+	}
+	return result, nil
 }
 
 // SweepAllExpired sweeps every engagement that currently has a pending approval (the prod
@@ -223,7 +439,7 @@ func (s *Service) RunSweeper(ctx context.Context, interval time.Duration) {
 // human gate in front of an agent action, so the decision and its record are one unit: the
 // error is returned rather than dropped, and every caller propagates it.
 func (s *Service) record(ctx context.Context, p agent.ProposedAction, action, actor string) error {
-	return s.audit.Record(ctx, ports.AuditEntry{
+	entry := ports.AuditEntry{
 		Actor:  actor,
 		Action: action,
 		Target: p.Target.Value,
@@ -234,5 +450,13 @@ func (s *Service) record(ctx context.Context, p agent.ProposedAction, action, ac
 			"risk":            string(p.Risk),
 		},
 		At: s.clock.Now(),
-	})
+	}
+	if s.notifications != nil && action == "agent.approval.requested" {
+		entry.At = p.ProposedAt
+		entry.Metadata["idempotency_key"] = "approval-requested:" + p.ID.String()
+		if idempotent, ok := s.audit.(ports.IdempotentAuditLogger); ok {
+			return idempotent.RecordOnce(ctx, entry)
+		}
+	}
+	return s.audit.Record(ctx, entry)
 }

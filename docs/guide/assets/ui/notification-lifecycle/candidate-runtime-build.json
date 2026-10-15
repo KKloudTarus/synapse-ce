@@ -1,0 +1,15 @@
+{
+  "replaced_at": "2026-10-14T09:25:33.053360+00:00",
+  "containers": [
+    "synapse-remaining-notification-worker",
+    "synapse-remaining-notification-api",
+    "synapse-remaining-notification-web"
+  ],
+  "images": {
+    "synapse-remaining-notification-worker": "sha256:b1113709fdf68e94c7f8e3d3cf34d96537368cdc8fbd437c46b87f3cd94a3c18",
+    "synapse-remaining-notification-api": "sha256:3f504759b3ccca48fd86d561d089abdc4668bcad6395510355bf0ceb63f30835",
+    "synapse-remaining-notification-web": "sha256:c69c234ac02115fc493a06837b338ae8e0bd1c040a60a78a14fccf1370f778d6"
+  },
+  "original_stack_and_parallel_jira_unchanged": true,
+  "scope": "Owned loopback candidate API/worker/web only; current final transaction and JSM note fixes included. No production stack or parallel Jira environment mutation."
+}

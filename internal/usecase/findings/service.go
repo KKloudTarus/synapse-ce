@@ -18,7 +18,9 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/judgment"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -46,6 +48,7 @@ type Service struct {
 	notificationTx    ports.TenantTransactionRunner
 	notifications     ports.NotificationOutbox
 	notificationFacts ports.NotificationFindingFactsReader
+	mentionUsers      ports.UserRepository
 }
 
 type CreatedFindingProjector interface {
@@ -65,6 +68,10 @@ func (s *Service) SetEngagementTenantResolver(r ports.EngagementTenantResolver) 
 func (s *Service) SetAttributor(a ports.FindingAttributor) { s.attributor = a }
 
 func (s *Service) SetAssigneeWriter(writer ports.FindingAssigneeWriter) { s.assigneeWriter = writer }
+
+// SetMentionUsers enables canonical user-ID validation for native comments.
+// Display labels and contacts are deliberately outside this boundary.
+func (s *Service) SetMentionUsers(users ports.UserRepository) { s.mentionUsers = users }
 
 // SetNotifications enables finding event capture. The caller must supply the same
 // tenant transaction runner used by the repositories, so the finding, audit and
@@ -617,6 +624,23 @@ func (s *Service) appendFindingRetestCompleted(ctx context.Context, tenantID sha
 	})
 }
 
+func (s *Service) appendFindingCommented(ctx context.Context, tenantID shared.ID, c finding.Comment, f finding.Finding, actor string) error {
+	excerpt := privacy.ScrubURLCredentials(notification.ScrubPersonalText(c.Body, 500))
+	return s.appendFindingEvent(ctx, tenantID, notification.EventFindingCommented, "finding_comment", c.ID.String(), f, "", actor, map[string]any{
+		"title": "Finding comment added", "summary": "A comment was added to a finding.",
+		"finding_id": f.ID, "engagement_id": f.EngagementID, "status": f.Status,
+		"comment_id": c.ID, "comment_excerpt": excerpt,
+	})
+}
+
+func (s *Service) appendFindingMentioned(ctx context.Context, tenantID shared.ID, c finding.Comment, f finding.Finding, mentioned shared.ID) error {
+	return s.appendFindingEvent(ctx, tenantID, notification.EventFindingMentioned, "finding_mention", c.ID.String()+":"+mentioned.String(), f, "", c.Author, map[string]any{
+		"title": "You were mentioned on a finding", "summary": "You were mentioned in a finding comment.",
+		"finding_id": f.ID, "engagement_id": f.EngagementID, "status": f.Status,
+		"comment_id": c.ID, "mentioned_user_id": mentioned,
+	})
+}
+
 func (s *Service) appendFindingEvent(ctx context.Context, tenantID shared.ID, eventType notification.EventType, sourceKind, sourceID string, f finding.Finding, engagementName, actor string, data map[string]any) error {
 	if s.notifications == nil {
 		return nil
@@ -634,6 +658,9 @@ func (s *Service) appendFindingEvent(ctx context.Context, tenantID shared.ID, ev
 	facts, err := s.notificationFacts.SnapshotFindingNotificationFacts(ctx, tenantID, f.EngagementID, f.ID, f.AssigneeUserID, actor)
 	if err != nil {
 		return fmt.Errorf("snapshot finding notification identities: %w", err)
+	}
+	if eventType == notification.EventFindingCommented {
+		data["lead_user_id"] = facts.LeadUserID.String()
 	}
 	if !facts.ActorUserID.IsZero() {
 		data["actor_user_id"] = facts.ActorUserID
@@ -659,6 +686,9 @@ func (s *Service) appendFindingEvent(ctx context.Context, tenantID shared.ID, ev
 		if value, ok := data[name]; ok {
 			vars[name] = fmt.Sprint(value)
 		}
+	}
+	if excerpt, ok := data["comment_excerpt"]; ok {
+		vars["comment_excerpt"] = privacy.ScrubURLCredentials(notification.ScrubPersonalText(fmt.Sprint(excerpt), 500))
 	}
 	record, err := notification.SnapshotSourceRecord(notification.SourceRecord{
 		TenantID: tenantID, SourceKind: sourceKind, SourceID: sourceID, EventType: eventType,
@@ -765,22 +795,97 @@ func (s *Service) SetAssignee(ctx context.Context, engagementID, findingID share
 // AddComment appends a comment to a finding's thread (persisted, attributed) and
 // audits it. The finding must belong to the engagement (no cross-engagement comment).
 func (s *Service) AddComment(ctx context.Context, engagementID, findingID shared.ID, body, actor string) (finding.Comment, error) {
-	if ok, err := s.findingInEngagement(ctx, engagementID, findingID); err != nil {
-		return finding.Comment{}, err
-	} else if !ok {
-		return finding.Comment{}, fmt.Errorf("finding %s: %w", findingID, shared.ErrNotFound)
+	return s.AddCommentWithMentions(ctx, engagementID, findingID, body, actor, nil)
+}
+
+// AddCommentWithMentions stores a native comment plus an immutable canonical
+// mention relation. Mention syntax is a transport concern: only explicit user
+// IDs supplied by the caller reach this method.
+func (s *Service) AddCommentWithMentions(ctx context.Context, engagementID, findingID shared.ID, body, actor string, mentioned []shared.ID) (finding.Comment, error) {
+	if len(mentioned) != 0 {
+		if s.notificationTx == nil || s.notifications == nil || s.notificationFacts == nil {
+			return finding.Comment{}, fmt.Errorf("%w: mention capture dependencies are required", shared.ErrValidation)
+		}
+		if _, ok := s.comments.(ports.CommentMentionRepository); !ok {
+			return finding.Comment{}, fmt.Errorf("%w: comment mention persistence is required", shared.ErrValidation)
+		}
 	}
-	c, err := finding.NewComment(s.ids.NewID(), engagementID, findingID, actor, body, s.clock.Now())
+	var c finding.Comment
+	err := s.withFindingBoundary(ctx, engagementID, func(writeCtx context.Context, tenantID shared.ID) error {
+		canonicalMentions, err := s.validateMentionUsers(writeCtx, engagementID, mentioned)
+		if err != nil {
+			return err
+		}
+		f, err := s.loadFinding(writeCtx, engagementID, findingID)
+		if err != nil {
+			return err
+		}
+		c, err = finding.NewComment(s.ids.NewID(), engagementID, findingID, actor, body, s.clock.Now())
+		if err != nil {
+			return err
+		}
+		c.MentionUserIDs = append([]shared.ID(nil), canonicalMentions...)
+		if repository, ok := s.comments.(ports.CommentMentionRepository); ok {
+			err = repository.AddWithMentions(writeCtx, c, canonicalMentions)
+		} else {
+			err = s.comments.Add(writeCtx, c)
+		}
+		if err != nil {
+			return fmt.Errorf("persist comment: %w", err)
+		}
+		if s.notifications == nil {
+			return s.record(writeCtx, actor, "finding.comment", engagementID, findingID, nil)
+		}
+		if err := s.appendFindingCommented(writeCtx, tenantID, c, f, actor); err != nil {
+			return err
+		}
+		for _, userID := range canonicalMentions {
+			if err := s.appendFindingMentioned(writeCtx, tenantID, c, f, userID); err != nil {
+				return err
+			}
+		}
+		return s.record(writeCtx, actor, "finding.comment", engagementID, findingID, nil)
+	})
 	if err != nil {
 		return finding.Comment{}, err
 	}
-	if err := s.comments.Add(ctx, c); err != nil {
-		return finding.Comment{}, fmt.Errorf("persist comment: %w", err)
-	}
-	if err := s.record(ctx, actor, "finding.comment", engagementID, findingID, nil); err != nil {
-		return finding.Comment{}, err
-	}
 	return c, nil
+}
+
+func (s *Service) validateMentionUsers(ctx context.Context, engagementID shared.ID, mentioned []shared.ID) ([]shared.ID, error) {
+	if len(mentioned) == 0 {
+		return nil, nil
+	}
+	if s.mentionUsers == nil {
+		return nil, fmt.Errorf("%w: mention users must contain at most 10 canonical active users", shared.ErrValidation)
+	}
+	tenantID, err := s.findingTenant(ctx, engagementID)
+	if err != nil {
+		return nil, err
+	}
+	unique := make(map[shared.ID]bool, len(mentioned))
+	result := make([]shared.ID, 0, len(mentioned))
+	for _, userID := range mentioned {
+		if userID.IsZero() {
+			return nil, fmt.Errorf("%w: mentioned user is not an active viewer", shared.ErrValidation)
+		}
+		if unique[userID] {
+			continue
+		}
+		if len(result) == 10 {
+			return nil, fmt.Errorf("%w: mention users must contain at most 10 canonical active users", shared.ErrValidation)
+		}
+		candidate, err := s.mentionUsers.GetByID(ctx, tenantID, userID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: mentioned user is not an active viewer", shared.ErrValidation)
+		}
+		if candidate.Disabled || !candidate.Role.Valid() || !candidate.Role.Can(user.PermView) {
+			return nil, fmt.Errorf("%w: mentioned user is not an active viewer", shared.ErrValidation)
+		}
+		unique[userID] = true
+		result = append(result, userID)
+	}
+	return result, nil
 }
 
 // Comments returns a finding's comment thread (oldest first), scoped to the engagement.
@@ -842,21 +947,6 @@ func (s *Service) RecordRetest(ctx context.Context, engagementID, findingID shar
 // Retests returns a finding's retest history (oldest first), scoped to the engagement.
 func (s *Service) Retests(ctx context.Context, engagementID, findingID shared.ID) ([]finding.Retest, error) {
 	return s.retests.ListByEngagementFinding(ctx, engagementID, findingID)
-}
-
-// findingInEngagement reports whether the finding exists within the engagement
-// (used to scope comments + writes; no cross-engagement access).
-func (s *Service) findingInEngagement(ctx context.Context, engagementID, findingID shared.ID) (bool, error) {
-	list, err := s.repo.ListByEngagement(ctx, engagementID)
-	if err != nil {
-		return false, err
-	}
-	for _, f := range list {
-		if f.ID == findingID {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // loadFinding reads the indexed, engagement-scoped canonical finding.

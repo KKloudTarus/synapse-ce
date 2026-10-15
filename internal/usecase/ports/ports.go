@@ -1333,6 +1333,20 @@ type IdempotentAuditLogger interface {
 	RecordOnce(ctx context.Context, e AuditEntry) error
 }
 
+// FirstObservationAuditLogger records one immutable audit entry for an observed
+// condition. It differs from RecordOnce only by accepting a retry whose At value
+// changed: the first committed entry, including its timestamp and chain hash,
+// remains authoritative. Implementations still reject any difference in the
+// actor, action, target, or metadata.
+//
+// This narrow capability is for observations that may be retried after a failed
+// downstream delivery; ordinary idempotent audit obligations must keep using
+// RecordOnce's exact-payload comparison.
+type FirstObservationAuditLogger interface {
+	AuditLogger
+	RecordFirstObservation(ctx context.Context, e AuditEntry) error
+}
+
 // AuditReader reads the append-only audit log for the audit-trail UI. List
 // returns the most recent entries first, capped at limit. Verify re-derives the hash
 // chain over the entire log (oldest-first) and reports whether it is intact.

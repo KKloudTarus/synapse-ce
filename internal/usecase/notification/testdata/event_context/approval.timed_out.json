@@ -1,0 +1,16 @@
+{
+  "subject_kind": "approval",
+  "subject_id": "approval-42",
+  "vars": {
+    "actor": "system",
+    "engagement_name": "October assessment",
+    "event_label": "Approval timed out",
+    "event_type": "approval.timed_out",
+    "expires_at": "2026-10-15T08:00:00Z",
+    "kind": "response",
+    "occurred_at": "2026-10-15T08:00:00Z",
+    "status": "timed_out",
+    "summary": "A response approval expired without a decision.",
+    "title": "Approval timed out"
+  }
+}

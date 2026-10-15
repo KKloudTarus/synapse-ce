@@ -1,6 +1,8 @@
 package notification
 
 import (
+	"net/url"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/consolelink"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -23,12 +25,33 @@ func (s *Service) renderLinks(event domain.Event) []ports.RenderedLink {
 		err   error
 	)
 	switch event.Type {
+	case domain.EventApprovalRequested, domain.EventApprovalDecided, domain.EventApprovalTimedOut:
+		kind := decodeEventData(event.Data).text("kind")
+		path := ""
+		switch kind {
+		case "response":
+			path = "/blueteam/response"
+		case "agent":
+			if _, err := s.links.Engagement(event.EngagementID); err == nil {
+				path = "/engagements/" + url.PathEscape(event.EngagementID.String()) + "/agent"
+			}
+		}
+		if href, ok := s.links.Path(path); ok {
+			return []ports.RenderedLink{{Label: "Open approvals", URL: href}}
+		}
+		return nil
+	case domain.EventResponseFinished:
+		if href, ok := s.links.Path("/blueteam/response"); ok {
+			return []ports.RenderedLink{{Label: "Open response", URL: href}}
+		}
+		return nil
+
 	case domain.EventScanCompleted, domain.EventScanFailed:
 		if !event.EngagementID.IsZero() && event.SubjectID != "" {
 			link, err = s.links.Scan(event.EngagementID, shared.ID(event.SubjectID))
 			label = "Open scan"
 		}
-	case domain.EventSLAApproaching, domain.EventOwnershipChanged, domain.EventFindingCreated, domain.EventFindingStatusChanged, domain.EventFindingRetestCompleted, domain.EventSLABreached, domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired:
+	case domain.EventFindingCommented, domain.EventFindingMentioned, domain.EventSLAApproaching, domain.EventOwnershipChanged, domain.EventFindingCreated, domain.EventFindingStatusChanged, domain.EventFindingRetestCompleted, domain.EventSLABreached, domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired:
 		if !event.EngagementID.IsZero() && event.SubjectID != "" {
 			link, err = s.links.Finding(event.EngagementID, shared.ID(event.SubjectID))
 			label = "Open finding"
@@ -38,12 +61,12 @@ func (s *Service) renderLinks(event domain.Event) []ports.RenderedLink {
 			link, err = s.links.Engagement(event.EngagementID)
 			label = "Open engagement"
 		}
-	case domain.EventIncidentCreated:
+	case domain.EventIncidentCreated, domain.EventIncidentUpdated:
 		if event.SubjectID != "" {
 			link, err = s.links.Incident(shared.ID(event.SubjectID))
 			label = "Open incident"
 		}
-	case domain.EventVulnerabilityAction:
+	case domain.EventEngagementCreated, domain.EventEngagementStatusChanged, domain.EventEngagementWindowStarting, domain.EventEngagementWindowEnding, domain.EventEvidenceChainBroken, domain.EventVulnerabilityAction:
 		if !event.EngagementID.IsZero() {
 			link, err = s.links.Engagement(event.EngagementID)
 			label = "Open engagement"

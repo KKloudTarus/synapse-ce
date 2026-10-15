@@ -41,9 +41,10 @@ type auditFileEntry struct {
 func NewAuditLog(path string) *AuditLog { return &AuditLog{path: path, heads: map[string]string{}} }
 
 var (
-	_ ports.AuditLogger           = (*AuditLog)(nil)
-	_ ports.AuditReader           = (*AuditLog)(nil)
-	_ ports.IdempotentAuditLogger = (*AuditLog)(nil)
+	_ ports.AuditLogger                 = (*AuditLog)(nil)
+	_ ports.AuditReader                 = (*AuditLog)(nil)
+	_ ports.IdempotentAuditLogger       = (*AuditLog)(nil)
+	_ ports.FirstObservationAuditLogger = (*AuditLog)(nil)
 )
 
 // readAll returns every entry oldest-first (file order). Caller holds the mutex.
@@ -184,6 +185,38 @@ func (a *AuditLog) RecordOnce(ctx context.Context, e ports.AuditEntry) error {
 	return a.recordLocked(auditFileEntry{AuditEntry: e, TenantID: tenantID})
 }
 
+// RecordFirstObservation preserves the first immutable observation when a
+// retry arrives with a later timestamp. All other payload fields remain exact.
+func (a *AuditLog) RecordFirstObservation(ctx context.Context, e ports.AuditEntry) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	key := e.Metadata["idempotency_key"]
+	if strings.TrimSpace(key) == "" {
+		return fmt.Errorf("%w: first audit observation requires idempotency key", shared.ErrValidation)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	all, err := a.readAll()
+	if err != nil {
+		return err
+	}
+	tenantID := ""
+	if tenant, ok := shared.TenantFrom(ctx); ok {
+		tenantID = tenant.String()
+	}
+	for _, existing := range all {
+		if existing.Action != e.Action || existing.Metadata["idempotency_key"] != key || existing.TenantID != tenantID {
+			continue
+		}
+		if !sameFirstFileAuditPayload(existing.AuditEntry, e) {
+			return fmt.Errorf("%w: audit idempotency key %q is already committed to different content", shared.ErrConflict, key)
+		}
+		return nil
+	}
+	return a.recordLocked(auditFileEntry{AuditEntry: e, TenantID: tenantID})
+}
+
 func (a *AuditLog) Record(ctx context.Context, e ports.AuditEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -205,6 +238,11 @@ func sameFileAuditPayload(left, right ports.AuditEntry) bool {
 		left.Target == right.Target &&
 		left.At.UTC().Truncate(time.Microsecond).Equal(right.At.UTC().Truncate(time.Microsecond)) &&
 		maps.Equal(left.Metadata, right.Metadata)
+}
+
+func sameFirstFileAuditPayload(left, right ports.AuditEntry) bool {
+	return left.Actor == right.Actor && left.Action == right.Action &&
+		left.Target == right.Target && maps.Equal(left.Metadata, right.Metadata)
 }
 
 func (a *AuditLog) recordLocked(entry auditFileEntry) error {

@@ -275,7 +275,8 @@ func TestDecideApprovalExecutesOnResume(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/engagements/eng-1/agent/approvals/"+pend[0].ID.String()+"/decide", strings.NewReader(body))
 	req.SetPathValue("id", "eng-1")
 	req.SetPathValue("aid", pend[0].ID.String())
-	req = withPrincipal(req, "bob", "admin")
+	decisionContext := context.WithValue(req.Context(), principalKey, testPrincipal("bob", "admin", "tenant-test"))
+	req = req.WithContext(shared.WithTenant(decisionContext, "tenant-test"))
 	rec := httptest.NewRecorder()
 	rig.rt.decideAgentApproval(rec, req)
 	if rec.Code != http.StatusOK {

@@ -107,22 +107,31 @@ func PersonalEventConfigurable(event EventType) bool {
 // Rule recipient roles (#1415). A rule may address people by their relation to the event, in
 // addition to its channels. Each role is resolved by its own resolver at projection time, filtered
 // to enabled, same-tenant people whose role can view, and checked again at send time.
-var ruleRecipientRoles = []string{RoleAssignee, RoleTeamMember, RoleEngagementLead}
+var ruleRecipientRoles = []string{RoleAssignee, RoleTeamMember, RoleEngagementLead, RoleMentionedUser, RoleApprover}
 
 // RuleRecipientRoles lists the roles a rule may name.
 func RuleRecipientRoles() []string { return append([]string(nil), ruleRecipientRoles...) }
 
-// RuleRoleSupported reports whether a rule for event may name role. Assignee and team member come
-// from a finding the event is about; the engagement lead from the event's engagement. Mention and
-// approver roles have no producer that records a verified identity yet, so they are refused rather
-// than matched against free text.
+// RuleRoleSupported admits only roles backed by authoritative producer IDs.
+// A mention event addresses only its selected user, including for stored rules.
 func RuleRoleSupported(event EventType, role string) error {
 	spec, known := catalog[event]
 	if !known || spec.OperatorOnly {
 		return fmt.Errorf("%w: unknown event type", shared.ErrValidation)
 	}
+	if event == EventFindingMentioned && role != RoleMentionedUser {
+		return fmt.Errorf("%w: mentions address only the mentioned user", shared.ErrValidation)
+	}
 	switch role {
-	case RoleMentionedUser, RoleApprover:
+	case RoleMentionedUser:
+		if event == EventFindingMentioned {
+			return nil
+		}
+		return fmt.Errorf("%w: recipient role %s has no verified producer yet", shared.ErrValidation, role)
+	case RoleApprover:
+		if approvalSubjectEvent(event) {
+			return nil
+		}
 		return fmt.Errorf("%w: recipient role %s has no verified producer yet", shared.ErrValidation, role)
 	case RoleEngagementLead:
 		if spec.HasEngagement {
@@ -144,7 +153,7 @@ func RuleRoleSupported(event EventType, role string) error {
 
 func findingSubjectEvent(event EventType) bool {
 	switch event {
-	case EventFindingCreated, EventFindingStatusChanged, EventFindingRetestCompleted, EventSLABreached, EventRiskAcceptanceCreated, EventRiskAcceptanceExpiring, EventRiskAcceptanceExpired:
+	case EventFindingCommented, EventFindingCreated, EventFindingStatusChanged, EventFindingRetestCompleted, EventSLABreached, EventRiskAcceptanceCreated, EventRiskAcceptanceExpiring, EventRiskAcceptanceExpired:
 		return true
 	}
 	return false
@@ -288,4 +297,8 @@ func SlackContactValue(team, member string) (string, error) {
 func ParseSlackContact(value string) (team, member string, ok bool) {
 	team, member, ok = strings.Cut(value, ":")
 	return team, member, ok && slackTeamID.MatchString(team) && slackMemberID.MatchString(member)
+}
+
+func approvalSubjectEvent(event EventType) bool {
+	return event == EventApprovalRequested || event == EventApprovalDecided || event == EventApprovalTimedOut
 }

@@ -44,6 +44,10 @@ func New() *Catalog {
 		notification.EventFindingCreated, notification.EventFindingStatusChanged, notification.EventFindingRetestCompleted,
 		notification.EventScanFailed, notification.EventDASTRunFinished, notification.EventReconRunFinished, notification.EventCSPMRunFinished,
 		notification.EventSLABreached, notification.EventRiskAcceptanceCreated, notification.EventRiskAcceptanceExpiring, notification.EventRiskAcceptanceExpired,
+		notification.EventEngagementCreated, notification.EventEngagementStatusChanged, notification.EventEngagementWindowStarting, notification.EventEngagementWindowEnding,
+		notification.EventFindingCommented, notification.EventFindingMentioned,
+		notification.EventApprovalRequested, notification.EventApprovalDecided, notification.EventApprovalTimedOut,
+		notification.EventIncidentUpdated, notification.EventResponseFinished, notification.EventEvidenceChainBroken,
 	}
 	families := []notification.TemplateFamily{
 		notification.FamilyChat,
@@ -163,6 +167,32 @@ func copyFor(event notification.EventType, locale tenancy.Locale) (string, strin
 				title = "Chấp nhận rủi ro đã hết hạn"
 			}
 			return title, "Mức độ: {{.severity}}\nMức: {{.tier}}\nHết hạn: {{.expires_at}}{{if .lead_time_hours}}\nCòn lại: {{.lead_time_hours}} giờ{{end}}\nThời gian: {{.occurred_at}}{{if .finding_title}}\nPhát hiện: {{.finding_title}}{{end}}"
+		case notification.EventEngagementCreated:
+			return "Đợt đánh giá mới", "Trạng thái: {{.status}}\nĐược phép từ: {{.authorized_from}}\nĐến: {{.authorized_to}}{{if .timezone}}\nMúi giờ: {{.timezone}}{{end}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .actor}}\nNgười thực hiện: {{.actor}}{{end}}"
+		case notification.EventEngagementStatusChanged:
+			return "Trạng thái đợt đánh giá đã đổi", "{{.from_status}} → {{.to_status}}{{if .status}}\nTrạng thái: {{.status}}{{end}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .actor}}\nNgười thực hiện: {{.actor}}{{end}}"
+		case notification.EventEngagementWindowStarting, notification.EventEngagementWindowEnding:
+			title := "Cửa sổ đánh giá sắp bắt đầu"
+			if event == notification.EventEngagementWindowEnding {
+				title = "Cửa sổ đánh giá sắp kết thúc"
+			}
+			return title, "Mốc ủy quyền: {{.boundary}}{{if .lead_time_hours}}\nCòn lại: {{.lead_time_hours}} giờ{{end}}\nBắt đầu: {{.authorized_from}}\nKết thúc: {{.authorized_to}}{{if .timezone}}\nMúi giờ: {{.timezone}}{{end}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}"
+		case notification.EventFindingCommented:
+			return "Bình luận mới về phát hiện", "Mức độ: {{.severity}}\nTrạng thái: {{.status}}{{if .actor}}\nNgười bình luận: {{.actor}}{{end}}{{if .comment_excerpt}}\nNội dung: {{.comment_excerpt}}{{end}}\nThời gian: {{.occurred_at}}"
+		case notification.EventFindingMentioned:
+			return "Bạn được nhắc đến trong phát hiện", "Mức độ: {{.severity}}\nTrạng thái: {{.status}}\nThời gian: {{.occurred_at}}"
+		case notification.EventApprovalRequested:
+			return "Yêu cầu phê duyệt", "Loại: {{.kind}}\nTrạng thái: {{.status}}\nHết hạn: {{.expires_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}"
+		case notification.EventApprovalDecided:
+			return "Phê duyệt đã được quyết định", "Loại: {{.kind}}\nQuyết định: {{.decision}}\nTrạng thái: {{.status}}{{if .actor}}\nNgười quyết định: {{.actor}}{{end}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}"
+		case notification.EventApprovalTimedOut:
+			return "Phê duyệt đã hết hạn", "Loại: {{.kind}}\nTrạng thái: {{.status}}\nHết hạn: {{.expires_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}"
+		case notification.EventIncidentUpdated:
+			return "Sự cố đã cập nhật", "Mức độ: {{.severity}}\nCập nhật: {{.update_kind}}\nTrạng thái: {{.status}}{{if .disposition}}\nPhân loại: {{.disposition}}{{end}}{{if .incident_title}}\nSự cố: {{.incident_title}}{{end}}{{if .owner}}\nPhụ trách: {{.owner}}{{end}}{{if .actor}}\nNgười cập nhật: {{.actor}}{{end}}"
+		case notification.EventResponseFinished:
+			return "Phản hồi đã hoàn tất", "Kết quả: {{.outcome}}\nHành động: {{.action_kind}}{{if .target}}\nMục tiêu: {{.target}}{{end}}{{if .actor}}\nNgười thực hiện: {{.actor}}{{end}}"
+		case notification.EventEvidenceChainBroken:
+			return "Chuỗi bằng chứng không hợp lệ", "Mức độ: {{.severity}}\nLý do: {{.reason_code}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}"
 		default:
 			return "Thông báo Synapse", "Sự kiện: {{.event_label}}\nThời gian: {{.occurred_at}}"
 		}
@@ -200,6 +230,32 @@ func copyFor(event notification.EventType, locale tenancy.Locale) (string, strin
 			title = "Risk acceptance expired"
 		}
 		return title, "Severity: {{.severity}}\nTier: {{.tier}}\nExpires: {{.expires_at}}{{if .lead_time_hours}}\nTime remaining: {{.lead_time_hours}} hours{{end}}\nOccurred: {{.occurred_at}}{{if .finding_title}}\nFinding: {{.finding_title}}{{end}}"
+	case notification.EventEngagementCreated:
+		return "Engagement created", "Status: {{.status}}\nAuthorized from: {{.authorized_from}}\nAuthorized to: {{.authorized_to}}{{if .timezone}}\nTime zone: {{.timezone}}{{end}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .actor}}\nCreated by: {{.actor}}{{end}}"
+	case notification.EventEngagementStatusChanged:
+		return "Engagement status changed", "{{.from_status}} → {{.to_status}}{{if .status}}\nStatus: {{.status}}{{end}}\nOccurred: {{.occurred_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .actor}}\nChanged by: {{.actor}}{{end}}"
+	case notification.EventEngagementWindowStarting, notification.EventEngagementWindowEnding:
+		title := "Engagement window starting"
+		if event == notification.EventEngagementWindowEnding {
+			title = "Engagement window ending"
+		}
+		return title, "Authorization boundary: {{.boundary}}{{if .lead_time_hours}}\nTime remaining: {{.lead_time_hours}} hours{{end}}\nStarts: {{.authorized_from}}\nEnds: {{.authorized_to}}{{if .timezone}}\nTime zone: {{.timezone}}{{end}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}"
+	case notification.EventFindingCommented:
+		return "Finding comment added", "Severity: {{.severity}}\nStatus: {{.status}}{{if .actor}}\nCommented by: {{.actor}}{{end}}{{if .comment_excerpt}}\nComment: {{.comment_excerpt}}{{end}}\nOccurred: {{.occurred_at}}"
+	case notification.EventFindingMentioned:
+		return "You were mentioned on a finding", "Severity: {{.severity}}\nStatus: {{.status}}\nOccurred: {{.occurred_at}}"
+	case notification.EventApprovalRequested:
+		return "Approval requested", "Kind: {{.kind}}\nStatus: {{.status}}\nExpires: {{.expires_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}"
+	case notification.EventApprovalDecided:
+		return "Approval decided", "Kind: {{.kind}}\nDecision: {{.decision}}\nStatus: {{.status}}{{if .actor}}\nDecided by: {{.actor}}{{end}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}"
+	case notification.EventApprovalTimedOut:
+		return "Approval timed out", "Kind: {{.kind}}\nStatus: {{.status}}\nExpired: {{.expires_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}"
+	case notification.EventIncidentUpdated:
+		return "Incident updated", "Severity: {{.severity}}\nUpdate: {{.update_kind}}\nStatus: {{.status}}{{if .disposition}}\nDisposition: {{.disposition}}{{end}}{{if .incident_title}}\nIncident: {{.incident_title}}{{end}}{{if .owner}}\nOwner: {{.owner}}{{end}}{{if .actor}}\nUpdated by: {{.actor}}{{end}}"
+	case notification.EventResponseFinished:
+		return "Response finished", "Outcome: {{.outcome}}\nAction: {{.action_kind}}{{if .target}}\nTarget: {{.target}}{{end}}{{if .actor}}\nActor: {{.actor}}{{end}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}"
+	case notification.EventEvidenceChainBroken:
+		return "Evidence chain broken", "Severity: {{.severity}}\nReason: {{.reason_code}}\nOccurred: {{.occurred_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}"
 	default:
 		return "Synapse notification", "Event: {{.event_label}}\nOccurred: {{.occurred_at}}"
 	}

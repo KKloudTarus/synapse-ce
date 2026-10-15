@@ -1,0 +1,11 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "event_label": "Finding mention",
+    "event_type": "finding.mentioned",
+    "occurred_at": "2026-10-14T08:00:00Z",
+    "severity": "high",
+    "status": "triage"
+  }
+}

@@ -46,8 +46,8 @@ func TestBuiltinRendererGoldenMatrix(t *testing.T) {
 			}
 		}
 	}
-	if len(english) != 216 {
-		t.Fatalf("English matrix has %d cases, want 216", len(english))
+	if len(english) != 360 {
+		t.Fatalf("English matrix has %d cases, want 360", len(english))
 	}
 	encoded, err := json.MarshalIndent(english, "", "  ")
 	if err != nil {
@@ -95,8 +95,8 @@ func TestBuiltinRendererVietnameseMatrix(t *testing.T) {
 			}
 		}
 	}
-	if cases != 216 {
-		t.Fatalf("Vietnamese matrix has %d cases, want 216", cases)
+	if cases != 360 {
+		t.Fatalf("Vietnamese matrix has %d cases, want 360", cases)
 	}
 	encoded, err := json.MarshalIndent(vietnamese, "", "  ")
 	if err != nil {
@@ -151,6 +151,10 @@ func builtinMatrixEvents() []domain.EventType {
 		domain.EventFindingCreated, domain.EventFindingStatusChanged, domain.EventFindingRetestCompleted,
 		domain.EventScanFailed, domain.EventDASTRunFinished, domain.EventReconRunFinished, domain.EventCSPMRunFinished,
 		domain.EventSLABreached, domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired,
+		domain.EventEngagementCreated, domain.EventEngagementStatusChanged, domain.EventEngagementWindowStarting, domain.EventEngagementWindowEnding,
+		domain.EventFindingCommented, domain.EventFindingMentioned,
+		domain.EventApprovalRequested, domain.EventApprovalDecided, domain.EventApprovalTimedOut,
+		domain.EventIncidentUpdated, domain.EventResponseFinished, domain.EventEvidenceChainBroken,
 	}
 }
 
@@ -285,6 +289,8 @@ func builtinMatrixSnapshot(spec domain.EventSpec) domain.TemplateContext {
 		"old_team":   "summary-old-team", "new_team": "summary-new-team", "old_assignee": "summary-old-assignee", "new_assignee": "summary-new-assignee", "actor": "summary-actor", "reason": "summary-reason",
 		"finding_kind": "sast", "status": "confirmed", "from_status": "triage", "to_status": "confirmed", "result": "remediated",
 		"outcome": "failed", "provider": "scanner", "error_code": "timeout", "accepted_at": "2026-10-01T09:00:00Z", "expires_at": "2026-11-01T09:00:00Z", "reminder": "expiry_warning",
+		"authorized_from": "2026-10-03T09:00:00Z", "authorized_to": "2026-10-10T09:00:00Z", "timezone": "Asia/Ho_Chi_Minh", "boundary": "authorized_from",
+		"update_kind": "status", "disposition": "investigating", "incident_title": "summary-incident", "owner": "summary-owner", "decision": "approved", "kind": "response", "comment_excerpt": "detail-comment", "reason_code": "head_mismatch",
 	}
 	lists := map[string][]map[string]string{"findings": {{"id": "detail-finding-id", "severity": "detail-high", "title": "detail-finding", "status": "detail-new"}}}
 	return spec.SnapshotWithLists(vars, lists)

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "local_runtime_notification_lifecycle",
+  "scope": {
+    "event_types": [
+      "approval.decided",
+      "approval.requested",
+      "approval.timed_out",
+      "engagement.created",
+      "engagement.status_changed",
+      "engagement.window_ending",
+      "engagement.window_starting",
+      "evidence.chain_broken",
+      "finding.commented",
+      "finding.mentioned",
+      "incident.updated",
+      "response.finished"
+    ],
+    "source_instances": 13,
+    "approval_requested_instances": 2,
+    "excluded_preexisting_event_types": [
+      "finding.created",
+      "incident.created"
+    ]
+  },
+  "source_capture": {
+    "capture_version": 3,
+    "all_projected_after_restart": true,
+    "data_schema_subject_and_source_identity_preserved": true,
+    "context_enrichment": "three projected contexts added only standard system display keys; immutable source variables were unchanged"
+  },
+  "delivery": {
+    "logical_deliveries": 288,
+    "delivered": 244,
+    "webhook_dead_letter_http_429": 44,
+    "personal_only": {
+      "event_type": "finding.mentioned",
+      "shared_channel_deliveries": 0
+    }
+  },
+  "provenance": {
+    "native_api": [
+      "engagement.created",
+      "engagement.status_changed",
+      "finding.commented",
+      "finding.mentioned"
+    ],
+    "actual_service_helper": [
+      "approval.requested",
+      "approval.decided",
+      "approval.timed_out",
+      "incident.updated"
+    ],
+    "scheduled": [
+      "engagement.window_starting",
+      "engagement.window_ending"
+    ],
+    "synthetic_client_fixture": [
+      "response.finished",
+      "evidence.chain_broken"
+    ]
+  },
+  "limitations": [
+    "response.finished and evidence.chain_broken were labelled synthetic client fixtures and do not prove remote response execution or a live custody failure",
+    "the initial candidate used earlier approval inline identities; current formal approval-recipient roster needs a final live recheck",
+    "webhook HTTP 429 dead letters are retained evidence and are not provider success"
+  ],
+  "status": "partial: runtime source and delivery evidence captured; final live acceptance remains pending"
+}

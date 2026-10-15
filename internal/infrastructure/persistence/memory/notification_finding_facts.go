@@ -13,18 +13,40 @@ import (
 // NotificationFindingFactsReader snapshots tenant-local user identities for
 // finding producers. Memory has no ownership assignment store, so TeamID is
 // intentionally absent until an assignment implementation is configured.
-type NotificationFindingFactsReader struct{ users ports.UserRepository }
+type NotificationFindingFactsReader struct {
+	users    ports.UserRepository
+	settings notificationEngagementSettingReader
+}
 
-func NewNotificationFindingFactsReader(users ports.UserRepository) *NotificationFindingFactsReader {
-	return &NotificationFindingFactsReader{users: users}
+func NewNotificationFindingFactsReader(users ports.UserRepository, settings ...notificationEngagementSettingReader) *NotificationFindingFactsReader {
+	r := &NotificationFindingFactsReader{users: users}
+	if len(settings) > 0 {
+		r.settings = settings[0]
+	}
+	return r
 }
 
 var _ ports.NotificationFindingFactsReader = (*NotificationFindingFactsReader)(nil)
 
-func (r *NotificationFindingFactsReader) SnapshotFindingNotificationFacts(ctx context.Context, tenantID, _, _, assigneeID shared.ID, actor string) (ports.NotificationFindingFacts, error) {
+func (r *NotificationFindingFactsReader) SnapshotFindingNotificationFacts(ctx context.Context, tenantID, engagementID, _, assigneeID shared.ID, actor string) (ports.NotificationFindingFacts, error) {
 	var facts ports.NotificationFindingFacts
 	if r == nil || r.users == nil {
 		return facts, nil
+	}
+	if r.settings != nil {
+		setting, err := r.settings.GetEngagementNotificationSetting(ctx, tenantID, engagementID)
+		if err != nil && !errors.Is(err, shared.ErrNotFound) {
+			return facts, err
+		}
+		if err == nil && !setting.LeadUserID.IsZero() {
+			u, err := r.users.GetByID(ctx, tenantID, setting.LeadUserID)
+			if err != nil && !errors.Is(err, shared.ErrNotFound) {
+				return facts, err
+			}
+			if err == nil && u != nil && !u.Disabled && u.Role.Can(user.PermView) {
+				facts.LeadUserID = u.ID
+			}
+		}
 	}
 	if candidate := shared.ID(strings.TrimSpace(actor)); !candidate.IsZero() {
 		if u, err := r.users.GetByID(ctx, tenantID, candidate); err == nil && activeUser(u) {

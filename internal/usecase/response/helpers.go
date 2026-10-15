@@ -150,7 +150,34 @@ func (s *Service) recordExecutionIntent(ctx context.Context, actor string, actio
 }
 
 func (s *Service) recordOutcome(ctx context.Context, event, actor string, action rdom.Action, attempt responsesaga.ResponseAttempt, meta map[string]string) error {
-	committed, err := s.store.EnqueueResponseAudit(ctx, responseOutcomeAuditIntent(event, actor, action, attempt, meta))
+	intent := responseOutcomeAuditIntent(event, actor, action, attempt, meta)
+	outcome, notify := responseNotificationOutcome(event, attempt.State)
+	if s.notifications == nil {
+		committed, err := s.store.EnqueueResponseAudit(ctx, intent)
+		if err != nil {
+			return err
+		}
+		return s.deliverResponseAudit(ctx, committed)
+	}
+	record, found, err := s.store.Get(ctx, action.ID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("%w: response %s for outcome notification", shared.ErrNotFound, action.ID)
+	}
+	var committed ports.ResponseAuditIntent
+	err = s.notificationTx.Run(ctx, record.TenantID, func(txCtx context.Context) error {
+		var enqueueErr error
+		committed, enqueueErr = s.store.EnqueueResponseAudit(txCtx, intent)
+		if enqueueErr != nil {
+			return enqueueErr
+		}
+		if !notify {
+			return nil
+		}
+		return s.appendResponseFinished(txCtx, record, outcome, actor)
+	})
 	if err != nil {
 		return err
 	}
@@ -175,7 +202,41 @@ func responseOutcomeAuditIntent(event, actor string, action rdom.Action, attempt
 
 func (s *Service) commitAttemptOutcome(ctx context.Context, attempt responsesaga.ResponseAttempt, from, to responsesaga.SagaState, event, actor string, action rdom.Action, meta map[string]string) (responsesaga.ResponseAttempt, ports.ResponseAuditIntent, error) {
 	attempt.State = to
-	stored, transitioned, committed, err := s.store.TransitionAttemptWithAudit(ctx, attempt, from, responseOutcomeAuditIntent(event, actor, action, attempt, meta))
+	intent := responseOutcomeAuditIntent(event, actor, action, attempt, meta)
+	outcome, notify := responseNotificationOutcome(event, attempt.State)
+	if s.notifications == nil {
+		stored, transitioned, committed, err := s.store.TransitionAttemptWithAudit(ctx, attempt, from, intent)
+		if err != nil {
+			return responsesaga.ResponseAttempt{}, ports.ResponseAuditIntent{}, err
+		}
+		if !transitioned {
+			return responsesaga.ResponseAttempt{}, ports.ResponseAuditIntent{}, fmt.Errorf("%w: response attempt %s changed concurrently from %s to %s", shared.ErrConflict, attempt.IdempotencyKey, from, stored.State)
+		}
+		return stored, committed, nil
+	}
+	record, found, err := s.store.Get(ctx, action.ID)
+	if err != nil {
+		return responsesaga.ResponseAttempt{}, ports.ResponseAuditIntent{}, err
+	}
+	if !found {
+		return responsesaga.ResponseAttempt{}, ports.ResponseAuditIntent{}, fmt.Errorf("%w: response %s for attempt notification", shared.ErrNotFound, action.ID)
+	}
+	var (
+		stored       responsesaga.ResponseAttempt
+		transitioned bool
+		committed    ports.ResponseAuditIntent
+	)
+	err = s.notificationTx.Run(ctx, record.TenantID, func(txCtx context.Context) error {
+		var transitionErr error
+		stored, transitioned, committed, transitionErr = s.store.TransitionAttemptWithAudit(txCtx, attempt, from, intent)
+		if transitionErr != nil || !transitioned {
+			return transitionErr
+		}
+		if !notify {
+			return nil
+		}
+		return s.appendResponseFinished(txCtx, record, outcome, actor)
+	})
 	if err != nil {
 		return responsesaga.ResponseAttempt{}, ports.ResponseAuditIntent{}, err
 	}
@@ -183,6 +244,37 @@ func (s *Service) commitAttemptOutcome(ctx context.Context, attempt responsesaga
 		return responsesaga.ResponseAttempt{}, ports.ResponseAuditIntent{}, fmt.Errorf("%w: response attempt %s changed concurrently from %s to %s", shared.ErrConflict, attempt.IdempotencyKey, from, stored.State)
 	}
 	return stored, committed, nil
+}
+
+// responseNotificationOutcome translates only settled response outcomes to the
+// small terminal vocabulary exposed to notification subscribers. Journal entries
+// still record ambiguous and intermediate events, but those events must not claim
+// that a response finished.
+func responseNotificationOutcome(event string, state responsesaga.SagaState) (string, bool) {
+	switch event {
+	case "response.applied":
+		return "applied", true
+	case "response.verified", "response.verification_succeeded":
+		return "verified", true
+	case "response.reverted":
+		return "reverted", true
+	case "response.attempt_halted":
+		// A halt only has a terminal meaning when the attempt was stopped before
+		// dispatch, or its rollback was stopped before dispatch. Executing and
+		// post-effect states are retained in the audit journal for reconciliation.
+		switch state {
+		case responsesaga.StateCommandFailed, responsesaga.StateRollbackFailed:
+			return "halted", true
+		}
+	case "response.execution_failed", "response.verification_failed", "response.rollback_verification_failed":
+		return "failed", true
+	case "response.attempt_terminal":
+		switch state {
+		case responsesaga.StateCommandFailed, responsesaga.StateRollbackFailed:
+			return "failed", true
+		}
+	}
+	return "", false
 }
 
 func (s *Service) put(ctx context.Context, r Record) error { return s.store.Put(ctx, r) }

@@ -59,27 +59,39 @@ const CodeEngagementSuppressed = "engagement_suppressed"
 type EventType string
 
 const (
-	EventVulnerabilityAction    EventType = "vulnerability_action.created"
-	EventScanCompleted          EventType = "scan.completed"
-	EventQualityGateFailed      EventType = "quality_gate.failed"
-	EventSLAApproaching         EventType = "sla.approaching_deadline"
-	EventFleetAgentOffline      EventType = "fleet.agent.offline"
-	EventIncidentCreated        EventType = "incident.created"
-	EventOwnershipChanged       EventType = "finding.ownership_changed"
-	EventDestinationChanged     EventType = "notification.destination_changed"
-	EventChannelPaused          EventType = "notification.channel_paused"
-	EventTest                   EventType = "notification.test"
-	EventFindingCreated         EventType = "finding.created"
-	EventFindingStatusChanged   EventType = "finding.status_changed"
-	EventFindingRetestCompleted EventType = "finding.retest_completed"
-	EventScanFailed             EventType = "scan.failed"
-	EventDASTRunFinished        EventType = "dast.run_finished"
-	EventReconRunFinished       EventType = "recon.run_finished"
-	EventCSPMRunFinished        EventType = "cspm.run_finished"
-	EventSLABreached            EventType = "sla.breached"
-	EventRiskAcceptanceCreated  EventType = "risk_acceptance.created"
-	EventRiskAcceptanceExpiring EventType = "risk_acceptance.expiring"
-	EventRiskAcceptanceExpired  EventType = "risk_acceptance.expired"
+	EventVulnerabilityAction      EventType = "vulnerability_action.created"
+	EventScanCompleted            EventType = "scan.completed"
+	EventQualityGateFailed        EventType = "quality_gate.failed"
+	EventSLAApproaching           EventType = "sla.approaching_deadline"
+	EventFleetAgentOffline        EventType = "fleet.agent.offline"
+	EventIncidentCreated          EventType = "incident.created"
+	EventOwnershipChanged         EventType = "finding.ownership_changed"
+	EventDestinationChanged       EventType = "notification.destination_changed"
+	EventChannelPaused            EventType = "notification.channel_paused"
+	EventTest                     EventType = "notification.test"
+	EventFindingCreated           EventType = "finding.created"
+	EventFindingStatusChanged     EventType = "finding.status_changed"
+	EventFindingRetestCompleted   EventType = "finding.retest_completed"
+	EventScanFailed               EventType = "scan.failed"
+	EventDASTRunFinished          EventType = "dast.run_finished"
+	EventReconRunFinished         EventType = "recon.run_finished"
+	EventCSPMRunFinished          EventType = "cspm.run_finished"
+	EventSLABreached              EventType = "sla.breached"
+	EventRiskAcceptanceCreated    EventType = "risk_acceptance.created"
+	EventRiskAcceptanceExpiring   EventType = "risk_acceptance.expiring"
+	EventRiskAcceptanceExpired    EventType = "risk_acceptance.expired"
+	EventEngagementCreated        EventType = "engagement.created"
+	EventEngagementStatusChanged  EventType = "engagement.status_changed"
+	EventEngagementWindowStarting EventType = "engagement.window_starting"
+	EventEngagementWindowEnding   EventType = "engagement.window_ending"
+	EventFindingCommented         EventType = "finding.commented"
+	EventFindingMentioned         EventType = "finding.mentioned"
+	EventApprovalRequested        EventType = "approval.requested"
+	EventApprovalDecided          EventType = "approval.decided"
+	EventApprovalTimedOut         EventType = "approval.timed_out"
+	EventIncidentUpdated          EventType = "incident.updated"
+	EventResponseFinished         EventType = "response.finished"
+	EventEvidenceChainBroken      EventType = "evidence.chain_broken"
 )
 
 // Valid reports whether the event type is declared in the catalog.
@@ -223,6 +235,9 @@ func (r *Rule) Normalize() error {
 	}
 	if err := r.normalizeRecipientRoles(); err != nil {
 		return err
+	}
+	if r.EventType == EventFindingMentioned && len(r.ChannelIDs) > 0 {
+		return fmt.Errorf("%w: mentions require personal recipient routing", shared.ErrValidation)
 	}
 	if len(r.ChannelIDs) == 0 && len(r.RecipientRoles) == 0 {
 		return fmt.Errorf("%w: a rule needs a channel or a recipient role", shared.ErrValidation)

@@ -129,9 +129,17 @@ func (r *UserRepository) Bootstrap(ctx context.Context, u *user.User, auditEntry
 }
 
 func (r *UserRepository) GetByID(ctx context.Context, tenantID, id shared.ID) (*user.User, error) {
-	u, err := scanUser(r.pool.QueryRow(ctx,
-		`SELECT `+userCols+` FROM users WHERE `+userTenantPredicate+` AND id=$3`,
-		shared.DefaultTenant.String(), shared.TenantOrDefault(tenantID).String(), id.String()))
+	tenant := shared.TenantOrDefault(tenantID)
+	query := `SELECT ` + userCols + ` FROM users WHERE ` + userTenantPredicate + ` AND id=$3`
+	var row rowScanner
+	if tx, bound, err := contextTenantTx(ctx, tenant); err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
+	} else if bound {
+		row = tx.QueryRow(ctx, query, shared.DefaultTenant.String(), tenant.String(), id.String())
+	} else {
+		row = r.pool.QueryRow(ctx, query, shared.DefaultTenant.String(), tenant.String(), id.String())
+	}
+	u, err := scanUser(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// A user in another tenant is not found, never forbidden: existence is not revealed.
 		return nil, shared.ErrNotFound

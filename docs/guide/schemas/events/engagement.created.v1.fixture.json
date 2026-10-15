@@ -1,0 +1,5 @@
+{
+  "id": "event-engagement-created", "type": "engagement.created", "source_kind": "engagement", "source_id": "eng-42", "schema_version": 1,
+  "occurred_at": "2026-10-14T08:00:00Z", "engagement_id": "eng-42",
+  "data": {"title": "Engagement created", "summary": "A new engagement was authorized.", "engagement_id": "eng-42", "lead_user_id": "user-42", "status": "planned", "authorized_from": "2026-10-20T08:00:00Z", "authorized_to": "2026-10-27T08:00:00Z", "timezone": "Asia/Ho_Chi_Minh", "engagement_name": "October assessment", "actor": "operator-42"}
+}

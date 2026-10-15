@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/response.finished.v1.schema.json",
+  "title": "response.finished event (v1)",
+  "description": "A governed response reached a terminal outcome.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "const": "response.finished"
+    },
+    "source_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "engagement_id": {
+      "type": "string"
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "response_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "engagement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lead_user_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "applied",
+            "verified",
+            "failed",
+            "reverted",
+            "halted"
+          ]
+        },
+        "action_kind": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "engagement_name": {
+          "type": "string",
+          "maxLength": 500
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "response_id",
+        "engagement_id",
+        "outcome",
+        "action_kind"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "id",
+    "type",
+    "source_kind",
+    "source_id",
+    "schema_version",
+    "occurred_at",
+    "data"
+  ],
+  "additionalProperties": true
+}
