@@ -626,7 +626,12 @@ channel's formatter so that no value can become formatting, a link or a mention:
 - **Telegram** sends MarkdownV2 text with every special character escaped and link previews off. A
   `429` carries its wait in the body (`parameters.retry_after`), which the worker honours. A group that
   was upgraded to a supergroup fails with `telegram_chat_migrated`; re-enter the channel with the new
-  chat ID. The sent `message_id` is kept on the delivery for threading (#1384).
+  chat ID. The sent `message_id` is kept on the delivery for threading (#1384). A `2xx` whose reply
+  says `ok: false` is retried. A `2xx` whose reply cannot be read is final instead, because Telegram
+  has already posted the message and a retry would post it again: `telegram_response_too_large` when
+  the reply exceeds 1 MiB or the connection drops before it ends, `telegram_response_invalid` when it
+  is not a Bot API JSON object with a boolean `ok`. A `message_id` that is missing or not a positive
+  integer only leaves the delivery without a reference.
 - **Google Chat** posts a `cardsV2` card whose text is HTML with every value escaped, so
   `<users/all>` is text. The created message's resource name is kept on the delivery.
 - **Discord** posts one embed with every punctuation character of a value escaped and

@@ -27,17 +27,29 @@ const maxResponseBytes = 4 << 10
 // the provider's reply. Transport errors are reduced to a code here and never returned: the error
 // of a failed request holds the request URL, which for the chat channels is the credential.
 func (s *Sender) doRead(req *http.Request) (ports.NotificationSendResult, []byte) {
+	result, body, _ := s.doReadLimit(req, maxResponseBytes)
+	return result, body
+}
+
+// doReadLimit is doRead with a caller-chosen bound on the body. truncated reports that the body was
+// not read whole, because it was longer than limit or the connection failed mid-body, so a driver that
+// decodes the reply can tell a reply cut short here from one the provider sent malformed.
+func (s *Sender) doReadLimit(req *http.Request, limit int64) (result ports.NotificationSendResult, body []byte, truncated bool) {
 	resp, err := s.http.Do(req)
 	if errors.Is(err, safehttp.ErrBlockedDestination) {
 		// Retrying cannot change the answer; the destination has to be corrected.
-		return ports.NotificationSendResult{ErrorCode: "destination_blocked"}, nil
+		return ports.NotificationSendResult{ErrorCode: "destination_blocked"}, nil, false
 	}
 	if err != nil {
-		return ports.NotificationSendResult{ErrorCode: "network_error", Retryable: true}, nil
+		return ports.NotificationSendResult{ErrorCode: "network_error", Retryable: true}, nil, false
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	return s.classify(resp), body
+	// One byte past the limit is enough to know the body did not fit.
+	body, err = io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if int64(len(body)) > limit {
+		return s.classify(resp), body[:limit], true
+	}
+	return s.classify(resp), body, err != nil
 }
 
 func (s *Sender) classify(resp *http.Response) ports.NotificationSendResult {
