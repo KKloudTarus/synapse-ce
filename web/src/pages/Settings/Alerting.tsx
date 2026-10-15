@@ -1089,9 +1089,11 @@ function recipientRolesFor(
   event: string,
   spec: NotificationEventSpec | undefined,
 ): { value: string; label: string }[] {
+  if (event === 'finding.mentioned') return [{ value: 'mentioned_user', label: 'The mentioned user' }]
   const out: { value: string; label: string }[] = []
+  if (['approval.requested', 'approval.decided', 'approval.timed_out'].includes(event)) out.push({ value: 'approver', label: 'Eligible approvers' })
   const findingSubject = [
-    'finding.created', 'finding.status_changed', 'finding.retest_completed',
+    'finding.commented', 'finding.created', 'finding.status_changed', 'finding.retest_completed',
     'sla.breached', 'risk_acceptance.created', 'risk_acceptance.expiring',
     'risk_acceptance.expired',
   ].includes(event)
@@ -1132,13 +1134,13 @@ function RuleCreate({
   const allows = (filter: NotificationRuleFilter) =>
     spec?.filters.includes(filter) ?? false
   const [selected, setSelected] = useState<string[]>(
-    initial?.channel_ids ?? [channels[0]?.id].filter(Boolean),
+    event === 'finding.mentioned' ? [] : initial?.channel_ids ?? [channels[0]?.id].filter(Boolean),
   )
   const [engagements, setEngagements] = useState<string[]>(initial?.engagement_ids ?? [])
   const [teams, setTeams] = useState<string[]>(initial?.team_ids ?? [])
   const [allTeams, setAllTeams] = useState(initial?.all_teams ?? false)
   // Recipient roles (#1415) address people by their relation to the event, besides the channels.
-  const [roles, setRoles] = useState<string[]>(initial?.recipient_roles ?? [])
+  const [roles, setRoles] = useState<string[]>(initial?.recipient_roles ?? (event === 'finding.mentioned' ? ['mentioned_user'] : []))
   const availableRoles = recipientRolesFor(event, spec)
   const chosenRoles = roles.filter((role) => availableRoles.some((r) => r.value === role))
   const engagementCache = useRef<Promise<Array<{ id: string; name: string; client: string }>> | null>(null)
@@ -1189,6 +1191,7 @@ function RuleCreate({
   const [toStatuses, setToStatuses] = useState(initial?.to_statuses?.join(', ') ?? '')
   const [retestResults, setRetestResults] = useState(initial?.retest_results?.join(', ') ?? '')
   const [scanKinds, setScanKinds] = useState(initial?.scan_kinds?.join(', ') ?? '')
+  const [kinds, setKinds] = useState(initial?.kinds?.join(', ') ?? '')
   const [outcomes, setOutcomes] = useState(initial?.outcomes?.join(', ') ?? '')
   const [providers, setProviders] = useState(initial?.providers?.join(', ') ?? '')
   const [error, setError] = useState<string | null>(null)
@@ -1224,7 +1227,7 @@ function RuleCreate({
         name: name.trim(),
         enabled: initial?.enabled ?? true,
         event_type: event,
-        channel_ids: selected,
+        channel_ids: event === 'finding.mentioned' ? [] : selected,
         recipient_roles: chosenRoles,
         // A saved engagement scope on an event without engagements is cleared rather than resent.
         engagement_ids: allows('engagement_ids') ? engagements : [],
@@ -1238,6 +1241,7 @@ function RuleCreate({
         to_statuses: allows('to_statuses') ? ruleFilterValues(toStatuses) : undefined,
         retest_results: allows('retest_results') ? ruleFilterValues(retestResults) : undefined,
         scan_kinds: allows('scan_kinds') ? ruleFilterValues(scanKinds) : undefined,
+        kinds: allows('kinds') ? ruleFilterValues(kinds) : undefined,
         outcomes: allows('outcomes') ? ruleFilterValues(outcomes) : undefined,
         providers: allows('providers') ? ruleFilterValues(providers) : undefined,
         min_severity:
@@ -1277,6 +1281,7 @@ function RuleCreate({
             value={event}
             onValueChange={(nextEvent) => {
               setEvent(nextEvent)
+              if (nextEvent === 'finding.mentioned') { setSelected([]); setRoles(['mentioned_user']) }
               const nextFilters = eventTypes.find((item) => item.type === nextEvent)?.filters ?? []
               if (!nextFilters.includes('engagement_ids')) setEngagements([])
               if (!nextFilters.includes('team_ids')) {
@@ -1291,6 +1296,7 @@ function RuleCreate({
               if (!nextFilters.includes('to_statuses')) setToStatuses('')
               if (!nextFilters.includes('retest_results')) setRetestResults('')
               if (!nextFilters.includes('scan_kinds')) setScanKinds('')
+              if (!nextFilters.includes('kinds')) setKinds('')
               if (!nextFilters.includes('outcomes')) setOutcomes('')
               if (!nextFilters.includes('providers')) setProviders('')
             }}
@@ -1303,7 +1309,7 @@ function RuleCreate({
             ]}
           />
         </Field>
-        <fieldset className="space-y-2">
+        {event !== 'finding.mentioned' && <fieldset className="space-y-2">
           <legend className="text-sm font-medium text-secondary">
             Channels
           </legend>
@@ -1323,7 +1329,7 @@ function RuleCreate({
               {c.name}
             </label>
           ))}
-        </fieldset>
+        </fieldset>}
         <RuleTemplatePreview
           channels={channels.filter((c) => selected.includes(c.id))}
           eventType={event}
@@ -1377,6 +1383,11 @@ function RuleCreate({
               value={actions}
               onChange={(e) => setActions(e.target.value)}
             />
+          </Field>
+        )}
+        {allows('kinds') && (
+          <Field label="Approval kinds (optional)" htmlFor="notification-kinds" hint="agent, response">
+            <Input id="notification-kinds" aria-describedby="notification-kinds-hint" value={kinds} onChange={(e) => setKinds(e.target.value)} />
           </Field>
         )}
         {allows('finding_kinds') && (

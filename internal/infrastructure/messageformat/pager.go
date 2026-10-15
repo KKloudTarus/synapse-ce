@@ -19,6 +19,8 @@ const (
 	PagerDutySummaryRunes = 1024
 	// JSM Operations accepts a 130-character alert message.
 	JSMMessageRunes = 130
+	// Lifecycle notes retain bounded class-filtered facts beyond the alert title.
+	JSMNoteRunes = 4096
 )
 
 var (
@@ -31,18 +33,19 @@ func (PagerDutyFormatter) ChannelType() notification.ChannelType {
 }
 func (JSMFormatter) ChannelType() notification.ChannelType { return notification.ChannelJSM }
 func (PagerDutyFormatter) Format(message ports.RenderedMessage) (ports.FormattedMessage, error) {
-	return pagerMessage(message, PagerDutySummaryRunes)
+	return pagerMessage(message, PagerDutySummaryRunes, false)
 }
 func (JSMFormatter) Format(message ports.RenderedMessage) (ports.FormattedMessage, error) {
-	return pagerMessage(message, JSMMessageRunes)
+	return pagerMessage(message, JSMMessageRunes, true)
 }
 
-func pagerMessage(message ports.RenderedMessage, summaryRunes int) (ports.FormattedMessage, error) {
+func pagerMessage(message ports.RenderedMessage, summaryRunes int, includeNote bool) (ports.FormattedMessage, error) {
 	links, err := checkLinks(message.Links)
 	if err != nil {
 		return ports.FormattedMessage{}, err
 	}
-	summary := truncateRunes(headerText(msgmarkdown.Parse(msgtemplate.Sanitize(message.Fields["summary"]))), summaryRunes)
+	plainSummary := headerText(msgmarkdown.Parse(msgtemplate.Sanitize(message.Fields["summary"])))
+	summary := truncateRunes(plainSummary, summaryRunes)
 	if summary == "" {
 		return ports.FormattedMessage{}, nil
 	}
@@ -51,7 +54,11 @@ func pagerMessage(message ports.RenderedMessage, summaryRunes int) (ports.Format
 	for i, link := range links {
 		linkValues[i] = map[string]string{"label": link.label, "url": link.url}
 	}
-	payload, err := json.Marshal(map[string]any{"summary": summary, "links": linkValues})
+	values := map[string]any{"summary": summary, "links": linkValues}
+	if includeNote {
+		values["note"] = truncateRunes(plainSummary, JSMNoteRunes)
+	}
+	payload, err := json.Marshal(values)
 	if err != nil {
 		return ports.FormattedMessage{}, err
 	}

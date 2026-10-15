@@ -35,7 +35,7 @@ func (r *NotificationRepository) ResolvePersonalRecipients(ctx context.Context, 
 	var out []notification.ResolvedRecipient
 	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
 		var resolveErr error
-		out, resolveErr = resolvePersonalRecipients(ctx, tx, event, nil)
+		out, resolveErr = r.resolvePersonalRecipients(ctx, tx, event, nil)
 		return resolveErr
 	})
 	return out, err
@@ -197,7 +197,7 @@ func (r *NotificationRepository) projectPersonal(ctx context.Context, tx pgx.Tx,
 	if err != nil || !subject.ok {
 		return err
 	}
-	recipients, err := resolvePersonalRecipients(ctx, tx, e, ruleRoles)
+	recipients, err := r.resolvePersonalRecipients(ctx, tx, e, ruleRoles)
 	if err != nil || len(recipients) == 0 {
 		return err
 	}
@@ -217,9 +217,11 @@ func (r *NotificationRepository) projectPersonal(ctx context.Context, tx pgx.Tx,
 		User     string          `json:"user_id"`
 		ID       string          `json:"id"`
 		External map[string]bool `json:"-"`
+		Roles    []string        `json:"recipient_roles"`
 	}
 	rows := make([]inboxRow, 0, len(users))
-	for _, userID := range users {
+	for _, recipient := range recipients {
+		userID := recipient.UserID
 		if !notification.Deliver(notification.InAppMandatory(e.Type), prefs[prefKey{userID, notification.PersonalInApp}], true) {
 			continue
 		}
@@ -227,7 +229,7 @@ func (r *NotificationRepository) projectPersonal(ctx context.Context, tx pgx.Tx,
 		for _, channel := range notification.ExternalPersonalChannels() {
 			external[channel] = notification.Deliver(false, prefs[prefKey{userID, channel}], defaults.Enabled(e.Type, channel))
 		}
-		rows = append(rows, inboxRow{User: userID.String(), ID: stableID(e.TenantID.String(), userID.String(), e.ID.String()).String(), External: external})
+		rows = append(rows, inboxRow{User: userID.String(), ID: stableID(e.TenantID.String(), userID.String(), e.ID.String()).String(), External: external, Roles: recipient.Roles})
 	}
 	if len(rows) == 0 {
 		return nil
@@ -240,8 +242,8 @@ func (r *NotificationRepository) projectPersonal(ctx context.Context, tx pgx.Tx,
 	if title == "" {
 		title = "Notification"
 	}
-	inserted, err := tx.Query(ctx, `INSERT INTO user_notifications(tenant_id,user_id,id,event_id,event_type,title,summary,link_path,created_at)
-		SELECT $1, item->>'user_id', item->>'id', $2, $3, $4, $5, $6, now()
+	inserted, err := tx.Query(ctx, `INSERT INTO user_notifications(tenant_id,user_id,id,event_id,event_type,title,summary,link_path,created_at,recipient_roles)
+		SELECT $1, item->>'user_id', item->>'id', $2, $3, $4, $5, $6, now(), item->'recipient_roles'
 		FROM jsonb_array_elements($7::jsonb) AS item
 		WHERE NOT EXISTS (
 			SELECT 1 FROM user_notification_tombstones t
@@ -367,6 +369,7 @@ func personalSubject(e notification.Event, ruleRoles []string) (projectedSubject
 		return projectedSubject{}, nil
 	}
 	generic := notification.GenericPersonalSubject(e)
+	generic.LeadID, generic.CapturedLead, generic.MentionedIDs, generic.ApproverIDs = subject.LeadID, subject.CapturedLead, subject.MentionedIDs, subject.ApproverIDs
 	generic.AssigneeIDs, generic.TeamIDs, generic.LookupFinding, generic.FindingID = subject.AssigneeIDs, subject.TeamIDs, subject.LookupFinding, subject.FindingID
 	return projectedSubject{PersonalSubject: generic, ok: true}, nil
 }
@@ -381,13 +384,14 @@ var roleResolvers = map[string]roleResolver{
 	notification.RoleTeamMember:     resolveTeamMembers,
 	notification.RoleEngagementLead: resolveEngagementLead,
 	notification.RoleTenantAdmin:    resolveTenantAdmins,
+	notification.RoleMentionedUser:  resolveMentionedUsers,
 }
 
 // personalRoleOrder is the order roles are merged in: the first role that selects a person is the
 // first role listed for them.
-var personalRoleOrder = []string{notification.RoleAssignee, notification.RoleTeamMember, notification.RoleEngagementLead, notification.RoleTenantAdmin}
+var personalRoleOrder = []string{notification.RoleAssignee, notification.RoleTeamMember, notification.RoleEngagementLead, notification.RoleMentionedUser, notification.RoleApprover, notification.RoleTenantAdmin}
 
-func resolvePersonalRecipients(ctx context.Context, tx pgx.Tx, e notification.Event, ruleRoles []string) ([]notification.ResolvedRecipient, error) {
+func (r *NotificationRepository) resolvePersonalRecipients(ctx context.Context, tx pgx.Tx, e notification.Event, ruleRoles []string) ([]notification.ResolvedRecipient, error) {
 	projected, err := personalSubject(e, ruleRoles)
 	if err != nil || !projected.ok {
 		return nil, err
@@ -396,19 +400,29 @@ func resolvePersonalRecipients(ctx context.Context, tx pgx.Tx, e notification.Ev
 	// The event's own subject names its assignees, teams and administrators; a rule adds roles on
 	// top. A rule cannot take away the people the event itself addresses.
 	wanted := map[string]bool{
-		notification.RoleAssignee:    len(subject.AssigneeIDs) > 0 || subject.LookupFinding,
-		notification.RoleTeamMember:  len(subject.TeamIDs) > 0,
-		notification.RoleTenantAdmin: subject.Admins,
+		notification.RoleAssignee:      len(subject.AssigneeIDs) > 0 || subject.LookupFinding,
+		notification.RoleTeamMember:    len(subject.TeamIDs) > 0,
+		notification.RoleTenantAdmin:   subject.Admins,
+		notification.RoleMentionedUser: len(subject.MentionedIDs) > 0,
+		notification.RoleApprover:      subject.ApprovalRecipients || len(subject.ApproverIDs) > 0,
 	}
 	for _, role := range ruleRoles {
-		wanted[role] = true
+		if notification.RuleRoleSupported(e.Type, role) == nil {
+			wanted[role] = true
+		}
 	}
 	var groups []notification.RoleRecipients
 	for _, role := range personalRoleOrder {
 		if !wanted[role] {
 			continue
 		}
-		users, err := roleResolvers[role](ctx, tx, e, subject)
+		var users []shared.ID
+		var err error
+		if role == notification.RoleApprover {
+			users, err = r.resolveApprovers(ctx, tx, e, subject)
+		} else {
+			users, err = roleResolvers[role](ctx, tx, e, subject)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -448,7 +462,10 @@ func resolveTeamMembers(ctx context.Context, tx pgx.Tx, e notification.Event, su
 
 // resolveEngagementLead reads the lead an administrator set on the engagement's notification
 // settings. An event without an engagement, or an engagement without a lead, names nobody.
-func resolveEngagementLead(ctx context.Context, tx pgx.Tx, e notification.Event, _ notification.PersonalSubject) ([]shared.ID, error) {
+func resolveEngagementLead(ctx context.Context, tx pgx.Tx, e notification.Event, subject notification.PersonalSubject) ([]shared.ID, error) {
+	if subject.CapturedLead {
+		return resolveCapturedUsers(ctx, tx, e, compactRecipientIDs(subject.LeadID), humanNotificationRoles)
+	}
 	if e.EngagementID.IsZero() {
 		return nil, nil
 	}
@@ -478,4 +495,36 @@ func loadPersonalDefaults(ctx context.Context, tx pgx.Tx, tenant shared.ID, even
 		out[notification.PersonalDefaultKey{Event: event, Channel: channel}] = enabled
 	}
 	return out, rows.Err()
+}
+
+func compactRecipientIDs(id shared.ID) []shared.ID {
+	if id.IsZero() {
+		return nil
+	}
+	return []shared.ID{id}
+}
+func resolveCapturedUsers(ctx context.Context, tx pgx.Tx, e notification.Event, ids []shared.ID, roles []string) ([]shared.ID, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return queryUserIDs(ctx, tx, `SELECT id FROM users WHERE ownership_tenant_id=$1 AND id=ANY($2) AND NOT disabled AND role=ANY($3) ORDER BY id`, e.TenantID, idStrings(ids), roles)
+}
+func resolveMentionedUsers(ctx context.Context, tx pgx.Tx, e notification.Event, subject notification.PersonalSubject) ([]shared.ID, error) {
+	if e.Type != notification.EventFindingMentioned {
+		return nil, nil
+	}
+	return resolveCapturedUsers(ctx, tx, e, subject.MentionedIDs, humanNotificationRoles)
+}
+func (r *NotificationRepository) resolveApprovers(ctx context.Context, tx pgx.Tx, e notification.Event, subject notification.PersonalSubject) ([]shared.ID, error) {
+	ids := subject.ApproverIDs // legacy source records retain their former payload fact.
+	if r.approvalRecipients != nil {
+		captured, err := r.approvalRecipients.ApprovalNotificationRecipients(bindTenantTransaction(ctx, e.TenantID, tx), e.TenantID, e.SourceKind, e.SourceID)
+		if err != nil {
+			return nil, err
+		}
+		if len(captured) > 0 {
+			ids = captured
+		}
+	}
+	return resolveCapturedUsers(ctx, tx, e, ids, []string{"admin", "reviewer"})
 }

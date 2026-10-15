@@ -14,24 +14,30 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	evdom "github.com/KKloudTarus/synapse-ce/internal/domain/evidence"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // Service is the evidence vault use case.
 type Service struct {
-	store   ports.EvidenceStore
-	blobs   ports.BlobStore // optional; nil disables artifact capture/retrieval
-	audit   ports.AuditLogger
-	clock   ports.Clock
-	ids     ports.IDGenerator
-	signer  ports.ChainSigner        // optional; nil disables chain-head attestation
-	tsa     ports.TimestampAuthority // optional; nil disables external RFC-3161 anchoring
-	tsStore ports.TimestampStore     // optional; the out-of-band token store
-	log     *slog.Logger             // optional; defaults to slog.Default()
+	store             ports.EvidenceStore
+	blobs             ports.BlobStore // optional; nil disables artifact capture/retrieval
+	audit             ports.AuditLogger
+	clock             ports.Clock
+	ids               ports.IDGenerator
+	signer            ports.ChainSigner        // optional; nil disables chain-head attestation
+	tsa               ports.TimestampAuthority // optional; nil disables external RFC-3161 anchoring
+	tsStore           ports.TimestampStore     // optional; the out-of-band token store
+	log               *slog.Logger             // optional; defaults to slog.Default()
+	notificationTx    ports.IndependentTenantTransactionRunner
+	notifications     ports.NotificationOutbox
+	notificationFacts ports.NotificationLifecycleFactsReader
 }
 
 // anchorTimeout bounds the per-call wait on the TSA so a slow/down authority never
@@ -42,6 +48,21 @@ const anchorTimeout = 5 * time.Second
 // SetLogger sets the logger used to surface dropped audit/alert writes (a dropped
 // tamper alert must not vanish silently). Optional – defaults to slog.Default().
 func (s *Service) SetLogger(l *slog.Logger) { s.log = l }
+
+// SetNotifications enables mandatory, transactional capture for an evidence-chain
+// failure. The independent verification result remains fail-closed if alert capture
+// itself cannot commit.
+func (s *Service) SetNotifications(tx ports.TenantTransactionRunner, outbox ports.NotificationOutbox, facts ports.NotificationLifecycleFactsReader) error {
+	if tx == nil || outbox == nil || facts == nil {
+		return fmt.Errorf("%w: evidence notification dependencies are required", shared.ErrValidation)
+	}
+	independent, ok := tx.(ports.IndependentTenantTransactionRunner)
+	if !ok {
+		return fmt.Errorf("%w: evidence notification transaction runner must support independent transactions", shared.ErrValidation)
+	}
+	s.notificationTx, s.notifications, s.notificationFacts = independent, outbox, facts
+	return nil
+}
 
 // SetSigner enables chain-head attestation: when set, Verify attaches
 // a deterministic ed25519 signature over the chain head, proving origin on top of
@@ -408,7 +429,7 @@ func (s *Service) Verify(ctx context.Context, engagementID shared.ID) (Report, e
 	if err := evdom.VerifyChain(items); err != nil {
 		rep.Intact = false
 		rep.Error = err.Error()
-		s.alertTampered(ctx, engagementID, err)
+		s.alertTampered(ctx, engagementID, rep.Head, "chain_invalid")
 		return rep, nil
 	}
 	// Out-of-band TAIL-TRUNCATION detection: the append-only trigger (migration 0033)
@@ -420,7 +441,7 @@ func (s *Service) Verify(ctx context.Context, engagementID shared.ID) (Report, e
 		if retained, ok, herr := s.tsStore.LatestHead(ctx, ChainEvidence, engagementID); herr == nil && ok && retained != "" && !containsHash(items, retained) {
 			rep.Intact = false
 			rep.Error = "tail-truncation detected: a retained (externally-anchored) head is missing from the chain"
-			s.alertTampered(ctx, engagementID, errors.New(rep.Error))
+			s.alertTampered(ctx, engagementID, rep.Head, "tail_truncation")
 			return rep, nil
 		}
 	}
@@ -664,17 +685,115 @@ func isSHA256Hex(s string) bool {
 	return true
 }
 
-// alertTampered records the tamper alert on the append-only audit log. Best-effort:
-// a failed alert write must not mask the tamper (the caller still gets Intact=false).
-func (s *Service) alertTampered(ctx context.Context, engagementID shared.ID, cause error) {
-	if err := s.audit.Record(ctx, ports.AuditEntry{
-		Actor:    "system",
-		Action:   "evidence.tampered",
-		Target:   engagementID.String(),
-		Metadata: map[string]string{"engagement": engagementID.String(), "error": cause.Error()},
-		At:       s.clock.Now(),
-	}); err != nil {
-		// A dropped tamper alert must not vanish silently – it is the custody signal.
-		s.logger().Error("evidence tamper alert not recorded", "engagement", engagementID.String(), "err", err)
+// alertTampered records the tamper alert and its mandatory notification from an
+// independent short transaction. A failed alert never changes the verification
+// result: callers still receive an unreportable broken-chain result.
+func (s *Service) alertTampered(ctx context.Context, engagementID shared.ID, observedChain, reasonCode string) {
+	if engagementID.IsZero() {
+		s.logger().Error("evidence tamper alert lacks engagement", "reason_code", reasonCode)
+		return
 	}
+	occurredAt := s.clock.Now().UTC()
+	if s.notifications == nil {
+		if err := s.recordTamperAudit(ctx, engagementID, observedChain, reasonCode, occurredAt); err != nil {
+			s.logger().Error("evidence tamper alert not recorded", "engagement", engagementID.String(), "reason_code", reasonCode, "operation", "audit_append_failed")
+		}
+		return
+	}
+	tenant, ok := shared.TenantFrom(ctx)
+	if !ok || tenant.IsZero() {
+		s.logger().Error("evidence tamper alert lacks tenant", "engagement", engagementID.String(), "reason_code", reasonCode)
+		s.recordTamperAuditFallback(ctx, engagementID, observedChain, reasonCode, occurredAt)
+		return
+	}
+	alertCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.notificationTx.RunIndependent(alertCtx, tenant, func(txCtx context.Context) error {
+		if err := s.appendChainBroken(txCtx, tenant, engagementID, observedChain, reasonCode, occurredAt); err != nil {
+			return err
+		}
+		return s.recordTamperAudit(txCtx, engagementID, observedChain, reasonCode, occurredAt)
+	}); err != nil {
+		// The chain is already broken. Do not replace that custody failure with an
+		// alert-delivery error or include untrusted error text in an audit record.
+		s.logger().Error("evidence tamper alert not recorded", "engagement", engagementID.String(), "reason_code", reasonCode, "operation", "alert_commit_failed")
+		s.recordTamperAuditFallback(ctx, engagementID, observedChain, reasonCode, occurredAt)
+	}
+}
+
+// Preserve the custody audit when notification facts or the outbox are unavailable.
+// A fresh independent transaction keeps the audit outside a failed report transaction;
+// First-observation audit recording also recovers an ambiguous alert commit.
+func (s *Service) recordTamperAuditFallback(ctx context.Context, engagementID shared.ID, observedChain, reasonCode string, occurredAt time.Time) {
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	record := func(txCtx context.Context) error {
+		return s.recordTamperAudit(txCtx, engagementID, observedChain, reasonCode, occurredAt)
+	}
+	var err error
+	if tenant, ok := shared.TenantFrom(ctx); ok && !tenant.IsZero() && s.notificationTx != nil {
+		err = s.notificationTx.RunIndependent(auditCtx, tenant, record)
+	} else {
+		err = record(auditCtx)
+	}
+	if err != nil {
+		s.logger().Error("evidence tamper audit not recorded", "engagement", engagementID.String(), "reason_code", reasonCode, "operation", "audit_append_failed")
+	}
+}
+
+func (s *Service) recordTamperAudit(ctx context.Context, engagementID shared.ID, observedChain, reasonCode string, occurredAt time.Time) error {
+	entry := ports.AuditEntry{
+		Actor: "system", Action: "evidence.tampered", Target: engagementID.String(), At: occurredAt,
+		Metadata: map[string]string{
+			"engagement": engagementID.String(), "reason_code": reasonCode,
+			"observed_chain": observedChainFingerprint(observedChain), "idempotency_key": evidenceTamperKey(engagementID, observedChain, reasonCode),
+		},
+	}
+	if tenant, ok := shared.TenantFrom(ctx); ok && !tenant.IsZero() {
+		if observer, ok := s.audit.(ports.FirstObservationAuditLogger); ok {
+			return observer.RecordFirstObservation(ctx, entry)
+		}
+	}
+	if idempotent, ok := s.audit.(ports.IdempotentAuditLogger); ok {
+		return idempotent.RecordOnce(ctx, entry)
+	}
+	return s.audit.Record(ctx, entry)
+}
+
+func (s *Service) appendChainBroken(ctx context.Context, tenant, engagementID shared.ID, observedChain, reasonCode string, occurredAt time.Time) error {
+	facts, err := s.notificationFacts.SnapshotNotificationLifecycleFacts(ctx, tenant, engagementID, "system")
+	if err != nil {
+		return fmt.Errorf("snapshot evidence notification facts: %w", err)
+	}
+	engagementName := privacy.ScrubURLCredentials(notification.ScrubPersonalText(strings.TrimSpace(facts.EngagementName), 500))
+	data := map[string]any{
+		"title": "Evidence chain broken", "summary": "Evidence verification failed and reporting is blocked.",
+		"engagement_id": engagementID, "evidence_chain_id": engagementID.String(), "reason_code": reasonCode,
+		"lead_user_id": facts.LeadUserID.String(),
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("encode evidence-chain notification data: %w", err)
+	}
+	record, err := notification.SnapshotSourceRecord(notification.SourceRecord{
+		TenantID: tenant, SourceKind: "evidence_chain", SourceID: evidenceTamperKey(engagementID, observedChain, reasonCode),
+		EventType: notification.EventEvidenceChainBroken, EngagementID: engagementID, Severity: shared.SeverityCritical,
+		OccurredAt: occurredAt, Data: raw, SubjectKind: "evidence_chain", SubjectID: engagementID.String(),
+	}, map[string]string{"reason_code": reasonCode, "engagement_name": engagementName})
+	if err != nil {
+		return fmt.Errorf("snapshot evidence-chain notification: %w", err)
+	}
+	if err := s.notifications.Append(ctx, record); err != nil {
+		return fmt.Errorf("append evidence-chain notification: %w", err)
+	}
+	return nil
+}
+
+func evidenceTamperKey(engagementID shared.ID, observedChain, reasonCode string) string {
+	return "evidence-chain:" + engagementID.String() + ":" + observedChainFingerprint(observedChain) + ":" + reasonCode
+}
+
+func observedChainFingerprint(observedChain string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(observedChain)))
+	return hex.EncodeToString(sum[:])
 }

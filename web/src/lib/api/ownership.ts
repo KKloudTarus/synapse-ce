@@ -44,7 +44,7 @@ const mutate = (method: string, body: unknown, key?: string): RequestInit => ({ 
 const findingPath = (eng: string, fid: string) => `/engagements/${id(eng)}/findings/${id(fid)}/ownership`
 
 export const ownershipApi = {
-  userChoices: (team: string, q: string, cursor?: string, signal?: AbortSignal): Promise<OwnershipPage<UserChoice>> => req(`/users/picker${query({ team_id: team, q, cursor, limit: 25 })}`, { signal }),
+  userChoices: (team: string, q: string, cursor?: string, signal?: AbortSignal, purpose?: 'mention'): Promise<OwnershipPage<UserChoice>> => req(`/users/picker${query({ team_id: team, q, cursor, limit: 25, purpose })}`, { signal }),
   ownershipCapability: (signal?: AbortSignal): Promise<OwnershipCapability> => req('/ownership/capabilities', { signal }),
   ownershipTeams: (cursor?: string, signal?: AbortSignal): Promise<OwnershipPage<OwnershipTeam>> => req(`/ownership/teams${query({ cursor, limit: 200 })}`, { signal }),
   ownershipTeam: (team: string): Promise<OwnershipTeam> => req(`/ownership/teams/${id(team)}`),

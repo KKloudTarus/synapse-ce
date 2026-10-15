@@ -240,15 +240,20 @@ func (rt *Router) listFindingComments(w http.ResponseWriter, r *http.Request) {
 // addFindingComment appends a persisted, attributed comment to a finding.
 func (rt *Router) addFindingComment(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Body string `json:"body"`
+		Body           string   `json:"body"`
+		MentionUserIDs []string `json:"mention_user_ids"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid request body"})
 		return
 	}
-	c, err := rt.findings.AddComment(
+	mentioned := make([]shared.ID, len(body.MentionUserIDs))
+	for i, userID := range body.MentionUserIDs {
+		mentioned[i] = shared.ID(userID)
+	}
+	c, err := rt.findings.AddCommentWithMentions(
 		r.Context(), shared.ID(r.PathValue("id")), shared.ID(r.PathValue("fid")),
-		body.Body, PrincipalFrom(r.Context()))
+		body.Body, PrincipalFrom(r.Context()), mentioned)
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

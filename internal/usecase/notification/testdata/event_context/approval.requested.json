@@ -1,0 +1,16 @@
+{
+  "subject_kind": "approval",
+  "subject_id": "approval-42",
+  "vars": {
+    "actor": "system",
+    "engagement_name": "October assessment",
+    "event_label": "Approval requested",
+    "event_type": "approval.requested",
+    "expires_at": "2026-10-15T08:00:00Z",
+    "kind": "response",
+    "occurred_at": "2026-10-14T08:00:00Z",
+    "status": "pending",
+    "summary": "A response approval needs review.",
+    "title": "Approval requested"
+  }
+}

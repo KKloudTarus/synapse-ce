@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/finding.commented.v1.schema.json", "title": "finding.commented event (v1)", "description": "A comment was added to a finding.", "type": "object",
+  "properties": {
+    "id": {"type": "string", "minLength": 1}, "type": {"type": "string", "const": "finding.commented"}, "source_kind": {"type": "string", "minLength": 1}, "source_id": {"type": "string", "minLength": 1}, "schema_version": {"type": "integer", "const": 1}, "occurred_at": {"type": "string", "format": "date-time"}, "engagement_id": {"type": "string"}, "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info", "unknown"]},
+    "data": {"type": "object", "properties": {"title": {"type": "string"}, "summary": {"type": "string"}, "finding_id": {"type": "string", "minLength": 1}, "engagement_id": {"type": "string", "minLength": 1}, "lead_user_id": {"type": "string"}, "severity": {"type": "string"}, "status": {"type": "string"}, "comment_id": {"type": "string", "minLength": 1}, "actor": {"type": "string"}, "actor_user_id": {"type": "string", "minLength": 1}, "assignee_user_id": {"type": "string", "minLength": 1}, "team_id": {"type": "string", "minLength": 1}, "comment_excerpt": {"type": "string", "maxLength": 500}}, "required": ["title", "summary", "finding_id", "engagement_id", "comment_id"], "additionalProperties": true}
+  },
+  "required": ["id", "type", "source_kind", "source_id", "schema_version", "occurred_at", "data"], "additionalProperties": true
+}

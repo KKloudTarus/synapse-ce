@@ -2,14 +2,17 @@ package response
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/offensivepolicy"
 	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
@@ -294,6 +297,35 @@ type fixedClock struct{ t time.Time }
 
 func (c fixedClock) Now() time.Time { return c.t }
 
+type responseLifecycleFacts struct {
+	ports.NotificationLifecycleFacts
+}
+
+func (f responseLifecycleFacts) SnapshotNotificationLifecycleFacts(context.Context, shared.ID, shared.ID, string) (ports.NotificationLifecycleFacts, error) {
+	return f.NotificationLifecycleFacts, nil
+}
+
+type appendThenFailResponseOutbox struct {
+	next ports.NotificationOutbox
+	err  error
+}
+
+func (o appendThenFailResponseOutbox) Append(ctx context.Context, record notification.SourceRecord) error {
+	if err := o.next.Append(ctx, record); err != nil {
+		return err
+	}
+	return o.err
+}
+
+type failingAttemptLookupStore struct {
+	ports.ResponseAuditStore
+	err error
+}
+
+func (s failingAttemptLookupStore) GetAttempt(context.Context, string) (responsesaga.ResponseAttempt, bool, error) {
+	return responsesaga.ResponseAttempt{}, false, s.err
+}
+
 type fakeReceiptValidator struct {
 	err   error
 	calls int
@@ -358,6 +390,206 @@ func newHarness(t *testing.T) *harness {
 }
 
 func tctx() context.Context { return shared.WithTenant(context.Background(), "t1") }
+
+func enableResponseFinishedSources(t *testing.T, service *Service) *memory.NotificationOutbox {
+	t.Helper()
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate("t1", time.Unix(999, 0).UTC())
+	if err := service.SetNotifications(memory.NewTenantTransactionRunner(), outbox, responseLifecycleFacts{}); err != nil {
+		t.Fatal(err)
+	}
+	return outbox
+}
+
+func responseSourceOutcomes(t *testing.T, outbox *memory.NotificationOutbox) map[string]int {
+	t.Helper()
+	outcomes := map[string]int{}
+	for _, source := range outbox.Records("t1") {
+		if source.EventType != notification.EventResponseFinished || source.CaptureVersion != 3 {
+			t.Fatalf("response source=%+v", source)
+		}
+		var data map[string]any
+		if err := json.Unmarshal(source.Data, &data); err != nil {
+			t.Fatal(err)
+		}
+		outcome, _ := data["outcome"].(string)
+		outcomes[outcome]++
+	}
+	return outcomes
+}
+
+func TestResponseNotificationOutcome_OnlyMapsSettledOutcomes(t *testing.T) {
+	tests := []struct {
+		name    string
+		event   string
+		state   responsesaga.SagaState
+		outcome string
+		ok      bool
+	}{
+		{name: "applied", event: "response.applied", outcome: "applied", ok: true},
+		{name: "verified", event: "response.verified", state: responsesaga.StateVerifiedSucceeded, outcome: "verified", ok: true},
+		{name: "reverted", event: "response.reverted", state: responsesaga.StateRolledBack, outcome: "reverted", ok: true},
+		{name: "halted attempt", event: "response.attempt_halted", state: responsesaga.StateCommandFailed, outcome: "halted", ok: true},
+		{name: "halted rollback attempt", event: "response.attempt_halted", state: responsesaga.StateRollbackFailed, outcome: "halted", ok: true},
+		{name: "executing halt remains unresolved", event: "response.attempt_halted", state: responsesaga.StateOutcomeUnknown},
+		{name: "rollback halt remains unresolved", event: "response.attempt_halted", state: responsesaga.StateRollbackUnknown},
+		{name: "confirmed execution failure", event: "response.execution_failed", state: responsesaga.StateCommandFailed, outcome: "failed", ok: true},
+		{name: "confirmed verification failure", event: "response.verification_failed", state: responsesaga.StateVerificationFailed, outcome: "failed", ok: true},
+		{name: "confirmed rollback verification failure", event: "response.rollback_verification_failed", state: responsesaga.StateRollbackFailed, outcome: "failed", ok: true},
+		{name: "terminal command failure", event: "response.attempt_terminal", state: responsesaga.StateCommandFailed, outcome: "failed", ok: true},
+		{name: "terminal rollback failure", event: "response.attempt_terminal", state: responsesaga.StateRollbackFailed, outcome: "failed", ok: true},
+		{name: "execution outcome unknown", event: "response.execution_outcome_unknown", state: responsesaga.StateOutcomeUnknown},
+		{name: "requires rollback", event: "response.execution_requires_rollback", state: responsesaga.StateRollbackRequested},
+		{name: "completed after halt", event: "response.completed_after_halt", state: responsesaga.StateOutcomeUnknown},
+		{name: "rollback completed after halt", event: "response.rollback_completed_after_halt", state: responsesaga.StateRollbackUnknown},
+		{name: "terminal verification timeout", event: "response.attempt_terminal", state: responsesaga.StateTimedOut},
+		{name: "terminal manual intervention", event: "response.attempt_terminal", state: responsesaga.StateManualIntervention},
+		{name: "future event", event: "response.future_outcome", state: responsesaga.StateCompleted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outcome, ok := responseNotificationOutcome(tt.event, tt.state)
+			if outcome != tt.outcome || ok != tt.ok {
+				t.Fatalf("responseNotificationOutcome(%q, %q) = (%q, %t), want (%q, %t)", tt.event, tt.state, outcome, ok, tt.outcome, tt.ok)
+			}
+		})
+	}
+}
+
+func TestRecordOutcome_AmbiguousEventKeepsAuditWithoutFinishedSourceAndLaterFailureDelivers(t *testing.T) {
+	h := newHarness(t)
+	outbox := enableResponseFinishedSources(t, h.svc)
+	record, _ := pendingApprovalRecord(act("response-outcome-notification"), "alice")
+	if err := h.store.Put(tctx(), record); err != nil {
+		t.Fatal(err)
+	}
+	attempt := h.svc.newAttempt(record.Action, record.TargetFingerprint, false, responsesaga.StateOutcomeUnknown, 0, "reviewer", time.Unix(1001, 0).UTC())
+
+	if err := h.svc.recordOutcome(tctx(), "response.execution_outcome_unknown", "reviewer", record.Action, attempt, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !h.audit.has("response.execution_outcome_unknown") {
+		t.Fatal("ambiguous outcome audit was not delivered")
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); len(outcomes) != 0 {
+		t.Fatalf("ambiguous outcome created response.finished source: %#v", outcomes)
+	}
+
+	attempt.State = responsesaga.StateCommandFailed
+	if err := h.svc.recordOutcome(tctx(), "response.execution_failed", "reviewer", record.Action, attempt, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !h.audit.has("response.execution_failed") {
+		t.Fatal("confirmed failure audit was not delivered")
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); outcomes["failed"] != 1 || len(outcomes) != 1 {
+		t.Fatalf("confirmed failure response.finished outcomes = %#v, want one failed outcome", outcomes)
+	}
+}
+
+func TestCommitAttemptOutcome_CompletedAfterHaltKeepsAuditWithoutFinishedSourceAndLaterFailureDelivers(t *testing.T) {
+	h := newHarness(t)
+	outbox := enableResponseFinishedSources(t, h.svc)
+	record, _ := pendingApprovalRecord(act("response-attempt-outcome-notification"), "alice")
+	if err := h.store.Put(tctx(), record); err != nil {
+		t.Fatal(err)
+	}
+	attempt := h.svc.newAttempt(record.Action, record.TargetFingerprint, false, responsesaga.StateExecuting, 0, "reviewer", time.Unix(1001, 0).UTC())
+	if err := setVerificationChallenge(&attempt); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := h.store.StartAttempt(tctx(), attempt); err != nil || !created {
+		t.Fatalf("start attempt: created=%t err=%v", created, err)
+	}
+
+	stored, committed, err := h.svc.commitAttemptOutcome(tctx(), attempt, responsesaga.StateExecuting, responsesaga.StateOutcomeUnknown, "response.completed_after_halt", "reviewer", record.Action, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.svc.deliverResponseAudit(tctx(), committed); err != nil {
+		t.Fatal(err)
+	}
+	if !h.audit.has("response.completed_after_halt") {
+		t.Fatal("post-halt outcome audit was not delivered")
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); len(outcomes) != 0 {
+		t.Fatalf("post-halt outcome created response.finished source: %#v", outcomes)
+	}
+
+	_, committed, err = h.svc.commitAttemptOutcome(tctx(), stored, responsesaga.StateOutcomeUnknown, responsesaga.StateCommandFailed, "response.execution_failed", "reviewer", record.Action, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.svc.deliverResponseAudit(tctx(), committed); err != nil {
+		t.Fatal(err)
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); outcomes["failed"] != 1 || len(outcomes) != 1 {
+		t.Fatalf("confirmed terminal attempt failure response.finished outcomes = %#v, want one failed outcome", outcomes)
+	}
+}
+
+func TestResponseFinishedTargetSnapshotDropsURLSecrets(t *testing.T) {
+	h := newHarness(t)
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate("t1", time.Unix(999, 0).UTC())
+	if err := h.svc.SetNotifications(memory.NewTenantTransactionRunner(), outbox, responseLifecycleFacts{NotificationLifecycleFacts: ports.NotificationLifecycleFacts{
+		EngagementName: "October assessment", ActorName: "Operator", ActorUserID: "user-1", LeadUserID: "lead-1",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	record := h.svc.record("t1", "eng-1", act("source-action"), engagement.Target{Kind: engagement.TargetDomain, Value: "https://user:secret@example.test?query=secret#fragment"}, fingerprint(), "alice", StateApplied, "reviewer", "evidence-1")
+	if err := memory.NewTenantTransactionRunner().Run(tctx(), "t1", func(txCtx context.Context) error {
+		return h.svc.appendResponseFinished(txCtx, record, "applied", "reviewer")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	records := outbox.Records("t1")
+	if len(records) != 1 {
+		t.Fatalf("response source count = %d, want 1", len(records))
+	}
+	source := records[0]
+	if source.EventType != notification.EventResponseFinished || source.CaptureVersion != 3 {
+		t.Fatalf("response source = %+v", source)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(source.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["response_id"] != record.ID.String() || data["engagement_id"] != record.EngagementID.String() || data["lead_user_id"] != "lead-1" || data["target"] != "https://example.test" {
+		t.Fatalf("response source data = %#v", data)
+	}
+	encoded, _ := json.Marshal(map[string]any{"data": data, "context": source.Context})
+	if strings.Contains(string(encoded), "user:secret") || strings.Contains(string(encoded), "?query=") || strings.Contains(string(encoded), "#fragment") {
+		t.Fatalf("response source leaked URL detail: %s", encoded)
+	}
+}
+
+func TestResponseFinishedOutboxFailureRollsBackTransition(t *testing.T) {
+	h := newHarness(t)
+	record, _ := pendingApprovalRecord(act("notification-rollback"), "alice")
+	if err := h.store.Put(tctx(), record); err != nil {
+		t.Fatal(err)
+	}
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate("t1", time.Unix(999, 0).UTC())
+	injected := errors.New("outbox failure after append")
+	if err := h.svc.SetNotifications(memory.NewTenantTransactionRunner(), appendThenFailResponseOutbox{next: outbox, err: injected}, responseLifecycleFacts{}); err != nil {
+		t.Fatal(err)
+	}
+	record.State = StateCancelled
+	record.UpdatedAt = time.Unix(1001, 0).UTC()
+	intent := responseAuditIntent("response-notification-rollback", "reviewer", "response.approval_denied", record.ID.String(), record.UpdatedAt, map[string]string{})
+	if _, _, err := h.svc.transitionWithAuditAndNotification(tctx(), record, StatePending, intent, "failed", "reviewer"); !errors.Is(err, injected) {
+		t.Fatalf("transition error = %v, want injected outbox failure", err)
+	}
+	stored, found, err := h.store.Get(tctx(), record.ID)
+	if err != nil || !found || stored.State != StatePending {
+		t.Fatalf("failed notification changed response projection: record=%+v found=%t err=%v", stored, found, err)
+	}
+	if records := outbox.Records("t1"); len(records) != 0 {
+		t.Fatalf("failed notification retained source: %+v", records)
+	}
+}
 
 func act(id string) rdom.Action {
 	sp, _ := rdom.SpecFor(rdom.KindIsolateHost)
@@ -927,6 +1159,7 @@ func TestApplyFailsClosedBeforeExecutionWhenJournalOrAuditFails(t *testing.T) {
 
 func TestApplyRecoversCommittedAttemptWithoutReexecuting(t *testing.T) {
 	h := newHarness(t)
+	outbox := enableResponseFinishedSources(t, h.svc)
 	if _, err := h.svc.Apply(tctx(), "eng-1", act("a1"), target(), fingerprint(), "alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -949,6 +1182,9 @@ func TestApplyRecoversCommittedAttemptWithoutReexecuting(t *testing.T) {
 	}
 	if !h.audit.has("response.applied") {
 		t.Fatal("recovered projection must reconcile the durable outcome audit")
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); outcomes["applied"] != 1 || len(outbox.Records("t1")) != 1 {
+		t.Fatalf("replayed recovery duplicated source snapshots: %#v", outcomes)
 	}
 }
 
@@ -1081,6 +1317,225 @@ func TestHaltCancelsRegisteredInFlightExecution(t *testing.T) {
 	}
 }
 
+func TestHaltCapturesIssuedAndClaimedAttempts(t *testing.T) {
+	for _, state := range []responsesaga.SagaState{responsesaga.StateIssued, responsesaga.StateClaimed} {
+		t.Run(string(state), func(t *testing.T) {
+			h := newHarness(t)
+			outbox := enableResponseFinishedSources(t, h.svc)
+			action := act("halt-" + string(state))
+			record := h.svc.record("t1", "eng-1", action, target(), fingerprint(), "alice", StatePending, "reviewer", "")
+			if err := h.store.Put(tctx(), record); err != nil {
+				t.Fatal(err)
+			}
+			attempt := h.svc.newAttempt(action, fingerprint(), false, responsesaga.StateIssued, 0, "reviewer", time.Unix(1000, 0).UTC())
+			attempt.ExecutorID = h.exec.Identity()
+			attempt.ExecutorAgentID = "response-executor"
+			if err := setVerificationChallenge(&attempt); err != nil {
+				t.Fatal(err)
+			}
+			if _, created, err := h.store.StartAttempt(tctx(), attempt); err != nil || !created {
+				t.Fatalf("start active attempt: created=%t err=%v", created, err)
+			}
+			if state == responsesaga.StateClaimed {
+				var claimed bool
+				_, claimed, err := h.store.ClaimAttempt(tctx(), attempt.IdempotencyKey, responsesaga.StateIssued, responsesaga.StateClaimed, time.Unix(1000, 0).UTC())
+				if err != nil || !claimed {
+					t.Fatalf("claim active attempt: claimed=%t err=%v", claimed, err)
+				}
+			}
+
+			halted, err := h.svc.HaltResponses(tctx(), "t1", "operator@example.test", "kill switch")
+			if err != nil || halted != 1 {
+				t.Fatalf("halt active attempt: halted=%d err=%v", halted, err)
+			}
+			stored, found, err := h.store.GetAttempt(tctx(), attempt.IdempotencyKey)
+			if err != nil || !found || stored.State != responsesaga.StateCommandFailed || stored.CommandOutcome != "cancelled_by_kill_switch" {
+				t.Fatalf("halted attempt=%+v found=%t err=%v", stored, found, err)
+			}
+			if outcomes := responseSourceOutcomes(t, outbox); outcomes["halted"] != 1 || len(outbox.Records("t1")) != 1 {
+				t.Fatalf("halt sources=%#v", outcomes)
+			}
+			if _, err := h.svc.HaltResponses(tctx(), "t1", "operator@example.test", "repeat kill switch"); err != nil {
+				t.Fatalf("replay halt: %v", err)
+			}
+			if outcomes := responseSourceOutcomes(t, outbox); outcomes["halted"] != 1 || len(outbox.Records("t1")) != 1 {
+				t.Fatalf("replayed halt duplicated source=%#v", outcomes)
+			}
+		})
+	}
+}
+
+func TestHaltPendingParentWithCrashWindowAttemptDoesNotEmitHalted(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, h *harness) responsesaga.ResponseAttempt
+	}{
+		{
+			name: "manual intervention",
+			prepare: func(t *testing.T, h *harness) responsesaga.ResponseAttempt {
+				t.Helper()
+				attempt := seedAttemptState(t, h, responsesaga.StateExecuting, false)
+				attempt.TerminalReason = "execution outcome was not observed before crash"
+				attempt.VerificationOutcome = responsesaga.VerificationUnknown
+				stored, err := h.svc.transitionAttempt(tctx(), attempt, responsesaga.StateExecuting, responsesaga.StateManualIntervention)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return stored
+			},
+		},
+		{
+			name: "verification timed out",
+			prepare: func(t *testing.T, h *harness) responsesaga.ResponseAttempt {
+				t.Helper()
+				attempt := seedAttemptState(t, h, responsesaga.StateVerifying, false)
+				attempt.VerificationOutcome = responsesaga.VerificationTimedOut
+				stored, err := h.svc.transitionAttempt(tctx(), attempt, responsesaga.StateVerifying, responsesaga.StateTimedOut)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return stored
+			},
+		},
+		{
+			name: "verification unknown",
+			prepare: func(t *testing.T, h *harness) responsesaga.ResponseAttempt {
+				t.Helper()
+				attempt := seedAttemptState(t, h, responsesaga.StateVerifying, false)
+				attempt.VerificationOutcome = responsesaga.VerificationUnknown
+				stored, err := h.svc.transitionAttempt(tctx(), attempt, responsesaga.StateVerifying, responsesaga.StateVerificationUnknown)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return stored
+			},
+		},
+		{
+			name: "verified before parent projection",
+			prepare: func(t *testing.T, h *harness) responsesaga.ResponseAttempt {
+				t.Helper()
+				attempt := seedAttemptState(t, h, responsesaga.StateVerifying, false)
+				attempt.VerificationOutcome = responsesaga.VerificationSucceeded
+				attempt.VerifierID = "agent:independent-verifier"
+				attempt.VerificationEvidenceID = "verification-evidence-1"
+				stored, err := h.svc.transitionAttempt(tctx(), attempt, responsesaga.StateVerifying, responsesaga.StateVerifiedSucceeded)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return stored
+			},
+		},
+		{
+			name: "completed before parent projection",
+			prepare: func(t *testing.T, h *harness) responsesaga.ResponseAttempt {
+				t.Helper()
+				attempt := seedAttemptState(t, h, responsesaga.StateVerifying, false)
+				attempt.VerificationOutcome = responsesaga.VerificationSucceeded
+				attempt.VerifierID = "agent:independent-verifier"
+				attempt.VerificationEvidenceID = "verification-evidence-1"
+				verified, err := h.svc.transitionAttempt(tctx(), attempt, responsesaga.StateVerifying, responsesaga.StateVerifiedSucceeded)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stored, err := h.svc.transitionAttempt(tctx(), verified, responsesaga.StateVerifiedSucceeded, responsesaga.StateCompleted)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return stored
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			outbox := enableResponseFinishedSources(t, h.svc)
+			attempt := tc.prepare(t, h)
+
+			halted, err := h.svc.HaltResponses(tctx(), "t1", "operator@example.test", "kill switch")
+			if halted != 1 || !errors.Is(err, shared.ErrSaturated) {
+				t.Fatalf("halted=%d err=%v, want one failed-closed halt", halted, err)
+			}
+			if !h.audit.has("response.cancelled_by_halt") {
+				t.Fatal("crash-window parent cancellation audit was not delivered")
+			}
+			if records := outbox.Records("t1"); len(records) != 0 {
+				t.Fatalf("pending parent with %s emitted response.finished=%+v", attempt.State, records)
+			}
+			record, found, loadErr := h.store.Get(tctx(), attempt.ActionID)
+			if loadErr != nil || !found || record.State != StateCancelled {
+				t.Fatalf("halted crash-window parent=%+v found=%t err=%v", record, found, loadErr)
+			}
+		})
+	}
+}
+
+func TestHaltPendingParentFailsClosedWhenAttemptLookupFails(t *testing.T) {
+	h := newHarness(t)
+	outbox := enableResponseFinishedSources(t, h.svc)
+	pending, _ := pendingApprovalRecord(act("halt-lookup-failure"), "alice")
+	if err := h.store.Put(tctx(), pending); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.store = failingAttemptLookupStore{ResponseAuditStore: h.store, err: errors.New("attempt journal unavailable")}
+
+	halted, err := h.svc.HaltResponses(tctx(), "t1", "operator@example.test", "kill switch")
+	if halted != 1 || !errors.Is(err, shared.ErrSaturated) {
+		t.Fatalf("halted=%d err=%v, want one failed-closed halt", halted, err)
+	}
+	if !h.audit.has("response.cancelled_by_halt") || !h.audit.has("response.halt_failed") {
+		t.Fatal("lookup failure must still preserve cancellation and failed-halt audit facts")
+	}
+	if records := outbox.Records("t1"); len(records) != 0 {
+		t.Fatalf("attempt lookup failure emitted response.finished=%+v", records)
+	}
+	stored, found, loadErr := h.store.Get(tctx(), pending.ID)
+	if loadErr != nil || !found || stored.State != StateCancelled {
+		t.Fatalf("lookup failure did not cancel parent record=%+v found=%t err=%v", stored, found, loadErr)
+	}
+}
+
+func TestHaltActiveAttemptNotificationFailureRollsBackAndReplays(t *testing.T) {
+	h := newHarness(t)
+	action := act("halt-notification-rollback")
+	record := h.svc.record("t1", "eng-1", action, target(), fingerprint(), "alice", StatePending, "reviewer", "")
+	if err := h.store.Put(tctx(), record); err != nil {
+		t.Fatal(err)
+	}
+	attempt := h.svc.newAttempt(action, fingerprint(), false, responsesaga.StateIssued, 0, "reviewer", time.Unix(1000, 0).UTC())
+	attempt.ExecutorID, attempt.ExecutorAgentID = h.exec.Identity(), "response-executor"
+	if err := setVerificationChallenge(&attempt); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := h.store.StartAttempt(tctx(), attempt); err != nil || !created {
+		t.Fatalf("start active attempt: created=%t err=%v", created, err)
+	}
+	outbox := memory.NewNotificationOutbox()
+	outbox.Activate("t1", time.Unix(999, 0).UTC())
+	injected := errors.New("outbox failure after append")
+	if err := h.svc.SetNotifications(memory.NewTenantTransactionRunner(), appendThenFailResponseOutbox{next: outbox, err: injected}, responseLifecycleFacts{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.HaltResponses(tctx(), "t1", "operator@example.test", "kill switch"); !errors.Is(err, shared.ErrSaturated) {
+		t.Fatalf("halt with failed notification: %v", err)
+	}
+	stored, found, err := h.store.GetAttempt(tctx(), attempt.IdempotencyKey)
+	if err != nil || !found || stored.State != responsesaga.StateIssued {
+		t.Fatalf("failed notification changed attempt=%+v found=%t err=%v", stored, found, err)
+	}
+	if records := outbox.Records("t1"); len(records) != 0 {
+		t.Fatalf("failed notification retained source=%+v", records)
+	}
+	if err := h.svc.SetNotifications(memory.NewTenantTransactionRunner(), outbox, responseLifecycleFacts{}); err != nil {
+		t.Fatal(err)
+	}
+	if halted, err := h.svc.HaltResponses(tctx(), "t1", "operator@example.test", "retry kill switch"); err != nil || halted != 1 {
+		t.Fatalf("replayed halt: halted=%d err=%v", halted, err)
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); outcomes["halted"] != 1 || len(outbox.Records("t1")) != 1 {
+		t.Fatalf("replayed halt sources=%#v", outcomes)
+	}
+}
+
 func TestHaltStillCancelsWhenIntentAuditFails(t *testing.T) {
 	h := newHarness(t)
 	h.audit.fail = "response.halt_intent"
@@ -1193,6 +1648,7 @@ func TestHaltFencesExecutionClaimedByAnotherService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	outbox := enableResponseFinishedSources(t, halter)
 	applyDone := make(chan error, 1)
 	go func() {
 		_, err := worker.Apply(tctx(), "eng-1", act("a1"), target(), fingerprint(), "alice")
@@ -1203,6 +1659,12 @@ func TestHaltFencesExecutionClaimedByAnotherService(t *testing.T) {
 	halted, err := halter.HaltResponses(tctx(), "t1", "operator@example.test", "kill switch")
 	if halted != 1 || !errors.Is(err, shared.ErrSaturated) {
 		t.Fatalf("cross-service halt must fail closed: halted=%d err=%v", halted, err)
+	}
+	if !h.audit.has("response.cancelled_by_halt") || !h.audit.has("response.halt_failed") {
+		t.Fatal("the unresolved halt must preserve cancellation and failed-halt audit facts")
+	}
+	if records := outbox.Records("t1"); len(records) != 0 {
+		t.Fatalf("unresolved cross-service apply emitted response.finished=%+v", records)
 	}
 	close(exec.release)
 	if err := <-applyDone; err == nil {
@@ -1330,6 +1792,7 @@ func TestHaltFencesRollbackClaimedByAnotherService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	outbox := enableResponseFinishedSources(t, halter)
 	revertDone := make(chan error, 1)
 	go func() {
 		_, err := worker.Revert(tctx(), "a1", target(), fingerprint(), "alice")
@@ -1340,6 +1803,12 @@ func TestHaltFencesRollbackClaimedByAnotherService(t *testing.T) {
 	halted, err := halter.HaltResponses(tctx(), "t1", "operator@example.test", "kill switch")
 	if halted != 1 || !errors.Is(err, shared.ErrSaturated) {
 		t.Fatalf("cross-service rollback halt must fail closed: halted=%d err=%v", halted, err)
+	}
+	if !h.audit.has("response.halt_failed") {
+		t.Fatal("the unresolved rollback halt must preserve its failed-halt audit fact")
+	}
+	if records := outbox.Records("t1"); len(records) != 0 {
+		t.Fatalf("unresolved cross-service rollback emitted response.finished=%+v", records)
 	}
 	close(exec.release)
 	if err := <-revertDone; err == nil {
@@ -1573,6 +2042,7 @@ func TestDryRunExecutesNothing(t *testing.T) {
 func TestRevertIsAdmittedAndAudited(t *testing.T) {
 	h := newHarness(t)
 	h.svc.verify = &fakeVerifier{outcome: VerificationSucceeded}
+	outbox := enableResponseFinishedSources(t, h.svc)
 	if _, err := h.svc.Apply(tctx(), "eng-1", act("a1"), target(), fingerprint(), "alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -1595,6 +2065,9 @@ func TestRevertIsAdmittedAndAudited(t *testing.T) {
 	if !last.IsReversal || len(last.Argv) == 0 {
 		t.Errorf("reversal must be an argv-only, reversal-flagged execution: %+v", last)
 	}
+	if outcomes := responseSourceOutcomes(t, outbox); outcomes["applied"] != 1 || outcomes["verified"] != 1 || outcomes["reverted"] != 1 || len(outbox.Records("t1")) != 3 {
+		t.Fatalf("apply/revert sources=%#v", outcomes)
+	}
 }
 
 // TestRevertEnforcesTheBlastRadius is the same guarantee as apply, on the reversal: a reversal whose
@@ -1602,6 +2075,7 @@ func TestRevertIsAdmittedAndAudited(t *testing.T) {
 // clean revert. Without it a reversal could escape the blast-radius rule apply enforces.
 func TestRevertEnforcesTheBlastRadius(t *testing.T) {
 	h := newHarness(t)
+	outbox := enableResponseFinishedSources(t, h.svc)
 	if _, err := h.svc.Apply(tctx(), "eng-1", act("a1"), target(), fingerprint(), "alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -1625,6 +2099,15 @@ func TestRevertEnforcesTheBlastRadius(t *testing.T) {
 	attempt, found, attemptErr := h.store.GetAttempt(tctx(), responseAttemptKey(act("a1"), true))
 	if attemptErr != nil || !found || attempt.State != responsesaga.StateRollbackUnknown {
 		t.Fatalf("reversal violation attempt = %+v found=%v err=%v, want durable rollback-unknown", attempt, found, attemptErr)
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); outcomes["applied"] != 1 || outcomes["failed"] != 1 || len(outbox.Records("t1")) != 2 {
+		t.Fatalf("reversal violation sources=%#v", outcomes)
+	}
+	if _, retryErr := h.svc.Revert(tctx(), "a1", target(), fingerprint(), "alice"); !errors.Is(retryErr, shared.ErrValidation) {
+		t.Fatalf("replay reversal violation: %v", retryErr)
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); outcomes["applied"] != 1 || outcomes["failed"] != 1 || len(outbox.Records("t1")) != 2 {
+		t.Fatalf("replayed reversal violation duplicated source=%#v", outcomes)
 	}
 }
 
@@ -1700,6 +2183,7 @@ func TestRevertRequiresVerifiedRestoration(t *testing.T) {
 // approved) action is halted.
 func TestKillSwitchHaltsPending(t *testing.T) {
 	h := newHarness(t)
+	outbox := enableResponseFinishedSources(t, h.svc)
 	h.admit.err = safety.ErrPendingApproval // admission suspends → pending recorded
 	if _, err := h.svc.Apply(tctx(), "eng-1", act("a1"), target(), fingerprint(), "alice"); !errors.Is(err, safety.ErrPendingApproval) {
 		t.Fatalf("manual admission must suspend, got %v", err)
@@ -1726,6 +2210,9 @@ func TestKillSwitchHaltsPending(t *testing.T) {
 	rec, _, _ := h.store.Get(tctx(), "a1")
 	if rec.State != StateCancelled {
 		t.Fatalf("halted action must be cancelled, got %s", rec.State)
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); outcomes["halted"] != 1 || len(outbox.Records("t1")) != 1 {
+		t.Fatalf("halt sources=%#v", outcomes)
 	}
 }
 
@@ -1798,6 +2285,7 @@ func TestApplyVerifiesEffectPostCondition(t *testing.T) {
 			h := newHarness(t)
 			vf := &fakeVerifier{outcome: tc.outcome, err: tc.err}
 			h.svc.verify = vf
+			outbox := enableResponseFinishedSources(t, h.svc)
 			rec, err := h.svc.Apply(tctx(), "eng-1", act("a1"), target(), fingerprint(), "alice")
 			if tc.wantErr && !errors.Is(err, shared.ErrConflict) {
 				t.Fatalf("unverified apply must return conflict, got %v", err)
@@ -1821,12 +2309,30 @@ func TestApplyVerifiesEffectPostCondition(t *testing.T) {
 			if !found || got.Verification != tc.want {
 				t.Fatalf("persisted verification = %q (found=%v), want %q", got.Verification, found, tc.want)
 			}
+			seen := responseSourceOutcomes(t, outbox)
+			if seen["applied"] != 1 {
+				t.Fatal("durable command outcome did not emit an applied source")
+			}
+			if tc.want == VerificationUnknown {
+				if seen["failed"] != 0 || len(outbox.Records("t1")) != 1 {
+					t.Fatalf("unknown verification created a false finished failure source: %#v", seen)
+				}
+				return
+			}
+			wantOutcome := "failed"
+			if tc.want == VerificationSucceeded {
+				wantOutcome = "verified"
+			}
+			if seen[wantOutcome] != 1 || len(outbox.Records("t1")) != 2 {
+				t.Fatalf("verification %s did not emit %s source: %#v", tc.want, wantOutcome, seen)
+			}
 		})
 	}
 }
 
 func TestApplyKeepsMissingObservationPendingUntilReconciled(t *testing.T) {
 	h := newHarness(t)
+	outbox := enableResponseFinishedSources(t, h.svc)
 	verifier := &fakeVerifier{outcome: VerificationPending, err: errors.New("telemetry store unavailable")}
 	h.svc.verify = verifier
 	action := act("pending-observation")
@@ -1851,6 +2357,9 @@ func TestApplyKeepsMissingObservationPendingUntilReconciled(t *testing.T) {
 	rec, found, err = h.store.Get(tctx(), action.ID)
 	if err != nil || !found || rec.Verification != VerificationSucceeded {
 		t.Fatalf("late observation did not verify response: record=%+v found=%t err=%v", rec, found, err)
+	}
+	if outcomes := responseSourceOutcomes(t, outbox); outcomes["applied"] != 1 || outcomes["verified"] != 1 || len(outbox.Records("t1")) != 2 {
+		t.Fatalf("reconciled verification sources=%#v", outcomes)
 	}
 }
 

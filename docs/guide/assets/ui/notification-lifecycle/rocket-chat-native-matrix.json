@@ -1,0 +1,936 @@
+{
+  "observed_at": "2026-10-15T03:52:43.166434+00:00",
+  "status": "pass",
+  "expected_cells": 88,
+  "reviewed_cells": 88,
+  "provenance": "Native exact-title and corrected-fixture searches return two posts per event/locale. The 44 post-ID set exactly matches the receiver inspector; explicit detail-only semantic fields bind class. Every image individually inspected.",
+  "cells": [
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-window_ending-vi-detail-light.jpg",
+      "sha256": "5875d95659cd2c0194f8e7fc9d6b5dd6f42a135b05f277e641de241531ae43ac",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-window_ending-vi-signal-light.jpg",
+      "sha256": "372123ac9256b226be931b5ec0ca91ea18d0e7d3a701a2721a3c53f1df05cfa6",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-decided-en-detail-light.jpg",
+      "sha256": "ea8609771d7e03cd7645f36a16b46f040b00409444a6644600b802e2a0e31bbc",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-decided-en-signal-light.jpg",
+      "sha256": "e85ddc688d0bf325bb42fa1bb8330fd77f94225aef54343372d93361ec98cf35",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-requested-en-detail-light.jpg",
+      "sha256": "36cf3e59808a1627d80200e02a9638ca87f553501dda2263f4b1e6aab3ba029f",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-requested-en-signal-light.jpg",
+      "sha256": "d407308e54ea1c53423b6ef20a444883da648797711c30ac1c439ced52ade14a",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-timed_out-en-detail-light.jpg",
+      "sha256": "d683180f0f65d373b5e890114219ce1e73f14523757ee5758c98ea74b978a4bd",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-timed_out-en-signal-light.jpg",
+      "sha256": "62c7edcc3a124c10cdc6de2f769fed43e2d6fe0a0d7a766697debb11fbd278cd",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-created-en-detail-light.jpg",
+      "sha256": "8ccb05e9714ba2f4c924f3a73eb272ec1817610c9d99097f27cfbb368a3645d1",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-created-en-signal-light.jpg",
+      "sha256": "fb39ea6ee24bc27f917b56ac1b74e8855647e60db52ef9789347a55aaf5bd491",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-status_changed-en-detail-light.jpg",
+      "sha256": "8f3d192dcee54ae7729a1bf5e35c3cc672378c2ea59a1657309ea28ad8561619",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-status_changed-en-signal-light.jpg",
+      "sha256": "7579d9a775ad835a23e853e1ca672a62ef0de2c463a17157f5b1df65d436ae3b",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-window_ending-en-detail-light.jpg",
+      "sha256": "883d61b4cf9a0125e40b481cf1f3ca0aa2a4d95705e95b11b67ed776fc23e94e",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-window_ending-en-signal-light.jpg",
+      "sha256": "462ba39fa0936f69e286eca1492988f51d8d19895275cd636eaff8e660d7827f",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-window_starting-en-detail-light.jpg",
+      "sha256": "728b06cfecf75e1fc5d69f24fe4daa6440d80ebb31d07a841747837968735644",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-window_starting-en-signal-light.jpg",
+      "sha256": "00d4b3c55a0173212b2bf4455f6dd43c8c762cceee240fdb6724db8d55a2bd28",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-evidence-chain_broken-en-detail-light.jpg",
+      "sha256": "69c67057c9386a8d6066f8c4228e5d1613b3a686e5a8079628a8bd736e8146d1",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-evidence-chain_broken-en-signal-light.jpg",
+      "sha256": "e208b45837fa6c6f0e4774f964791482887a6d0e9ce4cd0d480da499cae872ca",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-finding-commented-en-detail-light.jpg",
+      "sha256": "9fffe36f15cfa890d29f18229420606a6bf845c74219488c09086d8a6e619425",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-finding-commented-en-signal-light.jpg",
+      "sha256": "a3aeec75565929c0e80cbbd12df2e33ef7eebf8f957e9d732bf2978af6472ddf",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-incident-updated-en-detail-light.jpg",
+      "sha256": "e5d967b130bed3a0c82f45e7283a277f08fd9ffeb100c1fa79a3234d37cce47f",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-incident-updated-en-signal-light.jpg",
+      "sha256": "cc5f98023a65580b9afe7156543219a96dbb4a69b9a11eb2a8b906ab946e7e7e",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-response-finished-en-detail-light.jpg",
+      "sha256": "964598e5c2a6fc68ef8851154be77c93ec049e24a8bbaacd79c9df6de80fd855",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-response-finished-en-signal-light.jpg",
+      "sha256": "3acd31c72dccd72ae3103cd080adb4adb274d74330bd2eb289bc18e80e6ef37b",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-decided-vi-detail-light.jpg",
+      "sha256": "4bf9ad5de89da921cdafbb6695d3cb911be6b66cdf6c8f2cd39799fbe457449f",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-decided-vi-signal-light.jpg",
+      "sha256": "81c1154e07fe8a9da5a23f76f4b9dde9889ea33869e505263729a22c8082c25c",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-requested-vi-detail-light.jpg",
+      "sha256": "2089f3f573f85f6df2886e4c43d50fd19cd750a485f6c10c46e7224c0cd61eee",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-requested-vi-signal-light.jpg",
+      "sha256": "d2ce745fec852f5e4b0edd05294dfeaf08b5a59ae1afdb0b6d274664742ebfd8",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-timed_out-vi-detail-light.jpg",
+      "sha256": "e581d9925f13ffbd2970081047f5174f9983906cd4162661f1ab7576a56c922e",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-approval-timed_out-vi-signal-light.jpg",
+      "sha256": "5e4adee917447f9666d5d0747fe113ebb0d5e65f6d2fa94d35bab385448792c2",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-created-vi-detail-light.jpg",
+      "sha256": "ac3caec052dbfef545c511ce151315505a9c147d10fd101133e94ee2e7add198",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-created-vi-signal-light.jpg",
+      "sha256": "7853ed6dbe082acf7fe0dbcb877e5e2294664fcb6bde6bf1b23ffa890475c944",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-status_changed-vi-detail-light.jpg",
+      "sha256": "422e97025b925bcfd56cb01bd19bc4245f8ff248f01f2bc45381c55be70e9c02",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-status_changed-vi-signal-light.jpg",
+      "sha256": "33e1d10c4ac067a45c6ed09642070204c28679113041697b6e78b4a2e31f0cbf",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-window_starting-vi-detail-light.jpg",
+      "sha256": "4ee652365701038effd1d58e7365ed1333a084334ec84402dc1f1a24456e7da2",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-engagement-window_starting-vi-signal-light.jpg",
+      "sha256": "f38c6a651af0fc1ab8eb5aae48b6ec404b6ec477d84a4041103b1dcdb28c0373",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-evidence-chain_broken-vi-detail-light.jpg",
+      "sha256": "ecc9ce4811dd382cd555e4a14a6ffdc0e91cb7b26f64330f1099971e7b570d43",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-evidence-chain_broken-vi-signal-light.jpg",
+      "sha256": "c8c61301b0f99f699f5b530cd6a58ba020bf92754003e50b6670c684a536d3ab",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-finding-commented-vi-detail-light.jpg",
+      "sha256": "50075ecd8f2b77b4b20d5f539a83e4187f60f71df6df384b26d794ad9f975c4c",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-finding-commented-vi-signal-light.jpg",
+      "sha256": "d626f473c11d26096bf8ec9355a178d636a874d2b5588ea15edea38782fb6f0e",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-incident-updated-vi-detail-light.jpg",
+      "sha256": "f0f6f6f85fba2ed62ed6e98c012bedb241a5a8c47a0455502a338cfcc38f7e97",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-incident-updated-vi-signal-light.jpg",
+      "sha256": "9ef67ddb0e74ea4eac49b3376d9eea90a0682d00f119a95a88d4502394afcc8f",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-response-finished-vi-detail-light.jpg",
+      "sha256": "778000800c064f61f60d2099188b691104155f156e384c88ae96fdb140c418c9",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "rocket-chat-native-response-finished-vi-signal-light.jpg",
+      "sha256": "f7458a0e39363da6a01c9e10059167275dafa84e812a7c63a62ff17c522708dd",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-decided-en-detail-dark.jpg",
+      "sha256": "6014d9da3e67e3e2f179fb9327534e932f0d3f357ddb96bba80a0807becff5cd",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-decided-en-signal-dark.jpg",
+      "sha256": "342ed2721cfba6ff426b8f1a54ab50d6e17ce330ec02142142f7d5eda6fded3c",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-requested-en-detail-dark.jpg",
+      "sha256": "ea1759b36f5edcac9e480923fe1cccbaa575715a2cf070f09f9e3d610c0905fc",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-requested-en-signal-dark.jpg",
+      "sha256": "1f9e3667a7c4d91014c4cfd27e73a279566e3f3c836d7ab22197b0d1e1210f56",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-timed_out-en-detail-dark.jpg",
+      "sha256": "7e6e5a1c809011475f26cda0c9c0e752265fc89633a7fe38d49c0cdecc265f6d",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-timed_out-en-signal-dark.jpg",
+      "sha256": "e2e3684e9994f8f8697b4df46b9f460f612d931352c9193fe0a39fa4a55d1af1",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-created-en-detail-dark.jpg",
+      "sha256": "7ad576ec9812fd1ad7a17e94e9927fb5c82732fbe46bb02dbe82c3e627685bf9",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-created-en-signal-dark.jpg",
+      "sha256": "d7fdeb8ce6c25ba732b9d14ca45cb27a0b0d741d519013f9fc92cf03fa35ea42",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-status_changed-en-detail-dark.jpg",
+      "sha256": "22a5a9217eb7c3c083ed3f473e61bc533961e8e5dcd1a5d2bca9593d8bafbec4",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-status_changed-en-signal-dark.jpg",
+      "sha256": "e88576841dded6475463fa228b6251cc900f4929501509f5442c7984caa104c0",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-window_ending-en-detail-dark.jpg",
+      "sha256": "6b99ed6707bfdad28150be07ea3e559e182d27c2465692ceb7d0aaeb767cf655",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-window_ending-en-signal-dark.jpg",
+      "sha256": "3a2b1fe97a28919c89c4dbd2c21c3c7f2ab2b85d95d9895582afdc5c7b5389c4",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-window_starting-en-detail-dark.jpg",
+      "sha256": "8c91e9b0a1690393aea4cbb575af1476d4df10d4ae187a9f48676723d4a9aae4",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-window_starting-en-signal-dark.jpg",
+      "sha256": "027e3e557c85ddc0ee71a644e8639e8177bc85641e90391af91ca9864b7090b8",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-evidence-chain_broken-en-detail-dark.jpg",
+      "sha256": "53bd8ad359db708c0d5eb29148abd29de20ce2b79838f7effbb0da57f852a84f",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-evidence-chain_broken-en-signal-dark.jpg",
+      "sha256": "e8180de42c8d3e24259458454c808945188799ae325e87c434ef2dbe387e01f1",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-finding-commented-en-detail-dark.jpg",
+      "sha256": "69a23e175c986694a8075e8b33b2dc33f245727c10fa7003c5590006ca14b66d",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-finding-commented-en-signal-dark.jpg",
+      "sha256": "d745c81e24587bc919eb9a83adc8f8c7fe7440bc5447c207a32265599398153a",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-incident-updated-en-detail-dark.jpg",
+      "sha256": "3cec50e006f18d370c3e53a16665436ef25f1fbb064383fbc7508b2341599f3a",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-incident-updated-en-signal-dark.jpg",
+      "sha256": "1de9e33ecac06e8441e491bdb11e0701252145376661473ad7b2a87fa8fd2c48",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-response-finished-en-detail-dark.jpg",
+      "sha256": "a16b759a77120e8d57d3c214d307914f10c59237bc168490e23606560e306f2b",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-response-finished-en-signal-dark.jpg",
+      "sha256": "37e7082ecc52c2e538c3847f75ea4f4328caeb82af340bae9cc3b65c27357809",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-decided-vi-detail-dark.jpg",
+      "sha256": "5bd3815e30da80168efc42355b68549aed1e7ec516ace11c0e6fd8b03d9ee9b3",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-decided-vi-signal-dark.jpg",
+      "sha256": "7bed34404bca858ee5419cb556a8a1f0191d9bb38af2192fbe84c405acba8f0b",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-requested-vi-detail-dark.jpg",
+      "sha256": "fd7deffe3b9914187348e5de3e3deaa33d820f249721382de40af4b4c9f1a327",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-requested-vi-signal-dark.jpg",
+      "sha256": "f773badb50a81dfa1f6479e3442623604c4a76fde1fdc70aca001d8d23c172b0",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-timed_out-vi-detail-dark.jpg",
+      "sha256": "7a32662f83b640b08b8bf67786781c8901970f75cafb0992e4740ff4907177d6",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-approval-timed_out-vi-signal-dark.jpg",
+      "sha256": "0a1c79f9307d45372b59d6634ec53d796987b192d1a5033f2f452db4e8c8f16e",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-created-vi-detail-dark.jpg",
+      "sha256": "aa5733c0b1318a9c4ba249c2ca11ade2dafc31add820ff1643eaa485efe4a006",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-created-vi-signal-dark.jpg",
+      "sha256": "b9ee816d9b12f7e4d9bb756fec2c0b31dfc41aa07c7b73b492c97a83afd8d1e0",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-status_changed-vi-detail-dark.jpg",
+      "sha256": "957de2039145ba0be4b3a459e6d22fe88cad8c0e9936951a2cb6b96bc0d4f966",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-status_changed-vi-signal-dark.jpg",
+      "sha256": "d1cc771ef67ca5537f4b8555e63862e930359f2f9324b85cd95f137ef5bf7e80",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-window_ending-vi-detail-dark.jpg",
+      "sha256": "205568b30ee0f17be979f5c5ce1b944bae73a3bec7053c79413ec87748bcb48f",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-window_ending-vi-signal-dark.jpg",
+      "sha256": "70bf2db9334698ae8e7e7f84cbdcab1febdd5d5b648d643d7ba345d69f01147f",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-window_starting-vi-detail-dark.jpg",
+      "sha256": "f2021e239da69001db0a36c735652862960aa204e192ec2cf8c6b375e93b74dc",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-engagement-window_starting-vi-signal-dark.jpg",
+      "sha256": "ffac9cca38bdc87b19ae2831e2f7a25d3c3066ac605e04c533bc4ae7d4fc7e2c",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-evidence-chain_broken-vi-detail-dark.jpg",
+      "sha256": "8e2336a5f1724283eae87e0c2352be1e927a9dda3ec2887470380dd5640f348e",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-evidence-chain_broken-vi-signal-dark.jpg",
+      "sha256": "10c299687b629ce3e412fe2177eaf5a7bccbf278bfe80540cd259eb55d8f3c43",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-finding-commented-vi-detail-dark.jpg",
+      "sha256": "5c01ce0573e607aadef995daf6f2c620845d13a7d0d129014b9d8868794890ab",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-finding-commented-vi-signal-dark.jpg",
+      "sha256": "662786e11280cca928d56efa40ffb80c8b316cc95b59d87dba8d443535ac021b",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-incident-updated-vi-detail-dark.jpg",
+      "sha256": "7dee56a06474a480b6005c6878af5fca30217130c27c7b25ac5517585691c07e",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-incident-updated-vi-signal-dark.jpg",
+      "sha256": "ffecf2836d5f2568c4ff8b0f5d2faa1366e7fdc29654359ee637d6935aa34f5d",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-response-finished-vi-detail-dark.jpg",
+      "sha256": "cedab45d72a7562759b0ccb01ed2ab742146aec63d2ed094f1ce81ea764fc8a9",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "rocket-chat-native-response-finished-vi-signal-dark.jpg",
+      "sha256": "076927d777f0485cdc42e1d849e75b634b157bae033107adedad51cbaf3aa004",
+      "provider_post_id_matched": true,
+      "visual_review": "pass"
+    }
+  ],
+  "clicked_source_event_groups": [
+    {
+      "source_event_type": "engagement.created",
+      "exact_deployed_url_checked": true,
+      "screenshot": "rocket-chat-engagement-deployed-link.jpg",
+      "sha256": "2eb6a705c364f30159d530933b789182677d26754b59e8ef7afa78c3a7c3ba25",
+      "visual_review": "pass"
+    },
+    {
+      "source_event_type": "finding.commented",
+      "exact_deployed_url_checked": true,
+      "screenshot": "rocket-chat-finding-deployed-link.jpg",
+      "sha256": "039463231e454860669d6728c6f93075adb38328b05030840c37f48ec36ec9c7",
+      "visual_review": "pass"
+    },
+    {
+      "source_event_type": "approval.requested",
+      "exact_deployed_url_checked": true,
+      "screenshot": "rocket-chat-approval-deployed-link.jpg",
+      "sha256": "61c14fe2ee69cd2997042b186015b70da545e31e5be618dd3ad337e4f8259962",
+      "visual_review": "pass"
+    },
+    {
+      "source_event_type": "incident.updated",
+      "exact_deployed_url_checked": true,
+      "screenshot": "rocket-chat-incident-deployed-link.jpg",
+      "sha256": "cd54634144bd9855c52d0f3497bb5dcdfd2c101dd977bbcc30f9ca3137e30683",
+      "visual_review": "pass"
+    },
+    {
+      "source_event_type": "response.finished",
+      "exact_deployed_url_checked": true,
+      "screenshot": "rocket-chat-response-deployed-link.jpg",
+      "sha256": "ab05e4493ead87e9017de823128675a60ff85f7c64d24979ae1b9f82ab2529a2",
+      "visual_review": "pass"
+    },
+    {
+      "source_event_type": "evidence.chain_broken",
+      "exact_deployed_url_checked": true,
+      "screenshot": "rocket-chat-evidence-deployed-link.jpg",
+      "sha256": "2c3478a367b11267f7f1edf8d8755887f98205012528c6962eb6fbbd860d0042",
+      "visual_review": "pass"
+    }
+  ],
+  "original_color_mode": "Match system",
+  "original_color_mode_restored": true,
+  "limits": "Labelled synthetic sender fixtures reuse captured immutable facts without domain/outbox writes. No remote response execution or actual chain violation claimed. Approval destination image proves selected Agent page; response destination shows disabled operations. Earlier modal-obstructed and incorrectly themed frames were replaced and privately archived before acceptance."
+}

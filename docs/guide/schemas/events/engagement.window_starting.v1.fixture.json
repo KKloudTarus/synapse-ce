@@ -1,0 +1,5 @@
+{
+  "id": "event-engagement-window-start", "type": "engagement.window_starting", "source_kind": "engagement_window", "source_id": "eng-42:authorized_from:86400", "schema_version": 1,
+  "occurred_at": "2026-10-19T08:00:00Z", "engagement_id": "eng-42",
+  "data": {"title": "Engagement window starting", "summary": "The authorization window starts in 24 hours.", "engagement_id": "eng-42", "lead_user_id": "user-42", "status": "active", "authorized_from": "2026-10-20T08:00:00Z", "authorized_to": "2026-10-27T08:00:00Z", "timezone": "Asia/Ho_Chi_Minh", "boundary": "authorized_from", "lead_time_seconds": 86400, "engagement_name": "October assessment", "actor": "system"}
+}

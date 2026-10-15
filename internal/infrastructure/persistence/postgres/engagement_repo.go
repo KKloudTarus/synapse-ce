@@ -29,6 +29,7 @@ func NewEngagementRepository(pool *pgxpool.Pool) *EngagementRepository {
 }
 
 var _ ports.EngagementRepository = (*EngagementRepository)(nil)
+var _ ports.EngagementMutationLocker = (*EngagementRepository)(nil)
 var _ ports.PromotionReconciliationScopeReader = (*EngagementRepository)(nil)
 var _ ports.VulnerabilityReconciliationTenantStore = (*EngagementRepository)(nil)
 var _ ports.DetectionReconciliationTenantStore = (*EngagementRepository)(nil)
@@ -187,6 +188,19 @@ func (r *EngagementRepository) GetByIDInTenant(ctx context.Context, tenantID, id
 	tenantID = shared.TenantOrDefault(tenantID)
 	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 		out, err = r.get(ctx, tx, `id=$1 AND project_id IS NULL AND host_asset_id IS NULL AND tenant_id=$2`, id.String(), tenantID.String())
+		return err
+	})
+	return out, err
+}
+
+// GetByIDInTenantForUpdate loads a visible engagement under a row lock in the
+// ambient tenant transaction. A notification producer holds that lock through
+// its aggregate write, audit append, and outbox append so a concurrent mutation
+// cannot overwrite the facts being captured.
+func (r *EngagementRepository) GetByIDInTenantForUpdate(ctx context.Context, tenantID, id shared.ID) (out *engagement.Engagement, err error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	err = WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		out, err = r.get(ctx, tx, `id=$1 AND project_id IS NULL AND host_asset_id IS NULL AND tenant_id=$2 FOR UPDATE`, id.String(), tenantID.String())
 		return err
 	})
 	return out, err

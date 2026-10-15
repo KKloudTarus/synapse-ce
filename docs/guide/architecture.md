@@ -47,6 +47,12 @@ their Project instead of duplicating or forking that engine.
 
 An **Assessment Cycle** owns rooted Assessment/Re-test ancestry and a frozen Asset/Project boundary. Immutable Snapshots own selected sealed run inputs; Comparisons own directional presence results. Closure manifests are built transactionally, sealed once, and thereafter may only be superseded. Their ordered path and typed immutable references remain tenant-scoped under forced PostgreSQL RLS. Lifecycle migrations and historical backfills are separate: API/worker startup never runs backfill commands, and all rollout gates default off.
 
+## Notification event contracts
+
+Notification producers append an immutable event and outbox record in the same tenant transaction. The event's `data` object holds the source facts that explain the action; projection may sanitize and select those facts for a template context, but does not fetch live display data. Event schemas and fixtures in `docs/guide/schemas/events/` are versioned public webhook contracts, and builders, built-in English/Vietnamese templates, and context goldens are kept in step by contract tests.
+
+Engagement lifecycle and window events retain authorization boundaries and lead time. Finding comment events keep only a bounded excerpt; mention events retain validated user IDs, never a recipient's display text. Approval events retain their kind, status, and a public approver count; their immutable approver roster is stored separately by source identity for personal routing, while decisions remain console actions subject to `PermReview`. Incident updates and response completions record bounded immutable status facts and sanitized targets. An `evidence.chain_broken` event is critical and mandatory: it carries the affected engagement for reporting association but offers no rule filters, cannot be muted, and never makes a failed evidence chain reportable.
+
 ## Binaries
 
 `cmd/` holds the service, operational, helper, and agent composition roots.

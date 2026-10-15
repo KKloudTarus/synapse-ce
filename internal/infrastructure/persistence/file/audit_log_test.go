@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -181,6 +182,67 @@ func TestAuditLogRecordOnceScopesIdempotencyByTenant(t *testing.T) {
 	}
 	if report, err := log.Verify(shared.WithTenant(ctx, "tenant-a")); err != nil || !report.Intact {
 		t.Fatalf("Verify = %+v, %v", report, err)
+	}
+}
+
+func TestAuditLogRecordFirstObservationPreservesFirstEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	log := NewAuditLog(path)
+	base := context.Background()
+	tenantA := shared.WithTenant(base, "tenant-a")
+	tenantB := shared.WithTenant(base, "tenant-b")
+	first := ports.AuditEntry{
+		Actor: "system", Action: "evidence.tampered", Target: "engagement-1",
+		Metadata: map[string]string{"idempotency_key": "observation-1", "reason_code": "chain_invalid"},
+		At:       time.Unix(10, 0).UTC(),
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- log.RecordFirstObservation(tenantA, first)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent first observation: %v", err)
+		}
+	}
+
+	entries, err := log.List(tenantA, 10)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("tenant A first observation entries=%+v err=%v", entries, err)
+	}
+	if !entries[0].At.Equal(first.At) || entries[0].Hash == "" {
+		t.Fatalf("first observation was not preserved: %+v", entries[0])
+	}
+	firstHash := entries[0].Hash
+	later := first
+	later.At = first.At.Add(time.Hour)
+	if err := log.RecordFirstObservation(tenantA, later); err != nil {
+		t.Fatalf("later observation retry: %v", err)
+	}
+	entries, err = log.List(tenantA, 10)
+	if err != nil || len(entries) != 1 || !entries[0].At.Equal(first.At) || entries[0].Hash != firstHash {
+		t.Fatalf("later retry changed first entry: %+v err=%v", entries, err)
+	}
+
+	mismatch := later
+	mismatch.Metadata = map[string]string{"idempotency_key": "observation-1", "reason_code": "other"}
+	if err := log.RecordFirstObservation(tenantA, mismatch); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("different first observation payload error=%v, want conflict", err)
+	}
+	if err := log.RecordFirstObservation(tenantB, later); err != nil {
+		t.Fatalf("tenant B same key: %v", err)
+	}
+	other, err := log.List(tenantB, 10)
+	if err != nil || len(other) != 1 || !other[0].At.Equal(later.At) {
+		t.Fatalf("tenant B observation entries=%+v err=%v", other, err)
 	}
 }
 

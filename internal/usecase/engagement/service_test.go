@@ -5,17 +5,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/blob"
+	memorypersistence "github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sourceupload"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -89,6 +93,17 @@ type fixedClock struct{ t time.Time }
 
 func (c fixedClock) Now() time.Time { return c.t }
 
+type sequenceIDs struct {
+	values []shared.ID
+	index  int
+}
+
+func (g *sequenceIDs) NewID() shared.ID {
+	id := g.values[g.index]
+	g.index++
+	return id
+}
+
 type fixedIDs struct{}
 
 func (fixedIDs) NewID() shared.ID { return shared.ID("eng-1") }
@@ -118,6 +133,27 @@ type sourceStoreFake struct {
 	item    sourcepackage.Package
 	saved   []byte
 	deleted bool
+}
+
+type lifecycleFacts struct {
+	ports.NotificationLifecycleFacts
+	err error
+}
+
+func (f lifecycleFacts) SnapshotNotificationLifecycleFacts(context.Context, shared.ID, shared.ID, string) (ports.NotificationLifecycleFacts, error) {
+	return f.NotificationLifecycleFacts, f.err
+}
+
+type failingEngagementOutbox struct {
+	next ports.NotificationOutbox
+	err  error
+}
+
+func (o failingEngagementOutbox) Append(ctx context.Context, record notification.SourceRecord) error {
+	if err := o.next.Append(ctx, record); err != nil {
+		return err
+	}
+	return o.err
 }
 
 type failedUploadAudit struct{ err error }
@@ -609,5 +645,188 @@ func TestSetOffensiveRoE(t *testing.T) {
 	// A cross-tenant write cannot see the engagement.
 	if _, err := svc.SetOffensiveRoE(ctx, "mallory", shared.ID("tenant-B"), e.ID, "X", "Y", "low", true); !errors.Is(err, shared.ErrNotFound) {
 		t.Errorf("cross-tenant SetOffensiveRoE must be ErrNotFound, got %v", err)
+	}
+}
+
+func TestEngagementLifecycleNotificationsCaptureImmutableFactsAndRollback(t *testing.T) {
+	now := time.Date(2026, 10, 14, 9, 30, 0, 0, time.UTC)
+	tenant := shared.ID("engagement-events")
+	ctx := shared.WithTenant(context.Background(), tenant)
+	repo := memorypersistence.NewEngagementRepository()
+	outbox := memorypersistence.NewNotificationOutbox()
+	outbox.Activate(tenant, now.Add(-time.Second))
+	svc := NewService(repo, fixedClock{now}, fixedIDs{}, &capAudit{})
+	facts := lifecycleFacts{NotificationLifecycleFacts: ports.NotificationLifecycleFacts{
+		EngagementName: "Original engagement", ActorName: "Alice", ActorUserID: "actor-user", LeadUserID: "lead-user",
+	}}
+	if err := svc.SetNotifications(memorypersistence.NewTenantTransactionRunner(), outbox, facts); err != nil {
+		t.Fatal(err)
+	}
+	created, err := svc.Create(ctx, CreateInput{TenantID: tenant, Name: "Original engagement", CreatedBy: "opaque actor", Timezone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := outbox.Records(tenant)
+	if len(records) != 1 || records[0].EventType != notification.EventEngagementCreated || records[0].CaptureVersion != 3 {
+		t.Fatalf("created record = %+v", records)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(records[0].Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["engagement_name"] != "Original engagement" || data["lead_user_id"] != "lead-user" || data["actor_user_id"] != "actor-user" {
+		t.Fatalf("created immutable facts = %#v", data)
+	}
+	current, err := repo.GetByIDInTenant(ctx, tenant, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Name = "Changed engagement"
+	if err := repo.Update(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(records[0].Data, &data); err != nil || data["engagement_name"] != "Original engagement" {
+		t.Fatalf("stored record changed with aggregate: %#v %v", data, err)
+	}
+
+	injected := errors.New("outbox unavailable")
+
+	facts.EngagementName = "Changed engagement"
+	if err := svc.SetNotifications(memorypersistence.NewTenantTransactionRunner(), failingEngagementOutbox{next: outbox, err: injected}, facts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Transition(ctx, "opaque actor", tenant, created.ID, domain.StatusActive); !errors.Is(err, injected) {
+		t.Fatalf("transition error = %v", err)
+	}
+	rolledBack, err := repo.GetByIDInTenant(ctx, tenant, created.ID)
+	if err != nil || rolledBack.Status != domain.StatusDraft {
+		t.Fatalf("transition escaped rollback: %+v %v", rolledBack, err)
+	}
+	if records := outbox.Records(tenant); len(records) != 1 {
+		t.Fatalf("outbox escaped rollback: %+v", records)
+	}
+}
+
+func TestEngagementSourceCreationBindsWithLifecycleOutboxTransaction(t *testing.T) {
+	now := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+	tenant := shared.ID("engagement-source-events")
+	ctx := shared.WithTenant(context.Background(), tenant)
+	repo := memorypersistence.NewEngagementRepository()
+	objects := blob.NewMemory()
+	sources := sourceupload.NewStoreWithRepository(objects, memorypersistence.NewEngagementSourceRepository(), 0)
+	outbox := memorypersistence.NewNotificationOutbox()
+	outbox.Activate(tenant, now.Add(-time.Second))
+	svc := NewService(repo, fixedClock{now}, fixedIDs{}, &capAudit{})
+	svc.SetSourceStore(sources)
+	facts := lifecycleFacts{NotificationLifecycleFacts: ports.NotificationLifecycleFacts{EngagementName: "Source engagement"}}
+	injected := errors.New("capture failed")
+	if err := svc.SetNotifications(memorypersistence.NewTenantTransactionRunner(), failingEngagementOutbox{next: outbox, err: injected}, facts); err != nil {
+		t.Fatal(err)
+	}
+	archive := []byte("source archive")
+	sum := sha256.Sum256(archive)
+	_, item, err := svc.CreateFromSourcePackage(ctx, CreateInput{TenantID: tenant, Name: "Source engagement", CreatedBy: "actor"}, "source.zip", int64(len(archive)), hex.EncodeToString(sum[:]), bytes.NewReader(archive))
+	if !errors.Is(err, injected) {
+		t.Fatalf("source create error = %v", err)
+	}
+	if item.VersionID.IsZero() {
+		t.Fatalf("prepared package identity was lost: %+v", item)
+	}
+	if _, err := repo.GetByIDInTenant(ctx, tenant, "eng-1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("engagement escaped rollback: %v", err)
+	}
+	if _, err := sources.Get(ctx, tenant, "eng-1"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("source metadata escaped rollback: %v", err)
+	}
+	if _, err := objects.OpenObject(ctx, item.ObjectKey); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("unpublished source bytes remained: %v", err)
+	}
+	if records := outbox.Records(tenant); len(records) != 0 {
+		t.Fatalf("source outbox escaped rollback: %+v", records)
+	}
+}
+
+func TestEngagementSourceReuseBindsWithLifecycleOutboxTransaction(t *testing.T) {
+	now := time.Date(2026, 10, 14, 10, 30, 0, 0, time.UTC)
+	tenant := shared.ID("engagement-source-reuse-events")
+	ctx := shared.WithTenant(context.Background(), tenant)
+	repo := memorypersistence.NewEngagementRepository()
+	objects := blob.NewMemory()
+	sources := sourceupload.NewStoreWithRepository(objects, memorypersistence.NewEngagementSourceRepository(), 0)
+	ids := &sequenceIDs{values: []shared.ID{"parent", "child"}}
+	parentSvc := NewService(repo, fixedClock{now}, ids, &capAudit{})
+	parentSvc.SetSourceStore(sources)
+	archive := []byte("parent source archive")
+	sum := sha256.Sum256(archive)
+	parent, original, err := parentSvc.CreateFromSourcePackage(ctx, CreateInput{TenantID: tenant, Name: "Parent", CreatedBy: "actor"}, "source.zip", int64(len(archive)), hex.EncodeToString(sum[:]), bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outbox := memorypersistence.NewNotificationOutbox()
+	outbox.Activate(tenant, now.Add(-time.Second))
+	childSvc := NewService(repo, fixedClock{now}, ids, &capAudit{})
+	childSvc.SetSourceStore(sources)
+	facts := lifecycleFacts{NotificationLifecycleFacts: ports.NotificationLifecycleFacts{EngagementName: "Child"}}
+	injected := errors.New("capture failed")
+	if err := childSvc.SetNotifications(memorypersistence.NewTenantTransactionRunner(), failingEngagementOutbox{next: outbox, err: injected}, facts); err != nil {
+		t.Fatal(err)
+	}
+	_, reused, err := childSvc.CreateFromReusedSource(ctx, CreateInput{TenantID: tenant, Name: "Child", CreatedBy: "actor"}, parent.ID, original.VersionID)
+	if !errors.Is(err, injected) {
+		t.Fatalf("reuse create error = %v", err)
+	}
+	if _, err := repo.GetByIDInTenant(ctx, tenant, "child"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("child engagement escaped rollback: %v", err)
+	}
+	if _, err := sources.Get(ctx, tenant, "child"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("child source metadata escaped rollback: %v", err)
+	}
+	persisted, err := sources.GetByVersion(ctx, tenant, parent.ID, original.VersionID)
+	if err != nil || persisted != original || reused.ObjectKey != original.ObjectKey {
+		t.Fatalf("parent source changed during child rollback: %+v %+v %v", persisted, reused, err)
+	}
+	if _, err := objects.OpenObject(ctx, original.ObjectKey); err != nil {
+		t.Fatalf("parent source bytes removed: %v", err)
+	}
+	if records := outbox.Records(tenant); len(records) != 0 {
+		t.Fatalf("reuse outbox escaped rollback: %+v", records)
+	}
+}
+
+func TestEngagementLifecycleCaptureScrubsDisplayFacts(t *testing.T) {
+	at := time.Now().UTC()
+	tenant := shared.ID("engagement-display")
+	ctx := shared.WithTenant(context.Background(), tenant)
+	name := "Review https://operator:super-secret@example.test token=seed-secret"
+	outbox := memorypersistence.NewNotificationOutbox()
+	outbox.Activate(tenant, at.Add(-time.Second))
+	svc := NewService(memorypersistence.NewEngagementRepository(), fixedClock{at}, fixedIDs{}, &capAudit{})
+	facts := lifecycleFacts{NotificationLifecycleFacts: ports.NotificationLifecycleFacts{
+		EngagementName: name, ActorName: "password=actor-secret " + strings.Repeat("é", 700), ActorUserID: "canonical-actor",
+	}}
+	if err := svc.SetNotifications(memorypersistence.NewTenantTransactionRunner(), outbox, facts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Create(ctx, CreateInput{TenantID: tenant, Name: name, Timezone: "UTC"}); err != nil {
+		t.Fatal(err)
+	}
+	records := outbox.Records(tenant)
+	if len(records) != 1 {
+		t.Fatalf("captures=%d", len(records))
+	}
+	for _, raw := range [][]byte{records[0].Data, records[0].Context} {
+		for _, secret := range []string{"super-secret", "seed-secret", "actor-secret"} {
+			if strings.Contains(string(raw), secret) {
+				t.Fatalf("secret escaped capture: %s", secret)
+			}
+		}
+	}
+	var data map[string]any
+	if err := json.Unmarshal(records[0].Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if utf8.RuneCountInString(data["actor"].(string)) > 500 || data["actor_user_id"] != "canonical-actor" {
+		t.Fatalf("actor facts=%#v", data)
 	}
 }

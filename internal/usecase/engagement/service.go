@@ -3,6 +3,7 @@ package engagement
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/privacy"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sourcepackage"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -26,6 +29,10 @@ type Service struct {
 	sources                   ports.EngagementSourceStore
 	snapshots                 ports.AssessmentSnapshotDefaultReader
 	requireCompletionSnapshot func(string) bool
+	notificationTx            ports.TenantTransactionRunner
+	notifications             ports.NotificationOutbox
+	notificationFacts         ports.NotificationLifecycleFactsReader
+	notificationLocker        ports.EngagementMutationLocker
 }
 
 // NewService wires the engagement use case with its driven ports.
@@ -48,6 +55,19 @@ func (s *Service) SetCompletionSnapshotPolicy(reader ports.AssessmentSnapshotDef
 	s.requireCompletionSnapshot = required
 }
 
+// SetNotifications enables transactional engagement lifecycle capture. The
+// supplied transaction runner must be the one used by the engagement, audit,
+// facts and outbox adapters; a mutation locker is mandatory so status and
+// window reads cannot race a competing aggregate write.
+func (s *Service) SetNotifications(tx ports.TenantTransactionRunner, outbox ports.NotificationOutbox, facts ports.NotificationLifecycleFactsReader) error {
+	locker, ok := s.repo.(ports.EngagementMutationLocker)
+	if tx == nil || outbox == nil || facts == nil || !ok {
+		return fmt.Errorf("%w: engagement notification dependencies are required", shared.ErrValidation)
+	}
+	s.notificationTx, s.notifications, s.notificationFacts, s.notificationLocker = tx, outbox, facts, locker
+	return nil
+}
+
 // CreateInput is the input for creating an engagement.
 type CreateInput struct {
 	AssessmentProjectID                    shared.ID
@@ -67,7 +87,29 @@ type CreateInput struct {
 
 // Create validates and persists a new engagement with its scope.
 func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Engagement, error) {
-	return s.create(ctx, in, s.ids.NewID())
+	if s.notificationTx == nil || s.notifications == nil {
+		return s.create(ctx, in, s.ids.NewID())
+	}
+	tenantID, err := s.notificationTenant(ctx, in.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	in.TenantID = tenantID
+	var created *domain.Engagement
+	err = s.notificationTx.Run(ctx, tenantID, func(txCtx context.Context) error {
+		created, err = s.create(txCtx, in, s.ids.NewID())
+		if err != nil {
+			return err
+		}
+		if err := s.appendEngagementCreated(txCtx, tenantID, created, in.CreatedBy); err != nil {
+			return err
+		}
+		return s.auditChange(txCtx, in.CreatedBy, "engagement.created", created.ID, nil, s.clock.Now())
+	})
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
 }
 
 func (s *Service) CreateFromSourcePackage(ctx context.Context, in CreateInput, filename string, size int64, sha256hex string, src io.Reader) (*domain.Engagement, sourcepackage.Package, error) {
@@ -84,6 +126,27 @@ func (s *Service) CreateFromSourcePackage(ctx context.Context, in CreateInput, f
 			return nil, sourcepackage.Package{}, err
 		}
 		return nil, sourcepackage.Package{}, fmt.Errorf("%w: source upload is required", shared.ErrValidation)
+	}
+	if s.lifecycleNotificationsEnabled() {
+		tenantID, err := s.notificationTenant(ctx, in.TenantID)
+		if err != nil {
+			return nil, sourcepackage.Package{}, err
+		}
+		preparer, ok := s.sources.(ports.EngagementSourcePreparer)
+		if !ok {
+			return nil, sourcepackage.Package{}, fmt.Errorf("%w: transactional source preparation is not configured", shared.ErrValidation)
+		}
+		in.TenantID, metadata.TenantID = tenantID, tenantID
+		prepared, err := preparer.Prepare(ctx, tenantID, id, metadata.Filename, in.CreatedBy, metadata.CreatedAt, size, metadata.SHA256, src)
+		if err != nil {
+			return nil, prepared, err
+		}
+		in.InScope = append([]domain.Target{{Kind: domain.TargetRepo, Value: prepared.Target()}}, in.InScope...)
+		return s.createWithPreparedSource(ctx, tenantID, in, id, prepared, "engagement.source_uploaded", func(item sourcepackage.Package) map[string]string {
+			return map[string]string{
+				"filename": item.Filename, "sha256": item.SHA256, "size": strconv.FormatInt(item.Size, 10), "source_version_id": item.VersionID.String(),
+			}
+		})
 	}
 	// Persist the draft owner before its source association so metadata stores
 	// can enforce the engagement foreign key. No scan can execute this draft.
@@ -128,6 +191,37 @@ func (s *Service) SourcePackage(ctx context.Context, tenantID, engagementID shar
 // selected predecessor archive. Reuse never changes the predecessor package or
 // inherits its execution authorization, and original upload attribution is kept.
 func (s *Service) CreateFromReusedSource(ctx context.Context, in CreateInput, predecessorID, expectedVersionID shared.ID) (*domain.Engagement, sourcepackage.Package, error) {
+	if s.lifecycleNotificationsEnabled() {
+		tenantID, err := s.notificationTenant(ctx, in.TenantID)
+		if err != nil {
+			return nil, sourcepackage.Package{}, err
+		}
+		preparer, ok := s.sources.(ports.EngagementSourcePreparer)
+		if !ok {
+			return nil, sourcepackage.Package{}, fmt.Errorf("%w: transactional source preparation is not configured", shared.ErrValidation)
+		}
+		parent, err := s.SourcePackage(ctx, tenantID, predecessorID)
+		if err != nil {
+			return nil, sourcepackage.Package{}, err
+		}
+		if !expectedVersionID.IsZero() && parent.VersionID != expectedVersionID {
+			return nil, sourcepackage.Package{}, fmt.Errorf("%w: selected source version no longer matches the predecessor", shared.ErrConflict)
+		}
+		id := s.ids.NewID()
+		prepared, err := preparer.PrepareReuse(ctx, tenantID, predecessorID, id, parent.VersionID, in.CreatedBy, s.clock.Now())
+		if err != nil {
+			return nil, prepared, err
+		}
+		in.TenantID = tenantID
+		in.InScope = append([]domain.Target{{Kind: domain.TargetRepo, Value: prepared.Target()}}, in.InScope...)
+		return s.createWithPreparedSource(ctx, tenantID, in, id, prepared, "engagement.source_reused", func(item sourcepackage.Package) map[string]string {
+			return map[string]string{
+				"source_version_id": item.VersionID.String(), "sha256": item.SHA256,
+				"source_assessment_id": predecessorID.String(), "reused_from_version_id": parent.VersionID.String(),
+			}
+		})
+	}
+
 	reuser, ok := s.sources.(ports.EngagementSourceReuser)
 	if !ok {
 		return nil, sourcepackage.Package{}, fmt.Errorf("%w: source reuse is not configured", shared.ErrValidation)
@@ -158,6 +252,56 @@ func (s *Service) CreateFromReusedSource(ctx context.Context, in CreateInput, pr
 	return assessment, item, nil
 }
 
+// createWithPreparedSource atomically binds a previously prepared archive with
+// the engagement, custody audit entries, and created-event outbox record. The
+// prepared archive is cleaned up only after a definite callback failure; an
+// unknown transaction outcome retains bytes to avoid deleting a committed source.
+func (s *Service) createWithPreparedSource(ctx context.Context, tenantID shared.ID, in CreateInput, id shared.ID, prepared sourcepackage.Package, sourceAction string, metadata func(sourcepackage.Package) map[string]string) (*domain.Engagement, sourcepackage.Package, error) {
+	preparer, ok := s.sources.(ports.EngagementSourcePreparer)
+	if !ok {
+		return nil, prepared, fmt.Errorf("%w: transactional source preparation is not configured", shared.ErrValidation)
+	}
+	var created *domain.Engagement
+	item := prepared
+	callbackFailed := false
+	err := s.notificationTx.Run(ctx, tenantID, func(txCtx context.Context) error {
+		var err error
+		created, err = s.create(txCtx, in, id)
+		if err != nil {
+			callbackFailed = true
+			return err
+		}
+		item, err = preparer.Bind(txCtx, prepared)
+		if err != nil {
+			callbackFailed = true
+			return err
+		}
+		if err := s.appendEngagementCreated(txCtx, tenantID, created, in.CreatedBy); err != nil {
+			callbackFailed = true
+			return err
+		}
+		if err := s.auditChange(txCtx, in.CreatedBy, sourceAction, id, metadata(item), s.clock.Now()); err != nil {
+			callbackFailed = true
+			return err
+		}
+		if err := s.auditChange(txCtx, in.CreatedBy, "engagement.created", id, nil, s.clock.Now()); err != nil {
+			callbackFailed = true
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		if callbackFailed {
+			return nil, item, errors.Join(err, s.DiscardUnpublishedSource(context.WithoutCancel(ctx), prepared))
+		}
+		return nil, item, err
+	}
+	return created, item, nil
+}
+
+func (s *Service) lifecycleNotificationsEnabled() bool {
+	return s.notificationTx != nil && s.notifications != nil && s.notificationFacts != nil && s.notificationLocker != nil
+}
 func (s *Service) CompensateCreate(ctx context.Context, tenantID, engagementID shared.ID, createdSources ...sourcepackage.Package) error {
 	for _, item := range createdSources {
 		if !item.VersionID.IsZero() && (item.TenantID != shared.TenantOrDefault(tenantID) || item.EngagementID != engagementID) {
@@ -251,25 +395,27 @@ func (s *Service) UpdateScope(ctx context.Context, actor string, tenantID, id sh
 	if err := requireActor(actor); err != nil {
 		return nil, err
 	}
-	e, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
+	var updated *domain.Engagement
+	err := s.withNotificationMutation(ctx, tenantID, id, func(writeCtx context.Context, _ shared.ID, current *domain.Engagement) error {
+		now := s.clock.Now()
+		cp := *current
+		if err := cp.SetScope(in, out, now); err != nil {
+			return err
+		}
+		cp.Audit.UpdatedBy = actor
+		if err := s.repo.Update(writeCtx, &cp); err != nil {
+			return fmt.Errorf("persist scope: %w", err)
+		}
+		if err := s.auditChange(writeCtx, actor, "engagement.scope.update", id, map[string]string{"in_scope": strconv.Itoa(len(in)), "out_of_scope": strconv.Itoa(len(out))}, now); err != nil {
+			return err
+		}
+		updated = &cp
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	now := s.clock.Now()
-	cp := *e // copy-then-mutate: never mutate the repo's returned aggregate in place
-	if err := cp.SetScope(in, out, now); err != nil {
-		return nil, err
-	}
-	cp.Audit.UpdatedBy = actor // attribute the last modifier
-	if err := s.repo.Update(ctx, &cp); err != nil {
-		return nil, fmt.Errorf("persist scope: %w", err)
-	}
-	if err := s.auditChange(ctx, actor, "engagement.scope.update", id, map[string]string{
-		"in_scope": strconv.Itoa(len(in)), "out_of_scope": strconv.Itoa(len(out)),
-	}, now); err != nil {
-		return nil, err
-	}
-	return &cp, nil
+	return updated, nil
 }
 
 // SetWindow validates and sets the legal authorization window, persists, and
@@ -278,23 +424,27 @@ func (s *Service) SetWindow(ctx context.Context, actor string, tenantID, id shar
 	if err := requireActor(actor); err != nil {
 		return nil, err
 	}
-	e, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
+	var updated *domain.Engagement
+	err := s.withNotificationMutation(ctx, tenantID, id, func(writeCtx context.Context, tenant shared.ID, current *domain.Engagement) error {
+		now := s.clock.Now()
+		cp := *current
+		if err := cp.SetAuthorizationWindow(from, to, tz, now); err != nil {
+			return err
+		}
+		cp.Audit.UpdatedBy = actor
+		if err := s.repo.Update(writeCtx, &cp); err != nil {
+			return fmt.Errorf("persist authorization window: %w", err)
+		}
+		if err := s.auditChange(writeCtx, actor, "engagement.window.update", id, nil, now); err != nil {
+			return err
+		}
+		updated = &cp
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	now := s.clock.Now()
-	cp := *e
-	if err := cp.SetAuthorizationWindow(from, to, tz, now); err != nil {
-		return nil, err
-	}
-	cp.Audit.UpdatedBy = actor // attribute the last modifier
-	if err := s.repo.Update(ctx, &cp); err != nil {
-		return nil, fmt.Errorf("persist authorization window: %w", err)
-	}
-	if err := s.auditChange(ctx, actor, "engagement.window.update", id, nil, now); err != nil {
-		return nil, err
-	}
-	return &cp, nil
+	return updated, nil
 }
 
 // Transition validates and applies a lifecycle status change (activate, complete,
@@ -303,42 +453,51 @@ func (s *Service) Transition(ctx context.Context, actor string, tenantID, id sha
 	if err := requireActor(actor); err != nil {
 		return nil, err
 	}
-	e, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
+	var updated *domain.Engagement
+	err := s.withNotificationMutation(ctx, tenantID, id, func(writeCtx context.Context, tenant shared.ID, current *domain.Engagement) error {
+		if to == domain.StatusCompleted && current.Status != domain.StatusCompleted {
+			required := s.requireCompletionSnapshot != nil && s.requireCompletionSnapshot(tenant.String())
+			if required {
+				if s.snapshots == nil {
+					return fmt.Errorf("%w: assessment snapshot completion guard is not configured", shared.ErrValidation)
+				}
+				snapshot, _, err := s.snapshots.GetDefault(writeCtx, tenant, id)
+				if err != nil {
+					if errors.Is(err, shared.ErrNotFound) {
+						return fmt.Errorf("%w: engagement requires a default finalized assessment snapshot before completion", shared.ErrValidation)
+					}
+					return fmt.Errorf("load default assessment snapshot: %w", err)
+				}
+				if snapshot.Lifecycle != assessmentsnapshot.LifecycleFinalized {
+					return fmt.Errorf("%w: engagement default assessment snapshot is not finalized", shared.ErrValidation)
+				}
+			}
+		}
+		from := current.Status
+		now := s.clock.Now()
+		cp := *current
+		if err := cp.Transition(to, now); err != nil {
+			return err
+		}
+		cp.Audit.UpdatedBy = actor
+		if err := s.repo.Update(writeCtx, &cp); err != nil {
+			return fmt.Errorf("persist transition: %w", err)
+		}
+		if s.notifications != nil && from != cp.Status {
+			if err := s.appendEngagementStatusChanged(writeCtx, tenant, &cp, from, actor); err != nil {
+				return err
+			}
+		}
+		if err := s.auditChange(writeCtx, actor, "engagement.transition", id, map[string]string{"to": string(to)}, now); err != nil {
+			return err
+		}
+		updated = &cp
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if to == domain.StatusCompleted && e.Status != domain.StatusCompleted {
-		required := s.requireCompletionSnapshot != nil && s.requireCompletionSnapshot(shared.TenantOrDefault(tenantID).String())
-		if required {
-			if s.snapshots == nil {
-				return nil, fmt.Errorf("%w: assessment snapshot completion guard is not configured", shared.ErrValidation)
-			}
-			snapshot, _, err := s.snapshots.GetDefault(ctx, shared.TenantOrDefault(tenantID), id)
-			if err != nil {
-				if errors.Is(err, shared.ErrNotFound) {
-					return nil, fmt.Errorf("%w: engagement requires a default finalized assessment snapshot before completion", shared.ErrValidation)
-				}
-				return nil, fmt.Errorf("load default assessment snapshot: %w", err)
-			}
-			if snapshot.Lifecycle != assessmentsnapshot.LifecycleFinalized {
-				return nil, fmt.Errorf("%w: engagement default assessment snapshot is not finalized", shared.ErrValidation)
-			}
-		}
-	}
-
-	now := s.clock.Now()
-	cp := *e
-	if err := cp.Transition(to, now); err != nil {
-		return nil, err
-	}
-	cp.Audit.UpdatedBy = actor // attribute the last modifier
-	if err := s.repo.Update(ctx, &cp); err != nil {
-		return nil, fmt.Errorf("persist transition: %w", err)
-	}
-	if err := s.auditChange(ctx, actor, "engagement.transition", id, map[string]string{"to": string(to)}, now); err != nil {
-		return nil, err
-	}
-	return &cp, nil
+	return updated, nil
 }
 
 // SetRoE validates and sets the engagement's rules of engagement (allowed tool
@@ -363,27 +522,29 @@ func (s *Service) SetLiveRecon(ctx context.Context, actor string, tenantID, id s
 			return nil, fmt.Errorf("%w: enabling live recon requires a recorded lab-authorization attestation", shared.ErrValidation)
 		}
 	}
-	e, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
+	var updated *domain.Engagement
+	err := s.withNotificationMutation(ctx, tenantID, id, func(writeCtx context.Context, _ shared.ID, current *domain.Engagement) error {
+		now := s.clock.Now()
+		cp := *current
+		cp.SetLiveRecon(enabled, now)
+		cp.Audit.UpdatedBy = actor
+		if err := s.repo.Update(writeCtx, &cp); err != nil {
+			return fmt.Errorf("persist live-recon flag: %w", err)
+		}
+		meta := map[string]string{"enabled": strconv.FormatBool(enabled)}
+		if enabled {
+			meta["aup_version"], meta["attestation"] = strings.TrimSpace(aupVersion), strings.TrimSpace(attestation)
+		}
+		if err := s.auditChange(writeCtx, actor, "engagement.live_recon.update", id, meta, now); err != nil {
+			return err
+		}
+		updated = &cp
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	now := s.clock.Now()
-	cp := *e
-	cp.SetLiveRecon(enabled, now)
-	cp.Audit.UpdatedBy = actor // attribute the last modifier
-	if err := s.repo.Update(ctx, &cp); err != nil {
-		return nil, fmt.Errorf("persist live-recon flag: %w", err)
-	}
-	meta := map[string]string{"enabled": strconv.FormatBool(enabled)}
-	if enabled {
-		// The re-confirmation + attestation become part of the immutable custody record.
-		meta["aup_version"] = strings.TrimSpace(aupVersion)
-		meta["attestation"] = strings.TrimSpace(attestation)
-	}
-	if err := s.auditChange(ctx, actor, "engagement.live_recon.update", id, meta, now); err != nil {
-		return nil, err
-	}
-	return &cp, nil
+	return updated, nil
 }
 
 // SetOffensiveRoE records the offensive rules of engagement (customer + emergency contact, risk ceiling,
@@ -394,50 +555,178 @@ func (s *Service) SetOffensiveRoE(ctx context.Context, actor string, tenantID, i
 	if err := requireActor(actor); err != nil {
 		return nil, err
 	}
-	e, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
+	var updated *domain.Engagement
+	err := s.withNotificationMutation(ctx, tenantID, id, func(writeCtx context.Context, _ shared.ID, current *domain.Engagement) error {
+		now := s.clock.Now()
+		cp := *current
+		if err := cp.SetOffensiveRoE(customerContact, emergencyContact, riskCeiling, exclusionsChecked, now); err != nil {
+			return err
+		}
+		cp.Audit.UpdatedBy = actor
+		if err := s.repo.Update(writeCtx, &cp); err != nil {
+			return fmt.Errorf("persist offensive roe: %w", err)
+		}
+		meta := map[string]string{"risk_ceiling": cp.RiskCeiling, "exclusions_checked": strconv.FormatBool(cp.ExclusionsChecked)}
+		if err := s.auditChange(writeCtx, actor, "engagement.offensive_roe.update", id, meta, now); err != nil {
+			return err
+		}
+		updated = &cp
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	now := s.clock.Now()
-	cp := *e
-	if err := cp.SetOffensiveRoE(customerContact, emergencyContact, riskCeiling, exclusionsChecked, now); err != nil {
-		return nil, err
-	}
-	cp.Audit.UpdatedBy = actor
-	if err := s.repo.Update(ctx, &cp); err != nil {
-		return nil, fmt.Errorf("persist offensive roe: %w", err)
-	}
-	meta := map[string]string{"risk_ceiling": cp.RiskCeiling, "exclusions_checked": strconv.FormatBool(cp.ExclusionsChecked)}
-	if err := s.auditChange(ctx, actor, "engagement.offensive_roe.update", id, meta, now); err != nil {
-		return nil, err
-	}
-	return &cp, nil
+	return updated, nil
 }
-
 func (s *Service) SetRoE(ctx context.Context, actor string, tenantID, id shared.ID, roe domain.RoE) (*domain.Engagement, error) {
 	if err := requireActor(actor); err != nil {
 		return nil, err
 	}
-	e, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
+	var updated *domain.Engagement
+	err := s.withNotificationMutation(ctx, tenantID, id, func(writeCtx context.Context, _ shared.ID, current *domain.Engagement) error {
+		now := s.clock.Now()
+		cp := *current
+		if err := cp.SetRoE(roe, now); err != nil {
+			return err
+		}
+		cp.Audit.UpdatedBy = actor
+		if err := s.repo.Update(writeCtx, &cp); err != nil {
+			return fmt.Errorf("persist roe: %w", err)
+		}
+		if err := s.auditChange(writeCtx, actor, "engagement.roe.update", id, map[string]string{"allowed_tool_classes": strconv.Itoa(len(roe.AllowedToolClasses)), "blackouts": strconv.Itoa(len(roe.Blackouts))}, now); err != nil {
+			return err
+		}
+		updated = &cp
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	now := s.clock.Now()
-	cp := *e
-	if err := cp.SetRoE(roe, now); err != nil {
-		return nil, err
+	return updated, nil
+}
+
+// withNotificationMutation takes the visible engagement row lock only when
+// lifecycle capture is configured. Legacy callers retain their existing path;
+// capture-enabled mutations always execute the aggregate update, audit and
+// source snapshot under the same tenant transaction.
+func (s *Service) withNotificationMutation(ctx context.Context, tenantID, id shared.ID, write func(context.Context, shared.ID, *domain.Engagement) error) error {
+	if s.notificationTx == nil || s.notifications == nil || s.notificationLocker == nil {
+		current, err := s.repo.GetByIDInTenant(ctx, tenantID, id)
+		if err != nil {
+			return err
+		}
+		return write(ctx, shared.TenantOrDefault(tenantID), current)
 	}
-	cp.Audit.UpdatedBy = actor // attribute the last modifier
-	if err := s.repo.Update(ctx, &cp); err != nil {
-		return nil, fmt.Errorf("persist roe: %w", err)
+	tenant, err := s.notificationTenant(ctx, tenantID)
+	if err != nil {
+		return err
 	}
-	if err := s.auditChange(ctx, actor, "engagement.roe.update", id, map[string]string{
-		"allowed_tool_classes": strconv.Itoa(len(roe.AllowedToolClasses)),
-		"blackouts":            strconv.Itoa(len(roe.Blackouts)),
-	}, now); err != nil {
-		return nil, err
+	return s.notificationTx.Run(ctx, tenant, func(txCtx context.Context) error {
+		current, err := s.notificationLocker.GetByIDInTenantForUpdate(txCtx, tenant, id)
+		if err != nil {
+			return err
+		}
+		return write(txCtx, tenant, current)
+	})
+}
+
+func (s *Service) notificationTenant(ctx context.Context, tenantID shared.ID) (shared.ID, error) {
+	tenantID = shared.TenantOrDefault(tenantID)
+	if current, ok := shared.TenantFrom(ctx); ok && shared.TenantOrDefault(current) != tenantID {
+		return "", fmt.Errorf("%w: engagement belongs to another tenant", shared.ErrValidation)
 	}
-	return &cp, nil
+	return tenantID, nil
+}
+
+func (s *Service) appendEngagementCreated(ctx context.Context, tenant shared.ID, item *domain.Engagement, actor string) error {
+	return s.appendEngagementEvent(ctx, tenant, notification.EventEngagementCreated, "engagement_created", item.ID.String(), item, "", actor)
+}
+
+func (s *Service) appendEngagementStatusChanged(ctx context.Context, tenant shared.ID, item *domain.Engagement, from domain.Status, actor string) error {
+	return s.appendEngagementEvent(ctx, tenant, notification.EventEngagementStatusChanged, "engagement_status_changed", item.ID.String()+":"+string(item.Status), item, from, actor)
+}
+
+func (s *Service) appendEngagementEvent(ctx context.Context, tenant shared.ID, eventType notification.EventType, sourceKind, sourceID string, item *domain.Engagement, from domain.Status, actor string) error {
+	if item == nil || item.ID.IsZero() {
+		return fmt.Errorf("%w: engagement notification source is required", shared.ErrValidation)
+	}
+	facts, err := s.notificationFacts.SnapshotNotificationLifecycleFacts(ctx, tenant, item.ID, actor)
+	if err != nil {
+		return fmt.Errorf("snapshot engagement notification facts: %w", err)
+	}
+	if facts.EngagementName != "" && facts.EngagementName != item.Name {
+		return fmt.Errorf("%w: engagement notification facts changed during mutation", shared.ErrConflict)
+	}
+	name := privacy.ScrubURLCredentials(notification.ScrubPersonalText(item.Name, 500))
+	tz := privacy.ScrubURLCredentials(notification.ScrubPersonalText(item.Timezone, 100))
+	actorName := privacy.ScrubURLCredentials(notification.ScrubPersonalText(facts.ActorName, 500))
+	data := map[string]any{
+		"title": engagementEventTitle(eventType), "summary": engagementEventSummary(eventType),
+		"engagement_id": item.ID, "lead_user_id": facts.LeadUserID.String(),
+		"status": item.Status, "from_status": from, "to_status": item.Status,
+		"timezone": tz, "engagement_name": name,
+	}
+	if item.AuthorizedFrom != nil {
+		data["authorized_from"] = item.AuthorizedFrom.UTC()
+	}
+	if item.AuthorizedTo != nil {
+		data["authorized_to"] = item.AuthorizedTo.UTC()
+	}
+	if !facts.ActorUserID.IsZero() {
+		data["actor_user_id"] = facts.ActorUserID
+	}
+	if facts.ActorName != "" {
+		data["actor"] = actorName
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("encode engagement notification data: %w", err)
+	}
+	occurredAt := s.clock.Now().UTC()
+	vars := map[string]string{
+		"event_type": string(eventType), "event_label": notificationEventLabel(eventType),
+		"occurred_at": occurredAt.Format(time.RFC3339), "title": engagementEventTitle(eventType), "summary": engagementEventSummary(eventType),
+		"status": string(item.Status), "from_status": string(from), "to_status": string(item.Status),
+		"timezone": tz, "engagement_name": name, "actor": actorName,
+	}
+	if item.AuthorizedFrom != nil {
+		vars["authorized_from"] = item.AuthorizedFrom.UTC().Format(time.RFC3339)
+	}
+	if item.AuthorizedTo != nil {
+		vars["authorized_to"] = item.AuthorizedTo.UTC().Format(time.RFC3339)
+	}
+	record, err := notification.SnapshotSourceRecord(notification.SourceRecord{
+		TenantID: tenant, SourceKind: sourceKind, SourceID: sourceID, EventType: eventType,
+		EngagementID: item.ID, OccurredAt: occurredAt, Data: raw, SubjectKind: "engagement", SubjectID: item.ID.String(),
+	}, vars)
+	if err != nil {
+		return fmt.Errorf("snapshot engagement notification: %w", err)
+	}
+	if err := s.notifications.Append(ctx, record); err != nil {
+		return fmt.Errorf("append engagement notification: %w", err)
+	}
+	return nil
+}
+
+func notificationEventLabel(eventType notification.EventType) string {
+	if spec, ok := notification.LookupEvent(eventType); ok {
+		return spec.Label
+	}
+	return ""
+}
+
+func engagementEventTitle(eventType notification.EventType) string {
+	if eventType == notification.EventEngagementStatusChanged {
+		return "Engagement status changed"
+	}
+	return "Engagement created"
+}
+
+func engagementEventSummary(eventType notification.EventType) string {
+	if eventType == notification.EventEngagementStatusChanged {
+		return "An engagement lifecycle status changed."
+	}
+	return "An engagement was created."
 }
 
 // requireActor enforces attributability: never apply an audited

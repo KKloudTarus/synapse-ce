@@ -77,21 +77,91 @@ func eventBuilders() map[domain.EventType]eventBuilder {
 				return map[string]string{"actor": data.text("actor"), "reason": data.text("reason")}
 			},
 		},
-		domain.EventFindingCreated:         findingEventBuilder("finding_id"),
-		domain.EventFindingStatusChanged:   findingEventBuilder("finding_id"),
-		domain.EventFindingRetestCompleted: findingEventBuilder("finding_id"),
-		domain.EventScanFailed:             runEventBuilder("scan_id"),
-		domain.EventDASTRunFinished:        runEventBuilder("run_id"),
-		domain.EventReconRunFinished:       runEventBuilder("run_id"),
-		domain.EventCSPMRunFinished:        runEventBuilder("run_id"),
-		domain.EventSLABreached:            lifecycleEventBuilder("finding_id", lifecycleStillCurrent),
-		domain.EventRiskAcceptanceCreated:  lifecycleEventBuilder("finding_id", nil),
-		domain.EventRiskAcceptanceExpiring: lifecycleEventBuilder("finding_id", lifecycleStillCurrent),
-		domain.EventRiskAcceptanceExpired:  lifecycleEventBuilder("finding_id", lifecycleStillCurrent),
-		domain.EventChannelPaused:          {subjectKey: "channel_id"},
-		domain.EventDestinationChanged:     {},
-		domain.EventTest:                   {},
+		domain.EventFindingCreated:           findingEventBuilder("finding_id"),
+		domain.EventFindingStatusChanged:     findingEventBuilder("finding_id"),
+		domain.EventFindingRetestCompleted:   findingEventBuilder("finding_id"),
+		domain.EventScanFailed:               runEventBuilder("scan_id"),
+		domain.EventDASTRunFinished:          runEventBuilder("run_id"),
+		domain.EventReconRunFinished:         runEventBuilder("run_id"),
+		domain.EventCSPMRunFinished:          runEventBuilder("run_id"),
+		domain.EventSLABreached:              lifecycleEventBuilder("finding_id", lifecycleStillCurrent),
+		domain.EventRiskAcceptanceCreated:    lifecycleEventBuilder("finding_id", nil),
+		domain.EventRiskAcceptanceExpiring:   lifecycleEventBuilder("finding_id", lifecycleStillCurrent),
+		domain.EventRiskAcceptanceExpired:    lifecycleEventBuilder("finding_id", lifecycleStillCurrent),
+		domain.EventEngagementCreated:        engagementEventBuilder(false),
+		domain.EventEngagementStatusChanged:  engagementEventBuilder(false),
+		domain.EventEngagementWindowStarting: engagementEventBuilder(true),
+		domain.EventEngagementWindowEnding:   engagementEventBuilder(true),
+		domain.EventFindingCommented: {
+			subjectKey: "finding_id",
+			vars: func(e domain.Event, data eventData, _ sourceFacts) map[string]string {
+				return map[string]string{"severity": string(e.Severity), "status": data.text("status"), "actor": data.text("actor"), "comment_excerpt": truncateRunes(data.text("comment_excerpt"), 500)}
+			},
+		},
+		domain.EventFindingMentioned: {
+			subjectKey: "finding_id",
+			vars: func(e domain.Event, data eventData, _ sourceFacts) map[string]string {
+				return map[string]string{"severity": string(e.Severity), "status": data.text("status")}
+			},
+		},
+		domain.EventApprovalRequested: approvalEventBuilder(),
+		domain.EventApprovalDecided:   approvalEventBuilder(),
+		domain.EventApprovalTimedOut:  approvalEventBuilder(),
+		domain.EventIncidentUpdated: {
+			subjectKey: "incident_id",
+			vars: func(e domain.Event, data eventData, _ sourceFacts) map[string]string {
+				return map[string]string{"severity": string(e.Severity), "update_kind": data.text("update_kind"), "status": data.text("status"), "disposition": data.text("disposition"), "actor": data.text("actor"), "incident_title": data.text("incident_title"), "owner": data.text("owner")}
+			},
+		},
+		domain.EventResponseFinished: {
+			subjectKey: "response_id",
+			vars: func(_ domain.Event, data eventData, _ sourceFacts) map[string]string {
+				return map[string]string{"outcome": data.text("outcome"), "action_kind": data.text("action_kind"), "target": displayTarget(data.text("target")), "actor": data.text("actor"), "engagement_name": data.text("engagement_name")}
+			},
+		},
+		domain.EventEvidenceChainBroken: {
+			subjectKey: "evidence_chain_id",
+			vars: func(e domain.Event, data eventData, _ sourceFacts) map[string]string {
+				return map[string]string{"severity": string(e.Severity), "reason_code": data.text("reason_code"), "engagement_name": data.text("engagement_name")}
+			},
+		},
+		domain.EventChannelPaused:      {subjectKey: "channel_id"},
+		domain.EventDestinationChanged: {},
+		domain.EventTest:               {},
 	}
+}
+
+func engagementEventBuilder(withLeadTime bool) eventBuilder {
+	return eventBuilder{subjectKey: "engagement_id", relevant: func(ctx context.Context, facts ports.NotificationRelevance, work ports.NotificationWork, data eventData) (bool, error) {
+		if !withLeadTime {
+			return true, nil
+		}
+		return engagementWindowStillCurrent(ctx, facts, work, data)
+	}, vars: func(_ domain.Event, data eventData, _ sourceFacts) map[string]string {
+		values := map[string]string{
+			"status": data.text("status"), "from_status": data.text("from_status"), "to_status": data.text("to_status"),
+			"timezone": data.text("timezone"), "boundary": data.text("boundary"), "engagement_name": data.text("engagement_name"), "actor": data.text("actor"),
+		}
+		for _, name := range []string{"authorized_from", "authorized_to"} {
+			if at, ok := data.time(name); ok {
+				values[name] = formatTime(at)
+			}
+		}
+		if withLeadTime {
+			values["lead_time_hours"] = leadTimeHours(data)
+		}
+		return values
+	}}
+}
+
+func approvalEventBuilder() eventBuilder {
+	return eventBuilder{subjectKey: "approval_id", vars: func(_ domain.Event, data eventData, _ sourceFacts) map[string]string {
+		values := map[string]string{"kind": data.text("kind"), "status": data.text("status"), "decision": data.text("decision"), "actor": data.text("actor"), "engagement_name": data.text("engagement_name")}
+		if at, ok := data.time("expires_at"); ok {
+			values["expires_at"] = formatTime(at)
+		}
+		return values
+	}}
 }
 
 func findingEventBuilder(subjectKey string) eventBuilder {
@@ -192,6 +262,17 @@ func factOr(facts sourceFacts, name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func truncateRunes(value string, limit int) string {
+	if limit < 1 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
 }
 
 // displayTarget is a scan target fit for a message: a URL loses its userinfo, query and fragment,

@@ -1266,6 +1266,7 @@ func main() {
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())
 	exportService.SetAIGateExemptions(scaService)
 	findingsService := findingsuc.NewService(findingRepo, commentRepo, retestRepo, auditLog, clock, ids)
+	findingsService.SetMentionUsers(userRepo)
 	// Both additions are independent; the tenant resolver is wired first because the review service
 	// takes findingsService as a dependency.
 	findingsService.SetEngagementTenantResolver(repo)
@@ -1669,6 +1670,19 @@ func main() {
 			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires SYNAPSE_VAULT_MASTER_KEY shared by API and worker")
 			os.Exit(1)
 		}
+		if err := engService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), postgres.NewNotificationLifecycleFactsReader(databasePool)); err != nil {
+			log.Error("engagement notification producers init failed", "err", err)
+			os.Exit(1)
+		}
+		notificationLifecycleFacts := postgres.NewNotificationLifecycleFactsReader(databasePool)
+		if err := evidenceService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), notificationLifecycleFacts); err != nil {
+			log.Error("evidence notification producers init failed", "err", err)
+			os.Exit(1)
+		}
+		if err := approvalSvc.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), notificationLifecycleFacts, notificationLifecycleFacts); err != nil {
+			log.Error("approval notification producers init failed", "err", err)
+			os.Exit(1)
+		}
 		notificationRepository := postgres.NewNotificationRepository(databasePool)
 		notificationRepository.EnableDestinationNotices()
 		notificationRepository.SetEventProjector(notificationuc.NewEventBuilders())
@@ -1896,6 +1910,12 @@ func main() {
 		os.Exit(1)
 	}
 	responseService.SetApprovalDecider(approvalSvc)
+	if cfg.NotificationEnabled {
+		if err := responseService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), postgres.NewNotificationLifecycleFactsReader(databasePool)); err != nil {
+			log.Error("response notification producers init failed", "err", err)
+			os.Exit(1)
+		}
+	}
 	var incidentResponseCoordinator *responseuc.IncidentCoordinator
 	// Hoisted so the agent catalog can read incidents too; the read service itself stays the same instance
 	// the operator surface uses, so the agent sees exactly what a human analyst sees.
@@ -2869,6 +2889,12 @@ func main() {
 		if terr != nil {
 			log.Error("incident triage service init failed", "err", terr)
 			os.Exit(1)
+		}
+		if cfg.NotificationEnabled {
+			if err := triageSvc.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), postgres.NewNotificationLifecycleFactsReader(databasePool)); err != nil {
+				log.Error("incident notification producers init failed", "err", err)
+				os.Exit(1)
+			}
 		}
 		router.SetIncidentTriage(triageSvc)
 		// Behavioral baseline (#594 D): learn each asset's normal running-process profile at report time and

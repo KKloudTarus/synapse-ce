@@ -1,0 +1,15 @@
+{
+  "subject_kind": "response",
+  "subject_id": "response-42",
+  "vars": {
+    "action_kind": "isolate_host",
+    "actor": "operator-42",
+    "event_label": "Response finished",
+    "event_type": "response.finished",
+    "occurred_at": "2026-10-14T08:00:00Z",
+    "outcome": "verified",
+    "summary": "A governed response was verified.",
+    "target": "host-42.example.test",
+    "title": "Response finished"
+  }
+}

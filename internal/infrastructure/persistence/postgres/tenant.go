@@ -39,6 +39,18 @@ func (runner *TenantTransactionRunner) Run(ctx context.Context, tenantID shared.
 	})
 }
 
+var _ ports.IndependentTenantTransactionRunner = (*TenantTransactionRunner)(nil)
+
+func (runner *TenantTransactionRunner) RunIndependent(ctx context.Context, tenant shared.ID, fn func(context.Context) error) error {
+	if current, ok := shared.TenantFrom(ctx); ok && current != tenant {
+		return fmt.Errorf("%w: independent tenant transaction mismatch", shared.ErrValidation)
+	}
+	if bound, ok := ctx.Value(tenantTransactionKey{}).(tenantTransaction); ok && bound.tenantID != tenant.String() {
+		return fmt.Errorf("%w: independent tenant transaction mismatch", shared.ErrValidation)
+	}
+	return runner.Run(context.WithValue(ctx, tenantTransactionKey{}, nil), tenant, fn)
+}
+
 // WithTenant runs fn inside a transaction whose `app.current_tenant` session variable is set to
 // tenantID for the life of that transaction only. Stores of Row-Level-Security-protected tables
 // (see migration 0057 and its synapse_enable_tenant_rls procedure) MUST route reads and writes

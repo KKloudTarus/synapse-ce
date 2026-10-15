@@ -1,0 +1,194 @@
+{
+  "captured_at": "2026-10-14T07:50:37.797151+00:00",
+  "provenance": "Real Request/Decide/SweepExpired approval service and real rescheduled authorization-window poller; synthetic proposals and engagement only; no agent/response execution",
+  "source_records": 6,
+  "data_mismatches": 0,
+  "subject_mismatches": 0,
+  "schema_mismatches": 0,
+  "webhook_receiver_requests": 24,
+  "webhook_hmac_verified": 24,
+  "deliveries": [
+    {
+      "event_type": "approval.decided",
+      "provider": "discord",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.decided",
+      "provider": "google_chat",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.decided",
+      "provider": "jsm",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.decided",
+      "provider": "slack_bot",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.decided",
+      "provider": "telegram",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.decided",
+      "provider": "webhook",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.requested",
+      "provider": "discord",
+      "state": "delivered",
+      "count": 8
+    },
+    {
+      "event_type": "approval.requested",
+      "provider": "google_chat",
+      "state": "delivered",
+      "count": 8
+    },
+    {
+      "event_type": "approval.requested",
+      "provider": "jsm",
+      "state": "delivered",
+      "count": 8
+    },
+    {
+      "event_type": "approval.requested",
+      "provider": "slack_bot",
+      "state": "delivered",
+      "count": 8
+    },
+    {
+      "event_type": "approval.requested",
+      "provider": "telegram",
+      "state": "delivered",
+      "count": 8
+    },
+    {
+      "event_type": "approval.requested",
+      "provider": "webhook",
+      "state": "delivered",
+      "count": 8
+    },
+    {
+      "event_type": "approval.timed_out",
+      "provider": "discord",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.timed_out",
+      "provider": "google_chat",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.timed_out",
+      "provider": "jsm",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.timed_out",
+      "provider": "slack_bot",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.timed_out",
+      "provider": "telegram",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "approval.timed_out",
+      "provider": "webhook",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "provider": "discord",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "provider": "google_chat",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "provider": "jsm",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "provider": "slack_bot",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "provider": "telegram",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "provider": "webhook",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "provider": "discord",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "provider": "google_chat",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "provider": "jsm",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "provider": "slack_bot",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "provider": "telegram",
+      "state": "delivered",
+      "count": 4
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "provider": "webhook",
+      "state": "delivered",
+      "count": 4
+    }
+  ],
+  "original_channel_configuration_restored": 4,
+  "old_dead_letter_history": "Retained; version-fenced redrive rejected HTTP409, no retargeting"
+}

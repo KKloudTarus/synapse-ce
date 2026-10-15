@@ -187,11 +187,17 @@ function mapSLAEvent(r: any): SLAEvent {
 }
 
 function mapComment(r: any): FindingComment {
+  const mentionUserIds = Array.isArray(r.mention_user_ids)
+    ? r.mention_user_ids.filter((id: unknown): id is string => typeof id === 'string')
+    : Array.isArray(r.MentionUserIDs)
+      ? r.MentionUserIDs.filter((id: unknown): id is string => typeof id === 'string')
+      : undefined
   return {
     id: r.ID ?? '',
     findingId: r.FindingID ?? '',
     author: r.Author ?? '',
     body: r.Body ?? '',
+    ...(mentionUserIds ? { mentionUserIds } : {}),
     createdAt: r.CreatedAt ?? null,
   }
 }
@@ -271,11 +277,11 @@ export const findingsApi = {
       )) ?? []
     ).map(mapComment),
 
-  addFindingComment: async (engagementId: string, findingId: string, body: string): Promise<FindingComment> =>
+  addFindingComment: async (engagementId: string, findingId: string, body: string, mentionUserIds: string[] = []): Promise<FindingComment> =>
     mapComment(
       await req(`/engagements/${encodeURIComponent(engagementId)}/findings/${encodeURIComponent(findingId)}/comments`, {
         method: 'POST',
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, mention_user_ids: mentionUserIds }),
       }),
     ),
 

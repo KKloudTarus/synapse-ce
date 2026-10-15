@@ -22,7 +22,28 @@ func (rt *Router) listUserChoices(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	items, err := rt.userPicker.ListUserChoices(r.Context(), shared.ID(TenantFrom(r.Context())), shared.ID(r.URL.Query().Get("team_id")), r.URL.Query().Get("q"), shared.ID(r.URL.Query().Get("cursor")), limit)
+	tenantID := shared.ID(TenantFrom(r.Context()))
+	teamID := shared.ID(r.URL.Query().Get("team_id"))
+	query := r.URL.Query().Get("q")
+	cursor := shared.ID(r.URL.Query().Get("cursor"))
+	var (
+		items []ports.UserChoice
+		err   error
+	)
+	switch r.URL.Query().Get("purpose") {
+	case "":
+		items, err = rt.userPicker.ListUserChoices(r.Context(), tenantID, teamID, query, cursor, limit)
+	case "mention":
+		reader, ok := rt.userPicker.(ports.MentionChoiceReader)
+		if !ok {
+			writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "mention choices are unavailable"})
+			return
+		}
+		items, err = reader.ListMentionChoices(r.Context(), tenantID, teamID, query, cursor, limit)
+	default:
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "purpose must be mention"})
+		return
+	}
 	if err != nil {
 		writeError(w, rt.log, err)
 		return

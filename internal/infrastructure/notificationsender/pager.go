@@ -105,6 +105,23 @@ func (d jsmDriver) Send(ctx context.Context, w ports.NotificationWork, config po
 	}
 	target := jsmAlertsURL
 	payload := map[string]any{"message": summary, "alias": alias, "source": "synapse", "priority": jsmPriority(w.Event.Severity), "details": jsmLinkDetails(links)}
+	if jsmLifecycleEvent(w.Event.Type) {
+		// A duplicate alias keeps the first alert message. Create.note preserves
+		// each captured lifecycle fact even when concurrent sends have no anchor.
+		note := summary
+		if w.Formatted != nil {
+			var rendered struct {
+				Note string `json:"note"`
+			}
+			if json.Unmarshal(w.Formatted.Body, &rendered) == nil && strings.TrimSpace(rendered.Note) != "" {
+				note = limit(rendered.Note, messageformat.JSMNoteRunes)
+			}
+		}
+		if len(links) > 0 && len(links[0]["url"]) <= 2048 {
+			note += "\n" + links[0]["url"]
+		}
+		payload["note"] = note
+	}
 	if w.SubjectResolved {
 		target += "/" + url.PathEscape(alias) + "/close?identifierType=alias"
 		payload = map[string]any{"source": "synapse"}
@@ -142,6 +159,19 @@ func (d jsmDriver) Send(ctx context.Context, w ports.NotificationWork, config po
 	// provider accepts this create, its next claimed attempt resumes this handle instead of
 	// submitting another alert with the same alias.
 	return jsmUnconfirmed(http.StatusAccepted, fallback, accepted.RequestID)
+}
+
+func jsmLifecycleEvent(event notification.EventType) bool {
+	switch event {
+	case notification.EventEngagementCreated, notification.EventEngagementStatusChanged,
+		notification.EventEngagementWindowStarting, notification.EventEngagementWindowEnding,
+		notification.EventFindingCommented, notification.EventFindingMentioned,
+		notification.EventApprovalRequested, notification.EventApprovalDecided, notification.EventApprovalTimedOut,
+		notification.EventIncidentUpdated, notification.EventResponseFinished, notification.EventEvidenceChainBroken:
+		return true
+	default:
+		return false
+	}
 }
 
 // confirmJSMRequest reads the asynchronous request status once. The worker owns delayed retries,

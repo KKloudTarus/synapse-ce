@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,6 +155,78 @@ func TestAuditOutsideATransactionStillCommits(t *testing.T) {
 
 	if got := auditRowCount(t, pool, target); got != 1 {
 		t.Errorf("audit rows = %d, want 1 for an unbound caller", got)
+	}
+}
+
+func TestAuditFirstObservationPreservesFirstEntryAndTenantScope(t *testing.T) {
+	pool := auditTxTestPool(t)
+	ctx := context.Background()
+	tenantA := shared.ID("audit-observation-tenant-a")
+	tenantB := shared.ID("audit-observation-tenant-b")
+	target := "audit-observation-" + time.Now().UTC().Format("150405.000000000")
+	cleanupAuditRows(t, pool, target)
+	for _, tenant := range []shared.ID{tenantA, tenantB} {
+		if _, err := pool.Exec(ctx, `INSERT INTO tenants(id, name) VALUES ($1,$1) ON CONFLICT DO NOTHING`, tenant.String()); err != nil {
+			t.Fatalf("seed tenant %s: %v", tenant, err)
+		}
+	}
+	log := postgres.NewAuditLog(pool)
+	first := ports.AuditEntry{
+		Actor: "system", Action: "evidence.tampered", Target: target,
+		Metadata: map[string]string{"idempotency_key": "observation-1", "reason_code": "chain_invalid"},
+		At:       time.Now().UTC().Truncate(time.Microsecond),
+	}
+	tenantACtx := shared.WithTenant(ctx, tenantA)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- log.RecordFirstObservation(tenantACtx, first)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent first observation: %v", err)
+		}
+	}
+	var firstAt time.Time
+	var firstHash string
+	if err := pool.QueryRow(ctx, `SELECT created_at, hash FROM audit_log WHERE tenant_id=$1 AND action=$2 AND target=$3`, tenantA, first.Action, target).Scan(&firstAt, &firstHash); err != nil {
+		t.Fatalf("read first observation: %v", err)
+	}
+	if got := auditRowCount(t, pool, target); got != 1 {
+		t.Fatalf("concurrent first observations = %d, want 1", got)
+	}
+
+	later := first
+	later.At = first.At.Add(time.Hour)
+	if err := log.RecordFirstObservation(tenantACtx, later); err != nil {
+		t.Fatalf("later observation retry: %v", err)
+	}
+	var retainedAt time.Time
+	var retainedHash string
+	if err := pool.QueryRow(ctx, `SELECT created_at, hash FROM audit_log WHERE tenant_id=$1 AND action=$2 AND target=$3`, tenantA, first.Action, target).Scan(&retainedAt, &retainedHash); err != nil {
+		t.Fatalf("read retained observation: %v", err)
+	}
+	if !retainedAt.Equal(firstAt) || retainedHash != firstHash {
+		t.Fatalf("later retry changed first observation: at/hash=%s/%q want %s/%q", retainedAt, retainedHash, firstAt, firstHash)
+	}
+
+	mismatch := later
+	mismatch.Metadata = map[string]string{"idempotency_key": "observation-1", "reason_code": "other"}
+	if err := log.RecordFirstObservation(tenantACtx, mismatch); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("different observation content error=%v, want conflict", err)
+	}
+	if err := log.RecordFirstObservation(shared.WithTenant(ctx, tenantB), later); err != nil {
+		t.Fatalf("tenant B same key: %v", err)
+	}
+	if got := auditRowCount(t, pool, target); got != 2 {
+		t.Fatalf("cross-tenant first observations = %d, want 2", got)
 	}
 }
 

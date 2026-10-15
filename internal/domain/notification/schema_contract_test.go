@@ -147,3 +147,44 @@ func TestEventSchemaRejectsBrokenFixture(t *testing.T) {
 		t.Fatal("unknown JSON Schema keyword ignored")
 	}
 }
+
+func TestRemainingEventSchemasDeclareImmutableFacts(t *testing.T) {
+	expected := map[EventType][]string{
+		EventEngagementCreated:        {"engagement_id", "lead_user_id", "status", "from_status", "to_status", "authorized_from", "authorized_to", "timezone", "engagement_name", "actor"},
+		EventEngagementStatusChanged:  {"engagement_id", "lead_user_id", "status", "from_status", "to_status", "authorized_from", "authorized_to", "timezone", "engagement_name", "actor"},
+		EventEngagementWindowStarting: {"engagement_id", "lead_user_id", "authorized_from", "authorized_to", "boundary", "lead_time_seconds"},
+		EventEngagementWindowEnding:   {"engagement_id", "lead_user_id", "authorized_from", "authorized_to", "boundary", "lead_time_seconds"},
+		EventFindingCommented:         {"finding_id", "engagement_id", "comment_id", "actor_user_id", "assignee_user_id", "team_id", "comment_excerpt"},
+		EventFindingMentioned:         {"finding_id", "engagement_id", "comment_id", "mentioned_user_id", "actor_user_id", "assignee_user_id", "team_id"},
+		EventApprovalRequested:        {"approval_id", "engagement_id", "kind", "status", "approver_count"},
+		EventApprovalDecided:          {"approval_id", "engagement_id", "kind", "status", "approver_count"},
+		EventApprovalTimedOut:         {"approval_id", "engagement_id", "kind", "status", "approver_count"},
+		EventIncidentUpdated:          {"incident_id", "engagement_id", "update_kind", "status", "disposition", "incident_title", "owner"},
+		EventResponseFinished:         {"response_id", "engagement_id", "outcome", "action_kind", "target"},
+		EventEvidenceChainBroken:      {"engagement_id", "lead_user_id", "evidence_chain_id", "reason_code"},
+	}
+	for typ, fields := range expected {
+		t.Run(string(typ), func(t *testing.T) {
+			schema := publishedEventSchema(t, typ, 1)
+			props := schema["properties"].(map[string]any)["data"].(map[string]any)["properties"].(map[string]any)
+			for _, field := range fields {
+				if _, ok := props[field]; !ok {
+					t.Errorf("missing immutable fact %s", field)
+				}
+			}
+		})
+	}
+}
+
+func TestRemainingEventSchemaBounds(t *testing.T) {
+	comment := publishedEventSchema(t, EventFindingCommented, 1)["properties"].(map[string]any)["data"].(map[string]any)
+	excerpt := comment["properties"].(map[string]any)["comment_excerpt"].(map[string]any)
+	if excerpt["maxLength"] != float64(500) || matchEventSchema(excerpt, strings.Repeat("x", 501)) == nil {
+		t.Fatal("finding comment excerpt must be capped at 500 characters")
+	}
+	approval := publishedEventSchema(t, EventApprovalRequested, 1)["properties"].(map[string]any)["data"].(map[string]any)
+	approverCount := approval["properties"].(map[string]any)["approver_count"].(map[string]any)
+	if approverCount["minimum"] != float64(0) || matchEventSchema(approverCount, -1) == nil {
+		t.Fatal("approval recipient count must be non-negative")
+	}
+}

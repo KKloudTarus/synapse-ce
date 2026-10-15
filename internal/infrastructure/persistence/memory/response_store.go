@@ -94,6 +94,7 @@ func (s *ResponseStore) Transition(ctx context.Context, r rdom.Record, from rdom
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.checkpointTenant(ctx, tenant)
 	existing, found := s.byTenant[tenant][r.ID]
 	if !found {
 		return false, shared.ErrNotFound
@@ -106,6 +107,69 @@ func (s *ResponseStore) Transition(ctx context.Context, r rdom.Record, from rdom
 	}
 	s.byTenant[tenant][r.ID] = cloneResponseRecord(r)
 	return true, nil
+}
+
+// checkpointTenant captures this tenant's mutable response state once per
+// in-memory transaction. It lets a notification append failure roll back the
+// response projection and durable audit obligation together in tests.
+func (s *ResponseStore) checkpointTenant(ctx context.Context, tenant shared.ID) {
+	registerTenantCheckpoint(ctx, s, func(transactionTenant shared.ID) func() {
+		records := cloneResponseRecords(s.byTenant[transactionTenant])
+		attempts := cloneResponseAttempts(s.attempts[transactionTenant])
+		audits := cloneResponseAudits(s.audits[transactionTenant])
+		return func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if records == nil {
+				delete(s.byTenant, transactionTenant)
+			} else {
+				s.byTenant[transactionTenant] = cloneResponseRecords(records)
+			}
+			if audits == nil {
+				delete(s.audits, transactionTenant)
+			} else {
+				s.audits[transactionTenant] = cloneResponseAudits(audits)
+			}
+			if attempts == nil {
+				delete(s.attempts, transactionTenant)
+			} else {
+				s.attempts[transactionTenant] = cloneResponseAttempts(attempts)
+			}
+		}
+	})
+}
+
+func cloneResponseRecords(source map[shared.ID]rdom.Record) map[shared.ID]rdom.Record {
+	if source == nil {
+		return nil
+	}
+	result := make(map[shared.ID]rdom.Record, len(source))
+	for id, record := range source {
+		result[id] = cloneResponseRecord(record)
+	}
+	return result
+}
+
+func cloneResponseAudits(source map[string]ports.ResponseAuditIntent) map[string]ports.ResponseAuditIntent {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]ports.ResponseAuditIntent, len(source))
+	for id, intent := range source {
+		result[id] = cloneResponseAuditIntent(intent)
+	}
+	return result
+}
+
+func cloneResponseAttempts(source map[string]responsesaga.ResponseAttempt) map[string]responsesaga.ResponseAttempt {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]responsesaga.ResponseAttempt, len(source))
+	for key, attempt := range source {
+		result[key] = attempt
+	}
+	return result
 }
 
 // ListByState returns the ctx tenant's records in the given state, deterministically ordered by id.
@@ -194,6 +258,7 @@ func (s *ResponseStore) transitionAttempt(ctx context.Context, a responsesaga.Re
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.checkpointTenant(ctx, tenant)
 	existing, found := s.attempts[tenant][a.IdempotencyKey]
 	if !found {
 		return responsesaga.ResponseAttempt{}, false, shared.ErrNotFound
@@ -304,6 +369,7 @@ func (s *ResponseStore) TransitionWithAudit(ctx context.Context, r rdom.Record, 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.checkpointTenant(ctx, tenant)
 	existing, found := s.byTenant[tenant][r.ID]
 	if !found {
 		return false, ports.ResponseAuditIntent{}, shared.ErrNotFound
@@ -339,6 +405,7 @@ func (s *ResponseStore) TransitionAttemptWithAudit(ctx context.Context, a respon
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.checkpointTenant(ctx, tenant)
 	existing, found := s.attempts[tenant][a.IdempotencyKey]
 	if !found {
 		return responsesaga.ResponseAttempt{}, false, ports.ResponseAuditIntent{}, shared.ErrNotFound
@@ -368,6 +435,7 @@ func (s *ResponseStore) EnqueueResponseAudit(ctx context.Context, intent ports.R
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.checkpointTenant(ctx, tenant)
 	return s.putAuditLocked(tenant, intent)
 }
 

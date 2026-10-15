@@ -30,6 +30,9 @@ func (r *NotificationFindingFactsReader) SnapshotFindingNotificationFacts(ctx co
 			WHERE tenant_id=$1 AND engagement_id=$2 AND finding_id=$3`, tenantID, engagementID, findingID).Scan(&facts.TeamID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if err := tx.QueryRow(ctx, `SELECT u.id FROM notification_engagement_settings s JOIN users u ON u.ownership_tenant_id=s.tenant_id AND u.id=s.lead_user_id WHERE s.tenant_id=$1 AND s.engagement_id=$2 AND NOT u.disabled AND u.role=ANY($3)`, tenantID, engagementID, humanNotificationRoles).Scan(&facts.LeadUserID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		actorID := shared.ID(strings.TrimSpace(actor))
 		if !actorID.IsZero() {
 			if err := tx.QueryRow(ctx, `SELECT id,name FROM users WHERE `+userTenantPredicate+` AND id=$3 AND NOT disabled`, shared.DefaultTenant.String(), tenantID.String(), actorID.String()).Scan(&facts.ActorUserID, &facts.ActorName); err != nil && !errors.Is(err, pgx.ErrNoRows) {

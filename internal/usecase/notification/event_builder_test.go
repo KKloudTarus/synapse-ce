@@ -27,6 +27,10 @@ var builderFixtures = []domain.EventType{
 	domain.EventFindingCreated, domain.EventFindingStatusChanged, domain.EventFindingRetestCompleted,
 	domain.EventScanFailed, domain.EventDASTRunFinished, domain.EventReconRunFinished, domain.EventCSPMRunFinished,
 	domain.EventSLABreached, domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired,
+	domain.EventEngagementCreated, domain.EventEngagementStatusChanged, domain.EventEngagementWindowStarting, domain.EventEngagementWindowEnding,
+	domain.EventFindingCommented, domain.EventFindingMentioned,
+	domain.EventApprovalRequested, domain.EventApprovalDecided, domain.EventApprovalTimedOut,
+	domain.EventIncidentUpdated, domain.EventResponseFinished, domain.EventEvidenceChainBroken,
 }
 
 func fixtureEvent(t *testing.T, eventType domain.EventType) domain.Event {
@@ -164,6 +168,59 @@ func TestProjectKeepsAProducerSubject(t *testing.T) {
 	}
 	if projected.SubjectID != "scan-from-producer" {
 		t.Fatalf("subject = %q", projected.SubjectID)
+	}
+}
+
+func TestRemainingEventBuildersReadImmutableFacts(t *testing.T) {
+	builders := NewEventBuilders()
+	cases := []struct {
+		event domain.EventType
+		want  map[string]string
+	}{
+		{domain.EventEngagementStatusChanged, map[string]string{"from_status": "planned", "to_status": "active", "engagement_name": "October assessment"}},
+		{domain.EventEngagementWindowStarting, map[string]string{"boundary": "authorized_from", "lead_time_hours": "24"}},
+		{domain.EventFindingCommented, map[string]string{"actor": "analyst-42", "comment_excerpt": "Please validate the affected endpoint."}},
+		{domain.EventFindingMentioned, map[string]string{"status": "triage"}},
+		{domain.EventApprovalDecided, map[string]string{"kind": "response", "decision": "approved", "expires_at": "2026-10-15T08:00:00Z"}},
+		{domain.EventIncidentUpdated, map[string]string{"update_kind": "status", "incident_title": "Suspicious network activity"}},
+		{domain.EventResponseFinished, map[string]string{"outcome": "verified", "action_kind": "isolate_host"}},
+		{domain.EventEvidenceChainBroken, map[string]string{"reason_code": "head_mismatch", "engagement_name": "October assessment"}},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.event), func(t *testing.T) {
+			e := fixtureEvent(t, tc.event)
+			projected, err := builders.Project(context.Background(), e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := domain.DecodeTemplateContext(projected.Context)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, want := range tc.want {
+				if got := snapshot.Vars[name]; got != want {
+					t.Errorf("%s = %q, want %q", name, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestFindingCommentBuilderCapsExcerptInTheSnapshot(t *testing.T) {
+	e := fixtureEvent(t, domain.EventFindingCommented)
+	var data map[string]any
+	if err := json.Unmarshal(e.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	data["comment_excerpt"] = strings.Repeat("é", 600)
+	e.Data, _ = json.Marshal(data)
+	projected, err := NewEventBuilders().Project(context.Background(), e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, _ := domain.DecodeTemplateContext(projected.Context)
+	if got := len([]rune(snapshot.Vars["comment_excerpt"])); got != 500 {
+		t.Fatalf("comment excerpt has %d runes, want 500", got)
 	}
 }
 

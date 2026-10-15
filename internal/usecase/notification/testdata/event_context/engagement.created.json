@@ -1,0 +1,17 @@
+{
+  "subject_kind": "engagement",
+  "subject_id": "eng-42",
+  "vars": {
+    "actor": "operator-42",
+    "authorized_from": "2026-10-20T08:00:00Z",
+    "authorized_to": "2026-10-27T08:00:00Z",
+    "engagement_name": "October assessment",
+    "event_label": "Engagement created",
+    "event_type": "engagement.created",
+    "occurred_at": "2026-10-14T08:00:00Z",
+    "status": "planned",
+    "summary": "A new engagement was authorized.",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "title": "Engagement created"
+  }
+}

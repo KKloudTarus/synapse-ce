@@ -75,6 +75,26 @@ tags:
     description: Separate HMAC-authenticated ingress, never human/OIDC authorization
 
 paths:
+  /api/v1/engagements/{id}/findings/{fid}/comments:
+    parameters:
+    - $ref: "#/components/parameters/EngagementId"
+    - name: fid
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [findings]
+      operationId: listFindingComments
+      responses:
+        '200': {description: Comments, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/FindingComment'}}}}}
+    post:
+      tags: [findings]
+      operationId: addFindingComment
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FindingCommentInput'}}}
+      responses:
+        '201': {description: Comment created, content: {application/json: {schema: {$ref: '#/components/schemas/FindingComment'}}}}
   /api/v1/ticket-mappings:
     parameters:
       - name: scope
@@ -3482,9 +3502,10 @@ paths:
     get:
       tags: [users]
       operationId: searchEligibleUsers
-      summary: Search active same-tenant users for an ownership assignee
-      description: Requires the triage permission. Results contain only stable ID, display name and role; no contact data. Team filter uses active membership.
+      summary: Search bounded same-tenant choices for an ownership assignee or finding mention
+      description: Requires the triage permission. The default purpose returns active assignee roles. purpose=mention also returns readonly and integration_admin viewers, which may be mentioned but cannot own a finding. Results contain only stable ID and display name; no contact data. Team filter uses active membership.
       parameters:
+        - {name: purpose, in: query, description: Omit for an ownership assignee; set to mention for finding-comment recipients., schema: {type: string, enum: [mention]}}
         - {name: team_id, in: query, schema: {type: string}}
         - {name: q, in: query, schema: {type: string, maxLength: 100}}
         - {name: cursor, in: query, schema: {type: string}}
@@ -13931,7 +13952,7 @@ components:
         filters:
           type: array
           description: Rule filters this event type accepts; a rule using any other filter is rejected.
-          items: {type: string, enum: [min_severity, action_types, engagement_ids, team_ids, lead_time_seconds, finding_kinds, from_statuses, to_statuses, retest_results, scan_kinds, outcomes, providers]}
+          items: {type: string, enum: [min_severity, action_types, engagement_ids, team_ids, lead_time_seconds, finding_kinds, from_statuses, to_statuses, retest_results, scan_kinds, outcomes, providers, kinds]}
         max_data_class: {$ref: '#/components/schemas/NotificationDataClass'}
         mandatory: {type: boolean, description: Cannot be muted by a rule or a user preference}
         operator_only: {type: boolean, description: Sent on demand to one channel and never matched by rules}
@@ -14382,7 +14403,8 @@ components:
         to_statuses: {type: array, maxItems: 50, items: {type: string}}
         retest_results: {type: array, maxItems: 50, items: {type: string}}
         scan_kinds: {type: array, maxItems: 50, items: {type: string}}
-        outcomes: {type: array, maxItems: 50, items: {type: string}}
+        kinds: {type: array, maxItems: 50, items: {type: string, enum: [agent, response]}}
+        outcomes: {type: array, maxItems: 50, items: {type: string}, description: Run outcomes or applied/verified/failed/reverted/halted for response.finished.}
         providers: {type: array, maxItems: 50, items: {type: string}}
         engagement_ids: {type: array, maxItems: 200, items: {type: string}}
         team_ids:
@@ -14394,14 +14416,14 @@ components:
           type: boolean
           default: false
           description: Explicit administrator subscription across this tenant for ownership changes, SLA breach and risk acceptance lifecycle events, including unassigned lifecycle findings. Mutually exclusive with team_ids.
-        channel_ids: {type: array, maxItems: 50, items: {type: string}, description: The channels to deliver to. A rule needs at least one channel or one recipient role.}
+        channel_ids: {type: array, maxItems: 50, items: {type: string}, description: The channels to deliver to. A rule needs at least one channel or one recipient role. finding.mentioned permits only personal recipient routing.}
         recipient_roles:
           type: array
-          maxItems: 3
-          items: {type: string, enum: [assignee, team_member, engagement_lead]}
+          maxItems: 5
+          items: {type: string, enum: [assignee, team_member, engagement_lead, mentioned_user, approver]}
           description: >-
-            People to notify personally, in addition to the channels. Assignee and team_member
-            are supported for finding.ownership_changed, finding.created, finding.status_changed,
+            People to notify personally, in addition to the channels. Mentioned_user is exclusive to finding.mentioned and cannot fan out to channels or other roles. Approver names captured eligible reviewers on approval lifecycle events. Assignee and team_member
+            are supported for finding.commented, finding.ownership_changed, finding.created, finding.status_changed,
             finding.retest_completed, sla.breached, risk_acceptance.created,
             risk_acceptance.expiring and risk_acceptance.expired. Assignee is also supported for
             sla.approaching_deadline; engagement_lead is supported for any event with an engagement. Each
@@ -14472,6 +14494,35 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/NotificationSourceFailure'}}
         next_offset: {type: integer, minimum: 0}
+
+    FindingCommentInput:
+      type: object
+      required: [body]
+      properties:
+        body: {type: string, minLength: 1}
+        mention_user_ids:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: {type: string, minLength: 1}
+          description: Canonical same-tenant user IDs only; display names and email addresses are not resolved.
+
+    FindingComment:
+      type: object
+      required: [ID, EngagementID, FindingID, Author, Body, CreatedAt]
+      properties:
+        ID: {type: string}
+        EngagementID: {type: string}
+        FindingID: {type: string}
+        Author: {type: string}
+        Body: {type: string}
+        mention_user_ids:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: {type: string, minLength: 1}
+          description: Canonical same-tenant mention IDs. Omitted for legacy comments without persisted mentions.
+        CreatedAt: {type: string, format: date-time}
 
     NotificationAttempt:
       type: object

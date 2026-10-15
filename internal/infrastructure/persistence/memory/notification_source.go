@@ -115,7 +115,7 @@ func eventFromSourceRecord(record notification.SourceRecord) notification.Event 
 		TenantID: record.TenantID, ID: notificationStableID(record.TenantID.String(), record.SourceKind, record.SourceID),
 		Type: record.EventType, SourceKind: record.SourceKind, SourceID: record.SourceID,
 		EngagementID: record.EngagementID, Severity: record.Severity, SchemaVersion: record.SchemaVersion,
-		OccurredAt: record.OccurredAt, Data: record.Data,
+		OccurredAt: record.OccurredAt, Data: record.Data, SubjectKind: record.SubjectKind, SubjectID: record.SubjectID, Context: record.Context,
 	}
 }
 

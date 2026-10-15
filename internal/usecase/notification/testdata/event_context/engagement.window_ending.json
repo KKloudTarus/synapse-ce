@@ -1,0 +1,19 @@
+{
+  "subject_kind": "engagement",
+  "subject_id": "eng-42",
+  "vars": {
+    "actor": "system",
+    "authorized_from": "2026-10-20T08:00:00Z",
+    "authorized_to": "2026-10-27T08:00:00Z",
+    "boundary": "authorized_to",
+    "engagement_name": "October assessment",
+    "event_label": "Engagement window ending",
+    "event_type": "engagement.window_ending",
+    "lead_time_hours": "24",
+    "occurred_at": "2026-10-26T08:00:00Z",
+    "status": "active",
+    "summary": "The authorization window ends in 24 hours.",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "title": "Engagement window ending"
+  }
+}

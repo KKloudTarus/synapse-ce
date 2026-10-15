@@ -1,0 +1,5 @@
+{
+  "id": "event-finding-commented", "type": "finding.commented", "source_kind": "finding_comment", "source_id": "comment-42", "schema_version": 1,
+  "occurred_at": "2026-10-14T08:00:00Z", "engagement_id": "eng-42", "severity": "high",
+  "data": {"title": "Finding commented", "summary": "A comment was added to a finding.", "finding_id": "finding-42", "engagement_id": "eng-42", "lead_user_id": "user-42", "severity": "high", "status": "triage", "comment_id": "comment-42", "actor": "analyst-42", "actor_user_id": "user-analyst", "assignee_user_id": "user-assignee", "team_id": "team-42", "comment_excerpt": "Please validate the affected endpoint."}
+}

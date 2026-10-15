@@ -22,6 +22,18 @@ Each file below documents the **stored versioned event envelope**, including its
 | `risk_acceptance.created` — Risk acceptance recorded | [JSON Schema](risk_acceptance.created.v1.schema.json) · [fixture](risk_acceptance.created.v1.fixture.json) | `summary` |
 | `risk_acceptance.expiring` — Risk acceptance expiry warning | [JSON Schema](risk_acceptance.expiring.v1.schema.json) · [fixture](risk_acceptance.expiring.v1.fixture.json) | `summary` |
 | `risk_acceptance.expired` — Risk acceptance expired | [JSON Schema](risk_acceptance.expired.v1.schema.json) · [fixture](risk_acceptance.expired.v1.fixture.json) | `summary` |
+| `engagement.created` — Engagement authorization created | [JSON Schema](engagement.created.v1.schema.json) · [fixture](engagement.created.v1.fixture.json) | `summary` |
+| `engagement.status_changed` — Engagement lifecycle transition | [JSON Schema](engagement.status_changed.v1.schema.json) · [fixture](engagement.status_changed.v1.fixture.json) | `summary` |
+| `engagement.window_starting` — Authorization window reminder before start | [JSON Schema](engagement.window_starting.v1.schema.json) · [fixture](engagement.window_starting.v1.fixture.json) | `summary` |
+| `engagement.window_ending` — Authorization window reminder before end | [JSON Schema](engagement.window_ending.v1.schema.json) · [fixture](engagement.window_ending.v1.fixture.json) | `summary` |
+| `finding.commented` — Finding comment with a bounded detail excerpt | [JSON Schema](finding.commented.v1.schema.json) · [fixture](finding.commented.v1.fixture.json) | `detail` |
+| `finding.mentioned` — Validated user mention on a finding | [JSON Schema](finding.mentioned.v1.schema.json) · [fixture](finding.mentioned.v1.fixture.json) | `signal` |
+| `approval.requested` — Governed agent or response approval requested | [JSON Schema](approval.requested.v1.schema.json) · [fixture](approval.requested.v1.fixture.json) | `summary` |
+| `approval.decided` — Governed agent or response approval decided | [JSON Schema](approval.decided.v1.schema.json) · [fixture](approval.decided.v1.fixture.json) | `summary` |
+| `approval.timed_out` — Governed approval expired without a decision | [JSON Schema](approval.timed_out.v1.schema.json) · [fixture](approval.timed_out.v1.fixture.json) | `summary` |
+| `incident.updated` — Incident status, owner or disposition update | [JSON Schema](incident.updated.v1.schema.json) · [fixture](incident.updated.v1.fixture.json) | `summary` |
+| `response.finished` — Governed response terminal outcome | [JSON Schema](response.finished.v1.schema.json) · [fixture](response.finished.v1.fixture.json) | `detail` |
+| `evidence.chain_broken` — Mandatory critical evidence-chain verification alert | [JSON Schema](evidence.chain_broken.v1.schema.json) · [fixture](evidence.chain_broken.v1.fixture.json) | `summary` |
 | `notification.destination_changed` (operator-only) — channel destination notice | [JSON Schema](notification.destination_changed.v1.schema.json) · [fixture](notification.destination_changed.v1.fixture.json) | `summary` |
 | `notification.channel_paused` (operator-only) — automatic channel pause notice to tenant admins | [JSON Schema](notification.channel_paused.v1.schema.json) · [fixture](notification.channel_paused.v1.fixture.json) | `summary` |
 | `notification.test` (operator-only) — channel test | [JSON Schema](notification.test.v1.schema.json) · [fixture](notification.test.v1.fixture.json) | `signal` |

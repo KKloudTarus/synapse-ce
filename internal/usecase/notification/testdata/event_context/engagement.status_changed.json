@@ -1,0 +1,19 @@
+{
+  "subject_kind": "engagement",
+  "subject_id": "eng-42",
+  "vars": {
+    "actor": "operator-42",
+    "authorized_from": "2026-10-20T08:00:00Z",
+    "authorized_to": "2026-10-27T08:00:00Z",
+    "engagement_name": "October assessment",
+    "event_label": "Engagement status changed",
+    "event_type": "engagement.status_changed",
+    "from_status": "planned",
+    "occurred_at": "2026-10-14T08:00:00Z",
+    "status": "active",
+    "summary": "The engagement moved to active.",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "title": "Engagement status changed",
+    "to_status": "active"
+  }
+}

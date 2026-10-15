@@ -356,7 +356,7 @@ func (s *Service) Revert(ctx context.Context, actionID shared.ID, target engagem
 			attempt.IdempotencyKey+":response.reversal_blast_radius_violation", attempt.DecidedBy,
 			"response.reversal_blast_radius_violation", rec.ID.String(), attempt.At, meta,
 		)
-		transitioned, committed, transitionErr := s.store.TransitionWithAudit(ctx, rec, parentState, intent)
+		transitioned, committed, transitionErr := s.transitionWithAuditAndNotification(ctx, rec, parentState, intent, "failed", attempt.DecidedBy)
 		if transitionErr != nil {
 			return rec, errors.Join(violationErr, fmt.Errorf("persist reversal violation %s: %w", actionID, transitionErr))
 		}

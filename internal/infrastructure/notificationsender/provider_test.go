@@ -622,3 +622,80 @@ func TestJSMClosePayloadDoesNotIncludeTriggerPriority(t *testing.T) {
 		t.Fatalf("close payload=%s", closeBody)
 	}
 }
+
+func TestJSMLifecycleCreatesPreserveDistinctFactsInNotesAndResumeWithoutPost(t *testing.T) {
+	s := New(SMTPConfig{}, 0)
+	s.pagerKey = []byte("pager-master-key-for-test")
+	var aliases, notes []string
+	posts, gets := 0, 0
+	s.http = &http.Client{Transport: providerRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet {
+			gets++
+			return providerResponse(http.StatusOK, `{"data":{"isSuccess":true}}`), nil
+		}
+		posts++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		aliases = append(aliases, body["alias"].(string))
+		notes = append(notes, body["note"].(string))
+		return providerResponse(http.StatusAccepted, `{"requestId":"request-lifecycle"}`), nil
+	})}
+	work := testWork(notification.ChannelJSM)
+	work.Event.SubjectKind, work.Event.SubjectID = "approval", "canonical-approval"
+	cfg := ports.JSMChannelConfig{APIKey: "synthetic-jsm-key"}
+	for _, item := range []struct {
+		typ     notification.EventType
+		summary string
+	}{{notification.EventApprovalRequested, "Yêu cầu phê duyệt: pending"}, {notification.EventApprovalDecided, "Phê duyệt đã quyết định: approved"}} {
+		work.Event.Type = item.typ
+		body, _ := json.Marshal(map[string]any{"summary": item.summary, "note": item.summary + " • Captured detail fact beyond the alert title", "links": []map[string]string{{"url": "https://console.example.test/engagements/assessment/agent"}}})
+		work.Formatted = &ports.FormattedMessage{Body: body}
+		result := s.Send(context.Background(), work, cfg)
+		if result.ProviderRequestRef == "" || result.ErrorCode != "jsm_request_unconfirmed" {
+			t.Fatalf("create=%+v", result)
+		}
+		work.Delivery.ProviderRequestRef = result.ProviderRequestRef
+		work.Formatted = &ports.FormattedMessage{Body: []byte(`{`)}
+		result = s.Send(context.Background(), work, cfg)
+		if result.ErrorCode != "" || result.RemoteRef == "" {
+			t.Fatalf("confirmation=%+v", result)
+		}
+		work.Delivery.ProviderRequestRef = ""
+	}
+	if posts != 2 || gets != 2 || aliases[0] != aliases[1] || notes[0] == notes[1] || !strings.Contains(notes[1], "Phê duyệt đã quyết định") || !strings.Contains(notes[1], "https://console.example.test/engagements/assessment/agent") {
+		t.Fatalf("posts=%d gets=%d aliases=%v notes=%v", posts, gets, aliases, notes)
+	}
+}
+
+func TestJSMLifecycleNoteScopeAndBounds(t *testing.T) {
+	for _, typ := range []notification.EventType{notification.EventEngagementCreated, notification.EventEngagementStatusChanged, notification.EventEngagementWindowStarting, notification.EventEngagementWindowEnding, notification.EventFindingCommented, notification.EventFindingMentioned, notification.EventApprovalRequested, notification.EventApprovalDecided, notification.EventApprovalTimedOut, notification.EventIncidentUpdated, notification.EventResponseFinished, notification.EventEvidenceChainBroken, notification.EventFindingCreated} {
+		t.Run(string(typ), func(t *testing.T) {
+			s := New(SMTPConfig{}, 0)
+			s.pagerKey = []byte("pager-master-key-for-test")
+			var body map[string]any
+			s.http = &http.Client{Transport: providerRoundTrip(func(r *http.Request) (*http.Response, error) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				return providerResponse(http.StatusAccepted, `{"requestId":"request-bounds"}`), nil
+			})}
+			work := testWork(notification.ChannelJSM)
+			work.Event.Type = typ
+			raw, _ := json.Marshal(map[string]any{"summary": strings.Repeat("ễ", 1000), "links": []map[string]string{{"url": "https://console.example.test/" + strings.Repeat("x", 2048)}}})
+			work.Formatted = &ports.FormattedMessage{Body: raw}
+			got := s.Send(context.Background(), work, ports.JSMChannelConfig{APIKey: "synthetic-jsm-key"})
+			if got.ProviderRequestRef == "" {
+				t.Fatalf("send=%+v", got)
+			}
+			note, exists := body["note"].(string)
+			if exists != (typ != notification.EventFindingCreated) {
+				t.Fatalf("note field exists=%t", exists)
+			}
+			if exists && (!utf8.ValidString(note) || utf8.RuneCountInString(note) > messageformat.JSMMessageRunes) {
+				t.Fatalf("bounded note=%q", note)
+			}
+		})
+	}
+}

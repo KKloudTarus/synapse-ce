@@ -1,0 +1,35 @@
+{
+  "observed_at": "2026-10-15T01:48:26.041304+00:00",
+  "event_type": "finding.mentioned",
+  "provenance": "Native HTTP canonical own-user mention, real outbox projection and worker; verified contact linked through native Slack challenge",
+  "verified_contact": true,
+  "email_lookup_used": false,
+  "inbox_recipients": 1,
+  "shared_channel_deliveries": 0,
+  "personal_slack_jobs": 1,
+  "personal_slack_job_state": "done",
+  "personal_slack_attempts": 1,
+  "temporary_preference_restored": true,
+  "approved_scope_additions": [
+    "users:read",
+    "im:write"
+  ],
+  "provider_scope_header_verified": true,
+  "native_message_screenshot": "slack-personal-mentioned-native-light.jpg",
+  "clicked_deployed_finding_screenshot": "slack-personal-mentioned-deployed-link.jpg",
+  "visual_review": "pass; security reviewer individually read both frames; no codes or contacts visible",
+  "limits": "Existing personal sender uses its shipped generic English notice contract. This proves canonical recipient routing and direct delivery, not a new B06 locale/preference/template implementation.",
+  "native_message_screenshots": [
+    {
+      "path": "slack-personal-mentioned-native-light.jpg",
+      "sha256": "4a78bb13a8e24c634f92019e898e1a237d622890f831fef68a9b507b165e6c7e",
+      "visual_review": "pass"
+    },
+    {
+      "path": "slack-personal-mentioned-native-dark.jpg",
+      "sha256": "7ce24ebb1f545577a974de45337ceba25a01d600b1c3cf7191246ee6f818d999",
+      "visual_review": "pass"
+    }
+  ],
+  "original_slack_color_mode_restored": "Operating System"
+}

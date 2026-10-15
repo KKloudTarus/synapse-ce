@@ -1,0 +1,14 @@
+{
+  "subject_kind": "evidence_chain",
+  "subject_id": "chain-42",
+  "vars": {
+    "engagement_name": "October assessment",
+    "event_label": "Evidence chain broken",
+    "event_type": "evidence.chain_broken",
+    "occurred_at": "2026-10-14T08:00:00Z",
+    "reason_code": "head_mismatch",
+    "severity": "critical",
+    "summary": "Evidence verification failed and reporting is blocked.",
+    "title": "Evidence chain broken"
+  }
+}

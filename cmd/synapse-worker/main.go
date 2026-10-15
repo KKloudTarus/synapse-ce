@@ -499,6 +499,12 @@ func main() {
 		log.Error("evidence service init failed", "err", err)
 		os.Exit(1)
 	}
+	if cfg.NotificationEnabled {
+		if err := evidenceService.SetNotifications(postgres.NewTenantTransactionRunner(pool), postgres.NewNotificationOutbox(pool), postgres.NewNotificationLifecycleFactsReader(pool)); err != nil {
+			log.Error("evidence notification producers init failed", "err", err)
+			os.Exit(1)
+		}
+	}
 
 	// Tamper-resistant custody: the worker SEALS evidence (recon + agent), so it must
 	// also attest + anchor the heads it advances – not leave them un-anchored until a later API
@@ -952,6 +958,13 @@ func main() {
 				log.Error("DAST approval service init failed", "err", aerr)
 				os.Exit(1)
 			}
+			if cfg.NotificationEnabled {
+				facts := postgres.NewNotificationLifecycleFactsReader(pool)
+				if err := dastApprovalSvc.SetNotifications(postgres.NewTenantTransactionRunner(pool), postgres.NewNotificationOutbox(pool), facts, facts); err != nil {
+					log.Error("DAST approval notification producers init failed", "err", err)
+					os.Exit(1)
+				}
+			}
 			dastGate, gerr := safety.NewGate(guard, dastApprovalSvc, evidenceService)
 			if gerr != nil {
 				log.Error("DAST safety gate init failed", "err", gerr)
@@ -1087,6 +1100,13 @@ func main() {
 			// A human's approve or deny and its audit record commit together, so an operator is
 			// never told the decision failed while the agent acts on it.
 			approvalSvc.SetTransactionRunner(vulnerabilityTransactions)
+		}
+		if cfg.NotificationEnabled {
+			facts := postgres.NewNotificationLifecycleFactsReader(pool)
+			if err := approvalSvc.SetNotifications(postgres.NewTenantTransactionRunner(pool), postgres.NewNotificationOutbox(pool), facts, facts); err != nil {
+				log.Error("agent approval notification producers init failed", "err", err)
+				os.Exit(1)
+			}
 		}
 		agentGate, gerr := safety.NewGate(guard, approvalSvc, evidenceService)
 		if gerr != nil {
