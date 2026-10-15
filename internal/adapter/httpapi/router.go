@@ -457,6 +457,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("PUT /api/v1/ticket-mappings/{mappingID}", rt.authz(userdom.PermAdminister, rt.saveTicketMapping))
 		mux.HandleFunc("DELETE /api/v1/ticket-mappings/{mappingID}", rt.authz(userdom.PermAdminister, rt.deleteTicketMapping))
 		mux.HandleFunc("GET /api/v1/integrations/{integrationID}/jira-metadata", rt.authz(userdom.PermManageIntegrations, rt.jiraMetadata))
+		mux.HandleFunc("POST /api/v1/integrations/{integrationID}/jira-breaker/reset", rt.authz(userdom.PermAdminister, rt.resetJiraBreaker))
 		mux.HandleFunc("GET /api/v1/engagements/{id}/findings/{fid}/tickets", rt.authz(userdom.PermView, rt.withEngTenant(rt.findingTickets)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/tickets", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.linkTicket)))
 		mux.HandleFunc("DELETE /api/v1/engagements/{id}/findings/{fid}/tickets/{linkID}", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.unlinkTicket)))

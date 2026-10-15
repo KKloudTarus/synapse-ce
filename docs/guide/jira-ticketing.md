@@ -37,6 +37,16 @@ another automatic POST. Breakers and rate-limit eligibility survive process rest
 Definite 400/401/403/404 failures open the destination tuple until an audited
 administrator recovery. A 429 cooldown cannot be reset before `Retry-After` expires.
 
+After repairing a 400/401/403/404 cause, a human administrator can send
+`POST /api/v1/integrations/{integrationID}/jira-breaker/reset` with
+`{"project_key":"SEC","issue_type":"10001"}` using the original destination
+tuple. This audited operation clears its gate without retrying a failed command,
+changing an approved snapshot or releasing an active lease. It also works when a
+replacement is already pending or the failed command's finding no longer exists.
+The next worker poll revalidates pending commands before sending them; commands
+approved before a credential or mapping change still require a fresh preview and
+replacement. An active 429 cooldown returns 409 and remains enforced.
+
 Reconciliation searches the original destination for the exact correlation label.
 One verified match completes the intent; multiple matches require human review.
 Zero matches remain uncertain because Jira search is eventually consistent. An

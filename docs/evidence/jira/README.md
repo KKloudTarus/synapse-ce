@@ -6,6 +6,8 @@ Actual Jira captures establish rendered content and completed delivery. The read
 
 The four actual intents completed with one attempt, one correlation match and one finding link each. The sandbox projects use audited administrator security waivers. Cloud priority uses the optional provider default Medium; Data Center maps High and resolves its required Reporter from the authenticated identity.
 
+Live screenshots showing a selected Jira issue security level remain outstanding for both deployments. The existing samples demonstrate the audited waiver path. The configured security-level path is covered by automated provider and workflow tests.
+
 No customer data or configured credential is included. Production recovery objectives, broad browser coverage and assistive-technology conformance are outside this evidence.
 
 ## Jira Cloud — English

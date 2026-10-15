@@ -354,7 +354,7 @@ func assertTicketRetryAuditRollback(t *testing.T, ctx context.Context, pool *pgx
 	if err != nil || !ok {
 		t.Fatalf("claim retry audit intent: ok=%t err=%v", ok, err)
 	}
-	failed, err := store.FinishDispatch(ctx, f.Tenant, intent.ID, claimed.Version, ticketing.IntentTransition{Event: writeintent.Reject, ErrorCode: "provider_rejected"}, now.Add(time.Second), nil, "")
+	failed, err := store.FinishDispatch(ctx, f.Tenant, intent.ID, claimed.Version, ticketing.IntentTransition{Event: writeintent.Reject, ErrorCode: "provider_rejected"}, now.Add(time.Second), nil, "http_401")
 	if err != nil || failed.State != writeintent.Failed {
 		t.Fatalf("fail retry audit intent: %+v err=%v", failed, err)
 	}
@@ -374,6 +374,22 @@ func assertTicketRetryAuditRollback(t *testing.T, ctx context.Context, pool *pgx
 	_, err = store.RetryIntentAudited(ctx, f.Tenant, intent.ID, failed.Version, now.Add(2*time.Second), ports.AuditEntry{Actor: "admin", Action: "ticket.intent.retry_duplicate_risk", Target: intent.ID.String(), At: now.Add(2 * time.Second)})
 	if err == nil {
 		t.Fatal("retry accepted forced audit failure")
+	}
+	if err = store.ResetBreaker(ctx, f.Tenant, f.Integration, "SEC", "Bug", ports.AuditEntry{Actor: "admin", Action: "ticket.breaker.reset", Target: f.Integration.String(), At: now.Add(2 * time.Second)}); err == nil {
+		t.Fatal("reset accepted forced audit failure")
+	}
+	if err = WithTenant(ctx, pool, f.Tenant.String(), func(tx pgx.Tx) error {
+		var code string
+		var gate time.Time
+		if e := tx.QueryRow(ctx, `SELECT breaker_code,gate_until FROM ticket_dispatch_breakers WHERE tenant_id=$1 AND integration_id=$2 AND project_key='SEC' AND issue_type='Bug'`, f.Tenant.String(), f.Integration.String()).Scan(&code, &gate); e != nil {
+			return e
+		}
+		if code != "http_401" || !gate.After(now.AddDate(99, 0, 0)) {
+			return fmt.Errorf("audit failure cleared gate: code=%s gate=%s", code, gate)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	got, err := store.GetIntent(ctx, f.Tenant, intent.ID)
 	if err != nil || got.State != writeintent.Failed || got.Version != failed.Version {

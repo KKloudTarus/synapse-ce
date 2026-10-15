@@ -210,6 +210,32 @@ paths:
           description: Tenant-owned resource not found
         '409':
           description: Stale preview, version or uncertain state
+  /api/v1/integrations/{integrationID}/jira-breaker/reset:
+    parameters:
+      - name: integrationID
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [ticketing]
+      summary: Reset a repaired Jira destination breaker
+      description: Human administrator only. Atomically audits and clears the tenant-owned project/type gate. Does not retry an intent, change its snapshot, release an active lease or bypass an active Retry-After cooldown.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TicketBreakerResetInput"}
+      responses:
+        '204':
+          description: Breaker reset and audit committed
+        '400':
+          description: Invalid destination tuple
+        '403':
+          description: Human administrator permission required
+        '404':
+          description: Tenant-owned integration or breaker not found
+        '409':
+          description: Retry-After cooldown remains active
   /api/v1/engagements/{id}/findings/{fid}/tickets:
     parameters:
       - name: id
@@ -7728,6 +7754,7 @@ components:
     TicketMetadata: {"type":"object","properties":{"resolved_reporter":{"type":"string","maxLength":255,"description":"Authenticated Data Center user supplied in the immutable preview when Reporter is required and has no default."},"projects":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"issue_types":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"priorities":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"security_levels":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"components":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"transitions":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"fields":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"required":{"type":"boolean"},"type":{"type":"string"},"item_type":{"type":"string"},"has_default":{"type":"boolean"},"values":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}}}}}}}
     TicketIntentVersion: {"type":"object","additionalProperties":false,"required":["version"],"properties":{"version":{"type":"integer","minimum":1}}}
     TicketRetryInput: {"type":"object","additionalProperties":false,"required":["version","acknowledge_duplicate_risk","reason"],"properties":{"version":{"type":"integer","minimum":1},"acknowledge_duplicate_risk":{"type":"boolean","const":true},"reason":{"type":"string","minLength":1,"maxLength":1024}}}
+    TicketBreakerResetInput: {"type":"object","additionalProperties":false,"required":["project_key","issue_type"],"properties":{"project_key":{"type":"string","minLength":1,"maxLength":255},"issue_type":{"type":"string","minLength":1,"maxLength":255}}}
     TicketBulkInput: {"type":"object","additionalProperties":false,"required":["mapping_id","items"],"properties":{"mapping_id":{"type":"string"},"items":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"object","required":["finding_id","preview_digest","request_key"],"properties":{"finding_id":{"type":"string"},"preview_digest":{"type":"string"},"request_key":{"type":"string"}}}}}}
     SIEMSink:
       type: object

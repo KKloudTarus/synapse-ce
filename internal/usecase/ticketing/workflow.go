@@ -308,6 +308,23 @@ func (w *Workflow) RetryUncertain(ctx context.Context, tenant, id shared.ID, ver
 	return w.dispatch.RetryIntentAudited(ctx, tenant, id, i.Version, entry.At, entry)
 }
 
+// ResetBreaker releases only the tuple gate. Retained commands, approval facts
+// and active dispatch leases are unchanged; execution preflight still applies.
+func (w *Workflow) ResetBreaker(ctx context.Context, tenant, integrationID shared.ID, project, issueType, actor string) error {
+	if strings.TrimSpace(actor) == "" || strings.TrimSpace(project) == "" || strings.TrimSpace(issueType) == "" || len(project) > 255 || len(issueType) > 255 {
+		return shared.ErrValidation
+	}
+	literals, err := json.Marshal(map[string]string{"project_key": project, "issue_type": issueType})
+	if err != nil {
+		return shared.ErrValidation
+	}
+	if err = w.validateTicketLiterals(ctx, tenant, integrationID, literals); err != nil {
+		return err
+	}
+	entry := ports.AuditEntry{Actor: actor, Action: "ticket.breaker.reset", Target: integrationID.String(), At: w.clock.Now().UTC(), Metadata: map[string]string{"project_key": ticketAuditText(project), "issue_type": ticketAuditText(issueType)}}
+	return w.dispatch.ResetBreaker(shared.WithTenant(ctx, tenant), tenant, integrationID, project, issueType, entry)
+}
+
 type snapshotFacts struct {
 	Provider           integration.Provider   `json:"provider"`
 	Endpoint           string                 `json:"endpoint"`

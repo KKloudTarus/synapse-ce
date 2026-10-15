@@ -18,6 +18,36 @@ type ticketHTTPFake struct {
 	calls        int
 	tenant       shared.ID
 	mappingInput ticketuc.MappingInput
+	resetInput   [4]string
+}
+
+func (f *ticketHTTPFake) ResetBreaker(_ context.Context, tenant, id shared.ID, project, issueType, actor string) error {
+	f.calls++
+	f.tenant = tenant
+	f.resetInput = [4]string{id.String(), project, issueType, actor}
+	return nil
+}
+
+func TestResetJiraBreakerRouteDerivesTenantAndActor(t *testing.T) {
+	fake := &ticketHTTPFake{}
+	rt := &Router{log: discardLog()}
+	rt.SetTicketing(fake)
+	for _, body := range []string{`{"project_key":"SEC","issue_type":"10001","tenant_id":"other"}`, `{"project_key":"SEC","issue_type":"10001","actor":"other"}`} {
+		req := httptest.NewRequest("POST", "/api/v1/integrations/jira/jira-breaker/reset", strings.NewReader(body))
+		req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "admin-id", Role: "admin", TenantID: "tenant-a"}))
+		res := httptest.NewRecorder()
+		rt.routes().ServeHTTP(res, req)
+		if res.Code != 400 || fake.calls != 0 {
+			t.Fatalf("authority injection: status=%d calls=%d", res.Code, fake.calls)
+		}
+	}
+	req := httptest.NewRequest("POST", "/api/v1/integrations/jira/jira-breaker/reset", strings.NewReader(`{"project_key":"SEC","issue_type":"10001"}`))
+	req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "admin-id", Role: "admin", TenantID: "tenant-a"}))
+	res := httptest.NewRecorder()
+	rt.routes().ServeHTTP(res, req)
+	if res.Code != 204 || fake.calls != 1 || fake.tenant != "tenant-a" || fake.resetInput != [4]string{"jira", "SEC", "10001", "admin-id"} {
+		t.Fatalf("reset: status=%d calls=%d tenant=%s input=%+v", res.Code, fake.calls, fake.tenant, fake.resetInput)
+	}
 }
 
 func (f *ticketHTTPFake) GetFindingTickets(_ context.Context, tenant, _, _ shared.ID) (ticketuc.FindingTickets, error) {
@@ -48,6 +78,7 @@ func TestTicketRoutesRejectUnauthorizedHumansAndMachines(t *testing.T) {
 		{"POST", "/api/v1/engagements/eng/tickets/bulk", []string{"integration_admin", "readonly", "agent", "mcp", ""}},
 		{"POST", "/api/v1/ticket-intents/intent/reconcile", []string{"integration_admin", "readonly", "agent", "mcp", ""}},
 		{"POST", "/api/v1/ticket-intents/intent/retry", []string{"integration_admin", "consultant", "reviewer", "readonly", "agent", "mcp", ""}},
+		{"POST", "/api/v1/integrations/jira/jira-breaker/reset", []string{"integration_admin", "consultant", "reviewer", "readonly", "agent", "mcp", ""}},
 		{"GET", "/api/v1/engagements/eng/findings/finding/tickets", []string{"agent", "mcp", ""}},
 		{"POST", "/api/v1/engagements/eng/findings/finding/ticket-preview", []string{"agent", "mcp", ""}},
 	}

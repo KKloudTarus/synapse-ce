@@ -170,6 +170,94 @@ func (f workflowFixture) mapping(t *testing.T, security string) domain.Mapping {
 	return m
 }
 
+func TestWorkflowBreakerRecoveryAfterCredentialRotationAndReplacement(t *testing.T) {
+	f := newWorkflowFixture(t)
+	m := f.mapping(t, "security-1")
+	ctx := context.Background()
+	submit := func(key string) domain.Intent {
+		t.Helper()
+		p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		i, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: key, PreviewDigest: p.Digest, Actor: "admin"})
+		if err != nil || !created {
+			t.Fatalf("submit: created=%t err=%v", created, err)
+		}
+		return i
+	}
+	first := submit("before-rotation")
+	f.provider.createErr = &ports.TicketProviderError{Status: 401}
+	if _, err := f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := f.store.GetIntent(ctx, "tenant-a", first.ID)
+	if err != nil || failed.State != writeintent.Failed {
+		t.Fatalf("first=%+v err=%v", failed, err)
+	}
+	f.integrations.item.CredentialRevision++
+	f.provider.createErr = nil
+	replacement := submit("after-rotation")
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.posts != 1 {
+		t.Fatal("breaker admitted replacement before recovery")
+	}
+	if _, err = f.workflow.RetryUncertain(ctx, "tenant-a", failed.ID, failed.Version, true, "credential repaired", "admin"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("retry should preserve active replacement: %v", err)
+	}
+	recovery, ok := any(f.workflow).(interface {
+		ResetBreaker(context.Context, shared.ID, shared.ID, string, string, string) error
+	})
+	if !ok {
+		t.Fatal("no workflow recovery for the blocked replacement")
+	}
+	for _, input := range [][3]string{{"", "10001", "admin"}, {"SEC", "", "admin"}, {"SEC", "10001", ""}, {strings.Repeat("a", 256), "10001", "admin"}} {
+		if err = recovery.ResetBreaker(ctx, "tenant-a", "jira", input[0], input[1], input[2]); !errors.Is(err, shared.ErrValidation) {
+			t.Fatalf("invalid reset: %v", err)
+		}
+	}
+	beforeAudit := len(f.audit.entries)
+	f.provider.validationErr = shared.ErrValidation
+	if err = recovery.ResetBreaker(ctx, "tenant-a", "jira", "SEC", "10001", "admin"); err == nil || len(f.audit.entries) != beforeAudit {
+		t.Fatal("refused tuple literal reached audit")
+	}
+	f.provider.validationErr = nil
+	if err = recovery.ResetBreaker(ctx, "foreign", "jira", "SEC", "10001", "admin"); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("foreign reset: %v", err)
+	}
+	f.audit.err = errors.New("audit unavailable")
+	if err = recovery.ResetBreaker(ctx, "tenant-a", "jira", "SEC", "10001", "admin"); err == nil {
+		t.Fatal("reset survived failed audit")
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.posts != 1 {
+		t.Fatal("failed audit opened breaker")
+	}
+	f.audit.err = nil
+	if err = recovery.ResetBreaker(ctx, "tenant-a", "jira", "SEC", "10001", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	done, err := f.store.GetIntent(ctx, "tenant-a", replacement.ID)
+	if err != nil || done.State != writeintent.Done || f.provider.posts != 2 {
+		t.Fatalf("replacement=%+v posts=%d err=%v", done, f.provider.posts, err)
+	}
+	unchanged, err := f.store.GetIntent(ctx, "tenant-a", failed.ID)
+	if err != nil || unchanged.State != failed.State || unchanged.Version != failed.Version {
+		t.Fatalf("failed intent changed: %+v %v", unchanged, err)
+	}
+	last := f.audit.entries[len(f.audit.entries)-1]
+	if last.Action != "ticket.breaker.reset" || last.Actor != "admin" || last.Target != "jira" || last.Metadata["project_key"] != "SEC" || last.Metadata["issue_type"] != "10001" {
+		t.Fatalf("reset audit=%+v", last)
+	}
+}
+
 func TestWorkflowPreviewSubmitSnapshotsAndPostsOnlyFromTick(t *testing.T) {
 	f := newWorkflowFixture(t)
 	m := f.mapping(t, "security-1")

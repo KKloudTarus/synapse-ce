@@ -26,6 +26,7 @@ type ticketWorkflow interface {
 	Submit(context.Context, ticketuc.SubmitRequest) (ticketing.Intent, bool, error)
 	Reconcile(context.Context, shared.ID, shared.ID, int) (ticketing.Intent, error)
 	RetryUncertain(context.Context, shared.ID, shared.ID, int, bool, string, string) (ticketing.Intent, error)
+	ResetBreaker(context.Context, shared.ID, shared.ID, string, string, string) error
 }
 
 func (rt *Router) SetTicketing(service ticketWorkflow) {
@@ -117,6 +118,21 @@ func (rt *Router) jiraMetadata(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, meta)
+}
+func (rt *Router) resetJiraBreaker(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ProjectKey string `json:"project_key"`
+		IssueType  string `json:"issue_type"`
+	}
+	if !decodeIntegrationJSON(w, r, &input) {
+		return
+	}
+	err := rt.ticketing.ResetBreaker(r.Context(), shared.TenantOrDefault(shared.ID(TenantFrom(r.Context()))), shared.ID(r.PathValue("integrationID")), input.ProjectKey, input.IssueType, PrincipalFrom(r.Context()))
+	if err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func (rt *Router) findingTickets(w http.ResponseWriter, r *http.Request) {
 	data, err := rt.ticketing.GetFindingTickets(r.Context(), shared.TenantOrDefault(shared.ID(TenantFrom(r.Context()))), shared.ID(r.PathValue("id")), shared.ID(r.PathValue("fid")))

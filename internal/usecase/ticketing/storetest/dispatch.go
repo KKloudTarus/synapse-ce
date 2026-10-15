@@ -79,6 +79,9 @@ func Dispatch(t *testing.T, store dispatchStore, f Fixture) {
 		t.Fatalf("opened breaker allowed claim: ok=%t err=%v", ok, err)
 	}
 	audit := ports.AuditEntry{Actor: "admin", Action: "ticket.breaker.reset", Target: string(f.Integration), At: now.Add(3 * time.Second)}
+	if err := store.ResetBreaker(ctx, f.Other, f.Integration, "SEC", "Bug", audit); err == nil {
+		t.Fatal("cross-tenant reset accepted")
+	}
 	if err := store.ResetBreaker(ctx, f.Tenant, f.Integration, "SEC", "Bug", audit); err != nil {
 		t.Fatalf("reset breaker: %v", err)
 	}
@@ -100,9 +103,18 @@ func Dispatch(t *testing.T, store dispatchStore, f Fixture) {
 	if _, claimed, e := store.AcquireDispatch(ctx, f.Tenant, fenced.ID, 1, now.Add(4*time.Second), now.Add(5*time.Minute)); e != nil || claimed {
 		t.Fatalf("retry erased active fence: claimed=%t err=%v", claimed, e)
 	}
+	if err := store.ResetBreaker(ctx, f.Tenant, f.Integration, "SEC", "Bug", audit); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, e := store.AcquireDispatch(ctx, f.Tenant, fenced.ID, 1, now.Add(4*time.Second), now.Add(5*time.Minute)); e != nil || claimed {
+		t.Fatalf("reset erased active fence: claimed=%t err=%v", claimed, e)
+	}
 	cooldown := now.Add(10 * time.Minute)
 	if _, err = store.FinishDispatch(ctx, f.Tenant, active.ID, active.Version, ticketing.IntentTransition{Event: writeintent.Reject, ErrorCode: "provider_rejected"}, now.Add(5*time.Second), &cooldown, "http_429"); err != nil {
 		t.Fatalf("finish 429: %v", err)
+	}
+	if err := store.ResetBreaker(ctx, f.Tenant, f.Integration, "SEC", "Bug", audit); err == nil {
+		t.Fatal("reset bypassed Retry-After")
 	}
 	third := makeIntent("ticket-dispatch-three", "dispatch-three")
 	if _, _, err = store.CreateOrGetIntent(ctx, f.Tenant, third); err != nil {
