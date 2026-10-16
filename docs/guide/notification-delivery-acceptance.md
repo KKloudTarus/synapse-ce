@@ -59,9 +59,9 @@ upstream release tags; this is a real object store, not a mocked dependency. Pri
 credentials and local overrides stay outside the repository.
 
 Local browser, database and transport checks establish only their measured boundaries.
-They do not establish delivery in Slack, Teams, Telegram, Discord, Google Chat, Gmail,
-Outlook or PagerDuty. In particular, this packet does not claim a usable Teams bot
-identity or accepted real-client evidence. Any outstanding leaf is referenced with
+The initial local checks do not establish external delivery. The later live-provider
+run below adds Slack, Telegram and Google Chat receipts only. This packet does not claim
+a usable Teams bot identity or accepted Teams client evidence. Any outstanding leaf is referenced with
 `Refs`, not closed by a code-only result.
 
 PagerDuty live acceptance is deferred to [#1576](https://github.com/KKloudTarus/synapse-ce/issues/1576)
@@ -202,7 +202,90 @@ No external scan or customer destination was used.
 
 The frontend reviewer inspected all thirteen images. Missing evidence includes the complete
 light/dark/state matrix for every changed screen, cross-engine/screen-reader verification,
-real-client preview/send pairs, mixed-event hourly/daily client matrices across en/vi and
-signal/detail, and the Teams link/contact/message/history/navigation journey. Keep
+the complete real-client preview/send pair matrix, mixed-event hourly/daily client
+matrices and dark/mobile coverage, and the Teams link/contact/message/history/navigation
+journey. The later live run below covers five finding.created events across en/vi and
+signal/detail on three desktop clients. Keep
 #1420 open. Use `Refs` for #1372, #1374, #1377, #1417, #1420, #1421 and #1422; retain
 #1418/#1419 as already closed integrations. Ownership is unchanged.
+
+## Live provider verification on 2026-10-16
+
+The [live evidence record](assets/notification-live-delivery-evidence.json) records
+24 actual queued digest deliveries: Slack in the maintainer-selected JJ workspace,
+the existing Telegram test bot, and the existing Google Chat test space. Each provider
+received hourly and daily digests for en/detail, en/signal, vi/detail and vi/signal.
+Every job reached `delivered` with HTTP 200 and one attempt. Native message text contained
+all five severity rows; detail contained finding titles and signal omitted them.
+An actual worker restart preserved the same 24 event/delivery identities and one attempt
+per job. This establishes that bounded restart case, not a concurrency or soak result.
+
+Five findings were created through the API for each cell, with high/medium/low/info/high
+severity. These remain five `finding.created` events, not five different event types.
+Only these fixture rules' windows were moved into closed periods before the actual worker
+published them. No elapsed hourly/daily soak is claimed. The en/detail run used the exact
+Google Chat patch before its commit; the other three cells used binaries built from clean
+`eb41dbf7e07c11d9610e8347e38718e2f9e2ae45`. Binary and patch hashes distinguish them.
+
+Native correlation uses Google provider message references, unique engagement/finding
+links plus cadence in Slack, and Telegram timestamps within two seconds of the matching
+attempt plus cadence/content. Telegram web DOM IDs differ from Bot API message IDs;
+the packet does not claim direct ID equality there. Eighteen stored-event preview bodies
+matched native body lines. Six previews returned 404 because their events fell outside
+the newest-twenty selection ordered by `occurred_at` and ID. Those six are explicitly
+unverified for preview parity. Fixture send-tests also reached each provider in en/detail;
+the complete console-preview/send pair matrix remains open.
+
+### Google Chat standalone digest repair
+
+The first two Google Chat digest jobs failed with HTTP 400 while a fixture send-test
+succeeded. A real provider diagnostic reported: “The request does not specify which
+message to reply to.” The driver had requested reply fallback without a subject thread.
+It now adds that reply option only with a subject-derived thread key. Fresh hourly/daily
+digests succeeded through the real worker. The original failed attempts remain in history;
+two manual diagnostic posts are excluded from queued acceptance.
+
+The new standalone regression failed with HTTP 400 before the repair and passed after it.
+Focused sender/usecase/formatter checks and sender race tests pass. The full Go run now
+records **17,319 pass / 709 conditional skips / 0 fail**, including subtests. Vet, lint
+(`0 issues.`), static API/worker builds and docs checks pass. Independent QA and security
+reviews pass for this adapter change. The earlier PostgreSQL and frontend results remain
+bound to their unchanged surfaces; they were not rerun for this adapter-only repair.
+
+### Representative native receipts
+
+The frontend reviewer inspected all twelve images and found no credentials, private
+sidebars or unrelated people. Two English Google screenshots crop the start of the space
+header; the complete representative cards remain readable and the daily app sender is
+visible. These images show desktop light-mode receipts. Initial en/detail Telegram and fixture
+images retain their pre-fix source label in the JSON; they are not evidence of the Google
+Chat repair. Screenshots do not establish authenticated console navigation.
+
+| Native client | Captures |
+| --- | --- |
+| Slack, JJ test channel | [en/detail](assets/ui/notification-delivery/live/slack-digests-en-detail-light.jpg), [vi/signal](assets/ui/notification-delivery/live/slack-digests-vi-signal-light.jpg) |
+| Google Chat test space | [en/detail hourly](assets/ui/notification-delivery/live/google-chat-hourly-en-detail-light.jpg), [en/detail daily](assets/ui/notification-delivery/live/google-chat-daily-en-detail-light.jpg), [vi/detail daily](assets/ui/notification-delivery/live/google-chat-daily-vi-detail-light.jpg), [vi/detail hourly](assets/ui/notification-delivery/live/google-chat-hourly-vi-detail-light.jpg), [vi/signal hourly](assets/ui/notification-delivery/live/google-chat-hourly-vi-signal-light.jpg) |
+| Telegram test bot | [initial en/detail hourly](assets/ui/notification-delivery/live/telegram-hourly-en-detail-light.jpg), [initial en/detail daily](assets/ui/notification-delivery/live/telegram-daily-en-detail-light.jpg), [vi/detail hourly](assets/ui/notification-delivery/live/telegram-hourly-vi-detail-light.jpg), [vi/signal hourly](assets/ui/notification-delivery/live/telegram-hourly-vi-signal-light.jpg) |
+| Google Chat fixture test | [en/detail receipt](assets/ui/notification-delivery/live/google-chat-preview-test-en-detail-light.jpg) |
+
+### Remaining client boundaries
+
+The complete theme/device matrix, mixed-event digests, authenticated deep-link clicks and
+all locale/class console-preview/send pairs remain incomplete. Telegram web displayed the
+localhost finding labels without anchor elements; its navigation acceptance remains
+unverified. No public console route was substituted. Slack and Google Chat native links
+were observed, but destination navigation was not accepted while the local console was
+logged out.
+
+The existing Discord test server/webhook was found, but its credential could not be handed
+off through the browser clipboard; no Discord receipt is claimed. The logged-in Teams
+account is personal and does not establish the dedicated Microsoft 365 bot, verified link,
+contact/history and navigation required by #1420. Keep that issue open.
+
+Gmail/Outlook login alone does not establish SMTP credentials or transport acceptance.
+School-account GCP inspection stopped at reauthentication; the maintainer then prohibited
+billing or organization-impacting setup there and allowed a personal-account fallback.
+The personal account's project search returned no resource named Synapse; the displayed
+project had no OAuth client. No new project, API enablement, billing, credential or mail
+grant was created. No Gmail/Outlook SMTP receipt is claimed. PagerDuty remains deferred
+to #1576. The PR stays Draft with `Refs`; ownership and issue closure policy are unchanged.
