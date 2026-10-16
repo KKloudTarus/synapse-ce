@@ -153,7 +153,7 @@ func TestSandboxWrapsInSystemdRunForLimits(t *testing.T) {
 		t.Fatalf("argv[0] = %q, want systemd-run prefix", argv[0])
 	}
 	joined := strings.Join(argv, " ")
-	if !strings.Contains(joined, "--user --scope") || !strings.Contains(joined, "MemoryMax=536870912") || !strings.Contains(joined, "TasksMax=64") {
+	if !strings.Contains(joined, "--user --scope") || !strings.Contains(joined, "MemoryMax=536870912") || !strings.Contains(joined, "MemorySwapMax=0") || !strings.Contains(joined, "TasksMax=64") {
 		t.Errorf("systemd-run cgroup limits missing: %s", joined)
 	}
 	// bwrap still wraps the tool inside the scope (appears after systemd-run, before the tool).
@@ -591,5 +591,28 @@ func TestSandboxBindsResolvedBinaryOnTheLegacyPath(t *testing.T) {
 	joined := strings.Join(r.command(ports.ToolSpec{Name: "/opt/synapse/bin/synapse-cspm"}, "", "", 3, 0, 0, false), " ")
 	if !strings.Contains(joined, "--ro-bind-try /opt/synapse/bin/synapse-cspm /opt/synapse/bin/synapse-cspm") {
 		t.Errorf("no bind emitted without a binary registry: %s", joined)
+	}
+}
+
+func TestSystemdMemoryPolicyMatchesDefaultAndUnboundedRuns(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		limit      int64
+		wantMemory bool
+	}{
+		{name: "default bounded", limit: 256 << 20, wantMemory: true},
+		{name: "unbounded", limit: 0, wantMemory: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := fakeRunner("/usr/bin/systemd-run")
+			r.memMax = tc.limit
+			args := r.systemdArgs(ports.ToolSpec{})
+			if got := slices.Contains(args, "MemorySwapMax=0"); got != tc.wantMemory {
+				t.Fatalf("swap policy present=%v, want %v: %v", got, tc.wantMemory, args)
+			}
+			if tc.wantMemory && !slices.Contains(args, "MemoryMax=268435456") {
+				t.Fatalf("default memory limit missing: %v", args)
+			}
+		})
 	}
 }

@@ -80,7 +80,39 @@ rollback keeps migration `0239` applied and stops producers/workers that could h
 jobs to an older binary. Draining jobs cannot make Down possible after a retained pinned
 test snapshot; use a forward fix rather than deleting history.
 
-## Verification recorded on 2026-10-16
+## Gate repair verification on 2026-10-16
+
+The two initial baseline failures below are repaired. The CLI pins Git's `a/` and `b/`
+header prefixes, independently of mnemonic/custom/no-prefix presentation, and disables
+external diff/text conversion. Correct-module coverage measures 100%; an unmatched module
+still fails its coverage condition. Regression cases exercise each presentation setting
+and both converter paths.
+
+The systemd sandbox fallback now sets `MemorySwapMax=0` whenever it sets `MemoryMax`,
+matching the direct cgroup policy. Before the fix, the local scope had
+`memory.max=67108864` and `memory.swap.max=max`, allowing the memory bomb to finish its
+1 GiB allocation loop through swap. Process limits remain unchanged. The test now requires
+allocation-loop evidence and non-successful termination, rejects setup errors, and uses
+strict bounds of at most 63 forks and less than 64 MiB of reported allocations.
+
+| Current check | Observed result |
+| --- | --- |
+| Full Go suite, `GOMAXPROCS=2 go test -p 4 -json ./...` | Exit 0; 17,318 pass / 709 conditional skips / 0 fail, including subtests. |
+| `go build ./...`, `go vet ./...`, `golangci-lint run ./...` | Pass; lint reports `0 issues.` |
+| Race checks for gitdiff, sandbox and CLI | Pass, 1.320s / 2.292s / 1.525s respectively. |
+| Real containment in ordinary local session | Pass: 61 child forks, 48 MiB reported allocation, termination exit -1. |
+| Real containment in a `systemd-run --user --scope -p Delegate=yes` scope | Pass: 61 child forks, 48 MiB reported allocation, termination exit 137. |
+
+Reported allocations are progress telemetry from the test workload, not a measured
+resident-memory peak. Neither containment run skipped. The narrower Git/sandbox fixes do
+not change notification persistence, rendering or frontend code; the PostgreSQL/browser/
+frontend evidence below remains bound to the original notification implementation.
+The full local Taurus gate passes; external-client acceptance remains incomplete as
+listed below. After rebuilding and restarting the local API and worker, readiness passes
+and both retained hourly/daily SMTP payloads still match current preview text and HTML.
+The PR stays Draft, uses `Refs` and is not merged.
+
+## Initial verification recorded on 2026-10-16
 
 The [sanitized evidence record](assets/notification-delivery-evidence.json) contains the
 captured payload hashes, binary hashes, screenshot hashes and PostgreSQL shard results.
@@ -106,7 +138,7 @@ separate test-role DSNs. The notification tenant/RLS tests did execute. None of 
 skips is a production capacity or recovery claim. Frontend lint retains eleven existing
 warnings; the build retains its existing large-chunk warning.
 
-The full Go gate remains **red** because both failures below also occur at pristine
+The initial full Go gate was **red** because both failures below also occurred at pristine
 `b88812e15fce7c88604bc735872532fe5cae75f3`:
 
 ```text
@@ -117,8 +149,8 @@ TestCgroupContainsBombs:
   memory bomb NOT contained: reached 1024MB under a 64MB cap
 ```
 
-These failures were not skipped or weakened. The Draft must not be marked ready based on
-this packet. No issue is closed while its complete DoD or evidence is outstanding.
+These failures were fixed and rechecked without skipping or weakening them. No issue is
+closed while its complete DoD or external-client evidence is outstanding.
 
 The Taurus tier-0 QA, security and performance panel passed the reviewed implementation;
 reliability and frontend specialists also passed. Confirmed cancellation, history,

@@ -112,17 +112,6 @@
     "templates-permission-denied.png": "b296891cae543ecaa77d77db3b5fe6f792c3440908ecd0f651618da3b1fb1313"
   },
   "checks": {
-    "go_full": {
-      "command": "GOMAXPROCS=2 go test -p 4 -json ./...",
-      "exit_code": 1,
-      "passed_including_subtests": 17307,
-      "skipped_including_subtests": 709,
-      "failures": [
-        "TestRunGateStripsGoModulePathForNewCodeCoverage",
-        "TestCgroupContainsBombs"
-      ],
-      "failures_reproduced_at_baseline": true
-    },
     "web_full": {
       "files_passed": 199,
       "tests_passed": 1330,
@@ -136,6 +125,80 @@
       "exit_code": 0,
       "go_lint_issues": 0,
       "web_existing_warnings": 11
+    },
+    "initial_go_full": {
+      "command": "GOMAXPROCS=2 go test -p 4 -json ./...",
+      "exit_code": 1,
+      "passed_including_subtests": 17307,
+      "skipped_including_subtests": 709,
+      "failures": [
+        "TestRunGateStripsGoModulePathForNewCodeCoverage",
+        "TestCgroupContainsBombs"
+      ],
+      "failures_reproduced_at_baseline": true
+    },
+    "go_full": {
+      "command": "GOMAXPROCS=2 go test -p 4 -json ./...",
+      "exit_code": 0,
+      "passed_including_subtests": 17318,
+      "skipped_including_subtests": 709,
+      "failures": []
+    }
+  },
+  "gate_repairs": {
+    "base_commit": "42a78a678bd63051201551603745788a169865a3",
+    "coverage": {
+      "cause": "Git mnemonic/no/custom prefixes changed parser headers; module wiring was already present",
+      "fix": "Pin src/dst prefixes and disable external diff/textconv",
+      "matching_module_percent": 100,
+      "mismatched_module_fails": true
+    },
+    "containment": {
+      "cause": "systemd fallback capped memory but left swap unlimited",
+      "fix": "MemorySwapMax=0 whenever MemoryMax is set",
+      "memory_limit_mib": 64,
+      "pid_limit": 64,
+      "ordinary_session": {
+        "exit_code": -1,
+        "forked_children": 61,
+        "reported_allocations_mib": 48
+      },
+      "delegate_yes_scope": {
+        "exit_code": 137,
+        "forked_children": 61,
+        "reported_allocations_mib": 48
+      },
+      "allocation_measurement": "Workload progress telemetry, not measured resident-memory peak"
+    },
+    "race_checks": {
+      "gitdiff_seconds": 1.32,
+      "sandbox_seconds": 2.292,
+      "cli_seconds": 1.525,
+      "exit_code": 0
+    },
+    "notification_runtime_evidence_source_commit": "42a78a678bd63051201551603745788a169865a3",
+    "notification_sources_unchanged": true,
+    "verified_at_utc": "2026-10-16T09:24:00.873724+00:00",
+    "runtime_refresh": {
+      "runtime_binaries_sha256": {
+        "api": "0178f285856f6c57e7c37c110e0aaa3c47e4c192c1a43217e8ada9577c9a361f",
+        "worker": "1e0e883b1f2112ba9c1084d1399615debe189efdfe26f5dc6ec7a56798df56ed"
+      },
+      "readiness": {
+        "database": "ok",
+        "migrations": "ok"
+      },
+      "retained_smtp_preview_parity": {
+        "hourly": {
+          "text_equal": true,
+          "html_equal": true
+        },
+        "daily": {
+          "text_equal": true,
+          "html_equal": true
+        }
+      },
+      "boundary": "New binaries preview retained local SMTP payloads; no new provider-client acceptance or elapsed-window soak"
     }
   }
 }
