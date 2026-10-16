@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -32,13 +33,14 @@ func (s *InboxStore) LoadPersonalDelivery(ctx context.Context, tenant, user, eve
 	ok := false
 	err := WithTenant(ctx, s.pool, tenant.String(), func(tx pgx.Tx) error {
 		var state, inApp *string
-		var eventType string
-		scanErr := tx.QueryRow(ctx, `SELECT n.title, n.summary, n.link_path, n.event_type, p.state, i.state
+		var eventType, userRole string
+		var recipientRoles []string
+		scanErr := tx.QueryRow(ctx, `SELECT n.title, n.summary, n.link_path, n.event_type, p.state, i.state, u.role, n.recipient_roles
 			FROM user_notifications n
 			JOIN users u ON u.ownership_tenant_id=n.tenant_id AND u.id=n.user_id AND NOT u.disabled AND u.role = ANY($4)
 			LEFT JOIN user_notification_preferences p ON p.tenant_id=n.tenant_id AND p.user_id=n.user_id AND p.event_type=n.event_type AND p.channel=$5
 			LEFT JOIN user_notification_preferences i ON i.tenant_id=n.tenant_id AND i.user_id=n.user_id AND i.event_type=n.event_type AND i.channel='in_app'
-			WHERE n.tenant_id=$1 AND n.user_id=$2 AND n.event_id=$3`, tenant, user, event, humanNotificationRoles, channel).Scan(&out.Title, &out.Summary, &out.LinkPath, &eventType, &state, &inApp)
+			WHERE n.tenant_id=$1 AND n.user_id=$2 AND n.event_id=$3`, tenant, user, event, humanNotificationRoles, channel).Scan(&out.Title, &out.Summary, &out.LinkPath, &eventType, &state, &inApp, &userRole, &recipientRoles)
 		if errors.Is(scanErr, pgx.ErrNoRows) {
 			return nil
 		}
@@ -46,6 +48,9 @@ func (s *InboxStore) LoadPersonalDelivery(ctx context.Context, tenant, user, eve
 			return scanErr
 		}
 		out.EventType = notification.EventType(eventType)
+		if !personalRecipientAuthorized(out.EventType, recipientRoles, userRole) {
+			return nil
+		}
 		// Every personal message is sent from its inbox row, so muting the inbox mutes it too, even
 		// after it was queued; a mandatory notice cannot be muted.
 		inAppChoice := notification.PreferenceInherit
@@ -69,6 +74,35 @@ func (s *InboxStore) LoadPersonalDelivery(ctx context.Context, tenant, user, eve
 		var engagement *string
 		if scanErr = tx.QueryRow(ctx, `SELECT engagement_id FROM notification_events WHERE tenant_id=$1 AND id=$2`, tenant, event).Scan(&engagement); scanErr != nil && !errors.Is(scanErr, pgx.ErrNoRows) {
 			return scanErr
+		}
+		if out.EventType == notification.EventEngagementWindowStarting || out.EventType == notification.EventEngagementWindowEnding {
+			var raw json.RawMessage
+			if err := tx.QueryRow(ctx, `SELECT data FROM notification_events WHERE tenant_id=$1 AND id=$2`, tenant, event).Scan(&raw); err != nil {
+				return err
+			}
+			var data struct {
+				EngagementID string     `json:"engagement_id"`
+				Boundary     string     `json:"boundary"`
+				From         *time.Time `json:"authorized_from"`
+				To           *time.Time `json:"authorized_to"`
+			}
+			if err := json.Unmarshal(raw, &data); err != nil {
+				return err
+			}
+			column, boundary := "authorized_from", data.From
+			if out.EventType == notification.EventEngagementWindowEnding {
+				column, boundary = "authorized_to", data.To
+			}
+			if boundary == nil || data.Boundary != column || engagement == nil || data.EngagementID != *engagement {
+				return nil
+			}
+			var relevant bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM engagements WHERE tenant_id=$1 AND id=$2 AND project_id IS NULL AND host_asset_id IS NULL AND status IN ('draft','active') AND `+column+`=$3 AND `+column+`>now())`, tenant, *engagement, *boundary).Scan(&relevant); err != nil {
+				return err
+			}
+			if !relevant {
+				return nil
+			}
 		}
 		// The engagement's setting caps what leaves Synapse as it stands now, not as it stood when
 		// the job was queued: none sends nothing, signal sends only the event label and link.
@@ -141,4 +175,33 @@ func (s *InboxStore) SavePersonalDefault(ctx context.Context, tenant shared.ID, 
 			Metadata: map[string]string{"event_type": string(event), "channel": channel, "enabled": strconv.FormatBool(enabled)}})
 	})
 	return out, err
+}
+
+// A queued recipient may have several captured relations. At least one still
+// valid relation is enough; losing review permission does not revoke a separately
+// selected engagement lead, while a former administrator loses the mandatory role.
+func personalRecipientAuthorized(event notification.EventType, roles []string, userRole string) bool {
+	switch event {
+	case notification.EventApprovalRequested, notification.EventApprovalDecided, notification.EventApprovalTimedOut, notification.EventEvidenceChainBroken:
+		for _, role := range roles {
+			if notification.PersonalRoleSupported(event, role) != nil {
+				continue
+			}
+			switch role {
+			case notification.RoleApprover:
+				if userRole == "admin" || userRole == "reviewer" {
+					return true
+				}
+			case notification.RoleTenantAdmin:
+				if userRole == "admin" {
+					return true
+				}
+			default:
+				return true
+			}
+		}
+		return false
+	default:
+		return true
+	}
 }

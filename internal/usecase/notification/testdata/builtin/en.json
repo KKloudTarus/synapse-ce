@@ -1,4 +1,406 @@
 {
+  "approval.decided/chat/detail": {
+    "fields": {
+      "body": "Kind: response\nDecision: approved\nStatus: confirmed\nDecided by: summary\\-actor\nEngagement: summary\\-engagement",
+      "title": "Approval decided"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Approval decided\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: response\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Decision: approved\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Decided by: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Approval decided\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "approval.decided/chat/signal": {
+    "fields": {
+      "body": "Kind: response\nDecision: approved\nStatus: confirmed",
+      "title": "Approval decided"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Approval decided\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: response\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Decision: approved\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Approval decided\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "approval.decided/chat/summary": {
+    "fields": {
+      "body": "Kind: response\nDecision: approved\nStatus: confirmed\nDecided by: summary\\-actor\nEngagement: summary\\-engagement",
+      "title": "Approval decided"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Approval decided\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: response\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Decision: approved\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Decided by: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Approval decided\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "approval.decided/email/detail": {
+    "fields": {
+      "body": "Kind: response\nDecision: approved\nStatus: confirmed\nDecided by: summary\\-actor\nEngagement: summary\\-engagement",
+      "subject": "Approval decided"
+    },
+    "formatted": "Kind: response\nDecision: approved\nStatus: confirmed\nDecided by: summary-actor\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: response\u003cbr\u003e\nDecision: approved\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nDecided by: summary-actor\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "approval.decided/email/signal": {
+    "fields": {
+      "body": "Kind: response\nDecision: approved\nStatus: confirmed",
+      "subject": "Approval decided"
+    },
+    "formatted": "Kind: response\nDecision: approved\nStatus: confirmed",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: response\u003cbr\u003e\nDecision: approved\u003cbr\u003e\nStatus: confirmed\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "approval.decided/email/summary": {
+    "fields": {
+      "body": "Kind: response\nDecision: approved\nStatus: confirmed\nDecided by: summary\\-actor\nEngagement: summary\\-engagement",
+      "subject": "Approval decided"
+    },
+    "formatted": "Kind: response\nDecision: approved\nStatus: confirmed\nDecided by: summary-actor\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: response\u003cbr\u003e\nDecision: approved\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nDecided by: summary-actor\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "approval.decided/pager/detail": {
+    "fields": {
+      "summary": "Approval decided: Kind: response\nDecision: approved\nStatus: confirmed\nDecided by: summary\\-actor\nEngagement: summary\\-engagement"
+    }
+  },
+  "approval.decided/pager/signal": {
+    "fields": {
+      "summary": "Approval decided: Kind: response\nDecision: approved\nStatus: confirmed"
+    }
+  },
+  "approval.decided/pager/summary": {
+    "fields": {
+      "summary": "Approval decided: Kind: response\nDecision: approved\nStatus: confirmed\nDecided by: summary\\-actor\nEngagement: summary\\-engagement"
+    }
+  },
+  "approval.decided/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-approval.decided",
+        "type": "approval.decided",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "decision": "approved",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "approval.decided",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "kind": "response",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "approval.decided/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-approval.decided",
+        "type": "approval.decided",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "decision": "approved",
+          "event_label": "signal-event-label",
+          "event_type": "approval.decided",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "kind": "response",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "approval.decided/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-approval.decided",
+        "type": "approval.decided",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "decision": "approved",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "approval.decided",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "kind": "response",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "approval.requested/chat/detail": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpires: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "title": "Approval requested"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Approval requested\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: response\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Approval requested\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "approval.requested/chat/signal": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpires: 2026\\-11\\-01 09\\:00 UTC",
+      "title": "Approval requested"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Approval requested\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: response\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Approval requested\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "approval.requested/chat/summary": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpires: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "title": "Approval requested"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Approval requested\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: response\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expires: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Approval requested\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "approval.requested/email/detail": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpires: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "subject": "Approval requested"
+    },
+    "formatted": "Kind: response\nStatus: confirmed\nExpires: 2026-11-01 09:00 UTC\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: response\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "approval.requested/email/signal": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpires: 2026\\-11\\-01 09\\:00 UTC",
+      "subject": "Approval requested"
+    },
+    "formatted": "Kind: response\nStatus: confirmed\nExpires: 2026-11-01 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: response\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "approval.requested/email/summary": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpires: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "subject": "Approval requested"
+    },
+    "formatted": "Kind: response\nStatus: confirmed\nExpires: 2026-11-01 09:00 UTC\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: response\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nExpires: 2026-11-01 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "approval.requested/pager/detail": {
+    "fields": {
+      "summary": "Approval requested: Kind: response\nStatus: confirmed\nExpires: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement"
+    }
+  },
+  "approval.requested/pager/signal": {
+    "fields": {
+      "summary": "Approval requested: Kind: response\nStatus: confirmed\nExpires: 2026\\-11\\-01 09\\:00 UTC"
+    }
+  },
+  "approval.requested/pager/summary": {
+    "fields": {
+      "summary": "Approval requested: Kind: response\nStatus: confirmed\nExpires: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement"
+    }
+  },
+  "approval.requested/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-approval.requested",
+        "type": "approval.requested",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "decision": "approved",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "approval.requested",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "kind": "response",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "approval.requested/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-approval.requested",
+        "type": "approval.requested",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "decision": "approved",
+          "event_label": "signal-event-label",
+          "event_type": "approval.requested",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "kind": "response",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "approval.requested/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-approval.requested",
+        "type": "approval.requested",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "decision": "approved",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "approval.requested",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "kind": "response",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "approval.timed_out/chat/detail": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpired: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "title": "Approval timed out"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Approval timed out\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: response\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expired: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Approval timed out\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "approval.timed_out/chat/signal": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpired: 2026\\-11\\-01 09\\:00 UTC",
+      "title": "Approval timed out"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Approval timed out\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: response\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expired: 2026-11-01 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Approval timed out\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "approval.timed_out/chat/summary": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpired: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "title": "Approval timed out"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Approval timed out\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Kind: response\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Expired: 2026-11-01 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Approval timed out\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "approval.timed_out/email/detail": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpired: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "subject": "Approval timed out"
+    },
+    "formatted": "Kind: response\nStatus: confirmed\nExpired: 2026-11-01 09:00 UTC\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: response\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nExpired: 2026-11-01 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "approval.timed_out/email/signal": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpired: 2026\\-11\\-01 09\\:00 UTC",
+      "subject": "Approval timed out"
+    },
+    "formatted": "Kind: response\nStatus: confirmed\nExpired: 2026-11-01 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: response\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nExpired: 2026-11-01 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "approval.timed_out/email/summary": {
+    "fields": {
+      "body": "Kind: response\nStatus: confirmed\nExpired: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "subject": "Approval timed out"
+    },
+    "formatted": "Kind: response\nStatus: confirmed\nExpired: 2026-11-01 09:00 UTC\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eKind: response\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nExpired: 2026-11-01 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "approval.timed_out/pager/detail": {
+    "fields": {
+      "summary": "Approval timed out: Kind: response\nStatus: confirmed\nExpired: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement"
+    }
+  },
+  "approval.timed_out/pager/signal": {
+    "fields": {
+      "summary": "Approval timed out: Kind: response\nStatus: confirmed\nExpired: 2026\\-11\\-01 09\\:00 UTC"
+    }
+  },
+  "approval.timed_out/pager/summary": {
+    "fields": {
+      "summary": "Approval timed out: Kind: response\nStatus: confirmed\nExpired: 2026\\-11\\-01 09\\:00 UTC\nEngagement: summary\\-engagement"
+    }
+  },
+  "approval.timed_out/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-approval.timed_out",
+        "type": "approval.timed_out",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "decision": "approved",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "approval.timed_out",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "kind": "response",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "approval.timed_out/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-approval.timed_out",
+        "type": "approval.timed_out",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "decision": "approved",
+          "event_label": "signal-event-label",
+          "event_type": "approval.timed_out",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "kind": "response",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "approval.timed_out/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-approval.timed_out",
+        "type": "approval.timed_out",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "decision": "approved",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "approval.timed_out",
+          "expires_at": "2026-11-01T09:00:00Z",
+          "kind": "response",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
   "cspm.run_finished/chat/detail": {
     "fields": {
       "body": "Kind: sast\nOutcome: failed\nProvider: scanner\nError: timeout\nFindings: 12 (critical 1, high 2, medium 3, low 4, info 2)\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTarget: summary\\-target\\.example",
@@ -315,6 +717,843 @@
       }
     }
   },
+  "engagement.created/chat/detail": {
+    "fields": {
+      "body": "Status: confirmed\nAuthorized from: 2026\\-10\\-03 09\\:00 UTC\nAuthorized to: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement\nCreated by: summary\\-actor",
+      "title": "Engagement created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Authorized from: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Authorized to: 2026-10-10 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time zone: Asia/Ho_Chi_Minh\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Created by: summary-actor\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.created/chat/signal": {
+    "fields": {
+      "body": "Status: confirmed\nAuthorized from: 2026\\-10\\-03 09\\:00 UTC\nAuthorized to: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh",
+      "title": "Engagement created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Authorized from: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Authorized to: 2026-10-10 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time zone: Asia/Ho_Chi_Minh\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.created/chat/summary": {
+    "fields": {
+      "body": "Status: confirmed\nAuthorized from: 2026\\-10\\-03 09\\:00 UTC\nAuthorized to: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement\nCreated by: summary\\-actor",
+      "title": "Engagement created"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement created\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Authorized from: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Authorized to: 2026-10-10 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time zone: Asia/Ho_Chi_Minh\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Created by: summary-actor\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement created\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.created/email/detail": {
+    "fields": {
+      "body": "Status: confirmed\nAuthorized from: 2026\\-10\\-03 09\\:00 UTC\nAuthorized to: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement\nCreated by: summary\\-actor",
+      "subject": "Engagement created"
+    },
+    "formatted": "Status: confirmed\nAuthorized from: 2026-10-03 09:00 UTC\nAuthorized to: 2026-10-10 09:00 UTC\nTime zone: Asia/Ho_Chi_Minh\nEngagement: summary-engagement\nCreated by: summary-actor",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eStatus: confirmed\u003cbr\u003e\nAuthorized from: 2026-10-03 09:00 UTC\u003cbr\u003e\nAuthorized to: 2026-10-10 09:00 UTC\u003cbr\u003e\nTime zone: Asia/Ho_Chi_Minh\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nCreated by: summary-actor\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.created/email/signal": {
+    "fields": {
+      "body": "Status: confirmed\nAuthorized from: 2026\\-10\\-03 09\\:00 UTC\nAuthorized to: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh",
+      "subject": "Engagement created"
+    },
+    "formatted": "Status: confirmed\nAuthorized from: 2026-10-03 09:00 UTC\nAuthorized to: 2026-10-10 09:00 UTC\nTime zone: Asia/Ho_Chi_Minh",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eStatus: confirmed\u003cbr\u003e\nAuthorized from: 2026-10-03 09:00 UTC\u003cbr\u003e\nAuthorized to: 2026-10-10 09:00 UTC\u003cbr\u003e\nTime zone: Asia/Ho_Chi_Minh\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.created/email/summary": {
+    "fields": {
+      "body": "Status: confirmed\nAuthorized from: 2026\\-10\\-03 09\\:00 UTC\nAuthorized to: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement\nCreated by: summary\\-actor",
+      "subject": "Engagement created"
+    },
+    "formatted": "Status: confirmed\nAuthorized from: 2026-10-03 09:00 UTC\nAuthorized to: 2026-10-10 09:00 UTC\nTime zone: Asia/Ho_Chi_Minh\nEngagement: summary-engagement\nCreated by: summary-actor",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eStatus: confirmed\u003cbr\u003e\nAuthorized from: 2026-10-03 09:00 UTC\u003cbr\u003e\nAuthorized to: 2026-10-10 09:00 UTC\u003cbr\u003e\nTime zone: Asia/Ho_Chi_Minh\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nCreated by: summary-actor\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.created/pager/detail": {
+    "fields": {
+      "summary": "Engagement created: Status: confirmed\nAuthorized from: 2026\\-10\\-03 09\\:00 UTC\nAuthorized to: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement\nCreated by: summary\\-actor"
+    }
+  },
+  "engagement.created/pager/signal": {
+    "fields": {
+      "summary": "Engagement created: Status: confirmed\nAuthorized from: 2026\\-10\\-03 09\\:00 UTC\nAuthorized to: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh"
+    }
+  },
+  "engagement.created/pager/summary": {
+    "fields": {
+      "summary": "Engagement created: Status: confirmed\nAuthorized from: 2026\\-10\\-03 09\\:00 UTC\nAuthorized to: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement\nCreated by: summary\\-actor"
+    }
+  },
+  "engagement.created/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.created",
+        "type": "engagement.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.created",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.created/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.created",
+        "type": "engagement.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.created",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.created/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.created",
+        "type": "engagement.created",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.created",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.status_changed/chat/detail": {
+    "fields": {
+      "body": "triage → confirmed\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nChanged by: summary\\-actor",
+      "title": "Engagement status changed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement status changed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"triage → confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Changed by: summary-actor\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement status changed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.status_changed/chat/signal": {
+    "fields": {
+      "body": "triage → confirmed\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Engagement status changed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement status changed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"triage → confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement status changed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.status_changed/chat/summary": {
+    "fields": {
+      "body": "triage → confirmed\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nChanged by: summary\\-actor",
+      "title": "Engagement status changed"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement status changed\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"triage → confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Changed by: summary-actor\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement status changed\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.status_changed/email/detail": {
+    "fields": {
+      "body": "triage → confirmed\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nChanged by: summary\\-actor",
+      "subject": "Engagement status changed"
+    },
+    "formatted": "triage → confirmed\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nChanged by: summary-actor",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003etriage → confirmed\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nChanged by: summary-actor\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.status_changed/email/signal": {
+    "fields": {
+      "body": "triage → confirmed\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Engagement status changed"
+    },
+    "formatted": "triage → confirmed\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003etriage → confirmed\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.status_changed/email/summary": {
+    "fields": {
+      "body": "triage → confirmed\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nChanged by: summary\\-actor",
+      "subject": "Engagement status changed"
+    },
+    "formatted": "triage → confirmed\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nChanged by: summary-actor",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003etriage → confirmed\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nChanged by: summary-actor\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.status_changed/pager/detail": {
+    "fields": {
+      "summary": "Engagement status changed: triage → confirmed\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nChanged by: summary\\-actor"
+    }
+  },
+  "engagement.status_changed/pager/signal": {
+    "fields": {
+      "summary": "Engagement status changed: triage → confirmed\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "engagement.status_changed/pager/summary": {
+    "fields": {
+      "summary": "Engagement status changed: triage → confirmed\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nChanged by: summary\\-actor"
+    }
+  },
+  "engagement.status_changed/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.status_changed",
+        "type": "engagement.status_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.status_changed",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.status_changed/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.status_changed",
+        "type": "engagement.status_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.status_changed",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.status_changed/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.status_changed",
+        "type": "engagement.status_changed",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.status_changed",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.window_ending/chat/detail": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement",
+      "title": "Engagement window ending"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement window ending\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Authorization boundary: authorized_from\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Starts: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Ends: 2026-10-10 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time zone: Asia/Ho_Chi_Minh\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement window ending\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.window_ending/chat/signal": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh",
+      "title": "Engagement window ending"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement window ending\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Authorization boundary: authorized_from\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Starts: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Ends: 2026-10-10 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time zone: Asia/Ho_Chi_Minh\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement window ending\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.window_ending/chat/summary": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement",
+      "title": "Engagement window ending"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement window ending\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Authorization boundary: authorized_from\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Starts: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Ends: 2026-10-10 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time zone: Asia/Ho_Chi_Minh\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement window ending\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.window_ending/email/detail": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement",
+      "subject": "Engagement window ending"
+    },
+    "formatted": "Authorization boundary: authorized_from\nTime remaining: 24 hours\nStarts: 2026-10-03 09:00 UTC\nEnds: 2026-10-10 09:00 UTC\nTime zone: Asia/Ho_Chi_Minh\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eAuthorization boundary: authorized_from\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nStarts: 2026-10-03 09:00 UTC\u003cbr\u003e\nEnds: 2026-10-10 09:00 UTC\u003cbr\u003e\nTime zone: Asia/Ho_Chi_Minh\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.window_ending/email/signal": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh",
+      "subject": "Engagement window ending"
+    },
+    "formatted": "Authorization boundary: authorized_from\nTime remaining: 24 hours\nStarts: 2026-10-03 09:00 UTC\nEnds: 2026-10-10 09:00 UTC\nTime zone: Asia/Ho_Chi_Minh",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eAuthorization boundary: authorized_from\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nStarts: 2026-10-03 09:00 UTC\u003cbr\u003e\nEnds: 2026-10-10 09:00 UTC\u003cbr\u003e\nTime zone: Asia/Ho_Chi_Minh\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.window_ending/email/summary": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement",
+      "subject": "Engagement window ending"
+    },
+    "formatted": "Authorization boundary: authorized_from\nTime remaining: 24 hours\nStarts: 2026-10-03 09:00 UTC\nEnds: 2026-10-10 09:00 UTC\nTime zone: Asia/Ho_Chi_Minh\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eAuthorization boundary: authorized_from\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nStarts: 2026-10-03 09:00 UTC\u003cbr\u003e\nEnds: 2026-10-10 09:00 UTC\u003cbr\u003e\nTime zone: Asia/Ho_Chi_Minh\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.window_ending/pager/detail": {
+    "fields": {
+      "summary": "Engagement window ending: Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement"
+    }
+  },
+  "engagement.window_ending/pager/signal": {
+    "fields": {
+      "summary": "Engagement window ending: Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh"
+    }
+  },
+  "engagement.window_ending/pager/summary": {
+    "fields": {
+      "summary": "Engagement window ending: Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement"
+    }
+  },
+  "engagement.window_ending/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.window_ending",
+        "type": "engagement.window_ending",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.window_ending",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.window_ending/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.window_ending",
+        "type": "engagement.window_ending",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.window_ending",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.window_ending/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.window_ending",
+        "type": "engagement.window_ending",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.window_ending",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.window_starting/chat/detail": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement",
+      "title": "Engagement window starting"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement window starting\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Authorization boundary: authorized_from\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Starts: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Ends: 2026-10-10 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time zone: Asia/Ho_Chi_Minh\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement window starting\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.window_starting/chat/signal": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh",
+      "title": "Engagement window starting"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement window starting\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Authorization boundary: authorized_from\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Starts: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Ends: 2026-10-10 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time zone: Asia/Ho_Chi_Minh\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement window starting\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.window_starting/chat/summary": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement",
+      "title": "Engagement window starting"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Engagement window starting\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Authorization boundary: authorized_from\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time remaining: 24 hours\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Starts: 2026-10-03 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Ends: 2026-10-10 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Time zone: Asia/Ho_Chi_Minh\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Engagement window starting\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "engagement.window_starting/email/detail": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement",
+      "subject": "Engagement window starting"
+    },
+    "formatted": "Authorization boundary: authorized_from\nTime remaining: 24 hours\nStarts: 2026-10-03 09:00 UTC\nEnds: 2026-10-10 09:00 UTC\nTime zone: Asia/Ho_Chi_Minh\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eAuthorization boundary: authorized_from\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nStarts: 2026-10-03 09:00 UTC\u003cbr\u003e\nEnds: 2026-10-10 09:00 UTC\u003cbr\u003e\nTime zone: Asia/Ho_Chi_Minh\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.window_starting/email/signal": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh",
+      "subject": "Engagement window starting"
+    },
+    "formatted": "Authorization boundary: authorized_from\nTime remaining: 24 hours\nStarts: 2026-10-03 09:00 UTC\nEnds: 2026-10-10 09:00 UTC\nTime zone: Asia/Ho_Chi_Minh",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eAuthorization boundary: authorized_from\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nStarts: 2026-10-03 09:00 UTC\u003cbr\u003e\nEnds: 2026-10-10 09:00 UTC\u003cbr\u003e\nTime zone: Asia/Ho_Chi_Minh\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.window_starting/email/summary": {
+    "fields": {
+      "body": "Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement",
+      "subject": "Engagement window starting"
+    },
+    "formatted": "Authorization boundary: authorized_from\nTime remaining: 24 hours\nStarts: 2026-10-03 09:00 UTC\nEnds: 2026-10-10 09:00 UTC\nTime zone: Asia/Ho_Chi_Minh\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eAuthorization boundary: authorized_from\u003cbr\u003e\nTime remaining: 24 hours\u003cbr\u003e\nStarts: 2026-10-03 09:00 UTC\u003cbr\u003e\nEnds: 2026-10-10 09:00 UTC\u003cbr\u003e\nTime zone: Asia/Ho_Chi_Minh\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "engagement.window_starting/pager/detail": {
+    "fields": {
+      "summary": "Engagement window starting: Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement"
+    }
+  },
+  "engagement.window_starting/pager/signal": {
+    "fields": {
+      "summary": "Engagement window starting: Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh"
+    }
+  },
+  "engagement.window_starting/pager/summary": {
+    "fields": {
+      "summary": "Engagement window starting: Authorization boundary: authorized\\_from\nTime remaining: 24 hours\nStarts: 2026\\-10\\-03 09\\:00 UTC\nEnds: 2026\\-10\\-10 09\\:00 UTC\nTime zone: Asia\\/Ho\\_Chi\\_Minh\nEngagement: summary\\-engagement"
+    }
+  },
+  "engagement.window_starting/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.window_starting",
+        "type": "engagement.window_starting",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.window_starting",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.window_starting/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.window_starting",
+        "type": "engagement.window_starting",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.window_starting",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "engagement.window_starting/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-engagement.window_starting",
+        "type": "engagement.window_starting",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "authorized_from": "2026-10-03T09:00:00Z",
+          "authorized_to": "2026-10-10T09:00:00Z",
+          "boundary": "authorized_from",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "engagement.window_starting",
+          "from_status": "triage",
+          "lead_time_hours": "24",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "timezone": "Asia/Ho_Chi_Minh",
+          "title": "summary-title",
+          "to_status": "confirmed"
+        }
+      }
+    }
+  },
+  "evidence.chain_broken/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nReason: head\\_mismatch\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "title": "Evidence chain broken"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Evidence chain broken\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Reason: head_mismatch\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Evidence chain broken\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "evidence.chain_broken/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nReason: head\\_mismatch\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Evidence chain broken"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Evidence chain broken\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Reason: head_mismatch\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Evidence chain broken\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "evidence.chain_broken/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nReason: head\\_mismatch\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "title": "Evidence chain broken"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Evidence chain broken\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Reason: head_mismatch\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Evidence chain broken\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "evidence.chain_broken/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nReason: head\\_mismatch\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "subject": "Evidence chain broken"
+    },
+    "formatted": "Severity: critical\nReason: head_mismatch\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nReason: head_mismatch\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "evidence.chain_broken/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nReason: head\\_mismatch\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Evidence chain broken"
+    },
+    "formatted": "Severity: critical\nReason: head_mismatch\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nReason: head_mismatch\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "evidence.chain_broken/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nReason: head\\_mismatch\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement",
+      "subject": "Evidence chain broken"
+    },
+    "formatted": "Severity: critical\nReason: head_mismatch\nOccurred: 2026-10-02 09:00 UTC\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nReason: head_mismatch\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "evidence.chain_broken/pager/detail": {
+    "fields": {
+      "summary": "Evidence chain broken: Severity: critical\nReason: head\\_mismatch\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement"
+    }
+  },
+  "evidence.chain_broken/pager/signal": {
+    "fields": {
+      "summary": "Evidence chain broken: Severity: critical\nReason: head\\_mismatch\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "evidence.chain_broken/pager/summary": {
+    "fields": {
+      "summary": "Evidence chain broken: Severity: critical\nReason: head\\_mismatch\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement"
+    }
+  },
+  "evidence.chain_broken/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-evidence.chain_broken",
+        "type": "evidence.chain_broken",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "evidence.chain_broken",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reason_code": "head_mismatch",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "evidence.chain_broken/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-evidence.chain_broken",
+        "type": "evidence.chain_broken",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "evidence.chain_broken",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reason_code": "head_mismatch",
+          "severity": "critical"
+        }
+      }
+    }
+  },
+  "evidence.chain_broken/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-evidence.chain_broken",
+        "type": "evidence.chain_broken",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "evidence.chain_broken",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "reason_code": "head_mismatch",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.commented/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nCommented by: summary\\-actor\nComment: detail\\-comment\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Finding comment added"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding comment added\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Commented by: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Comment: detail-comment\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding comment added\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.commented/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Finding comment added"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding comment added\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding comment added\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.commented/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nCommented by: summary\\-actor\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Finding comment added"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Finding comment added\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Commented by: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Finding comment added\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.commented/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nCommented by: summary\\-actor\nComment: detail\\-comment\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Finding comment added"
+    },
+    "formatted": "Severity: critical\nStatus: confirmed\nCommented by: summary-actor\nComment: detail-comment\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nCommented by: summary-actor\u003cbr\u003e\nComment: detail-comment\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.commented/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Finding comment added"
+    },
+    "formatted": "Severity: critical\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.commented/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nCommented by: summary\\-actor\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Finding comment added"
+    },
+    "formatted": "Severity: critical\nStatus: confirmed\nCommented by: summary-actor\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nCommented by: summary-actor\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.commented/pager/detail": {
+    "fields": {
+      "summary": "Finding comment added: Severity: critical\nStatus: confirmed\nCommented by: summary\\-actor\nComment: detail\\-comment\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.commented/pager/signal": {
+    "fields": {
+      "summary": "Finding comment added: Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.commented/pager/summary": {
+    "fields": {
+      "summary": "Finding comment added: Severity: critical\nStatus: confirmed\nCommented by: summary\\-actor\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.commented/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.commented",
+        "type": "finding.commented",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "comment_excerpt": "detail-comment",
+          "event_label": "signal-event-label",
+          "event_type": "finding.commented",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.commented/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.commented",
+        "type": "finding.commented",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.commented",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.commented/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.commented",
+        "type": "finding.commented",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "event_label": "signal-event-label",
+          "event_type": "finding.commented",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
   "finding.created/chat/detail": {
     "fields": {
       "body": "Severity: critical\nKind: sast\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nFinding: summary\\-finding",
@@ -444,6 +1683,126 @@
           "status": "confirmed",
           "summary": "summary-description",
           "title": "summary-title"
+        }
+      }
+    }
+  },
+  "finding.mentioned/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "You were mentioned on a finding"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"You were mentioned on a finding\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"You were mentioned on a finding\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.mentioned/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "You were mentioned on a finding"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"You were mentioned on a finding\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"You were mentioned on a finding\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.mentioned/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "You were mentioned on a finding"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"You were mentioned on a finding\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Occurred: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"You were mentioned on a finding\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "finding.mentioned/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "You were mentioned on a finding"
+    },
+    "formatted": "Severity: critical\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.mentioned/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "You were mentioned on a finding"
+    },
+    "formatted": "Severity: critical\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.mentioned/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "You were mentioned on a finding"
+    },
+    "formatted": "Severity: critical\nStatus: confirmed\nOccurred: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nOccurred: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "finding.mentioned/pager/detail": {
+    "fields": {
+      "summary": "You were mentioned on a finding: Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.mentioned/pager/signal": {
+    "fields": {
+      "summary": "You were mentioned on a finding: Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.mentioned/pager/summary": {
+    "fields": {
+      "summary": "You were mentioned on a finding: Severity: critical\nStatus: confirmed\nOccurred: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "finding.mentioned/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.mentioned",
+        "type": "finding.mentioned",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.mentioned",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.mentioned/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.mentioned",
+        "type": "finding.mentioned",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.mentioned",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed"
+        }
+      }
+    }
+  },
+  "finding.mentioned/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-finding.mentioned",
+        "type": "finding.mentioned",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "finding.mentioned",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed"
         }
       }
     }
@@ -1101,6 +2460,142 @@
       }
     }
   },
+  "incident.updated/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating\nIncident: summary\\-incident\nOwner: summary\\-owner\nUpdated by: summary\\-actor",
+      "title": "Incident updated"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Incident updated\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Update: status\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Disposition: investigating\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Incident: summary-incident\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Owner: summary-owner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Updated by: summary-actor\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Incident updated\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "incident.updated/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating",
+      "title": "Incident updated"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Incident updated\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Update: status\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Disposition: investigating\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Incident updated\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "incident.updated/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating\nIncident: summary\\-incident\nOwner: summary\\-owner\nUpdated by: summary\\-actor",
+      "title": "Incident updated"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Incident updated\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Update: status\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Status: confirmed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Disposition: investigating\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Incident: summary-incident\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Owner: summary-owner\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Updated by: summary-actor\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Incident updated\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "incident.updated/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating\nIncident: summary\\-incident\nOwner: summary\\-owner\nUpdated by: summary\\-actor",
+      "subject": "Incident updated"
+    },
+    "formatted": "Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating\nIncident: summary-incident\nOwner: summary-owner\nUpdated by: summary-actor",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nUpdate: status\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nDisposition: investigating\u003cbr\u003e\nIncident: summary-incident\u003cbr\u003e\nOwner: summary-owner\u003cbr\u003e\nUpdated by: summary-actor\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "incident.updated/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating",
+      "subject": "Incident updated"
+    },
+    "formatted": "Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nUpdate: status\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nDisposition: investigating\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "incident.updated/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating\nIncident: summary\\-incident\nOwner: summary\\-owner\nUpdated by: summary\\-actor",
+      "subject": "Incident updated"
+    },
+    "formatted": "Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating\nIncident: summary-incident\nOwner: summary-owner\nUpdated by: summary-actor",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nUpdate: status\u003cbr\u003e\nStatus: confirmed\u003cbr\u003e\nDisposition: investigating\u003cbr\u003e\nIncident: summary-incident\u003cbr\u003e\nOwner: summary-owner\u003cbr\u003e\nUpdated by: summary-actor\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "incident.updated/pager/detail": {
+    "fields": {
+      "summary": "Incident updated: Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating\nIncident: summary\\-incident\nOwner: summary\\-owner\nUpdated by: summary\\-actor"
+    }
+  },
+  "incident.updated/pager/signal": {
+    "fields": {
+      "summary": "Incident updated: Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating"
+    }
+  },
+  "incident.updated/pager/summary": {
+    "fields": {
+      "summary": "Incident updated: Severity: critical\nUpdate: status\nStatus: confirmed\nDisposition: investigating\nIncident: summary\\-incident\nOwner: summary\\-owner\nUpdated by: summary\\-actor"
+    }
+  },
+  "incident.updated/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-incident.updated",
+        "type": "incident.updated",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "disposition": "investigating",
+          "event_label": "signal-event-label",
+          "event_type": "incident.updated",
+          "incident_title": "summary-incident",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "owner": "summary-owner",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title",
+          "update_kind": "status"
+        }
+      }
+    }
+  },
+  "incident.updated/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-incident.updated",
+        "type": "incident.updated",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "disposition": "investigating",
+          "event_label": "signal-event-label",
+          "event_type": "incident.updated",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "severity": "critical",
+          "status": "confirmed",
+          "update_kind": "status"
+        }
+      }
+    }
+  },
+  "incident.updated/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-incident.updated",
+        "type": "incident.updated",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "disposition": "investigating",
+          "event_label": "signal-event-label",
+          "event_type": "incident.updated",
+          "incident_title": "summary-incident",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "owner": "summary-owner",
+          "severity": "critical",
+          "status": "confirmed",
+          "summary": "summary-description",
+          "title": "summary-title",
+          "update_kind": "status"
+        }
+      }
+    }
+  },
   "quality_gate.failed/chat/detail": {
     "fields": {
       "body": "Failed conditions: 3\nOccurred: 2026\\-10\\-02 09\\:00 UTC\nProject: summary\\-project",
@@ -1378,6 +2873,132 @@
           "target": "summary-target.example",
           "title": "summary-title",
           "total_count": "12"
+        }
+      }
+    }
+  },
+  "response.finished/chat/detail": {
+    "fields": {
+      "body": "Outcome: failed\nAction: \nTarget: summary\\-target\\.example\nActor: summary\\-actor\nEngagement: summary\\-engagement",
+      "title": "Response finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Response finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Action: \",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Target: summary-target.example\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Actor: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Response finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "response.finished/chat/signal": {
+    "fields": {
+      "body": "Outcome: failed\nAction: ",
+      "title": "Response finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Response finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Action: \",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Response finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "response.finished/chat/summary": {
+    "fields": {
+      "body": "Outcome: failed\nAction: \nActor: summary\\-actor\nEngagement: summary\\-engagement",
+      "title": "Response finished"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Response finished\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Outcome: failed\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Action: \",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Actor: summary-actor\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Response finished\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "response.finished/email/detail": {
+    "fields": {
+      "body": "Outcome: failed\nAction: \nTarget: summary\\-target\\.example\nActor: summary\\-actor\nEngagement: summary\\-engagement",
+      "subject": "Response finished"
+    },
+    "formatted": "Outcome: failed\nAction: \nTarget: summary-target.example\nActor: summary-actor\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eOutcome: failed\u003cbr\u003e\nAction: \u003cbr\u003e\nTarget: summary-target.example\u003cbr\u003e\nActor: summary-actor\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "response.finished/email/signal": {
+    "fields": {
+      "body": "Outcome: failed\nAction: ",
+      "subject": "Response finished"
+    },
+    "formatted": "Outcome: failed\nAction: ",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eOutcome: failed\u003cbr\u003e\nAction: \u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "response.finished/email/summary": {
+    "fields": {
+      "body": "Outcome: failed\nAction: \nActor: summary\\-actor\nEngagement: summary\\-engagement",
+      "subject": "Response finished"
+    },
+    "formatted": "Outcome: failed\nAction: \nActor: summary-actor\nEngagement: summary-engagement",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eOutcome: failed\u003cbr\u003e\nAction: \u003cbr\u003e\nActor: summary-actor\u003cbr\u003e\nEngagement: summary-engagement\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "response.finished/pager/detail": {
+    "fields": {
+      "summary": "Response finished: Outcome: failed\nAction: \nTarget: summary\\-target\\.example\nActor: summary\\-actor\nEngagement: summary\\-engagement"
+    }
+  },
+  "response.finished/pager/signal": {
+    "fields": {
+      "summary": "Response finished: Outcome: failed\nAction: "
+    }
+  },
+  "response.finished/pager/summary": {
+    "fields": {
+      "summary": "Response finished: Outcome: failed\nAction: \nActor: summary\\-actor\nEngagement: summary\\-engagement"
+    }
+  },
+  "response.finished/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-response.finished",
+        "type": "response.finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "response.finished",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "summary": "summary-description",
+          "target": "summary-target.example",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "response.finished/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-response.finished",
+        "type": "response.finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "response.finished",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed"
+        }
+      }
+    }
+  },
+  "response.finished/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-response.finished",
+        "type": "response.finished",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "actor": "summary-actor",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "response.finished",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "outcome": "failed",
+          "summary": "summary-description",
+          "title": "summary-title"
         }
       }
     }

@@ -49,6 +49,10 @@ func (r *TenantTransactionRunner) Run(ctx context.Context, tenantID shared.ID, f
 	}
 	memoryTenantTransactions.Lock()
 	defer memoryTenantTransactions.Unlock()
+	return runMemoryTenantTransaction(ctx, tenantID, fn)
+}
+
+func runMemoryTenantTransaction(ctx context.Context, tenantID shared.ID, fn func(context.Context) error) error {
 	transaction := &tenantTransaction{tenantID: tenantID, checkpoints: make(map[any]bool)}
 	txCtx := shared.WithTenant(context.WithValue(ctx, tenantTransactionKey{}, transaction), tenantID)
 	committed := false
@@ -70,6 +74,30 @@ func (r *TenantTransactionRunner) Run(ctx context.Context, tenantID shared.ID, f
 		publish()
 	}
 	return nil
+}
+
+var _ ports.IndependentTenantTransactionRunner = (*TenantTransactionRunner)(nil)
+
+// RunIndependent uses the existing process lock when the caller already owns it.
+// Its append-only alert writes have their own compensation list. Business row
+// checkpoints in the outer transaction must not include those independent rows.
+func (r *TenantTransactionRunner) RunIndependent(ctx context.Context, tenant shared.ID, fn func(context.Context) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if tenant.IsZero() || fn == nil {
+		return fmt.Errorf("%w: tenant transaction identity is required", shared.ErrValidation)
+	}
+	if current, ok := shared.TenantFrom(ctx); ok && current != tenant {
+		return fmt.Errorf("%w: independent tenant transaction mismatch", shared.ErrValidation)
+	}
+	if outer, ok := ctx.Value(tenantTransactionKey{}).(*tenantTransaction); ok {
+		if outer.tenantID != tenant {
+			return fmt.Errorf("%w: independent tenant transaction mismatch", shared.ErrValidation)
+		}
+		return runMemoryTenantTransaction(context.WithValue(ctx, tenantTransactionKey{}, nil), tenant, fn)
+	}
+	return r.Run(ctx, tenant, fn)
 }
 
 // registerTenantCommit defers publishing process-local work until the enclosing

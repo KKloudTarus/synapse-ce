@@ -19,6 +19,7 @@ const (
 	FilterScanKinds     Filter = "scan_kinds"
 	FilterOutcomes      Filter = "outcomes"
 	FilterProviders     Filter = "providers"
+	FilterKinds         Filter = "kinds"
 )
 
 // DataClass is the most sensitive content a payload may carry (EPIC #1327 D7). signal is the event

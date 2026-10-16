@@ -1,0 +1,15 @@
+{
+  "subject_kind": "finding",
+  "subject_id": "finding-42",
+  "vars": {
+    "actor": "analyst-42",
+    "comment_excerpt": "Please validate the affected endpoint.",
+    "event_label": "Finding commented",
+    "event_type": "finding.commented",
+    "occurred_at": "2026-10-14T08:00:00Z",
+    "severity": "high",
+    "status": "triage",
+    "summary": "A comment was added to a finding.",
+    "title": "Finding commented"
+  }
+}

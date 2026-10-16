@@ -1,5 +1,5 @@
 // Package ticketing composes the ticket domain with tenant-scoped stores.
-// ticketing intentionally adds no API, provider calls, or background job.
+// Service provides the provider-independent foundation; Workflow adds Jira delivery.
 package ticketing
 
 import (

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -190,5 +192,198 @@ func TestFindingNotificationCapturesOnlyVerifiedActorIdentity(t *testing.T) {
 	}
 	if _, present := disabledData["actor_user_id"]; present {
 		t.Fatalf("disabled actor leaked into identity snapshot: %#v", disabledData)
+	}
+}
+
+func TestFindingCommentAndMentionNotificationsCaptureCanonicalFacts(t *testing.T) {
+	tenantID, engagementID := shared.ID("tenant-comment"), shared.ID("engagement-comment")
+	users := memory.NewUserRepository()
+	actor, err := user.New("comment-author", tenantID.String(), "Comment author", user.RoleConsultant, "author-key", testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mentioned, err := user.New("mentioned-user", tenantID.String(), "Mentioned user", user.RoleReadOnly, "mentioned-key", testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range []*user.User{actor, mentioned} {
+		if err := users.Create(context.Background(), candidate); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo, comments, outbox := memory.NewFindingRepository(), memory.NewCommentRepository(), memory.NewNotificationOutbox()
+	service := NewService(repo, comments, memory.NewRetestRepository(), &fakeAudit{}, fixedClock{t: testNow}, &fakeIDs{})
+	service.SetEngagementTenantResolver(notificationEngagementResolver{value: engagement.Engagement{ID: engagementID, TenantID: tenantID, Name: "Comment assessment"}})
+	service.SetMentionUsers(users)
+	if err := service.SetNotifications(memory.NewTenantTransactionRunner(), outbox, memory.NewNotificationFindingFactsReader(users)); err != nil {
+		t.Fatal(err)
+	}
+	outbox.Activate(tenantID, testNow.Add(-time.Second))
+	created, err := service.Create(context.Background(), actor.ID.String(), engagementID, finding.ManualInput{Title: "Comment target", Severity: shared.SeverityHigh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AddCommentWithMentions(context.Background(), engagementID, created.ID, "token=secret @[mentioned-user]", actor.ID.String(), []shared.ID{mentioned.ID}); err != nil {
+		t.Fatal(err)
+	}
+	records := outbox.Records(tenantID)
+	if len(records) != 3 {
+		t.Fatalf("records=%d, want finding + comment + mention", len(records))
+	}
+	var commentData, mentionData map[string]any
+	for _, record := range records {
+		switch record.EventType {
+		case notification.EventFindingCommented:
+			if err := json.Unmarshal(record.Data, &commentData); err != nil {
+				t.Fatal(err)
+			}
+			if record.SourceID == "" || record.CaptureVersion != 3 {
+				t.Fatalf("comment record=%+v", record)
+			}
+		case notification.EventFindingMentioned:
+			if err := json.Unmarshal(record.Data, &mentionData); err != nil {
+				t.Fatal(err)
+			}
+			if record.SourceID == "" || record.CaptureVersion != 3 {
+				t.Fatalf("mention record=%+v", record)
+			}
+		}
+	}
+	if commentData["comment_excerpt"] == "" || strings.Contains(fmt.Sprint(commentData["comment_excerpt"]), "secret") {
+		t.Fatalf("comment excerpt leaked or missing: %#v", commentData)
+	}
+	if mentionData["mentioned_user_id"] != mentioned.ID.String() {
+		t.Fatalf("mention identity=%#v", mentionData["mentioned_user_id"])
+	}
+	commentsList, err := comments.ListByEngagementFinding(shared.WithTenant(context.Background(), tenantID), engagementID, created.ID)
+	if err != nil || len(commentsList) != 1 || len(commentsList[0].MentionUserIDs) != 1 || commentsList[0].MentionUserIDs[0] != mentioned.ID {
+		t.Fatalf("stored canonical mentions=%+v err=%v", commentsList, err)
+	}
+}
+
+func TestFindingCommentMentionsAcceptEveryActiveHumanRole(t *testing.T) {
+	roles := []user.Role{
+		user.RoleAdmin,
+		user.RoleConsultant,
+		user.RoleReviewer,
+		user.RoleReadOnly,
+		user.RoleMember,
+		user.RoleIntegrationAdmin,
+	}
+	for _, role := range roles {
+		t.Run(string(role), func(t *testing.T) {
+			tenantID, engagementID := shared.ID("tenant-mention-"+string(role)), shared.ID("engagement-mention-"+string(role))
+			users := memory.NewUserRepository()
+			actor, err := user.New(shared.ID("comment-author-"+string(role)), tenantID.String(), "Comment author", user.RoleConsultant, "author-key", testNow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mentioned, err := user.New(shared.ID("mentioned-"+string(role)), tenantID.String(), "Mentioned user", role, "mentioned-key", testNow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range []*user.User{actor, mentioned} {
+				if err := users.Create(context.Background(), candidate); err != nil {
+					t.Fatal(err)
+				}
+			}
+			repo, comments, outbox := memory.NewFindingRepository(), memory.NewCommentRepository(), memory.NewNotificationOutbox()
+			service := NewService(repo, comments, memory.NewRetestRepository(), &fakeAudit{}, fixedClock{t: testNow}, &fakeIDs{})
+			service.SetEngagementTenantResolver(notificationEngagementResolver{value: engagement.Engagement{ID: engagementID, TenantID: tenantID, Name: "Mention assessment"}})
+			service.SetMentionUsers(users)
+			if err := service.SetNotifications(memory.NewTenantTransactionRunner(), outbox, memory.NewNotificationFindingFactsReader(users)); err != nil {
+				t.Fatal(err)
+			}
+			outbox.Activate(tenantID, testNow.Add(-time.Second))
+			created, err := service.Create(context.Background(), actor.ID.String(), engagementID, finding.ManualInput{Title: "Mention target", Severity: shared.SeverityHigh})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.AddCommentWithMentions(context.Background(), engagementID, created.ID, "@mentioned", actor.ID.String(), []shared.ID{mentioned.ID}); err != nil {
+				t.Fatalf("add comment with %s mention: %v", role, err)
+			}
+			stored, err := comments.ListByEngagementFinding(shared.WithTenant(context.Background(), tenantID), engagementID, created.ID)
+			if err != nil || len(stored) != 1 || len(stored[0].MentionUserIDs) != 1 || stored[0].MentionUserIDs[0] != mentioned.ID {
+				t.Fatalf("stored mention=%+v err=%v", stored, err)
+			}
+			records := outbox.Records(tenantID)
+			mentionedRecord := false
+			for _, record := range records {
+				if record.EventType == notification.EventFindingMentioned {
+					mentionedRecord = true
+				}
+			}
+			if len(records) != 3 || !mentionedRecord {
+				t.Fatalf("outbox records=%+v", records)
+			}
+		})
+	}
+}
+
+func TestFindingCommentMentionsRejectMachineRolesBeforePersistence(t *testing.T) {
+	for _, role := range []user.Role{"agent", "mcp"} {
+		t.Run(string(role), func(t *testing.T) {
+			tenantID, engagementID := shared.ID("tenant-machine-mention-"+string(role)), shared.ID("engagement-machine-mention-"+string(role))
+			users := memory.NewUserRepository()
+			actor, err := user.New(shared.ID("comment-author-"+string(role)), tenantID.String(), "Comment author", user.RoleConsultant, "author-key", testNow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			machine := &user.User{ID: shared.ID("machine-" + string(role)), TenantID: tenantID.String(), Name: "Machine", Role: role}
+			for _, candidate := range []*user.User{actor, machine} {
+				if err := users.Create(context.Background(), candidate); err != nil {
+					t.Fatal(err)
+				}
+			}
+			repo, comments, outbox := memory.NewFindingRepository(), memory.NewCommentRepository(), memory.NewNotificationOutbox()
+			service := NewService(repo, comments, memory.NewRetestRepository(), &fakeAudit{}, fixedClock{t: testNow}, &fakeIDs{})
+			service.SetEngagementTenantResolver(notificationEngagementResolver{value: engagement.Engagement{ID: engagementID, TenantID: tenantID, Name: "Machine mention assessment"}})
+			service.SetMentionUsers(users)
+			if err := service.SetNotifications(memory.NewTenantTransactionRunner(), outbox, memory.NewNotificationFindingFactsReader(users)); err != nil {
+				t.Fatal(err)
+			}
+			outbox.Activate(tenantID, testNow.Add(-time.Second))
+			created, err := service.Create(context.Background(), actor.ID.String(), engagementID, finding.ManualInput{Title: "Mention target", Severity: shared.SeverityHigh})
+			if err != nil {
+				t.Fatal(err)
+			}
+			baseline := len(outbox.Records(tenantID))
+			if _, err := service.AddCommentWithMentions(context.Background(), engagementID, created.ID, "@machine", actor.ID.String(), []shared.ID{machine.ID}); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("add comment with %s mention error=%v, want validation", role, err)
+			}
+			stored, err := comments.ListByEngagementFinding(shared.WithTenant(context.Background(), tenantID), engagementID, created.ID)
+			if err != nil || len(stored) != 0 {
+				t.Fatalf("machine mention persisted comment=%+v err=%v", stored, err)
+			}
+			if records := outbox.Records(tenantID); len(records) != baseline {
+				t.Fatalf("machine mention persisted notification records=%+v", records)
+			}
+		})
+	}
+}
+
+func TestFindingCommentMentionFailureRollsBackCommentAndOutbox(t *testing.T) {
+	tenantID, engagementID := shared.ID("tenant-comment-rollback"), shared.ID("engagement-comment-rollback")
+	repo, comments, plainOutbox := memory.NewFindingRepository(), memory.NewCommentRepository(), memory.NewNotificationOutbox()
+	plain := NewService(repo, comments, memory.NewRetestRepository(), &fakeAudit{}, fixedClock{t: testNow}, &fakeIDs{})
+	created, err := plain.Create(context.Background(), "author", engagementID, finding.ManualInput{Title: "Rollback target", Severity: shared.SeverityLow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, comments, memory.NewRetestRepository(), &fakeAudit{}, fixedClock{t: testNow}, &fakeIDs{})
+	service.SetEngagementTenantResolver(notificationEngagementResolver{value: engagement.Engagement{ID: engagementID, TenantID: tenantID, Name: "Rollback assessment"}})
+	if err := service.SetNotifications(memory.NewTenantTransactionRunner(), appendThenFailOutbox{next: plainOutbox, err: errors.New("outbox unavailable")}, memory.NewNotificationFindingFactsReader(memory.NewUserRepository())); err != nil {
+		t.Fatal(err)
+	}
+	plainOutbox.Activate(tenantID, testNow.Add(-time.Second))
+	if _, err := service.AddComment(context.Background(), engagementID, created.ID, "will roll back", "author"); err == nil {
+		t.Fatal("want outbox failure")
+	}
+	stored, err := comments.ListByEngagementFinding(shared.WithTenant(context.Background(), tenantID), engagementID, created.ID)
+	if err != nil || len(stored) != 0 {
+		t.Fatalf("comment escaped rollback: %+v err=%v", stored, err)
+	}
+	if records := plainOutbox.Records(tenantID); len(records) != 0 {
+		t.Fatalf("outbox escaped rollback: %+v", records)
 	}
 }

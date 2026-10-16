@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeintent"
 )
@@ -33,9 +34,19 @@ type Mapping struct {
 	Labels        []string
 	PriorityMap   map[string]string
 	SecurityLevel string
-	Version       int
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// SummaryTemplate and DescriptionTemplate are msgtemplate sources. They are
+	// stored with the mapping so a preview and its eventual intent use the same
+	// administrator-approved shape.
+	SummaryTemplate     string
+	DescriptionTemplate string
+	FieldValues         map[string]string
+	Transition          string
+	DataClass           notification.DataClass
+	Locale              string
+	WaiverReason        string
+	Version             int
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 func (m Mapping) Validate() error {
@@ -43,7 +54,7 @@ func (m Mapping) Validate() error {
 		m.ScopeID.IsZero() || (m.Scope != Project && m.Scope != Engagement) ||
 		!bounded(m.ProjectKey, 255) || !bounded(m.IssueType, 255) ||
 		len(m.Component) > 255 || !validText(m.Component) || len(m.SecurityLevel) > 255 || !validText(m.SecurityLevel) ||
-		len(m.Labels) > 32 || len(m.PriorityMap) > 32 || m.Version < 1 ||
+		len(m.Labels) > 32 || len(m.PriorityMap) > 32 || len(m.FieldValues) > 64 || m.Version < 1 ||
 		m.CreatedAt.IsZero() || m.UpdatedAt.Before(m.CreatedAt) {
 		return fmt.Errorf("%w: invalid ticket mapping", shared.ErrValidation)
 	}
@@ -57,6 +68,19 @@ func (m Mapping) Validate() error {
 			return fmt.Errorf("%w: invalid ticket priority mapping", shared.ErrValidation)
 		}
 	}
+	for k, v := range m.FieldValues {
+		if !bounded(k, 255) || len(v) > 4096 || !validText(v) {
+			return fmt.Errorf("%w: invalid ticket field value", shared.ErrValidation)
+		}
+	}
+	if len(m.SummaryTemplate) > 4096 || len(m.DescriptionTemplate) > 16384 ||
+		!validText(m.SummaryTemplate) || !validText(m.DescriptionTemplate) ||
+		len(m.Transition) > 255 || !validText(m.Transition) ||
+		(m.DataClass != "" && !m.DataClass.Valid()) ||
+		(m.Locale != "" && m.Locale != "en" && m.Locale != "vi") ||
+		len(m.WaiverReason) > 1024 || !validText(m.WaiverReason) {
+		return fmt.Errorf("%w: invalid ticket template or transition", shared.ErrValidation)
+	}
 	labels, err := json.Marshal(m.Labels)
 	if err != nil {
 		return fmt.Errorf("%w: invalid ticket labels", shared.ErrValidation)
@@ -68,6 +92,10 @@ func (m Mapping) Validate() error {
 	if len(labels) > 8192 || len(priorities) > 8192 {
 		return fmt.Errorf("%w: ticket mapping JSON exceeds persistence limit", shared.ErrValidation)
 	}
+	fields, err := json.Marshal(m.FieldValues)
+	if err != nil || len(fields) > 16384 {
+		return fmt.Errorf("%w: ticket field values exceed persistence limit", shared.ErrValidation)
+	}
 	return nil
 }
 func (m Mapping) Clone() Mapping {
@@ -78,6 +106,13 @@ func (m Mapping) Clone() Mapping {
 			out[k] = v
 		}
 		m.PriorityMap = out
+	}
+	if m.FieldValues != nil {
+		out := make(map[string]string, len(m.FieldValues))
+		for k, v := range m.FieldValues {
+			out[k] = v
+		}
+		m.FieldValues = out
 	}
 	return m
 }
@@ -201,8 +236,43 @@ type Intent struct {
 	RemoteID      string
 	RemoteURL     string
 	ErrorCode     string // stable classification only; no raw HTTP/provider errors
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// Snapshot is the exact provider payload (including a server-issued marker),
+	// plus the revisions and security decision which authorized it. It is never
+	// recomputed by a worker from mutable finding or mapping rows.
+	Snapshot           json.RawMessage
+	MappingVersion     int
+	ConnectionRevision int
+	CredentialRevision int
+	SecurityLevel      string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type DispatchTuple struct {
+	TenantID, IntegrationID shared.ID
+	ProjectKey, IssueType   string
+}
+
+// DispatchTarget derives the breaker identity exclusively from the immutable intent
+// snapshot. Current mappings are deliberately not consulted by a worker.
+func (i Intent) DispatchTarget() (DispatchTuple, error) {
+	if i.TenantID.IsZero() || i.IntegrationID.IsZero() || len(i.Snapshot) == 0 {
+		return DispatchTuple{}, fmt.Errorf("%w: ticket dispatch snapshot missing", shared.ErrValidation)
+	}
+	var payload struct {
+		Fields struct {
+			Project struct {
+				Key string `json:"key"`
+			} `json:"project"`
+			IssueType struct {
+				ID string `json:"id"`
+			} `json:"issuetype"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(i.Snapshot, &payload); err != nil || !bounded(payload.Fields.Project.Key, 255) || !bounded(payload.Fields.IssueType.ID, 255) {
+		return DispatchTuple{}, fmt.Errorf("%w: ticket dispatch snapshot target invalid", shared.ErrValidation)
+	}
+	return DispatchTuple{TenantID: i.TenantID, IntegrationID: i.IntegrationID, ProjectKey: payload.Fields.Project.Key, IssueType: payload.Fields.IssueType.ID}, nil
 }
 
 // IntentTransition supplies the evidence for one state-machine transition.
@@ -219,8 +289,15 @@ func (i Intent) Validate() error {
 		i.FindingID.IsZero() || i.EngagementID.IsZero() || !bounded(i.RequestKey, 128) || !sha256Pattern.MatchString(i.PayloadDigest) ||
 		i.Marker != "synapse-intent-"+i.ID.String() || len(i.Marker) > 256 ||
 		!i.State.Valid() || i.Version < 1 || i.Attempts < 0 || i.CreatedAt.IsZero() ||
-		i.UpdatedAt.Before(i.CreatedAt) {
+		i.UpdatedAt.Before(i.CreatedAt) || len(i.Snapshot) > 64<<10 {
 		return fmt.Errorf("%w: invalid ticket intent", shared.ErrValidation)
+	}
+	if len(i.Snapshot) != 0 {
+		var snapshot any
+		if err := json.Unmarshal(i.Snapshot, &snapshot); err != nil || snapshot == nil ||
+			i.MappingVersion < 1 || i.ConnectionRevision < 1 || i.CredentialRevision < 0 {
+			return fmt.Errorf("%w: ticket intent snapshot is invalid", shared.ErrValidation)
+		}
 	}
 	switch i.Action {
 	case Create, Update, Transition, Comment:
@@ -354,5 +431,6 @@ func (i Intent) Clone() Intent {
 		at := *i.LeaseUntil
 		i.LeaseUntil = &at
 	}
+	i.Snapshot = append(json.RawMessage(nil), i.Snapshot...)
 	return i
 }

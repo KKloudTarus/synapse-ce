@@ -15,7 +15,7 @@ import (
 var contractKeywords = map[string]bool{
 	"$schema": true, "$id": true, "title": true, "description": true,
 	"type": true, "const": true, "enum": true, "format": true,
-	"minLength": true, "minimum": true, "required": true,
+	"minLength": true, "maxLength": true, "minimum": true, "maxItems": true, "items": true, "required": true,
 	"properties": true, "additionalProperties": true,
 }
 
@@ -49,6 +49,18 @@ func Check(node map[string]any) error {
 		n, ok := raw.(float64)
 		if !ok || n < 0 || math.Trunc(n) != n {
 			return fmt.Errorf("invalid minLength")
+		}
+	}
+	if raw, exists := node["maxLength"]; exists {
+		n, ok := raw.(float64)
+		if !ok || n < 0 || math.Trunc(n) != n {
+			return fmt.Errorf("invalid maxLength")
+		}
+	}
+	if raw, exists := node["maxItems"]; exists {
+		n, ok := raw.(float64)
+		if !ok || n < 0 || math.Trunc(n) != n {
+			return fmt.Errorf("invalid maxItems")
 		}
 	}
 	if raw, exists := node["minimum"]; exists {
@@ -106,6 +118,15 @@ func Check(node map[string]any) error {
 		}
 		if err := Check(child); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	if raw, exists := node["items"]; exists {
+		child, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("items must be a schema")
+		}
+		if err := Check(child); err != nil {
+			return fmt.Errorf("items: %w", err)
 		}
 	}
 	return nil
@@ -188,6 +209,9 @@ func Match(node map[string]any, value any) error {
 		if n, ok := node["minLength"].(float64); ok && float64(len([]rune(text))) < n {
 			return fmt.Errorf("string too short")
 		}
+		if n, ok := node["maxLength"].(float64); ok && float64(len([]rune(text))) > n {
+			return fmt.Errorf("string too long")
+		}
 		if node["format"] == "date-time" {
 			if _, err := time.Parse(time.RFC3339Nano, text); err != nil {
 				return fmt.Errorf("invalid date-time: %w", err)
@@ -218,6 +242,19 @@ func Match(node map[string]any, value any) error {
 			}
 			if err := Match(child.(map[string]any), childValue); err != nil {
 				return fmt.Errorf("%s: %w", key, err)
+			}
+		}
+	}
+	if items, ok := value.([]any); ok {
+		if limit, ok := node["maxItems"].(float64); ok && float64(len(items)) > limit {
+			return fmt.Errorf("array too long")
+		}
+		if raw, exists := node["items"]; exists {
+			child := raw.(map[string]any)
+			for index, item := range items {
+				if err := Match(child, item); err != nil {
+					return fmt.Errorf("item %d: %w", index, err)
+				}
 			}
 		}
 	}

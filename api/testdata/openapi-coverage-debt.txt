@@ -36,7 +36,6 @@ GET /api/v1/engagements/{p}/evidence
 GET /api/v1/engagements/{p}/evidence/{p}
 GET /api/v1/engagements/{p}/export/cyclonedx
 GET /api/v1/engagements/{p}/export/spdx
-GET /api/v1/engagements/{p}/findings/{p}/comments
 GET /api/v1/engagements/{p}/findings/{p}/retests
 GET /api/v1/engagements/{p}/imported-findings
 GET /api/v1/engagements/{p}/judgments
@@ -98,7 +97,6 @@ POST /api/v1/engagements/{p}/dast/approvals/{p}/decide
 POST /api/v1/engagements/{p}/dast/proposals
 POST /api/v1/engagements/{p}/dast/proposals/{p}/run
 POST /api/v1/engagements/{p}/evidence
-POST /api/v1/engagements/{p}/findings/{p}/comments
 POST /api/v1/engagements/{p}/findings/{p}/retests
 POST /api/v1/engagements/{p}/findings/{p}/verify
 POST /api/v1/engagements/{p}/judgments/{p}/accept

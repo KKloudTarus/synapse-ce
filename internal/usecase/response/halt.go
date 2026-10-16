@@ -66,6 +66,15 @@ func (s *Service) HaltResponses(ctx context.Context, tenantID shared.ID, actor, 
 	executorHaltCtx, cancelExecutorHalt := context.WithTimeout(ctx, 5*time.Second)
 	executorHaltErr := s.deliverHaltDispatch(executorHaltCtx, haltDispatch)
 	cancelExecutorHalt()
+	active, err := s.store.ListAttemptsByState(ctx,
+		responsesaga.StateIssued, responsesaga.StateClaimed, responsesaga.StateExecuting, responsesaga.StateOutcomeUnknown,
+		responsesaga.StateCommandApplied, responsesaga.StateVerifying,
+		responsesaga.StateRollbackRequested, responsesaga.StateRollingBack,
+		responsesaga.StateRollbackVerifying, responsesaga.StateRollbackUnknown)
+	if err != nil {
+		s.effectMu.Unlock()
+		return 0, err
+	}
 	pending, err := s.store.ListByState(ctx, StatePending)
 	if err != nil {
 		s.effectMu.Unlock()
@@ -85,7 +94,32 @@ func (s *Service) HaltResponses(ctx context.Context, tenantID shared.ID, actor, 
 			actor, "response.cancelled_by_halt", rec.ID.String(), rec.UpdatedAt,
 			map[string]string{"reason": reason, "generation": fmt.Sprint(haltGeneration), "kind": string(rec.Action.Kind), "target": rec.Action.Target.String()},
 		)
-		transitioned, committed, transitionErr := s.store.TransitionWithAudit(ctx, rec, StatePending, intent)
+		var (
+			transitioned  bool
+			committed     ports.ResponseAuditIntent
+			transitionErr error
+		)
+		// A pending projection can lag an apply attempt after a crash. The
+		// deterministic apply-attempt key lets us inspect that single saga without
+		// scanning history: any existing attempt owns the terminal fact, so this
+		// parent cancellation must not fabricate a halted response.finished source.
+		deferTerminalSource := s.notifications != nil
+		if s.notifications != nil {
+			_, found, attemptErr := s.store.GetAttempt(ctx, responseAttemptKey(rec.Action, false))
+			if attemptErr != nil {
+				// Continue cancelling and journaling the parent record, but return a
+				// failed halt rather than claim a terminal fact while its saga cannot
+				// be inspected.
+				failed++
+			} else {
+				deferTerminalSource = found
+			}
+		}
+		if deferTerminalSource {
+			transitioned, committed, transitionErr = s.store.TransitionWithAudit(ctx, rec, StatePending, intent)
+		} else {
+			transitioned, committed, transitionErr = s.transitionWithAuditAndNotification(ctx, rec, StatePending, intent, "halted", actor)
+		}
 		if transitionErr != nil || !transitioned {
 			// A pending, production-changing action that could NOT be cancelled must not vanish from the
 			// count and read as a clean halt — it is a hard failure the operator must see.
@@ -98,21 +132,13 @@ func (s *Service) HaltResponses(ctx context.Context, tenantID shared.ID, actor, 
 		haltedActions[rec.ID] = rec
 		haltedDirections[responseFlightKey(tenantID, rec.ID, false)] = true
 	}
-	active, err := s.store.ListAttemptsByState(ctx,
-		responsesaga.StateIssued, responsesaga.StateClaimed, responsesaga.StateExecuting, responsesaga.StateOutcomeUnknown,
-		responsesaga.StateCommandApplied, responsesaga.StateVerifying,
-		responsesaga.StateRollbackRequested, responsesaga.StateRollingBack,
-		responsesaga.StateRollbackVerifying, responsesaga.StateRollbackUnknown)
-	if err != nil {
-		s.effectMu.Unlock()
-		return len(haltedActions), err
-	}
 	for _, attempt := range active {
 		from := attempt.State
 		to := responsesaga.StateCommandFailed
 		alreadyAmbiguous := from == responsesaga.StateOutcomeUnknown ||
 			from == responsesaga.StateRollbackVerifying || from == responsesaga.StateRollbackUnknown
-		postEffectVerification := from == responsesaga.StateCommandApplied || from == responsesaga.StateVerifying
+		postEffectVerification := from == responsesaga.StateCommandApplied || from == responsesaga.StateVerifying ||
+			(!attempt.IsReversal && from == responsesaga.StateRollbackRequested)
 		if from == responsesaga.StateExecuting {
 			to = responsesaga.StateOutcomeUnknown
 		} else if from == responsesaga.StateRollingBack {
@@ -127,27 +153,31 @@ func (s *Service) HaltResponses(ctx context.Context, tenantID shared.ID, actor, 
 			if attempt.IsReversal {
 				operation = "revert"
 			}
-			intent := responseAuditIntent(
-				fmt.Sprintf("response-halt:v1:%s:%d:attempt:%s:%s", tenantID, haltGeneration, attempt.IdempotencyKey, to),
-				actor, "response.attempt_halted", attempt.ActionID.String(), s.clock.Now().UTC(),
+			record, found, getErr := s.store.Get(ctx, attempt.ActionID)
+			if getErr != nil || !found {
+				failed++
+				continue
+			}
+			_, committed, claimErr := s.commitAttemptOutcome(ctx, attempt, from, to, "response.attempt_halted", actor, record.Action,
 				map[string]string{
 					"reason": reason, "generation": fmt.Sprint(haltGeneration), "operation": operation,
 					"from_state": string(from), "to_state": string(to), "attempt_idempotency_key": attempt.IdempotencyKey,
 				},
 			)
-			stored, claimed, committed, claimErr := s.store.TransitionAttemptWithAudit(ctx, attempt, from, intent)
 			if claimErr != nil {
-				failed++
-				continue
-			}
-			if !claimed && stored.State != to {
-				failed++
-				continue
-			}
-			if claimed {
-				if err := s.deliverResponseAudit(ctx, committed); err != nil {
-					failed++
+				if errors.Is(claimErr, shared.ErrConflict) {
+					stored, found, readErr := s.store.GetAttempt(ctx, attempt.IdempotencyKey)
+					if readErr == nil && found && stored.State == to {
+						claimErr = nil
+					}
 				}
+				if claimErr != nil {
+					failed++
+					continue
+				}
+			}
+			if committed.ID != "" && s.deliverResponseAudit(ctx, committed) != nil {
+				failed++
 			}
 		}
 		rec, found, getErr := s.store.Get(ctx, attempt.ActionID)
@@ -195,7 +225,8 @@ func (s *Service) HaltResponses(ctx context.Context, tenantID shared.ID, actor, 
 	postEffect, err := s.store.ListAttemptsByState(ctx,
 		responsesaga.StateCommandApplied, responsesaga.StateOutcomeUnknown, responsesaga.StateVerifying,
 		responsesaga.StateVerifiedSucceeded, responsesaga.StateVerificationFailed,
-		responsesaga.StateVerificationUnknown, responsesaga.StateTimedOut,
+		responsesaga.StateVerificationUnknown, responsesaga.StateTimedOut, responsesaga.StateManualIntervention,
+		responsesaga.StateCompleted,
 		responsesaga.StateRollbackVerifying, responsesaga.StateRollbackUnknown, responsesaga.StateRolledBack)
 	if err != nil {
 		return len(haltedActions), err

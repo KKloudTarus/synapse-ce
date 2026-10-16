@@ -1,0 +1,532 @@
+{
+  "verified_at": "2026-10-15T06:34:43.356Z",
+  "provenance": "actual Jira REST reads and durable Synapse API state; no fault injection",
+  "results": [
+    {
+      "kind": "cloud",
+      "locale": "en",
+      "engagement_id": "09713763d049273ab2c7d7e1b706c18c",
+      "finding_id": "1ad41b2c19ea37170d949388df96f2df",
+      "mapping_id": "4b89a0511bab9f28ab606ecbbb2d4011",
+      "intent_id": "5a9fccb1e280ab5cfbd131a51f76d233",
+      "remote_key": "SNT-3",
+      "remote_url": "https://vku-team-y0admp5f.atlassian.net/browse/SNT-3",
+      "preview_digest": "9c1884aa4c92c0368503ad0c207b4a716948647947fbacdf636265b56735a782",
+      "security_level": {
+        "self": "https://vku-team-y0admp5f.atlassian.net/rest/api/3/securitylevel/10000",
+        "id": "10000",
+        "description": "Only the reporter can view synthetic acceptance tickets.",
+        "name": "Synapse Restricted"
+      },
+      "priority": "High",
+      "marker": "synapse-intent-5a9fccb1e280ab5cfbd131a51f76d233",
+      "intent_count": 1,
+      "link_count": 1,
+      "attempts": 1,
+      "state": "done",
+      "checks": {
+        "summary": true,
+        "description": true,
+        "priority": true,
+        "security": true,
+        "marker": true,
+        "labels": true,
+        "project": true,
+        "issue_type": true,
+        "waiver": true,
+        "unique_marker": true,
+        "reporter": true
+      },
+      "preview_fields": {
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Finding: Sandbox: restricted SQL injection in user lookup",
+                  "type": "text"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "text": "ID: 1ad41b2c19ea37170d949388df96f2df",
+                  "type": "text"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "text": "Severity: high",
+                  "type": "text"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "text": "Status: open",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "attrs": {
+                        "href": "https://desktop-gtg6t7c.tailc140b8.ts.net:8444/engagements/09713763d049273ab2c7d7e1b706c18c/findings#finding-1ad41b2c19ea37170d949388df96f2df"
+                      },
+                      "type": "link"
+                    }
+                  ],
+                  "text": "Open finding",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10004"
+        },
+        "labels": [
+          "synapse-sandbox"
+        ],
+        "priority": {
+          "id": "2"
+        },
+        "project": {
+          "key": "SNT"
+        },
+        "security": {
+          "id": "10000"
+        },
+        "summary": "high finding: Sandbox: restricted SQL injection in user lookup"
+      },
+      "provider_fields": {
+        "summary": "high finding: Sandbox: restricted SQL injection in user lookup",
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Finding: Sandbox: restricted SQL injection in user lookup"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "type": "text",
+                  "text": "ID: 1ad41b2c19ea37170d949388df96f2df"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "type": "text",
+                  "text": "Severity: high"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "type": "text",
+                  "text": "Status: open"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Open finding",
+                  "marks": [
+                    {
+                      "type": "link",
+                      "attrs": {
+                        "href": "https://desktop-gtg6t7c.tailc140b8.ts.net:8444/engagements/09713763d049273ab2c7d7e1b706c18c/findings#finding-1ad41b2c19ea37170d949388df96f2df"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "priority": {
+          "id": "2"
+        },
+        "security": {
+          "id": "10000"
+        },
+        "labels": [
+          "synapse-intent-5a9fccb1e280ab5cfbd131a51f76d233",
+          "synapse-sandbox"
+        ],
+        "issuetype": {
+          "id": "10004"
+        },
+        "project": {
+          "key": "SNT"
+        }
+      }
+    },
+    {
+      "kind": "cloud",
+      "locale": "vi",
+      "engagement_id": "c610659828f04a6b4365ea7dcacc8c4c",
+      "finding_id": "db34ddfa7cc49ad342b082aa7b708a9c",
+      "mapping_id": "031ac8248ba02b2f7091757bc765501a",
+      "intent_id": "9402d7a6c092f490c7891b19a8ef403b",
+      "remote_key": "SNT-4",
+      "remote_url": "https://vku-team-y0admp5f.atlassian.net/browse/SNT-4",
+      "preview_digest": "c8ef1a47bb967c71a9b351c626069b78bcd747c735a8262e4dad8989249a79eb",
+      "security_level": {
+        "self": "https://vku-team-y0admp5f.atlassian.net/rest/api/3/securitylevel/10000",
+        "id": "10000",
+        "description": "Only the reporter can view synthetic acceptance tickets.",
+        "name": "Synapse Restricted"
+      },
+      "priority": "High",
+      "marker": "synapse-intent-9402d7a6c092f490c7891b19a8ef403b",
+      "intent_count": 1,
+      "link_count": 1,
+      "attempts": 1,
+      "state": "done",
+      "checks": {
+        "summary": true,
+        "description": true,
+        "priority": true,
+        "security": true,
+        "marker": true,
+        "labels": true,
+        "project": true,
+        "issue_type": true,
+        "waiver": true,
+        "unique_marker": true,
+        "reporter": true
+      },
+      "preview_fields": {
+        "description": {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Phát hiện: Sandbox: SQL injection trong tra cứu người dùng có giới hạn quyền xem",
+                  "type": "text"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "text": "Mã: db34ddfa7cc49ad342b082aa7b708a9c",
+                  "type": "text"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "text": "Mức độ: cao",
+                  "type": "text"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "text": "Trạng thái: mở",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "attrs": {
+                        "href": "https://desktop-gtg6t7c.tailc140b8.ts.net:8444/engagements/c610659828f04a6b4365ea7dcacc8c4c/findings#finding-db34ddfa7cc49ad342b082aa7b708a9c"
+                      },
+                      "type": "link"
+                    }
+                  ],
+                  "text": "Open finding",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "doc",
+          "version": 1
+        },
+        "issuetype": {
+          "id": "10004"
+        },
+        "labels": [
+          "synapse-sandbox"
+        ],
+        "priority": {
+          "id": "2"
+        },
+        "project": {
+          "key": "SNT"
+        },
+        "security": {
+          "id": "10000"
+        },
+        "summary": "Phát hiện cao: Sandbox: SQL injection trong tra cứu người dùng có giới hạn quyền xem"
+      },
+      "provider_fields": {
+        "summary": "Phát hiện cao: Sandbox: SQL injection trong tra cứu người dùng có giới hạn quyền xem",
+        "description": {
+          "type": "doc",
+          "version": 1,
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Phát hiện: Sandbox: SQL injection trong tra cứu người dùng có giới hạn quyền xem"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "type": "text",
+                  "text": "Mã: db34ddfa7cc49ad342b082aa7b708a9c"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "type": "text",
+                  "text": "Mức độ: cao"
+                },
+                {
+                  "type": "hardBreak"
+                },
+                {
+                  "type": "text",
+                  "text": "Trạng thái: mở"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Open finding",
+                  "marks": [
+                    {
+                      "type": "link",
+                      "attrs": {
+                        "href": "https://desktop-gtg6t7c.tailc140b8.ts.net:8444/engagements/c610659828f04a6b4365ea7dcacc8c4c/findings#finding-db34ddfa7cc49ad342b082aa7b708a9c"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "priority": {
+          "id": "2"
+        },
+        "security": {
+          "id": "10000"
+        },
+        "labels": [
+          "synapse-intent-9402d7a6c092f490c7891b19a8ef403b",
+          "synapse-sandbox"
+        ],
+        "issuetype": {
+          "id": "10004"
+        },
+        "project": {
+          "key": "SNT"
+        }
+      }
+    },
+    {
+      "kind": "dc",
+      "locale": "en",
+      "engagement_id": "568bf94f0a748fb5009e9d0a852a7071",
+      "finding_id": "7aef5148299635971b5ca8c9ad5a4970",
+      "mapping_id": "524a9efe350d3d13d4a6de7d558a86c7",
+      "intent_id": "75e52bec811c4858aa11bbdee3580f0a",
+      "remote_key": "SNT-3",
+      "remote_url": "https://desktop-gtg6t7c.tailc140b8.ts.net:8443/browse/SNT-3",
+      "preview_digest": "7dc74f7717ada7a5fabdceecb8a06ee16067a5f0bda33ddbfbe516b93950e362",
+      "security_level": {
+        "self": "https://desktop-gtg6t7c.tailc140b8.ts.net:8443/rest/api/2/securitylevel/10000",
+        "id": "10000",
+        "description": "Only the reporter can view synthetic acceptance tickets.",
+        "name": "Synapse Restricted"
+      },
+      "priority": "High",
+      "marker": "synapse-intent-75e52bec811c4858aa11bbdee3580f0a",
+      "intent_count": 1,
+      "link_count": 1,
+      "attempts": 1,
+      "state": "done",
+      "checks": {
+        "summary": true,
+        "description": true,
+        "priority": true,
+        "security": true,
+        "marker": true,
+        "labels": true,
+        "project": true,
+        "issue_type": true,
+        "waiver": true,
+        "unique_marker": true,
+        "reporter": true
+      },
+      "preview_fields": {
+        "description": "Finding&#58; Sandbox&#58; restricted SQL injection in user lookup\nID&#58; 7aef5148299635971b5ca8c9ad5a4970\nSeverity&#58; high\nStatus&#58; open\n\n[Open finding|https://desktop-gtg6t7c.tailc140b8.ts.net:8444/engagements/568bf94f0a748fb5009e9d0a852a7071/findings#finding-7aef5148299635971b5ca8c9ad5a4970]",
+        "issuetype": {
+          "id": "10003"
+        },
+        "labels": [
+          "synapse-sandbox"
+        ],
+        "priority": {
+          "id": "2"
+        },
+        "project": {
+          "key": "SNT"
+        },
+        "reporter": {
+          "name": "sandbox-admin"
+        },
+        "security": {
+          "id": "10000"
+        },
+        "summary": "high finding: Sandbox: restricted SQL injection in user lookup"
+      },
+      "provider_fields": {
+        "summary": "high finding: Sandbox: restricted SQL injection in user lookup",
+        "description": "Finding&#58; Sandbox&#58; restricted SQL injection in user lookup\nID&#58; 7aef5148299635971b5ca8c9ad5a4970\nSeverity&#58; high\nStatus&#58; open\n\n[Open finding|https://desktop-gtg6t7c.tailc140b8.ts.net:8444/engagements/568bf94f0a748fb5009e9d0a852a7071/findings#finding-7aef5148299635971b5ca8c9ad5a4970]",
+        "priority": {
+          "id": "2"
+        },
+        "security": {
+          "id": "10000"
+        },
+        "labels": [
+          "synapse-intent-75e52bec811c4858aa11bbdee3580f0a",
+          "synapse-sandbox"
+        ],
+        "issuetype": {
+          "id": "10003"
+        },
+        "project": {
+          "key": "SNT"
+        },
+        "reporter": {
+          "name": "sandbox-admin"
+        }
+      }
+    },
+    {
+      "kind": "dc",
+      "locale": "vi",
+      "engagement_id": "797ed69ce8a8058792dc40ec21df61aa",
+      "finding_id": "ca9de84543713f4d3da48b9f255aab54",
+      "mapping_id": "8ebed667b94384d0c609b0c7c1492943",
+      "intent_id": "3e24ffe96fe9b8d569fe4d62b1ae5641",
+      "remote_key": "SNT-4",
+      "remote_url": "https://desktop-gtg6t7c.tailc140b8.ts.net:8443/browse/SNT-4",
+      "preview_digest": "30783431529987080a371ac43e2f4574b9c9b7225826ebc1ce6abff5db596a4b",
+      "security_level": {
+        "self": "https://desktop-gtg6t7c.tailc140b8.ts.net:8443/rest/api/2/securitylevel/10000",
+        "id": "10000",
+        "description": "Only the reporter can view synthetic acceptance tickets.",
+        "name": "Synapse Restricted"
+      },
+      "priority": "High",
+      "marker": "synapse-intent-3e24ffe96fe9b8d569fe4d62b1ae5641",
+      "intent_count": 1,
+      "link_count": 1,
+      "attempts": 1,
+      "state": "done",
+      "checks": {
+        "summary": true,
+        "description": true,
+        "priority": true,
+        "security": true,
+        "marker": true,
+        "labels": true,
+        "project": true,
+        "issue_type": true,
+        "waiver": true,
+        "unique_marker": true,
+        "reporter": true
+      },
+      "preview_fields": {
+        "description": "Phát hiện&#58; Sandbox&#58; SQL injection trong tra cứu người dùng có giới hạn quyền xem\nMã&#58; ca9de84543713f4d3da48b9f255aab54\nMức độ&#58; cao\nTrạng thái&#58; mở\n\n[Open finding|https://desktop-gtg6t7c.tailc140b8.ts.net:8444/engagements/797ed69ce8a8058792dc40ec21df61aa/findings#finding-ca9de84543713f4d3da48b9f255aab54]",
+        "issuetype": {
+          "id": "10003"
+        },
+        "labels": [
+          "synapse-sandbox"
+        ],
+        "priority": {
+          "id": "2"
+        },
+        "project": {
+          "key": "SNT"
+        },
+        "reporter": {
+          "name": "sandbox-admin"
+        },
+        "security": {
+          "id": "10000"
+        },
+        "summary": "Phát hiện cao: Sandbox: SQL injection trong tra cứu người dùng có giới hạn quyền xem"
+      },
+      "provider_fields": {
+        "summary": "Phát hiện cao: Sandbox: SQL injection trong tra cứu người dùng có giới hạn quyền xem",
+        "description": "Phát hiện&#58; Sandbox&#58; SQL injection trong tra cứu người dùng có giới hạn quyền xem\nMã&#58; ca9de84543713f4d3da48b9f255aab54\nMức độ&#58; cao\nTrạng thái&#58; mở\n\n[Open finding|https://desktop-gtg6t7c.tailc140b8.ts.net:8444/engagements/797ed69ce8a8058792dc40ec21df61aa/findings#finding-ca9de84543713f4d3da48b9f255aab54]",
+        "priority": {
+          "id": "2"
+        },
+        "security": {
+          "id": "10000"
+        },
+        "labels": [
+          "synapse-intent-3e24ffe96fe9b8d569fe4d62b1ae5641",
+          "synapse-sandbox"
+        ],
+        "issuetype": {
+          "id": "10003"
+        },
+        "project": {
+          "key": "SNT"
+        },
+        "reporter": {
+          "name": "sandbox-admin"
+        }
+      }
+    }
+  ],
+  "candidate_source_head": "478b617a393b836d386dd1dcc922b1deada4e3fa",
+  "runtime": {
+    "api_sha256": "9cf645f10ed368ff8979df5a55cb35f3a96721e387fe80df4c07f0ba9b596e69",
+    "worker_sha256": "622cec01ddbd8bf49b967a51402a66d6dd3879df642fcdb617479750ffe5da98",
+    "description": "Existing isolated Linux acceptance runtime built on 2026-10-14 after the required Reporter correction. These live observations cover the unchanged Jira create path. The later administrator breaker-reset route is verified by current source, HTTP, durable-store and race tests; no live reset or crash injection is claimed."
+  }
+}

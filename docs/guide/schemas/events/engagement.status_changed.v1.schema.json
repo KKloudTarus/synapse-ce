@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synapse.kkloudtarus.net/docs/schemas/events/engagement.status_changed.v1.schema.json",
+  "title": "engagement.status_changed event (v1)",
+  "description": "An engagement status changed.",
+  "type": "object",
+  "properties": {
+    "id": {"type": "string", "minLength": 1}, "type": {"type": "string", "const": "engagement.status_changed"}, "source_kind": {"type": "string", "minLength": 1}, "source_id": {"type": "string", "minLength": 1}, "schema_version": {"type": "integer", "const": 1}, "occurred_at": {"type": "string", "format": "date-time"}, "engagement_id": {"type": "string"},
+    "data": {"type": "object", "properties": {"title": {"type": "string"}, "summary": {"type": "string"}, "engagement_id": {"type": "string", "minLength": 1}, "lead_user_id": {"type": "string"}, "status": {"type": "string"}, "from_status": {"type": "string"}, "to_status": {"type": "string"}, "authorized_from": {"type": "string", "format": "date-time"}, "authorized_to": {"type": "string", "format": "date-time"}, "timezone": {"type": "string"}, "engagement_name": {"type": "string"}, "actor": {"type": "string"}}, "required": ["title", "summary", "engagement_id"], "additionalProperties": true}
+  },
+  "required": ["id", "type", "source_kind", "source_id", "schema_version", "occurred_at", "data"], "additionalProperties": true
+}

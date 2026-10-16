@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
@@ -195,24 +196,164 @@ func TestTelegramSuccessWithoutOKIsRetried(t *testing.T) {
 	}
 }
 
-func TestChatDriversIgnoreMalformedReferences(t *testing.T) {
-	replies := map[notification.ChannelType]string{
-		notification.ChannelGoogleChat: `{"name":"../../admin"}`,
-		notification.ChannelDiscord:    `{"id":"<script>"}`,
-		notification.ChannelTelegram:   `{"ok":true,"result":{"message_id":-3}}`,
+// telegramMessageReply is a successful sendMessage reply echoing text, as the Bot API sends it. With
+// escapeNonASCII the non-ASCII runes are written as \uXXXX escapes, six bytes per CJK rune.
+func telegramMessageReply(t *testing.T, text string, escapeNonASCII bool, extra map[string]any) string {
+	t.Helper()
+	message := map[string]any{
+		"message_id": 777,
+		"date":       1700000000,
+		"chat":       map[string]any{"id": -1001234567890, "type": "supergroup", "title": "Alerts"},
+		"text":       text,
 	}
-	for _, tc := range chatCases {
-		reply, ok := replies[tc.kind]
-		if !ok {
+	for k, v := range extra {
+		message[k] = v
+	}
+	raw, err := json.Marshal(map[string]any{"ok": true, "result": message})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !escapeNonASCII {
+		return string(raw)
+	}
+	var b strings.Builder
+	for _, r := range string(raw) {
+		if r < 0x80 {
+			b.WriteRune(r)
 			continue
 		}
-		t.Run(string(tc.kind), func(t *testing.T) {
+		for _, unit := range utf16.Encode([]rune{r}) {
+			fmt.Fprintf(&b, `\u%04x`, unit)
+		}
+	}
+	return b.String()
+}
+
+func TestTelegramDeliversSuccessfulRepliesLongerThan4KiB(t *testing.T) {
+	// 4096 UTF-16 code units is the longest text sendMessage accepts.
+	longest := strings.Repeat("界", 4096)
+	entities := make([]map[string]any, 0, 512)
+	for i := range 512 {
+		entities = append(entities, map[string]any{"type": "bold", "offset": i * 8, "length": 4})
+	}
+	replies := map[string]string{
+		// The reproduction from #1553: 6 KiB of valid JSON for a 2000-rune summary.
+		"multibyte summary": telegramMessageReply(t, "Finding\n\n"+strings.Repeat("界", 2000), false, nil),
+		"escaped multibyte": telegramMessageReply(t, "Finding\n\n"+strings.Repeat("界", 2000), true, nil),
+		"longest text":      telegramMessageReply(t, longest, true, map[string]any{"entities": entities}),
+		"longest follow-up": telegramMessageReply(t, longest, true, map[string]any{
+			"entities":         entities,
+			"reply_to_message": map[string]any{"message_id": 776, "date": 1699999999, "text": longest, "entities": entities},
+		}),
+	}
+	for name, reply := range replies {
+		t.Run(name, func(t *testing.T) {
+			if len(reply) <= maxResponseBytes {
+				t.Fatalf("reply is %d bytes, want more than %d", len(reply), maxResponseBytes)
+			}
+			if !json.Valid([]byte(reply)) {
+				t.Fatal("reply is not valid JSON")
+			}
 			server := newChatServer(t, func(w http.ResponseWriter) { _, _ = io.WriteString(w, reply) })
-			result := chatSender(server).Send(context.Background(), testWork(tc.kind), tc.config(server.URL))
-			if result.ErrorCode != "" || result.RemoteRef != "" {
-				t.Fatalf("result = %+v", result)
+			result := chatSender(server).Send(context.Background(), testWork(notification.ChannelTelegram), chatCases[1].config(server.URL))
+			if result.ErrorCode != "" || result.Retryable || result.RemoteRef != "777" || result.StatusCode != http.StatusOK {
+				t.Fatalf("reply bytes=%d: result = %+v", len(reply), result)
 			}
 		})
+	}
+}
+
+func TestTelegramUnreadableSuccessIsFinal(t *testing.T) {
+	cases := map[string]struct {
+		reply string
+		code  string
+	}{
+		"over the bound": {
+			reply: `{"ok":true,"result":{"message_id":777,"text":"` + strings.Repeat("a", telegramMaxResponseBytes) + `"}}`,
+			code:  codeTelegramResponseTooLarge,
+		},
+		"not JSON":       {reply: `<html>502 from a proxy that still said 200</html>`, code: codeTelegramResponseInvalid},
+		"cut-off JSON":   {reply: `{"ok":true,"result":{"message_id":7`, code: codeTelegramResponseInvalid},
+		"empty body":     {reply: ``, code: codeTelegramResponseInvalid},
+		"wrong ok shape": {reply: `{"ok":"true","result":{"message_id":777}}`, code: codeTelegramResponseInvalid},
+		"JSON array":     {reply: `[{"ok":true}]`, code: codeTelegramResponseInvalid},
+		// json.Unmarshal accepts these without an error, so ok has to be checked for presence.
+		"null":         {reply: `null`, code: codeTelegramResponseInvalid},
+		"empty object": {reply: `{}`, code: codeTelegramResponseInvalid},
+		"null ok":      {reply: `{"ok":null,"result":{"message_id":777}}`, code: codeTelegramResponseInvalid},
+		"missing ok":   {reply: `{"result":{"message_id":777}}`, code: codeTelegramResponseInvalid},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			server := newChatServer(t, func(w http.ResponseWriter) { _, _ = io.WriteString(w, tc.reply) })
+			result := chatSender(server).Send(context.Background(), testWork(notification.ChannelTelegram), chatCases[1].config(server.URL))
+			// A retry would post the message again, so the provider's 2xx is never retried.
+			if result.Retryable || result.ErrorCode != tc.code || result.RemoteRef != "" || result.StatusCode != http.StatusOK {
+				t.Fatalf("result = %+v", result)
+			}
+			assertNoSecret(t, result)
+		})
+	}
+}
+
+func TestTelegramConnectionLostMidReplyIsFinal(t *testing.T) {
+	// The server promises more body than it sends, so the client sees an unexpected EOF.
+	server := newChatServer(t, func(w http.ResponseWriter) {
+		w.Header().Set("Content-Length", "1000")
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":777`)
+	})
+	result := chatSender(server).Send(context.Background(), testWork(notification.ChannelTelegram), chatCases[1].config(server.URL))
+	if result.Retryable || result.ErrorCode != codeTelegramResponseTooLarge || result.RemoteRef != "" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestDoReadLimitReportsTruncation(t *testing.T) {
+	for _, tc := range []struct {
+		size      int
+		truncated bool
+	}{{0, false}, {16, false}, {32, false}, {33, true}, {4096, true}} {
+		t.Run(fmt.Sprint(tc.size), func(t *testing.T) {
+			server := newChatServer(t, func(w http.ResponseWriter) { _, _ = io.WriteString(w, strings.Repeat("x", tc.size)) })
+			_, body, truncated := chatSender(server).postChatLimit(context.Background(), server.URL, []byte(`{}`), 32)
+			if truncated != tc.truncated || len(body) != min(tc.size, 32) {
+				t.Fatalf("len(body)=%d truncated=%v", len(body), truncated)
+			}
+		})
+	}
+}
+
+func TestChatDriversIgnoreMalformedReferences(t *testing.T) {
+	type reply struct{ body, ref string }
+	replies := map[notification.ChannelType][]reply{
+		notification.ChannelGoogleChat: {{body: `{"name":"../../admin"}`}},
+		notification.ChannelDiscord:    {{body: `{"id":"<script>"}`}},
+		// ok:true is the delivery; a message ID that cannot be used only drops the reference.
+		notification.ChannelTelegram: {
+			{body: `{"ok":true,"result":{"message_id":-3}}`},
+			{body: `{"ok":true,"result":{"message_id":0}}`},
+			{body: `{"ok":true,"result":{"message_id":"777"}}`},
+			{body: `{"ok":true,"result":{"message_id":777.5}}`},
+			{body: `{"ok":true,"result":{"message_id":99999999999999999999}}`},
+			{body: `{"ok":true,"result":{"message_id":null}}`},
+			{body: `{"ok":true,"result":{}}`},
+			{body: `{"ok":true,"result":null}`},
+			{body: `{"ok":true,"result":"777"}`},
+			{body: `{"ok":true}`},
+			// A malformed field the success path does not read keeps the valid reference.
+			{body: `{"ok":true,"result":{"message_id":777},"parameters":"not an object"}`, ref: "777"},
+		},
+	}
+	for _, tc := range chatCases {
+		for i, r := range replies[tc.kind] {
+			t.Run(fmt.Sprintf("%s/%d", tc.kind, i), func(t *testing.T) {
+				server := newChatServer(t, func(w http.ResponseWriter) { _, _ = io.WriteString(w, r.body) })
+				result := chatSender(server).Send(context.Background(), testWork(tc.kind), tc.config(server.URL))
+				if result.ErrorCode != "" || result.Retryable || result.RemoteRef != r.ref {
+					t.Fatalf("reply %s: result = %+v", r.body, result)
+				}
+			})
+		}
 	}
 }
 

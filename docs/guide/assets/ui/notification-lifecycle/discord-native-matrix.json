@@ -1,0 +1,968 @@
+{
+  "schema_version": 1,
+  "provider": "discord",
+  "expected_cells": 88,
+  "reviewed_cells": 88,
+  "shared_event_types": [
+    "approval.decided",
+    "approval.requested",
+    "approval.timed_out",
+    "engagement.created",
+    "engagement.status_changed",
+    "engagement.window_ending",
+    "engagement.window_starting",
+    "evidence.chain_broken",
+    "finding.commented",
+    "incident.updated",
+    "response.finished"
+  ],
+  "locales": [
+    "en",
+    "vi"
+  ],
+  "data_classes": [
+    "signal",
+    "detail"
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "provenance": "Original runtime delivery acknowledgements were correlated in Discord native search results. This is not a fresh-provider fixture run.",
+  "review": "Each of the 44 light and 44 dark cells passed final panel review; combined acceptance QA passed on its first replacement.",
+  "cells": [
+    {
+      "event_type": "approval.decided",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-decided-en-detail-dark.jpg",
+      "screenshot_sha256": "00a73abbd2915d86dd1870017e00ceaa8e218252ed98ad0d544efa9819b88b2f",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-approval-decided-en-detail-light.jpg",
+      "screenshot_sha256": "91757ca5ea95b57818144ea7a0dfd12dc6f4acecd94df821312752e34f077b34",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-decided-en-signal-dark.jpg",
+      "screenshot_sha256": "e536db89a0b7c003166b67ba83de15c9cdf5de005ac4c6031733f52b4f02b878",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-approval-decided-en-signal-light.jpg",
+      "screenshot_sha256": "b9445e484d4e0c7134f3bf850a6258af9247a236a084946213aa0eda04aec491",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-decided-vi-detail-dark.jpg",
+      "screenshot_sha256": "7520ec52f34b1ba2b97b99c4f0921e6b05a77038a81da30fab07075dfb3a886e",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-approval-decided-vi-detail-light.jpg",
+      "screenshot_sha256": "a40828b179f24b8c4e6b1188b082516bd1ae26c8d0bd30b7c1ec92983b298282",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-decided-vi-signal-dark.jpg",
+      "screenshot_sha256": "493bb427af265d055577cd2f747b0dc4bc51e2d2016eb5f5e2041b30809e035a",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-approval-decided-vi-signal-light.jpg",
+      "screenshot_sha256": "872298d4b027a7fee238cc7ac4b3f5771a2f5bc31b2a19260ce72f2b29b59513",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-requested-en-detail-dark.jpg",
+      "screenshot_sha256": "80d05bd8ee65e324e41d0577d802bd9a42468e37d78afc0914ecd98879977744",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-approval-requested-en-detail-light.jpg",
+      "screenshot_sha256": "aea41dc5dd8f7ce48cd9db8ba49d374cba1c843942ee67ce17c9b311832908db",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-requested-en-signal-dark.jpg",
+      "screenshot_sha256": "80d05bd8ee65e324e41d0577d802bd9a42468e37d78afc0914ecd98879977744",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-approval-requested-en-signal-light.jpg",
+      "screenshot_sha256": "ee648b69685236d97a18d9da866b4af09e3f502936d14833533972c2dacaf40b",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-requested-vi-detail-dark.jpg",
+      "screenshot_sha256": "53040c67c2e95ca4427c28464e687afe9ed1105c8bb005deeaf11d160d219928",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-approval-requested-vi-detail-light.jpg",
+      "screenshot_sha256": "a7a5997739b237e43beb03497d8ac261332a439fd8a6e6e934de292f757929b3",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-requested-vi-signal-dark.jpg",
+      "screenshot_sha256": "53040c67c2e95ca4427c28464e687afe9ed1105c8bb005deeaf11d160d219928",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.requested",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-approval-requested-vi-signal-light.jpg",
+      "screenshot_sha256": "02152d4e14d470663a04f252877bf453bb9781f42c5df2d619298ebb5d47b5d7",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-timed_out-en-detail-dark.jpg",
+      "screenshot_sha256": "9b05510b42e4993167553870cc6fe9d1be8bf8f4adfad184226b922a56f68bb9",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-approval-timed_out-en-detail-light.jpg",
+      "screenshot_sha256": "9c92024674584fd919e7d19bacd4d18201f6aeafae74e548708c78d72f0782fa",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-timed_out-en-signal-dark.jpg",
+      "screenshot_sha256": "743ba0b4aa511d054aab098a694c156d4161338709d05d388aac39f15d212fdf",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-approval-timed_out-en-signal-light.jpg",
+      "screenshot_sha256": "9c92024674584fd919e7d19bacd4d18201f6aeafae74e548708c78d72f0782fa",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-timed_out-vi-detail-dark.jpg",
+      "screenshot_sha256": "b70dadd761d54fd7ad66e0d447781eca970475ca49b904d47bfd0f0028911c75",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-approval-timed_out-vi-detail-light.jpg",
+      "screenshot_sha256": "7a8e9c6aae04d81db1f27c93d9554a5799b65a2c9fb485ca1110b207bd78191d",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-approval-timed_out-vi-signal-dark.jpg",
+      "screenshot_sha256": "99e248f0c1c5b13e8525a208d03588409124e512602d6158b672e3897efd2435",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "approval.timed_out",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-approval-timed_out-vi-signal-light.jpg",
+      "screenshot_sha256": "7a8e9c6aae04d81db1f27c93d9554a5799b65a2c9fb485ca1110b207bd78191d",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-created-en-detail-dark.jpg",
+      "screenshot_sha256": "bd2153186a7b164f3699dc3f193dc39296e551c5fa125799f896523f0b67b52d",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-created-en-detail-light.jpg",
+      "screenshot_sha256": "a3d3f14c9d61bbf71d91a0596b780fad7d7078f438df96a5766830afae6e6348",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-created-en-signal-dark.jpg",
+      "screenshot_sha256": "bd2153186a7b164f3699dc3f193dc39296e551c5fa125799f896523f0b67b52d",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-created-en-signal-light.jpg",
+      "screenshot_sha256": "796044297bf774a014c1f7cad851b7d279e0726b695b1034a961961953aae6e3",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-created-vi-detail-dark.jpg",
+      "screenshot_sha256": "597bfe2b509f94bb5e1aa9a17e464578ee9db5056af1b11ab386bec0d81aeda7",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-created-vi-detail-light.jpg",
+      "screenshot_sha256": "2b2743a96cc542a8be7334a467310e2b011c0cd75e51e6e6997dfcb478cd9f63",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-created-vi-signal-dark.jpg",
+      "screenshot_sha256": "8c332a73a9e9ed513b5e5ac7e67f2c6d7462f5ae282c1dbe884048569b0ae35a",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.created",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-created-vi-signal-light.jpg",
+      "screenshot_sha256": "8362b41d4c9d531babb81359d8a2234ac3f7d9ff93ac293406f7c6f3d8552d32",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-status_changed-en-detail-dark.jpg",
+      "screenshot_sha256": "5a39241856691e8972535ef238847ead1786c7d4b40082734196cbf5ff16de49",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-status_changed-en-detail-light.jpg",
+      "screenshot_sha256": "108ab226e7bb693d4ac56265189dc49120076c6a1775544d440ff3477108d2ff",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-status_changed-en-signal-dark.jpg",
+      "screenshot_sha256": "5a39241856691e8972535ef238847ead1786c7d4b40082734196cbf5ff16de49",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-status_changed-en-signal-light.jpg",
+      "screenshot_sha256": "108ab226e7bb693d4ac56265189dc49120076c6a1775544d440ff3477108d2ff",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-status_changed-vi-detail-dark.jpg",
+      "screenshot_sha256": "f38142ba960bb6cc11270f3c51f915769119d9988f13aa2a2df9a487843d6f12",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-status_changed-vi-detail-light.jpg",
+      "screenshot_sha256": "cb03468f856e3599dbf793b11cdcec37009b1262df086f5f59a2ceb89cb20023",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-status_changed-vi-signal-dark.jpg",
+      "screenshot_sha256": "81782d8bdabce4419167ee50282d8ee950f44d87527d9378811f4dcb462c0854",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.status_changed",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-status_changed-vi-signal-light.jpg",
+      "screenshot_sha256": "5bce78df5af8d4480754cd436e1fa97ca4f39324f826611366e7b2c34b3e9174",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-window_ending-en-detail-dark.jpg",
+      "screenshot_sha256": "280a6d4246967872694d8a9a7c7c7c03460b9e5e49d2f10d60d51f8c9fedf09e",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-window_ending-en-detail-light.jpg",
+      "screenshot_sha256": "53da9a03ebd359d5a1defec6707b0fce2a06909dd21142415745cda0c70509a7",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-window_ending-en-signal-dark.jpg",
+      "screenshot_sha256": "02f9231ef84b80617aa2ef37386dfd5755a616720a049d4e51552bf48991ac12",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-window_ending-en-signal-light.jpg",
+      "screenshot_sha256": "ce93b582954cdec664c3482834213e3aa8a3d63efeab9cf6f435408b0eb6ae03",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-window_ending-vi-detail-dark.jpg",
+      "screenshot_sha256": "6accfaebf016548538e76961c1438549b8a7a43873cd10af676157284c09f22c",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-window_ending-vi-detail-light.jpg",
+      "screenshot_sha256": "474c341e3feca2cf20fdb27c1d38ae8f5c5f4430689d3fbb361da56e98626e29",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-window_ending-vi-signal-dark.jpg",
+      "screenshot_sha256": "f25acb9b0d08f6e857ebab6163d2a0d45a663abb7abcee5bf9b1d552329851b4",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_ending",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-window_ending-vi-signal-light.jpg",
+      "screenshot_sha256": "9b29808d7c8b4f482706bc63b61141fc6042378e15146367a80b8aa7dc4d4928",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-window_starting-en-detail-dark.jpg",
+      "screenshot_sha256": "3b2fb7b1827cfadef3a199153363d2fc9a5d7051217d5b48b7c290a586593bf8",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-window_starting-en-detail-light.jpg",
+      "screenshot_sha256": "e6678e0b3f80f5f0ff79f42704ea7a71a530ed10236fadacf032087bbe2170fc",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-window_starting-en-signal-dark.jpg",
+      "screenshot_sha256": "819b428e740545af84a3d003e5ecb591371de84da72c1fd4ae79ebce654e8fa3",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-window_starting-en-signal-light.jpg",
+      "screenshot_sha256": "debcfb6cdb1dfef0f194af3ae9380c2e03f941130b570b9df995e761c3fd0e6b",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-window_starting-vi-detail-dark.jpg",
+      "screenshot_sha256": "86a336748d31e5260a4d9802ea2c5a08083fdc6dcacc50f0f30a923679a7aad3",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-window_starting-vi-detail-light.jpg",
+      "screenshot_sha256": "b13b02a40df6baed83f207c522da6ab10ce84bf630d734102dce2555b378a1c6",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-engagement-window_starting-vi-signal-dark.jpg",
+      "screenshot_sha256": "c4af4376e471a8c39967ca3acd4691c2caf79294ec340ef7eee915492b7abd8d",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "engagement.window_starting",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-engagement-window_starting-vi-signal-light.jpg",
+      "screenshot_sha256": "1de2f38c85ee78c30da3e9d4ad1fbe717d8f64f3c545c67916167c284ca91e5b",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-evidence-chain_broken-en-detail-dark.jpg",
+      "screenshot_sha256": "691d51c5131f22701293b8e6e466060d44a1124840be8fd4371feb9ff18f82e7",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-evidence-chain_broken-en-detail-light.jpg",
+      "screenshot_sha256": "952253b06f1a8e12cf7b3812e4e6b6fb4dfef06598653698adf94456860b365c",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-evidence-chain_broken-en-signal-dark.jpg",
+      "screenshot_sha256": "691d51c5131f22701293b8e6e466060d44a1124840be8fd4371feb9ff18f82e7",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-evidence-chain_broken-en-signal-light.jpg",
+      "screenshot_sha256": "394790ae0a2c79a7e1bfe342f5e26eb64c715b391dc3e2175b9a2c979085cd9a",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-evidence-chain_broken-vi-detail-dark.jpg",
+      "screenshot_sha256": "80aa309916cac19ea4f5beb93d55a31e4c7eb019ae64469ecf1f191060e3f3c1",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-evidence-chain_broken-vi-detail-light.jpg",
+      "screenshot_sha256": "3816b6328bb814b41c31111b62b4d7fe946f484a5d8ab6e57009b89f8029784b",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-evidence-chain_broken-vi-signal-dark.jpg",
+      "screenshot_sha256": "80aa309916cac19ea4f5beb93d55a31e4c7eb019ae64469ecf1f191060e3f3c1",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "evidence.chain_broken",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-evidence-chain_broken-vi-signal-light.jpg",
+      "screenshot_sha256": "3816b6328bb814b41c31111b62b4d7fe946f484a5d8ab6e57009b89f8029784b",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-finding-commented-en-detail-dark.jpg",
+      "screenshot_sha256": "ef39af411a499edf54277bb7c098d7d2ec24fe1af28ae7296a979d5c291a948d",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-finding-commented-en-detail-light.jpg",
+      "screenshot_sha256": "e766b7b0a7253b10d3530c0b54a1e96602daf4fac061bf07a439fb78246d18b6",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-finding-commented-en-signal-dark.jpg",
+      "screenshot_sha256": "903b769c7f7210134bd16137e8390f830dcbb90236552de7c37e9a789919dad0",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-finding-commented-en-signal-light.jpg",
+      "screenshot_sha256": "e766b7b0a7253b10d3530c0b54a1e96602daf4fac061bf07a439fb78246d18b6",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-finding-commented-vi-detail-dark.jpg",
+      "screenshot_sha256": "d537a1cb39a431c12045aef6c13c8f1f50d28154f7f970defee448216f30bf31",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-finding-commented-vi-detail-light.jpg",
+      "screenshot_sha256": "069b45841dd04515de43fd2687358a606df193ac7c3085a8ce2b526729eb4d11",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-finding-commented-vi-signal-dark.jpg",
+      "screenshot_sha256": "a0d26f95db29acfe72d820daffdb02d887557b917d972a3c82c838dab55ed6d6",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "finding.commented",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-finding-commented-vi-signal-light.jpg",
+      "screenshot_sha256": "40ce2e39bb244cf29258bed5d5ebb9fb1c0bb717923a1961d0302ae37fd3ccc8",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-incident-updated-en-detail-dark.jpg",
+      "screenshot_sha256": "894fef49b6752b65bedfa11983f63d66a9df608088b81411777b77240834e1a6",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-incident-updated-en-detail-light.jpg",
+      "screenshot_sha256": "108f5f676efe6e530b22388c107f1448e7e1b3adc8216a80cab29ea43ff51d51",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-incident-updated-en-signal-dark.jpg",
+      "screenshot_sha256": "96e0c7b7a2b54d6c84036070ccf8d459000fe131f05617e8bfa923780c6d63f2",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-incident-updated-en-signal-light.jpg",
+      "screenshot_sha256": "bd966cdc75ab52d2b438b2927c08e02b63ae1d723c9951c810a1037009baf698",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-incident-updated-vi-detail-dark.jpg",
+      "screenshot_sha256": "4e72153edf1f35fecbcdf317fa859336e2828b4cca886b9cbc515cbcdd7d521f",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-incident-updated-vi-detail-light.jpg",
+      "screenshot_sha256": "8803893d6c6730de155b0a8776d871d5874589380b6c6863ee39608bdbf73b94",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-incident-updated-vi-signal-dark.jpg",
+      "screenshot_sha256": "5ad78bf7d031a573f34aefa414785dc543d66678d571de1d9795c6ef582db133",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "incident.updated",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-incident-updated-vi-signal-light.jpg",
+      "screenshot_sha256": "988fdc747beee384a0bb6b2e50656f8222d8716b926aa0c7a3a13ccd918f258c",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-response-finished-en-detail-dark.jpg",
+      "screenshot_sha256": "2d4d5a9a045b76db9dba1ccb49178522d1b764d923c68ae37ea6c719dd6829c8",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "en",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-response-finished-en-detail-light.jpg",
+      "screenshot_sha256": "c22e3826ee0407a481a8e4886e57d9f3757d6d85f6e3e966b261422f0aaf95ad",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-response-finished-en-signal-dark.jpg",
+      "screenshot_sha256": "2d4d5a9a045b76db9dba1ccb49178522d1b764d923c68ae37ea6c719dd6829c8",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "en",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-response-finished-en-signal-light.jpg",
+      "screenshot_sha256": "c22e3826ee0407a481a8e4886e57d9f3757d6d85f6e3e966b261422f0aaf95ad",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "dark",
+      "screenshot": "discord-native-response-finished-vi-detail-dark.jpg",
+      "screenshot_sha256": "972f7864cd17c2e7ba287d1766d100356392966fc5b0da663fb044a912c28f5b",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "vi",
+      "data_class": "detail",
+      "theme": "light",
+      "screenshot": "discord-native-response-finished-vi-detail-light.jpg",
+      "screenshot_sha256": "00aa922d03d2ba743e3af691e58164243e77c8cca71dbc0cd93578e1d1b1397c",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "dark",
+      "screenshot": "discord-native-response-finished-vi-signal-dark.jpg",
+      "screenshot_sha256": "972f7864cd17c2e7ba287d1766d100356392966fc5b0da663fb044a912c28f5b",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    },
+    {
+      "event_type": "response.finished",
+      "locale": "vi",
+      "data_class": "signal",
+      "theme": "light",
+      "screenshot": "discord-native-response-finished-vi-signal-light.jpg",
+      "screenshot_sha256": "00aa922d03d2ba743e3af691e58164243e77c8cca71dbc0cd93578e1d1b1397c",
+      "native_delivery_ack_correlated": true,
+      "visual_review": "pass"
+    }
+  ],
+  "clicked_source_event_groups": 6,
+  "clicked_destinations": [
+    {
+      "group": "approval",
+      "screenshot": "discord-approval-deployed-link.jpg",
+      "screenshot_sha256": "61c14fe2ee69cd2997042b186015b70da545e31e5be618dd3ad337e4f8259962",
+      "native_destination_matched": true,
+      "destination_url_sha256": "d86ccf8ea524a0015348585f1160b9b9b0f44332e669a1b211fe76b2529b1af1"
+    },
+    {
+      "group": "engagement",
+      "screenshot": "discord-engagement-deployed-link.jpg",
+      "screenshot_sha256": "2eb6a705c364f30159d530933b789182677d26754b59e8ef7afa78c3a7c3ba25",
+      "native_destination_matched": true,
+      "destination_url_sha256": "e89be105ae0aba38e24941b09e9d6ea57f1bc75a8acf676189f227ceea2d8090"
+    },
+    {
+      "group": "evidence",
+      "screenshot": "discord-evidence-deployed-link.jpg",
+      "screenshot_sha256": "2c3478a367b11267f7f1edf8d8755887f98205012528c6962eb6fbbd860d0042",
+      "native_destination_matched": true,
+      "destination_url_sha256": "e89be105ae0aba38e24941b09e9d6ea57f1bc75a8acf676189f227ceea2d8090"
+    },
+    {
+      "group": "finding",
+      "screenshot": "discord-finding-deployed-link.jpg",
+      "screenshot_sha256": "4f3397079f377cae875beeda5075a5a6a869f1e14f7f630efa60e885736e7d06",
+      "native_destination_matched": true,
+      "destination_url_sha256": "f964062150045dd4a4c79c7bf4c76107a141a4b0e1cc8647cc8524ceed47ec1e"
+    },
+    {
+      "group": "incident",
+      "screenshot": "discord-incident-deployed-link.jpg",
+      "screenshot_sha256": "cd54634144bd9855c52d0f3497bb5dcdfd2c101dd977bbcc30f9ca3137e30683",
+      "native_destination_matched": true,
+      "destination_url_sha256": "01b23d2dd8ace5671a2902ce036b29fb7418fcbeff81d5c06a498cc3ee02acef"
+    },
+    {
+      "group": "response",
+      "screenshot": "discord-response-deployed-link.jpg",
+      "screenshot_sha256": "ab05e4493ead87e9017de823128675a60ff85f7c64d24979ae1b9f82ab2529a2",
+      "native_destination_matched": true,
+      "destination_url_sha256": "e2a1468dd1606b8ed8945d23ab0f8e4969c5ba64e80b29cf447b741172d099a2"
+    }
+  ],
+  "original_theme": "Dark",
+  "restored_theme": "Dark",
+  "theme_restoration_verified_in_native_ui": true,
+  "limits": [
+    "response.finished and evidence.chain_broken are bounded synthetic fact fixtures; this evidence does not claim an executed response or live evidence-chain mutation.",
+    "Approval destination evidence establishes the selected Agent route only; it does not claim disabled copy or controls below the captured viewport.",
+    "The public manifest contains screenshot and destination digests only. Private receipts retain delivery identifiers, source identifiers, message bodies and exact URLs."
+  ]
+}

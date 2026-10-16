@@ -31,6 +31,7 @@ export type NotificationRuleFilter =
   | 'scan_kinds'
   | 'outcomes'
   | 'providers'
+  | 'kinds'
 export type NotificationDataClass = 'signal' | 'summary' | 'detail'
 export type EngagementExternalNotifications = 'inherit' | 'signal' | 'none'
 export type NotificationLocale = 'en' | 'vi'
@@ -219,13 +220,14 @@ export interface NotificationRule {
   to_statuses?: string[]
   retest_results?: string[]
   scan_kinds?: string[]
+  kinds?: string[]
   outcomes?: string[]
   providers?: string[]
   engagement_ids?: string[]
   team_ids?: string[]
   all_teams?: boolean
   channel_ids: string[]
-  /** People to notify personally (#1415): assignee, team_member or engagement_lead. */
+  /** People to notify personally (#1415): assignee, team_member, engagement_lead, mentioned_user or approver. */
   recipient_roles?: string[]
   lead_time_seconds?: number
   revision: number
@@ -425,6 +427,7 @@ export const notificationsApi = {
         to_statuses: input.to_statuses,
         retest_results: input.retest_results,
         scan_kinds: input.scan_kinds,
+        kinds: input.kinds,
         outcomes: input.outcomes,
         providers: input.providers,
         engagement_ids: input.engagement_ids,

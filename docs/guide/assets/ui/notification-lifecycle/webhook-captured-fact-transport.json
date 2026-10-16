@@ -1,0 +1,39 @@
+{
+  "captured_at": "2026-10-14T07:35:42.233159+00:00",
+  "provenance": "Captured current immutable event facts rendered by real WebhookDriver; isolated fixture creates no domain source or outbox delivery",
+  "locales": [
+    "en",
+    "vi"
+  ],
+  "data_classes": [
+    "signal",
+    "detail"
+  ],
+  "shared_event_types": [
+    "approval.decided",
+    "approval.requested",
+    "approval.timed_out",
+    "engagement.created",
+    "engagement.status_changed",
+    "engagement.window_ending",
+    "engagement.window_starting",
+    "evidence.chain_broken",
+    "finding.commented",
+    "incident.updated",
+    "response.finished"
+  ],
+  "excluded_event_type": "finding.mentioned is personal-only",
+  "accepted_cells": 44,
+  "acknowledged_attempts": 44,
+  "known_rejected_attempts": 1,
+  "unknown_attempts": 0,
+  "receiver_hmac_verified": 68,
+  "fixture_delivery_id_and_body_sha256_verified": 44,
+  "actual_source_requests_verified": 24,
+  "locale_behavior": "Canonical structured webhook envelopes are locale-invariant; EN/VI channel configurations exercise the same schema",
+  "receiver_partitions": {
+    "source_and_fixture": 26,
+    "fixture_continuation": 18
+  },
+  "original_dead_letter_redrive": "HTTP409 rejected because channel secret version changed; immutable old jobs were not retargeted"
+}

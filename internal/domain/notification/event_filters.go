@@ -12,6 +12,7 @@ import (
 // EventFilters are event-specific selectors stored with a rule. They are kept
 // in one value so persistence can evolve without widening the rule table.
 type EventFilters struct {
+	Kinds         []string `json:"kinds,omitempty"`
 	FindingKinds  []string `json:"finding_kinds,omitempty"`
 	FromStatuses  []string `json:"from_statuses,omitempty"`
 	ToStatuses    []string `json:"to_statuses,omitempty"`
@@ -30,12 +31,13 @@ func (r *Rule) normalizeEventFilters(spec EventSpec) error {
 		name   string
 		valid  func(string) bool
 	}{
+		{&r.Kinds, FilterKinds, "kinds", validApprovalKind},
 		{&r.FindingKinds, FilterFindingKinds, "finding kinds", validFindingKind},
 		{&r.FromStatuses, FilterFromStatuses, "from statuses", validFindingStatus},
 		{&r.ToStatuses, FilterToStatuses, "to statuses", validFindingStatus},
 		{&r.RetestResults, FilterRetestResults, "retest results", validRetestResult},
 		{&r.ScanKinds, FilterScanKinds, "scan kinds", validRunToken},
-		{&r.Outcomes, FilterOutcomes, "outcomes", validOutcome},
+		{&r.Outcomes, FilterOutcomes, "outcomes", func(value string) bool { return validEventOutcome(r.EventType, value) }},
 		{&r.Providers, FilterProviders, "providers", validRunToken},
 	}
 	for _, set := range sets {
@@ -57,10 +59,11 @@ func (r *Rule) normalizeEventFilters(spec EventSpec) error {
 }
 
 func (r Rule) matchesEventFilters(e Event) bool {
-	if len(r.FindingKinds) == 0 && len(r.FromStatuses) == 0 && len(r.ToStatuses) == 0 && len(r.RetestResults) == 0 && len(r.ScanKinds) == 0 && len(r.Outcomes) == 0 && len(r.Providers) == 0 {
+	if len(r.Kinds) == 0 && len(r.FindingKinds) == 0 && len(r.FromStatuses) == 0 && len(r.ToStatuses) == 0 && len(r.RetestResults) == 0 && len(r.ScanKinds) == 0 && len(r.Outcomes) == 0 && len(r.Providers) == 0 {
 		return true
 	}
 	var data struct {
+		Kind        string   `json:"kind"`
 		FindingKind string   `json:"finding_kind"`
 		FromStatus  string   `json:"from_status"`
 		ToStatus    string   `json:"to_status"`
@@ -73,7 +76,8 @@ func (r Rule) matchesEventFilters(e Event) bool {
 	if json.Unmarshal(e.Data, &data) != nil {
 		return false
 	}
-	return (len(r.FindingKinds) == 0 || contains(r.FindingKinds, data.FindingKind)) &&
+	return (len(r.Kinds) == 0 || contains(r.Kinds, data.Kind)) &&
+		(len(r.FindingKinds) == 0 || contains(r.FindingKinds, data.FindingKind)) &&
 		(len(r.FromStatuses) == 0 || contains(r.FromStatuses, data.FromStatus)) &&
 		(len(r.ToStatuses) == 0 || contains(r.ToStatuses, data.ToStatus)) &&
 		(len(r.RetestResults) == 0 || contains(r.RetestResults, data.Result)) &&
@@ -118,4 +122,17 @@ func validRunToken(value string) bool {
 		}
 	}
 	return strings.TrimSpace(value) == value
+}
+
+func validApprovalKind(value string) bool { return value == "agent" || value == "response" }
+
+func validEventOutcome(event EventType, value string) bool {
+	if event == EventResponseFinished {
+		switch value {
+		case "applied", "verified", "failed", "reverted", "halted":
+			return true
+		}
+		return false
+	}
+	return validOutcome(value)
 }

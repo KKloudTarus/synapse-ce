@@ -23,11 +23,16 @@ type NotificationRepository struct {
 	destinationNotices bool
 	// projector names the subject and snapshots the template context of each new event (#1344).
 	// Without one, events are stored with an empty subject and context.
-	projector ports.NotificationEventProjector
+	projector          ports.NotificationEventProjector
+	approvalRecipients ports.ApprovalNotificationRecipientReader
 }
 
 func NewNotificationRepository(pool *pgxpool.Pool) *NotificationRepository {
-	return &NotificationRepository{pool: pool}
+	return &NotificationRepository{pool: pool, approvalRecipients: NewApprovalNotificationRecipients(pool)}
+}
+
+func (r *NotificationRepository) SetApprovalNotificationRecipientReader(reader ports.ApprovalNotificationRecipientReader) {
+	r.approvalRecipients = reader
 }
 
 // SetEventProjector installs the event builders. The composition root wires them in the API and the
@@ -497,6 +502,9 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 					roleRules = append(roleRules, rule.ID)
 				}
 				for _, cid := range rule.ChannelIDs {
+					if e.Type == notification.EventFindingMentioned {
+						continue
+					}
 					t := targets[cid]
 					if t == nil {
 						t = &target{}

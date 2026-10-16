@@ -74,7 +74,10 @@ type Comment struct {
 	FindingID    shared.ID
 	Author       string
 	Body         string
-	CreatedAt    time.Time
+	// MentionUserIDs is the canonical, same-tenant user identity set captured
+	// when a native comment is created. It is never inferred from display text.
+	MentionUserIDs []shared.ID `json:"mention_user_ids,omitempty"`
+	CreatedAt      time.Time
 }
 
 // NewComment validates and builds a comment (non-empty body, attributed author).

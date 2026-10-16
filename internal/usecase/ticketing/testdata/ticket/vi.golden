@@ -1,0 +1,9 @@
+Phát hiện cao: SQL injection
+---
+Phát hiện: SQL injection
+Mã: finding\-1
+Mức độ: cao
+Trạng thái: mở
+
+Mô tả:
+Validate every input\.

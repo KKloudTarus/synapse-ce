@@ -55,6 +55,24 @@ func (s *IncidentEventStore) AppendEvents(ctx context.Context, incidentID shared
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	registerTenantCheckpoint(ctx, s, func(transactionTenant shared.ID) func() {
+		logs := cloneIncidentLogs(s.logs[transactionTenant])
+		edges := cloneIncidentEdges(s.edges[transactionTenant])
+		return func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if logs == nil {
+				delete(s.logs, transactionTenant)
+			} else {
+				s.logs[transactionTenant] = cloneIncidentLogs(logs)
+			}
+			if edges == nil {
+				delete(s.edges, transactionTenant)
+			} else {
+				s.edges[transactionTenant] = cloneIncidentEdges(edges)
+			}
+		}
+	})
 	byInc := s.logs[tenant]
 	if byInc == nil {
 		byInc = map[shared.ID][]incident.IncidentEvent{}
@@ -101,6 +119,31 @@ func (s *IncidentEventStore) AppendEvents(ctx context.Context, incidentID shared
 		byEdge[edge.SourceID] = edge
 	}
 	return nil
+}
+
+func cloneIncidentLogs(source map[shared.ID][]incident.IncidentEvent) map[shared.ID][]incident.IncidentEvent {
+	if source == nil {
+		return nil
+	}
+	result := make(map[shared.ID][]incident.IncidentEvent, len(source))
+	for id, events := range source {
+		result[id] = make([]incident.IncidentEvent, len(events))
+		for index, event := range events {
+			result[id][index] = cloneIncidentEvent(event)
+		}
+	}
+	return result
+}
+
+func cloneIncidentEdges(source map[shared.ID]incident.MergeEdge) map[shared.ID]incident.MergeEdge {
+	if source == nil {
+		return nil
+	}
+	result := make(map[shared.ID]incident.MergeEdge, len(source))
+	for id, edge := range source {
+		result[id] = edge
+	}
+	return result
 }
 
 func cloneIncidentEvent(e incident.IncidentEvent) incident.IncidentEvent {

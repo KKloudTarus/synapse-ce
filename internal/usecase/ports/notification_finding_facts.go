@@ -15,6 +15,7 @@ type NotificationFindingFacts struct {
 	ActorName      string
 	AssigneeUserID shared.ID
 	TeamID         shared.ID
+	LeadUserID     shared.ID
 }
 
 // NotificationFindingFactsReader reads the small immutable-at-capture subset

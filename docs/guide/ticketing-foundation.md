@@ -1,7 +1,8 @@
 # Ticketing foundation
 
-Ticketing provides storage and domain contracts for external tickets. Provider
-integrations, routes, UI and outbound writes are future consumers of this foundation.
+Ticketing provides storage and domain contracts for external tickets. The
+[Jira workflow](jira-ticketing.md) composes these contracts with provider adapters,
+routes, UI and durable outbound writes.
 
 Mappings attach an existing integration to either one project or one engagement. Links
 may attach an HTTPS ticket URL to a finding even when no integration is configured.
@@ -13,14 +14,15 @@ Opening an intent verifies that its finding belongs to the requested engagement.
 A project mapping must match that engagement's authoritative `ProjectID` through
 the tenant's project analysis context. `AssessmentProjectID` is a separate visible
 assessment association and cannot authorize a project mapping.
-The internal `ListLinks` contract returns all links for a finding. Before exposing
-it through an API, consumers must introduce bounded pagination or an enforced
-per-finding limit; the foundation provides no production cardinality guarantee.
+Finding responses return the latest 100 links and intents. Mapping queries filter
+the authoritative scope before applying their bound.
 
 The pure `internal/domain/writeintent` state machine is shared with future
 documentation publishing. In-flight lease expiry leads to `uncertain`; this state
-must never be submitted again without remote reconciliation. Exactly zero marker
-matches permits `reconcile_absent` to return to pending, and exactly one match permits
+must never be submitted again without remote reconciliation. The pure
+`reconcile_absent` event permits a return to pending, but Jira search can lag:
+zero matches retain uncertainty until an administrator explicitly acknowledges
+duplicate risk in an audited retry. Exactly one verified match permits
 `reconcile_found` to finalize. `reconcile_multiple` records `multiple_matches` while
 keeping the intent uncertain; it cannot be claimed and requires human intervention.
 An explicit, definitive provider rejection becomes `failed` and requires a bounded

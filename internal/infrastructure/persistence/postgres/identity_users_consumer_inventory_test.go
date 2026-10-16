@@ -33,6 +33,8 @@ var usersConsumers = map[string]usersConsumer{
 	"user_contacts(tenant_id,user_id)":                         {"ownership_tenant_id,id", decisionLegacyUserID + "; contact source/source_key provenance is not rewritten"},
 	"user_contact_verification_requests(tenant_id,user_id)":    {"ownership_tenant_id,id", decisionLegacyUserID},
 	"findings(tenant_id,assignee_user_id)":                     {"ownership_tenant_id,id", decisionLegacyUserID + "; the assignee bridge trigger resolves the tenant-local id"},
+	"finding_comment_mentions(tenant_id,user_id)":              {"ownership_tenant_id,id", decisionLegacyUserID + "; immutable canonical mention relation retains tenant-local provenance"},
+	"notification_approval_recipients(tenant_id,user_id)":      {"ownership_tenant_id,id", decisionLegacyUserID + "; immutable approval recipient snapshot retains tenant-local provenance"},
 	"user_notifications(tenant_id,user_id)":                    {"ownership_tenant_id,id", decisionLegacyUserID},
 	"user_notification_preferences(tenant_id,user_id)":         {"ownership_tenant_id,id", decisionLegacyUserID},
 	"notification_engagement_settings(tenant_id,lead_user_id)": {"ownership_tenant_id,id", decisionLegacyUserID + "; the engagement lead (#1415) is a tenant-local user and is cleared when the user row goes"},

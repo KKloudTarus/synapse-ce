@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "local_captured_fact_transport_template_fixture",
+  "scope": {
+    "captured_event_types": 12,
+    "routed_event_types": 11,
+    "excluded_from_shared_transport": {
+      "event_type": "finding.mentioned",
+      "reason": "personal contact unavailable; no shared-channel send"
+    },
+    "variants": {
+      "providers": [
+        "mattermost",
+        "rocket_chat"
+      ],
+      "locales": [
+        "en",
+        "vi"
+      ],
+      "data_classes": [
+        "signal",
+        "detail"
+      ],
+      "posts": 88
+    }
+  },
+  "facts": {
+    "input": "captured notification events with Data, Context, subject, engagement and severity retained",
+    "validation": "notification event validation and published data-schema validation completed before rendering",
+    "public_console_origin": "configured public origin present in every inspected rendered post"
+  },
+  "delivery": {
+    "http_200_posts": 88,
+    "by_provider": {
+      "mattermost": 44,
+      "rocket_chat": 44
+    },
+    "receiver_post_ids": "verified privately; omitted from this manifest"
+  },
+  "boundary": "fixture directly renders and sends labelled synthetic messages. It creates no domain source, outbox, delivery, retry or business-state record.",
+  "supersedes": "An earlier generic fixture omitted Event.Data and must not be used as lifecycle acceptance evidence.",
+  "status": "transport and template evidence only; not proof of transactional producer behavior or domain outbox delivery"
+}

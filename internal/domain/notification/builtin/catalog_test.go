@@ -23,6 +23,7 @@ func TestCatalogVersionsChangedScanPagerAssetsIndependently(t *testing.T) {
 	}{
 		{event: notification.EventScanCompleted, family: notification.FamilyChat, locale: tenancy.LocaleEnglish},
 		{event: notification.EventIncidentCreated, family: notification.FamilyPager, locale: tenancy.LocaleVietnamese},
+		{event: notification.EventEvidenceChainBroken, family: notification.FamilyPager, locale: tenancy.LocaleEnglish},
 	} {
 		template, ok := catalog.Builtin(tc.event, tc.family, tc.locale)
 		if !ok || !strings.HasSuffix(template.Ref, "@v1") {

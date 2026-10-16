@@ -13,6 +13,10 @@ import (
 func ruleWithFilter(eventType EventType, filter Filter) Rule {
 	now := time.Now()
 	r := Rule{TenantID: "tenant", ID: "rule", Name: "rule", Enabled: true, EventType: eventType, ChannelIDs: []shared.ID{"channel"}, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	if eventType == EventFindingMentioned {
+		r.ChannelIDs = nil
+		r.RecipientRoles = []string{RoleMentionedUser}
+	}
 	switch filter {
 	case FilterMinSeverity:
 		r.MinSeverity = shared.SeverityHigh
@@ -36,6 +40,8 @@ func ruleWithFilter(eventType EventType, filter Filter) Rule {
 		r.ScanKinds = []string{"dast"}
 	case FilterOutcomes:
 		r.Outcomes = []string{"failed"}
+	case FilterKinds:
+		r.Kinds = []string{"agent"}
 	case FilterProviders:
 		r.Providers = []string{"native"}
 	}
@@ -43,7 +49,7 @@ func ruleWithFilter(eventType EventType, filter Filter) Rule {
 }
 
 func TestRuleAcceptsOnlyDeclaredFilters(t *testing.T) {
-	filters := []Filter{FilterMinSeverity, FilterActionTypes, FilterEngagements, FilterTeams, FilterLeadTime, FilterFindingKinds, FilterFromStatuses, FilterToStatuses, FilterRetestResults, FilterScanKinds, FilterOutcomes, FilterProviders}
+	filters := []Filter{FilterMinSeverity, FilterActionTypes, FilterEngagements, FilterTeams, FilterLeadTime, FilterFindingKinds, FilterFromStatuses, FilterToStatuses, FilterRetestResults, FilterScanKinds, FilterOutcomes, FilterProviders, FilterKinds}
 	for _, spec := range EventCatalog() {
 		if spec.OperatorOnly {
 			continue

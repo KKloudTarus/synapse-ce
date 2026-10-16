@@ -37,6 +37,8 @@ var integrationSurfacePrefixes = []string{
 // secret or credentials, raising a data class, allowing private networks.
 var integrationRoutePermissions = map[string]string{
 	"GET /api/v1/integration-providers":                            "PermView",
+	"GET /api/v1/integrations/{integrationID}/jira-metadata":       "PermManageIntegrations",
+	"POST /api/v1/integrations/{integrationID}/jira-breaker/reset": "PermAdminister",
 	"POST /api/v1/integrations":                                    "PermAdminister",
 	"GET /api/v1/integrations":                                     "PermView",
 	"GET /api/v1/integrations/{id}":                                "PermView",
@@ -156,6 +158,7 @@ func integrationSurfaceRouter() *Router {
 	notifications.SetTemplateStore(memory.NewNotificationTemplateStore())
 	rt.SetNotifications(notifications)
 	rt.SetIntegrations(&integrationuc.Service{})
+	rt.SetTicketing(&ticketHTTPFake{})
 	rt.SetInboundWebhookAdmin(&scmwebhookuc.Service{})
 	rt.SetSIEM(&siemuc.Service{})
 	rt.SetConnectors(&fakeConnectors{})

@@ -218,6 +218,63 @@ func TestIntegrationCredentialMutationsRequireOptimisticConcurrencyFields(t *tes
 	}
 }
 
+func TestIntegrationOperationResponsesExposeAuthorityRevisions(t *testing.T) {
+	handler := newIntegrationHTTPRouter(t).routes()
+	createdResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createdResponse, integrationHTTPRequest(http.MethodPost, "/api/v1/integrations", `{"provider":"fake-ci","name":"CI","endpoint":"https://ci.example.com","config":{},"poll_interval_seconds":60}`, string(user.RoleAdmin), "tenant-a"))
+	var created integrationDTO
+	if createdResponse.Code != http.StatusCreated || json.Unmarshal(createdResponse.Body.Bytes(), &created) != nil {
+		t.Fatalf("create status=%d body=%s", createdResponse.Code, createdResponse.Body.String())
+	}
+	credentialResponse := httptest.NewRecorder()
+	body := fmt.Sprintf(`{"secrets":{"token":"secret-token"},"version":%d,"connection_revision":%d}`, created.Version, created.ConnectionRevision)
+	handler.ServeHTTP(credentialResponse, integrationHTTPRequest(http.MethodPut, "/api/v1/integrations/"+created.ID.String()+"/credentials", body, string(user.RoleAdmin), "tenant-a"))
+	if credentialResponse.Code != http.StatusNoContent {
+		t.Fatalf("credential status=%d body=%s", credentialResponse.Code, credentialResponse.Body.String())
+	}
+	started := httptest.NewRecorder()
+	handler.ServeHTTP(started, integrationHTTPRequest(http.MethodPost, "/api/v1/integrations/"+created.ID.String()+"/operations", `{"type":"test"}`, string(user.RoleAdmin), "tenant-a"))
+	var operation integration.Operation
+	if started.Code != http.StatusAccepted || json.Unmarshal(started.Body.Bytes(), &operation) != nil || operation.ID.IsZero() {
+		t.Fatalf("start status=%d body=%s", started.Code, started.Body.String())
+	}
+	assertRevisions := func(response *httptest.ResponseRecorder, list bool) {
+		t.Helper()
+		if strings.Contains(response.Body.String(), "secret-token") {
+			t.Fatal("operation response leaked credentials")
+		}
+		var item map[string]any
+		if list {
+			var items []map[string]any
+			if err := json.Unmarshal(response.Body.Bytes(), &items); err != nil || len(items) != 1 {
+				t.Fatalf("operation list: %s", response.Body.String())
+			}
+			item = items[0]
+		} else if err := json.Unmarshal(response.Body.Bytes(), &item); err != nil {
+			t.Fatal(err)
+		}
+		if item["connection_revision"] != float64(created.ConnectionRevision) || item["credential_revision"] != float64(1) {
+			t.Fatalf("operation authority revisions: %s", response.Body.String())
+		}
+	}
+	assertRevisions(started, false)
+	for _, route := range []struct {
+		method, path string
+		list         bool
+	}{
+		{http.MethodGet, "/api/v1/integrations/" + created.ID.String() + "/operations", true},
+		{http.MethodGet, "/api/v1/integration-operations/" + operation.ID.String(), false},
+		{http.MethodPost, "/api/v1/integration-operations/" + operation.ID.String() + "/cancel", false},
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, integrationHTTPRequest(route.method, route.path, "", string(user.RoleAdmin), "tenant-a"))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s %s status=%d body=%s", route.method, route.path, response.Code, response.Body.String())
+		}
+		assertRevisions(response, route.list)
+	}
+}
+
 func TestIntegrationRoutesFailClosedForMachineAndMissingPrincipals(t *testing.T) {
 	mux := newIntegrationHTTPRouter(t).routes()
 	for _, test := range []struct {

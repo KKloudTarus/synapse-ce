@@ -55,7 +55,7 @@ func Deliver(mandatory bool, choice Preference, tenantDefault bool) bool {
 // InAppMandatory lists the administrator notices a user cannot mute in the inbox: a destination
 // change and an automatic channel pause (#1464).
 func InAppMandatory(event EventType) bool {
-	return event == EventDestinationChanged || event == EventChannelPaused
+	return event == EventDestinationChanged || event == EventChannelPaused || event == EventEvidenceChainBroken
 }
 
 // PersonalRoleSupported reports whether a shipped event can grant that role. Tenant administrators
@@ -63,7 +63,7 @@ func InAppMandatory(event EventType) bool {
 // approver roles stay unsupported until a producer records a verified identity.
 func PersonalRoleSupported(event EventType, role string) error {
 	if role == RoleTenantAdmin {
-		if event == EventDestinationChanged || event == EventChannelPaused {
+		if event == EventDestinationChanged || event == EventChannelPaused || event == EventEvidenceChainBroken {
 			return nil
 		}
 		return fmt.Errorf("%w: recipient role %s is not supported for %s", shared.ErrValidation, role, event)
@@ -72,19 +72,23 @@ func PersonalRoleSupported(event EventType, role string) error {
 }
 
 type PersonalSubject struct {
-	AssigneeIDs   []shared.ID
-	TeamIDs       []shared.ID
-	LookupFinding bool
-	EngagementID  shared.ID
-	FindingID     shared.ID
-	Admins        bool
-	Title         string
-	Summary       string
-	Link          string
+	MentionedIDs, ApproverIDs []shared.ID
+	ApprovalRecipients        bool
+	LeadID                    shared.ID
+	CapturedLead              bool
+	AssigneeIDs               []shared.ID
+	TeamIDs                   []shared.ID
+	LookupFinding             bool
+	EngagementID              shared.ID
+	FindingID                 shared.ID
+	Admins                    bool
+	Title                     string
+	Summary                   string
+	Link                      string
 }
 
 func (s PersonalSubject) Active() bool {
-	return len(s.AssigneeIDs) > 0 || len(s.TeamIDs) > 0 || s.LookupFinding || s.Admins
+	return len(s.AssigneeIDs) > 0 || len(s.TeamIDs) > 0 || s.LookupFinding || s.Admins || len(s.MentionedIDs) > 0 || len(s.ApproverIDs) > 0 || s.ApprovalRecipients
 }
 
 type actorContextKey struct{}
@@ -103,6 +107,8 @@ func ActorFrom(ctx context.Context) string {
 
 func SubjectFromEvent(e Event) (PersonalSubject, error) {
 	switch e.Type {
+	case EventFindingMentioned, EventApprovalRequested, EventApprovalDecided, EventApprovalTimedOut, EventEngagementCreated, EventEngagementStatusChanged, EventEngagementWindowStarting, EventEngagementWindowEnding, EventIncidentUpdated, EventResponseFinished, EventEvidenceChainBroken:
+		return lifecyclePersonalSubject(e)
 	case EventOwnershipChanged:
 		var data OwnershipChanged
 		if json.Unmarshal(e.Data, &data) != nil {
@@ -133,19 +139,20 @@ func SubjectFromEvent(e Event) (PersonalSubject, error) {
 			Summary:       "A finding is approaching its remediation deadline.",
 			Link:          FindingLink(data.EngagementID, data.FindingID),
 		}, nil
-	case EventFindingCreated, EventFindingStatusChanged, EventFindingRetestCompleted, EventSLABreached, EventRiskAcceptanceCreated, EventRiskAcceptanceExpiring, EventRiskAcceptanceExpired:
+	case EventFindingCommented, EventFindingCreated, EventFindingStatusChanged, EventFindingRetestCompleted, EventSLABreached, EventRiskAcceptanceCreated, EventRiskAcceptanceExpiring, EventRiskAcceptanceExpired:
 		var data struct {
 			EngagementID shared.ID `json:"engagement_id"`
 			FindingID    shared.ID `json:"finding_id"`
 			AssigneeID   shared.ID `json:"assignee_user_id"`
 			TeamID       shared.ID `json:"team_id"`
+			LeadID       shared.ID `json:"lead_user_id"`
 			Title        string    `json:"title"`
 			Summary      string    `json:"summary"`
 		}
 		if json.Unmarshal(e.Data, &data) != nil || !safeID(data.EngagementID) || !safeID(data.FindingID) {
 			return PersonalSubject{}, nil
 		}
-		return PersonalSubject{AssigneeIDs: compactIDs(data.AssigneeID), TeamIDs: compactIDs(data.TeamID), EngagementID: data.EngagementID, FindingID: data.FindingID, Title: data.Title, Summary: data.Summary, Link: FindingLink(data.EngagementID, data.FindingID)}, nil
+		return PersonalSubject{LeadID: data.LeadID, CapturedLead: e.Type == EventFindingCommented, AssigneeIDs: compactIDs(data.AssigneeID), TeamIDs: compactIDs(data.TeamID), EngagementID: data.EngagementID, FindingID: data.FindingID, Title: data.Title, Summary: data.Summary, Link: FindingLink(data.EngagementID, data.FindingID)}, nil
 	case EventDestinationChanged:
 		var data DestinationNotice
 		if json.Unmarshal(e.Data, &data) != nil || (data.Action != "created" && data.Action != "host_changed") {
@@ -308,14 +315,65 @@ func MergePersonalRecipients(assignees, members, admins []shared.ID) []ResolvedR
 }
 
 func ConfigurableEvents() []EventType {
-	return []EventType{EventVulnerabilityAction, EventScanCompleted, EventQualityGateFailed, EventSLAApproaching, EventFleetAgentOffline, EventIncidentCreated, EventOwnershipChanged,
-		EventFindingCreated, EventFindingStatusChanged, EventFindingRetestCompleted, EventScanFailed, EventDASTRunFinished, EventReconRunFinished, EventCSPMRunFinished,
-		EventSLABreached, EventRiskAcceptanceCreated, EventRiskAcceptanceExpiring, EventRiskAcceptanceExpired}
+	out := make([]EventType, 0, len(catalog))
+	for _, spec := range EventCatalog() {
+		if !spec.OperatorOnly {
+			out = append(out, spec.Type)
+		}
+	}
+	return out
 }
 
-// PersonalDeliveryAvailable reports whether an event can reach a person. Ownership changes and SLA
-// deadlines name their people; the administrator notices go to tenant administrators; every other
-// routable event reaches the people a rule's recipient roles name (#1415).
 func PersonalDeliveryAvailable(event EventType) bool {
 	return PersonalEventConfigurable(event)
+}
+
+func lifecyclePersonalSubject(e Event) (PersonalSubject, error) {
+	var data struct {
+		Kind         string      `json:"kind"`
+		EngagementID shared.ID   `json:"engagement_id"`
+		FindingID    shared.ID   `json:"finding_id"`
+		MentionedID  shared.ID   `json:"mentioned_user_id"`
+		ApproverIDs  []shared.ID `json:"approver_user_ids"`
+		LeadID       shared.ID   `json:"lead_user_id"`
+		Title        string      `json:"title"`
+		Summary      string      `json:"summary"`
+	}
+	if json.Unmarshal(e.Data, &data) != nil {
+		return PersonalSubject{}, fmt.Errorf("%w: lifecycle notification subject", shared.ErrValidation)
+	}
+	subject := PersonalSubject{EngagementID: e.EngagementID, FindingID: data.FindingID, LeadID: data.LeadID, CapturedLead: true, Title: data.Title, Summary: data.Summary}
+	if e.EngagementID != data.EngagementID {
+		return PersonalSubject{}, fmt.Errorf("%w: lifecycle notification engagement", shared.ErrValidation)
+	}
+	if e.Type == EventFindingMentioned {
+		if !safeID(data.FindingID) || !safeID(data.MentionedID) || !safeID(e.EngagementID) {
+			return PersonalSubject{}, fmt.Errorf("%w: mention notification subject", shared.ErrValidation)
+		}
+		subject.MentionedIDs = compactIDs(data.MentionedID)
+		subject.Link = FindingLink(e.EngagementID, data.FindingID)
+	} else if approvalSubjectEvent(e.Type) {
+		subject.ApproverIDs = compactIDs(data.ApproverIDs...)
+		subject.ApprovalRecipients = true
+		subject.Link = "/blueteam/response"
+		if data.Kind == "agent" {
+			subject.Link = engagementPersonalLink(e.EngagementID) + "/agent"
+		}
+	} else if e.Type == EventResponseFinished {
+		subject.Link = "/blueteam/response"
+	} else if e.Type == EventIncidentUpdated && safeID(shared.ID(e.SubjectID)) {
+		subject.Link = "/fleet/incidents/" + url.PathEscape(e.SubjectID)
+	} else if e.Type == EventEvidenceChainBroken {
+		subject.Admins = true
+		subject.Link = engagementPersonalLink(e.EngagementID)
+	} else {
+		subject.Link = engagementPersonalLink(e.EngagementID)
+	}
+	return subject, nil
+}
+func engagementPersonalLink(id shared.ID) string {
+	if !safeID(id) {
+		return "/inbox"
+	}
+	return "/engagements/" + url.PathEscape(id.String())
 }

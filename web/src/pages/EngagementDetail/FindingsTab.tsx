@@ -19,6 +19,7 @@ import {
 } from './components/FindingsTable'
 import { STATUS_DOT } from './components/FindingStatus'
 import { NewFindingModal } from './components/NewFindingModal'
+import { BulkTicketsPanel } from './components/BulkTicketsPanel'
 
 // Re-export shared symbols consumed by sibling tabs (ReviewsTab) and detail views.
 export {
@@ -91,6 +92,8 @@ export function FindingsTab({
   const [params, setParams] = useSearchParams()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [creating, setCreating] = useState(false)
+  const [ticketSelection, setTicketSelection] = useState<Set<string>>(new Set())
+  const [bulkTickets, setBulkTickets] = useState(false)
 
   // Filters, sort and paging live in the query string so a shared link keeps them.
   const searchQuery = params.get('q') ?? ''
@@ -300,6 +303,11 @@ export function FindingsTab({
 
           {/* Right: Historical counter + New finding button */}
           <div className="flex items-center gap-2 self-end lg:self-auto">
+            {ticketSelection.size > 0 && (
+              <Button variant="secondary" disabled={readOnly} onClick={() => setBulkTickets((value) => !value)} className="h-9 px-3.5 text-xs">
+                Create Jira tickets ({ticketSelection.size})
+              </Button>
+            )}
             {historical.length > 0 && (
               <span
                 className="inline-flex items-center gap-1.5 rounded-lg border border-secondary bg-secondary px-2.5 py-1.5 text-xs text-tertiary"
@@ -341,6 +349,7 @@ export function FindingsTab({
           onCancel={() => setCreating(false)}
         />
       )}
+      {bulkTickets && !readOnly && <BulkTicketsPanel engagementId={engagementId} findingIds={[...ticketSelection]} onDone={() => { setBulkTickets(false); setTicketSelection(new Set()); onReload() }} />}
 
       {/* Findings Table */}
       {findings.length === 0 ? (
@@ -380,6 +389,8 @@ export function FindingsTab({
               onToggle={toggle}
               onUpdated={onUpdated}
               onReload={onReload}
+              ticketSelected={ticketSelection}
+              onToggleTicket={(id) => setTicketSelection((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })}
               readOnly={readOnly}
               readOnlyReason={readOnlyReason}
             />

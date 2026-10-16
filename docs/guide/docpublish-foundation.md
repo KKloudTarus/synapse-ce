@@ -89,7 +89,7 @@ page through a bound, not through an unbounded read.
 
 ## Storage and rollout
 
-Run the normal migrate-first deployment workflow to install migration `0236` before using the
+Run the normal migrate-first deployment workflow to install migration `0239` before using the
 PostgreSQL store. It adds two tables, `document_links` and `document_intents`, with
 `synapse_enable_tenant_rls` and tenant-scoped composite foreign keys, and changes nothing that
 exists. Both tables are tenant scoped; every operation requires an explicit tenant.

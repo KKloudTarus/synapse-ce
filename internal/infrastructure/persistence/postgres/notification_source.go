@@ -142,6 +142,9 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			if err := s.baselineLifecycle(ctx, tx, tenant, now); err != nil {
 				return err
 			}
+			if err := s.baselineEngagementWindows(ctx, tx, tenant, now); err != nil {
+				return err
+			}
 			return s.repo.reconcileTx(ctx, tx, tenant)
 		}
 		var activated time.Time

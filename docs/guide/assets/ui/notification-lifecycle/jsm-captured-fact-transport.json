@@ -1,0 +1,70 @@
+{
+  "captured_at": "2026-10-14T09:01:31.825715+00:00",
+  "fixture": "captured_fact_jsm_transport",
+  "provenance": "Current immutable event Data/Context rendered by real Service.RenderMessage and sent by current JSM driver; no domain or outbox writes",
+  "shared_event_types": [
+    "approval.decided",
+    "approval.requested",
+    "approval.timed_out",
+    "engagement.created",
+    "engagement.status_changed",
+    "engagement.window_ending",
+    "engagement.window_starting",
+    "evidence.chain_broken",
+    "finding.commented",
+    "incident.updated",
+    "response.finished"
+  ],
+  "excluded_event_type": "finding.mentioned is personal-only",
+  "locales": [
+    "en",
+    "vi"
+  ],
+  "data_classes": [
+    "signal",
+    "detail"
+  ],
+  "delivered_cells": 44,
+  "confirmed_request_alias_bindings": 44,
+  "snapshot_sha256": "452a9272f4c5761baa919e2af456fadbb1b2a701f54c854591bc796e1e8fac43",
+  "unknown_attempts": 0,
+  "native_note_matrix": "88 event/locale/class/theme cells have exact note matches and authoritative alert identity checks. Every current content/notes/Details image individually reviewed; no outstanding visual rejection. Clicked destination behavior is separate.",
+  "same_alias_create_note_probe": {
+    "distinct_notes": 2,
+    "native_retained_both": true,
+    "screenshot": "jsm-create-note-dedup-probe-light.jpg"
+  },
+  "retry_contract": "Persisted accepted requests resume with GET only; a POST whose response is lost before request persistence may produce duplicate occurrences/notes on retry",
+  "reviewed_occurrence_captures": [
+    "jsm-approval-decided-en-signal-light.jpg",
+    "jsm-approval-requested-timed-out-en-signal-light.jpg",
+    "jsm-engagement-created-en-signal-light.jpg",
+    "jsm-evidence-chain-broken-vi-detail-light.jpg",
+    "jsm-incident-updated-vi-detail-light.jpg",
+    "jsm-native-approval-requested-en-detail-light.jpg",
+    "jsm-native-finding-commented-en-signal-light.jpg",
+    "jsm-response-finished-vi-detail-light.jpg"
+  ],
+  "rejected_capture_count": 21,
+  "identity_verified_native_cells": 88,
+  "native_matrix": "jsm-native-matrix.json",
+  "new_loading_captures_replaced_and_reviewed": 14,
+  "earlier_identity_examples": [
+    {
+      "event_type": "finding.commented",
+      "locale": "vi",
+      "data_class": "detail",
+      "identity_before_and_after": true,
+      "body_matches": true,
+      "screenshot": "jsm-verified-finding-commented-vi-detail-light.jpg"
+    },
+    {
+      "event_type": "approval.decided",
+      "locale": "en",
+      "data_class": "signal",
+      "identity_before_and_after": true,
+      "body_matches": true,
+      "screenshot": "jsm-verified-approval-decided-en-signal-light.jpg"
+    }
+  ]
+}

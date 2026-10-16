@@ -33,6 +33,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/notificationbuiltin"
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
+	"github.com/KKloudTarus/synapse-ce/internal/composition/ticketruntime"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/alerting"
 	ap "github.com/KKloudTarus/synapse-ce/internal/domain/attackpath"
@@ -62,6 +63,7 @@ import (
 	githubintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/github"
 	gitlabintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/gitlab"
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
+	jiraintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jira"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
@@ -237,6 +239,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/teamslink"
 	tenancyuc "github.com/KKloudTarus/synapse-ce/internal/usecase/tenancy"
 	threatmodeluc "github.com/KKloudTarus/synapse-ce/internal/usecase/threatmodeluc"
+	ticketuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing"
 	transferuc "github.com/KKloudTarus/synapse-ce/internal/usecase/transfer"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
@@ -997,6 +1000,10 @@ func main() {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
 	}
+	if err := jiraintegration.Register(integrationRegistry); err != nil {
+		log.Error("Jira provider registry init failed", "err", err)
+		os.Exit(1)
+	}
 	if err := azurepipelinesintegration.Register(integrationRegistry); err != nil {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
@@ -1259,6 +1266,7 @@ func main() {
 	exportService := exportuc.NewService(findingRepo, clock, buildinfo.App())
 	exportService.SetAIGateExemptions(scaService)
 	findingsService := findingsuc.NewService(findingRepo, commentRepo, retestRepo, auditLog, clock, ids)
+	findingsService.SetMentionUsers(userRepo)
 	// Both additions are independent; the tenant resolver is wired first because the review service
 	// takes findingsService as a dependency.
 	findingsService.SetEngagementTenantResolver(repo)
@@ -1616,6 +1624,38 @@ func main() {
 		os.Exit(1)
 	}
 	router.SetTenantSettings(tenantSettingsService)
+	var developmentTicketRunner *ticketruntime.Runner
+	if cfg.TicketingEnabled {
+		var store ports.TicketStore
+		var policy ports.TicketPolicyReader
+		if databasePool != nil {
+			store, err = postgres.NewTicketStore(databasePool)
+			policy = postgres.NewNotificationRepository(databasePool)
+		} else {
+			store, err = memory.NewTicketStore(repo.(*memory.EngagementRepository), findingRepo.(*memory.FindingRepository))
+			if err == nil {
+				policy, err = memory.NewTicketPolicyReader(repo)
+			}
+		}
+		if err != nil {
+			log.Error("ticket store init failed", "err", err)
+			os.Exit(1)
+		}
+		workflow, ticketErr := ticketuc.NewWorkflow(store, integrationStore, integrationService, findingRepo, repo, policy, auditLog, ids, clock)
+		if ticketErr != nil {
+			log.Error("ticket workflow init failed", "err", ticketErr)
+			os.Exit(1)
+		}
+		workflow.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
+		router.SetTicketing(workflow)
+		if databasePool == nil {
+			developmentTicketRunner, ticketErr = ticketruntime.New(workflow, repo.(ports.TenantLister), log)
+			if ticketErr != nil {
+				log.Error("development ticket runner init failed", "err", ticketErr)
+				os.Exit(1)
+			}
+		}
+	}
 	var userContactService *usercontacts.Service
 	if databasePool != nil {
 		router.SetAssigneeReviewReader(postgres.NewAssigneeReviewReader(databasePool))
@@ -1628,6 +1668,19 @@ func main() {
 		}
 		if cfg.VaultMasterKey == "" {
 			log.Error("SYNAPSE_NOTIFICATIONS_ENABLED requires SYNAPSE_VAULT_MASTER_KEY shared by API and worker")
+			os.Exit(1)
+		}
+		if err := engService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), postgres.NewNotificationLifecycleFactsReader(databasePool)); err != nil {
+			log.Error("engagement notification producers init failed", "err", err)
+			os.Exit(1)
+		}
+		notificationLifecycleFacts := postgres.NewNotificationLifecycleFactsReader(databasePool)
+		if err := evidenceService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), notificationLifecycleFacts); err != nil {
+			log.Error("evidence notification producers init failed", "err", err)
+			os.Exit(1)
+		}
+		if err := approvalSvc.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), notificationLifecycleFacts, notificationLifecycleFacts); err != nil {
+			log.Error("approval notification producers init failed", "err", err)
 			os.Exit(1)
 		}
 		notificationRepository := postgres.NewNotificationRepository(databasePool)
@@ -1857,6 +1910,12 @@ func main() {
 		os.Exit(1)
 	}
 	responseService.SetApprovalDecider(approvalSvc)
+	if cfg.NotificationEnabled {
+		if err := responseService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), postgres.NewNotificationLifecycleFactsReader(databasePool)); err != nil {
+			log.Error("response notification producers init failed", "err", err)
+			os.Exit(1)
+		}
+	}
 	var incidentResponseCoordinator *responseuc.IncidentCoordinator
 	// Hoisted so the agent catalog can read incidents too; the read service itself stays the same instance
 	// the operator surface uses, so the agent sees exactly what a human analyst sees.
@@ -1903,6 +1962,7 @@ func main() {
 		Ownership:            cfg.OwnershipMode != "off" && databasePool != nil,
 		InboundWebhooks:      cfg.InboundWebhooksEnabled,
 		Notifications:        cfg.NotificationEnabled,
+		Ticketing:            cfg.TicketingEnabled,
 		// Read from the driver registry, so a newly registered driver is advertised without a
 		// catalog edit; the kill switch then removes the types the operator turned off.
 		NotificationChannelTypes:      channelTypeNames(notificationSender.ChannelTypes()),
@@ -2830,6 +2890,12 @@ func main() {
 			log.Error("incident triage service init failed", "err", terr)
 			os.Exit(1)
 		}
+		if cfg.NotificationEnabled {
+			if err := triageSvc.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool), postgres.NewNotificationLifecycleFactsReader(databasePool)); err != nil {
+				log.Error("incident notification producers init failed", "err", err)
+				os.Exit(1)
+			}
+		}
 		router.SetIncidentTriage(triageSvc)
 		// Behavioral baseline (#594 D): learn each asset's normal running-process profile at report time and
 		// score the current profile read-only at risk-assessment time (the assembler's Behavior factor). It
@@ -3698,6 +3764,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if developmentTicketRunner != nil {
+		go developmentTicketRunner.Run(ctx)
+	}
 	startIdentityMaintenance(ctx, cfg, databasePool, notificationSender, clock, ids, log)
 	if promotionRunner != nil {
 		startupTimeout := cfg.PromotionReconcileInterval

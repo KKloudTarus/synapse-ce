@@ -34,6 +34,8 @@ const catalog = [
   eventSpec('finding.status_changed', 'Finding status changed', ['finding_kinds', 'from_statuses', 'to_statuses']),
   eventSpec('finding.retest_completed', 'Finding retest completed', ['retest_results']),
   eventSpec('dast.run_finished', 'DAST run finished', ['scan_kinds', 'outcomes']),
+  eventSpec('approval.requested', 'Approval requested', ['kinds']),
+  eventSpec('finding.mentioned', 'Finding mentioned', ['engagement_ids']),
   eventSpec('cspm.run_finished', 'CSPM run finished', ['providers', 'outcomes']),
 ]
 
@@ -111,4 +113,25 @@ describe('rule event filters', () => {
       from_statuses: undefined, to_statuses: undefined,
     })))
   })
+  it('preserves the approval kind selector and captured approver role', async () => {
+    vi.mocked(api.listNotificationRules).mockResolvedValue([{ ...savedRule, event_type: 'approval.requested', kinds: ['response'], recipient_roles: ['approver'] }])
+    render(<Alerting />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit rule' }))
+    expect(screen.getByLabelText('Approval kinds (optional)')).toHaveValue('response')
+    expect(screen.getByRole('checkbox', { name: 'Eligible approvers' })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
+    await waitFor(() => expect(api.updateNotificationRule).toHaveBeenCalledWith('rule-1', expect.objectContaining({ kinds: ['response'], recipient_roles: ['approver'] })))
+  })
+
+  it('a mention rule exposes only personal mention recipients', async () => {
+    vi.mocked(api.listNotificationRules).mockResolvedValue([{ ...savedRule, event_type: 'finding.mentioned', recipient_roles: ['mentioned_user'] }])
+    render(<Alerting />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit rule' }))
+    expect(screen.getByRole('checkbox', { name: 'The mentioned user' })).toBeChecked()
+    expect(screen.queryByRole('checkbox', { name: 'Security webhook' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: "The finding's assignee" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save rule' }))
+    await waitFor(() => expect(api.updateNotificationRule).toHaveBeenCalledWith('rule-1', expect.objectContaining({ channel_ids: [], recipient_roles: ['mentioned_user'] })))
+  })
+
 })

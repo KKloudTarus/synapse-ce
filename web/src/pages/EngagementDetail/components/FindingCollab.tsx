@@ -1,8 +1,9 @@
 import { AlertTriangle, Loading01, MessageSquare01, RefreshCcw01, User01 } from '@untitledui/icons'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Button, Input, Select, cn } from '../../../components/ui'
 import { useFetch } from '../../../hooks'
 import { ApiError, api } from '../../../lib/api'
+import type { UserChoice } from '../../../lib/api/ownership'
 import type { Finding, FindingComment, Retest, RetestOutcome } from '../../../lib/types'
 import { UserPicker } from '../../Ownership/UserPicker'
 
@@ -181,35 +182,47 @@ export function RetestPanel({
 }
 
 export function CommentsPanel({ engagementId, findingId }: { engagementId: string; findingId: string }) {
-  const [comments, setComments] = useState<FindingComment[] | null>(null)
+  const requestGeneration = useRef(0)
+  const [savedComments, setSavedComments] = useState<FindingComment[]>([])
   const [body, setBody] = useState('')
+  const [mentions, setMentions] = useState<UserChoice[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  // Same reason as the retest list: `comments` is a copy that outlives the request it came
-  // from, so a different finding starts from the loading state rather than from the previous
-  // finding's thread.
   useEffect(() => {
-    setComments(null)
+    requestGeneration.current += 1
+    setSavedComments([])
+    setBody('')
+    setMentions([])
+    setErr(null)
+    setBusy(false)
   }, [engagementId, findingId])
 
-  const { refetch: reload } = useFetch(
-    () => api.findingComments(engagementId, findingId).then((c) => { setComments(c); return c }).catch(() => { setComments([]); return [] }),
+  const { data, loading, error: loadError, refetch: reload } = useFetch(
+    () => api.findingComments(engagementId, findingId),
     { deps: [engagementId, findingId] },
   )
+  const comments = data === null && savedComments.length === 0 ? null : [
+    ...(data ?? []),
+    ...savedComments.filter((saved) => !(data ?? []).some((comment) => comment.id === saved.id)),
+  ]
 
   async function add() {
-    if (!body.trim()) return
+    if (!body.trim() || busy) return
+    const generation = requestGeneration.current
     setBusy(true)
     setErr(null)
     try {
-      await api.addFindingComment(engagementId, findingId, body.trim())
+      const saved = await api.addFindingComment(engagementId, findingId, body.trim(), mentions.map((user) => user.id))
+      if (generation !== requestGeneration.current) return
+      if (saved.id) setSavedComments((previous) => [...previous, saved])
       setBody('')
+      setMentions([])
       reload()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to add comment')
+      if (generation === requestGeneration.current) setErr(e instanceof Error ? e.message : 'Failed to add comment')
     } finally {
-      setBusy(false)
+      if (generation === requestGeneration.current) setBusy(false)
     }
   }
 
@@ -221,10 +234,10 @@ export function CommentsPanel({ engagementId, findingId }: { engagementId: strin
       </div>
 
       <div className="space-y-1.5 max-h-48 overflow-y-auto">
-        {comments === null ? (
+        {comments === null && loading ? (
           <span className="text-xs text-quaternary">Loading...</span>
-        ) : comments.length === 0 ? (
-          <span className="text-xs text-quaternary">No comments yet.</span>
+        ) : comments === null ? null : comments.length === 0 ? (
+          !loadError && <span className="text-xs text-quaternary">No comments yet.</span>
         ) : (
           comments.map((c) => (
             <div key={c.id} className="rounded-lg border border-secondary bg-secondary px-3 py-2 text-xs">
@@ -240,6 +253,10 @@ export function CommentsPanel({ engagementId, findingId }: { engagementId: strin
         )}
       </div>
 
+      {loadError && <div role="alert" className="text-xs text-error-primary">
+        <p>Could not load comments: {loadError}</p>
+        <button type="button" onClick={reload} className="mt-1 font-semibold underline">Retry loading comments</button>
+      </div>}
       <div className="flex items-center gap-2">
         <Input
           value={body}
@@ -249,13 +266,74 @@ export function CommentsPanel({ engagementId, findingId }: { engagementId: strin
           }}
           placeholder="Add a comment..."
           aria-label="New comment"
+          disabled={busy}
           className="h-8 flex-1 text-xs"
         />
         <Button loading={busy} onClick={add} variant="secondary" className="h-8 px-3 text-xs font-semibold">
           Post
         </Button>
       </div>
-      {err && <p className="mt-1 text-xs text-error-primary">{err}</p>}
+      <CommentMentionPicker selected={mentions} onChange={setMentions} disabled={busy} />
+      {err && <p role="alert" className="mt-1 text-xs text-error-primary">{err}</p>}
+    </div>
+  )
+}
+
+function CommentMentionPicker({ selected, onChange, disabled }: { selected: UserChoice[]; onChange: (users: UserChoice[]) => void; disabled: boolean }) {
+  const searchID = useId()
+  const [query, setQuery] = useState('')
+  const [options, setOptions] = useState<UserChoice[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setLoading(true)
+    setError('')
+    setOptions([])
+    const timer = setTimeout(() => {
+      let pending: ReturnType<typeof api.userChoices>
+      try {
+        pending = api.userChoices('', query, undefined, controller.signal, 'mention')
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          setError(cause instanceof Error ? cause.message : 'Could not search users')
+          setLoading(false)
+        }
+        return
+      }
+      void pending.then((page) => {
+        if (!controller.signal.aborted) setOptions(page.items)
+      }).catch((cause) => {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not search users')
+      }).finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    }, 200)
+    return () => { controller.abort(); clearTimeout(timer) }
+  }, [query])
+
+  const selectedIDs = new Set(selected.map((user) => user.id))
+  function add(user: UserChoice) {
+    if (!selectedIDs.has(user.id) && selected.length < 10) onChange([...selected, user])
+    setQuery('')
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-secondary" htmlFor={searchID}>Mention people (optional)</label>
+      {selected.length > 0 && <div className="flex flex-wrap gap-1" aria-label="Selected mentions">
+        {selected.map((user) => <span key={user.id} className="inline-flex items-center gap-1 rounded border border-secondary px-1.5 py-0.5 text-xs text-secondary">
+          {user.name} <button type="button" className="text-primary underline" disabled={disabled} aria-label={`Remove ${user.name}`} onClick={() => onChange(selected.filter((candidate) => candidate.id !== user.id))}>Remove</button>
+        </span>)}
+      </div>}
+      <Input id={searchID} value={query} disabled={disabled || selected.length >= 10} onChange={(event) => setQuery(event.target.value)} placeholder={selected.length >= 10 ? 'Maximum 10 mentions' : 'Search eligible users'} aria-label="Search eligible users to mention" className="h-8 text-xs" />
+      {loading && <p className="text-xs text-tertiary" role="status">Searching users…</p>}
+      {error && <p className="text-xs text-error-primary" role="alert">{error}</p>}
+      {!loading && !error && options.length === 0 && <p className="text-xs text-tertiary">No eligible users found.</p>}
+      {!loading && !error && options.filter((user) => !selectedIDs.has(user.id)).length > 0 && <ul className="max-h-28 overflow-y-auto rounded border border-secondary" aria-label="Eligible people to mention">
+        {options.filter((user) => !selectedIDs.has(user.id)).map((user) => <li key={user.id}><button type="button" disabled={disabled} onClick={() => add(user)} className="w-full px-2 py-1 text-left text-xs text-primary hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-brand">{user.name} <span className="text-tertiary">({user.id})</span></button></li>)}
+      </ul>}
     </div>
   )
 }

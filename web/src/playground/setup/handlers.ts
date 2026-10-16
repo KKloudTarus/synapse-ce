@@ -6,6 +6,7 @@ const json = (value: unknown, status = 200) => HttpResponse.json(value as never,
 const error = (message: string, status = 409) => json({ error: message, message }, status)
 const now = () => new Date().toISOString()
 const text = (v: unknown) => typeof v === 'string' ? v.trim().slice(0, 2000) : ''
+const seedJira = () => ({ id: 'demo-jira-cloud', provider: 'jira-cloud', name: 'Demo Jira Cloud', endpoint: 'https://jira.demo.invalid', config: {}, enabled: false, archived: false, version: 1, connection_revision: 1, credential_revision: 1, credential_configured: true, allow_private_network: false, poll_interval_seconds: 300, created_at: now(), updated_at: now() })
 export function agentReadiness(ready: boolean) {
   return { overall: ready ? 'ready' : 'blocked', target_kinds: ['repo'], suggested_goals: [REVIEW_GOAL],
     items: [
@@ -19,8 +20,10 @@ export const setupHandlers = [http.all('/api/v1/*', async ({ request }) => {
   const path = new URL(request.url).pathname.slice(7), method = request.method
   let s = setupStore.getSnapshot()
   const patch = (change: Parameters<typeof updateSetup>[0]) => { updateSetup(change); s = setupStore.getSnapshot() }
+  if (!s.connections.some((connection) => connection.id === 'demo-jira-cloud')) patch((data) => { data.connections.push(seedJira()) })
   const handled = /^\/(integration-providers|integrations(?:\/|$)|integration-operations\/|connectors(?:\/|$)|playground\/setup\/|engagements\/[^/]+\/agent\/)/.test(path)
   if (!handled) return
+  if (/^\/integrations\/[^/]+\/jira-metadata$/.test(path)) return
   let b: Record<string, unknown> = {}
   if (method !== 'GET' && method !== 'DELETE') { try { b = await request.json() as Record<string, unknown> } catch { return error('A JSON request is required.', 400) } }
   if (path === '/playground/setup/ai-ready' && method === 'POST') { patch(d => { d.aiReady = true }); return json({ simulation: true }) }
@@ -85,7 +88,7 @@ export const setupHandlers = [http.all('/api/v1/*', async ({ request }) => {
   const match = path.match(/^\/integrations\/([^/]+)(?:\/(.+))?$/)
   if (match) {
     const c = s.connections.find(v => v.id === match[1]); if (!c) return error('Integration not found.', 404)
-    const action = match[2], descriptor = providers.find(p => p.provider === c.provider)!, polling = descriptor.capabilities.includes('read_runs')
+    const action = match[2], descriptor = providers.find(p => p.provider === c.provider)!, polling = descriptor.capabilities.includes('read_runs'), jira = c.provider === 'jira-cloud' || c.provider === 'jira-dc', requiresTest = polling || jira
     if (!action && method === 'GET') return json(c)
     if (!action && method === 'PUT') {
       try { const url = new URL(text(b.endpoint)); if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error() } catch { return error('Use a valid HTTPS endpoint.', 400) }
@@ -103,17 +106,17 @@ export const setupHandlers = [http.all('/api/v1/*', async ({ request }) => {
       patch(d => { const row = d.connections.find(v => v.id === c.id)!; row.credential_configured = method === 'PUT'; row.credential_revision++; row.connection_revision++; row.version++; row.enabled = false }); return new HttpResponse(null, { status: 204 })
     }
     if (['enable', 'disable', 'archive'].includes(action) && method === 'POST') {
-      if (action === 'enable' && polling && !s.operations.some(o => o.integration_id === c.id && o.type === 'test' && o.state === 'succeeded' && o.connection_revision === c.connection_revision)) return error('Test the connection successfully before enabling it.')
-      if (action === 'enable' && !polling && (!s.webhookReady || !s.bindings.some(v => v.integration_id === c.id))) return error('Provision the simulated webhook and bind a Project before enabling inbound delivery.')
+      if (action === 'enable' && requiresTest && !s.operations.some(o => o.integration_id === c.id && o.type === 'test' && o.state === 'succeeded' && o.connection_revision === c.connection_revision && o.credential_revision === c.credential_revision)) return error('Test the connection successfully before enabling it.')
+      if (action === 'enable' && !polling && !jira && (!s.webhookReady || !s.bindings.some(v => v.integration_id === c.id))) return error('Provision the simulated webhook and bind a Project before enabling inbound delivery.')
       patch(d => { const row = d.connections.find(v => v.id === c.id)!; row.enabled = action === 'enable'; row.archived = action === 'archive'; row.version++; row.updated_at = now() }); return json(s.connections.find(v => v.id === c.id))
     }
     if (action === 'operations') {
       if (method === 'GET') return json(s.operations.filter(v => v.integration_id === c.id).reverse())
       if (method === 'POST') {
         const type = text(b.type)
-        if (!polling || !['test', 'discover', 'poll'].includes(type)) return error('This provider does not support this operation.', 422)
+        if ((!polling && !(jira && type === 'test')) || !['test', 'discover', 'poll'].includes(type)) return error('This provider does not support this operation.', 422)
         if (!c.credential_configured || type === 'poll' && (!c.enabled || !s.bindings.some(v => v.integration_id === c.id))) return error('Configure credentials, test, bind and enable before polling.')
-        const op: Operation = { id: crypto.randomUUID(), integration_id: c.id, connection_revision: c.connection_revision, type, state: 'queued', errors: [], created_at: now(), updated_at: now(), started_at: now(), finished_at: null, counts: { pipelines: type === 'discover' ? 1 : 0, runs: type === 'poll' ? 3 : 0, linked: type === 'poll' ? 1 : 0, unlinked: type === 'poll' ? 2 : 0, errors: 0 }, pipelines: type === 'discover' ? [{ external_key: '/job/synapse-ce/', name: 'Synapse CE', full_name: 'Synapse CE / main', kind: 'pipeline', url: 'https://ci.example/job/synapse-ce/' }] : [] }
+        const op: Operation = { id: crypto.randomUUID(), integration_id: c.id, connection_revision: c.connection_revision, credential_revision: c.credential_revision, type, state: 'queued', errors: [], created_at: now(), updated_at: now(), started_at: now(), finished_at: null, counts: { pipelines: type === 'discover' ? 1 : 0, runs: type === 'poll' ? 3 : 0, linked: type === 'poll' ? 1 : 0, unlinked: type === 'poll' ? 2 : 0, errors: 0 }, pipelines: type === 'discover' ? [{ external_key: '/job/synapse-ce/', name: 'Synapse CE', full_name: 'Synapse CE / main', kind: 'pipeline', url: 'https://ci.example/job/synapse-ce/' }] : [] }
         patch(d => { d.operations.push(op) }); return json(op, 202)
       }
     }

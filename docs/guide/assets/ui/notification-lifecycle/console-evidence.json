@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-14T09:47:10.345765+00:00",
+  "evidence_kind": "edge_native_evidence_inventory",
+  "available_captures": [
+    {
+      "path": "console-comment-error-retained.jpg",
+      "claim": "HTTP502 retains draft and mention for retry."
+    },
+    {
+      "path": "console-comment-success.jpg",
+      "claim": "Successful POST clears composer."
+    },
+    {
+      "path": "console-mention-empty.jpg",
+      "claim": "Empty eligible-person search state."
+    },
+    {
+      "path": "console-mention-keyboard-selected.jpg",
+      "claim": "Keyboard selection and removal of canonical mention."
+    },
+    {
+      "path": "console-mention-selected.jpg",
+      "claim": "Canonical mention selection before submit."
+    },
+    {
+      "path": "console-personal-inbox.jpg",
+      "claim": "Personal mention and current private-roster approval notifications in own inbox."
+    },
+    {
+      "path": "deployed-finding-deep-link.jpg",
+      "claim": "Mattermost finding link clicked to HTTPS deployed console; correct finding auto-expanded."
+    },
+    {
+      "path": "google-chat-window-thread-vietnamese-light.jpg",
+      "claim": "Native Google Chat VI detail engagement-created and boundary follow-up thread."
+    },
+    {
+      "path": "mattermost-corrected-vietnamese-dark.jpg",
+      "claim": "Native Mattermost VI incident/response captured-fact transport fixture, dark theme."
+    },
+    {
+      "path": "rocket-corrected-vietnamese-light.jpg",
+      "claim": "Native Rocket.Chat VI incident/response captured-fact transport fixture, light theme."
+    },
+    {
+      "path": "rocket-workspace-notice.jpg",
+      "claim": "Observed workspace ID notice; diagnostic only, excluded from rendering acceptance."
+    },
+    {
+      "path": "slack-engagement-created-light.jpg",
+      "claim": "Native Slack engagement-created EN detail and signal view."
+    },
+    {
+      "path": "telegram-approval-thread-light.jpg",
+      "claim": "Native Telegram EN approval timeout signal/detail, follow-up reply to requested message."
+    },
+    {
+      "path": "discord-current-approval-vietnamese-dark.jpg",
+      "claim": "Native Discord EN detail and EN/VI signal timeout messages after existing account login."
+    },
+    {
+      "path": "jsm-create-note-dedup-probe-light.jpg",
+      "claim": "Two distinct synthetic follow-up notes retained under one alert alias; provider behavior probe, excluded from per-event acceptance."
+    },
+    {
+      "path": "deployed-approval-deep-link.jpg",
+      "claim": "Discord approval link clicked through Visit Site to the correct HTTPS engagement agent route. Existing deployed API reports Agent feature disabled; no approval action performed."
+    },
+    {
+      "path": "jsm-approval-decided-en-signal-light.jpg",
+      "claim": "EN approved note with P3. Reviewer read the image; this alone does not establish class provenance, theme matrix or clicked link."
+    },
+    {
+      "path": "jsm-approval-requested-timed-out-en-signal-light.jpg",
+      "claim": "EN timeout note with P3; requested note clipped, excluded for requested-note coverage. Reviewer read the image; this alone does not establish class provenance, theme matrix or clicked link."
+    },
+    {
+      "path": "jsm-engagement-created-en-signal-light.jpg",
+      "claim": "EN created/status/start/end notes; priority outside viewport. Reviewer read the image; this alone does not establish class provenance, theme matrix or clicked link."
+    },
+    {
+      "path": "jsm-evidence-chain-broken-vi-detail-light.jpg",
+      "claim": "VI synthetic chain failure note with critical severity and P1. Reviewer read the image; this alone does not establish class provenance, theme matrix or clicked link."
+    },
+    {
+      "path": "jsm-incident-updated-vi-detail-light.jpg",
+      "claim": "VI incident status investigating and disposition unknown, high severity and P2. Reviewer read the image; this alone does not establish class provenance, theme matrix or clicked link."
+    },
+    {
+      "path": "jsm-native-approval-requested-en-detail-light.jpg",
+      "claim": "EN requested and timeout notes with P3; some metadata loading. Reviewer read the image; this alone does not establish class provenance, theme matrix or clicked link."
+    },
+    {
+      "path": "jsm-native-finding-commented-en-signal-light.jpg",
+      "claim": "EN finding comment note with high severity/open status and P2. Reviewer read the image; this alone does not establish class provenance, theme matrix or clicked link."
+    },
+    {
+      "path": "jsm-response-finished-vi-detail-light.jpg",
+      "claim": "VI synthetic failed isolate_host outcome note with P3. Reviewer read the image; this alone does not establish class provenance, theme matrix or clicked link."
+    },
+    {
+      "path": "jsm-verified-finding-commented-vi-detail-light.jpg",
+      "claim": "Native finding.commented vi/detail note body matched; current alert breadcrumb identity verified before and after screenshot; light theme. No clicked-link claim."
+    },
+    {
+      "path": "jsm-verified-approval-decided-en-signal-light.jpg",
+      "claim": "Native approval.decided en/signal note body matched; current alert breadcrumb identity verified before and after screenshot; light theme. No clicked-link claim."
+    }
+  ],
+  "observed_additional_actions": [
+    "Personal inbox mention clicked to its correct finding route.",
+    "Telegram AX confirms EN/VI signal/detail for incident.updated, response.finished and chain_broken; approval current private-roster messages and reply anchors.",
+    "Telegram current-renderer 88-cell EN/VI signal/detail light/dark matrix and six source-event destinations individually passed native review; System theme and browser viewport override were restored.",
+    "Google Chat AX confirms VI engagement status and window start/end within its engagement-created thread.",
+    "Discord existing login restored; correct engagement approval route opened from a native message link.",
+    "Discord original-runtime 88-cell EN/VI signal/detail light/dark matrix and six source-event destinations individually passed native review; original Dark theme was restored.",
+    "JSM Operations Alerts workspace discovered through Jira navigation; captured-fact request aliases correlated to native alert pages.",
+    "JSM full 88-cell content matrix and56 link supplements individually reviewed; six console destination kinds clicked and inspected.",
+    "Own Slack contact verified through native challenge; canonical mention delivered to one personal recipient and no shared channels; clicked correct finding; temporary preference restored.",
+    "Slack shared-event88cells and six source-event click destinations individually reviewed; own mention DM inspected in light/dark; OperatingSystem color mode restored.",
+    "Google Chat 88 native locale/class/theme cells and six exact clicked destinations individually passed review; original Light theme and expanded Main menu restored."
+  ],
+  "environment": "Existing Edge sandbox clients and owned local Docker services verified. Original client themes restored. No extension or browser security setting changed.",
+  "pending_acceptance": [],
+  "deferred_providers": [
+    "SMTP (Gmail/Outlook clients)",
+    "Microsoft Teams",
+    "PagerDuty"
+  ],
+  "deferral_issue": "https://github.com/KKloudTarus/synapse-ce/issues/1576",
+  "status": "complete for the eight in-scope native providers; deferred providers remain tracked in the deferral issue",
+  "native_matrix_artifacts": [
+    "slack-native-matrix.json",
+    "jsm-native-matrix.json",
+    "mattermost-native-matrix.json",
+    "rocket-chat-native-matrix.json",
+    "webhook-native-matrix.json",
+    "discord-native-matrix.json",
+    "telegram-native-matrix.json",
+    "google-chat-native-matrix.json",
+    "personal-mention-runtime.json"
+  ],
+  "observed_at": "2026-10-15T05:28:25.512989+00:00",
+  "mattermost_native_matrix": {
+    "manifest": "mattermost-native-matrix.json",
+    "reviewed_cells": 88,
+    "clicked_source_event_groups": 6,
+    "theme_restored": "Onyx"
+  },
+  "rocket_chat_native_matrix": {
+    "manifest": "rocket-chat-native-matrix.json",
+    "reviewed_cells": 88,
+    "clicked_source_event_groups": 6,
+    "theme_restored": "Match system"
+  },
+  "webhook_native_matrix": {
+    "manifest": "webhook-native-matrix.json",
+    "reviewed_cells": 88,
+    "clicked_source_event_groups": 6,
+    "locale_neutral_json": true
+  },
+  "discord_native_matrix": {
+    "manifest": "discord-native-matrix.json",
+    "reviewed_cells": 88,
+    "clicked_source_event_groups": 6,
+    "original_theme": "Dark",
+    "theme_restored": "Dark",
+    "provenance": "original runtime delivery acknowledgements correlated in Discord native search results; not a fresh-provider fixture"
+  },
+  "telegram_native_matrix": {
+    "manifest": "telegram-native-matrix.json",
+    "reviewed_cells": 88,
+    "clicked_source_event_groups": 6,
+    "original_theme": "System",
+    "theme_restored": "System",
+    "provenance": "current renderer and Sender.Send normal-HTTPS fixture journal; Bot API acknowledgements and native Web recipient identities are separately bound in private receipts"
+  },
+  "google_chat_native_matrix": {
+    "manifest": "google-chat-native-matrix.json",
+    "reviewed_cells": 88,
+    "clicked_source_event_groups": 6,
+    "original_theme": "Light",
+    "theme_restored": "Light",
+    "main_menu_restored": "expanded",
+    "provenance": "Current-renderer fixture journal; native full text and both acknowledgement components matched. Six actual Open button clicks matched the exact captured public URLs."
+  }
+}
