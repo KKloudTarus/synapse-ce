@@ -64,6 +64,11 @@ Outlook or PagerDuty. In particular, this packet does not claim a usable Teams b
 identity or accepted real-client evidence. Any outstanding leaf is referenced with
 `Refs`, not closed by a code-only result.
 
+PagerDuty live acceptance is deferred to [#1576](https://github.com/KKloudTarus/synapse-ce/issues/1576)
+by the maintainer because no PagerDuty access is available. The remaining eligible
+pager-class digest receipts, locale/theme rendering, deduplication and resolve evidence
+stay unverified there. This deferral does not count as provider acceptance or close #1576.
+
 ## Work bounds and recovery
 
 The runtime exercise contains five manually authored findings; production source rates and
