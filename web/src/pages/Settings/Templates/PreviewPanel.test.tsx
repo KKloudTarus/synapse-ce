@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError, type NotificationChannel, type NotificationEventSpec, type NotificationTemplatePreview } from '../../../lib/api'
 import { PREVIEW_DEBOUNCE_MS, PreviewPanel } from './PreviewPanel'
@@ -106,12 +106,31 @@ describe('PreviewPanel', () => {
     await act(async () => { await Promise.resolve() })
     await act(async () => { await Promise.resolve() })
     await settlePreview()
-    expect(screen.getByText('Severity: high')).toBeInTheDocument()
+    expect(screen.getByLabelText('Severity: high')).toBeInTheDocument()
     expect(screen.getByText('Incident', { selector: 'strong' })).toBeInTheDocument()
     expect(screen.getByText(/a_b/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open incident' })).toHaveAttribute('href', 'https://console.example/fleet/incidents/example')
     expect(screen.queryByRole('link', { name: 'Unsafe link' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Credential link' })).not.toBeInTheDocument()
+  })
+
+  it('presents the chat title before its body regardless of JSON field order', async () => {
+    vi.mocked(api.listNotificationChannels).mockResolvedValue([{ ...CHANNEL, id: 'chat-1', type: 'slack' }])
+    vi.mocked(api.previewNotificationTemplate).mockResolvedValue(preview({
+      channel: { id: 'chat-1', name: 'SOC chat', type: 'slack', family: 'chat' },
+      message: { template_ref: 'draft:example', fields: { body: 'Review the incident', title: 'Incident opened' }, severity: 'high' },
+    }))
+    render(<PreviewPanel templateEventType="incident.created" family="chat" fields={{ title: 'A', body: 'B' }} catalog={CATALOG} />)
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    await settlePreview()
+    const message = screen.getByLabelText('Rendered message preview')
+    const title = within(message).getByText('Incident opened')
+    const body = within(message).getByText('Review the incident')
+    expect(title.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(message).queryByText('title', { exact: true })).not.toBeInTheDocument()
+    expect(within(message).queryByText('body', { exact: true })).not.toBeInTheDocument()
+    expect(within(message).getByLabelText('Severity: high')).toHaveTextContent('High')
   })
 
   it('shows a webhook body as inert text', async () => {

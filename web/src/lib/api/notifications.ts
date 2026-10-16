@@ -215,6 +215,12 @@ export interface NotificationRule {
   name: string
   enabled: boolean
   event_type: NotificationEventType
+  /**
+   * Explicit subscriptions in priority order. The first value is always event_type.
+   * An omitted value is a legacy single-event rule; an explicit empty value deliberately
+   * returns a former multi-event rule to that legacy shape.
+   */
+  event_types?: NotificationEventType[]
   min_severity?: string
   action_types?: string[]
   finding_kinds?: string[]
@@ -427,6 +433,7 @@ export const notificationsApi = {
         name: input.name,
         enabled: input.enabled,
         event_type: input.event_type,
+        ...(input.event_types === undefined ? {} : { event_types: input.event_types }),
         min_severity: input.min_severity,
         action_types: input.action_types,
         finding_kinds: input.finding_kinds,

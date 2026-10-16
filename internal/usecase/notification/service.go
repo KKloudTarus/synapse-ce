@@ -373,11 +373,14 @@ type RuleInput struct {
 	Name             string                 `json:"name"`
 	Enabled          bool                   `json:"enabled"`
 	EventType        domain.EventType       `json:"event_type"`
-	MinSeverity      shared.Severity        `json:"min_severity,omitempty"`
-	ActionTypes      []string               `json:"action_types,omitempty"`
-	EngagementIDs    []shared.ID            `json:"engagement_ids,omitempty"`
-	TeamIDs          []shared.ID            `json:"team_ids,omitempty"`
-	AllTeams         bool                   `json:"all_teams,omitempty"`
+	// EventTypes is optional for legacy clients. A nonempty array is the complete ordered
+	// selection; an explicit empty array deliberately returns the rule to its primary selector.
+	EventTypes    []domain.EventType `json:"event_types,omitempty"`
+	MinSeverity   shared.Severity    `json:"min_severity,omitempty"`
+	ActionTypes   []string           `json:"action_types,omitempty"`
+	EngagementIDs []shared.ID        `json:"engagement_ids,omitempty"`
+	TeamIDs       []shared.ID        `json:"team_ids,omitempty"`
+	AllTeams      bool               `json:"all_teams,omitempty"`
 	domain.EventFilters
 	ChannelIDs []shared.ID `json:"channel_ids"`
 	// RecipientRoles address people by their relation to the event (#1415): assignee, team_member
@@ -400,7 +403,7 @@ func (s *Service) createRule(ctx context.Context, actor string, in RuleInput) (d
 		return domain.Rule{}, fmt.Errorf("notification rule limit reached: %w", shared.ErrSaturated)
 	}
 	now := s.clock.Now().UTC()
-	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, Cadence: in.Cadence, RecipientUserIDs: in.RecipientUserIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, EventTypes: in.EventTypes, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, Cadence: in.Cadence, RecipientUserIDs: in.RecipientUserIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}
@@ -411,7 +414,7 @@ func (s *Service) createRule(ctx context.Context, actor string, in RuleInput) (d
 	if err != nil {
 		return domain.Rule{}, err
 	}
-	if err = s.record(ctx, actor, "notification.rule.created", r.ID.String(), map[string]string{"event_type": string(r.EventType), "recipient_roles": strings.Join(r.RecipientRoles, ",")}); err != nil {
+	if err = s.record(ctx, actor, "notification.rule.created", r.ID.String(), ruleAuditMetadata(r)); err != nil {
 		return domain.Rule{}, err
 	}
 	return r, nil
@@ -428,7 +431,10 @@ func (s *Service) updateRule(ctx context.Context, actor string, id shared.ID, in
 	if current.Revision != in.Revision {
 		return domain.Rule{}, fmt.Errorf("notification rule revision is stale: %w", shared.ErrConflict)
 	}
-	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, Cadence: in.Cadence, RecipientUserIDs: in.RecipientUserIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
+	if len(current.EventTypes) > 0 && in.EventTypes == nil {
+		return domain.Rule{}, fmt.Errorf("%w: event_types is required when updating a multi-event rule", shared.ErrValidation)
+	}
+	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, EventTypes: in.EventTypes, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, Cadence: in.Cadence, RecipientUserIDs: in.RecipientUserIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}
@@ -439,10 +445,26 @@ func (s *Service) updateRule(ctx context.Context, actor string, id shared.ID, in
 	if err != nil {
 		return domain.Rule{}, err
 	}
-	if err = s.record(ctx, actor, "notification.rule.updated", id.String(), map[string]string{"event_type": string(r.EventType), "recipient_roles": strings.Join(r.RecipientRoles, ",")}); err != nil {
+	if err = s.record(ctx, actor, "notification.rule.updated", id.String(), ruleAuditMetadata(r)); err != nil {
 		return domain.Rule{}, err
 	}
 	return r, nil
+}
+
+func ruleAuditMetadata(rule domain.Rule) map[string]string {
+	return map[string]string{
+		"event_type":      string(rule.EventType),
+		"event_types":     strings.Join(eventTypeStrings(rule.SelectedEventTypes()), ","),
+		"recipient_roles": strings.Join(rule.RecipientRoles, ","),
+	}
+}
+
+func eventTypeStrings(types []domain.EventType) []string {
+	values := make([]string, len(types))
+	for index, eventType := range types {
+		values[index] = string(eventType)
+	}
+	return values
 }
 func (s *Service) deleteRule(ctx context.Context, actor string, id shared.ID, revision int) error {
 	tenant, err := tenantFrom(ctx)

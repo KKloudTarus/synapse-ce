@@ -42,6 +42,7 @@ import {
 import { ChannelTemplateFields, RuleTemplatePreview } from './ChannelTemplateBinding'
 import { SlackBotDestinationFields, slackBotDestinationValid } from './SlackBotDestination'
 import { PersonalDelivery } from './PersonalDelivery'
+import { MultiSelect } from '../../components/base/select/multi-select'
 
 // A new rule starts on the most common subscription when the catalog offers it.
 const DEFAULT_RULE_EVENT = 'vulnerability_action.created'
@@ -55,6 +56,10 @@ function ruleFilterValues(value: string): string[] {
 // catalog no longer declares.
 function eventLabel(eventTypes: NotificationEventSpec[], type: string) {
   return eventTypes.find((e) => e.type === type)?.label ?? type
+}
+
+function selectedRuleEventTypes(rule: Pick<NotificationRule, 'event_type' | 'event_types'>): string[] {
+  return rule.event_types && rule.event_types.length > 0 ? rule.event_types : [rule.event_type]
 }
 const stateTone: Record<string, string> = {
   delivered: 'text-success-primary',
@@ -1128,11 +1133,29 @@ function RuleCreate({
         ?.type ??
       '',
   )
+  // The primary event stays first for legacy callers. Additional subscriptions retain their
+  // saved order; the API receives the complete ordered set whenever it is multi-event.
+  const [additionalEvents, setAdditionalEvents] = useState<NotificationEventType[]>(() =>
+    (initial?.event_types ?? []).filter((type) => type !== initial?.event_type),
+  )
+  const [eventSelectionError, setEventSelectionError] = useState<string | null>(null)
+  const selectedEvents = [event, ...additionalEvents.filter((type) => type !== event)]
+  const selectedEventTypesForSave = additionalEvents.length > 0
+    ? selectedEvents
+    : initial?.event_types === undefined
+      ? undefined
+      : initial.event_types.length > 1
+        ? []
+        : initial.event_types.length === 1
+          ? [event]
+          : []
+  const selectedSpecs = selectedEvents.map((type) => eventTypes.find((item) => item.type === type))
   // Each field below renders only when the catalog says this event type accepts its filter, so the
   // form cannot build a rule the server would reject or that could never match.
   const spec = eventTypes.find((e) => e.type === event)
   const allows = (filter: NotificationRuleFilter) =>
-    spec?.filters.includes(filter) ?? false
+    selectedSpecs.length === selectedEvents.length &&
+    selectedSpecs.every((item) => item?.filters.includes(filter))
   const [selected, setSelected] = useState<string[]>(
     event === 'finding.mentioned' ? [] : initial?.channel_ids ?? [channels[0]?.id].filter(Boolean),
   )
@@ -1147,7 +1170,11 @@ function RuleCreate({
   const [allTeams, setAllTeams] = useState(initial?.all_teams ?? false)
   // Recipient roles (#1415) address people by their relation to the event, besides the channels.
   const [roles, setRoles] = useState<string[]>(initial?.recipient_roles ?? (event === 'finding.mentioned' ? ['mentioned_user'] : []))
-  const availableRoles = recipientRolesFor(event, spec)
+  const availableRoles = recipientRolesFor(event, spec).filter((role) =>
+    selectedSpecs.every((item, index) =>
+      recipientRolesFor(selectedEvents[index], item).some((candidate) => candidate.value === role.value),
+    ),
+  )
   const chosenRoles = roles.filter((role) => availableRoles.some((r) => r.value === role))
   const engagementCache = useRef<Promise<Array<{ id: string; name: string; client: string }>> | null>(null)
   const searchEngagements = useCallback(async (query: string, cursor: string | undefined, signal: AbortSignal) => {
@@ -1208,20 +1235,61 @@ function RuleCreate({
     String((initial?.lead_time_seconds ?? 86400) / 3600),
   )
   const [busy, setBusy] = useState(false)
+  const incompatibleFilters = [
+    ['engagement scopes', 'engagement_ids', engagements.length > 0],
+    ['team scopes', 'team_ids', allTeams || teams.length > 0],
+    ['action types', 'action_types', ruleFilterValues(actions).length > 0],
+    ['finding kinds', 'finding_kinds', ruleFilterValues(findingKinds).length > 0],
+    ['from statuses', 'from_statuses', ruleFilterValues(fromStatuses).length > 0],
+    ['to statuses', 'to_statuses', ruleFilterValues(toStatuses).length > 0],
+    ['retest results', 'retest_results', ruleFilterValues(retestResults).length > 0],
+    ['scan kinds', 'scan_kinds', ruleFilterValues(scanKinds).length > 0],
+    ['approval kinds', 'kinds', ruleFilterValues(kinds).length > 0],
+    ['outcomes', 'outcomes', ruleFilterValues(outcomes).length > 0],
+    ['providers', 'providers', ruleFilterValues(providers).length > 0],
+    ['minimum severity', 'min_severity', severity !== 'any'],
+    // The server applies the catalog lead-time default before validating every selected type.
+    ['lead time', 'lead_time_seconds', selectedSpecs.some((item) => item?.has_lead_time)],
+  ] as const
+  const incompatibleFilterNames = selectedEvents.length > 1
+    ? incompatibleFilters
+      .filter(([, filter, present]) => present && !allows(filter))
+      .map(([label]) => label)
+    : []
+  const incompatibleRoles = selectedEvents.length > 1
+    ? roles.filter((role) => !availableRoles.some((item) => item.value === role))
+    : []
+  const mixedMention = selectedEvents.includes('finding.mentioned') && selectedEvents.length > 1
+  const anyTeamScopedEvent = selectedSpecs.some((item) => item?.filters.includes('team_ids'))
+  const incompatibleTeamSelection = selectedEvents.length > 1 && anyTeamScopedEvent && !allows('team_ids')
+  const missingTeamScope = anyTeamScopedEvent && !incompatibleTeamSelection && !allTeams && teams.length === 0
   // #1347: while the deprecated SYNAPSE_ALERT_WEBHOOK_URL is set, an incident.created rule delivers
   // in addition to the legacy webhook. The capability catalog carries only a boolean, never the URL.
   // A deployment that does not report capabilities shows no warning, matching the catalog contract.
   const capabilities = useCapabilities()
   const legacyWebhook =
     capabilities?.get('legacy_alert_webhook')?.enabled === true
-  const legacyAckRequired = legacyWebhook && event === 'incident.created'
+  const legacyAckRequired = legacyWebhook && selectedEvents.includes('incident.created')
   const [legacyAck, setLegacyAck] = useState(false)
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      if (allows('team_ids') && !allTeams && teams.length === 0) {
+      if (eventSelectionError) throw new Error(eventSelectionError)
+      if (mixedMention) {
+        throw new Error('A mention event cannot share a rule with channel-routed events.')
+      }
+      if (incompatibleFilterNames.length > 0) {
+        throw new Error(`Every selected event must support ${incompatibleFilterNames.join(', ')}. Change the event selection before saving.`)
+      }
+      if (incompatibleRoles.length > 0) {
+        throw new Error('Every selected event must support the selected people recipients. Change the event selection before saving.')
+      }
+      if (incompatibleTeamSelection) {
+        throw new Error('Every selected event must support the required team scope. Change the event selection before saving.')
+      }
+      if (missingTeamScope) {
         throw new Error('Choose at least one team or select all teams.')
       }
       if (legacyAckRequired && !legacyAck) {
@@ -1233,9 +1301,11 @@ function RuleCreate({
         name: name.trim(),
         enabled: initial?.enabled ?? true,
         event_type: event,
-        channel_ids: event === 'finding.mentioned' ? [] : selected,
-        recipient_roles: chosenRoles,
-        recipient_user_ids: event === 'finding.mentioned' ? [] : users,
+        // Omit legacy singles. A changed multi-rule explicitly sends [] to return it to one event.
+        event_types: selectedEventTypesForSave,
+        channel_ids: selectedEvents.includes('finding.mentioned') ? [] : selected,
+        recipient_roles: selectedEvents.length > 1 ? roles : chosenRoles,
+        recipient_user_ids: selectedEvents.includes('finding.mentioned') ? [] : users,
         cadence,
         // A saved engagement scope on an event without engagements is cleared rather than resent.
         engagement_ids: allows('engagement_ids') ? engagements : [],
@@ -1272,6 +1342,65 @@ function RuleCreate({
       setBusy(false)
     }
   }
+  function clearFiltersUnsupportedBy(nextEvent: string) {
+    const nextFilters = eventTypes.find((item) => item.type === nextEvent)?.filters ?? []
+    if (!nextFilters.includes('engagement_ids')) setEngagements([])
+    if (!nextFilters.includes('team_ids')) {
+      setTeams([])
+      setAllTeams(false)
+    }
+    if (!nextFilters.includes('action_types')) setActions('')
+    if (!nextFilters.includes('min_severity')) setSeverity('any')
+    if (!nextFilters.includes('lead_time_seconds')) setLeadHours('24')
+    if (!nextFilters.includes('finding_kinds')) setFindingKinds('')
+    if (!nextFilters.includes('from_statuses')) setFromStatuses('')
+    if (!nextFilters.includes('to_statuses')) setToStatuses('')
+    if (!nextFilters.includes('retest_results')) setRetestResults('')
+    if (!nextFilters.includes('scan_kinds')) setScanKinds('')
+    if (!nextFilters.includes('kinds')) setKinds('')
+    if (!nextFilters.includes('outcomes')) setOutcomes('')
+    if (!nextFilters.includes('providers')) setProviders('')
+  }
+  function choosePrimaryEvent(nextEvent: string) {
+    if (nextEvent === event) return
+    if (additionalEvents.length === 0) {
+      setEvent(nextEvent)
+      setEventSelectionError(null)
+      if (nextEvent === 'finding.mentioned') { setSelected([]); setRoles(['mentioned_user']); setUsers([]) }
+      clearFiltersUnsupportedBy(nextEvent)
+      return
+    }
+    const nextAdditional = [event, ...additionalEvents.filter((item) => item !== nextEvent && item !== event)]
+    if (nextAdditional.length > 7) {
+      setEventSelectionError('A routing rule can select at most eight event types.')
+      return
+    }
+    setEvent(nextEvent)
+    setAdditionalEvents(nextAdditional)
+    setEventSelectionError(null)
+  }
+  function chooseAdditionalEvents(keys: Set<React.Key> | 'all') {
+    if (keys === 'all') return
+    const requested = [...keys].map(String).filter((type) => type !== event)
+    const ordered = [
+      ...additionalEvents.filter((type) => requested.includes(type)),
+      ...requested.filter((type) => !additionalEvents.includes(type)),
+    ]
+    if (ordered.length > 7) {
+      setEventSelectionError('A routing rule can select at most eight event types.')
+      return
+    }
+    setAdditionalEvents(ordered)
+    setEventSelectionError(null)
+  }
+  const additionalEventOptions = [
+    ...ruleEvents.filter((item) => item.type !== event).map((item) => ({ id: item.type, label: item.label })),
+    // A catalog change must not erase an event a rule already retains. It stays removable and is
+    // resubmitted verbatim, while operator-only catalog entries are never new choices.
+    ...additionalEvents
+      .filter((type) => !ruleEvents.some((item) => item.type === type))
+      .map((type) => ({ id: type, label: `${type} (not available for new rules)` })),
+  ]
   return (
     <Card title={initial ? 'Edit routing rule' : 'Add routing rule'}>
       <form className="grid grid-cols-1 gap-4 md:grid-cols-2" onSubmit={submit}>
@@ -1287,27 +1416,7 @@ function RuleCreate({
           <Select
             id="notification-event"
             value={event}
-            onValueChange={(nextEvent) => {
-              setEvent(nextEvent)
-              if (nextEvent === 'finding.mentioned') { setSelected([]); setRoles(['mentioned_user']); setUsers([]) }
-              const nextFilters = eventTypes.find((item) => item.type === nextEvent)?.filters ?? []
-              if (!nextFilters.includes('engagement_ids')) setEngagements([])
-              if (!nextFilters.includes('team_ids')) {
-                setTeams([])
-                setAllTeams(false)
-              }
-              if (!nextFilters.includes('action_types')) setActions('')
-              if (!nextFilters.includes('min_severity')) setSeverity('any')
-              if (!nextFilters.includes('lead_time_seconds')) setLeadHours('24')
-              if (!nextFilters.includes('finding_kinds')) setFindingKinds('')
-              if (!nextFilters.includes('from_statuses')) setFromStatuses('')
-              if (!nextFilters.includes('to_statuses')) setToStatuses('')
-              if (!nextFilters.includes('retest_results')) setRetestResults('')
-              if (!nextFilters.includes('scan_kinds')) setScanKinds('')
-              if (!nextFilters.includes('kinds')) setKinds('')
-              if (!nextFilters.includes('outcomes')) setOutcomes('')
-              if (!nextFilters.includes('providers')) setProviders('')
-            }}
+            onValueChange={choosePrimaryEvent}
             options={[
               ...ruleEvents.map((e) => ({ value: e.type, label: e.label })),
               // Keep a saved rule's type selectable even if the catalog stopped offering it.
@@ -1317,7 +1426,31 @@ function RuleCreate({
             ]}
           />
         </Field>
-        {event !== 'finding.mentioned' && <fieldset className="space-y-2">
+        <MultiSelect
+          label="Additional events"
+          hint="Add up to seven events. The primary event stays first, so an existing single-event rule keeps its legacy behavior until you add another event."
+          placeholder="No additional events"
+          items={additionalEventOptions}
+          selectedKeys={new Set(additionalEvents)}
+          onSelectionChange={chooseAdditionalEvents}
+          onReset={() => { setAdditionalEvents([]); setEventSelectionError(null) }}
+          showFooter={false}
+          selectedCountFormatter={(count) => `${count} additional event${count === 1 ? '' : 's'} selected`}
+          isDisabled={!canAdmin || busy}
+        >
+          {(item) => <MultiSelect.Item {...item} selectionIndicator="checkbox" />}
+        </MultiSelect>
+        {eventSelectionError && <ErrorState message={eventSelectionError} />}
+        {(mixedMention || incompatibleFilterNames.length > 0 || incompatibleRoles.length > 0 || incompatibleTeamSelection || missingTeamScope) && (
+          <div role="alert" className="space-y-1 rounded-lg border border-warning-primary bg-warning-primary p-3 text-sm text-secondary md:col-span-2">
+            {mixedMention && <p>Finding mentions use personal routing and cannot be mixed with channel-routed events.</p>}
+            {incompatibleFilterNames.length > 0 && <p>These saved filters are not shared by every selected event: {incompatibleFilterNames.join(', ')}. They remain unchanged until the event selection supports them.</p>}
+            {incompatibleRoles.length > 0 && <p>These saved people recipients are not supported by every selected event. They remain unchanged until the event selection supports them.</p>}
+            {incompatibleTeamSelection && <p>Every selected event must support the required team scope. Choose only events that support team scopes together.</p>}
+            {missingTeamScope && <p>Choose at least one team or select all teams.</p>}
+          </div>
+        )}
+        {!selectedEvents.includes('finding.mentioned') && <fieldset className="space-y-2">
           <legend className="text-sm font-medium text-secondary">
             Channels
           </legend>
@@ -1343,7 +1476,7 @@ function RuleCreate({
             { value: 'immediate', label: 'Immediate' }, { value: 'hourly', label: 'Hourly digest' }, { value: 'daily', label: 'Daily digest' },
           ]} />
         </Field>
-        {event !== 'finding.mentioned' && <RuleTargetPicker label="People (optional)" hint="Choose people in this tenant. Missing saved IDs stay selected; disabled or missing users receive no notification." selected={users} onChange={setUsers} search={searchUsers} disabled={!canAdmin || busy} />}
+        {!selectedEvents.includes('finding.mentioned') && <RuleTargetPicker label="People (optional)" hint="Choose people in this tenant. Missing saved IDs stay selected; disabled or missing users receive no notification." selected={users} onChange={setUsers} search={searchUsers} disabled={!canAdmin || busy} />}
         <RuleTemplatePreview
           channels={channels.filter((c) => selected.includes(c.id))}
           eventType={event}
@@ -1504,6 +1637,12 @@ function RuleCreate({
               !canAdmin ||
               !name.trim() ||
               !event ||
+              !!eventSelectionError ||
+              mixedMention ||
+              incompatibleFilterNames.length > 0 ||
+              incompatibleRoles.length > 0 ||
+              incompatibleTeamSelection ||
+              missingTeamScope ||
               (selected.length === 0 && chosenRoles.length === 0 && users.length === 0) ||
               (legacyAckRequired && !legacyAck) ||
               (allows('lead_time_seconds') &&
@@ -1572,7 +1711,7 @@ function RuleList({
                 </Pill>
               </div>
               <p className="text-sm text-tertiary">
-                {eventLabel(eventTypes, r.event_type)} →{' '}
+                {selectedRuleEventTypes(r).map((type) => eventLabel(eventTypes, type)).join(', ')} →{' '}
                 {r.channel_ids.map(channelName).join(', ')}
                 {r.cadence && r.cadence !== 'immediate' && ` · ${r.cadence} digest`}
                 {r.recipient_user_ids && r.recipient_user_ids.length > 0 && ` · ${r.recipient_user_ids.length} selected people`}
@@ -1582,7 +1721,7 @@ function RuleList({
               {r.engagement_ids && r.engagement_ids.length > 0 && (
                 <p className="text-sm text-tertiary">Engagements: {r.engagement_ids.join(', ')}</p>
               )}
-              {r.event_type === 'finding.ownership_changed' && (
+              {selectedRuleEventTypes(r).includes('finding.ownership_changed') && (
                 <p className="text-sm text-tertiary">
                   {r.all_teams ? 'All teams in this tenant' : `Teams: ${r.team_ids?.join(', ') ?? ''}`}
                 </p>

@@ -116,7 +116,7 @@ func (r *NotificationRepository) fanoutTargets(e notification.Event, only shared
 		return targets, revisions, matched, digestTargets
 	}
 	for key, rule := range r.rules {
-		if key.tenant != e.TenantID || !rule.Enabled || rule.EventType != e.Type || !rule.Matches(e) {
+		if key.tenant != e.TenantID || !rule.Enabled || !rule.Matches(e) {
 			continue
 		}
 		revisions[rule.ID] = rule.Revision

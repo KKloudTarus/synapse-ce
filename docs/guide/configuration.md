@@ -925,5 +925,8 @@ No new environment switch is required. With notifications enabled and a durable 
 notification workers materialize rule cadences (`immediate`, `hourly`, `daily`) in UTC
 publication windows and present timestamps in the tenant time zone. Apply migration `0239`
 first, upgrade every notification worker, then enable digest or template-test producers in
-the API. Keep the migration and queued work across rollback; see
+the API. Apply `0240` and upgrade all API/source publishers and workers before enabling
+explicit multi-event rule selections. Older matching publishers fail closed instead of
+ignoring secondary event types. Keep these migrations and queued work across application
+rollback; see
 [notification batching and rollback](notifications.md#digests-and-explicit-recipients).

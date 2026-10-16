@@ -1,0 +1,3155 @@
+{
+  "schema_version": 1,
+  "scope": "Dedicated synthetic mixed-event notification acceptance; historical severity-varied finding-only record retained separately",
+  "source_cells": [
+    {
+      "cell": "mixed-verified-en-detail",
+      "source_commit": "fc92ca5a9f06cac54ecc368af5f8c3cfefce29b0",
+      "source_patch_sha256": "bee83075186a09fec0fbc664ee5768afd3407b51192af24498b35a3727850f90",
+      "runtime_binaries_sha256": {
+        "api": "446dd421ee273b26b81d2d88cc0b84c45c7a025ba0c772d63abeff86c1971365",
+        "worker": "833a8071d5bdc0678af2ab9052e455d01a78edae8debdbe1c2a48d15ab35489f"
+      },
+      "source_untracked_files_sha256": {
+        "internal/domain/notification/builtin/digest_test.go": "107ef8d92fd29d984cb6535d1cb1b90a04d4db3347922d9c6696a3bfd3782a5f",
+        "internal/domain/notification/multi_event_test.go": "fd294e952d2f5192634879b672f2aec60d6ff42ec80196936a85a72f9d915e69",
+        "internal/infrastructure/persistence/memory/notification_multi_event_test.go": "0bd38f4156e30abc393288250eb2e66f591f61cb08dcb486bafc37e4be18d7cc",
+        "internal/infrastructure/persistence/postgres/migration_0240_notification_rule_selection_test.go": "f305410d7d3ac4f6d83e08dd20912e1189a4a2a56f44bd01004aaa5f804aade0",
+        "internal/infrastructure/persistence/postgres/notification_multi_event_source_test.go": "81760b15da37220e6e1e3a259d38cfdebb7f02cf83eaf0396f4faed74e86719c",
+        "internal/infrastructure/persistence/postgres/notification_multi_event_test.go": "b71ce08b3ae8f29eb94e6e1860cc613935fe29e47775f09458f5b17c631b3de0",
+        "migrations/0240_notification_rule_event_selection.sql": "8467878d82f600136f090f20c4ee05e1d0fe161f2aeed6f7756fbb60871a3a81",
+        "web/src/pages/Settings/Alerting.multiEvent.test.tsx": "07f7ff78aee45f2d616b9e97e7d3e0fbd260acd500f1fc215c3fe74c1a0a38a4"
+      },
+      "source_operation": "Five API-produced distinct event types; worker stopped during source/rule setup then restarted for real outbox projection",
+      "source_event_types": [
+        "engagement.created",
+        "engagement.status_changed",
+        "finding.created",
+        "finding.status_changed",
+        "finding.commented"
+      ],
+      "window_boundary": "Closed fixture windows, not elapsed hourly/daily soak",
+      "captured_at_utc": "2026-10-16T13:24:05.842150+00:00",
+      "engagement_id": "08d51ebfa9790b364cbd238bfb8ec9c8",
+      "finding_ids": [
+        "6ae2864e1ebbc3a3e65570a5d165711b"
+      ]
+    },
+    {
+      "cell": "mixed-verified-en-signal",
+      "source_commit": "fc92ca5a9f06cac54ecc368af5f8c3cfefce29b0",
+      "source_patch_sha256": "bee83075186a09fec0fbc664ee5768afd3407b51192af24498b35a3727850f90",
+      "runtime_binaries_sha256": {
+        "api": "446dd421ee273b26b81d2d88cc0b84c45c7a025ba0c772d63abeff86c1971365",
+        "worker": "833a8071d5bdc0678af2ab9052e455d01a78edae8debdbe1c2a48d15ab35489f"
+      },
+      "source_untracked_files_sha256": {
+        "internal/domain/notification/builtin/digest_test.go": "107ef8d92fd29d984cb6535d1cb1b90a04d4db3347922d9c6696a3bfd3782a5f",
+        "internal/domain/notification/multi_event_test.go": "fd294e952d2f5192634879b672f2aec60d6ff42ec80196936a85a72f9d915e69",
+        "internal/infrastructure/persistence/memory/notification_multi_event_test.go": "0bd38f4156e30abc393288250eb2e66f591f61cb08dcb486bafc37e4be18d7cc",
+        "internal/infrastructure/persistence/postgres/migration_0240_notification_rule_selection_test.go": "f305410d7d3ac4f6d83e08dd20912e1189a4a2a56f44bd01004aaa5f804aade0",
+        "internal/infrastructure/persistence/postgres/notification_multi_event_source_test.go": "81760b15da37220e6e1e3a259d38cfdebb7f02cf83eaf0396f4faed74e86719c",
+        "internal/infrastructure/persistence/postgres/notification_multi_event_test.go": "b71ce08b3ae8f29eb94e6e1860cc613935fe29e47775f09458f5b17c631b3de0",
+        "migrations/0240_notification_rule_event_selection.sql": "8467878d82f600136f090f20c4ee05e1d0fe161f2aeed6f7756fbb60871a3a81",
+        "web/src/pages/Settings/Alerting.multiEvent.test.tsx": "07f7ff78aee45f2d616b9e97e7d3e0fbd260acd500f1fc215c3fe74c1a0a38a4"
+      },
+      "source_operation": "Five API-produced distinct event types; worker stopped during source/rule setup then restarted for real outbox projection",
+      "source_event_types": [
+        "engagement.created",
+        "engagement.status_changed",
+        "finding.created",
+        "finding.status_changed",
+        "finding.commented"
+      ],
+      "window_boundary": "Closed fixture windows, not elapsed hourly/daily soak",
+      "captured_at_utc": "2026-10-16T13:28:39.753293+00:00",
+      "engagement_id": "af529c35788e0747ca34436dc53e9453",
+      "finding_ids": [
+        "eda4023d4217ab3eb842421f59696478"
+      ]
+    },
+    {
+      "cell": "mixed-verified-vi-detail",
+      "source_commit": "fc92ca5a9f06cac54ecc368af5f8c3cfefce29b0",
+      "source_patch_sha256": "bee83075186a09fec0fbc664ee5768afd3407b51192af24498b35a3727850f90",
+      "runtime_binaries_sha256": {
+        "api": "446dd421ee273b26b81d2d88cc0b84c45c7a025ba0c772d63abeff86c1971365",
+        "worker": "833a8071d5bdc0678af2ab9052e455d01a78edae8debdbe1c2a48d15ab35489f"
+      },
+      "source_untracked_files_sha256": {
+        "internal/domain/notification/builtin/digest_test.go": "107ef8d92fd29d984cb6535d1cb1b90a04d4db3347922d9c6696a3bfd3782a5f",
+        "internal/domain/notification/multi_event_test.go": "fd294e952d2f5192634879b672f2aec60d6ff42ec80196936a85a72f9d915e69",
+        "internal/infrastructure/persistence/memory/notification_multi_event_test.go": "0bd38f4156e30abc393288250eb2e66f591f61cb08dcb486bafc37e4be18d7cc",
+        "internal/infrastructure/persistence/postgres/migration_0240_notification_rule_selection_test.go": "f305410d7d3ac4f6d83e08dd20912e1189a4a2a56f44bd01004aaa5f804aade0",
+        "internal/infrastructure/persistence/postgres/notification_multi_event_source_test.go": "81760b15da37220e6e1e3a259d38cfdebb7f02cf83eaf0396f4faed74e86719c",
+        "internal/infrastructure/persistence/postgres/notification_multi_event_test.go": "b71ce08b3ae8f29eb94e6e1860cc613935fe29e47775f09458f5b17c631b3de0",
+        "migrations/0240_notification_rule_event_selection.sql": "8467878d82f600136f090f20c4ee05e1d0fe161f2aeed6f7756fbb60871a3a81",
+        "web/src/pages/Settings/Alerting.multiEvent.test.tsx": "07f7ff78aee45f2d616b9e97e7d3e0fbd260acd500f1fc215c3fe74c1a0a38a4"
+      },
+      "source_operation": "Five API-produced distinct event types; worker stopped during source/rule setup then restarted for real outbox projection",
+      "source_event_types": [
+        "engagement.created",
+        "engagement.status_changed",
+        "finding.created",
+        "finding.status_changed",
+        "finding.commented"
+      ],
+      "window_boundary": "Closed fixture windows, not elapsed hourly/daily soak",
+      "captured_at_utc": "2026-10-16T13:29:49.707792+00:00",
+      "engagement_id": "bcd544c2ad58d53534d6c70ffc5dc534",
+      "finding_ids": [
+        "fc8e1ec3acaf57d41d9a168b0214ddde"
+      ]
+    },
+    {
+      "cell": "mixed-verified-vi-signal",
+      "source_commit": "fc92ca5a9f06cac54ecc368af5f8c3cfefce29b0",
+      "source_patch_sha256": "bee83075186a09fec0fbc664ee5768afd3407b51192af24498b35a3727850f90",
+      "runtime_binaries_sha256": {
+        "api": "446dd421ee273b26b81d2d88cc0b84c45c7a025ba0c772d63abeff86c1971365",
+        "worker": "833a8071d5bdc0678af2ab9052e455d01a78edae8debdbe1c2a48d15ab35489f"
+      },
+      "source_untracked_files_sha256": {
+        "internal/domain/notification/builtin/digest_test.go": "107ef8d92fd29d984cb6535d1cb1b90a04d4db3347922d9c6696a3bfd3782a5f",
+        "internal/domain/notification/multi_event_test.go": "fd294e952d2f5192634879b672f2aec60d6ff42ec80196936a85a72f9d915e69",
+        "internal/infrastructure/persistence/memory/notification_multi_event_test.go": "0bd38f4156e30abc393288250eb2e66f591f61cb08dcb486bafc37e4be18d7cc",
+        "internal/infrastructure/persistence/postgres/migration_0240_notification_rule_selection_test.go": "f305410d7d3ac4f6d83e08dd20912e1189a4a2a56f44bd01004aaa5f804aade0",
+        "internal/infrastructure/persistence/postgres/notification_multi_event_source_test.go": "81760b15da37220e6e1e3a259d38cfdebb7f02cf83eaf0396f4faed74e86719c",
+        "internal/infrastructure/persistence/postgres/notification_multi_event_test.go": "b71ce08b3ae8f29eb94e6e1860cc613935fe29e47775f09458f5b17c631b3de0",
+        "migrations/0240_notification_rule_event_selection.sql": "8467878d82f600136f090f20c4ee05e1d0fe161f2aeed6f7756fbb60871a3a81",
+        "web/src/pages/Settings/Alerting.multiEvent.test.tsx": "07f7ff78aee45f2d616b9e97e7d3e0fbd260acd500f1fc215c3fe74c1a0a38a4"
+      },
+      "source_operation": "Five API-produced distinct event types; worker stopped during source/rule setup then restarted for real outbox projection",
+      "source_event_types": [
+        "engagement.created",
+        "engagement.status_changed",
+        "finding.created",
+        "finding.status_changed",
+        "finding.commented"
+      ],
+      "window_boundary": "Closed fixture windows, not elapsed hourly/daily soak",
+      "captured_at_utc": "2026-10-16T13:31:01.617339+00:00",
+      "engagement_id": "8f2fd1f67e03c3ac57c1e2a1760c8575",
+      "finding_ids": [
+        "c3a4d8df433acc836cbc47f93e9fde75"
+      ]
+    }
+  ],
+  "queued_digests": [
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "daily",
+      "event_id": "6092ff8a1b664ae3424e002c7d285ecb",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "5f34f9cb510a2d372edce4f170ecfca4",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "503",
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:08.501443Z",
+      "attempt_started_at": "2026-10-16T13:25:07.534314Z"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "hourly",
+      "event_id": "e0b7f0875132a2bfadcf10b5038f7745",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "0adcfe80d861629ac8732fa880b7eea1",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "504",
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "05160eeda4559157fc4cabd8a298ed489a1b693944689cfb868fb4b4ed2f0e65",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:11.102773Z",
+      "attempt_started_at": "2026-10-16T13:25:10.670614Z"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "daily",
+      "event_id": "32abe0b736053974091b2b1cf5e30ccd",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "c750972dcd62dff30f50fa7b414a3701",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:08.947113Z",
+      "attempt_started_at": "2026-10-16T13:25:08.534926Z"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "hourly",
+      "event_id": "29f4b2708d72d6a890e149ff30080506",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "898570631189b8f792b462bb201e13e2",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "15f67097abeda5248743c5adfb1a63908e21f8c62dda64f55830ed95cbc05fa8",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:11.459706Z",
+      "attempt_started_at": "2026-10-16T13:25:11.150682Z"
+    },
+    {
+      "channel_id": "f2bb6645822f57ca966cc24f65e049af",
+      "cadence": "daily",
+      "event_id": "4760a4608a6fe5848cc802d9bf153feb",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "ee8e86460552f4992ef51f0157871760",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "webhook",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:webhook:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:09.648043Z",
+      "attempt_started_at": "2026-10-16T13:25:08.978272Z"
+    },
+    {
+      "channel_id": "f2bb6645822f57ca966cc24f65e049af",
+      "cadence": "hourly",
+      "event_id": "8c73901f4f0f94be2cec89cec733e79d",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "b9a75752de2e3945a79fcec8e4191d21",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "webhook",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:webhook:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "ab9e65bd23be502d8656cce4ecd4f4c8bbb9b28ed824dd39056df35167fa7bf8",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:webhook:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:11.757322Z",
+      "attempt_started_at": "2026-10-16T13:25:11.498647Z"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "daily",
+      "event_id": "706792092abfcb6a04035069088f9eff",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "651a2df6a45cde5bbb860399c923959e",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/RKTA0Vs400Y.RKTA0Vs400Y",
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:10.632183Z",
+      "attempt_started_at": "2026-10-16T13:25:09.698508Z"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "hourly",
+      "event_id": "b137eb4afa313f256af0fe50f4e08549",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "6814746c6dce75de108d2b528ff3636e",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/7jE17iz1mfE.7jE17iz1mfE",
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "97e5916ecee490d7d6cdf6c6fe336f10de1b0727ae1ed831ffd11967d16055ef",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:12.313239Z",
+      "attempt_started_at": "2026-10-16T13:25:11.783011Z"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "daily",
+      "event_id": "0dfe60f943b4c7f01030fdc927d42281",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "68cb38a990fc7ff5e190af314b2b546a",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "505",
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:41.951479Z",
+      "attempt_started_at": "2026-10-16T13:29:41.03649Z"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "hourly",
+      "event_id": "c380a64be2a5ad62b957d0a7bca2b046",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "f337d7f8a30088e99ed6fdbbf997d9d3",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "506",
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "c18d955335e8cb60bbee39df5d284a76cee2a61a72e963fb086195bf9d4f3921",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:44.346228Z",
+      "attempt_started_at": "2026-10-16T13:29:43.869921Z"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "daily",
+      "event_id": "03293b2c7498a263de779847180090c4",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "2a7d9b2a7755365d9eee2ecf2e06a449",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:42.344693Z",
+      "attempt_started_at": "2026-10-16T13:29:41.964245Z"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "hourly",
+      "event_id": "06bc13a2c7087d8ddadbc5a696c60b2e",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "34f410ecc984a5f93de0fc7bdfbd5229",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "909983ef4c0a155100b21f1625ec8be9a2c42ae22ddbf6b4676c339265ecefed",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:44.693436Z",
+      "attempt_started_at": "2026-10-16T13:29:44.372992Z"
+    },
+    {
+      "channel_id": "f2bb6645822f57ca966cc24f65e049af",
+      "cadence": "daily",
+      "event_id": "3d1ff669cbb15d0cac8e61d30ed805a9",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "c616125869d5d8162e3fcf07d9e4c324",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "webhook",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:webhook:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:43.099433Z",
+      "attempt_started_at": "2026-10-16T13:29:42.363909Z"
+    },
+    {
+      "channel_id": "f2bb6645822f57ca966cc24f65e049af",
+      "cadence": "hourly",
+      "event_id": "2aa586a94c9c9d137e03c5fb45483cfb",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "473ee26fe8be9be774145f162c71b18e",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "webhook",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:webhook:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "0c4fc8d0204fafe479bd9b5a303c4e6740c7fbaa321a4769787597acc7b8156f",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:webhook:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:44.959159Z",
+      "attempt_started_at": "2026-10-16T13:29:44.721388Z"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "daily",
+      "event_id": "fa9ed2f6f48ad66c690b4e0cecebf9f8",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "8ac198e95567c8da380c176a60efb881",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/vZoVu9do_QQ.vZoVu9do_QQ",
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:43.836479Z",
+      "attempt_started_at": "2026-10-16T13:29:43.124251Z"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "hourly",
+      "event_id": "6fc4ed54da0366cf92bf82443874dabf",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "48bbb3e693ae6608489652c4d3d4a74c",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/YRPQ8f8d1kM.YRPQ8f8d1kM",
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "29bdd4795e095042a1e3dcf604e788c6dd327b47b46460785680277e6fae1dec",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:45.86389Z",
+      "attempt_started_at": "2026-10-16T13:29:45.002775Z"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "daily",
+      "event_id": "f8671a068f8518a8499917509a230e64",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "29a2f6d77857bff6424077676f98a322",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "508",
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:52.211681Z",
+      "attempt_started_at": "2026-10-16T13:30:50.188886Z"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "hourly",
+      "event_id": "522c6e30fc234d7232262b2e32c1b055",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "975250e43ceb3a0933e4cea1f5e974bb",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "509",
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "214b14c3f6f9c89e7b066d20b2b765fa5b5b2d96fa9dc57b6b271fc633300fce",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:55.411563Z",
+      "attempt_started_at": "2026-10-16T13:30:54.856414Z"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "daily",
+      "event_id": "f42d1f6416f3befe2bc0a0423ca95557",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "26330ca0d7061f584cfe3759e0c10d59",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:53.142043Z",
+      "attempt_started_at": "2026-10-16T13:30:52.23159Z"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "hourly",
+      "event_id": "8823345b8cd64b30600312c2175cde16",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "f2e99fd27fced171b8cb9256735d17fa",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "9ad44e61398b1ba40df98a2ce4578648c9a27f88f220a33ab08c594b18225985",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:55.766989Z",
+      "attempt_started_at": "2026-10-16T13:30:55.441188Z"
+    },
+    {
+      "channel_id": "f2bb6645822f57ca966cc24f65e049af",
+      "cadence": "daily",
+      "event_id": "71baadd2baf33aee23a706a7319d0946",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "c6063f624a874f2f7231dcc7a6fda688",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "webhook",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:webhook:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:53.863447Z",
+      "attempt_started_at": "2026-10-16T13:30:53.173733Z"
+    },
+    {
+      "channel_id": "f2bb6645822f57ca966cc24f65e049af",
+      "cadence": "hourly",
+      "event_id": "f9db95f5e4c88a5da9663d43bb19fe18",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "ba919aaf985f2a0222f0962ebcf5eeac",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "webhook",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:webhook:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "e99e601563e1365d3232d0e36d55a349ce0354b934c65e4297ab6de3caa75ced",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:webhook:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:56.048556Z",
+      "attempt_started_at": "2026-10-16T13:30:55.794534Z"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "daily",
+      "event_id": "9a172e16f3026976cc85ec32b31bec1f",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "03ff2792d02414536dd616f3f0b34066",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/7I5CafOsodM.7I5CafOsodM",
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:54.817251Z",
+      "attempt_started_at": "2026-10-16T13:30:53.890696Z"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "hourly",
+      "event_id": "d451c1bcb13c22da6da302ef5ed8faee",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "ea9e7f27ff03eae3e5383281755dfef3",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/ILPpFCcrOhE.ILPpFCcrOhE",
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "67e79c4b6f3aca16b8e5f4032601d9fb0e814ea66237b89d52f15b7ee553bae5",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:56.753356Z",
+      "attempt_started_at": "2026-10-16T13:30:56.07473Z"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "daily",
+      "event_id": "c4052cfc11a577b11c99fb2156db5148",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "68c4f142f73dd34f0f1d872a6f2c2592",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "511",
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:03.244337Z",
+      "attempt_started_at": "2026-10-16T13:32:02.083402Z"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "hourly",
+      "event_id": "e44ed9c4d965d4c75c67dec0841f48b8",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "e3292370bdd9fb5d761da8bb93d67d73",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "512",
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:chat:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "82b1f47121c346c640a7eeb2200bb8fc74b2007437f986abb12e196e3e8e2c37",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:07.837791Z",
+      "attempt_started_at": "2026-10-16T13:32:06.661745Z"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "daily",
+      "event_id": "1156130114f2a182083647a919ae11ac",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "4df33d66ab008ada666c76800c56fc59",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:03.776494Z",
+      "attempt_started_at": "2026-10-16T13:32:03.26668Z"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "hourly",
+      "event_id": "3ed570b61e503230af77b52f2e3f18ab",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "352070bc55d3962288dc12ac430aa84e",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:11.134018Z",
+      "attempt_started_at": "2026-10-16T13:32:07.87039Z"
+    },
+    {
+      "channel_id": "f2bb6645822f57ca966cc24f65e049af",
+      "cadence": "daily",
+      "event_id": "244df6bdd51382484b95e11341df0b3b",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "a231c58db817b0e71199152d2688d6b9",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "webhook",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:webhook:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:04.601595Z",
+      "attempt_started_at": "2026-10-16T13:32:03.794363Z"
+    },
+    {
+      "channel_id": "f2bb6645822f57ca966cc24f65e049af",
+      "cadence": "hourly",
+      "event_id": "9484deb7e6221220e8d7d3057f77ddb8",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "f57371609952d78205f99c9a3b58d49d",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "webhook",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:webhook:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "9c1c4dc5501148125b74bb998eb07c62d0aa7277386712c617f419ca73241435",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:webhook:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:12.154284Z",
+      "attempt_started_at": "2026-10-16T13:32:11.155784Z"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "daily",
+      "event_id": "5ec550147296ac3ddd6e481c688b04aa",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "26c01cdb90745f7905e9470ad79a7640",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/QgqMWTIFYbQ.QgqMWTIFYbQ",
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:06.636391Z",
+      "attempt_started_at": "2026-10-16T13:32:04.626473Z"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "hourly",
+      "event_id": "49b586262ae11e879b8e6ceb2912fecd",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "cb61f2c69b6e14e650c18fc1e06d8685",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/GbQFaQfYTFo.GbQFaQfYTFo",
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:12.8461Z",
+      "attempt_started_at": "2026-10-16T13:32:12.171346Z"
+    }
+  ],
+  "native_chat_correlations": [
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "daily",
+      "event_id": "6092ff8a1b664ae3424e002c7d285ecb",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "5f34f9cb510a2d372edce4f170ecfca4",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "503",
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:08.501443Z",
+      "attempt_started_at": "2026-10-16T13:25:07.534314Z",
+      "native_correlation": "native server timestamp within actual request attempt interval with one-second timestamp rounding, plus cadence/content",
+      "native_dom_id": "92760",
+      "native_text_sha256": "f0c8a2478895a4bf4ca2afad70b5781b1c0633ea65c6caf4cc57e6d67fab0283",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "08d51ebfa9790b364cbd238bfb8ec9c8"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "hourly",
+      "event_id": "e0b7f0875132a2bfadcf10b5038f7745",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "0adcfe80d861629ac8732fa880b7eea1",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "504",
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "05160eeda4559157fc4cabd8a298ed489a1b693944689cfb868fb4b4ed2f0e65",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:11.102773Z",
+      "attempt_started_at": "2026-10-16T13:25:10.670614Z",
+      "native_correlation": "native server timestamp within actual request attempt interval with one-second timestamp rounding, plus cadence/content",
+      "native_dom_id": "92761",
+      "native_text_sha256": "957132015a2d2fcb9269de212f0548ce14bbb10062052a4f50bda6cbce9c0cf7",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "08d51ebfa9790b364cbd238bfb8ec9c8"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "daily",
+      "event_id": "32abe0b736053974091b2b1cf5e30ccd",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "c750972dcd62dff30f50fa7b414a3701",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:08.947113Z",
+      "attempt_started_at": "2026-10-16T13:25:08.534926Z",
+      "native_correlation": "unique source engagement links and cadence in native Slack document",
+      "native_dom_id": null,
+      "native_text_sha256": "aae9c229ce0ed047f6d6bcf4c9345fcc161d289e8f64500eb73b3a19017dbfd9",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "08d51ebfa9790b364cbd238bfb8ec9c8"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "hourly",
+      "event_id": "29f4b2708d72d6a890e149ff30080506",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "898570631189b8f792b462bb201e13e2",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "15f67097abeda5248743c5adfb1a63908e21f8c62dda64f55830ed95cbc05fa8",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:11.459706Z",
+      "attempt_started_at": "2026-10-16T13:25:11.150682Z",
+      "native_correlation": "unique source engagement links and cadence in native Slack document",
+      "native_dom_id": null,
+      "native_text_sha256": "969afb8b5e2fbb7d705619c7796fc883b7b222b12d3cbc190bf82d636b300151",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "08d51ebfa9790b364cbd238bfb8ec9c8"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "daily",
+      "event_id": "706792092abfcb6a04035069088f9eff",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "651a2df6a45cde5bbb860399c923959e",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/RKTA0Vs400Y.RKTA0Vs400Y",
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:10.632183Z",
+      "attempt_started_at": "2026-10-16T13:25:09.698508Z",
+      "native_correlation": "exact provider remote message ID equals observed native data-id",
+      "native_dom_id": "RKTA0Vs400Y",
+      "native_text_sha256": "dd5f24259192ccbb680d6d0c4bf93e10bf4a686f0dd2b20e11c408c70a15405c",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "08d51ebfa9790b364cbd238bfb8ec9c8"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "hourly",
+      "event_id": "b137eb4afa313f256af0fe50f4e08549",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "6814746c6dce75de108d2b528ff3636e",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/7jE17iz1mfE.7jE17iz1mfE",
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "97e5916ecee490d7d6cdf6c6fe336f10de1b0727ae1ed831ffd11967d16055ef",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:25:12.313239Z",
+      "attempt_started_at": "2026-10-16T13:25:11.783011Z",
+      "native_correlation": "exact provider remote message ID equals observed native data-id",
+      "native_dom_id": "7jE17iz1mfE",
+      "native_text_sha256": "23be7e73e105b03c9c8439906fb8d6bb8986de104c56beb6013560cf2c63f1bf",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "08d51ebfa9790b364cbd238bfb8ec9c8"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "daily",
+      "event_id": "0dfe60f943b4c7f01030fdc927d42281",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "68cb38a990fc7ff5e190af314b2b546a",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "505",
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:41.951479Z",
+      "attempt_started_at": "2026-10-16T13:29:41.03649Z",
+      "native_correlation": "native server timestamp within actual request attempt interval with one-second timestamp rounding, plus cadence/content",
+      "native_dom_id": "92762",
+      "native_text_sha256": "9e665d518d4a90bf00038b581d8584f1357221e1e9ccd78a80903ecb5249eb2f",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "af529c35788e0747ca34436dc53e9453"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "hourly",
+      "event_id": "c380a64be2a5ad62b957d0a7bca2b046",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "f337d7f8a30088e99ed6fdbbf997d9d3",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "506",
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "c18d955335e8cb60bbee39df5d284a76cee2a61a72e963fb086195bf9d4f3921",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:44.346228Z",
+      "attempt_started_at": "2026-10-16T13:29:43.869921Z",
+      "native_correlation": "native server timestamp within actual request attempt interval with one-second timestamp rounding, plus cadence/content",
+      "native_dom_id": "92763",
+      "native_text_sha256": "d61f4d4d8eebd2b41f34263d8bad2b6fa4a871c91134548681f02fce94e920ab",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "af529c35788e0747ca34436dc53e9453"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "daily",
+      "event_id": "03293b2c7498a263de779847180090c4",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "2a7d9b2a7755365d9eee2ecf2e06a449",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:42.344693Z",
+      "attempt_started_at": "2026-10-16T13:29:41.964245Z",
+      "native_correlation": "unique source engagement links and cadence in native Slack document",
+      "native_dom_id": null,
+      "native_text_sha256": "f31f0993729a990b04b4c41f234b054b5b31c02d0092f168db67c4f02d46526f",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "af529c35788e0747ca34436dc53e9453"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "hourly",
+      "event_id": "06bc13a2c7087d8ddadbc5a696c60b2e",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "34f410ecc984a5f93de0fc7bdfbd5229",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "909983ef4c0a155100b21f1625ec8be9a2c42ae22ddbf6b4676c339265ecefed",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:44.693436Z",
+      "attempt_started_at": "2026-10-16T13:29:44.372992Z",
+      "native_correlation": "unique source engagement links and cadence in native Slack document",
+      "native_dom_id": null,
+      "native_text_sha256": "9e3c129dca5392803068fd5c24dd570aabf87e20a12007866c40ed1bdfe371a3",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "af529c35788e0747ca34436dc53e9453"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "daily",
+      "event_id": "fa9ed2f6f48ad66c690b4e0cecebf9f8",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "8ac198e95567c8da380c176a60efb881",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/vZoVu9do_QQ.vZoVu9do_QQ",
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:43.836479Z",
+      "attempt_started_at": "2026-10-16T13:29:43.124251Z",
+      "native_correlation": "exact provider remote message ID equals observed native data-id",
+      "native_dom_id": "vZoVu9do_QQ",
+      "native_text_sha256": "d6e5dc7291098234e7e6d5a3e668d8617348e79b9aa027012695e4c07ba3c260",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "af529c35788e0747ca34436dc53e9453"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "hourly",
+      "event_id": "6fc4ed54da0366cf92bf82443874dabf",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "48bbb3e693ae6608489652c4d3d4a74c",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/YRPQ8f8d1kM.YRPQ8f8d1kM",
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:chat:en@v1",
+      "response_code": 200,
+      "preview_body_sha256": "29bdd4795e095042a1e3dcf604e788c6dd327b47b46460785680277e6fae1dec",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:en@v1",
+      "attempt_finished_at": "2026-10-16T13:29:45.86389Z",
+      "attempt_started_at": "2026-10-16T13:29:45.002775Z",
+      "native_correlation": "exact provider remote message ID equals observed native data-id",
+      "native_dom_id": "YRPQ8f8d1kM",
+      "native_text_sha256": "d061653e05b14c1c2b261ed96b770922c1666eb4fd1f7cb9aadf17e83aa755c9",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "af529c35788e0747ca34436dc53e9453"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "daily",
+      "event_id": "f8671a068f8518a8499917509a230e64",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "29a2f6d77857bff6424077676f98a322",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "508",
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:52.211681Z",
+      "attempt_started_at": "2026-10-16T13:30:50.188886Z",
+      "native_correlation": "native server timestamp within actual request attempt interval with one-second timestamp rounding, plus cadence/content",
+      "native_dom_id": "92765",
+      "native_text_sha256": "0e42d2e941e5422c3ce91350bb506de6020bc708c21e5300365939550caa12a8",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "bcd544c2ad58d53534d6c70ffc5dc534"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "hourly",
+      "event_id": "522c6e30fc234d7232262b2e32c1b055",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "975250e43ceb3a0933e4cea1f5e974bb",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "509",
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "214b14c3f6f9c89e7b066d20b2b765fa5b5b2d96fa9dc57b6b271fc633300fce",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:55.411563Z",
+      "attempt_started_at": "2026-10-16T13:30:54.856414Z",
+      "native_correlation": "native server timestamp within actual request attempt interval with one-second timestamp rounding, plus cadence/content",
+      "native_dom_id": "92766",
+      "native_text_sha256": "6d6baf3b76546fb5c761efb7abf3ec1fd58b3b1d15ae8faa913820c53b9eb805",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "bcd544c2ad58d53534d6c70ffc5dc534"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "daily",
+      "event_id": "f42d1f6416f3befe2bc0a0423ca95557",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "26330ca0d7061f584cfe3759e0c10d59",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:53.142043Z",
+      "attempt_started_at": "2026-10-16T13:30:52.23159Z",
+      "native_correlation": "unique source engagement links and cadence in native Slack document",
+      "native_dom_id": null,
+      "native_text_sha256": "8d156d00411498c2aa974568fc16c5f0db96e760035a62b45206d7903416c66b",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "bcd544c2ad58d53534d6c70ffc5dc534"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "hourly",
+      "event_id": "8823345b8cd64b30600312c2175cde16",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "f2e99fd27fced171b8cb9256735d17fa",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "9ad44e61398b1ba40df98a2ce4578648c9a27f88f220a33ab08c594b18225985",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:55.766989Z",
+      "attempt_started_at": "2026-10-16T13:30:55.441188Z",
+      "native_correlation": "unique source engagement links and cadence in native Slack document",
+      "native_dom_id": null,
+      "native_text_sha256": "3720ed35a3ffcee6c1f24eed2ee1d484b4fe647d27a43258b011b2a444703ef8",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "bcd544c2ad58d53534d6c70ffc5dc534"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "daily",
+      "event_id": "9a172e16f3026976cc85ec32b31bec1f",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "03ff2792d02414536dd616f3f0b34066",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/7I5CafOsodM.7I5CafOsodM",
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:54.817251Z",
+      "attempt_started_at": "2026-10-16T13:30:53.890696Z",
+      "native_correlation": "exact provider remote message ID equals observed native data-id",
+      "native_dom_id": "7I5CafOsodM",
+      "native_text_sha256": "cd1aa9b160db5d84d43d5b1a51e93d99c12866015ad82a79b048bc77c1a18600",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "bcd544c2ad58d53534d6c70ffc5dc534"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "hourly",
+      "event_id": "d451c1bcb13c22da6da302ef5ed8faee",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "ea9e7f27ff03eae3e5383281755dfef3",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/ILPpFCcrOhE.ILPpFCcrOhE",
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "template_ref": "builtin:notification.digest:chat:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "67e79c4b6f3aca16b8e5f4032601d9fb0e814ea66237b89d52f15b7ee553bae5",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:30:56.753356Z",
+      "attempt_started_at": "2026-10-16T13:30:56.07473Z",
+      "native_correlation": "exact provider remote message ID equals observed native data-id",
+      "native_dom_id": "ILPpFCcrOhE",
+      "native_text_sha256": "e5e2644621deb354ff7656047e4e90bd8dd6fbda0ae47375ea1a3a2f59f5a458",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "bcd544c2ad58d53534d6c70ffc5dc534"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "daily",
+      "event_id": "c4052cfc11a577b11c99fb2156db5148",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "68c4f142f73dd34f0f1d872a6f2c2592",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "511",
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:03.244337Z",
+      "attempt_started_at": "2026-10-16T13:32:02.083402Z",
+      "native_correlation": "native server timestamp within actual request attempt interval with one-second timestamp rounding, plus cadence/content",
+      "native_dom_id": "92770",
+      "native_text_sha256": "7c53e538930fac5f25130a9cbb09342da3007efe48e847f5ac5169a14ac0b058",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "8f2fd1f67e03c3ac57c1e2a1760c8575"
+    },
+    {
+      "channel_id": "1b4f7b8280358ca08c170106770b8384",
+      "cadence": "hourly",
+      "event_id": "e44ed9c4d965d4c75c67dec0841f48b8",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "e3292370bdd9fb5d761da8bb93d67d73",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "512",
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": "builtin:notification.digest:chat:vi@v1",
+      "response_code": 200,
+      "preview_body_sha256": "82b1f47121c346c640a7eeb2200bb8fc74b2007437f986abb12e196e3e8e2c37",
+      "preview_limit": null,
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:07.837791Z",
+      "attempt_started_at": "2026-10-16T13:32:06.661745Z",
+      "native_correlation": "native server timestamp within actual request attempt interval with one-second timestamp rounding, plus cadence/content",
+      "native_dom_id": "92771",
+      "native_text_sha256": "fbc48e82095ea92194d30ab8c51e6ff8908acdaecc149b02f57df0c1833a0a87",
+      "preview_body_lines_match_native": true,
+      "engagement_id": "8f2fd1f67e03c3ac57c1e2a1760c8575"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "daily",
+      "event_id": "1156130114f2a182083647a919ae11ac",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "4df33d66ab008ada666c76800c56fc59",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:03.776494Z",
+      "attempt_started_at": "2026-10-16T13:32:03.26668Z",
+      "native_correlation": "unique source engagement links and cadence in native Slack document",
+      "native_dom_id": null,
+      "native_text_sha256": "330ec9f4c9fdac464b344ef4a27f066e666f877aa923a62703fae97cd2724066",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "8f2fd1f67e03c3ac57c1e2a1760c8575"
+    },
+    {
+      "channel_id": "38be218dd50357a385cea9eecbef18fe",
+      "cadence": "hourly",
+      "event_id": "3ed570b61e503230af77b52f2e3f18ab",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "352070bc55d3962288dc12ac430aa84e",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "",
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:11.134018Z",
+      "attempt_started_at": "2026-10-16T13:32:07.87039Z",
+      "native_correlation": "unique source engagement links and cadence in native Slack document",
+      "native_dom_id": null,
+      "native_text_sha256": "90359d616ada21adce3afa75f08f922a777f7738f1a8b4ac604b8b25c8d25fd4",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "8f2fd1f67e03c3ac57c1e2a1760c8575"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "daily",
+      "event_id": "5ec550147296ac3ddd6e481c688b04aa",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "26c01cdb90745f7905e9470ad79a7640",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/QgqMWTIFYbQ.QgqMWTIFYbQ",
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:06.636391Z",
+      "attempt_started_at": "2026-10-16T13:32:04.626473Z",
+      "native_correlation": "exact provider remote message ID equals observed native data-id",
+      "native_dom_id": "QgqMWTIFYbQ",
+      "native_text_sha256": "31faf1829470bdd3b557835ca5802c563f02db70336fec6a5674d65049da03c4",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "8f2fd1f67e03c3ac57c1e2a1760c8575"
+    },
+    {
+      "channel_id": "f9ca0deb5bfa048cecf02e33fe995af8",
+      "cadence": "hourly",
+      "event_id": "49b586262ae11e879b8e6ceb2912fecd",
+      "outcome": "published",
+      "total": "5",
+      "delivery_id": "cb61f2c69b6e14e650c18fc1e06d8685",
+      "state": "delivered",
+      "attempts": 1,
+      "remote_ref": "spaces/AAQAypJNJKI/messages/GbQFaQfYTFo.GbQFaQfYTFo",
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "template_ref": null,
+      "response_code": 200,
+      "preview_body_sha256": null,
+      "preview_limit": "Stored event outside newest twenty by occurred_at/id; API returned 404",
+      "attempt_template_ref": "builtin:notification.digest:chat:vi@v1",
+      "attempt_finished_at": "2026-10-16T13:32:12.8461Z",
+      "attempt_started_at": "2026-10-16T13:32:12.171346Z",
+      "native_correlation": "exact provider remote message ID equals observed native data-id",
+      "native_dom_id": "GbQFaQfYTFo",
+      "native_text_sha256": "5cf314d4eef227838608dea9dd4ea0d750555acd366f5de24cc2e4d52afbbf4b",
+      "preview_body_lines_match_native": null,
+      "engagement_id": "8f2fd1f67e03c3ac57c1e2a1760c8575"
+    }
+  ],
+  "public_https_receiver": [
+    {
+      "delivery_id": "ee8e86460552f4992ef51f0157871760",
+      "event_id": "4760a4608a6fe5848cc802d9bf153feb",
+      "receiver_request_id": "674d0d10-5130-4416-9e8a-71a683038279",
+      "received_at": "2026-10-16 13:25:09",
+      "signature_verified": true,
+      "body_sha256": "a508edbddd1e530a9782198e00f9a62f716e057e6cd223c1a35bb74389536d20",
+      "preview_body_equal": null,
+      "locale": "en",
+      "data_class": "detail",
+      "cadence": "daily",
+      "parsed_body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "4760a4608a6fe5848cc802d9bf153feb",
+          "type": "notification.digest",
+          "schema_version": 1,
+          "occurred_at": "2026-10-16T00:00:00Z",
+          "severity": "medium"
+        },
+        "data": {
+          "vars": {
+            "cadence": "daily",
+            "event_label": "Notification digest",
+            "event_type": "notification.digest",
+            "item_count": "5",
+            "occurred_at": "2026-10-16T00:00:00Z",
+            "omitted_count": "0",
+            "severity": "medium",
+            "window_end": "2026-10-16T00:00:00Z",
+            "window_start": "2026-10-15T00:00:00Z"
+          },
+          "lists": {
+            "items": [
+              {
+                "event_type": "engagement.created",
+                "occurred_at": "2026-10-16T13:24:04.871745Z",
+                "title": "Engagement created"
+              },
+              {
+                "event_type": "engagement.status_changed",
+                "occurred_at": "2026-10-16T13:24:04.966727Z",
+                "title": "Engagement status changed"
+              },
+              {
+                "event_type": "finding.created",
+                "occurred_at": "2026-10-16T13:24:05.012187Z",
+                "severity": "medium",
+                "title": "Upload permission review • quyền tải lên"
+              },
+              {
+                "event_type": "finding.status_changed",
+                "occurred_at": "2026-10-16T13:24:05.039638Z",
+                "severity": "medium",
+                "title": "Upload permission review • quyền tải lên"
+              },
+              {
+                "event_type": "finding.commented",
+                "occurred_at": "2026-10-16T13:24:05.066916Z",
+                "severity": "medium",
+                "title": "Finding comment added"
+              }
+            ]
+          }
+        },
+        "links": [
+          {
+            "label": "1 · Open engagement",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8"
+          },
+          {
+            "label": "2 · Open engagement",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8"
+          },
+          {
+            "label": "3 · Open finding",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8/findings#finding-6ae2864e1ebbc3a3e65570a5d165711b"
+          },
+          {
+            "label": "4 · Open finding",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8/findings#finding-6ae2864e1ebbc3a3e65570a5d165711b"
+          },
+          {
+            "label": "5 · Open finding",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8/findings#finding-6ae2864e1ebbc3a3e65570a5d165711b"
+          }
+        ]
+      }
+    },
+    {
+      "delivery_id": "b9a75752de2e3945a79fcec8e4191d21",
+      "event_id": "8c73901f4f0f94be2cec89cec733e79d",
+      "receiver_request_id": "9ba3cc74-4f46-42f9-a9d3-35659879e4e7",
+      "received_at": "2026-10-16 13:25:11",
+      "signature_verified": true,
+      "body_sha256": "ab9e65bd23be502d8656cce4ecd4f4c8bbb9b28ed824dd39056df35167fa7bf8",
+      "preview_body_equal": true,
+      "locale": "en",
+      "data_class": "detail",
+      "cadence": "hourly",
+      "parsed_body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "8c73901f4f0f94be2cec89cec733e79d",
+          "type": "notification.digest",
+          "schema_version": 1,
+          "occurred_at": "2026-10-16T13:00:00Z",
+          "severity": "medium"
+        },
+        "data": {
+          "vars": {
+            "cadence": "hourly",
+            "event_label": "Notification digest",
+            "event_type": "notification.digest",
+            "item_count": "5",
+            "occurred_at": "2026-10-16T13:00:00Z",
+            "omitted_count": "0",
+            "severity": "medium",
+            "window_end": "2026-10-16T13:00:00Z",
+            "window_start": "2026-10-16T12:00:00Z"
+          },
+          "lists": {
+            "items": [
+              {
+                "event_type": "engagement.created",
+                "occurred_at": "2026-10-16T13:24:04.871745Z",
+                "title": "Engagement created"
+              },
+              {
+                "event_type": "engagement.status_changed",
+                "occurred_at": "2026-10-16T13:24:04.966727Z",
+                "title": "Engagement status changed"
+              },
+              {
+                "event_type": "finding.created",
+                "occurred_at": "2026-10-16T13:24:05.012187Z",
+                "severity": "medium",
+                "title": "Upload permission review • quyền tải lên"
+              },
+              {
+                "event_type": "finding.status_changed",
+                "occurred_at": "2026-10-16T13:24:05.039638Z",
+                "severity": "medium",
+                "title": "Upload permission review • quyền tải lên"
+              },
+              {
+                "event_type": "finding.commented",
+                "occurred_at": "2026-10-16T13:24:05.066916Z",
+                "severity": "medium",
+                "title": "Finding comment added"
+              }
+            ]
+          }
+        },
+        "links": [
+          {
+            "label": "1 · Open engagement",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8"
+          },
+          {
+            "label": "2 · Open engagement",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8"
+          },
+          {
+            "label": "3 · Open finding",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8/findings#finding-6ae2864e1ebbc3a3e65570a5d165711b"
+          },
+          {
+            "label": "4 · Open finding",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8/findings#finding-6ae2864e1ebbc3a3e65570a5d165711b"
+          },
+          {
+            "label": "5 · Open finding",
+            "url": "https://localhost:8443/engagements/08d51ebfa9790b364cbd238bfb8ec9c8/findings#finding-6ae2864e1ebbc3a3e65570a5d165711b"
+          }
+        ]
+      }
+    },
+    {
+      "delivery_id": "c616125869d5d8162e3fcf07d9e4c324",
+      "event_id": "3d1ff669cbb15d0cac8e61d30ed805a9",
+      "receiver_request_id": "6a3c42d0-48e4-4da4-87e9-72c14a6cf461",
+      "received_at": "2026-10-16 13:29:42",
+      "signature_verified": true,
+      "body_sha256": "026fdfe8a7c02a7e41ecf374099ec8e08b0bd64f1886ca389748f5e7aaf51f80",
+      "preview_body_equal": null,
+      "locale": "en",
+      "data_class": "signal",
+      "cadence": "daily",
+      "parsed_body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "3d1ff669cbb15d0cac8e61d30ed805a9",
+          "type": "notification.digest",
+          "schema_version": 1,
+          "occurred_at": "2026-10-16T00:00:00Z",
+          "severity": "medium"
+        },
+        "data": {
+          "vars": {
+            "cadence": "daily",
+            "event_label": "Notification digest",
+            "event_type": "notification.digest",
+            "item_count": "5",
+            "occurred_at": "2026-10-16T00:00:00Z",
+            "omitted_count": "0",
+            "severity": "medium",
+            "window_end": "2026-10-16T00:00:00Z",
+            "window_start": "2026-10-15T00:00:00Z"
+          },
+          "lists": {
+            "items": [
+              {
+                "event_type": "engagement.created",
+                "occurred_at": "2026-10-16T13:28:39.411375Z"
+              },
+              {
+                "event_type": "engagement.status_changed",
+                "occurred_at": "2026-10-16T13:28:39.467741Z"
+              },
+              {
+                "event_type": "finding.created",
+                "occurred_at": "2026-10-16T13:28:39.483175Z",
+                "severity": "medium"
+              },
+              {
+                "event_type": "finding.status_changed",
+                "occurred_at": "2026-10-16T13:28:39.492904Z",
+                "severity": "medium"
+              },
+              {
+                "event_type": "finding.commented",
+                "occurred_at": "2026-10-16T13:28:39.502352Z",
+                "severity": "medium"
+              }
+            ]
+          }
+        },
+        "links": [
+          {
+            "label": "1 · Open engagement",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453"
+          },
+          {
+            "label": "2 · Open engagement",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453"
+          },
+          {
+            "label": "3 · Open finding",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453/findings#finding-eda4023d4217ab3eb842421f59696478"
+          },
+          {
+            "label": "4 · Open finding",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453/findings#finding-eda4023d4217ab3eb842421f59696478"
+          },
+          {
+            "label": "5 · Open finding",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453/findings#finding-eda4023d4217ab3eb842421f59696478"
+          }
+        ]
+      }
+    },
+    {
+      "delivery_id": "473ee26fe8be9be774145f162c71b18e",
+      "event_id": "2aa586a94c9c9d137e03c5fb45483cfb",
+      "receiver_request_id": "233353f5-f255-41b5-82a7-8b3b5ff3f679",
+      "received_at": "2026-10-16 13:29:44",
+      "signature_verified": true,
+      "body_sha256": "0c4fc8d0204fafe479bd9b5a303c4e6740c7fbaa321a4769787597acc7b8156f",
+      "preview_body_equal": true,
+      "locale": "en",
+      "data_class": "signal",
+      "cadence": "hourly",
+      "parsed_body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "2aa586a94c9c9d137e03c5fb45483cfb",
+          "type": "notification.digest",
+          "schema_version": 1,
+          "occurred_at": "2026-10-16T13:00:00Z",
+          "severity": "medium"
+        },
+        "data": {
+          "vars": {
+            "cadence": "hourly",
+            "event_label": "Notification digest",
+            "event_type": "notification.digest",
+            "item_count": "5",
+            "occurred_at": "2026-10-16T13:00:00Z",
+            "omitted_count": "0",
+            "severity": "medium",
+            "window_end": "2026-10-16T13:00:00Z",
+            "window_start": "2026-10-16T12:00:00Z"
+          },
+          "lists": {
+            "items": [
+              {
+                "event_type": "engagement.created",
+                "occurred_at": "2026-10-16T13:28:39.411375Z"
+              },
+              {
+                "event_type": "engagement.status_changed",
+                "occurred_at": "2026-10-16T13:28:39.467741Z"
+              },
+              {
+                "event_type": "finding.created",
+                "occurred_at": "2026-10-16T13:28:39.483175Z",
+                "severity": "medium"
+              },
+              {
+                "event_type": "finding.status_changed",
+                "occurred_at": "2026-10-16T13:28:39.492904Z",
+                "severity": "medium"
+              },
+              {
+                "event_type": "finding.commented",
+                "occurred_at": "2026-10-16T13:28:39.502352Z",
+                "severity": "medium"
+              }
+            ]
+          }
+        },
+        "links": [
+          {
+            "label": "1 · Open engagement",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453"
+          },
+          {
+            "label": "2 · Open engagement",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453"
+          },
+          {
+            "label": "3 · Open finding",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453/findings#finding-eda4023d4217ab3eb842421f59696478"
+          },
+          {
+            "label": "4 · Open finding",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453/findings#finding-eda4023d4217ab3eb842421f59696478"
+          },
+          {
+            "label": "5 · Open finding",
+            "url": "https://localhost:8443/engagements/af529c35788e0747ca34436dc53e9453/findings#finding-eda4023d4217ab3eb842421f59696478"
+          }
+        ]
+      }
+    },
+    {
+      "delivery_id": "c6063f624a874f2f7231dcc7a6fda688",
+      "event_id": "71baadd2baf33aee23a706a7319d0946",
+      "receiver_request_id": "4befba59-9291-417a-a0a9-534d2a63c800",
+      "received_at": "2026-10-16 13:30:53",
+      "signature_verified": true,
+      "body_sha256": "a980df6721b46c1961d47863b7cf38f021bd3bf2e8cf89fbfe70482bda21ac7f",
+      "preview_body_equal": null,
+      "locale": "vi",
+      "data_class": "detail",
+      "cadence": "daily",
+      "parsed_body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "71baadd2baf33aee23a706a7319d0946",
+          "type": "notification.digest",
+          "schema_version": 1,
+          "occurred_at": "2026-10-16T00:00:00Z",
+          "severity": "medium"
+        },
+        "data": {
+          "vars": {
+            "cadence": "daily",
+            "event_label": "Notification digest",
+            "event_type": "notification.digest",
+            "item_count": "5",
+            "occurred_at": "2026-10-16T00:00:00Z",
+            "omitted_count": "0",
+            "severity": "medium",
+            "window_end": "2026-10-16T00:00:00Z",
+            "window_start": "2026-10-15T00:00:00Z"
+          },
+          "lists": {
+            "items": [
+              {
+                "event_type": "engagement.created",
+                "occurred_at": "2026-10-16T13:29:49.051871Z",
+                "title": "Engagement created"
+              },
+              {
+                "event_type": "engagement.status_changed",
+                "occurred_at": "2026-10-16T13:29:49.130962Z",
+                "title": "Engagement status changed"
+              },
+              {
+                "event_type": "finding.created",
+                "occurred_at": "2026-10-16T13:29:49.161395Z",
+                "severity": "medium",
+                "title": "Upload permission review • quyền tải lên"
+              },
+              {
+                "event_type": "finding.status_changed",
+                "occurred_at": "2026-10-16T13:29:49.179281Z",
+                "severity": "medium",
+                "title": "Upload permission review • quyền tải lên"
+              },
+              {
+                "event_type": "finding.commented",
+                "occurred_at": "2026-10-16T13:29:49.202986Z",
+                "severity": "medium",
+                "title": "Finding comment added"
+              }
+            ]
+          }
+        },
+        "links": [
+          {
+            "label": "1 · Open engagement",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534"
+          },
+          {
+            "label": "2 · Open engagement",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534"
+          },
+          {
+            "label": "3 · Open finding",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534/findings#finding-fc8e1ec3acaf57d41d9a168b0214ddde"
+          },
+          {
+            "label": "4 · Open finding",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534/findings#finding-fc8e1ec3acaf57d41d9a168b0214ddde"
+          },
+          {
+            "label": "5 · Open finding",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534/findings#finding-fc8e1ec3acaf57d41d9a168b0214ddde"
+          }
+        ]
+      }
+    },
+    {
+      "delivery_id": "ba919aaf985f2a0222f0962ebcf5eeac",
+      "event_id": "f9db95f5e4c88a5da9663d43bb19fe18",
+      "receiver_request_id": "69d1f568-d443-4a2e-9048-d434c78555fc",
+      "received_at": "2026-10-16 13:30:55",
+      "signature_verified": true,
+      "body_sha256": "e99e601563e1365d3232d0e36d55a349ce0354b934c65e4297ab6de3caa75ced",
+      "preview_body_equal": true,
+      "locale": "vi",
+      "data_class": "detail",
+      "cadence": "hourly",
+      "parsed_body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "f9db95f5e4c88a5da9663d43bb19fe18",
+          "type": "notification.digest",
+          "schema_version": 1,
+          "occurred_at": "2026-10-16T13:00:00Z",
+          "severity": "medium"
+        },
+        "data": {
+          "vars": {
+            "cadence": "hourly",
+            "event_label": "Notification digest",
+            "event_type": "notification.digest",
+            "item_count": "5",
+            "occurred_at": "2026-10-16T13:00:00Z",
+            "omitted_count": "0",
+            "severity": "medium",
+            "window_end": "2026-10-16T13:00:00Z",
+            "window_start": "2026-10-16T12:00:00Z"
+          },
+          "lists": {
+            "items": [
+              {
+                "event_type": "engagement.created",
+                "occurred_at": "2026-10-16T13:29:49.051871Z",
+                "title": "Engagement created"
+              },
+              {
+                "event_type": "engagement.status_changed",
+                "occurred_at": "2026-10-16T13:29:49.130962Z",
+                "title": "Engagement status changed"
+              },
+              {
+                "event_type": "finding.created",
+                "occurred_at": "2026-10-16T13:29:49.161395Z",
+                "severity": "medium",
+                "title": "Upload permission review • quyền tải lên"
+              },
+              {
+                "event_type": "finding.status_changed",
+                "occurred_at": "2026-10-16T13:29:49.179281Z",
+                "severity": "medium",
+                "title": "Upload permission review • quyền tải lên"
+              },
+              {
+                "event_type": "finding.commented",
+                "occurred_at": "2026-10-16T13:29:49.202986Z",
+                "severity": "medium",
+                "title": "Finding comment added"
+              }
+            ]
+          }
+        },
+        "links": [
+          {
+            "label": "1 · Open engagement",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534"
+          },
+          {
+            "label": "2 · Open engagement",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534"
+          },
+          {
+            "label": "3 · Open finding",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534/findings#finding-fc8e1ec3acaf57d41d9a168b0214ddde"
+          },
+          {
+            "label": "4 · Open finding",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534/findings#finding-fc8e1ec3acaf57d41d9a168b0214ddde"
+          },
+          {
+            "label": "5 · Open finding",
+            "url": "https://localhost:8443/engagements/bcd544c2ad58d53534d6c70ffc5dc534/findings#finding-fc8e1ec3acaf57d41d9a168b0214ddde"
+          }
+        ]
+      }
+    },
+    {
+      "delivery_id": "a231c58db817b0e71199152d2688d6b9",
+      "event_id": "244df6bdd51382484b95e11341df0b3b",
+      "receiver_request_id": "d357311f-b927-4e01-a66d-cc076ff6ca9e",
+      "received_at": "2026-10-16 13:32:04",
+      "signature_verified": true,
+      "body_sha256": "8c786a74d90843ec40d27ae6d708921baec6b39f4a183e476e8fe120a91e73ff",
+      "preview_body_equal": null,
+      "locale": "vi",
+      "data_class": "signal",
+      "cadence": "daily",
+      "parsed_body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "244df6bdd51382484b95e11341df0b3b",
+          "type": "notification.digest",
+          "schema_version": 1,
+          "occurred_at": "2026-10-16T00:00:00Z",
+          "severity": "medium"
+        },
+        "data": {
+          "vars": {
+            "cadence": "daily",
+            "event_label": "Notification digest",
+            "event_type": "notification.digest",
+            "item_count": "5",
+            "occurred_at": "2026-10-16T00:00:00Z",
+            "omitted_count": "0",
+            "severity": "medium",
+            "window_end": "2026-10-16T00:00:00Z",
+            "window_start": "2026-10-15T00:00:00Z"
+          },
+          "lists": {
+            "items": [
+              {
+                "event_type": "engagement.created",
+                "occurred_at": "2026-10-16T13:31:01.086279Z"
+              },
+              {
+                "event_type": "engagement.status_changed",
+                "occurred_at": "2026-10-16T13:31:01.17138Z"
+              },
+              {
+                "event_type": "finding.created",
+                "occurred_at": "2026-10-16T13:31:01.19603Z",
+                "severity": "medium"
+              },
+              {
+                "event_type": "finding.status_changed",
+                "occurred_at": "2026-10-16T13:31:01.212796Z",
+                "severity": "medium"
+              },
+              {
+                "event_type": "finding.commented",
+                "occurred_at": "2026-10-16T13:31:01.227159Z",
+                "severity": "medium"
+              }
+            ]
+          }
+        },
+        "links": [
+          {
+            "label": "1 · Open engagement",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575"
+          },
+          {
+            "label": "2 · Open engagement",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575"
+          },
+          {
+            "label": "3 · Open finding",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575/findings#finding-c3a4d8df433acc836cbc47f93e9fde75"
+          },
+          {
+            "label": "4 · Open finding",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575/findings#finding-c3a4d8df433acc836cbc47f93e9fde75"
+          },
+          {
+            "label": "5 · Open finding",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575/findings#finding-c3a4d8df433acc836cbc47f93e9fde75"
+          }
+        ]
+      }
+    },
+    {
+      "delivery_id": "f57371609952d78205f99c9a3b58d49d",
+      "event_id": "9484deb7e6221220e8d7d3057f77ddb8",
+      "receiver_request_id": "a316ed44-0b4f-46a0-9c12-81bcd1494e9b",
+      "received_at": "2026-10-16 13:32:12",
+      "signature_verified": true,
+      "body_sha256": "9c1c4dc5501148125b74bb998eb07c62d0aa7277386712c617f419ca73241435",
+      "preview_body_equal": true,
+      "locale": "vi",
+      "data_class": "signal",
+      "cadence": "hourly",
+      "parsed_body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "9484deb7e6221220e8d7d3057f77ddb8",
+          "type": "notification.digest",
+          "schema_version": 1,
+          "occurred_at": "2026-10-16T13:00:00Z",
+          "severity": "medium"
+        },
+        "data": {
+          "vars": {
+            "cadence": "hourly",
+            "event_label": "Notification digest",
+            "event_type": "notification.digest",
+            "item_count": "5",
+            "occurred_at": "2026-10-16T13:00:00Z",
+            "omitted_count": "0",
+            "severity": "medium",
+            "window_end": "2026-10-16T13:00:00Z",
+            "window_start": "2026-10-16T12:00:00Z"
+          },
+          "lists": {
+            "items": [
+              {
+                "event_type": "engagement.created",
+                "occurred_at": "2026-10-16T13:31:01.086279Z"
+              },
+              {
+                "event_type": "engagement.status_changed",
+                "occurred_at": "2026-10-16T13:31:01.17138Z"
+              },
+              {
+                "event_type": "finding.created",
+                "occurred_at": "2026-10-16T13:31:01.19603Z",
+                "severity": "medium"
+              },
+              {
+                "event_type": "finding.status_changed",
+                "occurred_at": "2026-10-16T13:31:01.212796Z",
+                "severity": "medium"
+              },
+              {
+                "event_type": "finding.commented",
+                "occurred_at": "2026-10-16T13:31:01.227159Z",
+                "severity": "medium"
+              }
+            ]
+          }
+        },
+        "links": [
+          {
+            "label": "1 · Open engagement",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575"
+          },
+          {
+            "label": "2 · Open engagement",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575"
+          },
+          {
+            "label": "3 · Open finding",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575/findings#finding-c3a4d8df433acc836cbc47f93e9fde75"
+          },
+          {
+            "label": "4 · Open finding",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575/findings#finding-c3a4d8df433acc836cbc47f93e9fde75"
+          },
+          {
+            "label": "5 · Open finding",
+            "url": "https://localhost:8443/engagements/8f2fd1f67e03c3ac57c1e2a1760c8575/findings#finding-c3a4d8df433acc836cbc47f93e9fde75"
+          }
+        ]
+      }
+    }
+  ],
+  "fixture_tests": [
+    {
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "detail",
+      "captured_at_utc": "2026-10-16T13:09:07.160344+00:00",
+      "delivery": {
+        "id": "712957d79483ed508830c76492c0b1a1",
+        "event_id": "f1473ecb06adb3e3cd1410fbc19c2fc0",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/z8DDurI3Dhk.Gu12I_DCao0"
+      },
+      "attempt": {
+        "id": "372790345be3959cfbd58631a4452b68",
+        "delivery_id": "712957d79483ed508830c76492c0b1a1",
+        "number": 1,
+        "started_at": "2026-10-16T13:09:07.674087Z",
+        "finished_at": "2026-10-16T13:09:08.45791Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:en@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Severity: high\nKind: sast\nStatus: open\nOccurred: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Finding created"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:en@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "30b27ea0bfdacf80efc2db5543a13e34b9c3f2a7ec7bb173d50c95b66fdc97a0"
+    },
+    {
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "detail",
+      "captured_at_utc": "2026-10-16T13:09:07.232130+00:00",
+      "delivery": {
+        "id": "238e22822b56d44f1bc2894c2ddf9332",
+        "event_id": "63a021157409dd1c28b4070986e0bffe",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "498"
+      },
+      "attempt": {
+        "id": "8da3bf7a0fc9b3b45850c5e5727f5dc3",
+        "delivery_id": "238e22822b56d44f1bc2894c2ddf9332",
+        "number": 1,
+        "started_at": "2026-10-16T13:09:08.559689Z",
+        "finished_at": "2026-10-16T13:09:09.817846Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:en@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Severity: high\nKind: sast\nStatus: open\nOccurred: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Finding created"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:en@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "0efd153cfe531f33ea182c9421ca7bb475f410479f39d1275e0b87416040bfc6"
+    },
+    {
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "detail",
+      "captured_at_utc": "2026-10-16T13:09:07.310506+00:00",
+      "delivery": {
+        "id": "d12a2c656b1ac25f16ff5fff2677487b",
+        "event_id": "e189a0b1cca7614e37715ed6f33ca840",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": ""
+      },
+      "attempt": {
+        "id": "7eb2874b1b7a927c0a87e1640e0a69b9",
+        "delivery_id": "d12a2c656b1ac25f16ff5fff2677487b",
+        "number": 1,
+        "started_at": "2026-10-16T13:09:09.848537Z",
+        "finished_at": "2026-10-16T13:09:10.278826Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:en@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Severity: high\nKind: sast\nStatus: open\nOccurred: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Finding created"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:en@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "91e4be012598e8752b0dc18fc0398bf2e8eeafeeec599a730240514a93e4addb"
+    },
+    {
+      "provider": "google_chat",
+      "locale": "en",
+      "data_class": "signal",
+      "captured_at_utc": "2026-10-16T13:29:46.310599+00:00",
+      "delivery": {
+        "id": "62a30b0924bebe32d1cb69c25c672b12",
+        "event_id": "1a37aad9b6babc85bccbaaa26eb3258d",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/z8DDurI3Dhk.8Mg9s53bX5Y"
+      },
+      "attempt": {
+        "id": "f3665415f995e7dc32bdb869ef8b41e6",
+        "delivery_id": "62a30b0924bebe32d1cb69c25c672b12",
+        "number": 1,
+        "started_at": "2026-10-16T13:29:46.882459Z",
+        "finished_at": "2026-10-16T13:29:47.526302Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:en@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Severity: high\nKind: sast\nStatus: open\nOccurred: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Finding created"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:en@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "30b27ea0bfdacf80efc2db5543a13e34b9c3f2a7ec7bb173d50c95b66fdc97a0"
+    },
+    {
+      "provider": "telegram",
+      "locale": "en",
+      "data_class": "signal",
+      "captured_at_utc": "2026-10-16T13:29:46.336322+00:00",
+      "delivery": {
+        "id": "42e3f6e31102b0f78c3754e3b4b981c3",
+        "event_id": "621229c8d3614fbe355406c61e2d3889",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "507"
+      },
+      "attempt": {
+        "id": "18041f56206268671c6a3983d3f3a6e6",
+        "delivery_id": "42e3f6e31102b0f78c3754e3b4b981c3",
+        "number": 1,
+        "started_at": "2026-10-16T13:29:47.538203Z",
+        "finished_at": "2026-10-16T13:29:47.977172Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:en@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Severity: high\nKind: sast\nStatus: open\nOccurred: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Finding created"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:en@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "0efd153cfe531f33ea182c9421ca7bb475f410479f39d1275e0b87416040bfc6"
+    },
+    {
+      "provider": "slack",
+      "locale": "en",
+      "data_class": "signal",
+      "captured_at_utc": "2026-10-16T13:29:46.371448+00:00",
+      "delivery": {
+        "id": "342501a70cee9b1ab7944fc1248fccb3",
+        "event_id": "08b760459894a612c8454483fffa4f05",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": ""
+      },
+      "attempt": {
+        "id": "2ee909c8d9a4822139687089414f171d",
+        "delivery_id": "342501a70cee9b1ab7944fc1248fccb3",
+        "number": 1,
+        "started_at": "2026-10-16T13:29:47.992405Z",
+        "finished_at": "2026-10-16T13:29:48.379903Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:en@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Severity: high\nKind: sast\nStatus: open\nOccurred: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Finding created"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:en@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "91e4be012598e8752b0dc18fc0398bf2e8eeafeeec599a730240514a93e4addb"
+    },
+    {
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "detail",
+      "captured_at_utc": "2026-10-16T13:30:57.377977+00:00",
+      "delivery": {
+        "id": "f05d5848cd37a696aac279ab86f675c3",
+        "event_id": "1f63699c12061e1ef9c07a5a2dac02da",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/z8DDurI3Dhk.hWRwDNU8baw"
+      },
+      "attempt": {
+        "id": "191d2fb9bd1b4e9966efbb691113b543",
+        "delivery_id": "f05d5848cd37a696aac279ab86f675c3",
+        "number": 1,
+        "started_at": "2026-10-16T13:30:57.767921Z",
+        "finished_at": "2026-10-16T13:30:58.47546Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:vi@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Mức độ: high\nLoại: sast\nTrạng thái: open\nThời gian: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Phát hiện mới"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:vi@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "0d2b4be2aac8eb844b6179c71d6a056d321838128b0e079a82944d153fdced55"
+    },
+    {
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "detail",
+      "captured_at_utc": "2026-10-16T13:30:57.403518+00:00",
+      "delivery": {
+        "id": "90eb3d6c2a10aaec1260cc833c29919f",
+        "event_id": "06827d9b813a73a4ae89f777ef134aa1",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "510"
+      },
+      "attempt": {
+        "id": "d45330984c1a017b66b56213fa10badb",
+        "delivery_id": "90eb3d6c2a10aaec1260cc833c29919f",
+        "number": 1,
+        "started_at": "2026-10-16T13:30:58.508017Z",
+        "finished_at": "2026-10-16T13:30:59.256606Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:vi@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Mức độ: high\nLoại: sast\nTrạng thái: open\nThời gian: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Phát hiện mới"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:vi@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "5196a7d51f7b282ff08bac652a15becf4862009dd07abf6d40236b3ed3cd48a0"
+    },
+    {
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "detail",
+      "captured_at_utc": "2026-10-16T13:30:57.476485+00:00",
+      "delivery": {
+        "id": "f8c947f3631b3532c30b6fc234acab89",
+        "event_id": "934157521ab2c386e301e178fc5ae521",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": ""
+      },
+      "attempt": {
+        "id": "43ac9fbcd602eafd127157d6e56fe173",
+        "delivery_id": "f8c947f3631b3532c30b6fc234acab89",
+        "number": 1,
+        "started_at": "2026-10-16T13:30:59.269059Z",
+        "finished_at": "2026-10-16T13:30:59.579161Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:vi@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Mức độ: high\nLoại: sast\nTrạng thái: open\nThời gian: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Phát hiện mới"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:vi@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "527363847aaa02b46938a1f1eea3b6e4072659c15322bc50fabe3e49781949df"
+    },
+    {
+      "provider": "google_chat",
+      "locale": "vi",
+      "data_class": "signal",
+      "captured_at_utc": "2026-10-16T13:32:13.602461+00:00",
+      "delivery": {
+        "id": "b378b63c00a8396642674b3a9004b005",
+        "event_id": "9590b1747705823e5cee986ef61775a5",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/z8DDurI3Dhk.XTxQji4omNE"
+      },
+      "attempt": {
+        "id": "afaed75b4042a0d1d33ffbd265fdcc26",
+        "delivery_id": "b378b63c00a8396642674b3a9004b005",
+        "number": 1,
+        "started_at": "2026-10-16T13:32:13.867034Z",
+        "finished_at": "2026-10-16T13:32:14.524889Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:vi@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Mức độ: high\nLoại: sast\nTrạng thái: open\nThời gian: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Phát hiện mới"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:vi@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "0d2b4be2aac8eb844b6179c71d6a056d321838128b0e079a82944d153fdced55"
+    },
+    {
+      "provider": "telegram",
+      "locale": "vi",
+      "data_class": "signal",
+      "captured_at_utc": "2026-10-16T13:32:13.663221+00:00",
+      "delivery": {
+        "id": "4aab1db3236ae1b52d4d4a2fc63dbc96",
+        "event_id": "062ca7506a56a7c483baab0c7f510776",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "513"
+      },
+      "attempt": {
+        "id": "002bf7a63613415f1532acc4db766be5",
+        "delivery_id": "4aab1db3236ae1b52d4d4a2fc63dbc96",
+        "number": 1,
+        "started_at": "2026-10-16T13:32:14.55018Z",
+        "finished_at": "2026-10-16T13:32:15.0481Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:vi@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Mức độ: high\nLoại: sast\nTrạng thái: open\nThời gian: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Phát hiện mới"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:vi@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "5196a7d51f7b282ff08bac652a15becf4862009dd07abf6d40236b3ed3cd48a0"
+    },
+    {
+      "provider": "slack",
+      "locale": "vi",
+      "data_class": "signal",
+      "captured_at_utc": "2026-10-16T13:32:13.712751+00:00",
+      "delivery": {
+        "id": "5598e5174df9a1766e3827b7496454bc",
+        "event_id": "25b86ec84639eb6fc5590e522ba81e31",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": ""
+      },
+      "attempt": {
+        "id": "225aef7dc757d21b4a3524788c37fe8f",
+        "delivery_id": "5598e5174df9a1766e3827b7496454bc",
+        "number": 1,
+        "started_at": "2026-10-16T13:32:15.060776Z",
+        "finished_at": "2026-10-16T13:32:15.358157Z",
+        "outcome": "delivered",
+        "response_code": 200,
+        "template_ref": "draft:builtin:finding.created:chat:vi@v1@1"
+      },
+      "preview_message": {
+        "fields": {
+          "body": "Mức độ: high\nLoại: sast\nTrạng thái: open\nThời gian: 2026\\-10\\-10 08\\:00 UTC",
+          "title": "Phát hiện mới"
+        },
+        "links": [
+          {
+            "label": "Open notifications",
+            "url": "https://localhost:8443/settings/alerting"
+          }
+        ],
+        "template_ref": "builtin:finding.created:chat:vi@v1",
+        "severity": "high"
+      },
+      "formatted_preview_sha256": "527363847aaa02b46938a1f1eea3b6e4072659c15322bc50fabe3e49781949df"
+    }
+  ],
+  "native_google_fixture_pairs": [
+    {
+      "locale": "en",
+      "data_class": "detail",
+      "delivery_id": "712957d79483ed508830c76492c0b1a1",
+      "remote_ref": "spaces/AAQAypJNJKI/messages/z8DDurI3Dhk.Gu12I_DCao0",
+      "title_and_body_lines_match": true,
+      "native_text_sha256": "673588ce161867dd0a48bc575c68b0f29e7742381774bfb0abdc007c0a01aa30"
+    },
+    {
+      "locale": "en",
+      "data_class": "signal",
+      "delivery_id": "62a30b0924bebe32d1cb69c25c672b12",
+      "remote_ref": "spaces/AAQAypJNJKI/messages/z8DDurI3Dhk.8Mg9s53bX5Y",
+      "title_and_body_lines_match": true,
+      "native_text_sha256": "0c0f9db101408193a4cb989e6ac21da7e118b60d6c7f9642d3d6a6f011e65382"
+    },
+    {
+      "locale": "vi",
+      "data_class": "detail",
+      "delivery_id": "f05d5848cd37a696aac279ab86f675c3",
+      "remote_ref": "spaces/AAQAypJNJKI/messages/z8DDurI3Dhk.hWRwDNU8baw",
+      "title_and_body_lines_match": true,
+      "native_text_sha256": "e0528dd1e505716abf2be7f5ed86e213857dbdf035fcecedda9e6066a1bbe44f"
+    },
+    {
+      "locale": "vi",
+      "data_class": "signal",
+      "delivery_id": "b378b63c00a8396642674b3a9004b005",
+      "remote_ref": "spaces/AAQAypJNJKI/messages/z8DDurI3Dhk.XTxQji4omNE",
+      "title_and_body_lines_match": true,
+      "native_text_sha256": "94f730f6978a7c71486a2c4844c3f1c74250d6341b201b8b10b80ac001137972"
+    }
+  ],
+  "worker_restart": {
+    "observed_at_utc": "2026-10-16T13:53:48.157904+00:00",
+    "unchanged": true,
+    "unique_jobs": 32,
+    "attempts_per_job": 1,
+    "wait_after_worker_restart_seconds": 40,
+    "scope": "One actual worker restart after completed mixed-event fixture publication; not a concurrency or elapsed-window soak claim",
+    "jobs": [
+      {
+        "id": "03ff2792d02414536dd616f3f0b34066",
+        "event_id": "9a172e16f3026976cc85ec32b31bec1f",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/7I5CafOsodM.7I5CafOsodM",
+        "attempt_rows": 1
+      },
+      {
+        "id": "0adcfe80d861629ac8732fa880b7eea1",
+        "event_id": "e0b7f0875132a2bfadcf10b5038f7745",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "504",
+        "attempt_rows": 1
+      },
+      {
+        "id": "26330ca0d7061f584cfe3759e0c10d59",
+        "event_id": "f42d1f6416f3befe2bc0a0423ca95557",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "26c01cdb90745f7905e9470ad79a7640",
+        "event_id": "5ec550147296ac3ddd6e481c688b04aa",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/QgqMWTIFYbQ.QgqMWTIFYbQ",
+        "attempt_rows": 1
+      },
+      {
+        "id": "29a2f6d77857bff6424077676f98a322",
+        "event_id": "f8671a068f8518a8499917509a230e64",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "508",
+        "attempt_rows": 1
+      },
+      {
+        "id": "2a7d9b2a7755365d9eee2ecf2e06a449",
+        "event_id": "03293b2c7498a263de779847180090c4",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "34f410ecc984a5f93de0fc7bdfbd5229",
+        "event_id": "06bc13a2c7087d8ddadbc5a696c60b2e",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "352070bc55d3962288dc12ac430aa84e",
+        "event_id": "3ed570b61e503230af77b52f2e3f18ab",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "473ee26fe8be9be774145f162c71b18e",
+        "event_id": "2aa586a94c9c9d137e03c5fb45483cfb",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "48bbb3e693ae6608489652c4d3d4a74c",
+        "event_id": "6fc4ed54da0366cf92bf82443874dabf",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/YRPQ8f8d1kM.YRPQ8f8d1kM",
+        "attempt_rows": 1
+      },
+      {
+        "id": "4df33d66ab008ada666c76800c56fc59",
+        "event_id": "1156130114f2a182083647a919ae11ac",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "5f34f9cb510a2d372edce4f170ecfca4",
+        "event_id": "6092ff8a1b664ae3424e002c7d285ecb",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "503",
+        "attempt_rows": 1
+      },
+      {
+        "id": "651a2df6a45cde5bbb860399c923959e",
+        "event_id": "706792092abfcb6a04035069088f9eff",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/RKTA0Vs400Y.RKTA0Vs400Y",
+        "attempt_rows": 1
+      },
+      {
+        "id": "6814746c6dce75de108d2b528ff3636e",
+        "event_id": "b137eb4afa313f256af0fe50f4e08549",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/7jE17iz1mfE.7jE17iz1mfE",
+        "attempt_rows": 1
+      },
+      {
+        "id": "68c4f142f73dd34f0f1d872a6f2c2592",
+        "event_id": "c4052cfc11a577b11c99fb2156db5148",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "511",
+        "attempt_rows": 1
+      },
+      {
+        "id": "68cb38a990fc7ff5e190af314b2b546a",
+        "event_id": "0dfe60f943b4c7f01030fdc927d42281",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "505",
+        "attempt_rows": 1
+      },
+      {
+        "id": "898570631189b8f792b462bb201e13e2",
+        "event_id": "29f4b2708d72d6a890e149ff30080506",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "8ac198e95567c8da380c176a60efb881",
+        "event_id": "fa9ed2f6f48ad66c690b4e0cecebf9f8",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/vZoVu9do_QQ.vZoVu9do_QQ",
+        "attempt_rows": 1
+      },
+      {
+        "id": "975250e43ceb3a0933e4cea1f5e974bb",
+        "event_id": "522c6e30fc234d7232262b2e32c1b055",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "509",
+        "attempt_rows": 1
+      },
+      {
+        "id": "a231c58db817b0e71199152d2688d6b9",
+        "event_id": "244df6bdd51382484b95e11341df0b3b",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "b9a75752de2e3945a79fcec8e4191d21",
+        "event_id": "8c73901f4f0f94be2cec89cec733e79d",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "ba919aaf985f2a0222f0962ebcf5eeac",
+        "event_id": "f9db95f5e4c88a5da9663d43bb19fe18",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "c6063f624a874f2f7231dcc7a6fda688",
+        "event_id": "71baadd2baf33aee23a706a7319d0946",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "c616125869d5d8162e3fcf07d9e4c324",
+        "event_id": "3d1ff669cbb15d0cac8e61d30ed805a9",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "c750972dcd62dff30f50fa7b414a3701",
+        "event_id": "32abe0b736053974091b2b1cf5e30ccd",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "cb61f2c69b6e14e650c18fc1e06d8685",
+        "event_id": "49b586262ae11e879b8e6ceb2912fecd",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/GbQFaQfYTFo.GbQFaQfYTFo",
+        "attempt_rows": 1
+      },
+      {
+        "id": "e3292370bdd9fb5d761da8bb93d67d73",
+        "event_id": "e44ed9c4d965d4c75c67dec0841f48b8",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "512",
+        "attempt_rows": 1
+      },
+      {
+        "id": "ea9e7f27ff03eae3e5383281755dfef3",
+        "event_id": "d451c1bcb13c22da6da302ef5ed8faee",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "spaces/AAQAypJNJKI/messages/ILPpFCcrOhE.ILPpFCcrOhE",
+        "attempt_rows": 1
+      },
+      {
+        "id": "ee8e86460552f4992ef51f0157871760",
+        "event_id": "4760a4608a6fe5848cc802d9bf153feb",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "f2e99fd27fced171b8cb9256735d17fa",
+        "event_id": "8823345b8cd64b30600312c2175cde16",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      },
+      {
+        "id": "f337d7f8a30088e99ed6fdbbf997d9d3",
+        "event_id": "c380a64be2a5ad62b957d0a7bca2b046",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "506",
+        "attempt_rows": 1
+      },
+      {
+        "id": "f57371609952d78205f99c9a3b58d49d",
+        "event_id": "9484deb7e6221220e8d7d3057f77ddb8",
+        "state": "delivered",
+        "attempts": 1,
+        "remote_ref": "",
+        "attempt_rows": 1
+      }
+    ]
+  },
+  "screenshots": [
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-daily-en-detail-dark.jpg",
+      "sha256": "430ef7de4ad3730271b946126c9af303b1d12da403283e77ad754be2f0352e9e",
+      "provider": "google_chat",
+      "theme": "dark",
+      "locale": "en",
+      "data_class": "detail",
+      "cadence": "daily",
+      "delivery_id": "651a2df6a45cde5bbb860399c923959e",
+      "remote_message_id": "RKTA0Vs400Y"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-hourly-en-detail-dark.jpg",
+      "sha256": "e77c6f33969282486620e33dc786b77fa89c3a53a0db0516c37d277811dde7a8",
+      "provider": "google_chat",
+      "theme": "dark",
+      "locale": "en",
+      "data_class": "detail",
+      "cadence": "hourly",
+      "delivery_id": "6814746c6dce75de108d2b528ff3636e",
+      "remote_message_id": "7jE17iz1mfE"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-daily-en-signal-dark.jpg",
+      "sha256": "0f2bbd5812439d2d6736f301f6f1d53bf9095dec415065e0b6248bb1e7764c2f",
+      "provider": "google_chat",
+      "theme": "dark",
+      "locale": "en",
+      "data_class": "signal",
+      "cadence": "daily",
+      "delivery_id": "8ac198e95567c8da380c176a60efb881",
+      "remote_message_id": "vZoVu9do_QQ"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-hourly-en-signal-dark.jpg",
+      "sha256": "75f706ff1211be7e74633b3be6b2e2ce34d07f6dafddf06063fd504d4b86c5a6",
+      "provider": "google_chat",
+      "theme": "dark",
+      "locale": "en",
+      "data_class": "signal",
+      "cadence": "hourly",
+      "delivery_id": "48bbb3e693ae6608489652c4d3d4a74c",
+      "remote_message_id": "YRPQ8f8d1kM"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-daily-vi-detail-dark.jpg",
+      "sha256": "4f0a71a54926609a82e8268d171cbed0a9c27ef8bedae8cf53911bfea3c525be",
+      "provider": "google_chat",
+      "theme": "dark",
+      "locale": "vi",
+      "data_class": "detail",
+      "cadence": "daily",
+      "delivery_id": "03ff2792d02414536dd616f3f0b34066",
+      "remote_message_id": "7I5CafOsodM"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-hourly-vi-detail-dark.jpg",
+      "sha256": "229a5a185d1b3105ff02fa72ea96a97c586793a737f6696db6134f2517c468aa",
+      "provider": "google_chat",
+      "theme": "dark",
+      "locale": "vi",
+      "data_class": "detail",
+      "cadence": "hourly",
+      "delivery_id": "ea9e7f27ff03eae3e5383281755dfef3",
+      "remote_message_id": "ILPpFCcrOhE"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-daily-vi-signal-dark.jpg",
+      "sha256": "ead8bcf3b3392e9e35ec596e7320111445eb4e320da82b1fb2966dfb34efd1ad",
+      "provider": "google_chat",
+      "theme": "dark",
+      "locale": "vi",
+      "data_class": "signal",
+      "cadence": "daily",
+      "delivery_id": "26c01cdb90745f7905e9470ad79a7640",
+      "remote_message_id": "QgqMWTIFYbQ"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-hourly-vi-signal-dark.jpg",
+      "sha256": "ba47a15ef6d38955a6a0b95e36dd48126131159003be9a57de0a2b33549d910b",
+      "provider": "google_chat",
+      "theme": "dark",
+      "locale": "vi",
+      "data_class": "signal",
+      "cadence": "hourly",
+      "delivery_id": "cb61f2c69b6e14e650c18fc1e06d8685",
+      "remote_message_id": "GbQFaQfYTFo"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-daily-en-detail-light.jpg",
+      "sha256": "28ceb0996afbdf71dba45cc9d279a8a3529662f5feb18f8a5cd8744ef7c7f08d",
+      "provider": "google_chat",
+      "theme": "light",
+      "locale": "en",
+      "data_class": "detail",
+      "cadence": "daily",
+      "delivery_id": "651a2df6a45cde5bbb860399c923959e",
+      "remote_message_id": "RKTA0Vs400Y"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-hourly-en-detail-light.jpg",
+      "sha256": "9cd7419fc2045717a76040c6cf7e4a7decad6397c2e669b64a0c4a8449ee8092",
+      "provider": "google_chat",
+      "theme": "light",
+      "locale": "en",
+      "data_class": "detail",
+      "cadence": "hourly",
+      "delivery_id": "6814746c6dce75de108d2b528ff3636e",
+      "remote_message_id": "7jE17iz1mfE"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-daily-en-signal-light.jpg",
+      "sha256": "4e385b34326b3c4c836e6843d1d133639e3845a053167e4a3dccf0e85de21115",
+      "provider": "google_chat",
+      "theme": "light",
+      "locale": "en",
+      "data_class": "signal",
+      "cadence": "daily",
+      "delivery_id": "8ac198e95567c8da380c176a60efb881",
+      "remote_message_id": "vZoVu9do_QQ"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-hourly-en-signal-light.jpg",
+      "sha256": "1bcfde2cb17b12d5d61513c0d3bb97b56e49f6ec39ae0249bcb37fc44264e433",
+      "provider": "google_chat",
+      "theme": "light",
+      "locale": "en",
+      "data_class": "signal",
+      "cadence": "hourly",
+      "delivery_id": "48bbb3e693ae6608489652c4d3d4a74c",
+      "remote_message_id": "YRPQ8f8d1kM"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-daily-vi-detail-light.jpg",
+      "sha256": "4072f3deca304a6c1f773b90f10015850ec5162c502bd8e82e0f5b77e766350d",
+      "provider": "google_chat",
+      "theme": "light",
+      "locale": "vi",
+      "data_class": "detail",
+      "cadence": "daily",
+      "delivery_id": "03ff2792d02414536dd616f3f0b34066",
+      "remote_message_id": "7I5CafOsodM"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-hourly-vi-detail-light.jpg",
+      "sha256": "5ae6e9262d59d280e844968ff745689d58414412d5e39a2a78a388eeb05c369a",
+      "provider": "google_chat",
+      "theme": "light",
+      "locale": "vi",
+      "data_class": "detail",
+      "cadence": "hourly",
+      "delivery_id": "ea9e7f27ff03eae3e5383281755dfef3",
+      "remote_message_id": "ILPpFCcrOhE"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-daily-vi-signal-light.jpg",
+      "sha256": "eea2a03c368ce88cc8a75130487a236f38d43d21045e3a02c65057c4839512ce",
+      "provider": "google_chat",
+      "theme": "light",
+      "locale": "vi",
+      "data_class": "signal",
+      "cadence": "daily",
+      "delivery_id": "26c01cdb90745f7905e9470ad79a7640",
+      "remote_message_id": "QgqMWTIFYbQ"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/google-chat-mixed-hourly-vi-signal-light.jpg",
+      "sha256": "a9e7db2c1f33433297d83b4477862d560ab93cc63ac9cc91db6fc70425c8693c",
+      "provider": "google_chat",
+      "theme": "light",
+      "locale": "vi",
+      "data_class": "signal",
+      "cadence": "hourly",
+      "delivery_id": "cb61f2c69b6e14e650c18fc1e06d8685",
+      "remote_message_id": "GbQFaQfYTFo"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/console-preview-en-signal-light.jpg",
+      "sha256": "39f8d0c8f57c6837586dfb1126da9a46a411ab98815061adee88e12ff43277c3",
+      "provider": "console",
+      "theme": "light"
+    },
+    {
+      "file": "ui/notification-delivery/mixed/console-preview-en-detail-dark.jpg",
+      "sha256": "27cf35fd4ff06983eebcd12064dddbfb946ecf2416fa06cb74823b9970097617",
+      "provider": "console",
+      "theme": "dark"
+    }
+  ],
+  "verification": {
+    "go": {
+      "pass": 17341,
+      "skip": 713,
+      "fail": 0
+    },
+    "frontend": {
+      "files": 200,
+      "pass": 1342,
+      "fail": 0
+    },
+    "postgres_full_shards": {
+      "top_level_tests": 662,
+      "seconds": 1310.0,
+      "shards": [
+        {
+          "shard": 0,
+          "selected_top_level_tests": 166,
+          "exit_code": 0,
+          "results": {
+            "pass": 257,
+            "skip": 1
+          },
+          "failures": []
+        },
+        {
+          "shard": 1,
+          "selected_top_level_tests": 166,
+          "exit_code": 0,
+          "results": {
+            "pass": 261,
+            "skip": 1
+          },
+          "failures": []
+        },
+        {
+          "shard": 2,
+          "selected_top_level_tests": 165,
+          "exit_code": 1,
+          "results": {
+            "pass": 246,
+            "skip": 1,
+            "fail": 1
+          },
+          "failures": [
+            "TestBitbucketWebhookConcurrentPayloadReplaysEnqueueOnce"
+          ]
+        },
+        {
+          "shard": 3,
+          "selected_top_level_tests": 165,
+          "exit_code": 0,
+          "results": {
+            "pass": 258,
+            "skip": 1
+          },
+          "failures": []
+        }
+      ]
+    },
+    "postgres_final_notification_migration_and_role_rerun": {
+      "pass": 155,
+      "fail": 0,
+      "note": "Serial rerun resolves shared runtime-role password collision in sharded test setup; includes final scheduled secondary-event regressions."
+    }
+  },
+  "limits": [
+    "Fixture windows explicitly closed; no elapsed hourly/daily soak or production capacity claim.",
+    "Ten available stored chat preview bodies match native lines; fourteen were outside newest-twenty event selection and remain unverified for preview parity.",
+    "All eight webhook bodies parsed and HMAC verified; preview equality is claimed only where preview_body_equal is true. Receiver URL token, signature, IP and credentials excluded.",
+    "Twelve fixture tests delivered; only four Google Chat fixture title/body pairs and one console-to-client-to-authenticated-settings journey checked natively in this cohort. Full preview/send client matrix incomplete.",
+    "Google Chat native images cover en/vi, signal/detail, hourly/daily, light/dark. Remaining provider theme/device and complete changed-screen state matrices incomplete.",
+    "Telegram localhost labels lack anchors; navigation unverified. Teams real Microsoft 365 bot/client acceptance absent; keep #1420 open.",
+    "Discord and Gmail/Outlook SMTP receipts absent. PagerDuty deferred to #1576. No GCP project/API/billing/credential/grant created."
+  ]
+}

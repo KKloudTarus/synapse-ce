@@ -60,7 +60,7 @@ credentials and local overrides stay outside the repository.
 
 Local browser, database and transport checks establish only their measured boundaries.
 The initial local checks do not establish external delivery. The later live-provider
-run below adds Slack, Telegram and Google Chat receipts only. This packet does not claim
+runs below add Slack, Telegram, Google Chat and a public HTTPS receiver. This packet does not claim
 a usable Teams bot identity or accepted Teams client evidence. Any outstanding leaf is referenced with
 `Refs`, not closed by a code-only result.
 
@@ -71,8 +71,9 @@ stay unverified there. This deferral does not count as provider acceptance or cl
 
 ## Work bounds and recovery
 
-The runtime exercise contains five manually authored findings; production source rates and
-retained-window counts are unknown. Membership admission batches rule/channel targets into
+The initial runtime exercise contains five manually authored findings. The later mixed run
+uses five distinct API-produced types per cell; production rates and retained-window counts
+remain unknown. Membership admission batches rule/channel targets into
 one SQL write after the tenant scheduler and ordered channel locks. Pending windows use a
 partial due index; aggregate lookup uses the tenant/event index. A chunk hydrates at most
 200 source snapshots. Filtering and deterministic sorting take O(n log n) time and O(n)
@@ -270,12 +271,12 @@ Chat repair. Screenshots do not establish authenticated console navigation.
 
 ### Remaining client boundaries
 
-The complete theme/device matrix, mixed-event digests, authenticated deep-link clicks and
-all locale/class console-preview/send pairs remain incomplete. Telegram web displayed the
-localhost finding labels without anchor elements; its navigation acceptance remains
-unverified. No public console route was substituted. Slack and Google Chat native links
-were observed, but destination navigation was not accepted while the local console was
-logged out.
+The subsequent run adds mixed-event digests and Google Chat light/dark captures. The full
+provider/device and console-preview/send matrices remain incomplete. Telegram localhost
+labels lack anchors; navigation remains unverified. One Google Chat fixture button opened
+the correct notification settings route. Normal API-key sign-in retained that route and
+the delivered attempt was inspected. This establishes that bounded authenticated journey;
+it does not establish every source link or automatic session sharing between tabs.
 
 The existing Discord test server/webhook was found, but its credential could not be handed
 off through the browser clipboard; no Discord receipt is claimed. The logged-in Teams
@@ -289,3 +290,106 @@ The personal account's project search returned no resource named Synapse; the di
 project had no OAuth client. No new project, API enablement, billing, credential or mail
 grant was created. No Gmail/Outlook SMTP receipt is claimed. PagerDuty remains deferred
 to #1576. The PR stays Draft with `Refs`; ownership and issue closure policy are unchanged.
+
+
+## Mixed-event implementation and live verification on 2026-10-16
+
+The [mixed-event evidence record](assets/notification-mixed-delivery-evidence.json) keeps
+this cohort separate from the older finding-only receipts. A rule explicitly selects at
+most eight types while retaining its legacy primary selector. Shared filters, recipients,
+team scope, lead times and bindings validate every type. Omitting the selection cannot
+silently narrow an existing explicit selection. The searchable additional-event picker
+retains saved missing IDs and blocks incompatible selections. Chat preview shows the title
+before the body and a typed severity badge. Digest items without severity omit brackets.
+
+Migration `0240` preserves legacy rules. A transaction capability marker makes an older
+publisher fail closed for matching enabled multi-type rules. The fence cannot detect an
+old scheduler that never emits a secondary event: upgrade every API, source scheduler and
+worker before enabling these rules. Scheduled lead queries now match secondary types.
+Stop producers and the materializer before disabling rules to preserve pending work;
+running the materializer while a rule is disabled permanently suppresses its pending window.
+The notification runbook documents rollout and rollback.
+
+### Actual heterogeneous receipts
+
+Four cells cover en/vi and detail/signal. Each creates an engagement, changes its status,
+creates a finding, changes its status and comments through the real API. The five stored
+types are `engagement.created`, `engagement.status_changed`, `finding.created`,
+`finding.status_changed` and `finding.commented`. Two rules select all five and send
+hourly/daily windows through the real worker to Slack JJ, Telegram, Google Chat and a
+public HTTPS receiver.
+
+All **32 digest jobs** delivered HTTP 200 once, with five members. An actual worker restart
+and forty-second observation preserved every event/delivery identity, remote reference and
+single-attempt count. Fixture windows were explicitly closed; no elapsed hourly/daily soak
+is claimed. Cell provenance includes the base commit, tracked patch, untracked source and
+actual binary hashes rather than claiming a clean committed build.
+
+All 24 chat receipts were found in native clients. Google matches exact provider message
+IDs; Slack matches unique engagement links and cadence; Telegram matches native server
+timestamps within the actual request interval with one-second rounding, plus cadence and
+content. Telegram DOM IDs differ from Bot API IDs. Each digest contains all five types
+once. Detail includes the synthetic finding title; signal omits it. Ten stored chat
+previews match native body lines. Fourteen previews returned 404 outside newest-twenty
+sample selection and remain unverified for parity.
+
+The public receiver captured eight webhook requests. Every versioned envelope parsed with
+five typed items and verified HMAC. Four available previews match received bytes; four
+remain outside sample selection. Receiver URL tokens, signatures, IPs and credentials are
+excluded. An earlier private-address receiver attempt was correctly blocked by SSRF and
+is excluded from these successful receipts. Sender protections remain enabled.
+
+Twelve fixture tests across three chat providers and four locale/class cells delivered
+HTTP 200 once. All four Google fixture cards match provider reference, preview title and
+body lines in the native thread. One editor-initiated test has the authenticated settings
+and attempt-history journey above. The complete console-preview/send/navigation matrix
+remains unverified.
+
+### Reviewed captures
+
+All sixteen Google digest images and both console previews were individually reviewed;
+hashes match. Every digest card shows title, cadence, five typed rows and five buttons.
+Medium severity is textual where present, with a yellow marker. Vietnamese framing and
+diacritics remain intact; enum strings and source labels remain English. No credential or
+private sidebar appears. Pixels establish rendering; separate records establish correlation.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| Google en/detail hourly | [Light](assets/ui/notification-delivery/mixed/google-chat-mixed-hourly-en-detail-light.jpg) | [Dark](assets/ui/notification-delivery/mixed/google-chat-mixed-hourly-en-detail-dark.jpg) |
+| Google en/signal daily | [Light](assets/ui/notification-delivery/mixed/google-chat-mixed-daily-en-signal-light.jpg) | [Dark](assets/ui/notification-delivery/mixed/google-chat-mixed-daily-en-signal-dark.jpg) |
+| Google vi/detail daily | [Light](assets/ui/notification-delivery/mixed/google-chat-mixed-daily-vi-detail-light.jpg) | [Dark](assets/ui/notification-delivery/mixed/google-chat-mixed-daily-vi-detail-dark.jpg) |
+| Google vi/signal hourly | [Light](assets/ui/notification-delivery/mixed/google-chat-mixed-hourly-vi-signal-light.jpg) | [Dark](assets/ui/notification-delivery/mixed/google-chat-mixed-hourly-vi-signal-dark.jpg) |
+| Console preview | [en/signal](assets/ui/notification-delivery/mixed/console-preview-en-signal-light.jpg) | [en/detail](assets/ui/notification-delivery/mixed/console-preview-en-detail-dark.jpg) |
+
+The JSON contains all eighteen hashes and remaining captures. Slack dark mode, Telegram
+navigation, the full provider/device matrix and every changed screen's full state/theme
+matrix remain incomplete. Teams, Discord, Gmail/Outlook SMTP and PagerDuty retain the
+boundaries above. No mock supplies external acceptance.
+
+### Current engineering gate
+
+| Check | Actual result |
+| --- | --- |
+| Full Go 1.27.0 suite with Helm 3.19.0, `GOMAXPROCS=2 go test -p 2 -json ./...` | Exit 0; 17,341 pass / 713 conditional skips / 0 fail, including subtests. |
+| Go build, vet and golangci-lint 2.13.2 | Pass; zero lint issues. |
+| Domain/usecase/memory notification race checks | Pass. |
+| Full frontend, Node 22 / pnpm 9, two workers | 200 files / 1,342 tests pass; typecheck, lint and build pass. Eleven existing lint warnings. |
+| Full PostgreSQL selection, four databases | 662 top-level tests; 1,022 pass / 4 skip / 1 setup failure, including subtests. |
+| Final serial PostgreSQL notification/migration and failed-case rerun | 155 pass / 0 fail, including final secondary-event source regressions. |
+| Actual full stack | PostgreSQL 17, MinIO, Mailpit STARTTLS, API, worker, web and HTTPS; ready with schema 0240. |
+
+The PostgreSQL shard failure was a cluster-global test-role password collision in
+`TestBitbucketWebhookConcurrentPayloadReplaysEnqueueOnce`. Separate database shards altered
+the same role. The serial rerun passed. These are separate runs, not one clean full
+invocation. Four opt-in skips remain as listed above; notification/RLS tests executed.
+
+Tier-0 QA, security, performance, architecture, reliability and frontend reviews pass.
+A low recovery-documentation finding was fixed by documenting the materializer stop before
+rule disable. A restricted-role warm query over 24 rules and 76 joined rows used indexed
+tenant/team lookups, zero disk reads and 0.599 ms execution. This small observation does
+not establish production capacity. Hot-tenant contention, sustained drain and production
+latency remain unmeasured; the earlier due-window ordering follow-up is retained.
+
+The PR remains Draft with `Refs` for incomplete acceptance, #1418/#1419 stay closed,
+#1420 stays open and PagerDuty stays deferred to #1576. Ownership is unchanged. Passing
+implementation and the engineering gate do not close outstanding client acceptance.

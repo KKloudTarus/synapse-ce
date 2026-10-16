@@ -14480,7 +14480,19 @@ components:
           description: Explicit personal recipients. Missing saved IDs remain stored; only enabled same-tenant human users can receive. Not allowed for finding.mentioned.
         name: {type: string, maxLength: 200}
         enabled: {type: boolean}
-        event_type: {$ref: '#/components/schemas/NotificationEventType'}
+        event_type:
+          allOf:
+            - {$ref: '#/components/schemas/NotificationEventType'}
+          description: The legacy primary event type. When event_types is supplied, it must equal the first item.
+        event_types:
+          type: array
+          maxItems: 8
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/NotificationEventType'}
+          description: >-
+            Optional complete ordered selection for a multi-event rule. Omit only for a legacy
+            single-event rule; clients updating a stored multi-event rule must send its complete
+            selection. Send an explicit empty array to return to the primary event_type only.
         min_severity: {type: string, enum: [critical, high, medium, low, info]}
         action_types: {type: array, items: {type: string}}
         finding_kinds: {type: array, maxItems: 50, items: {type: string}}

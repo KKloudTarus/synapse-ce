@@ -349,6 +349,16 @@ Tests never create personal inbox or direct-message projections.
 
 ### Digests and explicit recipients
 
+A rule keeps its required `event_type` as the primary event. The optional `event_types`
+array selects up to eight distinct catalog types in order, with the primary first. Omitted
+or empty selections retain single-event behavior; selections never subscribe to future
+catalog additions. The form's searchable additional-event picker preserves saved missing
+IDs until removal. Shared filters, team scope, recipient roles and template bindings must
+be valid for every selected type. Mention events cannot be combined with other types.
+An update to a saved explicit selection must include `event_types`; an explicit empty
+array deliberately returns it to the primary event only. This protects saved selections
+from older clients that do not know the field.
+
 Rules accept `cadence: immediate | hourly | daily`, defaulting to `immediate`. Hourly and
 daily windows use UTC publication time, while rendered times use the tenant time zone.
 Membership is recorded atomically when the rule matches; source timestamps cannot place a
@@ -381,6 +391,19 @@ are deduplicated, and their current preferences, contacts and permissions are re
 before external delivery. Mention events remain limited to their captured mentioned user.
 `GET /api/v1/notifications/rules/user-options` needs `manage_integrations` and returns only
 a bounded page of user IDs and names, without roles or contact data.
+
+Apply migration `0240`, then upgrade every API/source publisher and worker before enabling
+multi-event rules. Scheduled lead discovery and channel matching both use the complete
+selection. An older publisher encountering an enabled matching multi-event rule is refused
+before event insertion; the source transaction can retry after upgrade instead of silently
+losing the secondary subscription. The capability marker is transaction-local and does
+not grant authorization. For an application rollback that preserves queued windows, stop
+source and materialization workers before disabling multi-event rules, and retain the schema,
+history and pending work for a forward fix. Keep older workers stopped while they could
+claim digest/test aggregates. If a current materializer runs while a rule is disabled, it
+finalizes pending windows as suppressed; re-enabling the rule does not replay those windows.
+Schema Down refuses retained multi-event selections, including disabled ones; intentionally
+retire those selections before considering a schema downgrade.
 
 Apply migration `0239` before upgrading all notification workers and then the API. Keep it
 applied for rollback; stop current workers and stop new digest/test producers before any

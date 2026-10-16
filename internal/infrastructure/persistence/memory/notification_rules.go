@@ -125,6 +125,7 @@ func (r *NotificationRepository) checkRuleReferences(rule notification.Rule) err
 // cloneRule copies the slices and returns them sorted, as the Postgres aggregate orders channel
 // and team IDs.
 func cloneRule(rule notification.Rule) notification.Rule {
+	rule.EventTypes = slices.Clone(rule.EventTypes)
 	rule.ActionTypes = slices.Clone(rule.ActionTypes)
 	rule.FindingKinds = slices.Clone(rule.FindingKinds)
 	rule.FromStatuses = slices.Clone(rule.FromStatuses)

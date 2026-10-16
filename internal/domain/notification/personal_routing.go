@@ -160,7 +160,7 @@ func findingSubjectEvent(event EventType) bool {
 }
 
 // normalizeRecipientRoles dedupes and checks a rule's roles.
-func (r *Rule) normalizeRecipientRoles() error {
+func (r *Rule) normalizeRecipientRoles(events []EventType) error {
 	r.RecipientRoles = uniqueStrings(r.RecipientRoles)
 	if len(r.RecipientRoles) == 0 {
 		r.RecipientRoles = nil
@@ -169,8 +169,10 @@ func (r *Rule) normalizeRecipientRoles() error {
 		return fmt.Errorf("%w: too many recipient roles", shared.ErrValidation)
 	}
 	for _, role := range r.RecipientRoles {
-		if err := RuleRoleSupported(r.EventType, role); err != nil {
-			return err
+		for _, event := range events {
+			if err := RuleRoleSupported(event, role); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

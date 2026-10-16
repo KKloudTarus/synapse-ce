@@ -1,6 +1,7 @@
 import { Eye, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Markdown } from '../../../components/synapse/Markdown'
+import { SeverityBadge } from '../../../components/synapse/SeverityBadge'
 import { Button, Card, EmptyState, ErrorState, Field, Select, Spinner } from '../../../components/ui'
 import { api, ApiError, type NotificationChannel, type NotificationEventSpec, type NotificationTemplateFamily, type NotificationTemplatePreview, type NotificationTemplatePreviewEvent } from '../../../lib/api'
 import { errorMessage, eventLabel, isForbidden } from './shared'
@@ -278,17 +279,29 @@ function RenderedPreview({ preview }: { preview: NotificationTemplatePreview }) 
       </div>
     )
   }
-  const fields = Object.entries(preview.message?.fields ?? {})
+  const message = preview.message
+  const fields = Object.entries(message?.fields ?? {})
   if (fields.length === 0) return <PreviewNotice title="No rendered content" detail="The selected channel did not return a displayable message." />
+  const severity = message?.severity
+  const knownSeverity = severity === 'critical' || severity === 'high' || severity === 'medium' || severity === 'low' || severity === 'info' ? severity : undefined
+  const chat = preview.channel.family === 'chat'
   return (
     <div className="space-y-3 rounded-lg border border-secondary bg-secondary p-4" aria-label="Rendered message preview">
-      {fields.map(([name, value]) => (
+      {chat ? (
+        <>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            {message?.fields.title && <div role="heading" aria-level={3}><Markdown className="font-semibold text-primary">{message.fields.title}</Markdown></div>}
+            {knownSeverity && <span aria-label={`Severity: ${knownSeverity}`}><SeverityBadge severity={knownSeverity} size="sm" /></span>}
+          </div>
+          {message?.fields.body && <Markdown className="text-sm text-primary">{message.fields.body}</Markdown>}
+        </>
+      ) : fields.map(([name, value]) => (
         <div key={name}>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-tertiary">{name}</p>
           <Markdown className={name === 'title' || name === 'subject' || name === 'summary' ? 'mt-1 font-semibold text-primary' : 'mt-1 text-sm text-primary'}>{value}</Markdown>
         </div>
       ))}
-      {preview.message?.severity && <p className="text-xs text-secondary">Severity: {preview.message.severity}</p>}
+      {severity && (!chat || !knownSeverity) && <p className="text-xs text-secondary">Severity: {severity}</p>}
       {(preview.message?.links ?? []).map((link, index) => safeConsoleLink(link.url) ? (
         <a key={`${index}:${link.url}`} href={link.url} target="_blank" rel="noopener noreferrer" className="block break-words text-sm text-brand-primary underline">{link.label}</a>
       ) : null)}

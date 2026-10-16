@@ -139,9 +139,9 @@ func fields(event notification.EventType, family notification.TemplateFamily, lo
 func copyFor(event notification.EventType, locale tenancy.Locale) (string, string) {
 	if event == notification.EventDigest {
 		if locale == tenancy.LocaleVietnamese {
-			return "Tổng hợp thông báo", "Chu kỳ: {{.cadence}} · {{.item_count}} sự kiện\n{{.window_start}} → {{.window_end}}{{range .items}}\n- {{.event_type}} [{{.severity}}]{{if .title}} {{.title}}{{end}}{{if .target}} · {{.target}}{{end}}{{end}}{{if ne .omitted_count \"0\"}}\nCòn {{.omitted_count}} sự kiện trong cửa sổ này.{{end}}"
+			return "Tổng hợp thông báo", "Chu kỳ: {{.cadence}} · {{.item_count}} sự kiện\n{{.window_start}} → {{.window_end}}{{range .items}}\n- {{.event_type}}{{if .severity}} [{{.severity}}]{{end}}{{if .title}} {{.title}}{{end}}{{if .target}} · {{.target}}{{end}}{{end}}{{if ne .omitted_count \"0\"}}\nCòn {{.omitted_count}} sự kiện trong cửa sổ này.{{end}}"
 		}
-		return "Notification digest", "Cadence: {{.cadence}} · {{.item_count}} events\n{{.window_start}} → {{.window_end}}{{range .items}}\n- {{.event_type}} [{{.severity}}]{{if .title}} {{.title}}{{end}}{{if .target}} · {{.target}}{{end}}{{end}}{{if ne .omitted_count \"0\"}}\n{{.omitted_count}} more events in this window.{{end}}"
+		return "Notification digest", "Cadence: {{.cadence}} · {{.item_count}} events\n{{.window_start}} → {{.window_end}}{{range .items}}\n- {{.event_type}}{{if .severity}} [{{.severity}}]{{end}}{{if .title}} {{.title}}{{end}}{{if .target}} · {{.target}}{{end}}{{end}}{{if ne .omitted_count \"0\"}}\n{{.omitted_count}} more events in this window.{{end}}"
 	}
 
 	if locale == tenancy.LocaleVietnamese {
