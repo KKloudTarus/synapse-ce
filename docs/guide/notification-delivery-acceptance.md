@@ -13,7 +13,7 @@ baseline `b88812e15fce7c88604bc735872532fe5cae75f3`. Issue ownership is unchange
 | #1374 | Add the template-editor preview, sandboxed email HTML and fixture-only queued test using an immutable template snapshot and the shared test quota. | Real-client preview/test pairs remain distinct from local transport and browser evidence. |
 | #1377 | Add immediate/hourly/daily rules, transactional membership, tenant-keyed closed windows, per-item filtering, mandatory/critical bypass, safe counts, retries and admission-policy witnesses. | Hourly five-item and daily live-client evidence, plus idempotency/concurrency and PostgreSQL checks. |
 | #1418 / #1419 | Already closed through merged #1571. Keep preferences, mandatory floors, explicit verified linking, contact versions and personal delivery. | Run integration regressions; do not reopen or reimplement accepted work. Historical Slack evidence keeps its tested commit. |
-| #1420 | Retain the merged Teams bot/link-code/contact/personal-delivery code. | **Open** until real Teams linking, verified contact, message/history correlation, correct console navigation and reviewer-inspected screenshots exist. Fake-service tests do not satisfy this. |
+| #1420 | Retain the merged Teams bot/link-code/contact/personal-delivery code. | **Deferred from this PR by the maintainer**, tracked in open #1420. Real Teams linking, verified contact, message/history correlation, console navigation and reviewed screenshots remain required there; fake-service tests do not satisfy them. |
 | #1417 | Retain the existing bell/inbox, filters, read operations and user-scoped API. | Actual console journey and relevant loading/empty/error/permission states, with per-user isolation tests. |
 | #1421 | Reuse engagement/team pickers and missing-ID retention; add explicit personal-recipient IDs, minimal managed user search and round-trip persistence. | Picker behavior/permission/tenant tests and console evidence. Missing IDs stay saved; disabled/foreign users receive nothing. |
 | #1422 | Extend the existing mandatory admin notice to email create/domain-set changes. Keep HTTP v1 schemas; publish email-capable v2. | Atomic/revision-deduped domain-only notices and mandatory inbox/isolation tests; same-domain edits, metadata and credential rotation emit no notice. |
@@ -63,6 +63,13 @@ The initial local checks do not establish external delivery. The later live-prov
 runs below add Slack, Telegram, Google Chat and a public HTTPS receiver. This packet does not claim
 a usable Teams bot identity or accepted Teams client evidence. Any outstanding leaf is referenced with
 `Refs`, not closed by a code-only result.
+
+Teams and PagerDuty live acceptance are deferred together to
+[#1576](https://github.com/KKloudTarus/synapse-ce/issues/1576). Teams personal-delivery
+acceptance also remains tracked in open
+[#1420](https://github.com/KKloudTarus/synapse-ce/issues/1420), with ownership unchanged.
+The Teams bot/link-code/contact implementation remains in this PR, but real Microsoft 365
+linking, contact, message/history and navigation evidence is not accepted or claimed.
 
 PagerDuty live acceptance is deferred to [#1576](https://github.com/KKloudTarus/synapse-ce/issues/1576)
 by the maintainer because no PagerDuty access is available. The remaining eligible
@@ -116,7 +123,7 @@ frontend evidence below remains bound to the original notification implementatio
 The full local Taurus gate passes; external-client acceptance remains incomplete as
 listed below. After rebuilding and restarting the local API and worker, readiness passes
 and both retained hourly/daily SMTP payloads still match current preview text and HTML.
-The PR stays Draft, uses `Refs` and is not merged.
+At this verification stage the PR stayed Draft, used `Refs` and was not merged.
 
 ## Initial verification recorded on 2026-10-16
 
@@ -289,7 +296,8 @@ billing or organization-impacting setup there and allowed a personal-account fal
 The personal account's project search returned no resource named Synapse; the displayed
 project had no OAuth client. No new project, API enablement, billing, credential or mail
 grant was created. No Gmail/Outlook SMTP receipt is claimed. PagerDuty remains deferred
-to #1576. The PR stays Draft with `Refs`; ownership and issue closure policy are unchanged.
+to #1576. This live-verification stage retained Draft with `Refs`; ownership and issue
+closure policy were unchanged.
 
 
 ## Mixed-event implementation and live verification on 2026-10-16
@@ -390,6 +398,9 @@ tenant/team lookups, zero disk reads and 0.599 ms execution. This small observat
 not establish production capacity. Hot-tenant contention, sustained drain and production
 latency remain unmeasured; the earlier due-window ordering follow-up is retained.
 
-The PR remains Draft with `Refs` for incomplete acceptance, #1418/#1419 stay closed,
-#1420 stays open and PagerDuty stays deferred to #1576. Ownership is unchanged. Passing
-implementation and the engineering gate do not close outstanding client acceptance.
+The maintainer authorized Ready for review after deferring Teams and PagerDuty together.
+Both deferrals are tracked in open #1576, with Teams personal delivery also retained in
+open #1420; neither issue is closed or
+counted as accepted. The implementation gate passes, and the remaining client-evidence
+limits above stay explicit with `Refs`. #1418/#1419 remain closed integrations and ownership
+is unchanged. Ready for review does not authorize merge or auto-merge.
