@@ -368,14 +368,16 @@ func (s *Service) ListChannels(ctx context.Context) ([]domain.Channel, error) {
 }
 
 type RuleInput struct {
-	Name          string           `json:"name"`
-	Enabled       bool             `json:"enabled"`
-	EventType     domain.EventType `json:"event_type"`
-	MinSeverity   shared.Severity  `json:"min_severity,omitempty"`
-	ActionTypes   []string         `json:"action_types,omitempty"`
-	EngagementIDs []shared.ID      `json:"engagement_ids,omitempty"`
-	TeamIDs       []shared.ID      `json:"team_ids,omitempty"`
-	AllTeams      bool             `json:"all_teams,omitempty"`
+	Cadence          domain.DeliveryCadence `json:"cadence"`
+	RecipientUserIDs []shared.ID            `json:"recipient_user_ids,omitempty"`
+	Name             string                 `json:"name"`
+	Enabled          bool                   `json:"enabled"`
+	EventType        domain.EventType       `json:"event_type"`
+	MinSeverity      shared.Severity        `json:"min_severity,omitempty"`
+	ActionTypes      []string               `json:"action_types,omitempty"`
+	EngagementIDs    []shared.ID            `json:"engagement_ids,omitempty"`
+	TeamIDs          []shared.ID            `json:"team_ids,omitempty"`
+	AllTeams         bool                   `json:"all_teams,omitempty"`
 	domain.EventFilters
 	ChannelIDs []shared.ID `json:"channel_ids"`
 	// RecipientRoles address people by their relation to the event (#1415): assignee, team_member
@@ -398,7 +400,7 @@ func (s *Service) createRule(ctx context.Context, actor string, in RuleInput) (d
 		return domain.Rule{}, fmt.Errorf("notification rule limit reached: %w", shared.ErrSaturated)
 	}
 	now := s.clock.Now().UTC()
-	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, Cadence: in.Cadence, RecipientUserIDs: in.RecipientUserIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}
@@ -426,7 +428,7 @@ func (s *Service) updateRule(ctx context.Context, actor string, id shared.ID, in
 	if current.Revision != in.Revision {
 		return domain.Rule{}, fmt.Errorf("notification rule revision is stale: %w", shared.ErrConflict)
 	}
-	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
+	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, Cadence: in.Cadence, RecipientUserIDs: in.RecipientUserIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}
@@ -715,17 +717,31 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	if _, deliver := domain.EffectiveDataClass(work.Channel.Class(), work.Engagement); !deliver {
 		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, domain.CodeEngagementSuppressed)
 	}
-	relevant, err := s.events.StillRelevant(ctx, s.repo, work)
-	if err != nil {
-		return err
-	}
-	if !relevant {
-		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, "source_no_longer_relevant")
+	// A fixture test pins its template and has no live source entity to recheck.
+	// Ordinary deliveries still require their source to remain relevant.
+	if work.Event.SourceKind != "template_test" || work.Event.TestTemplate == nil {
+		relevant, err := s.events.StillRelevant(ctx, s.repo, work)
+		if err != nil {
+			return err
+		}
+		if !relevant {
+			return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, "source_no_longer_relevant")
+		}
 	}
 	// Render before the attempt starts: a retry reuses the template the first attempt pinned.
-	render, err := s.RenderMessage(ctx, RenderInput{Channel: work.Channel, Event: work.Event, Engagement: work.Engagement, Pin: work.Delivery.TemplateRef})
+	render, err := s.RenderMessage(ctx, RenderInput{Channel: work.Channel, Event: work.Event, Engagement: work.Engagement, Pin: work.Delivery.TemplateRef, Draft: work.Event.TestTemplate})
 	if err != nil {
 		return err
+	}
+	if render.Suppressed {
+		reason := render.suppressionReason
+		if reason == "" {
+			reason = domain.CodeEngagementSuppressed
+		}
+		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, reason)
+	}
+	if render.event != nil {
+		work.Event = *render.event
 	}
 	work.Formatted, work.CustomWebhookBody, work.WebhookBody = render.Formatted, render.CustomBody, render.WebhookBody
 	if err := s.prepareSubjectThread(ctx, &work); err != nil {
@@ -733,7 +749,7 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	}
 	now := s.clock.Now().UTC()
 	aid := s.ids.NewID()
-	admission := ports.AttemptAdmission{TemplateRef: render.Message.TemplateRef, DataClass: render.Class,
+	admission := ports.AttemptAdmission{TemplateRef: render.Message.TemplateRef, DataClass: render.Class, DigestPolicy: work.DigestPolicy,
 		RawEvent: work.Channel.RawEvent && render.Class == domain.DataClassDetail}
 	if _, err = s.repo.BeginAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, now, admission); err != nil {
 		return err

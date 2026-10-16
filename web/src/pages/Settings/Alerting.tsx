@@ -1136,6 +1136,12 @@ function RuleCreate({
   const [selected, setSelected] = useState<string[]>(
     event === 'finding.mentioned' ? [] : initial?.channel_ids ?? [channels[0]?.id].filter(Boolean),
   )
+  const [cadence, setCadence] = useState<'immediate' | 'hourly' | 'daily'>(initial?.cadence ?? 'immediate')
+  const [users, setUsers] = useState<string[]>(initial?.recipient_user_ids ?? [])
+  const searchUsers = useCallback(async (query: string, cursor: string | undefined, signal: AbortSignal) => {
+    const page = await api.notificationUserChoices(query, cursor, signal)
+    return { items: (page.items ?? []).map((item) => ({ id: item.id, label: item.name || item.id })), next: page.next }
+  }, [])
   const [engagements, setEngagements] = useState<string[]>(initial?.engagement_ids ?? [])
   const [teams, setTeams] = useState<string[]>(initial?.team_ids ?? [])
   const [allTeams, setAllTeams] = useState(initial?.all_teams ?? false)
@@ -1229,6 +1235,8 @@ function RuleCreate({
         event_type: event,
         channel_ids: event === 'finding.mentioned' ? [] : selected,
         recipient_roles: chosenRoles,
+        recipient_user_ids: event === 'finding.mentioned' ? [] : users,
+        cadence,
         // A saved engagement scope on an event without engagements is cleared rather than resent.
         engagement_ids: allows('engagement_ids') ? engagements : [],
         team_ids: allows('team_ids') && !allTeams ? teams : undefined,
@@ -1281,7 +1289,7 @@ function RuleCreate({
             value={event}
             onValueChange={(nextEvent) => {
               setEvent(nextEvent)
-              if (nextEvent === 'finding.mentioned') { setSelected([]); setRoles(['mentioned_user']) }
+              if (nextEvent === 'finding.mentioned') { setSelected([]); setRoles(['mentioned_user']); setUsers([]) }
               const nextFilters = eventTypes.find((item) => item.type === nextEvent)?.filters ?? []
               if (!nextFilters.includes('engagement_ids')) setEngagements([])
               if (!nextFilters.includes('team_ids')) {
@@ -1330,6 +1338,12 @@ function RuleCreate({
             </label>
           ))}
         </fieldset>}
+        <Field label="Delivery cadence" htmlFor="notification-cadence" hint="UTC hourly or daily digests batch channel messages. Critical and mandatory events, and personal inbox notices, are delivered immediately.">
+          <Select id="notification-cadence" ariaDescribedBy="notification-cadence-hint" value={cadence} onValueChange={(value) => setCadence(value as typeof cadence)} options={[
+            { value: 'immediate', label: 'Immediate' }, { value: 'hourly', label: 'Hourly digest' }, { value: 'daily', label: 'Daily digest' },
+          ]} />
+        </Field>
+        {event !== 'finding.mentioned' && <RuleTargetPicker label="People (optional)" hint="Choose people in this tenant. Missing saved IDs stay selected; disabled or missing users receive no notification." selected={users} onChange={setUsers} search={searchUsers} disabled={!canAdmin || busy} />}
         <RuleTemplatePreview
           channels={channels.filter((c) => selected.includes(c.id))}
           eventType={event}
@@ -1490,7 +1504,7 @@ function RuleCreate({
               !canAdmin ||
               !name.trim() ||
               !event ||
-              (selected.length === 0 && chosenRoles.length === 0) ||
+              (selected.length === 0 && chosenRoles.length === 0 && users.length === 0) ||
               (legacyAckRequired && !legacyAck) ||
               (allows('lead_time_seconds') &&
                 (!Number.isFinite(Number(leadHours)) ||
@@ -1560,6 +1574,8 @@ function RuleList({
               <p className="text-sm text-tertiary">
                 {eventLabel(eventTypes, r.event_type)} →{' '}
                 {r.channel_ids.map(channelName).join(', ')}
+                {r.cadence && r.cadence !== 'immediate' && ` · ${r.cadence} digest`}
+                {r.recipient_user_ids && r.recipient_user_ids.length > 0 && ` · ${r.recipient_user_ids.length} selected people`}
                 {r.recipient_roles && r.recipient_roles.length > 0 &&
                   `${r.channel_ids.length > 0 ? ' · ' : ''}People: ${r.recipient_roles.map((role) => role.replaceAll('_', ' ')).join(', ')}`}
               </p>

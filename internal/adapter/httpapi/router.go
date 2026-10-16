@@ -618,8 +618,10 @@ func (rt *Router) routes() *http.ServeMux {
 			// Template preview (#1372): renders without sending, against a fixture or one of the
 			// tenant's recent events. Stored events also need view.
 			mux.HandleFunc("POST /api/v1/notifications/templates/preview", rt.authz(userdom.PermManageIntegrations, rt.previewNotificationTemplate))
+			mux.HandleFunc("POST /api/v1/notifications/templates/preview/send-test", rt.authz(userdom.PermManageIntegrations, rt.sendNotificationTemplateTest))
 			mux.HandleFunc("GET /api/v1/notifications/templates/preview/events", rt.authz(userdom.PermManageIntegrations, rt.listNotificationPreviewEvents))
 		}
+		mux.HandleFunc("GET /api/v1/notifications/rules/user-options", rt.authz(userdom.PermManageIntegrations, rt.listNotificationUserChoices))
 		mux.HandleFunc("POST /api/v1/notifications/deliveries/{nid}/redrive", rt.authz(userdom.PermAdminister, rt.redriveNotificationDelivery))
 	}
 	if rt.siem != nil {

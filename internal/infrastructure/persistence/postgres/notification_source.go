@@ -171,7 +171,22 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			remaining -= n
 		}
 		if remaining > 0 {
+			n, err := s.repo.materializeDigestsTx(ctx, tx, tenant, now, 1)
+			if err != nil {
+				return err
+			}
+			count += n
+			remaining -= n
+		}
+		if remaining > 0 {
 			n, err := s.pollSnapshots(ctx, tx, tenant, now, remaining)
+			if err != nil {
+				return err
+			}
+			count += n
+		}
+		if remaining := limit - count; remaining > 0 {
+			n, err := s.repo.materializeDigestsTx(ctx, tx, tenant, now, remaining)
 			if err != nil {
 				return err
 			}

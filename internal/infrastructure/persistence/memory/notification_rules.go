@@ -134,6 +134,7 @@ func cloneRule(rule notification.Rule) notification.Rule {
 	rule.Outcomes = slices.Clone(rule.Outcomes)
 	rule.Providers = slices.Clone(rule.Providers)
 	rule.EngagementIDs = slices.Clone(rule.EngagementIDs)
+	rule.RecipientUserIDs = sortedIDs(rule.RecipientUserIDs)
 	rule.TeamIDs = sortedIDs(rule.TeamIDs)
 	rule.ChannelIDs = sortedIDs(rule.ChannelIDs)
 	return rule

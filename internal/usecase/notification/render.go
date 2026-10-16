@@ -48,11 +48,14 @@ type RenderInput struct {
 
 // RenderResult is a rendered message.
 type RenderResult struct {
+	// event is the transient digest after current relevance and privacy filtering.
+	event             *domain.Event
+	suppressionReason string
 	// Suppressed reports that the engagement allows no external notification; nothing else is set.
 	Suppressed bool
 	Resolution TemplateResolution
-	// Message holds the rendered fields and the template reference to record. Its Fields are empty
-	// when the fallback applies, and the driver then sends its built-in content.
+	// Message holds the rendered fields and the template reference to record, including
+	// the shared code-owned fallback when the event has a catalog entry.
 	Message ports.RenderedMessage
 	// Formatted is the channel's wire payload, when a formatter for the channel type is set and
 	// fields were rendered.
@@ -86,8 +89,24 @@ func (s *Service) RenderMessage(ctx context.Context, in RenderInput) (RenderResu
 	if !deliver {
 		return RenderResult{Suppressed: true}, nil
 	}
+	if in.Event.Type == domain.EventDigest && in.Event.DigestItems != nil {
+		filtered, count, err := s.renderDigestEvent(ctx, in, class)
+		if err != nil {
+			return RenderResult{}, err
+		}
+		if count == 0 {
+			return RenderResult{Suppressed: true, suppressionReason: "source_no_longer_relevant"}, nil
+		}
+		in.Event = filtered
+	}
 	out, err := s.renderAt(ctx, in, class)
 	out.Class = class
+	if err == nil && out.Message.TemplateRef == refFallback {
+		out, err = s.renderFallback(ctx, in, out, class)
+	}
+	if in.Event.Type == domain.EventDigest && in.Event.DigestItems != nil {
+		out.event = &in.Event
+	}
 	return out, err
 }
 
@@ -337,4 +356,52 @@ func fallback(out RenderResult) RenderResult {
 	out.Message.TemplateRef = refFallback
 	out.Fallback = true
 	return out
+}
+
+// renderFallback gives previews and deliveries the same code-owned fallback content. The
+// formatter sees only filtered snapshot text, escaped as literal values.
+func (s *Service) renderFallback(ctx context.Context, in RenderInput, out RenderResult, class domain.DataClass) (RenderResult, error) {
+	family, ok := domain.FamilyForChannelType(in.Channel.Type)
+	if !ok {
+		return out, nil
+	}
+	spec, known := domain.LookupEvent(in.Event.Type)
+	if !known {
+		return out, nil
+	}
+	context, err := s.renderContext(ctx, in, spec, class, family)
+	if err != nil {
+		return RenderResult{}, err
+	}
+	out.Message.Links = s.renderLinks(in.Event)
+	if family == domain.FamilyWebhook {
+		body, err := domain.RenderWebhookEnvelopeWithLinks(in.Event, context, webhookLinks(out.Message.Links))
+		out.WebhookBody = body
+		return out, err
+	}
+	title := "Synapse: " + string(in.Event.Type)
+	body := "A " + string(in.Event.Type) + " event occurred at " + in.Event.OccurredAt.UTC().Format(time.RFC3339)
+	if value := strings.TrimSpace(context.Vars["title"]); value != "" {
+		title = value
+	}
+	if value := strings.TrimSpace(context.Vars["summary"]); value != "" {
+		body = value
+	}
+	title, body = msgtemplate.EscapeMarkdown(title), msgtemplate.EscapeMarkdown(body)
+	switch family {
+	case domain.FamilyEmail:
+		out.Message.Fields = map[string]string{"subject": title, "body": body}
+	case domain.FamilyPager:
+		out.Message.Fields = map[string]string{"summary": title + ": " + body}
+	default:
+		out.Message.Fields = map[string]string{"title": title, "body": body}
+	}
+	if formatter, ok := s.formatters[in.Channel.Type]; ok {
+		formatted, err := formatter.Format(out.Message)
+		if err != nil {
+			return RenderResult{}, fmt.Errorf("format notification fallback: %w", err)
+		}
+		out.Formatted = &formatted
+	}
+	return out, nil
 }

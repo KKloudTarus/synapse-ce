@@ -34,9 +34,11 @@ Each file below documents the **stored versioned event envelope**, including its
 | `incident.updated` — Incident status, owner or disposition update | [JSON Schema](incident.updated.v1.schema.json) · [fixture](incident.updated.v1.fixture.json) | `summary` |
 | `response.finished` — Governed response terminal outcome | [JSON Schema](response.finished.v1.schema.json) · [fixture](response.finished.v1.fixture.json) | `detail` |
 | `evidence.chain_broken` — Mandatory critical evidence-chain verification alert | [JSON Schema](evidence.chain_broken.v1.schema.json) · [fixture](evidence.chain_broken.v1.fixture.json) | `summary` |
-| `notification.destination_changed` (operator-only) — channel destination notice | [JSON Schema](notification.destination_changed.v1.schema.json) · [fixture](notification.destination_changed.v1.fixture.json) | `summary` |
+| `notification.destination_changed` (operator-only) — channel destination notice | [v2 JSON Schema](notification.destination_changed.v2.schema.json) · [v2 fixture](notification.destination_changed.v2.fixture.json) · [JSON Schema](notification.destination_changed.v1.schema.json) · [fixture](notification.destination_changed.v1.fixture.json) | `summary` |
 | `notification.channel_paused` (operator-only) — automatic channel pause notice to tenant admins | [JSON Schema](notification.channel_paused.v1.schema.json) · [fixture](notification.channel_paused.v1.fixture.json) | `summary` |
 | `notification.test` (operator-only) — channel test | [JSON Schema](notification.test.v1.schema.json) · [fixture](notification.test.v1.fixture.json) | `signal` |
+
+| `notification.digest` (operator-only) — closed UTC digest window | [JSON Schema](notification.digest.v1.schema.json) · [fixture](notification.digest.v1.fixture.json) | `detail` |
 
 ## Version and compatibility
 

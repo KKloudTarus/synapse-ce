@@ -1,0 +1,17 @@
+{
+  "id": "event-notification-digest",
+  "type": "notification.digest",
+  "source_kind": "digest",
+  "source_id": "rule-channel-hourly-window",
+  "schema_version": 1,
+  "occurred_at": "2026-10-16T09:00:00Z",
+  "data": {
+    "cadence": "hourly",
+    "window_start": "2026-10-16T08:00:00Z",
+    "window_end": "2026-10-16T09:00:00Z",
+    "event_ids": [
+      "source-event-1"
+    ]
+  },
+  "severity": "high"
+}

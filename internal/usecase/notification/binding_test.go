@@ -17,12 +17,13 @@ import (
 // bindingRepo keeps channels and rules in memory for the binding checks.
 type bindingRepo struct {
 	ports.NotificationRepository
-	channels map[shared.ID]domain.Channel
-	rules    map[shared.ID]domain.Rule
+	channels            map[shared.ID]domain.Channel
+	rules               map[shared.ID]domain.Rule
+	engagementOverrides map[shared.ID]domain.EngagementNotifications
 }
 
 func newBindingRepo() *bindingRepo {
-	return &bindingRepo{channels: map[shared.ID]domain.Channel{}, rules: map[shared.ID]domain.Rule{}}
+	return &bindingRepo{channels: map[shared.ID]domain.Channel{}, rules: map[shared.ID]domain.Rule{}, engagementOverrides: map[shared.ID]domain.EngagementNotifications{}}
 }
 
 func (r *bindingRepo) CreateChannel(_ context.Context, c domain.Channel, _ string) (domain.Channel, error) {
@@ -74,6 +75,17 @@ func (r *bindingRepo) ListRules(context.Context, shared.ID) ([]domain.Rule, erro
 		out = append(out, rule)
 	}
 	return out, nil
+}
+
+func (r *bindingRepo) GetEngagementNotificationSetting(_ context.Context, tenant, engagement shared.ID) (domain.EngagementNotificationSetting, error) {
+	if tenant != "tenant" || engagement.IsZero() {
+		return domain.EngagementNotificationSetting{}, shared.ErrNotFound
+	}
+	mode := r.engagementOverrides[engagement]
+	if mode == "" {
+		mode = domain.EngagementNotificationsInherit
+	}
+	return domain.EngagementNotificationSetting{TenantID: tenant, EngagementID: engagement, ExternalNotifications: mode, Revision: 1}, nil
 }
 
 type bindingFixture struct {

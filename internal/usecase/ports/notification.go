@@ -41,16 +41,18 @@ type NotificationSourceFailureFilter struct {
 // check, for an attempt whose content was not rendered from the snapshot.
 // A nonempty DataClass must be valid; repositories reject malformed values without admitting an attempt.
 type AttemptAdmission struct {
-	TemplateRef string
-	DataClass   notification.DataClass
+	DigestPolicy string
+	TemplateRef  string
+	DataClass    notification.DataClass
 	// RawEvent requires the administrator's opt-in to remain committed when the
 	// attempt begins, even if the channel still permits detail content.
 	RawEvent bool
 }
 
 type NotificationWork struct {
-	Delivery notification.Delivery
-	Event    notification.Event
+	DigestPolicy string
+	Delivery     notification.Delivery
+	Event        notification.Event
 	// Engagement is the event's engagement override (#1360); inherit when the event has no
 	// engagement or the engagement stores none.
 	Engagement notification.EngagementNotifications

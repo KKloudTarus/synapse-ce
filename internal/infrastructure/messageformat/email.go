@@ -10,6 +10,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgmarkdown"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -34,6 +35,9 @@ func (Email) Format(message ports.RenderedMessage) (ports.FormattedMessage, erro
 		return ports.FormattedMessage{}, err
 	}
 	text := emailText(msgmarkdown.Parse(message.Fields["body"]), links)
+	if label := emailSeverity(message.Severity); label != "" {
+		text = label + "\n\n" + text
+	}
 	htmlBody, err := EmailHTML(message)
 	if err != nil {
 		return ports.FormattedMessage{}, err
@@ -141,6 +145,9 @@ func emailHTMLFragment(message ports.RenderedMessage) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
+	if label := emailSeverity(message.Severity); label != "" {
+		b.WriteString("<p>" + html.EscapeString(label) + "</p>\n")
+	}
 	for _, block := range msgmarkdown.Parse(message.Fields["body"]).Blocks {
 		switch v := block.(type) {
 		case msgmarkdown.Paragraph:
@@ -189,4 +196,13 @@ func htmlInlines(b *strings.Builder, inlines []msgmarkdown.Inline) {
 			b.WriteString("<br>\n")
 		}
 	}
+}
+
+// Email uses the same typed urgency palette as chat, independent of template text.
+func emailSeverity(severity shared.Severity) string {
+	badge, known := severityBadge(severity)
+	if !known {
+		return ""
+	}
+	return badge + " Severity: " + string(severity)
 }

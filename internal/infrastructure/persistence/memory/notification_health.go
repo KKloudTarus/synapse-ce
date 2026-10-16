@@ -83,6 +83,7 @@ func (r *NotificationRepository) pauseChannel(ctx context.Context, channel notif
 	// Queued work is cancelled rather than held, as disabling a channel does. An attempt already
 	// in flight finishes; its outcome no longer changes the paused health.
 	r.cancelOpenDeliveries(channel.TenantID, channel.ID, pausedDeliveryReason, *health.PausedAt)
+	r.suppressMemoryPendingDigests(channel.TenantID, channel.ID)
 	return pauseID, nil
 }
 

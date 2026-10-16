@@ -209,6 +209,8 @@ export interface SlackConversations {
 }
 
 export interface NotificationRule {
+  cadence?: 'immediate' | 'hourly' | 'daily'
+  recipient_user_ids?: string[]
   id: string
   name: string
   enabled: boolean
@@ -303,6 +305,11 @@ export interface NotificationSourceFailurePage {
 }
 
 export const notificationsApi = {
+  notificationUserChoices: (query: string, cursor: string | undefined, signal: AbortSignal): Promise<{ items: { id: string; name: string }[]; next?: string }> => {
+    const params = new URLSearchParams({ q: query, limit: '25' })
+    if (cursor) params.set('cursor', cursor)
+    return req(`/notifications/rules/user-options?${params}`, { signal })
+  },
   listNotificationEventTypes: async (): Promise<NotificationEventSpec[]> =>
     ((await req('/notifications/event-types')) as {
       items?: NotificationEventSpec[]
@@ -437,6 +444,8 @@ export const notificationsApi = {
         channel_ids: input.channel_ids,
         // Omitted would clear them: a toggle or an edit must keep the rule's people (#1415).
         recipient_roles: input.recipient_roles ?? [],
+        recipient_user_ids: input.recipient_user_ids ?? [],
+        cadence: input.cadence ?? 'immediate',
         lead_time_seconds: input.lead_time_seconds,
         revision: input.revision,
       }),

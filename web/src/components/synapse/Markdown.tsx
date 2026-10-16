@@ -128,6 +128,12 @@ function renderInline(text: string): ReactNode[] {
     }
   }
   while (i < text.length) {
+    // Escaped punctuation stays literal, including values escaped by notification templates.
+    if (text[i] === '\\' && i + 1 < text.length && /[!-/:-@[-`{-~]/.test(text[i + 1])) {
+      buf += text[i + 1]
+      i += 2
+      continue
+    }
     const rest = text.slice(i)
     // inline code `…`
     if (text[i] === '`') {
@@ -145,7 +151,7 @@ function renderInline(text: string): ReactNode[] {
     }
     // bold **…**
     if (rest.startsWith('**')) {
-      const end = text.indexOf('**', i + 2)
+      const end = unescapedDelimiter(text, '**', i + 2)
       if (end > i) {
         flush()
         out.push(
@@ -160,7 +166,7 @@ function renderInline(text: string): ReactNode[] {
     // italic *…* or _…_ (single delimiter, non-empty)
     if (text[i] === '*' || text[i] === '_') {
       const ch = text[i]
-      const end = text.indexOf(ch, i + 1)
+      const end = unescapedDelimiter(text, ch, i + 1)
       if (end > i + 1) {
         flush()
         out.push(<em key={key++}>{renderInline(text.slice(i + 1, end))}</em>)
@@ -173,4 +179,15 @@ function renderInline(text: string): ReactNode[] {
   }
   flush()
   return out
+}
+
+function unescapedDelimiter(text: string, delimiter: string, start: number): number {
+  let at = text.indexOf(delimiter, start)
+  while (at >= 0) {
+    let slashes = 0
+    for (let i = at - 1; i >= 0 && text[i] === '\\'; i--) slashes++
+    if (slashes % 2 === 0) return at
+    at = text.indexOf(delimiter, at + delimiter.length)
+  }
+  return -1
 }

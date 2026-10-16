@@ -121,8 +121,42 @@ func (r *NotificationRepository) LoadWork(_ context.Context, tenant, delivery sh
 	channel = cloneChannel(channel)
 	channel.SecretVersion = stored.channelVersion
 	channel.DeletedAt = nil
-	return ports.NotificationWork{Delivery: cloneDelivery(d), Event: cloneNotificationEvent(event.event), Channel: channel, Sealed: sealed,
-		Engagement: r.engagementNotifications(tenant, event.event.EngagementID)}, nil
+	work := ports.NotificationWork{Delivery: cloneDelivery(d), Event: cloneNotificationEvent(event.event), Channel: channel, Sealed: sealed,
+		Engagement: r.engagementNotifications(tenant, event.event.EngagementID)}
+	if work.Event.Type != notification.EventDigest || work.Event.SourceKind != "digest" {
+		return work, nil
+	}
+	key, ok := r.memoryDigestKeyForEvent(tenant, work.Event.ID)
+	if !ok {
+		return ports.NotificationWork{}, deliveryNotFound(delivery)
+	}
+	items := r.memoryDigestItems(key)
+	if items == nil {
+		items = []notification.DigestItem{}
+	}
+	var digest notification.DigestData
+	if err := json.Unmarshal(work.Event.Data, &digest); err != nil {
+		return ports.NotificationWork{}, fmt.Errorf("decode notification digest: %w", err)
+	}
+	context, count, err := notification.BuildDigestContext(items, digest.Cadence, digest.WindowStart, digest.WindowEnd, channel.Class())
+	if err != nil {
+		return ports.NotificationWork{}, err
+	}
+	work.Event.Context, err = context.Encode()
+	if err != nil {
+		return ports.NotificationWork{}, err
+	}
+	work.Event.Data, err = json.Marshal(notification.DigestData{Cadence: digest.Cadence, WindowStart: digest.WindowStart, WindowEnd: digest.WindowEnd, EventIDs: memoryDigestEventIDs(items, channel.Class()), TotalCount: count})
+	if err != nil {
+		return ports.NotificationWork{}, err
+	}
+	work.Event.DigestItems = items
+	work.Event.Severity = notification.DigestSeverity(items)
+	work.DigestPolicy = notification.DigestPolicy(items, channel.Class())
+	if count == 0 {
+		work.Engagement = notification.EngagementNotificationsNone
+	}
+	return work, nil
 }
 
 // SubjectAnchor returns the earliest acknowledged remote reference for the same subject and
@@ -191,6 +225,9 @@ func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, deliver
 	if err := r.admitRendered(tenant, stored.delivery, admission.DataClass); err != nil {
 		return notification.Attempt{}, err
 	}
+	if err := r.admitDigestPolicy(tenant, stored.delivery, admission.DigestPolicy); err != nil {
+		return notification.Attempt{}, err
+	}
 	if admission.RawEvent {
 		if admission.DataClass != notification.DataClassDetail {
 			return notification.Attempt{}, fmt.Errorf("%w: raw event requires detail admission", shared.ErrValidation)
@@ -212,6 +249,40 @@ func (r *NotificationRepository) BeginAttempt(_ context.Context, tenant, deliver
 	started := notification.Attempt{ID: attempt, DeliveryID: delivery, Number: stored.delivery.Attempts, StartedAt: at, Outcome: "started", TemplateRef: admission.TemplateRef}
 	r.attempts[key] = append(r.attempts[key], started)
 	return cloneAttempt(started), nil
+}
+
+func (r *NotificationRepository) admitDigestPolicy(tenant shared.ID, delivery notification.Delivery, expected string) error {
+	event, ok := r.events[notificationKey{tenant, delivery.EventID}]
+	if !ok || event.event.Type != notification.EventDigest || event.event.SourceKind != "digest" {
+		if expected == "" {
+			return nil
+		}
+		return fmt.Errorf("%w: digest policy supplied for non-digest delivery", shared.ErrValidation)
+	}
+	if expected == "" {
+		return fmt.Errorf("%w: digest policy is required", shared.ErrValidation)
+	}
+	key, ok := r.memoryDigestKeyForEvent(tenant, event.event.ID)
+	if !ok {
+		return fmt.Errorf("%w: digest members unavailable", ports.ErrRetryable)
+	}
+	items := r.memoryDigestItems(key)
+	class := r.channels[notificationKey{tenant, delivery.ChannelID}].Class()
+	if notification.DigestPolicy(items, class) != expected {
+		return fmt.Errorf("%w: digest policy changed", ports.ErrRetryable)
+	}
+	var digest notification.DigestData
+	if err := json.Unmarshal(event.event.Data, &digest); err != nil {
+		return fmt.Errorf("decode notification digest: %w", err)
+	}
+	_, count, err := notification.BuildDigestContext(items, digest.Cadence, digest.WindowStart, digest.WindowEnd, class)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("%w: digest suppressed", ports.ErrRetryable)
+	}
+	return nil
 }
 
 // admitRendered applies notification.AdmitRendered to the channel class and engagement override

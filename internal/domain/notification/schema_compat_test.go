@@ -16,6 +16,7 @@ import (
 // fixture together without bumping the version. Additional optional fields
 // are allowed; removing, renaming, retyping or requiring new fields is not.
 var v1DataFields = map[EventType]string{
+	"notification.digest":              "cadence window_start window_end event_ids",
 	"vulnerability_action.created":     "title summary action_type outbox_id",
 	"scan.completed":                   "title summary scan_id scan_kind",
 	"quality_gate.failed":              "title summary analysis_id project_id",
@@ -136,7 +137,7 @@ func TestPublishedV1ContractCompatibility(t *testing.T) {
 				if field == "counts_available" || field == "severity_counts_available" {
 					wantType = "boolean"
 				}
-				if field == "providers" {
+				if field == "providers" || field == "event_ids" {
 					wantType = "array"
 				}
 				if strings.Join(types, "|") != wantType {
@@ -247,6 +248,7 @@ func TestPublishedEventSchemaIndex(t *testing.T) {
 func TestPublishedV1FieldConstraints(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "docs", "guide", "schemas", "events")
 	optionalEnvelope := map[EventType]string{
+		"notification.digest":              "severity",
 		"vulnerability_action.created":     "engagement_id severity",
 		"scan.completed":                   "engagement_id",
 		"quality_gate.failed":              "",

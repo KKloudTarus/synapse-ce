@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -50,5 +51,31 @@ func (r *NotificationRepository) GetNotificationEvent(_ context.Context, tenant,
 	if !ok {
 		return notification.Event{}, fmt.Errorf("notification event %s: %w", id, shared.ErrNotFound)
 	}
-	return cloneNotificationEvent(stored.event), nil
+	return r.hydrateMemoryDigestEvent(tenant, cloneNotificationEvent(stored.event))
+}
+
+func (r *NotificationRepository) hydrateMemoryDigestEvent(tenant shared.ID, event notification.Event) (notification.Event, error) {
+	if event.Type != notification.EventDigest || event.SourceKind != "digest" {
+		return event, nil
+	}
+	var digest notification.DigestData
+	if err := json.Unmarshal(event.Data, &digest); err != nil {
+		return notification.Event{}, fmt.Errorf("decode notification digest: %w", err)
+	}
+	key, ok := r.memoryDigestKeyForEvent(tenant, event.ID)
+	if !ok {
+		return notification.Event{}, fmt.Errorf("notification digest %s: %w", event.ID, shared.ErrNotFound)
+	}
+	items := r.memoryDigestItems(key)
+	if items == nil {
+		items = []notification.DigestItem{}
+	}
+	event.DigestItems = items
+	event.Severity = notification.DigestSeverity(items)
+	_, count, err := notification.BuildDigestContext(items, digest.Cadence, digest.WindowStart, digest.WindowEnd, notification.DataClassDetail)
+	if err != nil {
+		return notification.Event{}, err
+	}
+	event.Data, err = json.Marshal(notification.DigestData{Cadence: digest.Cadence, WindowStart: digest.WindowStart, WindowEnd: digest.WindowEnd, EventIDs: memoryDigestEventIDs(items, notification.DataClassDetail), TotalCount: count})
+	return event, err
 }

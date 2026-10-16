@@ -1,0 +1,141 @@
+{
+  "captured_at_utc": "2026-10-16T08:13:25.263576+00:00",
+  "baseline_commit": "b88812e15fce7c88604bc735872532fe5cae75f3",
+  "boundary": "Actual local Compose stack and TLS SMTP capture; no external provider-client acceptance",
+  "fixture": "Five API-created findings with mixed severity per hourly/daily aggregate; publication windows explicitly moved to closed windows, not elapsed cadence soak",
+  "template_test": {
+    "subject_equal": true,
+    "text_equal": true,
+    "html_equal": true,
+    "html_sha256": "b24c6e01191c9c96d1534ee04a7fd83fddf29f934b172210f8f93ab2ee8430b9"
+  },
+  "digests": [
+    {
+      "cadence": "daily",
+      "members": 5,
+      "outcome": "published",
+      "state": "delivered",
+      "attempts": 1,
+      "text_equal": true,
+      "html_equal": true,
+      "template_ref": "builtin:notification.digest:email:en@v1",
+      "html_sha256": "1e9590c7cc397606092148ac0f9893bad0a80b8e6fc3520408e8d50b1d4f916e"
+    },
+    {
+      "cadence": "hourly",
+      "members": 5,
+      "outcome": "published",
+      "state": "delivered",
+      "attempts": 1,
+      "text_equal": true,
+      "html_equal": true,
+      "template_ref": "builtin:notification.digest:email:en@v1",
+      "html_sha256": "36429ea2f90c07cb1bcc94d118e4ca1a5f9ef28832f2a94424854b130b37538b"
+    }
+  ],
+  "email_destination": {
+    "same_domain_delta": 0,
+    "metadata_delta": 0,
+    "domain_set_delta": 1,
+    "notice_summary": "971f3e7b6caf052736c4b9e747b4fa41 changed the email destination domains: alternate.test."
+  },
+  "postgres_suite": {
+    "top_level_tests": 660,
+    "seconds": 758.1,
+    "shards": [
+      {
+        "shard": 0,
+        "selected_top_level_tests": 165,
+        "exit_code": 0,
+        "results": {
+          "pass": 262,
+          "skip": 1
+        },
+        "failures": []
+      },
+      {
+        "shard": 1,
+        "selected_top_level_tests": 165,
+        "exit_code": 0,
+        "results": {
+          "pass": 231,
+          "skip": 1
+        },
+        "failures": []
+      },
+      {
+        "shard": 2,
+        "selected_top_level_tests": 165,
+        "exit_code": 0,
+        "results": {
+          "pass": 221,
+          "skip": 1
+        },
+        "failures": []
+      },
+      {
+        "shard": 3,
+        "selected_top_level_tests": 165,
+        "exit_code": 0,
+        "results": {
+          "pass": 300,
+          "skip": 1
+        },
+        "failures": []
+      }
+    ],
+    "selection": "All top-level names emitted by go test ./internal/infrastructure/persistence/postgres -list ^Test; round-robin partition into four exact-name regexes; no test removed from selection",
+    "skips": [
+      "TestPostgresAssessmentComparisonScale100K: opt-in scale fixture",
+      "TestResponseHaltWriterRoleIsolation: requires three separate test-role DSNs",
+      "TestAssessmentUIWorker: explicit local browser helper",
+      "TestOwnershipRepresentativeScale: opt-in scale fixture"
+    ]
+  },
+  "runtime_binaries_sha256": {
+    "final-api": "3f7d6c311e8ebc36ddd7a3ffbf913632163fd8fdfa0f99b77742c994baaa6e59",
+    "final-worker": "0f612b6f94e911519ca65a30254acc3739068706bb1d9b4e89dd082180ef8ab2"
+  },
+  "screenshots_sha256": {
+    "inbox-admin-domain-notice.png": "a6261d6373615edd863066c1a47aecf2662f4d883fe6c1e08ec37f11065a618a",
+    "inbox-loading.png": "3df75dfb79f9973f80835c013de41a3fd631c1e9481db0cc74b249bc67c45fc5",
+    "inbox-mobile.png": "b88cfd828bc99bddb1370c219340b6a67ccb8c5f0210ce65cf96d96491691a2a",
+    "inbox-network-error.png": "010204642e210a0c038bb3808733bed4cc262006bed763eb44e4438780623a8e",
+    "inbox-reader-bell.png": "ce6e7555cc16dd8cea438698549682a33e1b144b1d2eb444ca901821447a827b",
+    "inbox-unread-empty.png": "746fee461fd356bc9d1d5010cd0298d5c6426137f265f9ccbb48767c6de95019",
+    "rule-search-missing-recipient.png": "fe6558e921308f685eca4627957d155ee7f23a8b9c92b5200be722fe378563d8",
+    "smtp-digest-daily-en-light.png": "717260064b78075a87c8d4bf0182ad6c7d4b54469ebf8dd8ec7c5e561249dd18",
+    "smtp-digest-hourly-en-light.png": "769f3523ab69c9d5dc6d9419f0401dbffb193456a3d53e951fbbad22b1d490c6",
+    "template-email-preview-dark.png": "83d1f86bfee583acd85c9138bccedd4c41ebd6ef7940d8332ba9b8674ff3745f",
+    "template-email-preview-test.png": "801fbd5fbaeec1025ef472a71b017b4d334cd0504d3464bc50acef81ea6d433e",
+    "template-email-preview.png": "3e83e49b3e1ca91b5c5cf1f4ad4daa50cf59487578c9c29ba90ef7ad8e3409db",
+    "templates-permission-denied.png": "b296891cae543ecaa77d77db3b5fe6f792c3440908ecd0f651618da3b1fb1313"
+  },
+  "checks": {
+    "go_full": {
+      "command": "GOMAXPROCS=2 go test -p 4 -json ./...",
+      "exit_code": 1,
+      "passed_including_subtests": 17307,
+      "skipped_including_subtests": 709,
+      "failures": [
+        "TestRunGateStripsGoModulePathForNewCodeCoverage",
+        "TestCgroupContainsBombs"
+      ],
+      "failures_reproduced_at_baseline": true
+    },
+    "web_full": {
+      "files_passed": 199,
+      "tests_passed": 1330,
+      "exit_code": 0
+    },
+    "web_final_preview_regressions": {
+      "tests_passed": 11,
+      "exit_code": 0
+    },
+    "build_vet_lint_typecheck": {
+      "exit_code": 0,
+      "go_lint_issues": 0,
+      "web_existing_warnings": 11
+    }
+  }
+}

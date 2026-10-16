@@ -69,6 +69,7 @@ const (
 	EventDestinationChanged       EventType = "notification.destination_changed"
 	EventChannelPaused            EventType = "notification.channel_paused"
 	EventTest                     EventType = "notification.test"
+	EventDigest                   EventType = "notification.digest"
 	EventFindingCreated           EventType = "finding.created"
 	EventFindingStatusChanged     EventType = "finding.status_changed"
 	EventFindingRetestCompleted   EventType = "finding.retest_completed"
@@ -157,16 +158,18 @@ func (c Channel) Validate() error {
 }
 
 type Rule struct {
-	TenantID      shared.ID       `json:"tenant_id"`
-	ID            shared.ID       `json:"id"`
-	Name          string          `json:"name"`
-	Enabled       bool            `json:"enabled"`
-	EventType     EventType       `json:"event_type"`
-	MinSeverity   shared.Severity `json:"min_severity,omitempty"`
-	ActionTypes   []string        `json:"action_types,omitempty"`
-	EngagementIDs []shared.ID     `json:"engagement_ids,omitempty"`
-	TeamIDs       []shared.ID     `json:"team_ids,omitempty"`
-	AllTeams      bool            `json:"all_teams,omitempty"`
+	Cadence          DeliveryCadence `json:"cadence"`
+	RecipientUserIDs []shared.ID     `json:"recipient_user_ids,omitempty"`
+	TenantID         shared.ID       `json:"tenant_id"`
+	ID               shared.ID       `json:"id"`
+	Name             string          `json:"name"`
+	Enabled          bool            `json:"enabled"`
+	EventType        EventType       `json:"event_type"`
+	MinSeverity      shared.Severity `json:"min_severity,omitempty"`
+	ActionTypes      []string        `json:"action_types,omitempty"`
+	EngagementIDs    []shared.ID     `json:"engagement_ids,omitempty"`
+	TeamIDs          []shared.ID     `json:"team_ids,omitempty"`
+	AllTeams         bool            `json:"all_teams,omitempty"`
 	EventFilters
 	ChannelIDs []shared.ID `json:"channel_ids"`
 	// RecipientRoles address people by their relation to the event (#1415), in addition to the
@@ -187,6 +190,19 @@ const DisabledEngagementFilterUnsupported = "engagement_filter_unsupported"
 
 func (r *Rule) Normalize() error {
 	r.Name = strings.TrimSpace(r.Name)
+	if r.Cadence == "" {
+		r.Cadence = CadenceImmediate
+	}
+	if !r.Cadence.Valid() {
+		return fmt.Errorf("%w: invalid delivery cadence", shared.ErrValidation)
+	}
+	r.RecipientUserIDs = uniqueIDs(r.RecipientUserIDs)
+	if len(r.RecipientUserIDs) > 200 {
+		return fmt.Errorf("%w: too many recipient users", shared.ErrValidation)
+	}
+	if r.EventType == EventFindingMentioned && len(r.RecipientUserIDs) > 0 {
+		return fmt.Errorf("%w: mentions address only the mentioned user", shared.ErrValidation)
+	}
 	spec, known := catalog[r.EventType]
 	if r.LeadTimeSecs < 0 || r.LeadTimeSecs > 2592000 {
 		return fmt.Errorf("%w: invalid lead time", shared.ErrValidation)
@@ -239,7 +255,7 @@ func (r *Rule) Normalize() error {
 	if r.EventType == EventFindingMentioned && len(r.ChannelIDs) > 0 {
 		return fmt.Errorf("%w: mentions require personal recipient routing", shared.ErrValidation)
 	}
-	if len(r.ChannelIDs) == 0 && len(r.RecipientRoles) == 0 {
+	if len(r.ChannelIDs) == 0 && len(r.RecipientRoles) == 0 && len(r.RecipientUserIDs) == 0 {
 		return fmt.Errorf("%w: a rule needs a channel or a recipient role", shared.ErrValidation)
 	}
 	if len(r.ChannelIDs) > 50 || len(r.EngagementIDs) > 200 || len(r.Name) > 200 {
@@ -253,16 +269,20 @@ func unsupportedFilter(t EventType, filter string) error {
 }
 
 type Event struct {
-	TenantID      shared.ID       `json:"-"`
-	ID            shared.ID       `json:"id"`
-	Type          EventType       `json:"type"`
-	SourceKind    string          `json:"source_kind"`
-	SourceID      string          `json:"source_id"`
-	EngagementID  shared.ID       `json:"engagement_id,omitempty"`
-	Severity      shared.Severity `json:"severity,omitempty"`
-	SchemaVersion int             `json:"schema_version"`
-	OccurredAt    time.Time       `json:"occurred_at"`
-	Data          json.RawMessage `json:"data"`
+	// DigestItems are authoritative members hydrated only for send-time filtering and links.
+	DigestItems []DigestItem `json:"-"`
+	// TestTemplate is the immutable template snapshot for a fixture-only console test.
+	TestTemplate  *TemplateVersion `json:"-"`
+	TenantID      shared.ID        `json:"-"`
+	ID            shared.ID        `json:"id"`
+	Type          EventType        `json:"type"`
+	SourceKind    string           `json:"source_kind"`
+	SourceID      string           `json:"source_id"`
+	EngagementID  shared.ID        `json:"engagement_id,omitempty"`
+	Severity      shared.Severity  `json:"severity,omitempty"`
+	SchemaVersion int              `json:"schema_version"`
+	OccurredAt    time.Time        `json:"occurred_at"`
+	Data          json.RawMessage  `json:"data"`
 	// SubjectKind and SubjectID name the entity the event is about (EPIC D8), and Context is the
 	// template context snapshot its builder took at projection (D5). They are not part of the
 	// webhook body, which is the raw event and a public contract (D4).

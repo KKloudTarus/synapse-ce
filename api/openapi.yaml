@@ -4118,17 +4118,16 @@ paths:
     post:
       tags: [notifications]
       operationId: previewNotificationTemplate
-      summary: Prepare a template preview for a channel and an event type, without sending
+      summary: Render a template preview for a channel and an event type, without sending
       description: >
         Picks the sample event (the event type's published fixture, or one of the tenant's stored
         events when `event_id` is set) and the template text: what resolution would choose for the
         channel, a saved version of `template_id`, or unsaved `fields` (alone for a new template,
         with `template_id` for an unsaved edit). Unsaved text is checked exactly as a save checks
         it, so an engine rejection is a 400 with its field and line. Nothing is sent or stored, and
-        the response is never logged. The response names the sample and the template; it never
-        carries the event's data, its template context or template source. `rendered` stays false
-        until send-time rendering (#1365) is available; the response then also carries the
-        suppressed state and the rendered message. Registered only when templates are configured.
+        the response is never logged. The response names the sample and the template, and carries
+        only the class-filtered rendered payload; it never carries the raw event data, event source,
+        template source or channel credentials. Registered only when templates are configured.
         Requires manage_integrations; a stored event also requires view.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplatePreviewInput'}}}}
       responses:
@@ -4137,6 +4136,48 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {description: The channel, the template, its version or the stored event does not exist in the caller's tenant}
+
+  /api/v1/notifications/templates/preview/send-test:
+    post:
+      tags: [notifications]
+      operationId: sendNotificationTemplateTest
+      summary: Queue a durable fixture test using the previewed template
+      description: >
+        Uses the same selected template (saved or unsaved) and published fixture as the preview,
+        snapshots that template with the test event, and queues it through the normal targeted
+        channel delivery path. A stored `event_id` is refused, so a test never republishes tenant
+        event data. The channel's ordinary health, email-recipient validation, policy admission and
+        shared five-tests-per-channel-per-hour limit apply. Requires manage_integrations.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplatePreviewInput'}}}}
+      responses:
+        '202': {description: Queued, content: {application/json: {schema: {$ref: '#/components/schemas/NotificationTemplateTestQueued'}}}}
+        '400': {description: Invalid input, stored event selection, disabled channel type, or a template the channel cannot use}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {description: The channel, template, or version does not exist in the caller's tenant}
+        '409': {description: The channel is paused; resume it before sending a test}
+        '503': {description: Channel test rate limit exceeded; response carries Retry-After}
+
+  /api/v1/notifications/rules/user-options:
+    get:
+      summary: Search enabled personal rule recipients
+      description: Requires manage_integrations. Returns only same-tenant human IDs and names; never contacts, keys or roles.
+      operationId: listNotificationRuleUserOptions
+      parameters:
+        - {name: q, in: query, schema: {type: string}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 25}}
+      responses:
+        '200':
+          description: A bounded page of eligible recipients
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {type: object, properties: {id: {type: string}, name: {type: string}}}}
+                  next: {type: string}
+        '403': {$ref: '#/components/responses/Forbidden'}
 
   /api/v1/notifications/templates/preview/events:
     get:
@@ -14223,7 +14264,41 @@ components:
             template_id: {type: string}
             version: {type: integer, description: The saved version previewed; absent for unsaved text.}
             unsaved: {type: boolean}
-        rendered: {type: boolean, description: False until send-time rendering (#1365) is available.}
+        rendered: {type: boolean, description: True when the response contains the result of the shared send-time renderer.}
+        suppressed: {type: boolean, description: True when the real event engagement suppresses external notifications.}
+        class: {type: string, enum: [signal, summary, detail], description: The effective class used by the renderer; absent when suppressed.}
+        fallback: {type: boolean, description: The selected template could not produce deliverable content, so the shared code-owned fallback is rendered.}
+        message:
+          type: object
+          description: Rendered channel-neutral content. Template source and the source event are never present.
+          properties:
+            fields: {type: object, additionalProperties: {type: string}}
+            links: {type: array, items: {type: object, required: [label, url], properties: {label: {type: string}, url: {type: string, format: uri}}}}
+            template_ref: {type: string, description: The template pin the delivery path records.}
+            severity: {type: string}
+        formatted:
+          type: object
+          description: Safe payload emitted by a configured channel formatter.
+          required: [content_type, body]
+          properties:
+            content_type: {type: string}
+            body: {type: string}
+            html_body: {type: string}
+            subject: {type: string}
+        webhook:
+          type: object
+          description: Class-filtered webhook payload; this is never a raw source event.
+          required: [content_type, body, custom]
+          properties:
+            content_type: {type: string}
+            body: {type: string}
+            custom: {type: boolean}
+    NotificationTemplateTestQueued:
+      type: object
+      required: [delivery_id, state]
+      properties:
+        delivery_id: {type: string}
+        state: {type: string, enum: [pending]}
     NotificationTemplateResolution:
       type: object
       description: >-
@@ -14393,6 +14468,16 @@ components:
       type: object
       required: [name, enabled, event_type]
       properties:
+        cadence:
+          type: string
+          enum: [immediate, hourly, daily]
+          default: immediate
+          description: External channel batching in UTC publication windows. Critical and mandatory events bypass batching; personal notifications stay immediate.
+        recipient_user_ids:
+          type: array
+          maxItems: 200
+          items: {type: string, minLength: 1, maxLength: 200}
+          description: Explicit personal recipients. Missing saved IDs remain stored; only enabled same-tenant human users can receive. Not allowed for finding.mentioned.
         name: {type: string, maxLength: 200}
         enabled: {type: boolean}
         event_type: {$ref: '#/components/schemas/NotificationEventType'}

@@ -36,7 +36,7 @@ func (r *NotificationRepository) PublishToChannel(ctx context.Context, e notific
 	if !ok {
 		return "", fmt.Errorf("notification channel %s: %w", channel, shared.ErrNotFound)
 	}
-	if e.Type == notification.EventTest {
+	if e.Type == notification.EventTest || e.SourceKind == "template_test" {
 		if c.Health.Paused() {
 			return "", fmt.Errorf("notification channel is paused; resume it before sending a test: %w", shared.ErrConflict)
 		}
@@ -74,13 +74,12 @@ func (r *NotificationRepository) publish(ctx context.Context, e notification.Eve
 		}
 		e = projected
 	}
-	targets, revisions := r.fanoutTargets(e, only)
+	targets, revisions, matched, digestTargets := r.fanoutTargets(e, only)
 	if len(targets) > 0 && r.countOpenDeliveries(e.TenantID) >= maxOpenDeliveries {
 		return nil, capacityReached("delivery")
 	}
 	created := r.now().UTC()
 	var newDeliveries []notificationKey
-	matched := []shared.ID{}
 	for _, t := range targets {
 		for _, recipient := range deliveryRecipients(t.channel) {
 			key := r.addDelivery(e, t, recipient, created)
@@ -90,8 +89,10 @@ func (r *NotificationRepository) publish(ctx context.Context, e notification.Eve
 	}
 	r.events[notificationKey{e.TenantID, e.ID}] = storedEvent{event: cloneNotificationEvent(e), matched: matched, revisions: revisions}
 	r.eventIDs[source] = e.ID
+	digestKeys := r.recordMemoryDigestMembers(e, digestTargets)
 	if err := r.enqueueDeliveries(ctx, newDeliveries); err != nil {
 		r.forgetEvent(e, newDeliveries)
+		r.forgetMemoryDigestMembers(e.ID, digestKeys)
 		return nil, err
 	}
 	ids := make([]shared.ID, len(newDeliveries))
@@ -103,21 +104,29 @@ func (r *NotificationRepository) publish(ctx context.Context, e notification.Eve
 
 // fanoutTargets selects the enabled channels an event goes to and the rules that chose them. With
 // only set, the one channel is the target and no rule is consulted.
-func (r *NotificationRepository) fanoutTargets(e notification.Event, only shared.ID) (map[shared.ID]*fanoutTarget, map[shared.ID]int) {
+func (r *NotificationRepository) fanoutTargets(e notification.Event, only shared.ID) (map[shared.ID]*fanoutTarget, map[shared.ID]int, []shared.ID, []digestMembershipTarget) {
 	targets := map[shared.ID]*fanoutTarget{}
 	revisions := map[shared.ID]int{}
+	matched := []shared.ID{}
+	var digestTargets []digestMembershipTarget
 	if !only.IsZero() {
 		if c, ok := r.activeChannel(e.TenantID, only); ok {
 			targets[only] = &fanoutTarget{channel: c, rules: []shared.ID{}}
 		}
-		return targets, revisions
+		return targets, revisions, matched, digestTargets
 	}
 	for key, rule := range r.rules {
 		if key.tenant != e.TenantID || !rule.Enabled || rule.EventType != e.Type || !rule.Matches(e) {
 			continue
 		}
 		revisions[rule.ID] = rule.Revision
+		digested := false
 		for _, channel := range rule.ChannelIDs {
+			if rule.DigestEligible(e) {
+				digestTargets = append(digestTargets, digestMembershipTarget{rule: rule, channelID: channel})
+				digested = true
+				continue
+			}
 			if e.Type == notification.EventFindingMentioned {
 				continue
 			}
@@ -125,6 +134,9 @@ func (r *NotificationRepository) fanoutTargets(e notification.Event, only shared
 				targets[channel] = &fanoutTarget{rules: []shared.ID{}}
 			}
 			targets[channel].rules = append(targets[channel].rules, rule.ID)
+		}
+		if digested || (len(rule.ChannelIDs) == 0 && (len(rule.RecipientRoles) > 0 || len(rule.RecipientUserIDs) > 0)) {
+			matched = append(matched, rule.ID)
 		}
 	}
 	for id, t := range targets {
@@ -136,7 +148,7 @@ func (r *NotificationRepository) fanoutTargets(e notification.Event, only shared
 		t.channel = c
 		slices.Sort(t.rules)
 	}
-	return targets, revisions
+	return targets, revisions, matched, digestTargets
 }
 
 // deliveryRecipients is one delivery per email recipient, one per channel otherwise.
@@ -219,7 +231,7 @@ func (r *NotificationRepository) recentChannelTests(tenant, channel shared.ID) i
 		if key.tenant != tenant || d.ChannelID != channel || d.CreatedAt.Before(since) {
 			continue
 		}
-		if event, ok := r.events[notificationKey{tenant, d.EventID}]; ok && event.event.Type == notification.EventTest {
+		if event, ok := r.events[notificationKey{tenant, d.EventID}]; ok && (event.event.Type == notification.EventTest || event.event.SourceKind == "template_test") {
 			events[d.EventID] = true
 		}
 	}
@@ -229,6 +241,11 @@ func (r *NotificationRepository) recentChannelTests(tenant, channel shared.ID) i
 func cloneNotificationEvent(e notification.Event) notification.Event {
 	e.Data = slices.Clone(e.Data)
 	e.Context = slices.Clone(e.Context)
+	if e.TestTemplate != nil {
+		version := *e.TestTemplate
+		version.Fields = notification.CloneFields(e.TestTemplate.Fields)
+		e.TestTemplate = &version
+	}
 	return e
 }
 

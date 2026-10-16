@@ -1,0 +1,15 @@
+{
+  "subject_kind": "digest",
+  "subject_id": "",
+  "vars": {
+    "cadence": "hourly",
+    "event_label": "Notification digest",
+    "event_type": "notification.digest",
+    "item_count": "1",
+    "occurred_at": "2026-10-16T09:00:00Z",
+    "omitted_count": "0",
+    "severity": "high",
+    "window_end": "2026-10-16T09:00:00Z",
+    "window_start": "2026-10-16T08:00:00Z"
+  }
+}

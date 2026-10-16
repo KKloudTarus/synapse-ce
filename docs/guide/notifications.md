@@ -238,7 +238,7 @@ tenant from the session, and is registered only when notifications are enabled.
 | `POST /api/v1/notifications/templates/{id}/activate` | Make a version render (`version` omitted or `0` means the newest) |
 | `POST /api/v1/notifications/templates/{id}/rollback` | Activate an earlier `version` |
 | `POST /api/v1/notifications/templates/{id}/archive` | Retire the template |
-| `POST /api/v1/notifications/templates/preview` | Prepare a preview for a channel and event type without sending (see below) |
+| `POST /api/v1/notifications/templates/preview` | Render a preview for a channel and event type without sending (see below) |
 | `GET /api/v1/notifications/templates/preview/events` | The tenant's 20 newest events of an `event_type` a preview can use; also needs `view` |
 
 A template is keyed by event type (a catalog type or `*`), channel family and
@@ -332,6 +332,64 @@ the event's data, its template context or template source, and it is never
 logged. Preview uses the send-time renderer and carries the message at the channel's
 effective class, or the suppressed state when the engagement's override is `none`.
 
+The template editor shows a debounced preview for each enabled channel in the selected
+family. Email HTML is isolated in a sandboxed iframe with a `default-src 'none'` policy;
+chat content uses the element-only Markdown renderer. Email text and HTML include the
+same typed severity palette as chat, independent of editable template fields. Stored samples are restricted to
+the twenty newest readable events. Raw-event webhooks bypass templates, so template
+preview/test requests for that mode are refused.
+
+`POST /api/v1/notifications/templates/preview/send-test` accepts the same template input,
+but only the published fixture (`event_id` is refused). It snapshots the selected fields
+on the test event and queues ordinary channel delivery. Retries reuse that snapshot even
+if the draft or active template changes. The five-tests-per-channel rolling-hour quota is
+shared with the channel test button. Response metadata and event IDs identify each test;
+template fields, class filtering, safe fallback and formatters are shared with preview.
+Tests never create personal inbox or direct-message projections.
+
+### Digests and explicit recipients
+
+Rules accept `cadence: immediate | hourly | daily`, defaulting to `immediate`. Hourly and
+daily windows use UTC publication time, while rendered times use the tenant time zone.
+Membership is recorded atomically when the rule matches; source timestamps cannot place a
+late event into a window already sent. The maintenance worker closes windows under the
+tenant scheduler lock. Each durable chunk contains at most 200 members and publishes one
+synthetic `notification.digest` through the targeted channel path. Overflow continues in
+another chunk of the same window. The source identity includes tenant, rule, channel,
+cadence, window and chunk; replay/failover reuses the same event and delivery.
+
+Critical events and mandatory notices bypass batching. Personal inbox/email/Slack/Teams
+routing stays immediate. Every member is filtered at the lower of the destination and its
+own engagement policy; `none` members are dropped and excluded from counts. An empty window
+creates no delivery. The rendered list shows up to fifty bounded rows and an omitted count;
+membership retains the original events. State-sensitive members keep the same send-time
+relevance checks as immediate delivery: recovered fleet agents, superseded SLA reminders
+and other expired alerts are removed before count, severity, links or payload are built.
+Historical event types without a relevance guard remain included. Source-read errors retry
+rather than releasing unchecked content. Current policies are loaded for every send/retry
+and checked again under the engagement locks at admission, so a queued digest follows a
+later class reduction or suppression. Channel disable, pause and destination/secret
+replacement cancel pending digest chunks with ordinary delivery backlog. Inactive channels
+admit no new members. Valid events after resume start a fresh chunk, including within the
+same UTC window. Missing or disabled rules suppress pending chunks; deleting a rule keeps
+already published digest authority readable.
+
+The rule form offers searchable engagement, team and personal-recipient pickers. A saved ID
+missing from a directory stays selected until explicitly removed. `recipient_user_ids`
+adds explicit people to the existing recipient roles; enabled same-tenant human recipients
+are deduplicated, and their current preferences, contacts and permissions are rechecked
+before external delivery. Mention events remain limited to their captured mentioned user.
+`GET /api/v1/notifications/rules/user-options` needs `manage_integrations` and returns only
+a bounded page of user IDs and names, without roles or contact data.
+
+Apply migration `0239` before upgrading all notification workers and then the API. Keep it
+applied for rollback; stop current workers and stop new digest/test producers before any
+downgrade, and drain or retain pending digest and template-test work for re-upgrade. Older
+workers do not understand these aggregates or immutable test snapshots. Do not downgrade
+while they can claim those jobs. After the first immutable template-test snapshot is stored,
+draining jobs cannot make schema downgrade safe: retain migration `0239` for an application
+rollback or apply a forward fix. Do not delete immutable notification history to force Down.
+
 ### How a message renders
 
 The worker renders a delivery when it sends it, not when the event is recorded:
@@ -422,7 +480,7 @@ When notifications are enabled, each human user has an inbox at `/inbox` and a b
 
 Inbox rows are written in the same database transaction as the notification event. In-app delivery does not create a channel delivery or a job. Replaying an event after retention does not recreate a deleted row. Mark-all-read uses the server time of that request, so a message that arrives while the request is running stays unread.
 
-Personal recipients come from structured IDs already on the event: the canonical finding assignee and active ownership team members. A legacy assignee label, an email address, or a display name is never resolved into a recipient. A routing rule can add people by role (see [Recipient roles](#recipient-roles-and-engagement-leads)); mentioned users and approvers stay unsupported until a producer records a verified identity. `notification.destination_changed` is mandatory in-app for enabled tenant admins. It is not a routing rule and cannot be muted. One notice is stored per channel revision: repeating that save is a no-op, and changing only the secret or the URL path is not a host change. Changing back to an earlier host writes a new notice. The payload contains the actor, the action, the channel class, and the scheme plus host. It does not contain a URL path, query, port secret, or credential. `notification.channel_paused` is mandatory in-app for enabled tenant admins in the same way, once per automatic pause (see [Channel health and automatic pause](#channel-health-and-automatic-pause)).
+Personal recipients come from structured IDs already on the event: the canonical finding assignee and active ownership team members. A legacy assignee label, an email address, or a display name is never resolved into a recipient. A routing rule can add people by role (see [Recipient roles](#recipient-roles-and-engagement-leads)); mentioned users and approvers stay unsupported until a producer records a verified identity. `notification.destination_changed` is mandatory in-app for enabled tenant admins. It is not a routing rule and cannot be muted. One notice is stored per channel revision: repeating that save is a no-op, and changing only the secret or the URL path is not a host change. Changing back to an earlier host writes a new notice. The payload contains the actor, the action, the channel class, and the scheme plus host. It does not contain a URL path, query, port secret, or credential. Email destinations also produce a mandatory notice on create or recipient-domain-set change. Their v2 notice contains only sorted domains (`mailto`), never full recipient addresses. Same-domain address edits, metadata edits and secret rotations create no notice. The v1 HTTP notice schema remains published. `notification.channel_paused` is mandatory in-app for enabled tenant admins in the same way, once per automatic pause (see [Channel health and automatic pause](#channel-health-and-automatic-pause)).
 
 `PUT /api/v1/me/notification-preferences` stores `inherit`, `enabled`, or `disabled` per event type and personal channel (`in_app`, `email`, `slack`, `teams`) for the signed-in user. Precedence is mandatory > the person's choice > the tenant default > the built-in default (in-app on, everything else off); `inherit` follows the tenant default, which each preference reports as `default`. Every personal message is sent from its inbox row, so muting in-app also mutes email, Slack and Teams for that event. A personal message leaves Synapse only to the verified contact version captured when the event was projected; when the job runs it is checked again (the person is enabled with a human role, the inbox is not muted, the preference and tenant default still allow it, the engagement still lets messages out, the contact version is unchanged) and a stale job ends without sending. It is never retargeted. Slack can be chosen once the tenant has an enabled Slack app channel, and Teams once the operator configured the Teams bot.
 
