@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -411,6 +412,46 @@ func TestGoogleChatUsesStableSubjectThreadKeyAndFallback(t *testing.T) {
 	}
 	if err := json.Unmarshal(server.body, &payload); err != nil || payload.Thread.ThreadKey != googleChatThreadKey(work) {
 		t.Fatalf("thread key=%q payload=%s err=%v", payload.Thread.ThreadKey, server.body, err)
+	}
+}
+
+func TestGoogleChatSendsStandaloneDigestWithoutReplyOption(t *testing.T) {
+	var server *chatServer
+	server = newChatServer(t, func(w http.ResponseWriter) {
+		var message struct {
+			Thread json.RawMessage `json:"thread"`
+		}
+		query, err := url.ParseQuery(server.query)
+		if err != nil || json.Unmarshal(server.body, &message) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		// Google Chat rejects a reply option when no reply thread is supplied.
+		if query.Has("messageReplyOption") && len(message.Thread) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = io.WriteString(w, chatCases[2].success)
+	})
+	work := testWork(notification.ChannelGoogleChat)
+	work.Event.Type = notification.EventDigest
+	formatted, err := messageformat.GoogleChat(ports.RenderedMessage{Fields: map[string]string{
+		"title": "Notification digest", "body": "Cadence: hourly · 5 events",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work.Formatted = &formatted
+	result := chatSender(server).Send(context.Background(), work, chatCases[2].config(server.URL))
+	if result.ErrorCode != "" || result.StatusCode != http.StatusOK || result.RemoteRef != "spaces/AAA/messages/BBB.CCC" {
+		t.Fatalf("standalone digest result = %+v", result)
+	}
+	query, err := url.ParseQuery(server.query)
+	if err != nil || query.Has("messageReplyOption") || query.Get("key") != "k" || query.Get("token") != testChatSecret {
+		t.Fatalf("standalone request changed webhook parameters")
+	}
+	if string(server.body) != string(formatted.Body) {
+		t.Fatal("standalone digest changed its formatted payload")
 	}
 }
 
