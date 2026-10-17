@@ -191,6 +191,14 @@ func (p *inboundWebhookPlane) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if endpoint.Provider == "jira-cloud" || endpoint.Provider == "jira-dc" {
+		var ok bool
+		event, ok = jiraEventMetadata(endpoint.Provider, r.Header, body)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid_webhook_event"})
+			return
+		}
+	}
 
 	// Bind ONLY the authenticated record's tenant; do not use TenantOrDefault.
 	// GitLab and Bitbucket commit replay receipts with durable enqueue in
@@ -258,6 +266,8 @@ func (p *inboundWebhookPlane) verifyRequest(e ports.InboundWebhookEndpoint, publ
 		signatureHeader = githubSignatureHeader
 	} else if e.Provider == "bitbucket" {
 		signatureHeader = bitbucketSignatureHeader
+	} else if e.Provider == "jira-cloud" || e.Provider == "jira-dc" {
+		signatureHeader = jiraSignatureHeader
 	}
 	presented, signatureOK := inboundSignature(header.Values(signatureHeader))
 	valid, usedPrevious := p.verify(e, publicID, body, presented, now)

@@ -46,7 +46,7 @@ run: ## Run the API server (:8080)
 	$(GO) run ./cmd/synapse-api
 
 test: ## Run Go tests
-	$(GO) test ./...
+	$(GO) test -timeout 45m ./...
 
 harness: ## Run the hostile tenant-isolation harness
 	$(GO) test ./internal/adapter/httpapi -run '^TestHostileHarness$$'

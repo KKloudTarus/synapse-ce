@@ -1,0 +1,182 @@
+{
+  "provider": "Confluence Data Center",
+  "version": "10.2.17",
+  "fixture": "fresh isolated licensed local Docker lab",
+  "automatic_create": {
+    "id": "ebd6bd23b43d953152573e81858a7a0b",
+    "action": "create",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "remote_id": "327686",
+    "created_at": "2026-10-17T17:28:12.204936Z",
+    "updated_at": "2026-10-17T17:28:15.851382Z"
+  },
+  "republish": {
+    "id": "9d0e63b74ef5e5725d7ec31371f29771",
+    "link_id": "ebd6bd23b43d953152573e81858a7a0b",
+    "action": "update",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "remote_id": "327686",
+    "created_at": "2026-10-17T17:31:32.072759Z",
+    "updated_at": "2026-10-17T17:31:39.236567Z"
+  },
+  "manual_acl_repair_or_resume": false,
+  "compatibility_option": "legacy_xmlrpc_restrictions=true",
+  "final_before_purge": {
+    "page_id": "327686",
+    "page_version": 4,
+    "page_storage_sha256": "b6df12602c69ce479221160d6846ea325ac34d5a642e6e357aead25318cc89a0",
+    "script_tag_absent": true,
+    "read_acl": {
+      "users": [],
+      "groups": [
+        "confluence-users"
+      ]
+    },
+    "update_acl": {
+      "users": [],
+      "groups": [
+        "confluence-users"
+      ]
+    },
+    "expected_publication_hash": "e37744ac1582e41f2147936511012a436c5fc1ec92f5a4f5e7ae0d8446fb9f36",
+    "pdfs": [
+      {
+        "attachment_id": "327692",
+        "bytes": 46590,
+        "sha256": "53707b878df18f81b3cf77e60b60400834c7563fb07253e674e06ff3adf23b03",
+        "pages": 1,
+        "tls_verified_authenticated_download": true,
+        "review_artifact": "confluence-cloud-automatic-confirmed-report.pdf"
+      },
+      {
+        "attachment_id": "327689",
+        "bytes": 46590,
+        "sha256": "53707b878df18f81b3cf77e60b60400834c7563fb07253e674e06ff3adf23b03",
+        "pages": 1,
+        "tls_verified_authenticated_download": true,
+        "review_artifact": "confluence-cloud-automatic-confirmed-report.pdf"
+      },
+      {
+        "attachment_id": "327687",
+        "bytes": 46590,
+        "sha256": "53707b878df18f81b3cf77e60b60400834c7563fb07253e674e06ff3adf23b03",
+        "pages": 1,
+        "tls_verified_authenticated_download": true,
+        "review_artifact": "confluence-cloud-automatic-confirmed-report.pdf"
+      }
+    ]
+  },
+  "unchanged_hash_schedule": {
+    "schedule_id": "c6bedfa3f5a9e024652ebc3117eb8e65",
+    "run": {
+      "id": "schedule:38ea3fc2398b7b422a33b59b3de30520",
+      "due_at": "2026-10-17T17:34:00Z",
+      "state": "done",
+      "content_hash": "5d5b038e86050514b007955084e0d82a4749423da8a907861213ef1b239b8908",
+      "remote_page_id": null,
+      "remote_version": null,
+      "delivered_count": 0,
+      "uncertain_count": 0,
+      "failed_count": 0,
+      "updated_at": "2026-10-17T17:34:04.197369Z"
+    },
+    "expected_hash": "5d5b038e86050514b007955084e0d82a4749423da8a907861213ef1b239b8908",
+    "hash_skip_verified": true,
+    "schedule_disabled_after_one_run": true
+  },
+  "changed_hash_schedule": {
+    "schedule_id": "c6f8c602902a6d0620ac1551dfb592c3",
+    "run": {
+      "id": "schedule:8a5d8bdb6dd50f6aa5962fa3277e62c9",
+      "due_at": "2026-10-17T17:37:00Z",
+      "state": "done",
+      "content_hash": "e37744ac1582e41f2147936511012a436c5fc1ec92f5a4f5e7ae0d8446fb9f36",
+      "remote_page_id": "327686",
+      "remote_version": 4,
+      "delivered_count": 0,
+      "uncertain_count": 0,
+      "failed_count": 0,
+      "updated_at": "2026-10-17T17:37:05.426354Z"
+    },
+    "scheduled_native_republish_verified": true,
+    "schedule_disabled_after_one_run": true
+  },
+  "purge_intent": {
+    "id": "1cbb70b2c700e821ed01380d2e8635a9",
+    "link_id": "ebd6bd23b43d953152573e81858a7a0b",
+    "action": "purge",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "remote_id": "327686",
+    "created_at": "2026-10-17T17:39:07.054953Z",
+    "updated_at": "2026-10-17T17:39:16.106866Z"
+  },
+  "purge_verification": {
+    "page_id": "327686",
+    "attachment_ids": [
+      "327687",
+      "327689",
+      "327692"
+    ],
+    "all_provider_resources_404": true,
+    "provider_checks": {
+      "current": {
+        "http": 404
+      },
+      "trashed": {
+        "http": 404
+      },
+      "historical-v1": {
+        "http": 404
+      },
+      "historical-v2": {
+        "http": 404
+      },
+      "historical-v3": {
+        "http": 404
+      },
+      "historical-v4": {
+        "http": 404
+      },
+      "attachment-327687": {
+        "http": 404
+      },
+      "attachment-327689": {
+        "http": 404
+      },
+      "attachment-327692": {
+        "http": 404
+      }
+    },
+    "document_link_id": "ebd6bd23b43d953152573e81858a7a0b",
+    "link_retired": true,
+    "retired_at": "2026-10-17T17:39:16.106866Z"
+  },
+  "integration_disabled_after_acceptance": true,
+  "app_and_tls_stopped_data_preserved": true,
+  "runtime_build": {
+    "at": "2026-10-17T17:27:43.655949+00:00",
+    "CGO_ENABLED": "0",
+    "exit_code": 0,
+    "sha256": {
+      "synapse-api": "88b1537a2720f29a5c273195c692952c32f10b10c0f3ad2457eb4656520ccc78",
+      "synapse-worker": "378a4d6c81266ce4cb9b2d48c754c6af4a8cdd0dff5b0a35c93818f8bc61d1c1"
+    }
+  },
+  "license_checked_before_create": {
+    "expired": false,
+    "data_center": true,
+    "expiry_utc": "2026-10-17T19:34:08.261000+00:00"
+  },
+  "authenticated_remote_api_preparation": {
+    "operator_configured": true,
+    "anonymous_remote_api_changed": false,
+    "anonymous_unauthenticated_rpc_denied": true,
+    "neutral_probe_page_distinct_from_report_page": true
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "scope": "Historical review of the original Draft snapshot. Its acceptance limits and command results describe that snapshot only; current acceptance is in README.md and final-review-results.json.",
+  "decision": "pass for one Draft PR with incomplete provider acceptance referenced",
+  "limits": [
+    "Live DC and positive restricted Confluence acceptance remain missing.",
+    "Outlook attachment opening remains blocked by its Junk protection.",
+    "Production load, migration lock duration and manual assistive technology behavior remain unmeasured."
+  ],
+  "open_findings": [],
+  "rejected_findings": [
+    "Requiring expanded Jira history total to equal returned length contradicts Cloud\u2019s documented 100-most-recent window.",
+    "Project navigation already unmounts publishing state through its route/project guard."
+  ],
+  "reviewers": [
+    {
+      "agent": "qa-verifier",
+      "evidence": "Boundary/recovery/paragraph/fairness regressions independently rechecked.",
+      "verdict": "pass"
+    },
+    {
+      "agent": "security-auditor",
+      "evidence": "Tenant/RLS, authority, sharing-before-upload, proposal-only inbound, safe audit admission; no remaining findings.",
+      "verdict": "pass"
+    },
+    {
+      "agent": "performance-auditor",
+      "evidence": "Fairness regressions and read-only PG259 index plans; no production latency or constant-scan claim.",
+      "verdict": "pass"
+    },
+    {
+      "agent": "architecture-critic",
+      "evidence": "Ports/adapters, reused durable foundation and dispatch-only worker composition sound for Draft scope.",
+      "verdict": "pass"
+    },
+    {
+      "agent": "reliability-auditor",
+      "evidence": "Occurrence version fence, sanitized error propagation, recovery and migrate-first rollout rechecked.",
+      "verdict": "pass"
+    },
+    {
+      "agent": "algorithm-verifier",
+      "evidence": "Santiago civil-date counterexample fixed and independently rechecked; bounded calendar/claim algorithms.",
+      "verdict": "pass"
+    },
+    {
+      "agent": "frontend-quality-auditor",
+      "evidence": "Disabled/history behavior and all 17 native Edge frames inspected; full 206/1366 web suite passed.",
+      "verdict": "pass"
+    },
+    {
+      "agent": "platform-auditor",
+      "evidence": "Font package identity/integrity, license distribution manifests and Docker context inclusion verified; no upstream signature/full release build claim.",
+      "verdict": "pass"
+    }
+  ],
+  "tier": 0
+}

@@ -56,9 +56,35 @@ After changing a mapping, policy or credentials, prepare and approve a new previ
 before submitting a replacement command. Retained commands preserve the originally
 approved authority revisions and payload.
 
+Use a maintenance window for the Jira sync and report delivery migrations. Drain
+requests and stop all database clients, including API, worker, MCP, and scanner
+processes, before running `synapse-migrate`; migrate-first alone does not make this
+an online upgrade. The inbound backfill holds an access-exclusive lock on
+`ticket_intents`, and the source-job constraint/index migration blocks reads and
+writes on `scan_jobs`. A local million-row fixture measured approximately 65 seconds
+for the inbound backfill; size the window from a rehearsal on a restored database,
+not that synthetic measurement. See the
+[migration measurements and limits](../evidence/jira-sync-report-publishing/migration-measurements.md).
+Start the matching API and workers only after migration completes and readiness
+checks pass.
+
 Deploy migrations before API and worker. Disable Jira integrations before application
 rollback and retain intent, snapshot and breaker history. Memory persistence is for
 development only. PostgreSQL is required for durable production recovery.
+
+Do not mix old and new Jira consumers when deploying separate durable status
+comments. Disable the affected Jira integrations, let in-flight provider calls
+finish, then stop every old Jira worker before starting the new planner or worker.
+Deploy the new API and workers together, verify their versions, and re-enable only
+the canary connection first. New workers retain support for legacy bundled
+transition snapshots; old workers cannot execute the new transition-only snapshots
+or dedicated comment intents.
+
+Before rollback, disable the affected integrations, drain in-flight calls and stop
+the new workers. Keep Jira disabled on the older binary. Retain all new snapshots,
+intents and audit records for recovery with a compatible forward version; do not
+rewrite them into legacy commands or replay uncertain writes. An old binary is
+not a recovery executor for these records.
 
 The deployment operator should first enable only a dedicated test connection and
 test engagement. Create one English and one Vietnamese finding ticket on each
@@ -97,3 +123,129 @@ the local crash and lease tests do not establish those operational targets.
 Contract references: [Jira Cloud issues](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/),
 [Cloud search consistency](https://developer.atlassian.com/cloud/jira/platform/search-and-reconcile/),
 and [Data Center REST examples](https://developer.atlassian.com/server/jira/platform/jira-rest-api-examples/).
+
+## Automatic creation policy
+
+Automatic creation requires PostgreSQL and enabled notification event producers
+(`SYNAPSE_NOTIFICATIONS_ENABLED=true`). It is off on new and existing mappings. A tenant administrator can
+opt in and select the minimum severity in Jira settings. The policy applies only to
+confirmed findings; unconfirmed observations and external imports cannot authorize
+an automatic ticket. Manual preview and submit remain available under their existing
+permissions. The worker rechecks current confirmation, severity, mapping policy,
+destination security and privacy settings before dispatching a queued command.
+
+Policy admission consumes stored `finding.status_changed` business events with durable
+consumer progress; a worker restart must not lose or duplicate a logical command.
+Changing or disabling a policy invalidates stale queued automatic work. Historical
+status events preceding opt-in do not trigger a backfill.
+
+## Vulnerability grouping
+
+The default remains one ticket per finding. Project mappings at `detail` class can
+select one ticket per vulnerability and project. Group identity includes the tenant,
+mapping, Project and authoritative vulnerability identity. Missing vulnerability
+identity never merges unrelated findings. The asset table uses stored attribution;
+free-text descriptions do not establish an asset relationship.
+
+A pending or uncertain initial write reserves its group, so another request cannot
+create a second remote ticket while the first outcome is unresolved. Later members
+and rescans update the same remote issue. Lowering the effective destination class
+blocks grouped content until the privacy configuration permits detail again.
+
+## Project source scans and Jira
+
+An operator can run a vulnerabilities-only scan for one relative subdirectory of a
+local Project binding with `POST /api/v1/projects/{key}/source-scans`. The server
+selects the Project root and internal scan context; do not send a filesystem root,
+an engagement ID, or an absolute/traversal path. This scan does not replace the
+Project quality-analysis status or baseline.
+
+Use `/api/v1/projects/{key}/source-findings` to review and triage the resulting
+findings. The scoped ticket preview and submit routes under each finding use the
+same permissions, preview digest, destination checks, restricted-sharing checks,
+and durable intent rules as engagement tickets. For a Project vulnerability mapping,
+the rendered Jira link points to the Project source-finding view, so the hidden scan
+context is never exposed in the ticket body or API response.
+
+## Outbound status transitions
+
+Administrators can configure transition IDs for `remediated`, `accepted`,
+`false_positive` and `reopen`. Empty configuration disables status sync. Discover
+IDs on an existing Jira issue in each relevant workflow state; a transition can be
+available from one state and absent from another. The worker records a durable
+command for the existing ticket, sends the transition and explanatory comment
+first, then updates fields. An uncertain transition is retained for recovery.
+Accepted risk comes from the effective SLA lifecycle; an expired acceptance is open.
+For a grouped ticket, any active member keeps the ticket open.
+
+## Signed inbound observations
+
+With PostgreSQL, the vault master key and `SYNAPSE_INBOUND_WEBHOOKS_ENABLED=true`,
+a tenant administrator can configure or rotate a webhook in **Settings → Jira**.
+Enter the same randomly generated 32–128 byte secret in Synapse and Jira. Synapse
+returns an opaque relative hook path once; append it to the public Synapse origin.
+Keep the secret and path out of logs and screenshots. Rotation retains the path
+and permits the previous key for two hours. Disabling the integration stops hook
+admission and outbound work.
+
+Cloud is supported. Data Center currently requires version 11.3 or newer; older
+and unknown versions are refused rather than accepting unsigned delivery. This is
+the supported minimum for this adapter, not the first Jira release with webhook
+secrets. Configure HMAC-SHA256 on the exact body through `X-Hub-Signature`, and
+preserve `X-Atlassian-Webhook-Identifier` on retries. Subscribe to issue updates
+and comment creation/updates. Delivery identifiers and signed body digests are
+deduplicated for two hours, together with all local effects in one transaction.
+Cloud requires its delivery identifier. For Data Center deliveries without that
+header, the authenticated body digest is the receipt identity; malformed supplied
+headers are rejected.
+
+The finding's ticket panel shows external status, retest proposals and external
+comments. A transition into `fields.status.statusCategory.key == "done"` can
+request a retest at most once per finding in a rolling hour. Resolution is context,
+never the trigger. The authenticated integration principal suppresses its own
+status writes. A later human comment does not become evidence that the human
+closed the issue. Comments are redacted literal text, capped at 16 KiB, and never
+passed through the mention or triage parser. A reviewer records the retest through
+the existing finding workflow; Jira never changes finding security state.
+
+Polling reads current linked issues through the same reducer. It requests recent
+status history with the issue and attributes a status author only when the history
+proves that transition. Missing or truncated history leaves a retest decision
+pending until trustworthy attribution is available; a missed webhook plus missing
+history can therefore delay a proposal. The current external status remains
+visible. A Jira 404 means deleted **or unreadable**, not remediated.
+
+Contract references: [Cloud signed webhooks](https://developer.atlassian.com/cloud/jira/software/webhooks/),
+[Data Center webhook administration](https://confluence.atlassian.com/adminjiraserver/managing-webhooks-938846912.html),
+and [Cloud issue history](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/).
+
+Project source findings use bounded ID-keyset pages (50 by default, at most 100).
+The console resolves a finding deep link through its scoped single-finding route,
+so selection does not depend on which page is visible. Source-job diagnostics and
+errors retain the internal execution context on the server.
+
+For observed asset rows, enable the existing `SYNAPSE_FLEET_ASSETS_ENABLED` flag
+on both the API and SCA worker. Both use the same canonical asset store and
+producer attribution recorder; each source target replaces only its own observed
+bindings. A source scan does not create a full quality analysis or replace its
+latest-analysis status. Deploy migration 0260 with the migration credential
+before deploying the matching API and worker.
+
+Project source scans use the existing `sca` queue kind. Stop and drain old SCA
+consumers before enabling source-scan admission; do not run mixed versions against
+this queue. Older binaries ignore the server-owned selection and purpose fields,
+so they cannot preserve the confined snapshot or current-binding checks. Apply
+migration 0260 first, then deploy the matching API and workers, and only then admit
+source scans.
+
+For rollback, stop source-scan admission first. Drain source jobs with compatible
+workers or retain them until compatible workers are restored. Keep migration 0260
+and the immutable purpose values while any source records or queued jobs remain;
+do not down-migrate, relabel, or hand those jobs to older workers.
+
+Jira Data Center 11.3 administrative webhook registration uses
+`/rest/jira-webhook/1.0/webhooks` with the signing secret in
+`configuration.SECRET`. A top-level `secret` field is not this native contract.
+Keep the secret in private administration state and verify a real signed delivery
+before considering registration complete. Data Center callbacks can use the root
+`event` field; Cloud uses `webhookEvent`. Conflicting event fields are refused.

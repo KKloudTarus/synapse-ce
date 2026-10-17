@@ -376,6 +376,28 @@ forward schema only when every additional database migration is applied and has 
 above that binary's embedded maximum. Missing, down, or divergent required migrations remain
 unready.
 
+For the Jira sync and report delivery upgrade, use a blocking maintenance window.
+Migrations `0251` and `0260` hold access-exclusive locks on existing tables, so an
+older API must not keep serving through this migration sequence. Drain traffic,
+stop every API, worker, MCP and scanner database client, and resolve outstanding
+transactions before invoking the migration binary with its separate owner
+credential. Set a bounded PostgreSQL `lock_timeout` on that migration connection
+(for example, `5s`) so unexpected contention aborts instead of waiting behind a
+live client. Do not set the statement timeout from that lock-acquisition budget.
+
+Rehearse on a restored database to size the downtime. A focused local fixture with
+one million qualifying ticket intents measured about 65 seconds for the inbound
+backfill, blocking both reads and writes; see the
+[measurement evidence and limitations](../evidence/jira-sync-report-publishing/migration-measurements.md).
+The migration command has a two-minute overall deadline, so a rehearsal that
+exceeds it needs a reviewed migration plan before production execution. After
+success, verify the applied migration version, enabled and forced RLS on the
+affected tenant tables, and readiness before starting matching consumers and
+restoring traffic. On failure, keep traffic drained, inspect the applied versions,
+and retry only after resolving the cause; do not down-migrate retained command or
+evidence history. The coordinated Jira and source-worker rollout requirements
+still apply.
+
 The distinction is intentional: an API with a stale schema stays running but reports `503` from
 `/readyz`, allowing the orchestrator to remove it from traffic. `synapse-worker` and `synapse-mcp`
 have no equivalent HTTP readiness endpoint, so they refuse startup until migrations are ready.

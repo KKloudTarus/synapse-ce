@@ -89,6 +89,10 @@ type Router struct {
 	credentials              *credentialsuc.Service
 	integrations             *integrationuc.Service
 	ticketing                ticketWorkflow
+	documentPublishing       documentPublishing
+	documentScheduling       documentScheduling
+	documentScheduleIDs      ports.IDGenerator
+	documentScheduleHistory  documentScheduleHistory
 	dastVerifier             runtimeVerifierService
 	dastWorkflow             dastWorkflowService
 	dastRun                  dastRunService             // optional; nil ⇒ DAST verification runs execute synchronously in-process
@@ -144,11 +148,12 @@ type Router struct {
 	fleet                    *fleetRouter               // optional; nil ⇒ agent transport plane is not served
 	inboundWebhooks          *inboundWebhookPlane       // separate header-HMAC auth plane, no human fallback
 	inboundWebhookAdmin      *scmwebhookuc.Service      // tenant-authorized SCM endpoint provision/rotation
-	fleetAdmin               fleetAdminService          // optional; nil ⇒ operator agent-admin routes not registered
-	fleetKeys                fleetKeyAdmin              // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
-	qualityGates             qualityGateService         // optional; nil ⇒ quality-gate routes are not registered
-	qualityProfiles          qualityProfileService      // optional; nil ⇒ quality-profile routes are not registered
-	rules                    rulesService               // optional; nil ⇒ rule catalog routes are not registered
+	jiraWebhookAdmin         jiraWebhookAdmin
+	fleetAdmin               fleetAdminService     // optional; nil ⇒ operator agent-admin routes not registered
+	fleetKeys                fleetKeyAdmin         // optional; nil ⇒ operator signing-key routes not registered (A4 #625)
+	qualityGates             qualityGateService    // optional; nil ⇒ quality-gate routes are not registered
+	qualityProfiles          qualityProfileService // optional; nil ⇒ quality-profile routes are not registered
+	rules                    rulesService          // optional; nil ⇒ rule catalog routes are not registered
 	dastScan                 dastScanService
 	vulnerabilitySources     *vulnerabilitysourceuc.Service
 	vulnerabilityMonitor     *vulnerabilitymonitor.Service
@@ -452,6 +457,7 @@ func (rt *Router) withEngTenant(h http.HandlerFunc) http.HandlerFunc {
 func (rt *Router) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	if rt.ticketing != nil {
+		rt.mountJiraInboundWebhook(mux)
 		mux.HandleFunc("GET /api/v1/ticket-mappings", rt.authz(userdom.PermView, rt.listTicketMappings))
 		mux.HandleFunc("POST /api/v1/ticket-mappings", rt.authz(userdom.PermAdminister, rt.saveTicketMapping))
 		mux.HandleFunc("PUT /api/v1/ticket-mappings/{mappingID}", rt.authz(userdom.PermAdminister, rt.saveTicketMapping))
@@ -459,13 +465,39 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("GET /api/v1/integrations/{integrationID}/jira-metadata", rt.authz(userdom.PermManageIntegrations, rt.jiraMetadata))
 		mux.HandleFunc("POST /api/v1/integrations/{integrationID}/jira-breaker/reset", rt.authz(userdom.PermAdminister, rt.resetJiraBreaker))
 		mux.HandleFunc("GET /api/v1/engagements/{id}/findings/{fid}/tickets", rt.authz(userdom.PermView, rt.withEngTenant(rt.findingTickets)))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/findings/{fid}/ticket-observations", rt.authz(userdom.PermView, rt.withEngTenant(rt.findingTicketObservations)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/tickets", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.linkTicket)))
 		mux.HandleFunc("DELETE /api/v1/engagements/{id}/findings/{fid}/tickets/{linkID}", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.unlinkTicket)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/ticket-preview", rt.authz(userdom.PermView, rt.withEngTenant(rt.previewTicket)))
 		mux.HandleFunc("POST /api/v1/engagements/{id}/findings/{fid}/ticket-submit", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.submitTicket)))
+		if rt.projects != nil {
+			mux.HandleFunc("GET /api/v1/projects/{key}/source-findings/{fid}/tickets", rt.authz(userdom.PermView, rt.withProjectSourceContext(rt.findingTickets)))
+			mux.HandleFunc("GET /api/v1/projects/{key}/source-findings/{fid}/ticket-observations", rt.authz(userdom.PermView, rt.withProjectSourceContext(rt.findingTicketObservations)))
+			mux.HandleFunc("POST /api/v1/projects/{key}/source-findings/{fid}/tickets", rt.authz(userdom.PermTriage, rt.withProjectSourceContext(rt.linkTicket)))
+			mux.HandleFunc("DELETE /api/v1/projects/{key}/source-findings/{fid}/tickets/{linkID}", rt.authz(userdom.PermTriage, rt.withProjectSourceContext(rt.unlinkTicket)))
+			mux.HandleFunc("POST /api/v1/projects/{key}/source-findings/{fid}/ticket-preview", rt.authz(userdom.PermView, rt.withProjectSourceContext(rt.previewTicket)))
+			mux.HandleFunc("POST /api/v1/projects/{key}/source-findings/{fid}/ticket-submit", rt.authz(userdom.PermTriage, rt.withProjectSourceContext(rt.submitTicket)))
+		}
 		mux.HandleFunc("POST /api/v1/engagements/{id}/tickets/bulk", rt.authz(userdom.PermTriage, rt.withEngTenant(rt.bulkSubmitTickets)))
 		mux.HandleFunc("POST /api/v1/ticket-intents/{intentID}/reconcile", rt.authz(userdom.PermTriage, rt.reconcileTicket))
 		mux.HandleFunc("POST /api/v1/ticket-intents/{intentID}/retry", rt.authz(userdom.PermAdminister, rt.retryTicket))
+	}
+	if rt.documentPublishing != nil {
+		mux.HandleFunc("POST /api/v1/document-publications", rt.authz(userdom.PermReview, rt.publishDocument))
+		mux.HandleFunc("GET /api/v1/document-publications/{id}", rt.authz(userdom.PermView, rt.documentIntent))
+		mux.HandleFunc("POST /api/v1/document-publications/{id}/resume", rt.authz(userdom.PermReview, rt.resumePreparedDocumentPublication))
+		mux.HandleFunc("DELETE /api/v1/document-links/{id}", rt.authz(userdom.PermReview, rt.unpublishDocument))
+		mux.HandleFunc("GET /api/v1/engagements/{id}/documents", rt.authz(userdom.PermView, rt.withEngTenant(rt.engagementDocuments)))
+		mux.HandleFunc("GET /api/v1/projects/{key}/documents", rt.authz(userdom.PermView, rt.projectDocuments))
+	}
+	if rt.documentScheduling != nil {
+		mux.HandleFunc("POST /api/v1/document-schedules", rt.authz(userdom.PermReview, rt.saveDocumentSchedule))
+		mux.HandleFunc("GET /api/v1/document-schedules", rt.authz(userdom.PermView, rt.listDocumentSchedules))
+		mux.HandleFunc("DELETE /api/v1/document-schedules/{id}", rt.authz(userdom.PermReview, rt.disableDocumentSchedule))
+		mux.HandleFunc("GET /api/v1/document-schedules/email-destinations", rt.authz(userdom.PermReview, rt.documentScheduleEmailDestinations))
+	}
+	if rt.documentScheduleHistory != nil {
+		mux.HandleFunc("GET /api/v1/document-schedules/{id}/runs", rt.authz(userdom.PermView, rt.documentScheduleRuns))
 	}
 	rt.registerOwnership(mux)
 	rt.registerEnterprise(mux)
@@ -808,6 +840,11 @@ func (rt *Router) routes() *http.ServeMux {
 			mux.HandleFunc("PUT /api/v1/projects/{key}/profiles/{language}", rt.authz(userdom.PermOperate, rt.assignProjectProfile))
 		}
 		mux.HandleFunc("POST /api/v1/projects/{key}/analyses", rt.authz(userdom.PermOperate, rt.startProjectAnalysis))
+		mux.HandleFunc("POST /api/v1/projects/{key}/source-scans", rt.authz(userdom.PermOperate, rt.startProjectSourceScan))
+		mux.HandleFunc("GET /api/v1/projects/{key}/source-scans/{jobID}", rt.authz(userdom.PermView, rt.getProjectSourceScan))
+		mux.HandleFunc("GET /api/v1/projects/{key}/source-findings", rt.authz(userdom.PermView, rt.listProjectSourceFindings))
+		mux.HandleFunc("GET /api/v1/projects/{key}/source-findings/{fid}", rt.authz(userdom.PermView, rt.getProjectSourceFinding))
+		mux.HandleFunc("PATCH /api/v1/projects/{key}/source-findings/{fid}", rt.authz(userdom.PermTriage, rt.updateProjectSourceFinding))
 		// A pipeline that ran synapse-cli on its own checkout hands the result to the server here, and
 		// it is recorded through the same recorder as a server analysis.
 		mux.HandleFunc("POST /api/v1/projects/{key}/analyses/import", rt.authz(userdom.PermOperate, rt.importProjectAnalysis))

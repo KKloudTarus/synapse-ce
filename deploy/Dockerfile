@@ -82,6 +82,7 @@ RUN apt-get update \
     && useradd -r -u 10001 -m -d /home/synapse synapse \
     && mkdir -p /home/synapse/.m2 /home/synapse/.gradle /home/synapse/project-source-artifacts \
     && chown -R synapse:synapse /home/synapse
+COPY internal/infrastructure/report/assets/LiberationSans-LICENSE.txt /usr/share/licenses/synapse-ce/LiberationSans-LICENSE.txt
 COPY --from=build /out/synapse-api /usr/local/bin/synapse-api
 COPY --from=build /out/synapse-dast-helper /usr/local/bin/synapse-dast-helper
 COPY --from=build /out/synapse-cli /usr/local/bin/synapse-cli
@@ -103,6 +104,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/synapse-api"]
 # target: api – minimal local-development API image (the historical default).
 # ---------------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot AS api
+COPY internal/infrastructure/report/assets/LiberationSans-LICENSE.txt /usr/share/licenses/synapse-ce/LiberationSans-LICENSE.txt
 COPY --from=build /out/synapse-api /synapse-api
 COPY --from=build /out/synapse-dast-helper /synapse-dast-helper
 COPY --from=build /out/synapse-cli /synapse-cli
@@ -139,6 +141,7 @@ RUN apt-get update \
          /var/lib/synapse/project-uploads \
          /var/lib/synapse/project-source-artifacts \
          /var/lib/synapse/cache
+COPY internal/infrastructure/report/assets/LiberationSans-LICENSE.txt /usr/share/licenses/synapse-ce/LiberationSans-LICENSE.txt
 COPY --from=build /out/synapse-api /opt/synapse/synapse-api
 COPY --from=build /out/synapse-worker /opt/synapse/synapse-worker
 COPY --from=build /out/synapse-egress-broker /opt/synapse/synapse-egress-broker

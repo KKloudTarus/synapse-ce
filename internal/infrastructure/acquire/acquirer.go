@@ -143,6 +143,9 @@ var _ ports.Acquirer = (*Acquirer)(nil)
 // Acquire dispatches on the target kind. local is scanned in place; git is
 // shallow-cloned into a temp workspace that is cleaned up after the scan.
 func (a *Acquirer) Acquire(ctx context.Context, req ports.AcquireRequest) (*ports.Workspace, error) {
+	if req.ProjectSource != nil {
+		return acquireProjectSource(ctx, req, a.maxWorkspaceBytes)
+	}
 	switch req.Kind {
 	case "", ports.TargetLocal:
 		return acquireLocal(req.Value, a.maxWorkspaceBytes)

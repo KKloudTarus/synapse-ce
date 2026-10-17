@@ -5,17 +5,21 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sla"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeintent"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	usecase "github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing"
 )
@@ -24,6 +28,10 @@ type workflowIntegrations struct {
 	ports.IntegrationStore
 	item integration.Integration
 }
+
+type mutableWorkflowClock struct{ now time.Time }
+
+func (c *mutableWorkflowClock) Now() time.Time { return c.now }
 
 func (s workflowIntegrations) GetIntegration(ctx context.Context, id shared.ID) (integration.Integration, error) {
 	tenant, ok := shared.TenantFrom(ctx)
@@ -63,6 +71,12 @@ func (a *workflowAudit) Record(_ context.Context, entry ports.AuditEntry) error 
 type workflowProvider struct {
 	mu             sync.Mutex
 	posts          int
+	updates        int
+	transitions    int
+	comments       int
+	commentBodies  []string
+	commentErr     error
+	commentFound   bool
 	created        domain.RemoteTicket
 	createErr      error
 	hits           []domain.RemoteTicket
@@ -70,6 +84,8 @@ type workflowProvider struct {
 	metadataErr    error
 	validationErr  error
 	validationFn   func(json.RawMessage) error
+	observation    ports.TicketObservation
+	observationErr error
 	createdPayload json.RawMessage
 	discoverStart  chan struct{}
 	discoverWait   <-chan struct{}
@@ -99,6 +115,9 @@ func (p *workflowProvider) DiscoverTickets(ctx context.Context, _ string, _ stri
 func (p *workflowProvider) FormatTicketDescription(body string, _ []ports.RenderedLink) (json.RawMessage, error) {
 	return json.Marshal(body)
 }
+func (p *workflowProvider) FormatTicketGroupDescription(body string, _ []ports.RenderedLink, _ []string, _ [][]string) (json.RawMessage, error) {
+	return json.Marshal(body)
+}
 func (p *workflowProvider) ValidateTicketPayload(raw json.RawMessage) error {
 	p.mu.Lock()
 	validationFn, validationErr := p.validationFn, p.validationErr
@@ -114,6 +133,46 @@ func (p *workflowProvider) CreateTicket(_ context.Context, raw json.RawMessage) 
 	p.posts++
 	p.createdPayload = append(json.RawMessage(nil), raw...)
 	return p.created, p.createErr
+}
+func (p *workflowProvider) UpdateTicket(_ context.Context, _ string, raw json.RawMessage) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.updates++
+	p.createdPayload = append(json.RawMessage(nil), raw...)
+	return nil
+}
+func (p *workflowProvider) TransitionTicket(_ context.Context, _ string, _ string, comment string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.transitions++
+	p.commentBodies = append(p.commentBodies, comment)
+	return nil
+}
+func (p *workflowProvider) CommentTicket(_ context.Context, _ string, body string, _ string) (ports.TicketCommentReceipt, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.comments++
+	p.commentBodies = append(p.commentBodies, body)
+	if p.commentErr != nil {
+		return ports.TicketCommentReceipt{}, p.commentErr
+	}
+	return ports.TicketCommentReceipt{ID: fmt.Sprintf("comment-%d", p.comments)}, nil
+}
+func (p *workflowProvider) FindTicketComment(context.Context, string, string, string, string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.commentFound, nil
+}
+func (p *workflowProvider) TicketIdentity(context.Context) (string, error) {
+	return "jira-integration", nil
+}
+func (p *workflowProvider) GetTicket(context.Context, string) (ports.TicketObservation, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.observation, p.observationErr
+}
+func (p *workflowProvider) RedactExternalTicketText(value string) (string, error) {
+	return value, nil
 }
 func (p *workflowProvider) SearchTicketMarker(context.Context, string, string, string) ([]domain.RemoteTicket, error) {
 	p.mu.Lock()
@@ -168,6 +227,70 @@ func (f workflowFixture) mapping(t *testing.T, security string) domain.Mapping {
 		t.Fatal(err)
 	}
 	return m
+}
+
+func TestWorkflowGroupedSubmissionRetainsRemoteTicket(t *testing.T) {
+	f := newWorkflowFixture(t)
+	ctx := context.Background()
+	seedTicketParent(t, f.engagements, f.findings, "tenant-a", "group-engagement", "group-finding-a", "group-project", f.clock.Now())
+	first, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "group-engagement", "group-finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.AdvisoryID = "CVE-2026-12345"
+	if err = f.findings.Upsert(shared.WithTenant(ctx, "tenant-a"), []finding.Finding{first}); err != nil {
+		t.Fatal(err)
+	}
+	f.policy.setting.EngagementID = "group-engagement"
+	mapping, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Project, ScopeID: "group-project", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", DataClass: notification.DataClassDetail, GroupingMode: domain.GroupingVulnerabilityProject, SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", Version: 1, Actor: "admin", AllowAdmin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: mapping.ID, FindingID: "group-finding-a", EngagementID: "group-engagement"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, fresh, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: mapping.ID, FindingID: "group-finding-a", EngagementID: "group-engagement", RequestKey: "group-create", PreviewDigest: preview.Digest, Actor: "admin"})
+	if err != nil || !fresh || created.Action != domain.Create {
+		t.Fatalf("create grouped intent: %#v fresh=%t err=%v", created, fresh, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	groups := any(f.store).(ports.TicketGroupStore)
+	group, found, err := groups.GetTicketGroup(ctx, "tenant-a", mapping.ID, "group-project", "CVE-2026-12345")
+	if err != nil || !found || group.Remote.ID != "SEC-1" {
+		t.Fatalf("group completion: %#v found=%t err=%v", group, found, err)
+	}
+
+	second, err := finding.NewManual("group-finding-b", "group-engagement", finding.ManualInput{Title: "Rescanned group finding", Severity: shared.SeverityHigh}, f.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.AdvisoryID = "CVE-2026-12345"
+	if err = f.findings.Upsert(shared.WithTenant(ctx, "tenant-a"), []finding.Finding{second}); err != nil {
+		t.Fatal(err)
+	}
+	preview, err = f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: mapping.ID, FindingID: "group-finding-b", EngagementID: "group-engagement"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, fresh, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: mapping.ID, FindingID: "group-finding-b", EngagementID: "group-engagement", RequestKey: "group-update", PreviewDigest: preview.Digest, Actor: "admin"})
+	if err != nil || !fresh || updated.Action != domain.Update {
+		t.Fatalf("update grouped intent: %#v fresh=%t err=%v", updated, fresh, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.posts != 1 || f.provider.updates != 1 {
+		t.Fatalf("group update dispatched as a create: posts=%d updates=%d", f.provider.posts, f.provider.updates)
+	}
+	if _, err = f.workflow.SaveMapping(ctx, "tenant-a", mapping.ID, usecase.MappingInput{IntegrationID: "jira", Scope: domain.Project, ScopeID: "group-project", ProjectKey: "OTHER", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", DataClass: notification.DataClassDetail, GroupingMode: domain.GroupingVulnerabilityProject, SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", Version: mapping.Version, Actor: "admin", AllowAdmin: true}); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("mapping destination change accepted: %v", err)
+	}
 }
 
 func TestWorkflowBreakerRecoveryAfterCredentialRotationAndReplacement(t *testing.T) {
@@ -277,10 +400,15 @@ func TestWorkflowPreviewSubmitSnapshotsAndPostsOnlyFromTick(t *testing.T) {
 		t.Fatalf("snapshot marker labels = %#v", snapshotLabels)
 	}
 	delete(snapshot["fields"].(map[string]any), "labels")
+	facts := snapshot["_synapse"].(map[string]any)
+	if facts["request_preview_digest"] != p.Digest {
+		t.Fatal("submit lost original request preview identity")
+	}
+	delete(facts, "request_preview_digest")
 	previewFields := preview["fields"].(map[string]any)
 	delete(previewFields, "labels")
 	if !reflect.DeepEqual(preview, snapshot) {
-		t.Fatalf("snapshot differs beyond marker\npreview=%s\nsnapshot=%s", p.Payload, intent.Snapshot)
+		t.Fatalf("snapshot differs beyond marker and request identity\npreview=%s\nsnapshot=%s", p.Payload, intent.Snapshot)
 	}
 	if _, err = f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
 		t.Fatal(err)
@@ -1096,5 +1224,580 @@ func TestWorkflowPreflightRereadsAuthorityAfterMetadataDiscovery(t *testing.T) {
 				t.Fatalf("mid-discovery %s authority=%+v posts=%d err=%v", kind, got, f.provider.posts, err)
 			}
 		})
+	}
+}
+
+func TestWorkflowAutoPushIsOptInConfirmedAndIdempotent(t *testing.T) {
+	f := newWorkflowFixture(t)
+	input := usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "{{.title}}", DescriptionTemplate: "{{.title}}", AutoPushEnabled: true, AutoPushMinSeverity: shared.SeverityHigh, Version: 1, Actor: "admin"}
+	if _, err := f.workflow.SaveMapping(context.Background(), "tenant-a", "", input); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("non-admin auto-push enable: %v", err)
+	}
+	input.AllowAdmin = true
+	if _, err := f.workflow.SaveMapping(context.Background(), "tenant-a", "", input); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("auto-push without durable event source: %v", err)
+	}
+	f.workflow.SetAutoPushSourceAvailable(true)
+	m, err := f.workflow.SaveMapping(context.Background(), "tenant-a", "", input)
+	if err != nil || m.AutoPushEnabledAt == nil {
+		t.Fatalf("save auto policy: %#v %v", m, err)
+	}
+	current, err := f.findings.GetByEngagementAndID(shared.WithTenant(context.Background(), "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(context.Background(), "tenant-a"), "eng-a", "finding-a", finding.StatusConfirmed, current.Version); err != nil {
+		t.Fatal(err)
+	}
+	event := ports.TicketAutoPushEvent{ID: "status-confirmed", OccurredAt: f.clock.Now().Add(time.Nanosecond), EngagementID: "eng-a", FindingID: "finding-a", ToStatus: string(finding.StatusConfirmed)}
+	if err = f.store.AppendAutoPushEvent("tenant-a", event); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	intents, err := f.store.ListFindingIntents(context.Background(), "tenant-a", "finding-a", 10)
+	if err != nil || len(intents) != 1 || f.provider.posts != 1 {
+		t.Fatalf("first auto push intents=%+v posts=%d err=%v", intents, f.provider.posts, err)
+	}
+	if _, err = f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	intents, _ = f.store.ListFindingIntents(context.Background(), "tenant-a", "finding-a", 10)
+	if len(intents) != 1 || f.provider.posts != 1 {
+		t.Fatalf("replay created duplicate: intents=%d posts=%d", len(intents), f.provider.posts)
+	}
+}
+
+func TestWorkflowAutoPushDispatchRechecksCurrentFindingAndPolicy(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetAutoPushSourceAvailable(true)
+	m, err := f.workflow.SaveMapping(context.Background(), "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "{{.title}}", DescriptionTemplate: "{{.title}}", AutoPushEnabled: true, AutoPushMinSeverity: shared.SeverityHigh, Version: 1, Actor: "admin", AllowAdmin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, _ := f.findings.GetByEngagementAndID(shared.WithTenant(context.Background(), "tenant-a"), "eng-a", "finding-a")
+	confirmed, err := f.findings.UpdateStatus(shared.WithTenant(context.Background(), "tenant-a"), "eng-a", "finding-a", finding.StatusConfirmed, current.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(context.Background(), usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i, created, err := f.workflow.Submit(context.Background(), usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "auto:current-state", PreviewDigest: p.Digest, Actor: "system:auto_push"})
+	if err != nil || !created {
+		t.Fatalf("create auto intent: %#v %t %v", i, created, err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(context.Background(), "tenant-a"), "eng-a", "finding-a", finding.StatusOpen, confirmed.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.store.GetIntent(context.Background(), "tenant-a", i.ID)
+	if err != nil || got.State != writeintent.Failed || got.ErrorCode != "preflight_refused" || f.provider.posts != 0 {
+		t.Fatalf("stale auto intent=%+v posts=%d err=%v", got, f.provider.posts, err)
+	}
+}
+
+func TestWorkflowAutoPushDefaultsMinimumSeverityToHigh(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetAutoPushSourceAvailable(true)
+	m, err := f.workflow.SaveMapping(context.Background(), "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", SecurityLevel: "security-1", SummaryTemplate: "{{.title}}", DescriptionTemplate: "{{.title}}", AutoPushEnabled: true, Actor: "admin", AllowAdmin: true})
+	if err != nil || m.AutoPushMinSeverity != shared.SeverityHigh {
+		t.Fatalf("default threshold mapping=%+v err=%v", m, err)
+	}
+}
+
+func TestWorkflowStatusTransitionIsIdempotent(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "status-origin", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("origin created=%t err=%v", created, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	// A rescanned title update changes the finding revision but not its status
+	// episode, so it must not repeat the remote transition.
+	item, err = f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.Title = "Ticket finding, rescanned"
+	if err = f.findings.Upsert(shared.WithTenant(ctx, "tenant-a"), []finding.Finding{item}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.transitions != 1 {
+		items, _ := f.store.ListFindingIntents(ctx, "tenant-a", "finding-a", 10)
+		targets, targetErr := f.store.ListTicketStatusTargets(ctx, "tenant-a", 10)
+		t.Fatalf("transitions=%d intents=%+v targets=%+v targetErr=%v", f.provider.transitions, items, targets, targetErr)
+	}
+	if f.provider.updates != 1 {
+		items, _ := f.store.ListFindingIntents(ctx, "tenant-a", "finding-a", 10)
+		t.Fatalf("field refreshes=%d, want one after the transition; intents=%+v", f.provider.updates, items)
+	}
+	progresses := any(f.store).(ports.TicketStatusProgressStore)
+	progress, err := progresses.GetTicketStatusProgress(ctx, "tenant-a", m.ID, "eng-a", "finding-a")
+	if err != nil || progress.AppliedState != domain.SyncRemediated || progress.UpdateIntentID.IsZero() || progress.IntegrationAuthor != "jira-integration" {
+		t.Fatalf("status progress=%+v err=%v", progress, err)
+	}
+}
+
+func TestWorkflowStatusCommentRequiresDedicatedReceiptBeforeFieldRefresh(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "durable-comment-origin", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("submit created=%t err=%v", created, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // create
+		t.Fatal(err)
+	}
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // transition-only, Jira 204
+		t.Fatal(err)
+	}
+	f.provider.mu.Lock()
+	bundled := append([]string(nil), f.provider.commentBodies...)
+	f.provider.commentErr = &ports.TicketProviderError{Code: "network", Ambiguous: true}
+	f.provider.mu.Unlock()
+	if len(bundled) != 1 || bundled[0] != "" {
+		t.Fatalf("versioned transition carried bundled comment: %#v", bundled)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // dedicated comment becomes uncertain
+		t.Fatal(err)
+	}
+	if f.provider.comments != 1 || f.provider.updates != 0 {
+		t.Fatalf("comment writes=%d field refreshes=%d", f.provider.comments, f.provider.updates)
+	}
+	intents, err := f.store.ListFindingIntents(ctx, "tenant-a", "finding-a", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var comment domain.Intent
+	for _, candidate := range intents {
+		if candidate.Action == domain.Comment {
+			comment = candidate
+		}
+	}
+	if comment.ID.IsZero() || comment.State != writeintent.Uncertain {
+		t.Fatalf("comment intent=%+v", comment)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // uncertain is never resent
+		t.Fatal(err)
+	}
+	if f.provider.comments != 1 || f.provider.updates != 0 {
+		t.Fatalf("lost acknowledgement retried comment=%d updates=%d", f.provider.comments, f.provider.updates)
+	}
+	f.provider.mu.Lock()
+	f.provider.commentFound = true
+	f.provider.mu.Unlock()
+	if _, err = f.workflow.Reconcile(ctx, "tenant-a", comment.ID, comment.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // only now can a field refresh run
+		t.Fatal(err)
+	}
+	if f.provider.comments != 1 || f.provider.updates != 1 {
+		t.Fatalf("reconciliation comment=%d updates=%d", f.provider.comments, f.provider.updates)
+	}
+}
+
+func TestWorkflowStatusCommentPreflightRejectsStatusChangedDuringMetadata(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "comment-metadata-fence", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("submit created=%t err=%v", created, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // transition-only
+		t.Fatal(err)
+	}
+	fresh, err := usecase.NewWorkflow(f.store, f.integrations, workflowProviders{f.provider}, f.findings, f.engagements, f.policy, f.audit, &ticketIDs{}, f.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh.SetSLAStore(memory.NewSLAStore())
+	fresh.SetPublicBaseURL("https://console.example")
+	release := make(chan struct{})
+	f.provider.discoverStart = make(chan struct{}, 1)
+	f.provider.discoverWait = release
+	done := make(chan error, 1)
+	go func() { _, tickErr := fresh.Tick(ctx, "tenant-a", 10); done <- tickErr }()
+	select {
+	case <-f.provider.discoverStart:
+	case <-time.After(time.Second):
+		t.Fatal("comment metadata discovery did not start")
+	}
+	item, err = f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusOpen, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.comments != 0 || f.provider.updates != 0 {
+		t.Fatalf("stale comment wrote comments=%d updates=%d", f.provider.comments, f.provider.updates)
+	}
+	intents, err := f.store.ListFindingIntents(ctx, "tenant-a", "finding-a", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenComment := false
+	for _, candidate := range intents {
+		if candidate.Action == domain.Comment {
+			seenComment = true
+			if candidate.State != writeintent.Failed || candidate.ErrorCode != "preflight_refused" {
+				t.Fatalf("comment preflight=%+v", candidate)
+			}
+		}
+	}
+	if !seenComment {
+		t.Fatal("metadata race did not create a durable comment command")
+	}
+}
+
+func TestWorkflowStatusCommentConcurrentPlanningCreatesOneDurableCommand(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "concurrent-comment-origin", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("submit created=%t err=%v", created, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // transition completes
+		t.Fatal(err)
+	}
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, tickErr := f.workflow.Tick(ctx, "tenant-a", 10)
+			errs <- tickErr
+		}()
+	}
+	for range 2 {
+		if tickErr := <-errs; tickErr != nil {
+			t.Fatal(tickErr)
+		}
+	}
+	intents, err := f.store.ListFindingIntents(ctx, "tenant-a", "finding-a", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments := 0
+	for _, candidate := range intents {
+		if candidate.Action == domain.Comment {
+			comments++
+		}
+	}
+	if comments != 1 || f.provider.comments != 1 {
+		t.Fatalf("comment intents=%d provider writes=%d", comments, f.provider.comments)
+	}
+}
+
+func TestWorkflowStatusSyncUsesDistinctEpisodesForReopen(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123", domain.SyncReopen: "124"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "episode-origin", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("origin created=%t err=%v", created, err)
+	}
+	tick := func(n int) {
+		for range n {
+			if _, err := f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	set := func(status finding.Status) {
+		item, getErr := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if _, updateErr := f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", status, item.Version); updateErr != nil {
+			t.Fatal(updateErr)
+		}
+	}
+	// Initial open, close, reopen, and close again are four distinct state
+	// episodes. Repeating a tick after each completion must not add a fifth.
+	tick(4)
+	set(finding.StatusRemediated)
+	tick(3)
+	set(finding.StatusConfirmed)
+	tick(3)
+	set(finding.StatusRemediated)
+	tick(4)
+	if f.provider.transitions != 4 || f.provider.updates != 4 {
+		t.Fatalf("transitions=%d updates=%d", f.provider.transitions, f.provider.updates)
+	}
+	progresses := any(f.store).(ports.TicketStatusProgressStore)
+	progress, err := progresses.GetTicketStatusProgress(ctx, "tenant-a", m.ID, "eng-a", "finding-a")
+	if err != nil || progress.Episode != 4 || progress.AppliedState != domain.SyncRemediated {
+		t.Fatalf("progress=%+v err=%v", progress, err)
+	}
+}
+
+func TestWorkflowStatusSyncReopensOnAcceptedRiskExpiry(t *testing.T) {
+	base := newWorkflowFixture(t)
+	ctx := context.Background()
+	clock := &mutableWorkflowClock{now: base.clock.Now()}
+	workflow, err := usecase.NewWorkflow(base.store, base.integrations, workflowProviders{base.provider}, base.findings, base.engagements, base.policy, base.audit, &ticketIDs{}, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow.SetPublicBaseURL("https://console.example")
+	slaStore := memory.NewSLAStore()
+	workflow.SetSLAStore(slaStore)
+	m, err := workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncAccepted: "125", domain.SyncReopen: "124"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "accepted-expiry-origin", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("origin created=%t err=%v", created, err)
+	}
+	tick := func(n int) {
+		for range n {
+			if _, err := workflow.Tick(ctx, "tenant-a", 10); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// The initial open episode uses reopen. This proves a later expiry cannot
+	// reuse its completed request key.
+	tick(4)
+	assessment, err := sla.Evaluate(sla.AssessmentInput{TenantID: "tenant-a", EngagementID: "eng-a", FindingID: "finding-a", Risk: sla.Inputs{Severity: shared.SeverityHigh}}, sla.DefaultConfig(), clock.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = slaStore.UpsertAssessment(shared.WithTenant(ctx, "tenant-a"), assessment); err != nil {
+		t.Fatal(err)
+	}
+	current, err := slaStore.Current(shared.WithTenant(ctx, "tenant-a"), "tenant-a", "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := clock.now.Add(time.Hour)
+	next, event, err := sla.ApplyTransition(current.Lifecycle, "accepted-event", sla.TransitionCommand{To: sla.RemediationAcceptedRisk, Reason: "approved exception", CompensatingControl: "network isolation", AcceptanceExpiresAt: &expires, Actor: "alice", ExpectedVersion: current.Lifecycle.Version}, clock.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = slaStore.SaveTransition(shared.WithTenant(ctx, "tenant-a"), next, event); err != nil {
+		t.Fatal(err)
+	}
+	tick(3)
+	clock.now = expires
+	tick(4)
+	if base.provider.transitions != 3 || base.provider.updates != 3 {
+		t.Fatalf("transitions=%d updates=%d", base.provider.transitions, base.provider.updates)
+	}
+	progresses := any(base.store).(ports.TicketStatusProgressStore)
+	progress, err := progresses.GetTicketStatusProgress(ctx, "tenant-a", m.ID, "eng-a", "finding-a")
+	if err != nil || progress.Episode != 3 || progress.AppliedState != domain.SyncReopen {
+		t.Fatalf("progress=%+v err=%v", progress, err)
+	}
+}
+
+func TestWorkflowStatusSyncFairlyAdvancesPastUnconfiguredTargetsAtFrozenClock(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 11; n++ {
+		id := shared.ID(fmt.Sprintf("fairness-finding-%02d", n))
+		item, e := finding.NewManual(id, "eng-a", finding.ManualInput{Title: id.String(), Severity: shared.SeverityHigh}, f.clock.Now())
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = f.findings.Upsert(shared.WithTenant(ctx, "tenant-a"), []finding.Finding{item}); e != nil {
+			t.Fatal(e)
+		}
+		preview, e := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, EngagementID: "eng-a", FindingID: id})
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, created, e := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, EngagementID: "eng-a", FindingID: id, RequestKey: "fairness-" + id.String(), PreviewDigest: preview.Digest, Actor: "admin"}); e != nil || !created {
+			t.Fatalf("submit %s created=%t err=%v", id, created, e)
+		}
+	}
+	for n := 0; n < 3; n++ {
+		if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	progresses := any(f.store).(ports.TicketStatusProgressStore)
+	if _, err = progresses.GetTicketStatusProgress(ctx, "tenant-a", m.ID, "eng-a", "fairness-finding-10"); err != nil {
+		t.Fatalf("unvisited target starved behind frozen-clock targets: %v", err)
+	}
+}
+
+func TestWorkflowStatusSyncRefusesRetargetedMapping(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "retarget-origin", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("origin created=%t err=%v", created, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	m.ProjectKey = "OPS"
+	if _, err = f.store.UpdateMapping(ctx, "tenant-a", m, m.Version); err != nil {
+		t.Fatal(err)
+	}
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.transitions != 0 {
+		t.Fatalf("retargeted mapping sent %d transitions", f.provider.transitions)
+	}
+}
+
+func TestWorkflowStatusSyncUsesCurrentCredentialRevision(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "credential-origin", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("origin created=%t err=%v", created, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	f.integrations.item.ConnectionRevision++
+	f.integrations.item.CredentialRevision++
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if f.provider.transitions != 1 || f.provider.updates != 1 {
+		t.Fatalf("transitions=%d updates=%d", f.provider.transitions, f.provider.updates)
 	}
 }

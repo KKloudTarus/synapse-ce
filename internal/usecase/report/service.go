@@ -241,30 +241,66 @@ func (s *Service) load(ctx context.Context, tenantID, engagementID shared.ID) (l
 	if s.judgments != nil {
 		projectAcceptedJudgments(ctx, s.judgments, engagementID, &insight)
 	}
-	// Pin the report timestamp to the SCAN time (not generation time) so output is a
-	// pure function of stored data – byte-identical + SHA-256-stable across repeated
-	// generations (determinism fix). Fall back to Now only with no scan.
-	generatedAt := s.clock.Now()
+	// Pin the report timestamp to stored source state (not generation time) so output
+	// is byte-identical + SHA-256-stable across repeated generations. Engagements
+	// without a scan use their stored audit time; old incomplete fixtures fall back
+	// to the Unix epoch rather than a process clock.
+	generatedAt := eng.Audit.UpdatedAt
+	if generatedAt.IsZero() {
+		generatedAt = eng.Audit.CreatedAt
+	}
+	if generatedAt.IsZero() {
+		generatedAt = time.Unix(0, 0)
+	}
 	if insight.HasScan && !insight.ScanTime.IsZero() {
 		generatedAt = insight.ScanTime
 	}
-	return loaded{eng: eng, findings: findings, insight: insight, generatedAt: generatedAt}, nil
+	return loaded{eng: eng, findings: findings, insight: insight, generatedAt: generatedAt.UTC()}, nil
 }
 
 // Generate renders the engagement's PDF report from stored data and returns the
 // PDF bytes plus the lowercase hex SHA-256 of those bytes (the integrity seal).
 // l.findings is promotable-gated by load(), so an unproven finding never reaches the PDF.
 func (s *Service) Generate(ctx context.Context, tenantID, engagementID shared.ID) ([]byte, string, error) {
-	l, err := s.load(ctx, tenantID, engagementID)
+	publication, err := s.BuildEngagementPublication(ctx, tenantID, engagementID)
 	if err != nil {
 		return nil, "", err
 	}
+	return publication.PDF, publication.Digest, nil
+}
+
+// BuildEngagementPublication builds the PDF and its structured stored-fact
+// projection from one loaded report snapshot. The projection lets governed
+// delivery surfaces present key facts without extracting them from rendered PDF
+// text, and it retains the actual verified evidence-chain head when available.
+func (s *Service) BuildEngagementPublication(ctx context.Context, tenantID, engagementID shared.ID) (ports.EngagementReportPublication, error) {
+	l, err := s.load(ctx, tenantID, engagementID)
+	if err != nil {
+		return ports.EngagementReportPublication{}, err
+	}
 	pdf, err := s.renderer.Render(ctx, l.eng, l.findings, l.insight, l.generatedAt, s.version)
 	if err != nil {
-		return nil, "", fmt.Errorf("render report: %w", err)
+		return ports.EngagementReportPublication{}, fmt.Errorf("render report: %w", err)
 	}
 	sum := sha256.Sum256(pdf)
-	return pdf, hex.EncodeToString(sum[:]), nil
+	return ports.EngagementReportPublication{
+		Document:        s.buildDocument(l, Options{}),
+		PDF:             pdf,
+		Digest:          hex.EncodeToString(sum[:]),
+		EvidenceHead:    l.insight.EvidenceHead,
+		GeneratedAt:     l.generatedAt.UTC(),
+		HighestSeverity: highestSeverity(l.findings),
+	}, nil
+}
+
+func highestSeverity(findings []finding.Finding) shared.Severity {
+	var highest shared.Severity
+	for _, item := range findings {
+		if shared.SeverityRank(item.Severity) > shared.SeverityRank(highest) {
+			highest = item.Severity
+		}
+	}
+	return highest
 }
 
 // Render builds a customized report in opts.Format (html|docx) from stored data and

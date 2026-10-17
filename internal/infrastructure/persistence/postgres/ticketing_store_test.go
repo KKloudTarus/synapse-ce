@@ -75,16 +75,24 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		for _, tenant := range []string{"ticket-a", "ticket-b"} {
-			_ = WithTenant(context.Background(), pool, tenant, func(tx pgx.Tx) error {
-				for _, table := range []string{"ticket_dispatch_breakers", "ticket_intents", "ticket_links", "ticket_mappings"} {
-					_, _ = tx.Exec(context.Background(), "DELETE FROM "+table+" WHERE tenant_id=$1", tenant)
+			if err := WithTenant(context.Background(), pool, tenant, func(tx pgx.Tx) error {
+				if err := deleteTicketFixtureRows(context.Background(), tx, tenant); err != nil {
+					return err
 				}
-				_, _ = tx.Exec(context.Background(), `DELETE FROM findings WHERE tenant_id=$1 AND id LIKE 'ticket-finding-%'`, tenant)
-				_, _ = tx.Exec(context.Background(), `DELETE FROM integrations WHERE tenant_id=$1 AND id LIKE 'ticket-integration-%'`, tenant)
-				_, _ = tx.Exec(context.Background(), `DELETE FROM engagements WHERE tenant_id=$1 AND id LIKE 'ticket-engagement-%'`, tenant)
-				_, _ = tx.Exec(context.Background(), `DELETE FROM projects WHERE tenant_id=$1 AND id LIKE 'ticket-project-%'`, tenant)
+				for _, statement := range []string{
+					`DELETE FROM findings WHERE tenant_id=$1 AND id LIKE 'ticket-finding-%'`,
+					`DELETE FROM integrations WHERE tenant_id=$1 AND id LIKE 'ticket-integration-%'`,
+					`DELETE FROM engagements WHERE tenant_id=$1 AND id LIKE 'ticket-engagement-%'`,
+					`DELETE FROM projects WHERE tenant_id=$1 AND id LIKE 'ticket-project-%'`,
+				} {
+					if _, err := tx.Exec(context.Background(), statement, tenant); err != nil {
+						return err
+					}
+				}
 				return nil
-			})
+			}); err != nil {
+				t.Errorf("clean ticket fixture %s: %v", tenant, err)
+			}
 		}
 	})
 	fixture := storetest.Fixture{Tenant: "ticket-a", Other: "ticket-b",
@@ -93,6 +101,7 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertTicketAutoPushReceiptQueue(t, ctx, pool, store, "ticket-a")
 	storetest.Run(t, store, fixture)
 	storetest.ConcurrentReplay(t, store, fixture)
 	storetest.ConcurrentClaim(t, store, fixture)
@@ -102,7 +111,7 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	storetest.Dispatch(t, store, fixture)
 	assertTicketRetryAuditRollback(t, ctx, pool, store, fixture)
 	assertTicketStoreAuthoritativeProjectReferences(t, ctx, pool, store, fixture)
-	for _, table := range []string{"ticket_mappings", "ticket_links", "ticket_intents", "ticket_dispatch_breakers"} {
+	for _, table := range []string{"ticket_mappings", "ticket_links", "ticket_intents", "ticket_dispatch_breakers", "ticket_auto_push_receipts", "ticket_external_observations", "ticket_retest_proposals", "ticket_external_comments", "ticket_inbound_poll_progress"} {
 		var enabled, forced bool
 		err = pool.QueryRow(ctx, `SELECT relrowsecurity,relforcerowsecurity
             FROM pg_class WHERE oid=$1::regclass`, table).Scan(&enabled, &forced)
@@ -118,7 +127,7 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	for _, statement := range []string{
 		`CREATE ROLE ` + role + ` NOSUPERUSER NOBYPASSRLS`,
 		`GRANT USAGE ON SCHEMA public TO ` + role,
-		`GRANT SELECT,INSERT,UPDATE,DELETE ON ticket_mappings,ticket_links,ticket_intents,ticket_dispatch_breakers TO ` + role,
+		`GRANT SELECT,INSERT,UPDATE,DELETE ON ticket_mappings,ticket_links,ticket_intents,ticket_dispatch_breakers,ticket_auto_push_receipts,ticket_external_observations,ticket_retest_proposals,ticket_external_comments,ticket_inbound_poll_progress TO ` + role,
 	} {
 		if _, err = pool.Exec(ctx, statement); err != nil {
 			t.Fatalf("RLS role: %v", err)
@@ -141,7 +150,7 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 		})
 	}
 	for _, tenant := range []string{"ticket-b", ""} {
-		for _, table := range []string{"ticket_mappings", "ticket_links", "ticket_intents", "ticket_dispatch_breakers"} {
+		for _, table := range []string{"ticket_mappings", "ticket_links", "ticket_intents", "ticket_dispatch_breakers", "ticket_auto_push_receipts", "ticket_external_observations", "ticket_retest_proposals", "ticket_external_comments", "ticket_inbound_poll_progress"} {
 			err = withRole(tenant, func(tx pgx.Tx) error {
 				var n int
 				if e := tx.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&n); e != nil {
@@ -226,6 +235,46 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	_, err = store.GetMapping(ctx, "ticket-b", "ticket-map-a")
 	if !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("other tenant mapping visible: %v", err)
+	}
+}
+
+func assertTicketAutoPushReceiptQueue(t *testing.T, ctx context.Context, pool *pgxpool.Pool, store *TicketStore, tenant shared.ID) {
+	t.Helper()
+	id := shared.ID("ticket-auto-event-" + time.Now().UTC().Format("20060102150405.000000000"))
+	err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO notification_events
+            (tenant_id,id,event_type,source_kind,source_id,engagement_id,severity,schema_version,occurred_at,data,subject_kind,subject_id)
+            VALUES($1,$2,'finding.status_changed','finding_status',$3,'ticket-engagement-a','high',1,now(),'{"to_status":"confirmed"}'::jsonb,'finding','ticket-finding-a')`, tenant.String(), id.String(), id.String())
+		return err
+	})
+	if err != nil {
+		t.Fatalf("append status event: %v", err)
+	}
+	events, err := store.ListAutoPushEvents(ctx, tenant, time.Now().UTC().Add(time.Second), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event ports.TicketAutoPushEvent
+	for _, candidate := range events {
+		if candidate.ID == id {
+			event = candidate
+			break
+		}
+	}
+	if event.ID != id || event.FindingID != "ticket-finding-a" || event.ToStatus != "confirmed" {
+		t.Fatalf("receipt event=%+v all=%+v", event, events)
+	}
+	if err = store.CompleteAutoPushEvent(ctx, tenant, event, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	events, err = store.ListAutoPushEvents(ctx, tenant, time.Now().UTC().Add(time.Second), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range events {
+		if candidate.ID == id {
+			t.Fatal("completed receipt was returned")
+		}
 	}
 }
 
@@ -528,17 +577,31 @@ func TestTicketStorePersistsAfterPoolReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { pool.Close() })
 	t.Cleanup(func() {
-		_ = WithTenant(context.Background(), pool, tenant, func(tx pgx.Tx) error {
-			for _, table := range []string{"ticket_dispatch_breakers", "ticket_intents", "ticket_links", "ticket_mappings"} {
-				_, _ = tx.Exec(context.Background(), "DELETE FROM "+table+" WHERE tenant_id=$1", tenant)
+		assertTicketFixtureRowsAbsent(t, pool, tenant)
+	})
+	t.Cleanup(func() {
+		if err := WithTenant(context.Background(), pool, tenant, func(tx pgx.Tx) error {
+			if err := deleteTicketFixtureRows(context.Background(), tx, tenant); err != nil {
+				return err
 			}
-			_, _ = tx.Exec(context.Background(), `DELETE FROM findings WHERE tenant_id=$1 AND id=$2`, tenant, finding)
-			_, _ = tx.Exec(context.Background(), `DELETE FROM integrations WHERE tenant_id=$1 AND id=$2`, tenant, integration)
-			_, _ = tx.Exec(context.Background(), `DELETE FROM engagements WHERE tenant_id=$1 AND id=$2`, tenant, engagement)
+			for _, statement := range []struct {
+				query string
+				args  []any
+			}{
+				{`DELETE FROM findings WHERE tenant_id=$1 AND id=$2`, []any{tenant, finding}},
+				{`DELETE FROM integrations WHERE tenant_id=$1 AND id=$2`, []any{tenant, integration}},
+				{`DELETE FROM engagements WHERE tenant_id=$1 AND id=$2`, []any{tenant, engagement}},
+			} {
+				if _, err := tx.Exec(context.Background(), statement.query, statement.args...); err != nil {
+					return err
+				}
+			}
 			return nil
-		})
-		pool.Close()
+		}); err != nil {
+			t.Errorf("clean reopen ticket fixture: %v", err)
+		}
 	})
 
 	store, err = NewTicketStore(pool)
@@ -603,5 +666,49 @@ func TestTicketStorePersistsAfterPoolReopen(t *testing.T) {
 	if err != nil || len(links) != 1 || links[0].ID != intent.ID || links[0].IntegrationID != integration ||
 		links[0].ExternalID != remote.ID || links[0].ExternalURL != remote.URL {
 		t.Fatalf("completion link after second pool reopen: %+v, %v", links, err)
+	}
+}
+
+// deleteTicketFixtureRows removes every ticketing table that can retain a
+// reference to the fixture's mappings, intents, findings, or integrations.
+// The order follows the foreign-key graph, keeping cleanup failures observable.
+func deleteTicketFixtureRows(ctx context.Context, tx pgx.Tx, tenant string) error {
+	for _, table := range []string{
+		"ticket_external_comments",
+		"ticket_retest_proposals",
+		"ticket_external_observations",
+		"ticket_inbound_poll_progress",
+		"ticket_inbound_config",
+		"ticket_status_sync",
+		"ticket_group_members",
+		"ticket_groups",
+		"ticket_auto_push_receipts",
+		"ticket_dispatch_breakers",
+		"ticket_intents",
+		"ticket_links",
+		"ticket_mappings",
+	} {
+		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE tenant_id=$1", tenant); err != nil {
+			return fmt.Errorf("delete %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func assertTicketFixtureRowsAbsent(t *testing.T, pool *pgxpool.Pool, tenant string) {
+	t.Helper()
+	if err := WithTenant(context.Background(), pool, tenant, func(tx pgx.Tx) error {
+		for _, table := range []string{"ticket_intents", "ticket_inbound_poll_progress"} {
+			var count int
+			if err := tx.QueryRow(context.Background(), "SELECT count(*) FROM "+table+" WHERE tenant_id=$1", tenant).Scan(&count); err != nil {
+				return fmt.Errorf("count %s: %w", table, err)
+			}
+			if count != 0 {
+				return fmt.Errorf("%s retained %d rows", table, count)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Errorf("assert ticket fixture cleanup: %v", err)
 	}
 }

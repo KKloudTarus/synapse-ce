@@ -43,6 +43,7 @@ export function Integrations() {
   const { data: me } = useFetch(() => api.me(), { deps: [] })
   const canAdmin = isAdminRole(me?.role)
   const canManage = canManageIntegrations(me?.role)
+  const showCreateForm = creating && canAdmin
 
   const selected = integrations.find((item) => item.id === selectedId) ?? null
   const provider = providers.find((item) => item.provider === selected?.provider) ?? null
@@ -207,8 +208,8 @@ export function Integrations() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link to="/settings/integrations" className="text-sm font-semibold text-brand-secondary hover:underline">← All integrations</Link>
-          <h2 className="text-lg font-semibold text-primary">CI/CD integrations</h2>
-          <p className="mt-1 text-sm text-tertiary">Receive repository webhooks or discover pipelines and link external runs to Project analyses.</p>
+          <h2 className="text-lg font-semibold text-primary">External integrations</h2>
+          <p className="mt-1 text-sm text-tertiary">Connect external systems for ticketing, documentation, repository events, and Project analyses.</p>
         </div>
         {canAdmin && <Button onClick={() => setCreating(true)}><Plus className="size-4" />Add integration</Button>}
       </div>
@@ -216,7 +217,7 @@ export function Integrations() {
       {error && <ErrorState message={error} />}
       {notice && <div role="status" className="rounded-lg border border-low/30 bg-low/10 px-4 py-3 text-sm text-low">{notice}</div>}
 
-      {creating && (
+      {showCreateForm && (
         <IntegrationForm
           providers={providers}
           loading={busy === 'create'}
@@ -225,7 +226,7 @@ export function Integrations() {
         />
       )}
 
-      {integrations.length === 0 && !creating ? (
+      {integrations.length === 0 && !showCreateForm ? (
         <EmptyState icon={Link01} title="No integrations configured" hint={canAdmin ? 'Add a provider connection to receive webhooks or discover external pipelines.' : 'A tenant administrator can add a provider connection.'} action={canAdmin ? <Button onClick={() => setCreating(true)}>Add integration</Button> : undefined} />
       ) : integrations.length > 0 && (
         <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">

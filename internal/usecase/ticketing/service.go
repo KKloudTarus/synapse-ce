@@ -16,9 +16,14 @@ type Service struct {
 	store       ports.TicketStore
 	findings    ports.FindingRepository
 	engagements ports.EngagementRepository
+	projects    ports.ProjectRepository
 	ids         ports.IDGenerator
 	clock       ports.Clock
 }
+
+// SetProjects enables Project-scoped ticket links to use the stable public
+// project key. The caller never supplies this key to ticket rendering.
+func (s *Service) SetProjects(repo ports.ProjectRepository) { s.projects = repo }
 
 func NewService(store ports.TicketStore, findings ports.FindingRepository, engagements ports.EngagementRepository, ids ports.IDGenerator, clock ports.Clock) (*Service, error) {
 	if store == nil || findings == nil || engagements == nil || ids == nil || clock == nil {
@@ -33,7 +38,7 @@ func (s *Service) CreateMapping(ctx context.Context, tenant, integration, scopeI
 	now := s.clock.Now().UTC()
 	m := domain.Mapping{ID: s.ids.NewID(), TenantID: tenant, IntegrationID: integration,
 		Scope: scope, ScopeID: scopeID, ProjectKey: projectKey, IssueType: issueType,
-		Version: 1, CreatedAt: now, UpdatedAt: now}
+		GroupingMode: domain.GroupingFinding, Version: 1, CreatedAt: now, UpdatedAt: now}
 	if err := s.store.CreateMapping(ctx, tenant, m); err != nil {
 		return domain.Mapping{}, err
 	}

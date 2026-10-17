@@ -32,6 +32,316 @@ var _ ports.TicketStore = (*TicketStore)(nil)
 var _ ports.TicketAuditStore = (*TicketStore)(nil)
 var _ ports.TicketIntentAuditStore = (*TicketStore)(nil)
 var _ ports.TicketDispatchStore = (*TicketStore)(nil)
+var _ ports.TicketAutoPushStore = (*TicketStore)(nil)
+var _ ports.TicketGroupStore = (*TicketStore)(nil)
+var _ ports.TicketStatusStore = (*TicketStore)(nil)
+var _ ports.TicketStatusProgressStore = (*TicketStore)(nil)
+
+const ticketStatusProgressCols = `tenant_id,mapping_id,engagement_id,finding_id,desired_state,applied_state,source_revision,COALESCE(transition_intent_id,''),COALESCE(update_intent_id,''),integration_author,version,episode,checked_at`
+
+func scanTicketStatusProgress(row rowScanner) (out ports.TicketStatusProgress, err error) {
+	err = row.Scan(&out.TenantID, &out.MappingID, &out.EngagementID, &out.FindingID, &out.DesiredState, &out.AppliedState,
+		&out.SourceRevision, &out.TransitionIntentID, &out.UpdateIntentID, &out.IntegrationAuthor, &out.Version, &out.Episode, &out.CheckedAt)
+	return out, err
+}
+
+func (s *TicketStore) GetTicketStatusProgress(ctx context.Context, tenant, mappingID, engagementID, findingID shared.ID) (out ports.TicketStatusProgress, err error) {
+	if tenant.IsZero() || mappingID.IsZero() || engagementID.IsZero() || findingID.IsZero() {
+		return out, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		item, e := scanTicketStatusProgress(tx.QueryRow(ctx, `SELECT `+ticketStatusProgressCols+` FROM ticket_status_sync WHERE tenant_id=$1 AND mapping_id=$2 AND engagement_id=$3 AND finding_id=$4`, tenant.String(), mappingID.String(), engagementID.String(), findingID.String()))
+		if errors.Is(e, pgx.ErrNoRows) {
+			return shared.ErrNotFound
+		}
+		out = item
+		return e
+	})
+	return out, ticketWriteError(err)
+}
+
+func (s *TicketStore) CreateTicketStatusProgress(ctx context.Context, tenant shared.ID, item ports.TicketStatusProgress) (out ports.TicketStatusProgress, created bool, err error) {
+	if tenant.IsZero() || item.TenantID != tenant || item.MappingID.IsZero() || item.EngagementID.IsZero() || item.FindingID.IsZero() || !item.DesiredState.Valid() || item.SourceRevision == "" || item.CheckedAt.IsZero() {
+		return out, false, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `INSERT INTO ticket_status_sync (tenant_id,mapping_id,engagement_id,finding_id,desired_state,applied_state,source_revision,transition_intent_id,update_intent_id,integration_author,version,episode,checked_at,created_at,updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULLIF($9,''),$10,1,1,$11,$11,$11)
+			ON CONFLICT (tenant_id,mapping_id,finding_id,engagement_id) DO NOTHING RETURNING `+ticketStatusProgressCols,
+			tenant.String(), item.MappingID.String(), item.EngagementID.String(), item.FindingID.String(), string(item.DesiredState), string(item.AppliedState), item.SourceRevision, item.TransitionIntentID.String(), item.UpdateIntentID.String(), item.IntegrationAuthor, item.CheckedAt)
+		fresh, e := scanTicketStatusProgress(row)
+		if e == nil {
+			out, created = fresh, true
+			return nil
+		}
+		if !errors.Is(e, pgx.ErrNoRows) {
+			return e
+		}
+		out, e = s.GetTicketStatusProgress(ctx, tenant, item.MappingID, item.EngagementID, item.FindingID)
+		return e
+	})
+	return out, created, ticketWriteError(err)
+}
+
+func (s *TicketStore) UpdateTicketStatusProgress(ctx context.Context, tenant shared.ID, item ports.TicketStatusProgress, expected int) (out ports.TicketStatusProgress, err error) {
+	if tenant.IsZero() || item.TenantID != tenant || item.MappingID.IsZero() || item.EngagementID.IsZero() || item.FindingID.IsZero() || !item.DesiredState.Valid() || item.SourceRevision == "" || item.CheckedAt.IsZero() || item.Episode < 1 || expected < 1 {
+		return out, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `UPDATE ticket_status_sync SET desired_state=$5,applied_state=$6,source_revision=$7,transition_intent_id=NULLIF($8,''),update_intent_id=NULLIF($9,''),integration_author=$10,episode=$11,checked_at=$12,updated_at=$12,version=version+1
+			WHERE tenant_id=$1 AND mapping_id=$2 AND engagement_id=$3 AND finding_id=$4 AND version=$13 RETURNING `+ticketStatusProgressCols,
+			tenant.String(), item.MappingID.String(), item.EngagementID.String(), item.FindingID.String(), string(item.DesiredState), string(item.AppliedState), item.SourceRevision, item.TransitionIntentID.String(), item.UpdateIntentID.String(), item.IntegrationAuthor, item.Episode, item.CheckedAt, expected)
+		out, err = scanTicketStatusProgress(row)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrConflict
+		}
+		return err
+	})
+	return out, ticketWriteError(err)
+}
+
+func (s *TicketStore) ListTicketStatusTargets(ctx context.Context, tenant shared.ID, limit int) (out []ports.TicketStatusTarget, err error) {
+	if tenant.IsZero() || limit < 1 || limit > 200 {
+		return nil, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		rows, e := tx.Query(ctx, `SELECT i.id,i.mapping_id FROM ticket_intents i JOIN ticket_mappings m ON m.tenant_id=i.tenant_id AND m.id=i.mapping_id
+			LEFT JOIN ticket_status_sync s ON s.tenant_id=i.tenant_id AND s.mapping_id=i.mapping_id AND s.engagement_id=i.engagement_id AND s.finding_id=i.finding_id
+			WHERE i.tenant_id=$1 AND i.state='done' AND i.action='create' AND i.remote_id<>'' AND m.status_transitions<>'{}'::jsonb
+			ORDER BY s.checked_at NULLS FIRST,s.version NULLS FIRST,i.id LIMIT $2`, tenant.String(), limit)
+		if e != nil {
+			return e
+		}
+		var refs []ticketTargetRef
+		for rows.Next() {
+			var intentID, mappingID shared.ID
+			if e := rows.Scan(&intentID, &mappingID); e != nil {
+				return e
+			}
+			refs = append(refs, ticketTargetRef{intentID, mappingID})
+		}
+		if e := rows.Err(); e != nil {
+			return e
+		}
+		rows.Close()
+		for _, ref := range refs {
+			target, e := loadTicketStatusTarget(ctx, tx, tenant, ref.intentID, ref.mappingID)
+			if e != nil {
+				return e
+			}
+			out = append(out, target)
+		}
+		return nil
+	})
+	return out, ticketWriteError(err)
+}
+
+func ticketGroupFromRow(row rowScanner) (ports.TicketGroup, error) {
+	var group ports.TicketGroup
+	err := row.Scan(&group.ID, &group.TenantID, &group.MappingID, &group.ProjectID, &group.Vulnerability,
+		&group.IntegrationID, &group.Endpoint, &group.ProjectKey, &group.IssueType, &group.SecurityLevel,
+		&group.IntentID, &group.Remote.ID, &group.Remote.URL, &group.CreatedAt, &group.UpdatedAt, &group.Revision)
+	return group, err
+}
+
+const ticketGroupCols = `id,tenant_id,mapping_id,project_id,vulnerability_id,integration_id,endpoint,project_key,issue_type,security_level,COALESCE(intent_id,''),COALESCE(remote_id,''),COALESCE(remote_url,''),created_at,updated_at,revision`
+
+func sameTicketGroupDestination(a, b ports.TicketGroup) bool {
+	return a.IntegrationID == b.IntegrationID && a.Endpoint == b.Endpoint && a.ProjectKey == b.ProjectKey &&
+		a.IssueType == b.IssueType && a.SecurityLevel == b.SecurityLevel
+}
+
+func (s *TicketStore) ValidateTicketGroupDestination(ctx context.Context, tenant shared.ID, candidate ports.TicketGroup) error {
+	if tenant.IsZero() || candidate.TenantID != tenant || candidate.MappingID.IsZero() {
+		return shared.ErrValidation
+	}
+	return ticketWriteError(requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		existing, err := ticketGroupFromRow(tx.QueryRow(ctx, `SELECT `+ticketGroupCols+` FROM ticket_groups WHERE tenant_id=$1 AND mapping_id=$2 LIMIT 1`, tenant.String(), candidate.MappingID.String()))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !sameTicketGroupDestination(existing, candidate) {
+			return shared.ErrConflict
+		}
+		return nil
+	}))
+}
+
+func (s *TicketStore) GetTicketGroup(ctx context.Context, tenant, mappingID, projectID shared.ID, vulnerability string) (group ports.TicketGroup, found bool, err error) {
+	if tenant.IsZero() || mappingID.IsZero() || projectID.IsZero() || vulnerability == "" {
+		return group, false, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		var e error
+		group, e = ticketGroupFromRow(tx.QueryRow(ctx, `SELECT `+ticketGroupCols+` FROM ticket_groups WHERE tenant_id=$1 AND mapping_id=$2 AND project_id=$3 AND vulnerability_id=$4`, tenant.String(), mappingID.String(), projectID.String(), vulnerability))
+		if errors.Is(e, pgx.ErrNoRows) {
+			return nil
+		}
+		if e != nil {
+			return e
+		}
+		if group.Remote.ID == "" && !group.IntentID.IsZero() {
+			previous, e := scanTicketIntent(tx.QueryRow(ctx, `SELECT `+intentCols+` FROM ticket_intents WHERE tenant_id=$1 AND id=$2`, tenant.String(), group.IntentID.String()))
+			if e != nil {
+				return e
+			}
+			if previous.State == writeintent.Done {
+				group.Remote = ticketing.RemoteTicket{ID: previous.RemoteID, URL: previous.RemoteURL}
+			}
+		}
+		found = true
+		return nil
+	})
+	return group, found, ticketWriteError(err)
+}
+
+func (s *TicketStore) CreateOrGetGroupedIntent(ctx context.Context, tenant shared.ID, group ports.TicketGroup, member ports.TicketGroupMember, intent ticketing.Intent, audit ports.AuditEntry) (out ticketing.Intent, created bool, err error) {
+	if tenant.IsZero() || group.TenantID != tenant || group.ID.IsZero() || group.MappingID != intent.MappingID || group.ProjectID.IsZero() || group.Vulnerability == "" || group.IntegrationID != intent.IntegrationID || group.Endpoint == "" || group.ProjectKey == "" || group.IssueType == "" || member.EngagementID != intent.EngagementID || member.FindingID != intent.FindingID || (intent.Action != ticketing.Create && intent.Action != ticketing.Update) || group.Revision < 0 {
+		return out, false, shared.ErrValidation
+	}
+	if err = intent.Validate(); err != nil {
+		return out, false, err
+	}
+	err = NewTenantTransactionRunner(s.pool).Run(ctx, tenant, func(txctx context.Context) error {
+		tx, e := ticketTx(txctx, tenant)
+		if e != nil {
+			return e
+		}
+		if old, found, e := s.FindTicketRequest(txctx, tenant, intent.MappingID, intent.EngagementID, intent.FindingID, intent.RequestKey); e != nil {
+			return e
+		} else if found {
+			if !sameTicketCommand(old, intent) {
+				return shared.ErrConflict
+			}
+			out = old
+			return nil
+		}
+		_, e = tx.Exec(txctx, `INSERT INTO ticket_groups(tenant_id,id,mapping_id,project_id,vulnerability_id,integration_id,endpoint,project_key,issue_type,security_level,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11) ON CONFLICT(tenant_id,mapping_id,project_id,vulnerability_id) DO NOTHING`, tenant.String(), group.ID.String(), group.MappingID.String(), group.ProjectID.String(), group.Vulnerability, group.IntegrationID.String(), group.Endpoint, group.ProjectKey, group.IssueType, group.SecurityLevel, group.CreatedAt.UTC())
+		if e != nil {
+			return e
+		}
+		persisted, e := ticketGroupFromRow(tx.QueryRow(txctx, `SELECT `+ticketGroupCols+` FROM ticket_groups WHERE tenant_id=$1 AND mapping_id=$2 AND project_id=$3 AND vulnerability_id=$4 FOR UPDATE`, tenant.String(), group.MappingID.String(), group.ProjectID.String(), group.Vulnerability))
+		if e != nil {
+			return e
+		}
+		if !sameTicketGroupDestination(persisted, group) {
+			return shared.ErrConflict
+		}
+		if persisted.Revision != group.Revision {
+			return fmt.Errorf("%w: %w", shared.ErrConflict, ticketing.ErrGroupBusy)
+		}
+		if !persisted.IntentID.IsZero() {
+			previous, e := s.GetIntent(txctx, tenant, persisted.IntentID)
+			if e != nil {
+				return e
+			}
+			if previous.State != writeintent.Done && previous.State != writeintent.Failed {
+				return fmt.Errorf("%w: %w", shared.ErrConflict, ticketing.ErrGroupBusy)
+			}
+			if persisted.Remote.ID == "" && previous.State == writeintent.Done {
+				persisted.Remote = ticketing.RemoteTicket{ID: previous.RemoteID, URL: previous.RemoteURL}
+			}
+			if (persisted.Remote.ID != "" && intent.Action != ticketing.Update) || (persisted.Remote.ID == "" && intent.Action != ticketing.Create) {
+				return fmt.Errorf("%w: %w", shared.ErrConflict, ticketing.ErrGroupBusy)
+			}
+		} else if intent.Action != ticketing.Create {
+			return shared.ErrConflict
+		}
+		out, created, e = s.CreateOrGetIntent(txctx, tenant, intent)
+		if e != nil {
+			return e
+		}
+		if !created {
+			return shared.ErrConflict
+		}
+		if _, e = tx.Exec(txctx, `INSERT INTO ticket_group_members(tenant_id,group_id,engagement_id,finding_id,created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, tenant.String(), persisted.ID.String(), member.EngagementID.String(), member.FindingID.String(), group.UpdatedAt.UTC()); e != nil {
+			return e
+		}
+		if _, e = tx.Exec(txctx, `UPDATE ticket_groups SET intent_id=$3,remote_id=$4,remote_url=$5,revision=revision+1,updated_at=$6 WHERE tenant_id=$1 AND id=$2`, tenant.String(), persisted.ID.String(), out.ID.String(), persisted.Remote.ID, persisted.Remote.URL, group.UpdatedAt.UTC()); e != nil {
+			return e
+		}
+		return NewAuditLog(s.pool).Record(txctx, audit)
+	})
+	return out, created, ticketWriteError(err)
+}
+
+func (s *TicketStore) CompleteGroupedIntent(ctx context.Context, tenant, intentID shared.ID, remote ticketing.RemoteTicket, at time.Time) error {
+	if tenant.IsZero() || intentID.IsZero() || at.IsZero() {
+		return shared.ErrValidation
+	}
+	return ticketWriteError(requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE ticket_groups SET remote_id=$3,remote_url=$4,updated_at=$5 WHERE tenant_id=$1 AND intent_id=$2`, tenant.String(), intentID.String(), remote.ID, remote.URL, at.UTC())
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return shared.ErrNotFound
+		}
+		return nil
+	}))
+}
+
+func (s *TicketStore) ListAutoPushEvents(ctx context.Context, tenant shared.ID, now time.Time, limit int) (out []ports.TicketAutoPushEvent, err error) {
+	if tenant.IsZero() || limit < 1 || limit > 100 {
+		return nil, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT event_id,occurred_at,engagement_id,finding_id,to_status
+			FROM ticket_auto_push_receipts
+			WHERE tenant_id=$1 AND completed_at IS NULL AND available_at<=$2
+			ORDER BY available_at,event_id LIMIT $3`, tenant.String(), now.UTC(), limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var event ports.TicketAutoPushEvent
+			if err := rows.Scan(&event.ID, &event.OccurredAt, &event.EngagementID, &event.FindingID, &event.ToStatus); err != nil {
+				return err
+			}
+			out = append(out, event)
+		}
+		return rows.Err()
+	})
+	return out, ticketWriteError(err)
+}
+
+func (s *TicketStore) CompleteAutoPushEvent(ctx context.Context, tenant shared.ID, event ports.TicketAutoPushEvent, at time.Time) error {
+	if tenant.IsZero() || event.ID.IsZero() || event.OccurredAt.IsZero() || at.IsZero() {
+		return shared.ErrValidation
+	}
+	return ticketWriteError(requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE ticket_auto_push_receipts SET completed_at=$3,updated_at=$3
+			WHERE tenant_id=$1 AND event_id=$2`, tenant.String(), event.ID.String(), at.UTC())
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return shared.ErrNotFound
+		}
+		return nil
+	}))
+}
+
+func (s *TicketStore) DeferAutoPushEvent(ctx context.Context, tenant shared.ID, event ports.TicketAutoPushEvent, retryAt time.Time) error {
+	if tenant.IsZero() || event.ID.IsZero() || event.OccurredAt.IsZero() || retryAt.IsZero() {
+		return shared.ErrValidation
+	}
+	return ticketWriteError(requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE ticket_auto_push_receipts SET available_at=$3,updated_at=$3
+			WHERE tenant_id=$1 AND event_id=$2 AND completed_at IS NULL`, tenant.String(), event.ID.String(), retryAt.UTC())
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return shared.ErrNotFound
+		}
+		return nil
+	}))
+}
 
 func ticketWriteError(err error) error {
 	if err == nil {
@@ -62,14 +372,14 @@ func nullableInt(v int) any {
 }
 
 const mappingCols = `id,tenant_id,integration_id,COALESCE(project_id,''),COALESCE(engagement_id,''),
-    project_key,issue_type,component,labels,priority_map,security_level,summary_template,description_template,field_values,transition_name,data_class,locale,waiver_reason,version,created_at,updated_at`
+    project_key,issue_type,component,labels,priority_map,security_level,summary_template,description_template,field_values,transition_name,data_class,locale,waiver_reason,auto_push_enabled,auto_push_min_severity,auto_push_enabled_at,grouping_mode,status_transitions,version,created_at,updated_at`
 
 func scanTicketMapping(row rowScanner) (ticketing.Mapping, error) {
 	var m ticketing.Mapping
 	var project, engagement string
-	var labels, priorities, fields []byte
+	var labels, priorities, fields, statusTransitions []byte
 	err := row.Scan(&m.ID, &m.TenantID, &m.IntegrationID, &project, &engagement,
-		&m.ProjectKey, &m.IssueType, &m.Component, &labels, &priorities, &m.SecurityLevel, &m.SummaryTemplate, &m.DescriptionTemplate, &fields, &m.Transition, &m.DataClass, &m.Locale, &m.WaiverReason,
+		&m.ProjectKey, &m.IssueType, &m.Component, &labels, &priorities, &m.SecurityLevel, &m.SummaryTemplate, &m.DescriptionTemplate, &fields, &m.Transition, &m.DataClass, &m.Locale, &m.WaiverReason, &m.AutoPushEnabled, &m.AutoPushMinSeverity, &m.AutoPushEnabledAt, &m.GroupingMode, &statusTransitions,
 		&m.Version, &m.CreatedAt, &m.UpdatedAt)
 	if err != nil {
 		return ticketing.Mapping{}, err
@@ -90,11 +400,17 @@ func scanTicketMapping(row rowScanner) (ticketing.Mapping, error) {
 	if err = json.Unmarshal(fields, &m.FieldValues); err != nil {
 		return ticketing.Mapping{}, err
 	}
+	if err = json.Unmarshal(statusTransitions, &m.StatusTransitions); err != nil {
+		return ticketing.Mapping{}, err
+	}
 	return m, nil
 }
 func (s *TicketStore) CreateMapping(ctx context.Context, tenant shared.ID, m ticketing.Mapping) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if m.GroupingMode == "" {
+		m.GroupingMode = ticketing.GroupingFinding
 	}
 	if err := m.Validate(); err != nil {
 		return err
@@ -117,11 +433,17 @@ func (s *TicketStore) CreateMapping(ctx context.Context, tenant shared.ID, m tic
 	if m.FieldValues == nil {
 		m.FieldValues = map[string]string{}
 	}
+	if m.StatusTransitions == nil {
+		m.StatusTransitions = map[ticketing.SyncState]string{}
+	}
 	if m.DataClass == "" {
 		m.DataClass = "summary"
 	}
 	if m.Locale == "" {
 		m.Locale = "en"
+	}
+	if m.StatusTransitions == nil {
+		m.StatusTransitions = map[ticketing.SyncState]string{}
 	}
 	labels, err := json.Marshal(m.Labels)
 	if err != nil {
@@ -135,13 +457,17 @@ func (s *TicketStore) CreateMapping(ctx context.Context, tenant shared.ID, m tic
 	if err != nil {
 		return shared.ErrValidation
 	}
+	statusTransitions, err := json.Marshal(m.StatusTransitions)
+	if err != nil {
+		return shared.ErrValidation
+	}
 	return ticketWriteError(requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO ticket_mappings
             (id,tenant_id,integration_id,project_id,engagement_id,project_key,issue_type,
-			 component,labels,priority_map,security_level,summary_template,description_template,field_values,transition_name,data_class,locale,waiver_reason,version,created_at,updated_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19,$20,$21)`,
+			 component,labels,priority_map,security_level,summary_template,description_template,field_values,transition_name,data_class,locale,waiver_reason,auto_push_enabled,auto_push_min_severity,auto_push_enabled_at,grouping_mode,status_transitions,version,created_at,updated_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb,$24,$25,$26)`,
 			m.ID.String(), tenant.String(), m.IntegrationID.String(), project, engagement, m.ProjectKey,
-			m.IssueType, m.Component, string(labels), string(priorities), m.SecurityLevel, m.SummaryTemplate, m.DescriptionTemplate, string(fields), m.Transition, string(m.DataClass), m.Locale, m.WaiverReason, m.Version,
+			m.IssueType, m.Component, string(labels), string(priorities), m.SecurityLevel, m.SummaryTemplate, m.DescriptionTemplate, string(fields), m.Transition, string(m.DataClass), m.Locale, m.WaiverReason, m.AutoPushEnabled, string(m.AutoPushMinSeverity), m.AutoPushEnabledAt, string(m.GroupingMode), string(statusTransitions), m.Version,
 			m.CreatedAt.UTC(), m.UpdatedAt.UTC())
 		return err
 	}))
@@ -266,6 +592,9 @@ func (s *TicketStore) ListFindingMappings(ctx context.Context, tenant, engagemen
 	return out, ticketWriteError(err)
 }
 func (s *TicketStore) UpdateMapping(ctx context.Context, tenant shared.ID, m ticketing.Mapping, expected int) (out ticketing.Mapping, err error) {
+	if m.GroupingMode == "" {
+		m.GroupingMode = ticketing.GroupingFinding
+	}
 	if err = m.Validate(); err != nil {
 		return out, err
 	}
@@ -281,8 +610,9 @@ func (s *TicketStore) UpdateMapping(ctx context.Context, tenant shared.ID, m tic
 	labels, _ := json.Marshal(m.Labels)
 	priorities, _ := json.Marshal(m.PriorityMap)
 	fields, _ := json.Marshal(m.FieldValues)
+	statusTransitions, _ := json.Marshal(m.StatusTransitions)
 	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
-		row := tx.QueryRow(ctx, `UPDATE ticket_mappings SET project_key=$3,issue_type=$4,component=$5,labels=$6::jsonb,priority_map=$7::jsonb,security_level=$8,summary_template=$9,description_template=$10,field_values=$11::jsonb,transition_name=$12,data_class=$13,locale=$14,waiver_reason=$15,version=version+1,updated_at=$16 WHERE tenant_id=$1 AND id=$2 AND version=$17 RETURNING `+mappingCols, tenant.String(), m.ID.String(), m.ProjectKey, m.IssueType, m.Component, string(labels), string(priorities), m.SecurityLevel, m.SummaryTemplate, m.DescriptionTemplate, string(fields), m.Transition, string(m.DataClass), m.Locale, m.WaiverReason, m.UpdatedAt.UTC(), expected)
+		row := tx.QueryRow(ctx, `UPDATE ticket_mappings SET project_key=$3,issue_type=$4,component=$5,labels=$6::jsonb,priority_map=$7::jsonb,security_level=$8,summary_template=$9,description_template=$10,field_values=$11::jsonb,transition_name=$12,data_class=$13,locale=$14,waiver_reason=$15,auto_push_enabled=$16,auto_push_min_severity=$17,auto_push_enabled_at=$18,grouping_mode=$19,status_transitions=$20::jsonb,version=version+1,updated_at=$21 WHERE tenant_id=$1 AND id=$2 AND version=$22 RETURNING `+mappingCols, tenant.String(), m.ID.String(), m.ProjectKey, m.IssueType, m.Component, string(labels), string(priorities), m.SecurityLevel, m.SummaryTemplate, m.DescriptionTemplate, string(fields), m.Transition, string(m.DataClass), m.Locale, m.WaiverReason, m.AutoPushEnabled, string(m.AutoPushMinSeverity), m.AutoPushEnabledAt, string(m.GroupingMode), string(statusTransitions), m.UpdatedAt.UTC(), expected)
 		var e error
 		out, e = scanTicketMapping(row)
 		if errors.Is(e, pgx.ErrNoRows) {

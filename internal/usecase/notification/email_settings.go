@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/net/idna"
 
+	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -234,6 +235,9 @@ func (s *Service) UpdateEmailSettings(ctx context.Context, actor string, in Emai
 func (s *Service) EmailChannelConfig(ctx context.Context, work ports.NotificationWork, config ports.NotificationChannelConfig) (ports.NotificationChannelConfig, string) {
 	if work.Channel.Type != "email" {
 		return config, ""
+	}
+	if s.disabled[domain.ChannelEmail] {
+		return nil, "provider_disabled"
 	}
 	email, ok := config.(ports.EmailChannelConfig)
 	if !ok {

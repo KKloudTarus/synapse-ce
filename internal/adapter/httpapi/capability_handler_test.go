@@ -75,10 +75,10 @@ func TestCapabilitiesReportsDisabledSubsystemWithItsSwitchName(t *testing.T) {
 	}
 }
 
-// TestCapabilitiesReportsNotificationChannelsAndPlannedSubsystems pins the #1350 wire shape: the
-// channel type list rides in `values`, and a subsystem this build does not ship answers `planned`
-// with an empty switch.
-func TestCapabilitiesReportsNotificationChannelsAndPlannedSubsystems(t *testing.T) {
+// TestCapabilitiesReportsNotificationChannelsAndDocumentPublishing pins the wire shape: the
+// channel type list rides in `values`, while document publishing reports whether durable route
+// wiring exists instead of pretending it is a planned feature.
+func TestCapabilitiesReportsNotificationChannelsAndDocumentPublishing(t *testing.T) {
 	rt := newCapabilityRouter(t, capabilities.Flags{Notifications: true, NotificationChannelTypes: []string{"webhook", "slack", "email"}})
 	_, byKey := getCapabilities(t, rt, "readonly")
 	if got := byKey["notifications"]; !got.Enabled || got.Switch != "SYNAPSE_NOTIFICATIONS_ENABLED" {
@@ -88,11 +88,16 @@ func TestCapabilitiesReportsNotificationChannelsAndPlannedSubsystems(t *testing.
 	if !types.Enabled || strings.Join(types.Values, ",") != "webhook,slack,email" {
 		t.Errorf("notifications.channel_types = %+v, want enabled with webhook, slack and email", types)
 	}
-	for _, key := range []string{"docpublish"} {
-		got, ok := byKey[key]
-		if !ok || !got.Planned || got.Enabled || got.Switch != "" {
-			t.Errorf("%s = %+v (present %v), want planned and disabled without a switch", key, got, ok)
-		}
+	got, ok := byKey["docpublish"]
+	if !ok || got.Planned || got.Enabled || got.Switch != "" {
+		t.Errorf("docpublish = %+v (present %v), want disabled, not planned and without a switch", got, ok)
+	}
+
+	rt = newCapabilityRouter(t, capabilities.Flags{DocumentPublishing: true})
+	_, byKey = getCapabilities(t, rt, "readonly")
+	got = byKey["docpublish"]
+	if got.Planned || !got.Enabled || got.Switch != "" {
+		t.Errorf("enabled docpublish = %+v, want enabled, not planned and without a switch", got)
 	}
 }
 

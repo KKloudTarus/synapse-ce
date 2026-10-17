@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,37 +18,398 @@ import (
 // TicketStore is an in-memory conformance adapter. PostgreSQL is the durable production store.
 // Every map is tenant partitioned and every returned composite value is cloned.
 type TicketStore struct {
-	mu          sync.RWMutex
-	engagements *EngagementRepository
-	findings    *FindingRepository
-	mappings    map[shared.ID]map[shared.ID]ticketing.Mapping
-	links       map[shared.ID]map[shared.ID]ticketing.Link
-	intents     map[shared.ID]map[shared.ID]ticketing.Intent
-	breakers    map[string]memoryTicketBreaker
-	audit       ports.AuditLogger
+	mu                    sync.RWMutex
+	engagements           *EngagementRepository
+	findings              *FindingRepository
+	groupAssets           ports.AssetRepository
+	groupBindings         ports.AttackPathStore
+	mappings              map[shared.ID]map[shared.ID]ticketing.Mapping
+	links                 map[shared.ID]map[shared.ID]ticketing.Link
+	intents               map[shared.ID]map[shared.ID]ticketing.Intent
+	groups                map[shared.ID]map[string]ports.TicketGroup
+	groupMembers          map[shared.ID]map[shared.ID]map[string]ports.TicketGroupMember
+	breakers              map[string]memoryTicketBreaker
+	autoEvents            map[shared.ID][]ports.TicketAutoPushEvent
+	autoReceipts          map[shared.ID]map[shared.ID]memoryAutoPushReceipt
+	statusProgress        map[shared.ID]map[string]ports.TicketStatusProgress
+	inboundConfigurations map[shared.ID]map[shared.ID]ports.TicketInboundConfiguration
+	inboundObservations   map[shared.ID]map[string]ticketing.ExternalTicketObservation
+	inboundProposals      map[shared.ID][]ticketing.RetestProposal
+	inboundComments       map[shared.ID][]ticketing.ExternalTicketComment
+	inboundPollProgress   map[shared.ID]map[string]memoryInboundPollProgress
+	audit                 ports.AuditLogger
 }
 type memoryTicketBreaker struct {
 	active      shared.ID
 	lease, gate *time.Time
 	code        string
 }
+type memoryAutoPushReceipt struct {
+	availableAt time.Time
+	completed   bool
+}
+type memoryInboundPollProgress struct {
+	checkedAt time.Time
+	version   int
+}
 
 var _ ports.TicketStore = (*TicketStore)(nil)
 var _ ports.TicketIntentAuditStore = (*TicketStore)(nil)
 var _ ports.TicketDispatchStore = (*TicketStore)(nil)
+var _ ports.TicketAutoPushStore = (*TicketStore)(nil)
+var _ ports.TicketGroupStore = (*TicketStore)(nil)
+var _ ports.TicketStatusStore = (*TicketStore)(nil)
+var _ ports.TicketStatusProgressStore = (*TicketStore)(nil)
 
 func NewTicketStore(engagements *EngagementRepository, findings *FindingRepository) (*TicketStore, error) {
 	if engagements == nil || findings == nil {
 		return nil, fmt.Errorf("%w: ticket store requires engagement and finding repositories", shared.ErrValidation)
 	}
 	return &TicketStore{
-		engagements: engagements,
-		findings:    findings,
-		mappings:    make(map[shared.ID]map[shared.ID]ticketing.Mapping),
-		links:       make(map[shared.ID]map[shared.ID]ticketing.Link),
-		intents:     make(map[shared.ID]map[shared.ID]ticketing.Intent),
-		breakers:    make(map[string]memoryTicketBreaker),
+		engagements:           engagements,
+		findings:              findings,
+		mappings:              make(map[shared.ID]map[shared.ID]ticketing.Mapping),
+		links:                 make(map[shared.ID]map[shared.ID]ticketing.Link),
+		intents:               make(map[shared.ID]map[shared.ID]ticketing.Intent),
+		groups:                make(map[shared.ID]map[string]ports.TicketGroup),
+		groupMembers:          make(map[shared.ID]map[shared.ID]map[string]ports.TicketGroupMember),
+		breakers:              make(map[string]memoryTicketBreaker),
+		autoEvents:            make(map[shared.ID][]ports.TicketAutoPushEvent),
+		autoReceipts:          make(map[shared.ID]map[shared.ID]memoryAutoPushReceipt),
+		statusProgress:        make(map[shared.ID]map[string]ports.TicketStatusProgress),
+		inboundConfigurations: make(map[shared.ID]map[shared.ID]ports.TicketInboundConfiguration),
+		inboundObservations:   make(map[shared.ID]map[string]ticketing.ExternalTicketObservation),
+		inboundProposals:      make(map[shared.ID][]ticketing.RetestProposal),
+		inboundComments:       make(map[shared.ID][]ticketing.ExternalTicketComment),
+		inboundPollProgress:   make(map[shared.ID]map[string]memoryInboundPollProgress),
 	}, nil
+}
+
+func ticketStatusProgressKey(mappingID, engagementID, findingID shared.ID) string {
+	return mappingID.String() + "\x00" + engagementID.String() + "\x00" + findingID.String()
+}
+
+func (s *TicketStore) GetTicketStatusProgress(ctx context.Context, tenant, mappingID, engagementID, findingID shared.ID) (ports.TicketStatusProgress, error) {
+	if err := ctx.Err(); err != nil {
+		return ports.TicketStatusProgress{}, err
+	}
+	if tenant.IsZero() || mappingID.IsZero() || engagementID.IsZero() || findingID.IsZero() {
+		return ports.TicketStatusProgress{}, shared.ErrValidation
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, ok := s.statusProgress[tenant][ticketStatusProgressKey(mappingID, engagementID, findingID)]
+	if !ok {
+		return ports.TicketStatusProgress{}, shared.ErrNotFound
+	}
+	return item, nil
+}
+
+func (s *TicketStore) CreateTicketStatusProgress(ctx context.Context, tenant shared.ID, item ports.TicketStatusProgress) (ports.TicketStatusProgress, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return ports.TicketStatusProgress{}, false, err
+	}
+	if tenant.IsZero() || item.TenantID != tenant || item.MappingID.IsZero() || item.EngagementID.IsZero() || item.FindingID.IsZero() || !item.DesiredState.Valid() || item.SourceRevision == "" {
+		return ports.TicketStatusProgress{}, false, shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.statusProgress[tenant] == nil {
+		s.statusProgress[tenant] = map[string]ports.TicketStatusProgress{}
+	}
+	key := ticketStatusProgressKey(item.MappingID, item.EngagementID, item.FindingID)
+	if existing, ok := s.statusProgress[tenant][key]; ok {
+		return existing, false, nil
+	}
+	item.Version = 1
+	item.Episode = 1
+	s.statusProgress[tenant][key] = item
+	return item, true, nil
+}
+
+func (s *TicketStore) UpdateTicketStatusProgress(ctx context.Context, tenant shared.ID, item ports.TicketStatusProgress, expected int) (ports.TicketStatusProgress, error) {
+	if err := ctx.Err(); err != nil {
+		return ports.TicketStatusProgress{}, err
+	}
+	if tenant.IsZero() || item.TenantID != tenant || item.MappingID.IsZero() || item.EngagementID.IsZero() || item.FindingID.IsZero() || expected < 1 || item.Episode < 1 || !item.DesiredState.Valid() || item.SourceRevision == "" {
+		return ports.TicketStatusProgress{}, shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := ticketStatusProgressKey(item.MappingID, item.EngagementID, item.FindingID)
+	existing, ok := s.statusProgress[tenant][key]
+	if !ok {
+		return ports.TicketStatusProgress{}, shared.ErrNotFound
+	}
+	if existing.Version != expected {
+		return ports.TicketStatusProgress{}, shared.ErrConflict
+	}
+	item.Version = existing.Version + 1
+	s.statusProgress[tenant][key] = item
+	return item, nil
+}
+
+func ticketGroupKey(g ports.TicketGroup) string {
+	return g.MappingID.String() + "\x00" + g.ProjectID.String() + "\x00" + g.Vulnerability
+}
+func sameTicketGroupDestination(a, b ports.TicketGroup) bool {
+	return a.IntegrationID == b.IntegrationID && a.Endpoint == b.Endpoint && a.ProjectKey == b.ProjectKey &&
+		a.IssueType == b.IssueType && a.SecurityLevel == b.SecurityLevel
+}
+func ticketGroupMemberKey(m ports.TicketGroupMember) string {
+	return m.EngagementID.String() + "\x00" + m.FindingID.String()
+}
+
+func (s *TicketStore) ValidateTicketGroupDestination(ctx context.Context, tenant shared.ID, candidate ports.TicketGroup) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if tenant.IsZero() || candidate.TenantID != tenant || candidate.MappingID.IsZero() {
+		return shared.ErrValidation
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, existing := range s.groups[tenant] {
+		if existing.MappingID == candidate.MappingID && !sameTicketGroupDestination(existing, candidate) {
+			return shared.ErrConflict
+		}
+	}
+	return nil
+}
+
+func (s *TicketStore) GetTicketGroup(ctx context.Context, tenant, mappingID, projectID shared.ID, vulnerability string) (ports.TicketGroup, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return ports.TicketGroup{}, false, err
+	}
+	if tenant.IsZero() || mappingID.IsZero() || projectID.IsZero() || strings.TrimSpace(vulnerability) == "" {
+		return ports.TicketGroup{}, false, shared.ErrValidation
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	group, ok := s.groups[tenant][mappingID.String()+"\x00"+projectID.String()+"\x00"+vulnerability]
+	return group, ok, nil
+}
+
+func (s *TicketStore) ListTicketStatusTargets(ctx context.Context, tenant shared.ID, limit int) ([]ports.TicketStatusTarget, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if tenant.IsZero() || limit < 1 || limit > 200 {
+		return nil, shared.ErrValidation
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]ports.TicketStatusTarget, 0, limit)
+	for _, intent := range s.intents[tenant] {
+		if intent.State != writeintent.Done || intent.Action != ticketing.Create || intent.RemoteID == "" {
+			continue
+		}
+		mapping, ok := s.mappings[tenant][intent.MappingID]
+		if !ok || len(mapping.StatusTransitions) == 0 {
+			continue
+		}
+		out = append(out, ports.TicketStatusTarget{Mapping: mapping.Clone(), Intent: intent.Clone()})
+	}
+	slices.SortFunc(out, func(a, b ports.TicketStatusTarget) int {
+		left, leftSeen := s.statusProgress[tenant][ticketStatusProgressKey(a.Mapping.ID, a.Intent.EngagementID, a.Intent.FindingID)]
+		right, rightSeen := s.statusProgress[tenant][ticketStatusProgressKey(b.Mapping.ID, b.Intent.EngagementID, b.Intent.FindingID)]
+		if leftSeen != rightSeen {
+			if !leftSeen {
+				return -1
+			}
+			return 1
+		}
+		leftAt, leftVersion := left.CheckedAt, left.Version
+		rightAt, rightVersion := right.CheckedAt, right.Version
+		if cmp := leftAt.Compare(rightAt); cmp != 0 {
+			return cmp
+		}
+		if leftVersion != rightVersion {
+			return leftVersion - rightVersion
+		}
+		return strings.Compare(a.Intent.ID.String(), b.Intent.ID.String())
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *TicketStore) CreateOrGetGroupedIntent(ctx context.Context, tenant shared.ID, group ports.TicketGroup, member ports.TicketGroupMember, intent ticketing.Intent, audit ports.AuditEntry) (ticketing.Intent, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return ticketing.Intent{}, false, err
+	}
+	if tenant.IsZero() || group.TenantID != tenant || group.ID.IsZero() || group.MappingID != intent.MappingID || group.ProjectID.IsZero() || group.Vulnerability == "" || group.IntegrationID != intent.IntegrationID || group.Endpoint == "" || group.ProjectKey == "" || group.IssueType == "" || member.EngagementID != intent.EngagementID || member.FindingID != intent.FindingID || (intent.Action != ticketing.Create && intent.Action != ticketing.Update) || group.Revision < 0 {
+		return ticketing.Intent{}, false, shared.ErrValidation
+	}
+	if err := intent.Validate(); err != nil {
+		return ticketing.Intent{}, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, old := range s.intents[tenant] {
+		if old.IntegrationID == intent.IntegrationID && old.RequestKey == intent.RequestKey {
+			if !sameCommand(old, intent) {
+				return ticketing.Intent{}, false, shared.ErrConflict
+			}
+			return old.Clone(), false, nil
+		}
+	}
+	if err := s.validateIntentReferences(ctx, tenant, intent, s.mappings[tenant][intent.MappingID]); err != nil {
+		return ticketing.Intent{}, false, err
+	}
+	key := ticketGroupKey(group)
+	persisted, exists := s.groups[tenant][key]
+	if exists {
+		if !sameTicketGroupDestination(persisted, group) {
+			return ticketing.Intent{}, false, shared.ErrConflict
+		}
+		if persisted.Revision != group.Revision {
+			return ticketing.Intent{}, false, fmt.Errorf("%w: %w", shared.ErrConflict, ticketing.ErrGroupBusy)
+		}
+		previous, ok := s.intents[tenant][persisted.IntentID]
+		if !ok {
+			return ticketing.Intent{}, false, shared.ErrConflict
+		}
+		if previous.State != writeintent.Done && previous.State != writeintent.Failed {
+			return ticketing.Intent{}, false, fmt.Errorf("%w: %w", shared.ErrConflict, ticketing.ErrGroupBusy)
+		}
+		if persisted.Remote.ID == "" && previous.State == writeintent.Done {
+			persisted.Remote = ticketing.RemoteTicket{ID: previous.RemoteID, URL: previous.RemoteURL}
+		}
+		if (persisted.Remote.ID != "" && intent.Action != ticketing.Update) || (persisted.Remote.ID == "" && intent.Action != ticketing.Create) {
+			return ticketing.Intent{}, false, fmt.Errorf("%w: %w", shared.ErrConflict, ticketing.ErrGroupBusy)
+		}
+	} else {
+		if group.Revision != 0 || intent.Action != ticketing.Create {
+			return ticketing.Intent{}, false, shared.ErrConflict
+		}
+		persisted = group
+	}
+	if _, duplicate := s.intents[tenant][intent.ID]; duplicate {
+		return ticketing.Intent{}, false, shared.ErrConflict
+	}
+	if err := s.recordTicketAuditLocked(ctx, tenant, &audit); err != nil {
+		return ticketing.Intent{}, false, err
+	}
+	if s.groups[tenant] == nil {
+		s.groups[tenant] = make(map[string]ports.TicketGroup)
+	}
+	if s.groupMembers[tenant] == nil {
+		s.groupMembers[tenant] = make(map[shared.ID]map[string]ports.TicketGroupMember)
+	}
+	if s.groupMembers[tenant][persisted.ID] == nil {
+		s.groupMembers[tenant][persisted.ID] = make(map[string]ports.TicketGroupMember)
+	}
+	if s.intents[tenant] == nil {
+		s.intents[tenant] = make(map[shared.ID]ticketing.Intent)
+	}
+	persisted.IntentID = intent.ID
+	persisted.Revision++
+	persisted.UpdatedAt = group.UpdatedAt
+	s.groups[tenant][key] = persisted
+	s.groupMembers[tenant][persisted.ID][ticketGroupMemberKey(member)] = member
+	s.intents[tenant][intent.ID] = intent.Clone()
+	return intent.Clone(), true, nil
+}
+
+func (s *TicketStore) CompleteGroupedIntent(ctx context.Context, tenant, intentID shared.ID, remote ticketing.RemoteTicket, at time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if tenant.IsZero() || intentID.IsZero() || at.IsZero() {
+		return shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, group := range s.groups[tenant] {
+		if group.IntentID == intentID {
+			group.Remote, group.UpdatedAt = remote, at
+			s.groups[tenant][key] = group
+			return nil
+		}
+	}
+	return shared.ErrNotFound
+}
+
+// AppendAutoPushEvent is an in-memory adapter seam for development and workflow
+// tests. Production reads the notification_events projection in PostgreSQL.
+func (s *TicketStore) AppendAutoPushEvent(tenant shared.ID, event ports.TicketAutoPushEvent) error {
+	if tenant.IsZero() || event.ID.IsZero() || event.OccurredAt.IsZero() {
+		return shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, current := range s.autoEvents[tenant] {
+		if current.ID == event.ID {
+			return nil
+		}
+	}
+	s.autoEvents[tenant] = append(s.autoEvents[tenant], event)
+	sort.Slice(s.autoEvents[tenant], func(i, j int) bool {
+		a, b := s.autoEvents[tenant][i], s.autoEvents[tenant][j]
+		if a.OccurredAt.Equal(b.OccurredAt) {
+			return a.ID < b.ID
+		}
+		return a.OccurredAt.Before(b.OccurredAt)
+	})
+	return nil
+}
+
+func (s *TicketStore) ListAutoPushEvents(ctx context.Context, tenant shared.ID, now time.Time, limit int) ([]ports.TicketAutoPushEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if tenant.IsZero() || limit < 1 || limit > 100 {
+		return nil, shared.ErrValidation
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]ports.TicketAutoPushEvent, 0, limit)
+	for _, event := range s.autoEvents[tenant] {
+		receipt, exists := s.autoReceipts[tenant][event.ID]
+		if exists && (receipt.completed || receipt.availableAt.After(now)) {
+			continue
+		}
+		out = append(out, event)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (s *TicketStore) CompleteAutoPushEvent(ctx context.Context, tenant shared.ID, event ports.TicketAutoPushEvent, at time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if tenant.IsZero() || event.ID.IsZero() || event.OccurredAt.IsZero() {
+		return shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.autoReceipts[tenant] == nil {
+		s.autoReceipts[tenant] = make(map[shared.ID]memoryAutoPushReceipt)
+	}
+	s.autoReceipts[tenant][event.ID] = memoryAutoPushReceipt{availableAt: at, completed: true}
+	return nil
+}
+func (s *TicketStore) DeferAutoPushEvent(ctx context.Context, tenant shared.ID, event ports.TicketAutoPushEvent, retryAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if tenant.IsZero() || event.ID.IsZero() || event.OccurredAt.IsZero() || retryAt.IsZero() {
+		return shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.autoReceipts[tenant] == nil {
+		s.autoReceipts[tenant] = make(map[shared.ID]memoryAutoPushReceipt)
+	}
+	if current := s.autoReceipts[tenant][event.ID]; !current.completed {
+		s.autoReceipts[tenant][event.ID] = memoryAutoPushReceipt{availableAt: retryAt}
+	}
+	return nil
 }
 func (s *TicketStore) SetAudit(audit ports.AuditLogger) { s.mu.Lock(); s.audit = audit; s.mu.Unlock() }
 func ticketBreakerKey(t ticketing.DispatchTuple) string {
@@ -56,6 +418,9 @@ func ticketBreakerKey(t ticketing.DispatchTuple) string {
 func (s *TicketStore) createMapping(ctx context.Context, tenant shared.ID, m ticketing.Mapping, audit *ports.AuditEntry) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if m.GroupingMode == "" {
+		m.GroupingMode = ticketing.GroupingFinding
 	}
 	if err := m.Validate(); err != nil {
 		return err
@@ -188,6 +553,9 @@ func (s *TicketStore) ListFindingMappings(ctx context.Context, tenant, engagemen
 func (s *TicketStore) updateMapping(ctx context.Context, tenant shared.ID, m ticketing.Mapping, expected int, audit *ports.AuditEntry) (ticketing.Mapping, error) {
 	if err := ctx.Err(); err != nil {
 		return ticketing.Mapping{}, err
+	}
+	if m.GroupingMode == "" {
+		m.GroupingMode = ticketing.GroupingFinding
 	}
 	if err := m.Validate(); err != nil {
 		return ticketing.Mapping{}, err
