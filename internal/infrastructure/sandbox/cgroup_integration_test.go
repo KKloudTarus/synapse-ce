@@ -36,8 +36,8 @@ int main(int argc,char**argv){
 }
 `
 
-// TestCgroupContainsForkBomb proves F3: pids.max bounds a fork bomb on the egress path
-// (the privileged path that touches hostile networks). Needs bwrap + gcc + cgroup write.
+// TestCgroupContainsBombs proves F3: process and memory budgets contain resource bombs.
+// Requires bubblewrap, gcc and cgroup v2 resource controls.
 func TestCgroupContainsBombs(t *testing.T) {
 	for _, b := range []string{"bwrap", "gcc"} {
 		if _, err := exec.LookPath(b); err != nil {
@@ -74,7 +74,10 @@ func TestCgroupContainsBombs(t *testing.T) {
 	}
 
 	// Memory bomb under memory.max=64MB: OOM-killed long before allocating 1GB.
-	res, _ = sb.Run(ctx, ports.ToolSpec{Name: bomb, Args: []string{"mem"}, Workdir: dir, MemMaxBytes: 64 << 20})
+	res, err = sb.Run(ctx, ports.ToolSpec{Name: bomb, Args: []string{"mem"}, Workdir: dir, MemMaxBytes: 64 << 20})
+	if err != nil || res.TimedOut {
+		t.Fatalf("memory run did not execute normally: %v (timed_out=%t, stderr=%s)", err, res.TimedOut, res.Stderr)
+	}
 	high := 0
 	for _, m := range regexp.MustCompile(`alloced=(\d+)MB`).FindAllStringSubmatch(string(res.Stdout), -1) {
 		if v, _ := strconv.Atoi(m[1]); v > high {
@@ -82,6 +85,9 @@ func TestCgroupContainsBombs(t *testing.T) {
 		}
 	}
 	t.Logf("memory bomb: high-water=%dMB (memory.max=64MB), exit=%d", high, res.ExitCode)
+	if high == 0 || res.ExitCode == 0 {
+		t.Fatalf("allocator must start and be terminated by its memory budget: high-water=%dMB exit=%d stderr=%s", high, res.ExitCode, res.Stderr)
+	}
 	if high >= 256 {
 		t.Fatalf("memory bomb NOT contained: reached %dMB under a 64MB cap", high)
 	}

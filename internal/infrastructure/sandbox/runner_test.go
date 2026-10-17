@@ -153,12 +153,37 @@ func TestSandboxWrapsInSystemdRunForLimits(t *testing.T) {
 		t.Fatalf("argv[0] = %q, want systemd-run prefix", argv[0])
 	}
 	joined := strings.Join(argv, " ")
-	if !strings.Contains(joined, "--user --scope") || !strings.Contains(joined, "MemoryMax=536870912") || !strings.Contains(joined, "TasksMax=64") {
+	if !strings.Contains(joined, "--user --scope") || !strings.Contains(joined, "MemoryMax=536870912") ||
+		!strings.Contains(joined, "MemorySwapMax=0") || !strings.Contains(joined, "TasksMax=64") {
 		t.Errorf("systemd-run cgroup limits missing: %s", joined)
 	}
 	// bwrap still wraps the tool inside the scope (appears after systemd-run, before the tool).
 	if bw, tool := slices.Index(argv, "/usr/bin/bwrap"), slices.Index(argv, "syft"); !(bw > 0 && tool > bw) {
 		t.Errorf("bwrap must wrap the tool inside the systemd scope: %v", argv)
+	}
+}
+
+func TestSystemdDefaultMemoryBudgetDisablesSwap(t *testing.T) {
+	args := fakeRunner("/usr/bin/systemd-run").systemdArgs(ports.ToolSpec{})
+	for _, property := range []string{"MemoryMax=268435456", "MemorySwapMax=0", "TasksMax=128"} {
+		if !slices.Contains(args, property) {
+			t.Errorf("default scope budget lacks %s: %v", property, args)
+		}
+	}
+}
+
+func TestSystemdProbeRejectsUnsupportedSwapLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a POSIX executable fixture")
+	}
+	command := filepath.Join(t.TempDir(), "systemd-run")
+	// An older manager accepts a plain scope but refuses the required swap property.
+	script := "#!/bin/sh\nfor arg do\n  if [ \"$arg\" = \"MemorySwapMax=0\" ]; then exit 1; fi\ndone\nexit 0\n"
+	if err := os.WriteFile(command, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if probeSystemdRun(command) {
+		t.Fatal("a manager that refuses the swap cap must not be advertised as usable")
 	}
 }
 
