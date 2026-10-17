@@ -1,33 +1,52 @@
 # B07 verification summary
 
-This summary records nine published source-check records
-that completed successfully on 2026-10-17. It contains commands, exit outcomes,
-and public test scope only.
-Private provider credentials, endpoints, and raw runtime output remain outside the
-repository.
+This summary records published command and provider evidence as of 2026-10-17.
+It records public scope, timing and outcomes. Credentials, signing material and
+raw runtime output remain outside the repository; the linked synthetic report
+artifacts and provider captures are included for review.
+It accompanies the worktree-bound Taurus gate and final review record.
 
 | Check | Result | Evidence covered |
 | --- | --- | --- |
-| `make lint build vet test typecheck` | Passed, exit 0 at 16:08:33 UTC | Final Go lint, builds, tests, vet, and web TypeScript baseline. |
-| `cd web && pnpm exec vitest run --maxWorkers=2 && pnpm build` | Passed, exit 0 | 208 test files and 1,400 tests; production web build. |
-| `go test -race ./internal/infrastructure/acquire ./internal/usecase/sca ./internal/usecase/findings ./internal/usecase/projectuc ./internal/usecase/ticketing ./internal/usecase/docpublish ./internal/adapter/httpapi` | Passed, exit 0 | Race-sensitive acquisition, SCA, finding, Project, ticketing, document publication, and HTTP paths. |
-| `go test ./internal/infrastructure/persistence/postgres -run 'Test(ScanJobStore.*ProjectAnalysis\|FindingRepositoryListFindingPage\|Ticket\|Document)' -count=1` | Passed, exit 0 | Fresh PostgreSQL Project analysis, finding-page, ticket, and document contracts. Generic-plan coverage and NULL-group coverage are distinct assertions within this run. |
-| `go test -race ./internal/adapter/httpapi -run 'Test(Jira\|HostileHarness)' -count=1` | Passed, exit 0; repeated at 16:14:35 UTC | Final Jira/DC event-contract and hostile HTTP harness coverage. |
-| `go test -race ./internal/usecase/ticketing ./internal/infrastructure/persistence/memory -run 'TestReceiveInboundWebhook(DeduplicatesProviderCommentAcrossJiraWebhookShapes\|CommentSnapshotsKeepProviderIdentityAndEdits\|NormalizesEmbeddedAndDedicatedCommentEdits)\|TestTicket' -count=1` | Passed, exit 0 | Final comment-delivery race coverage for cross-event dedupe and edited snapshots. |
-| `go test -race ./internal/infrastructure/persistence/postgres -run '^TestTicketInboundReducerPostgresSerializesFindingProposalWindow$' -count=1` | Passed, exit 0 | Concurrent PostgreSQL inbound snapshot and proposal-window regression. |
+| `make lint build vet test typecheck` | Passed, exit 0; 18:02:00–18:02:48 UTC | Current Go lint, builds, tests, vet, and web TypeScript baseline after the Documentation capability update. |
+| `pnpm --dir web exec vitest run --maxWorkers=2` | Passed, exit 0; 18:18:36–18:21:39 UTC | 208 test files and 1,405 tests, including Documentation grouping, navigation, and delayed-identity read-only empty-editor tests. |
+| `pnpm --dir web typecheck` | Passed, exit 0; 18:23:41–18:23:45 UTC | Current web TypeScript check after the read-only role guard. |
+| `pnpm --dir web run build` | Passed, exit 0; 18:18:36–18:18:39 UTC | Production web build after the Documentation UI update and read-only role-state guard. |
+| `go test -timeout 45m -count=1 ./internal/infrastructure/persistence/postgres` | Passed twice on the same clean PostgreSQL database, exit 0; 17:27:36–17:48:51 and 17:49:20–18:10:55 UTC | Full PostgreSQL persistence suite, including the fixture-cleanup regression. |
+| `go test -race -count=1 ./internal/infrastructure/integration/confluence ./internal/usecase/docpublish` | Passed, exit 0 | Confluence restriction and governed document-publication paths. |
+| `go test -v -count=1 ./internal/usecase/ticketing -run 'TestWorkflowTickReconcilesProviderStateAndMarksUnreadable\|TestInboundReconcileTimeoutCheckpointsAttemptedTargetForNextFairTick\|TestInboundReconcileChargesIdentityWithinReadBudget'` | Passed, exit 0 | Inbound Jira reconciliation fairness, timeout checkpointing, and unreadable provider state. |
+| Earlier B07 focused race and PostgreSQL checks | Passed, exit 0 | Acquisition, SCA, finding, Project, ticketing, document publication, HTTP, inbound comment snapshot, and concurrent PostgreSQL proposal-window paths. The individual public records remain in `continuation-verification-checks.json`. |
 
-| `cd web && pnpm exec vitest run src/pages/CodeQuality/ProjectSourceFindings.test.tsx --maxWorkers=2 && pnpm typecheck && pnpm build` | Passed, exit 0 at 16:15:05 UTC | Final icon convention alignment; 12 focused tests, TypeScript and production build. |
+The final Tier 0 architecture/QA/security panel and required specialist reviews
+passed with no open findings. The readonly UI and fresh licensed Jira findings
+were resolved with regression tests and live proof. The public
+[final review record](final-review-results.json) preserves reviewer scope and
+limitations; the current worktree-bound `.git/taurus/verification.json` is validated
+before commit/push. GitHub Actions are disabled for this repository, so no hosted-CI result is
+claimed. A frontend role-state guard was added after review identified a newly
+reachable read-only empty-editor path; its three regression cases failed before the fix, then both focused suites passed
+(37 tests). The complete UI suite and production build passed after the fix.
+Real configured, empty, delayed-response loading, upstream-502, and read-only empty
+journeys were inspected in Edge; the isolated fixture was restored after capture.
+See [Documentation proof](documentation-discovery-proof.json).
 
-The final code and specialist review gates passed, including security's edit fix,
-performance and reliability's narrow delta, the later Data Center metadata delta,
-and implementation QA. The supplemental Source Findings icon-focused Vitest run
-passed all 12 tests; TypeScript and the production build passed at 16:15:05 UTC.
-The worktree-bound `.git/taurus/verification.json` is validated before commit and
-refreshed for the committed tree before push; this summary does not replace it.
+Live provider proof includes automatic group-only restriction creation before
+content upload for Confluence Cloud page `131374` and fresh Confluence Data Center
+page `327686`: each completed create in one attempt, a republish reached version 3,
+the scheduled run reached version 4, and governed purge returned the current page,
+history, trash, and report attachments as absent. See the public
+[Cloud proof](automatic-cloud-provider-proof.json) and
+[Data Center proof](automatic-dc-provider-proof.json). The scheduled PDF email
+proof records receipt by both approved personal mailboxes and a two-page native
+Gmail PDF view. Outlook received the same attachment, but its native preview
+reported a client-side preview error; that limitation is recorded without treating
+it as an attachment-delivery failure. See the
+[scheduled email proof](scheduled-email-provider-proof.json).
 
-Live-provider evidence is recorded in the acceptance ledger and the public
-[continuation provider proof](continuation-provider-proof.json),
-[DC webhook proof](dc-webhook-provider-proof.json), and
-[legal-hold proof](legal-hold-provider-proof.json). Known acceptance limits remain:
-unassisted fresh group-only Confluence restriction creation and an opened final
-Outlook PDF.
+Fresh Jira DC acceptance used normal Synapse API/worker creation of restricted
+`SYNACC-1` followed by an independent reviewer's genuine native callbacks. Seven
+valid HMAC forwards returned 202 at 18:39:28–18:40:36 UTC, before the official
+three-hour test license expired at 20:54:31. Final readback retained one pending
+proposal, a confirmed finding and two distinct snapshots for one remote comment.
+The native registration, proxy and temporary route were closed. The older expired-lab
+callback record is historical only. See [fresh Jira proof](fresh-jira-native-provider-proof.json).

@@ -1,4 +1,5 @@
 {
+  "scope": "Historical native callbacks from the earlier DC lab after its three-hour test license had expired. These observations are retained, but do not establish licensed DC acceptance. The fresh licensed rerun is recorded separately.",
   "provider": "Jira Data Center 11.3.12",
   "integration_id": "1eca97562f73793403747c61271ccabd",
   "engagement_id": "3c9d4500dc154dc01c1d4486c1864b2c",
@@ -92,7 +93,8 @@
   },
   "limitations": [
     "Two duplicate comment rows from pre-fix deliveries are retained and documented.",
-    "A direct same-body replay was not injected; the real creation pair (`jira:issue_updated` + `comment_created`) and edit pair (`jira:issue_updated` + `comment_updated`) tested cross-event deduplication."
+    "A direct same-body replay was not injected; the real creation pair (`jira:issue_updated` + `comment_created`) and edit pair (`jira:issue_updated` + `comment_updated`) tested cross-event deduplication.",
+    "The old license was outside validity during these late callback deliveries; do not use this record as the licensed DC acceptance run."
   ],
   "runtime_api_sha_for_comment_pairs": "5ba4f814",
   "runtime_worker_sha_for_comment_pairs": "93ed97cd"

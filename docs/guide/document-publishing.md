@@ -16,6 +16,12 @@ advances scheduled report delivery and builds report artifacts. The `integration
 profile uses fail-closed dispatch-only scan ports while it reads verified stored
 report data; it does not claim scan, recon, or assessment-lifecycle jobs.
 
+In the console, open **Settings → Integrations → Documentation**, then choose
+**Manage documentation**. The configuration editor is headed **External
+integrations** and lists the available Confluence Cloud and Data Center providers.
+The Documentation group is available when the API has the same durable PostgreSQL
+store that wires document publishing; it is not a separate feature switch.
+
 ## Configure Confluence
 
 Create an enabled `confluence-cloud` or `confluence-dc` integration with a
@@ -38,6 +44,28 @@ configured site has a blocking public-link policy. The organization policy API m
 be unavailable, changed, deprecated, or unavailable on a Free plan. Any missing,
 incomplete, stale, or unreadable proof blocks the release; a successful connection
 test is not proof that sensitive publication can proceed.
+
+Cloud restriction creation uses the V2 direct-permissions replacement and
+`VIEW_RESTRICTED` state APIs. The integration actor must retain effective access
+through the configured group. Synapse leaves the provider's self-lockout protection
+enabled. Before upload, both V2 state/complete direct grants and V1 read/update
+ACLs must agree with the configured group, followed by the current public-link
+policy proof. A tenant without the required V2 API fails closed.
+
+For Confluence Data Center 10.2 LTS, setting the optional boolean
+`legacy_xmlrpc_restrictions` to `true` selects the vendor-documented compatibility
+path for group-only restriction creation. It reuses the PAT; no password or RPC
+session credential is needed. An administrator must enable authenticated Remote
+API access in Confluence's Further Configuration first and leave anonymous access
+disabled. Synapse never enables it automatically. Other provider versions, missing
+group membership, unavailable RPC, or unverifiable results fail closed.
+
+XML-RPC is deprecated and planned for removal in Confluence 11. Keep this option
+off unless the tested compatibility path is needed. It is not a fallback after a
+REST error. View/Edit writes still require exact group-only REST readback before
+any report upload. See the
+[vendor workaround](https://jira.atlassian.com/browse/CONFSERVER-56405) and
+[restriction design](../evidence/jira-sync-report-publishing/restricted-publication-design.md).
 
 The first remote write is only a neutral recovery shell. Synapse applies the exact
 read ACL and verifies it, including the Cloud public-link proof, before it uploads
@@ -104,8 +132,10 @@ submission, grouped updates, or report schedules. Before rolling binaries back,
 disable the affected integrations and schedules and let in-flight work settle.
 Keep the durable command and delivery tables: rollback guards deliberately refuse
 to remove populated history. Use a forward migration to repair persisted data.
-Index creation and backfill can block writes; measure their duration against a
-representative database before scheduling production rollout.
+The upgrade requires a maintenance window: drain all database clients before
+migration. Backfill and constraint work can block reads as well as writes. Rehearse
+against a restored representative database and follow the
+[migration rollout procedure](deployment.md#migration-rollout).
 
 Run a narrow canary in an isolated restricted space and group first. Retain the
 intent, audit record, stored content hash, and provider response classification.

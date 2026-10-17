@@ -56,6 +56,18 @@ After changing a mapping, policy or credentials, prepare and approve a new previ
 before submitting a replacement command. Retained commands preserve the originally
 approved authority revisions and payload.
 
+Use a maintenance window for the Jira sync and report delivery migrations. Drain
+requests and stop all database clients, including API, worker, MCP, and scanner
+processes, before running `synapse-migrate`; migrate-first alone does not make this
+an online upgrade. The inbound backfill holds an access-exclusive lock on
+`ticket_intents`, and the source-job constraint/index migration blocks reads and
+writes on `scan_jobs`. A local million-row fixture measured approximately 65 seconds
+for the inbound backfill; size the window from a rehearsal on a restored database,
+not that synthetic measurement. See the
+[migration measurements and limits](../evidence/jira-sync-report-publishing/migration-measurements.md).
+Start the matching API and workers only after migration completes and readiness
+checks pass.
+
 Deploy migrations before API and worker. Disable Jira integrations before application
 rollback and retain intent, snapshot and breaker history. Memory persistence is for
 development only. PostgreSQL is required for durable production recovery.

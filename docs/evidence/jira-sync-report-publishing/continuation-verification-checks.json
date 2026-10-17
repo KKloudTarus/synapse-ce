@@ -137,11 +137,268 @@
       "exit_code": 0,
       "postgres_enabled": false,
       "name": "final-source-icon-web"
+    },
+    {
+      "argv": [
+        "make",
+        "lint",
+        "build",
+        "vet",
+        "test",
+        "typecheck"
+      ],
+      "started_at": "2026-10-17T17:28:47.329664+00:00",
+      "finished_at": "2026-10-17T17:30:38.438665+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-source-baseline-pinned"
+    },
+    {
+      "argv": [
+        "pnpm",
+        "--dir",
+        "web",
+        "run",
+        "test"
+      ],
+      "started_at": "2026-10-17T17:30:55.198884+00:00",
+      "finished_at": "2026-10-17T17:33:36.788065+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-web-suite-final"
+    },
+    {
+      "argv": [
+        "pnpm",
+        "--dir",
+        "web",
+        "run",
+        "build"
+      ],
+      "started_at": "2026-10-17T17:34:59.304050+00:00",
+      "finished_at": "2026-10-17T17:35:02.829833+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-web-build"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "-race",
+        "-count=1",
+        "./internal/infrastructure/integration/confluence",
+        "./internal/usecase/docpublish"
+      ],
+      "started_at": "2026-10-17T17:35:00.890857+00:00",
+      "finished_at": "2026-10-17T17:35:04.123100+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-confluence-race"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "-v",
+        "-count=1",
+        "./internal/usecase/ticketing",
+        "-run",
+        "TestWorkflowTickReconcilesProviderStateAndMarksUnreadable|TestInboundReconcileTimeoutCheckpointsAttemptedTargetForNextFairTick|TestInboundReconcileChargesIdentityWithinReadBudget"
+      ],
+      "started_at": "2026-10-17T17:40:12.994045+00:00",
+      "finished_at": "2026-10-17T17:40:13.987057+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-inbound-reconciliation"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "-timeout",
+        "45m",
+        "-count=1",
+        "./internal/infrastructure/persistence/postgres"
+      ],
+      "started_at": "2026-10-17T17:27:36.562418+00:00",
+      "finished_at": "2026-10-17T17:48:51.900602+00:00",
+      "exit_code": 0,
+      "postgres_enabled": true,
+      "name": "ready-full-postgres"
+    },
+    {
+      "argv": [
+        "make",
+        "lint",
+        "build",
+        "vet",
+        "test",
+        "typecheck"
+      ],
+      "started_at": "2026-10-17T18:02:00.593210+00:00",
+      "finished_at": "2026-10-17T18:02:48.186831+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-discovery-baseline"
+    },
+    {
+      "argv": [
+        "pnpm",
+        "--dir",
+        "web",
+        "exec",
+        "vitest",
+        "run",
+        "--maxWorkers=2"
+      ],
+      "started_at": "2026-10-17T18:02:00.585726+00:00",
+      "finished_at": "2026-10-17T18:05:45.178810+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-discovery-full-web"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "-v",
+        "-timeout",
+        "45m",
+        "-count=1",
+        "./internal/infrastructure/persistence/postgres"
+      ],
+      "started_at": "2026-10-17T17:49:20.953653+00:00",
+      "finished_at": "2026-10-17T18:10:55.437314+00:00",
+      "exit_code": 0,
+      "postgres_enabled": true,
+      "name": "ready-full-postgres-repeat"
+    },
+    {
+      "argv": [
+        "pnpm",
+        "--dir",
+        "web",
+        "run",
+        "build"
+      ],
+      "started_at": "2026-10-17T18:16:12.561087+00:00",
+      "finished_at": "2026-10-17T18:16:14.634473+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-discovery-web-build"
+    },
+    {
+      "argv": [
+        "/home/vihn/.local/share/mise/installs/pnpm/9.15.9/pnpm",
+        "--dir",
+        "web",
+        "run",
+        "build"
+      ],
+      "started_at": "2026-10-17T18:18:23.266200+00:00",
+      "finished_at": "2026-10-17T18:18:25.430542+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-documentation-role-guard-web-build"
+    },
+    {
+      "argv": [
+        "/home/vihn/.local/share/mise/installs/pnpm/9.15.9/pnpm",
+        "--dir",
+        "web",
+        "exec",
+        "vitest",
+        "run",
+        "src/pages/Settings/Integrations.test.tsx",
+        "--maxWorkers=2"
+      ],
+      "started_at": "2026-10-17T18:17:07.252870+00:00",
+      "finished_at": "2026-10-17T18:17:25.678152+00:00",
+      "exit_code": 1,
+      "postgres_enabled": false,
+      "name": "ready-readonly-empty-red",
+      "expected_failure": true,
+      "scope": "Regression reproduction before the permission guard: three unauthorized empty-editor cases failed; not an open failure."
+    },
+    {
+      "argv": [
+        "/home/vihn/.local/share/mise/installs/pnpm/9.15.9/pnpm",
+        "--dir",
+        "web",
+        "exec",
+        "vitest",
+        "run",
+        "src/pages/Settings/Integrations.test.tsx",
+        "src/pages/Settings/IntegrationsHub.test.tsx",
+        "--maxWorkers=2"
+      ],
+      "started_at": "2026-10-17T18:17:58.685668+00:00",
+      "finished_at": "2026-10-17T18:18:02.202301+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-readonly-empty-green"
+    },
+    {
+      "argv": [
+        "/home/vihn/.local/share/mise/installs/pnpm/9.15.9/pnpm",
+        "--dir",
+        "web",
+        "exec",
+        "vitest",
+        "run",
+        "--maxWorkers=2"
+      ],
+      "started_at": "2026-10-17T18:18:36.671740+00:00",
+      "finished_at": "2026-10-17T18:21:39.578972+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-frontend-final"
+    },
+    {
+      "argv": [
+        "/home/vihn/.local/share/mise/installs/pnpm/9.15.9/pnpm",
+        "--dir",
+        "web",
+        "build"
+      ],
+      "started_at": "2026-10-17T18:18:36.672828+00:00",
+      "finished_at": "2026-10-17T18:18:39.284287+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-web-build-final"
+    },
+    {
+      "argv": [
+        "/home/vihn/.local/share/mise/installs/pnpm/9.15.9/pnpm",
+        "--dir",
+        "web",
+        "typecheck"
+      ],
+      "started_at": "2026-10-17T18:23:41.998847+00:00",
+      "finished_at": "2026-10-17T18:23:45.230335+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "ready-typecheck-final"
     }
   ],
   "web_test_files": 208,
-  "web_tests": 1400,
+  "web_tests": 1405,
   "runtime": {
+    "at": "2026-10-17T18:02:24.427155+00:00",
+    "CGO_ENABLED": "0",
+    "exit_code": 0,
+    "sha256": {
+      "synapse-api": "b43e60f0b000422e8e119ff4889ab6726705715fd3ec60b2d3a71061895cf846",
+      "synapse-worker": "378a4d6c81266ce4cb9b2d48c754c6af4a8cdd0dff5b0a35c93818f8bc61d1c1"
+    }
+  },
+  "limits": [
+    "No production performance benchmark",
+    "Original broad race evidence supplemented by final changed-package race and real PostgreSQL concurrent snapshot regression",
+    "GitHub Actions are disabled for the repository; no hosted CI result is available"
+  ],
+  "historical_runtime": {
     "at": "2026-10-17T16:07:49.774157+00:00",
     "CGO_ENABLED": "0",
     "exit_code": 0,
@@ -150,9 +407,5 @@
       "synapse-worker": "93ed97cd023d189f2e4a8acd9c900cf80ef4211b09ffa091e74f404992a2206b"
     }
   },
-  "limits": [
-    "No production performance benchmark",
-    "Original broad race evidence supplemented by final changed-package race and real PostgreSQL concurrent snapshot regression",
-    "Known provider acceptance gaps use Refs in the ledger"
-  ]
+  "runtime_scope": "Final Documentation API and fresh Jira rerun build. Earlier provider runs retain their own build hashes and timestamps in the corresponding provider proof; the current binary hash is not retroactive evidence."
 }

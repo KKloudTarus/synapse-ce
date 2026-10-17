@@ -1,4 +1,5 @@
 {
+  "scope": "Historical review of the original Draft snapshot. Its acceptance limits and command results describe that snapshot only; current acceptance is in README.md and final-review-results.json.",
   "decision": "pass for one Draft PR with incomplete provider acceptance referenced",
   "limits": [
     "Live DC and positive restricted Confluence acceptance remain missing.",
@@ -7,7 +8,7 @@
   ],
   "open_findings": [],
   "rejected_findings": [
-    "Requiring expanded Jira history total to equal returned length contradicts Cloud’s documented 100-most-recent window.",
+    "Requiring expanded Jira history total to equal returned length contradicts Cloud\u2019s documented 100-most-recent window.",
     "Project navigation already unmounts publishing state through its route/project guard."
   ],
   "reviewers": [
