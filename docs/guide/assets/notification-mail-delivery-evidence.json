@@ -1,0 +1,541 @@
+{
+  "schema_version": 1,
+  "captured_on": "2026-10-17",
+  "scope": "Dedicated synthetic Gmail and Discord notification-delivery cohort on the local full Compose stack. This record publishes only reviewed Gmail native body crops and sanitized correlation metadata.",
+  "runtime": {
+    "base_url": "https://localhost:8443",
+    "topology": "local full Compose stack; no public host, tunnel, Tailscale Serve, or Funnel",
+    "readiness": {
+      "database": "ok",
+      "migrations": "ok"
+    },
+    "source_and_binary_identity": {
+      "git_head_at_cohort": "3e60d62182a4e5af1afd54905187ba78cdd56c36",
+      "synapse_api_sha256": "85bd9b881c094891ea22533d22fec48adde62a24d3c16db1a7dd4003b074e07b",
+      "synapse_worker_sha256": "10fcdb3195acfc16cb83c97bc638904b7f74170424872c421185bf377ca31f88",
+      "synapse_migrate_sha256": "5e73939d00d39db7cb54f0095a0b678abbd812f2049869adf93acee297534fb2",
+      "tracked_worktree_diff_sha256_at_cohort": "22aa038ee3205f7bf03158bf8994818d6f44623cc1525142731e5b863cf306fb"
+    }
+  },
+  "cohort_boundary": {
+    "source_event_types": [
+      "engagement.created",
+      "engagement.status_changed",
+      "finding.created",
+      "finding.status_changed",
+      "finding.commented"
+    ],
+    "data_cells": [
+      "en-detail",
+      "en-signal",
+      "vi-detail",
+      "vi-signal"
+    ],
+    "cadences": [
+      "hourly",
+      "daily"
+    ],
+    "window_boundary": "Digest windows were closed early for this controlled cohort. The result is not elapsed-cadence soak evidence.",
+    "cleanup_state": "Each provider cohort created four channels and eight rules; all eight rules were disabled after delivery. Channels were left enabled only for native capture.",
+    "historical_evidence_boundary": "This artifact does not merge or restate historical acceptance records. Those records remain separate, with their own provenance and limits."
+  },
+  "gmail": {
+    "provider": "gmail",
+    "transport": "Real Google SMTP OAuth relay and a personal Gmail Inbox receipt; credentials, address, raw MIME, and SMTP transcript are intentionally excluded.",
+    "deliveries": {
+      "fixture_preview_send_test_pairs": 4,
+      "mixed_digest_deliveries": 8,
+      "editor_send_test_delivery": 1,
+      "total_inbox_receipts": 13,
+      "all_delivery_attempts": 13,
+      "attempt_result": "All 13 deliveries, including the editor send test, had exactly one successful SMTP 250 attempt; every receipt is independently correlated by Message-ID."
+    },
+    "receipt_parity": {
+      "normalization": "CRLF-to-LF and terminal-newline normalization only",
+      "digest_receipts": "8 of 8: subject, plain text, and HTML body match the corresponding API preview",
+      "fixture_receipts": "4 of 4: subject, plain text, and HTML body match the corresponding API preview",
+      "editor_send_test_receipt": "API preview returned 200; subject, plain text, and HTML body match the editor send-test receipt"
+    },
+    "receipts": [
+      {
+        "kind": "fixture",
+        "cell": "en-detail",
+        "delivery_id": "1e8880179a48bddb1dbc0e97d5882c66",
+        "message_id": "<1e8880179a48bddb1dbc0e97d5882c66@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "fabf789f20085f4dc66c1f72f41feb2ae5d0fc95d83b907ee29e830581a8c2c9"
+      },
+      {
+        "kind": "fixture",
+        "cell": "en-signal",
+        "delivery_id": "c6890af1f4baa4f7868740240e49062d",
+        "message_id": "<c6890af1f4baa4f7868740240e49062d@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "b41455380b23877055eb3f471ae04405197e8e1e4eaed916ac0a60f7b4440b67"
+      },
+      {
+        "kind": "fixture",
+        "cell": "vi-detail",
+        "delivery_id": "0490be5b76f86407194b614ae0794147",
+        "message_id": "<0490be5b76f86407194b614ae0794147@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "c6f881482e1fbee997f9750252b6a6b0828d5ec946e732efdc9febdfbfc7fc53"
+      },
+      {
+        "kind": "fixture",
+        "cell": "vi-signal",
+        "delivery_id": "33d2f287bbcd3f08921e398b18d7fd87",
+        "message_id": "<33d2f287bbcd3f08921e398b18d7fd87@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "8123eebf2e1b678d5f6083801ca8ed1b358f79c80c2e3eff35184fa294e054a4"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "hourly",
+        "delivery_id": "7faf093083f4a78289cdea1a5d2f5bf9",
+        "message_id": "<7faf093083f4a78289cdea1a5d2f5bf9@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "6bba1712a2a5de8ffb011297cb716ae49ab7366cbd24abd70a095ba4d45be771"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "daily",
+        "delivery_id": "d1d1decc9ce69498ec42ecf0314d72e7",
+        "message_id": "<d1d1decc9ce69498ec42ecf0314d72e7@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "86f9a6869c4fc8256b1b6d4f0401bb96e15baa26eb3c43fb8b0a8307f1efb7e0"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "hourly",
+        "delivery_id": "899d405f93ae1b4e6dd30f597ac97a41",
+        "message_id": "<899d405f93ae1b4e6dd30f597ac97a41@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "e289385c7e184ca363ec7780352e2b86d06250f75d90008a189e8c0839ccfe1b"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "daily",
+        "delivery_id": "4db4b0c3920f4bbd8b2437b6004854d2",
+        "message_id": "<4db4b0c3920f4bbd8b2437b6004854d2@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "094a8b5be164721a2b6850e6a0b16508900ff09f740a3a96d617326d7ab596d8"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "hourly",
+        "delivery_id": "13b80ef1ce9cc6b6908e88ba335171cd",
+        "message_id": "<13b80ef1ce9cc6b6908e88ba335171cd@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "6485784425883ee0130a04de69ca40f60d1eb884543ffd20c3867a56bcfd3621"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "daily",
+        "delivery_id": "902f177f69196b76a19e590e4036cd9f",
+        "message_id": "<902f177f69196b76a19e590e4036cd9f@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "9b216f4d9a68509eff4847872d6788041f9f36c168c9697ba9d1e9f4996b75f3"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "hourly",
+        "delivery_id": "1c3f2cb873c86993afb44d587077cd3c",
+        "message_id": "<1c3f2cb873c86993afb44d587077cd3c@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "a6450d24500b31a9f07c04f8f8aac54b01046d4a852c19f091a98c70bab1921d"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "daily",
+        "delivery_id": "cb92a180d8b765086fb8716e484015c4",
+        "message_id": "<cb92a180d8b765086fb8716e484015c4@synapse.local>",
+        "inbox_message_count": 1,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "7f1aa9216b981bbc38035b8e9c32f61db6d4154a2f54e633da40561c3eb73bab"
+      },
+      {
+        "kind": "editor-send-test",
+        "cell": "en-detail",
+        "delivery_id": "5a51df93b1a09a06cb6d143dc3af9e05",
+        "message_id": "<5a51df93b1a09a06cb6d143dc3af9e05@synapse.local>",
+        "inbox_message_count": 1,
+        "api_preview_http": 200,
+        "subject_match": true,
+        "plain_match": true,
+        "html_match": true,
+        "raw_sha256": "012d354bf1c11ef3b7b95a234251904af054f5e8a7856e0f33cc9f882d19eb82"
+      }
+    ],
+    "reviewed_native_body_crops": [
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-hourly-en-detail-light.jpg",
+        "sha256": "aed523f0118eff3c8b90739655a41907fa39b0620199ddc3cf20c9d587acfcdb",
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "hourly",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-hourly-en-detail-dark.jpg",
+        "sha256": "c0121a6b12e8784858354c7b62be767180dcfa7f6c7fdc7f6ffa7f501cf2383a",
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "hourly",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-daily-en-detail-light.jpg",
+        "sha256": "fb871fb264abccda1cf98eb2a8f47ede94f01acb13b5acecaee36c4a8ca4e476",
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "daily",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-daily-en-detail-dark.jpg",
+        "sha256": "5aabe63cc6f2e01604dd9c58264826d9bf7d3995194a5ed00accfa7a11c51083",
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "daily",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-hourly-en-signal-light.jpg",
+        "sha256": "41d5a1a68f23a7bf2b82f60afa90ea9251b52c5ef0ba0bb2a9450a859df55f3b",
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "hourly",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-hourly-en-signal-dark.jpg",
+        "sha256": "9ebf1d6a542afa13a228b525a04ecc3e2c855df54f676063926fcfbcb65ad054",
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "hourly",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-daily-en-signal-light.jpg",
+        "sha256": "e6b8bfcf8be6a94d21db01caf8a2aa46e6e06a508ceef76fc8faa3463980267a",
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "daily",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-daily-en-signal-dark.jpg",
+        "sha256": "4d89a37314c8a6f0d8761876114951ae8ced35f7ed2b69f5235ef72e99c99d88",
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "daily",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-hourly-vi-detail-light.jpg",
+        "sha256": "65eddf922cbb5b18f16eb6554ed92c4aac48d5aba2c2d145284ec385f1193891",
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "hourly",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-hourly-vi-detail-dark.jpg",
+        "sha256": "59a37c5c796e1f280ccece4b2420bbb323ac8bc5e258f2376009f5bdacd9328b",
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "hourly",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-daily-vi-detail-light.jpg",
+        "sha256": "d25fc23837880f02b46ed72f732a278d1d9dae179d58354ea274c5d4e83bcaae",
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "daily",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-daily-vi-detail-dark.jpg",
+        "sha256": "a4d2b4b448f92388875f4b7df97e42a1917352ff4e2b56bee801c6223db596ed",
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "daily",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-hourly-vi-signal-light.jpg",
+        "sha256": "95383a00fe24436e2a2441c5717a0d9487784616f5c1ea48677cff325292c516",
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "hourly",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-hourly-vi-signal-dark.jpg",
+        "sha256": "ca53ff41efeed12ebaeb7f47ab09a822d8785f3750c403ec68cd3d3ec2f0cece",
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "hourly",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-daily-vi-signal-light.jpg",
+        "sha256": "7f1cc55b877b45fe6eb6f3598253b9e10840d2410232ed53550c3523705c5a8f",
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "daily",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-mixed-daily-vi-signal-dark.jpg",
+        "sha256": "7031f974dff4e931efe0283d74d1f67ac7ebf03c217e24a1052f07b82129cff8",
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "daily",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-fixture-en-detail-light.jpg",
+        "sha256": "ffd89c753a11173353bf50ff142f265a1fa183b400d1b82cbb2dad16469c7950",
+        "kind": "fixture",
+        "cell": "en-detail",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-fixture-en-detail-dark.jpg",
+        "sha256": "e08c04da25614510ca41b47fa8accd20e6c64216ddb8e92f45a0818f73a28b32",
+        "kind": "fixture",
+        "cell": "en-detail",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-fixture-en-signal-light.jpg",
+        "sha256": "ffd89c753a11173353bf50ff142f265a1fa183b400d1b82cbb2dad16469c7950",
+        "kind": "fixture",
+        "cell": "en-signal",
+        "theme": "light",
+        "duplicate_of": "gmail-fixture-en-detail-light.jpg"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-fixture-en-signal-dark.jpg",
+        "sha256": "e08c04da25614510ca41b47fa8accd20e6c64216ddb8e92f45a0818f73a28b32",
+        "kind": "fixture",
+        "cell": "en-signal",
+        "theme": "dark",
+        "duplicate_of": "gmail-fixture-en-detail-dark.jpg"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-fixture-vi-detail-light.jpg",
+        "sha256": "701f636eb19e49cca7e39651975bfacb14bd80f1d82d40bfece755d27957ad24",
+        "kind": "fixture",
+        "cell": "vi-detail",
+        "theme": "light"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-fixture-vi-detail-dark.jpg",
+        "sha256": "45069babe9434b093e1ce50ea9b0e3d6f1d504d8b57c76d6758d301bb49e2633",
+        "kind": "fixture",
+        "cell": "vi-detail",
+        "theme": "dark"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-fixture-vi-signal-light.jpg",
+        "sha256": "701f636eb19e49cca7e39651975bfacb14bd80f1d82d40bfece755d27957ad24",
+        "kind": "fixture",
+        "cell": "vi-signal",
+        "theme": "light",
+        "duplicate_of": "gmail-fixture-vi-detail-light.jpg"
+      },
+      {
+        "path": "ui/notification-delivery/mail/gmail-fixture-vi-signal-dark.jpg",
+        "sha256": "45069babe9434b093e1ce50ea9b0e3d6f1d504d8b57c76d6758d301bb49e2633",
+        "kind": "fixture",
+        "cell": "vi-signal",
+        "theme": "dark",
+        "duplicate_of": "gmail-fixture-vi-detail-dark.jpg"
+      }
+    ]
+  },
+  "discord": {
+    "provider": "discord",
+    "transport": "Real Discord webhook delivery; remote_ref is stored on notification_deliveries, not on attempt rows.",
+    "deliveries": {
+      "fixture_preview_send_test_pairs": 4,
+      "mixed_digest_deliveries": 8,
+      "all_delivery_attempts": 12,
+      "attempt_result": "Each delivery was delivered after one HTTP 200 attempt."
+    },
+    "receipt_boundary": "Native DOM correlation was captured for each provider reference. No Discord screenshot is published because the browser capture viewport did not reliably follow the selected message.",
+    "provider_receipts": [
+      {
+        "kind": "fixture",
+        "cell": "en-detail",
+        "delivery_id": "c7cc2bdbe4a54dec4aa0ac7fe2d34565",
+        "provider_reference": "1560843425383845910",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843425383845910",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "fixture",
+        "cell": "en-signal",
+        "delivery_id": "cdc44398c39ec864e2a889dad988ec3a",
+        "provider_reference": "1560843426612645945",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843426612645945",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "fixture",
+        "cell": "vi-detail",
+        "delivery_id": "4690bb6722f1dd91aae8fd5543b1ac3d",
+        "provider_reference": "1560843428521320571",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843428521320571",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "fixture",
+        "cell": "vi-signal",
+        "delivery_id": "935cd452a53e4c48cb230b75ff88f9a6",
+        "provider_reference": "1560843430400237679",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843430400237679",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "hourly",
+        "delivery_id": "e69626590c9e271ed3ab798c450ec30b",
+        "provider_reference": "1560843753814626427",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843753814626427",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "daily",
+        "delivery_id": "b3273f0f3a0ba76c6666de7e79d348da",
+        "provider_reference": "1560843802472615966",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843802472615966",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "hourly",
+        "delivery_id": "a0d99ff62bc1c29344eb14d5479b888d",
+        "provider_reference": "1560843747871162413",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843747871162413",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "daily",
+        "delivery_id": "d0c23c228248c8f20d134da3b624d1a4",
+        "provider_reference": "1560843792557539389",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843792557539389",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "hourly",
+        "delivery_id": "3d85aa6bab69892d147e76fa56d8c403",
+        "provider_reference": "1560843755471241247",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843755471241247",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "daily",
+        "delivery_id": "d873a334fcd97248dfda60f2b9519b38",
+        "provider_reference": "1560843749997813863",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843749997813863",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "hourly",
+        "delivery_id": "828d9f1b0d67092b3dcb23e92b7af956",
+        "provider_reference": "1560843752078049431",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843752078049431",
+        "attempts": 1,
+        "response_code": 200
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "daily",
+        "delivery_id": "5fcd1305075a6643e8a3f30c627fbd2e",
+        "provider_reference": "1560843756721274986",
+        "native_dom_id": "chat-messages-1558058436766466141-1560843756721274986",
+        "attempts": 1,
+        "response_code": 200
+      }
+    ]
+  },
+  "excluded_or_limited": [
+    "No mobile, full browser/theme-state matrix, or elapsed hourly/daily soak is claimed.",
+    "No console/editor/navigation image is published; only the 24 independently reviewed native Gmail body crops are included.",
+    "No Discord pixels are published because the capture viewport was inconsistent, although the corresponding native DOM receipts are recorded.",
+    "Outlook has one native probe receipt and a separate cohort with SMTP acceptance only. This artifact makes no Outlook cohort receiver-receipt claim.",
+    "Teams and PagerDuty are not covered by this cohort and remain deferred.",
+    "No recipient address, OAuth credential, webhook URL, DSN, raw MIME, or SMTP transcript is included."
+  ]
+}

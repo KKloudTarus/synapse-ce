@@ -361,6 +361,11 @@ from older clients that do not know the field.
 
 Rules accept `cadence: immediate | hourly | daily`, defaulting to `immediate`. Hourly and
 daily windows use UTC publication time, while rendered times use the tenant time zone.
+Updates to a saved digest rule must include `cadence`; send `immediate` explicitly to stop
+batching. Updates to a rule with explicit recipients must include `recipient_user_ids`;
+send an empty array to remove those people. Omitted or null recipient lists cannot silently
+clear saved targets. Legacy immediate rules without explicit recipients still accept both
+fields omitted.
 Membership is recorded atomically when the rule matches; source timestamps cannot place a
 late event into a window already sent. The maintenance worker closes windows under the
 tenant scheduler lock. Each durable chunk contains at most 200 members and publishes one
@@ -381,8 +386,11 @@ and checked again under the engagement locks at admission, so a queued digest fo
 later class reduction or suppression. Channel disable, pause and destination/secret
 replacement cancel pending digest chunks with ordinary delivery backlog. Inactive channels
 admit no new members. Valid events after resume start a fresh chunk, including within the
-same UTC window. Missing or disabled rules suppress pending chunks; deleting a rule keeps
-already published digest authority readable.
+same UTC window. Missing or disabled rules suppress pending chunks. A cadence change also
+suppresses pending chunks of the old cadence; it does not move them to the new cadence.
+Removing a channel from a rule stops new membership for that channel, while membership
+already captured for it remains eligible under the current channel and engagement policies.
+Deleting a rule keeps already published digest authority readable.
 
 The rule form offers searchable engagement, team and personal-recipient pickers. A saved ID
 missing from a directory stays selected until explicitly removed. `recipient_user_ids`

@@ -14472,12 +14472,18 @@ components:
           type: string
           enum: [immediate, hourly, daily]
           default: immediate
-          description: External channel batching in UTC publication windows. Critical and mandatory events bypass batching; personal notifications stay immediate.
+          description: >-
+            External channel batching in UTC publication windows. Critical and mandatory events
+            bypass batching; personal notifications stay immediate. Required on updates to a saved
+            hourly or daily rule; send immediate explicitly to stop batching.
         recipient_user_ids:
           type: array
           maxItems: 200
           items: {type: string, minLength: 1, maxLength: 200}
-          description: Explicit personal recipients. Missing saved IDs remain stored; only enabled same-tenant human users can receive. Not allowed for finding.mentioned.
+          description: >-
+            Explicit personal recipients. Missing saved IDs remain stored; only enabled same-tenant
+            human users can receive. Not allowed for finding.mentioned. Required on updates to a
+            rule with saved explicit recipients; send an empty array to remove them deliberately.
         name: {type: string, maxLength: 200}
         enabled: {type: boolean}
         event_type:

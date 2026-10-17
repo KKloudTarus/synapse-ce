@@ -434,6 +434,12 @@ func (s *Service) updateRule(ctx context.Context, actor string, id shared.ID, in
 	if len(current.EventTypes) > 0 && in.EventTypes == nil {
 		return domain.Rule{}, fmt.Errorf("%w: event_types is required when updating a multi-event rule", shared.ErrValidation)
 	}
+	if current.Cadence != "" && current.Cadence != domain.CadenceImmediate && in.Cadence == "" {
+		return domain.Rule{}, fmt.Errorf("%w: cadence is required when updating a digest rule", shared.ErrValidation)
+	}
+	if len(current.RecipientUserIDs) > 0 && in.RecipientUserIDs == nil {
+		return domain.Rule{}, fmt.Errorf("%w: recipient_user_ids is required when updating a rule with explicit recipients", shared.ErrValidation)
+	}
 	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, EventTypes: in.EventTypes, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, Cadence: in.Cadence, RecipientUserIDs: in.RecipientUserIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err

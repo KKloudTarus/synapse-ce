@@ -46,8 +46,8 @@ Fixture links open notification settings rather than a nonexistent fixture findi
 Email notice summaries contain sorted recipient domains only. A full recipient address
 must not appear in the destination notice summary or context.
 Secret values, credential-bearing URLs and unfiltered source contexts must not appear in
-preview metadata, attempt history or this packet. Browser evidence uses only reserved
-synthetic addresses and locally generated identities. Inbox rows remain self-scoped and
+preview metadata, attempt history or this packet. Published browser evidence excludes
+private account headers and recipient addresses. Inbox rows remain self-scoped and
 mandatory floors retain precedence over preferences.
 
 ## Local stack and evidence limits
@@ -403,4 +403,89 @@ Both deferrals are tracked in open #1576, with Teams personal delivery also reta
 open #1420; neither issue is closed or
 counted as accepted. The implementation gate passes, and the remaining client-evidence
 limits above stay explicit with `Refs`. #1418/#1419 remain closed integrations and ownership
-is unchanged. Ready for review does not authorize merge or auto-merge.
+is unchanged. At that checkpoint, Ready for review did not authorize merge or auto-merge.
+
+## Evidence reconciliation and compatibility on 2026-10-17
+
+The maintainer subsequently authorized a fix/review loop and merge only after approval.
+Teams and PagerDuty remain deferred to #1576, and #1420 remains open. Other missing
+client evidence is not converted into an accepted result by that instruction.
+
+The previous PRs were checked against their complete bodies and review comments:
+
+| Merged PR | Evidence retained with its original boundary |
+| --- | --- |
+| #1571 | Fourteen reviewed captures cover Slack contact linking, challenge, verified contact, DM, personal defaults, inbox and destination navigation. Teams was unavailable. |
+| #1572 | Commit `a8e2d1b9` sent ten actual Gmail SMTP/XOAUTH2 self-mails. Its grants were revoked. The later `993fc712` URL-defanging check used Gmail UI self-send, rather than another SMTP run. Outlook had no accepted live transport result. |
+| #1574 | Real queued source/outbox/worker receipts and trusted HTTPS destination journeys were recorded for the providers named in that packet. Earlier Gmail receipts were retained as history, rather than a fresh event matrix. |
+| #1583 | Eight provider manifests contain 88 reviewed cells each, 704 total, and six clicked source/destination groups per provider. Some rows use renderer/sender fixtures; these do not prove a fresh source or live host/custody failure. Slack personal delivery and an actual finding journey were exercised. Telegram anchors worked with the trusted deployed HTTPS base. |
+
+These are accepted historical boundaries, not new preview/send-test or mixed-digest
+receipts. The localhost Telegram limitation above does not establish that Telegram
+cannot navigate a trusted HTTPS console. The current source retains those merged paths.
+
+The first independent full-candidate review found that an older client omitting
+`cadence` or `recipient_user_ids` could silently reset a digest rule or its selected
+people. Updates now reject omitted cadence on a saved digest and omitted/null recipients
+on a rule with explicit people. Deliberate `immediate` and `[]` still clear them;
+legacy immediate rules without explicit people remain compatible. The saved rule stays
+unchanged on rejection, and its pending digest still produces a delivery containing its
+source event. The API contract and notification guide describe the update requirements
+and the existing cadence/channel edit lifecycle.
+
+| Current compatibility check | Actual result |
+| --- | --- |
+| Usecase regression against the previous service through a Go overlay | All eight omission cases fail as expected before the fix. |
+| Real PostgreSQL regression against the previous service | Both hourly and daily cases reproduce the silent update. |
+| Full affected notification/domain/sender/memory/HTTP/API/docs selection | 2,302 pass, one skip, zero fail. |
+| Targeted race, full Go build, affected vet and lint | Exit 0. |
+| Final real PostgreSQL regression, including retained digest event/delivery assertions | Pass, 1.513 seconds. |
+| Independent compatibility QA | Pass; its low missing delivery assertion was fixed and rerun. |
+
+The earlier broad PostgreSQL follow-up had three failing test records caused by comparing
+UTC and scanned local-time representations. Re-reading the persisted baseline fixed the
+comparison; the final focused run above is separate from that earlier invocation.
+Previous full-suite, frontend, containment and RLS evidence remains bound to unchanged
+surfaces; it is not represented as a new full-suite execution.
+
+### Personal Gmail SMTP and native receipt evidence
+
+The restored full Docker stack uses PostgreSQL 17, the restricted runtime role, MinIO,
+Mailpit STARTTLS, separate API/worker services and the trusted local HTTPS console.
+Schema `0240` and readiness were checked. The API and worker include the compatibility
+guard above; the evidence record identifies their actual binary hashes and dirty-source
+provenance rather than describing them as a clean release build.
+
+With the maintainer's explicit consent, an existing personal Google project supplied a
+Testing desktop OAuth client, one self-test user and the SMTP mail scope. No project,
+billing change, compute resource or school-organization API enablement was created for
+this run. An accidentally exposed, ungranted client was deleted before the replacement
+client was authorized. Client secrets, tokens, consent details and recipient addresses
+remain private. The temporary test grant must be revoked after this PR.
+
+The [mail and Discord evidence record](assets/notification-mail-delivery-evidence.json)
+separates these new observations from the historical PR evidence above:
+
+| Surface | Actual observation |
+| --- | --- |
+| Gmail transport and mailbox | Four fixture tests, eight mixed digests and one actual editor send: 13 deliveries, one SMTP `250` attempt each, with exactly one matching Message-ID in the recipient Inbox. |
+| Gmail parity | Received MIME subject, plain text and HTML match the captured previews for all 13 messages. Only transport line endings and terminal newlines are normalized. |
+| Gmail mixed digests | All eight en/vi × signal/detail × hourly/daily combinations contain the five normal API-produced types listed above. Each cohort has eight windows and forty members. Windows were explicitly closed early; no elapsed-hour/day soak is claimed. |
+| Gmail native rendering | Sixteen reviewed digest body crops and eight fixture body crops cover the desktop client's light/dark observations. Detail includes the synthetic finding title; signal omits it. Vietnamese framing is intact; source labels and enum values retain English text. |
+| Gmail destination navigation | A digest finding link and the editor fixture's notification-settings link reached the correct local console route after normal API-key login. Exact destinations and the selected delivery are retained separately from pixels. |
+| Discord transport and native DOM | Four fixture tests and eight mixed digests delivered once with HTTP `200`. Exact stored provider message IDs correlate all twelve native messages. Incorrect viewport captures are withheld; they do not supply visual acceptance. |
+| Outlook receiver | A probe sent through Gmail OAuth SMTP was actually visible in the self-owned Outlook web mailbox. A further four fixtures and eight mixed digests have one SMTP `250` attempt each; their twelve native receipts, headers and rendering remain to be verified. This does not exercise Microsoft SMTP. |
+
+The Gmail crops omit mailbox headers, addresses and private sidebars. Dark client mode
+retains the template's white HTML body. Fixture detail/signal images share hashes when
+the fixture contains only signal-level facts; the record discloses these duplicates
+rather than counting distinct visual observations. No mobile or complete client-chrome
+coverage is claimed.
+
+The image review found private recipient addresses in an attempted history capture,
+missing preview bodies in two console crops and incorrectly labeled console themes.
+Those images are withheld. Later console and Discord captures also showed viewport
+mismatches despite correct DOM state. They cannot establish preview/send visual pairs.
+The browser connection then became unavailable before Outlook correlation and replacement
+captures could finish. These are outstanding acceptance work, not additional provider
+deferrals. Teams and PagerDuty remain the only maintainer-approved deferrals.
