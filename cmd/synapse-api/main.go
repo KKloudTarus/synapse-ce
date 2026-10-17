@@ -1986,6 +1986,10 @@ func main() {
 		InboundWebhooks:      cfg.InboundWebhooksEnabled,
 		Notifications:        cfg.NotificationEnabled,
 		Ticketing:            cfg.TicketingEnabled,
+		// Document publishing has no feature switch. Its routes are wired below only after a
+		// durable PostgreSQL pool exists and all constructors succeed, so advertise the same
+		// composition condition rather than telling operators to set a nonexistent boolean.
+		DocumentPublishing: databasePool != nil,
 		// Read from the driver registry, so a newly registered driver is advertised without a
 		// catalog edit; the kill switch then removes the types the operator turned off.
 		NotificationChannelTypes:      channelTypeNames(notificationSender.ChannelTypes()),

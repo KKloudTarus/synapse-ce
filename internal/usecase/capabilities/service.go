@@ -13,9 +13,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
-// Flags carries the resolved value of every SYNAPSE_* switch that gates an optional subsystem.
-// The composition root assigns each field straight from config; no derivation happens there. A
-// subsystem whose enablement depends on more than one switch is derived here, once.
+// Flags carries the resolved values that gate optional subsystems. Most fields mirror a
+// SYNAPSE_* switch; composition-root wiring conditions are recorded explicitly when no operator
+// switch exists. A subsystem whose enablement depends on more than one switch is derived here,
+// once.
 type Flags struct {
 	Fleet                bool // SYNAPSE_FLEET_ENABLED
 	FleetAssets          bool // SYNAPSE_FLEET_ASSETS_ENABLED
@@ -38,6 +39,10 @@ type Flags struct {
 	InboundWebhooks      bool // SYNAPSE_INBOUND_WEBHOOKS_ENABLED
 	Notifications        bool // SYNAPSE_NOTIFICATIONS_ENABLED
 	Ticketing            bool // SYNAPSE_TICKETING_ENABLED
+	// DocumentPublishing reports that durable PostgreSQL-backed document routes are wired.
+	// There is no independent environment switch: a running API has these routes only when its
+	// composition root created a database pool and successfully constructed the document service.
+	DocumentPublishing bool
 	// NotificationChannelTypes is every channel type the notification driver registry holds, in
 	// registry order. The composition root reads it from the registry, so a new driver is
 	// advertised without editing this package.
@@ -58,7 +63,8 @@ type Flags struct {
 // enabled switch that still yields a disabled subsystem. Values lists the options an enabled
 // capability offers, such as the channel types the notification sender supports. Planned marks a
 // subsystem this build does not ship yet: it is always disabled and names no switch, so a client
-// never tells an operator to set a variable that does nothing.
+// never tells an operator to set a variable that does nothing. Derived marks a capability whose
+// availability comes from composition-root wiring rather than an operator-controlled switch.
 type Capability struct {
 	Key      string
 	Name     string
@@ -67,6 +73,7 @@ type Capability struct {
 	Requires []string
 	Values   []string
 	Planned  bool
+	Derived  bool
 }
 
 // Service serves the immutable capability catalog resolved at startup.
@@ -74,7 +81,7 @@ type Service struct{ catalog []Capability }
 
 // NewService resolves the catalog from the deployment's flags. It rejects a catalog with a
 // duplicate or incomplete entry, so a future edit cannot ship an ambiguous key or a capability that
-// names no switch, unless it is planned.
+// names no switch unless it is planned or derives from composition-root wiring.
 func NewService(flags Flags) (*Service, error) {
 	catalog := build(flags)
 	if err := validate(catalog); err != nil {
@@ -84,8 +91,9 @@ func NewService(flags Flags) (*Service, error) {
 }
 
 // validate rejects a catalog with a blank field, a duplicate key, or a dependency on a capability
-// that does not exist. A planned capability must be disabled and name no switch; every other one
-// must name its switch. It runs at startup so a bad edit fails the process, never a request.
+// that does not exist. A planned capability must be disabled and name no switch; a capability
+// without a switch must explicitly declare that it derives from composition-root wiring. It runs
+// at startup so a bad edit fails the process, never a request.
 func validate(catalog []Capability) error {
 	seen := make(map[string]bool, len(catalog))
 	for _, capability := range catalog {
@@ -95,8 +103,11 @@ func validate(catalog []Capability) error {
 		if capability.Planned && (capability.Enabled || capability.Switch != "") {
 			return fmt.Errorf("%w: planned capability %q must be disabled and name no switch", shared.ErrValidation, capability.Key)
 		}
-		if !capability.Planned && capability.Switch == "" {
+		if !capability.Planned && !capability.Derived && capability.Switch == "" {
 			return fmt.Errorf("%w: capability %q is missing a switch", shared.ErrValidation, capability.Key)
+		}
+		if capability.Derived && (capability.Planned || capability.Switch != "") {
+			return fmt.Errorf("%w: derived capability %q must not be planned or name a switch", shared.ErrValidation, capability.Key)
 		}
 		if seen[capability.Key] {
 			return fmt.Errorf("%w: duplicate capability key %q", shared.ErrValidation, capability.Key)
@@ -207,10 +218,10 @@ func build(f Flags) []Capability {
 			Enabled: f.Notifications, Switch: "SYNAPSE_NOTIFICATIONS_ENABLED",
 			Requires: []string{"notifications"}, Values: notificationChannelTypes(f),
 		},
-		// Ticketing (WS5) and documentation publishing (WS6) are not in this build yet. They are listed
-		// so a client can render them as planned instead of guessing from a 404.
+		// Ticketing is operator-controlled. Documentation publishing is available only when the
+		// durable PostgreSQL wiring below exists, so it has no boolean environment switch.
 		{Key: "ticketing", Name: "Ticketing", Enabled: f.Ticketing, Switch: "SYNAPSE_TICKETING_ENABLED"},
-		{Key: "docpublish", Name: "Documentation publishing", Planned: true},
+		{Key: "docpublish", Name: "Documentation publishing", Enabled: f.DocumentPublishing, Derived: true},
 		{
 			// Deprecated compatibility path, removed in alerting.LegacyWebhookRemovalRelease. Enabled
 			// means the API posts every incident to the deployment-wide webhook in addition to any
