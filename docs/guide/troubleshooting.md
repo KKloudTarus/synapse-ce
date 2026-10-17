@@ -199,6 +199,10 @@ The runner puts each run in a delegated cgroup when it has one, and falls back t
 `systemd-run --scope` when it does not. Neither exists when the process has no cgroup delegation at
 all, and then `SYNAPSE_SANDBOX_MEM_MAX` and `SYNAPSE_SANDBOX_PIDS_MAX` have nothing to act on.
 
+The fallback pairs its RAM cap with `MemorySwapMax=0`, matching direct cgroups so allocations
+cannot grow beyond the budget through swap. Startup rejects a fallback whose user manager
+refuses the required memory, swap or task limits.
+
 Run the execution tier as a systemd unit, or under `systemd-run --user`, so a delegated subtree
 exists. In a container, the cgroup namespace must be delegated to it; most default container
 runtimes do not.

@@ -103,6 +103,7 @@ nav:
       - CI/CD integrations: integrations.md
       - Ticketing foundation: ticketing-foundation.md
       - Jira ticketing: jira-ticketing.md
+      - Documentation publishing foundation: docpublish-foundation.md
       - Bitbucket webhook review evidence: bitbucket-webhook-evidence.md
       - Notification event schemas: schemas/events/README.md
       - Code quality rule authoring: code-quality-rules.md

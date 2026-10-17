@@ -162,6 +162,21 @@ func TestSandboxWrapsInSystemdRunForLimits(t *testing.T) {
 	}
 }
 
+func TestSystemdProbeRejectsUnsupportedSwapLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a POSIX executable fixture")
+	}
+	command := filepath.Join(t.TempDir(), "systemd-run")
+	// A manager can accept a plain scope while refusing a required resource property.
+	script := "#!/bin/sh\nfor arg do\n  if [ \"$arg\" = \"MemorySwapMax=0\" ]; then exit 1; fi\ndone\nexit 0\n"
+	if err := os.WriteFile(command, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if probeSystemdRun(command) {
+		t.Fatal("a manager that refuses the swap cap must not be advertised as usable")
+	}
+}
+
 func TestSandboxDirectCgroupSkipsSystemdRun(t *testing.T) {
 	r := fakeRunner("/usr/bin/systemd-run")
 	// useSystemd=false means the direct cgroup already limits this run, so a redundant

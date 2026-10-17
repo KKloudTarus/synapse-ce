@@ -962,11 +962,12 @@ func allowedCaps(reqs []string) []string {
 	return out
 }
 
-// probeSystemdRun checks that `systemd-run --user --scope` actually works here (it
-// needs a user systemd session + DBus). A daemon without one degrades to no cgroup
-// limits rather than failing every run.
+// probeSystemdRun checks that the user manager accepts the resource controls used
+// by real scopes. Readiness refuses a fallback that cannot apply those controls.
 func probeSystemdRun(sd string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, sd, "--user", "--scope", "--quiet", "--collect", "--", "true").Run() == nil
+	probe := &Runner{systemdRun: sd, memMax: 64 << 20, pidsMax: 64}
+	argv := append(probe.systemdArgs(ports.ToolSpec{}), "/bin/true")
+	return exec.CommandContext(ctx, argv[0], argv[1:]...).Run() == nil
 }
