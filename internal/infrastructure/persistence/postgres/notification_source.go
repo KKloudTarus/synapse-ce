@@ -171,7 +171,22 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 			remaining -= n
 		}
 		if remaining > 0 {
+			n, err := s.repo.materializeDigestsTx(ctx, tx, tenant, now, 1)
+			if err != nil {
+				return err
+			}
+			count += n
+			remaining -= n
+		}
+		if remaining > 0 {
 			n, err := s.pollSnapshots(ctx, tx, tenant, now, remaining)
+			if err != nil {
+				return err
+			}
+			count += n
+		}
+		if remaining := limit - count; remaining > 0 {
+			n, err := s.repo.materializeDigestsTx(ctx, tx, tenant, now, remaining)
 			if err != nil {
 				return err
 			}
@@ -293,26 +308,10 @@ func (s *NotificationSource) pollQualityGates(ctx context.Context, tx pgx.Tx, te
 }
 
 func (s *NotificationSource) pollSLA(ctx context.Context, tx pgx.Tx, tenant shared.ID, _, now time.Time, limit int) (int, error) {
-	leadRows, err := tx.Query(ctx, `SELECT DISTINCT lead_time_secs FROM notification_rules WHERE tenant_id=$1 AND enabled AND event_type='sla.approaching_deadline' ORDER BY lead_time_secs`, tenant)
+	leads, err := notificationRuleLeads(ctx, tx, tenant, notification.EventSLAApproaching)
 	if err != nil {
 		return 0, err
 	}
-	var leads []int64
-	for leadRows.Next() {
-		var lead int64
-		if err := leadRows.Scan(&lead); err != nil {
-			leadRows.Close()
-			return 0, err
-		}
-		if lead > 0 {
-			leads = append(leads, lead)
-		}
-	}
-	if err := leadRows.Err(); err != nil {
-		leadRows.Close()
-		return 0, err
-	}
-	leadRows.Close()
 	count := 0
 	for _, lead := range leads {
 		if count >= limit {
@@ -355,6 +354,28 @@ func (s *NotificationSource) pollSLA(ctx context.Context, tx pgx.Tx, tenant shar
 		}
 	}
 	return count, nil
+}
+
+// notificationRuleLeads finds positive lead windows for either a legacy primary selector or an
+// explicit multi-event selection. Every source scheduler uses it so a secondary selected type is
+// discovered with the same tenant and enabled constraints as a primary type.
+func notificationRuleLeads(ctx context.Context, tx pgx.Tx, tenant shared.ID, event notification.EventType) ([]int64, error) {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT lead_time_secs FROM notification_rules
+		WHERE tenant_id=$1 AND enabled AND (event_type=$2 OR event_types @> ARRAY[$2]::text[]) AND lead_time_secs>0
+		ORDER BY lead_time_secs`, tenant, event)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var leads []int64
+	for rows.Next() {
+		var lead int64
+		if err := rows.Scan(&lead); err != nil {
+			return nil, err
+		}
+		leads = append(leads, lead)
+	}
+	return leads, rows.Err()
 }
 
 func (s *NotificationSource) pollIncidents(ctx context.Context, tx pgx.Tx, tenant shared.ID, activated, now time.Time, limit int) (int, error) {

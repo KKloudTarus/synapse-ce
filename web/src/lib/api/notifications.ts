@@ -209,10 +209,18 @@ export interface SlackConversations {
 }
 
 export interface NotificationRule {
+  cadence?: 'immediate' | 'hourly' | 'daily'
+  recipient_user_ids?: string[]
   id: string
   name: string
   enabled: boolean
   event_type: NotificationEventType
+  /**
+   * Explicit subscriptions in priority order. The first value is always event_type.
+   * An omitted value is a legacy single-event rule; an explicit empty value deliberately
+   * returns a former multi-event rule to that legacy shape.
+   */
+  event_types?: NotificationEventType[]
   min_severity?: string
   action_types?: string[]
   finding_kinds?: string[]
@@ -303,6 +311,11 @@ export interface NotificationSourceFailurePage {
 }
 
 export const notificationsApi = {
+  notificationUserChoices: (query: string, cursor: string | undefined, signal: AbortSignal): Promise<{ items: { id: string; name: string }[]; next?: string }> => {
+    const params = new URLSearchParams({ q: query, limit: '25' })
+    if (cursor) params.set('cursor', cursor)
+    return req(`/notifications/rules/user-options?${params}`, { signal })
+  },
   listNotificationEventTypes: async (): Promise<NotificationEventSpec[]> =>
     ((await req('/notifications/event-types')) as {
       items?: NotificationEventSpec[]
@@ -420,6 +433,7 @@ export const notificationsApi = {
         name: input.name,
         enabled: input.enabled,
         event_type: input.event_type,
+        ...(input.event_types === undefined ? {} : { event_types: input.event_types }),
         min_severity: input.min_severity,
         action_types: input.action_types,
         finding_kinds: input.finding_kinds,
@@ -437,6 +451,8 @@ export const notificationsApi = {
         channel_ids: input.channel_ids,
         // Omitted would clear them: a toggle or an edit must keep the rule's people (#1415).
         recipient_roles: input.recipient_roles ?? [],
+        recipient_user_ids: input.recipient_user_ids ?? [],
+        cadence: input.cadence ?? 'immediate',
         lead_time_seconds: input.lead_time_seconds,
         revision: input.revision,
       }),

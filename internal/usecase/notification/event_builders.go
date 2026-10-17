@@ -128,6 +128,7 @@ func eventBuilders() map[domain.EventType]eventBuilder {
 		domain.EventChannelPaused:      {subjectKey: "channel_id"},
 		domain.EventDestinationChanged: {},
 		domain.EventTest:               {},
+		domain.EventDigest:             digestEventBuilder(),
 	}
 }
 

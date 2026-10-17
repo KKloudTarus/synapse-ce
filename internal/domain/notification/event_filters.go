@@ -24,7 +24,7 @@ type EventFilters struct {
 
 const maxEventFilterValues = 50
 
-func (r *Rule) normalizeEventFilters(spec EventSpec) error {
+func (r *Rule) normalizeEventFilters(selected []EventType, specs []EventSpec) error {
 	sets := []struct {
 		values *[]string
 		filter Filter
@@ -37,7 +37,7 @@ func (r *Rule) normalizeEventFilters(spec EventSpec) error {
 		{&r.ToStatuses, FilterToStatuses, "to statuses", validFindingStatus},
 		{&r.RetestResults, FilterRetestResults, "retest results", validRetestResult},
 		{&r.ScanKinds, FilterScanKinds, "scan kinds", validRunToken},
-		{&r.Outcomes, FilterOutcomes, "outcomes", func(value string) bool { return validEventOutcome(r.EventType, value) }},
+		{&r.Outcomes, FilterOutcomes, "outcomes", func(value string) bool { return validEventOutcomes(selected, value) }},
 		{&r.Providers, FilterProviders, "providers", validRunToken},
 	}
 	for _, set := range sets {
@@ -45,8 +45,10 @@ func (r *Rule) normalizeEventFilters(spec EventSpec) error {
 		if len(values) > maxEventFilterValues {
 			return fmt.Errorf("%w: too many notification %s", shared.ErrValidation, set.name)
 		}
-		if len(values) > 0 && !spec.Allows(set.filter) {
-			return unsupportedFilter(r.EventType, set.name)
+		if len(values) > 0 {
+			if err := requireAllFilters(selected, specs, set.filter, set.name); err != nil {
+				return err
+			}
 		}
 		for _, value := range values {
 			if !set.valid(value) {
@@ -56,6 +58,15 @@ func (r *Rule) normalizeEventFilters(spec EventSpec) error {
 		*set.values = values
 	}
 	return nil
+}
+
+func validEventOutcomes(events []EventType, value string) bool {
+	for _, event := range events {
+		if !validEventOutcome(event, value) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r Rule) matchesEventFilters(e Event) bool {

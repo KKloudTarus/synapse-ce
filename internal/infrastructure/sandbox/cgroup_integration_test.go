@@ -36,8 +36,8 @@ int main(int argc,char**argv){
 }
 `
 
-// TestCgroupContainsBombs proves F3: process and memory budgets contain resource bombs.
-// Requires bubblewrap, gcc and cgroup v2 resource controls.
+// TestCgroupContainsBombs verifies process and memory containment for isolated tool runs.
+// It needs bwrap, gcc and a usable cgroup limiter.
 func TestCgroupContainsBombs(t *testing.T) {
 	for _, b := range []string{"bwrap", "gcc"} {
 		if _, err := exec.LookPath(b); err != nil {
@@ -69,14 +69,14 @@ func TestCgroupContainsBombs(t *testing.T) {
 		forked, _ = strconv.Atoi(m[1])
 	}
 	t.Logf("fork bomb: forked=%d (pids.max=64)", forked)
-	if forked >= 500 {
+	if forked > 63 {
 		t.Fatalf("fork bomb NOT contained: forked=%d (pids.max should cap ~64)", forked)
 	}
 
 	// Memory bomb under memory.max=64MB: OOM-killed long before allocating 1GB.
 	res, err = sb.Run(ctx, ports.ToolSpec{Name: bomb, Args: []string{"mem"}, Workdir: dir, MemMaxBytes: 64 << 20})
-	if err != nil || res.TimedOut {
-		t.Fatalf("memory run did not execute normally: %v (timed_out=%t, stderr=%s)", err, res.TimedOut, res.Stderr)
+	if err != nil {
+		t.Fatalf("memory run: %v", err)
 	}
 	high := 0
 	for _, m := range regexp.MustCompile(`alloced=(\d+)MB`).FindAllStringSubmatch(string(res.Stdout), -1) {
@@ -84,11 +84,14 @@ func TestCgroupContainsBombs(t *testing.T) {
 			high = v
 		}
 	}
-	t.Logf("memory bomb: high-water=%dMB (memory.max=64MB), exit=%d", high, res.ExitCode)
-	if high == 0 || res.ExitCode == 0 {
-		t.Fatalf("allocator must start and be terminated by its memory budget: high-water=%dMB exit=%d stderr=%s", high, res.ExitCode, res.Stderr)
+	t.Logf("memory bomb: reported allocations=%dMB (memory.max=64MB, swap=0), exit=%d", high, res.ExitCode)
+	if high == 0 {
+		t.Fatalf("memory bomb never reached its allocation loop: exit=%d stderr=%s", res.ExitCode, res.Stderr)
 	}
-	if high >= 256 {
+	if res.ExitCode == 0 {
+		t.Fatal("memory bomb completed successfully instead of being contained")
+	}
+	if high >= 64 {
 		t.Fatalf("memory bomb NOT contained: reached %dMB under a 64MB cap", high)
 	}
 	if strings.Contains(string(res.Stdout), "alloced=1024MB") {

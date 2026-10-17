@@ -23,7 +23,7 @@ var updateGolden = flag.Bool("update", false, "rewrite the golden template conte
 var builderFixtures = []domain.EventType{
 	domain.EventVulnerabilityAction, domain.EventScanCompleted, domain.EventQualityGateFailed, domain.EventSLAApproaching,
 	domain.EventFleetAgentOffline, domain.EventIncidentCreated, domain.EventOwnershipChanged,
-	domain.EventChannelPaused, domain.EventDestinationChanged, domain.EventTest,
+	domain.EventChannelPaused, domain.EventDestinationChanged, domain.EventTest, domain.EventDigest,
 	domain.EventFindingCreated, domain.EventFindingStatusChanged, domain.EventFindingRetestCompleted,
 	domain.EventScanFailed, domain.EventDASTRunFinished, domain.EventReconRunFinished, domain.EventCSPMRunFinished,
 	domain.EventSLABreached, domain.EventRiskAcceptanceCreated, domain.EventRiskAcceptanceExpiring, domain.EventRiskAcceptanceExpired,

@@ -54,3 +54,17 @@ func (rt *Router) listUserChoices(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "next": next})
 }
+
+// Rule authors need only the same bounded ID/name projection as mention pickers, without
+// receiving the administrator roster or any contact data.
+func (rt *Router) listNotificationUserChoices(w http.ResponseWriter, r *http.Request) {
+	if rt.userPicker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: "user choices are unavailable"})
+		return
+	}
+	request := r.Clone(r.Context())
+	query := request.URL.Query()
+	query.Set("purpose", "mention")
+	request.URL.RawQuery = query.Encode()
+	rt.listUserChoices(w, request)
+}

@@ -25,12 +25,27 @@ type OwnershipChanged struct {
 	Reason        string    `json:"reason"`
 }
 
-func (r *Rule) normalizeTeamScope(spec EventSpec) error {
-	if !spec.Allows(FilterTeams) {
+func (r *Rule) normalizeTeamScope(selected []EventType, specs []EventSpec) error {
+	teamScoped := false
+	for _, spec := range specs {
+		if spec.Allows(FilterTeams) {
+			teamScoped = true
+			break
+		}
+	}
+	if !teamScoped {
 		if len(r.TeamIDs) > 0 || r.AllTeams {
-			return unsupportedFilter(r.EventType, "team scope")
+			return requireAllFilters(selected, specs, FilterTeams, "team scope")
 		}
 		return nil
+	}
+	// A selected team-capable event must retain the existing explicit-scope invariant. If another
+	// selected event cannot carry that scope, it is rejected below instead of silently never matching.
+	if len(r.TeamIDs) == 0 && !r.AllTeams {
+		return fmt.Errorf("%w: choose team IDs or explicitly subscribe to all teams", shared.ErrValidation)
+	}
+	if err := requireAllFilters(selected, specs, FilterTeams, "team scope"); err != nil {
+		return err
 	}
 	// Fail closed: a blank/malformed filter must never become a tenant-wide rule.
 	if len(r.TeamIDs) > 200 || r.AllTeams == (len(r.TeamIDs) > 0) {

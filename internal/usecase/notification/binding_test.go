@@ -17,12 +17,13 @@ import (
 // bindingRepo keeps channels and rules in memory for the binding checks.
 type bindingRepo struct {
 	ports.NotificationRepository
-	channels map[shared.ID]domain.Channel
-	rules    map[shared.ID]domain.Rule
+	channels            map[shared.ID]domain.Channel
+	rules               map[shared.ID]domain.Rule
+	engagementOverrides map[shared.ID]domain.EngagementNotifications
 }
 
 func newBindingRepo() *bindingRepo {
-	return &bindingRepo{channels: map[shared.ID]domain.Channel{}, rules: map[shared.ID]domain.Rule{}}
+	return &bindingRepo{channels: map[shared.ID]domain.Channel{}, rules: map[shared.ID]domain.Rule{}, engagementOverrides: map[shared.ID]domain.EngagementNotifications{}}
 }
 
 func (r *bindingRepo) CreateChannel(_ context.Context, c domain.Channel, _ string) (domain.Channel, error) {
@@ -74,6 +75,17 @@ func (r *bindingRepo) ListRules(context.Context, shared.ID) ([]domain.Rule, erro
 		out = append(out, rule)
 	}
 	return out, nil
+}
+
+func (r *bindingRepo) GetEngagementNotificationSetting(_ context.Context, tenant, engagement shared.ID) (domain.EngagementNotificationSetting, error) {
+	if tenant != "tenant" || engagement.IsZero() {
+		return domain.EngagementNotificationSetting{}, shared.ErrNotFound
+	}
+	mode := r.engagementOverrides[engagement]
+	if mode == "" {
+		mode = domain.EngagementNotificationsInherit
+	}
+	return domain.EngagementNotificationSetting{TenantID: tenant, EngagementID: engagement, ExternalNotifications: mode, Revision: 1}, nil
 }
 
 type bindingFixture struct {
@@ -260,6 +272,78 @@ func TestBindingAndRulesMustAgreeOnEventTypes(t *testing.T) {
 	}
 	if _, err := f.svc.CreateRule(f.ctx, "ada", refused); err != nil {
 		t.Fatalf("incident rule on a *-bound channel: %v", err)
+	}
+}
+
+func TestMultiEventRuleRequiresExplicitSelectionOnUpdate(t *testing.T) {
+	f := newBindingFixture(t)
+	channel := f.slackChannel(t)
+	created, err := f.svc.CreateRule(f.ctx, "ada", RuleInput{
+		Name:       "scan and incident",
+		Enabled:    true,
+		EventType:  domain.EventScanCompleted,
+		EventTypes: []domain.EventType{domain.EventScanCompleted, domain.EventIncidentCreated},
+		ChannelIDs: []shared.ID{channel.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.audit.last(t, "notification.rule.created").Metadata["event_types"]; got != "scan.completed,incident.created" {
+		t.Fatalf("create audit event_types = %q", got)
+	}
+	if _, err := f.svc.UpdateRule(f.ctx, "ada", created.ID, RuleInput{
+		Name: "renamed", Enabled: true, EventType: domain.EventScanCompleted,
+		ChannelIDs: []shared.ID{channel.ID}, Revision: created.Revision,
+	}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("legacy update narrowed multi-event rule: %v", err)
+	}
+	updated, err := f.svc.UpdateRule(f.ctx, "ada", created.ID, RuleInput{
+		Name: "single", Enabled: true, EventType: domain.EventScanCompleted, EventTypes: []domain.EventType{},
+		ChannelIDs: []shared.ID{channel.ID}, Revision: created.Revision,
+	})
+	if err != nil || len(updated.EventTypes) != 0 || len(updated.SelectedEventTypes()) != 1 {
+		t.Fatalf("explicit single-event update = %+v err=%v", updated, err)
+	}
+	if got := f.audit.last(t, "notification.rule.updated").Metadata["event_types"]; got != "scan.completed" {
+		t.Fatalf("update audit event_types = %q", got)
+	}
+}
+
+func TestBoundTemplateCoversEveryMultiEventSelection(t *testing.T) {
+	f := newBindingFixture(t)
+	channel := f.slackChannel(t)
+	created, err := f.svc.CreateRule(f.ctx, "ada", RuleInput{
+		Name:       "scan and incident",
+		Enabled:    true,
+		EventType:  domain.EventScanCompleted,
+		EventTypes: []domain.EventType{domain.EventScanCompleted, domain.EventIncidentCreated},
+		ChannelIDs: []shared.ID{channel.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scanOnly := f.template(t, domain.EventScanCompleted, domain.FamilyChat, "en", true)
+	if _, err := f.svc.UpdateChannel(f.ctx, "ada", channel.ID, ChannelInput{Name: channel.Name, Enabled: true, Revision: channel.Revision, TemplateID: idPtr(scanOnly.ID)}); !errors.Is(err, shared.ErrValidation) || !strings.Contains(err.Error(), string(domain.EventIncidentCreated)) {
+		t.Fatalf("binding single-event template to multi-event rule: %v", err)
+	}
+	any := f.template(t, domain.AnyEventType, domain.FamilyChat, "en", true)
+	current := f.repo.channels[channel.ID]
+	bound, err := f.svc.UpdateChannel(f.ctx, "ada", channel.ID, ChannelInput{Name: current.Name, Enabled: true, Revision: current.Revision, TemplateID: idPtr(any.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.UpdateRule(f.ctx, "ada", created.ID, RuleInput{Name: "mixed", Enabled: true, EventType: domain.EventScanCompleted, EventTypes: []domain.EventType{domain.EventScanCompleted, domain.EventIncidentCreated}, ChannelIDs: []shared.ID{bound.ID}, Revision: created.Revision}); err != nil {
+		t.Fatalf("wildcard template should cover every selected type: %v", err)
+	}
+
+	other := newBindingFixture(t)
+	otherChannel := other.slackChannel(t)
+	otherScanOnly := other.template(t, domain.EventScanCompleted, domain.FamilyChat, "en", true)
+	if _, err := other.svc.UpdateChannel(other.ctx, "ada", otherChannel.ID, ChannelInput{Name: otherChannel.Name, Enabled: true, Revision: otherChannel.Revision, TemplateID: idPtr(otherScanOnly.ID)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.svc.CreateRule(other.ctx, "ada", RuleInput{Name: "scan and incident", Enabled: true, EventType: domain.EventScanCompleted, EventTypes: []domain.EventType{domain.EventScanCompleted, domain.EventIncidentCreated}, ChannelIDs: []shared.ID{otherChannel.ID}}); !errors.Is(err, shared.ErrValidation) || !strings.Contains(err.Error(), string(otherScanOnly.ID)) {
+		t.Fatalf("create multi-event rule on a single-event binding: %v", err)
 	}
 }
 

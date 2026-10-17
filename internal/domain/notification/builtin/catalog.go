@@ -34,6 +34,7 @@ type Template struct {
 func New() *Catalog {
 	c := &Catalog{byKey: make(map[notification.TemplateKey]Template)}
 	events := []notification.EventType{
+		notification.EventDigest,
 		notification.EventVulnerabilityAction,
 		notification.EventScanCompleted,
 		notification.EventQualityGateFailed,
@@ -118,6 +119,9 @@ func cloneFields(in map[string]string) map[string]string {
 
 func fields(event notification.EventType, family notification.TemplateFamily, locale tenancy.Locale) map[string]string {
 	title, body := copyFor(event, locale)
+	if event == notification.EventDigest && family == notification.FamilyPager {
+		return map[string]string{"summary": title + ": {{.item_count}} ({{.cadence}})"}
+	}
 	switch family {
 	case notification.FamilyChat:
 		return map[string]string{"title": title, "body": body}
@@ -133,6 +137,13 @@ func fields(event notification.EventType, family notification.TemplateFamily, lo
 }
 
 func copyFor(event notification.EventType, locale tenancy.Locale) (string, string) {
+	if event == notification.EventDigest {
+		if locale == tenancy.LocaleVietnamese {
+			return "Tổng hợp thông báo", "Chu kỳ: {{.cadence}} · {{.item_count}} sự kiện\n{{.window_start}} → {{.window_end}}{{range .items}}\n- {{.event_type}}{{if .severity}} [{{.severity}}]{{end}}{{if .title}} {{.title}}{{end}}{{if .target}} · {{.target}}{{end}}{{end}}{{if ne .omitted_count \"0\"}}\nCòn {{.omitted_count}} sự kiện trong cửa sổ này.{{end}}"
+		}
+		return "Notification digest", "Cadence: {{.cadence}} · {{.item_count}} events\n{{.window_start}} → {{.window_end}}{{range .items}}\n- {{.event_type}}{{if .severity}} [{{.severity}}]{{end}}{{if .title}} {{.title}}{{end}}{{if .target}} · {{.target}}{{end}}{{end}}{{if ne .omitted_count \"0\"}}\n{{.omitted_count}} more events in this window.{{end}}"
+	}
+
 	if locale == tenancy.LocaleVietnamese {
 		switch event {
 		case notification.EventVulnerabilityAction:

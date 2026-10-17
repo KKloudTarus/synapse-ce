@@ -19,6 +19,15 @@ import (
 // previewEventReader serves one stored incident for the tenant "tenant".
 type previewEventReader struct{}
 
+// The shared PATCH fixture only needs a deterministic target for the preview send route; the
+// delivery persistence and retry snapshot are covered by the notification use-case tests.
+func (r *channelPatchRepo) PublishToChannel(_ context.Context, event domain.Event, channel shared.ID) (shared.ID, error) {
+	if event.SourceKind != "template_test" || channel != r.channel.ID {
+		return "", shared.ErrValidation
+	}
+	return "preview-delivery", nil
+}
+
 func (previewEventReader) event() domain.Event {
 	return domain.Event{TenantID: "tenant", ID: "ev-1", Type: domain.EventIncidentCreated, SourceKind: "incident", SourceID: "inc-1",
 		SchemaVersion: 1, OccurredAt: time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC), SubjectKind: "incident",
@@ -41,7 +50,7 @@ func (r previewEventReader) GetNotificationEvent(_ context.Context, tenant, id s
 
 func previewRouter(t *testing.T) *Router {
 	t.Helper()
-	repo := &channelPatchRepo{channel: domain.Channel{TenantID: "tenant", ID: "c1", Name: "ops", Type: domain.ChannelSlack, Enabled: true,
+	repo := &channelPatchRepo{channel: domain.Channel{TenantID: "tenant", ID: "c1", Name: "ops", Type: domain.ChannelSlack, DataClass: domain.DataClassSummary, Enabled: true,
 		Destination: "https://hooks.slack.com/services/…", Revision: 1, SecretVersion: 1}}
 	svc, err := notificationuc.NewService(repo, handlerProtector{}, nil, &templateHandlerAudit{}, handlerClock{}, &templateHandlerIDs{})
 	if err != nil {
@@ -70,7 +79,14 @@ type previewResponse struct {
 	Draft *struct {
 		Unsaved bool `json:"unsaved"`
 	} `json:"draft"`
-	Rendered *bool `json:"rendered"`
+	Rendered   *bool  `json:"rendered"`
+	Suppressed bool   `json:"suppressed"`
+	Class      string `json:"class"`
+	Fallback   bool   `json:"fallback"`
+	Message    *struct {
+		TemplateRef string            `json:"template_ref"`
+		Fields      map[string]string `json:"fields"`
+	} `json:"message"`
 }
 
 func decodePreview(t *testing.T, response interface {
@@ -92,7 +108,7 @@ func TestPreviewTemplateRoute(t *testing.T) {
 
 	response := templateCall(rt, "integration_admin", "tenant", http.MethodPost, "/api/v1/notifications/templates/preview", `{"channel_id":"c1","event_type":"incident.created"}`)
 	fixture := decodePreview(t, response, response.Body.String(), http.StatusOK)
-	if fixture.Sample.Source != "fixture" || fixture.Channel.Family != "chat" || fixture.Resolution == nil || fixture.Resolution.Tier != "fallback" || fixture.Rendered == nil || *fixture.Rendered {
+	if fixture.Sample.Source != "fixture" || fixture.Channel.Family != "chat" || fixture.Resolution == nil || fixture.Resolution.Tier != "fallback" || fixture.Rendered == nil || !*fixture.Rendered || fixture.Suppressed || !fixture.Fallback || fixture.Class != "summary" || fixture.Message == nil || fixture.Message.TemplateRef != "fallback" {
 		t.Fatalf("fixture preview = %s", response.Body.String())
 	}
 
@@ -102,11 +118,30 @@ func TestPreviewTemplateRoute(t *testing.T) {
 	if stored.Sample.Source != "event" || stored.Sample.ID != "ev-1" || stored.Draft == nil || !stored.Draft.Unsaved || stored.Resolution != nil {
 		t.Fatalf("stored preview = %s", response.Body.String())
 	}
-	// Neither the event's content nor the draft text comes back before rendering exists.
-	for _, leak := range []string{"STORED-TITLE", "DRAFT-BODY"} {
+	if stored.Message == nil || stored.Message.Fields["title"] != `STORED\-TITLE` || stored.Message.Fields["body"] != "DRAFT-BODY" || stored.Suppressed || stored.Fallback {
+		t.Fatalf("stored rendered content = %s", response.Body.String())
+	}
+	// The rendered content is present, but raw event metadata and source fields stay server-side.
+	for _, leak := range []string{`"data"`, "source_kind", "inc-1", "https://hooks.slack.com"} {
 		if strings.Contains(response.Body.String(), leak) {
 			t.Fatalf("response leaks %q: %s", leak, response.Body.String())
 		}
+	}
+}
+
+func TestPreviewTemplateSendTestRouteUsesFixtureOnly(t *testing.T) {
+	rt := previewRouter(t)
+	response := templateCall(rt, "integration_admin", "tenant", http.MethodPost, "/api/v1/notifications/templates/preview/send-test", `{"channel_id":"c1","event_type":"incident.created","fields":{"title":"{{.title}}","body":"Preview test"}}`)
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"delivery_id":"preview-delivery"`) {
+		t.Fatalf("send fixture = %d %s", response.Code, response.Body.String())
+	}
+	response = templateCall(rt, "integration_admin", "tenant", http.MethodPost, "/api/v1/notifications/templates/preview/send-test", `{"channel_id":"c1","event_type":"incident.created","event_id":"ev-1"}`)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("send stored event = %d %s", response.Code, response.Body.String())
+	}
+	response = templateCall(rt, "reviewer", "tenant", http.MethodPost, "/api/v1/notifications/templates/preview/send-test", `{"channel_id":"c1","event_type":"incident.created"}`)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("send as reviewer = %d %s", response.Code, response.Body.String())
 	}
 }
 

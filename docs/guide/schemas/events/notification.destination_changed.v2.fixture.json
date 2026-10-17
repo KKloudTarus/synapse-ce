@@ -1,0 +1,17 @@
+{
+  "id": "event-notification-destination_changed",
+  "type": "notification.destination_changed",
+  "source_kind": "notification_destination",
+  "source_id": "source-42",
+  "schema_version": 2,
+  "occurred_at": "2026-09-27T08:00:00Z",
+  "data": {
+    "title": "Notification email destination created",
+    "summary": "admin created the email destination domains: example.test.",
+    "actor": "system",
+    "action": "created",
+    "class": "email",
+    "scheme": "mailto",
+    "host": "example.test"
+  }
+}

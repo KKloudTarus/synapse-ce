@@ -116,21 +116,57 @@ type PreviewDraft struct {
 	Unsaved    bool      `json:"unsaved,omitempty"`
 }
 
-// TemplatePreview is the answer to a preview. Exactly one of Resolution and Draft is set.
-//
-// Rendered stays false until the send-time renderer (#1365) lands: the preview then hands the
-// prepared channel, event and draft to the same RenderMessage that deliveries use, so preview and
-// send can never render differently, and the response gains the suppressed state and the message.
+// TemplatePreview is the answer to a preview. Exactly one of Resolution and Draft is set. It is
+// rendered through the same RenderMessage path a delivery uses.
 type TemplatePreview struct {
 	Channel    PreviewChannel      `json:"channel"`
 	Sample     PreviewSample       `json:"sample"`
 	Resolution *TemplateResolution `json:"resolution,omitempty"`
 	Draft      *PreviewDraft       `json:"draft,omitempty"`
+	// Rendered is always true when PreviewTemplate returns successfully. It distinguishes the
+	// rendered message from the sample and template metadata above.
 	Rendered   bool                `json:"rendered"`
+	Suppressed bool                `json:"suppressed"`
+	Class      domain.DataClass    `json:"class,omitempty"`
+	Fallback   bool                `json:"fallback,omitempty"`
+	Message    *PreviewMessage     `json:"message,omitempty"`
+	Formatted  *PreviewFormatted   `json:"formatted,omitempty"`
+	Webhook    *PreviewWebhookBody `json:"webhook,omitempty"`
 
-	// prepared is the render input #1365 will consume. It holds the event's template context and
-	// the draft's text, so it is never serialized.
+	// prepared is the render input PreviewTemplate consumes. It holds the event's template
+	// context and the draft's text, so it is never serialized.
 	prepared preparedPreview
+}
+
+// PreviewMessage is the safe, channel-neutral rendered content. It intentionally exposes the
+// rendered result, but not the source event, template source, or channel credentials.
+type PreviewMessage struct {
+	Fields      map[string]string `json:"fields,omitempty"`
+	Links       []PreviewLink     `json:"links,omitempty"`
+	TemplateRef string            `json:"template_ref,omitempty"`
+	Severity    shared.Severity   `json:"severity,omitempty"`
+}
+
+// PreviewLink is a server-built rendered link with stable API field names.
+type PreviewLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
+// PreviewFormatted is the safe formatted payload the configured channel formatter produced.
+// Body fields are strings rather than []byte so JSON never base64-encodes a preview.
+type PreviewFormatted struct {
+	ContentType string `json:"content_type"`
+	Body        string `json:"body"`
+	HTMLBody    string `json:"html_body,omitempty"`
+	Subject     string `json:"subject,omitempty"`
+}
+
+// PreviewWebhookBody is a class-filtered webhook body. It never contains the raw event envelope.
+type PreviewWebhookBody struct {
+	ContentType string `json:"content_type"`
+	Body        string `json:"body"`
+	Custom      bool   `json:"custom"`
 }
 
 type preparedPreview struct {
@@ -171,6 +207,9 @@ func (s *Service) PreviewTemplate(ctx context.Context, in PreviewInput) (Templat
 	if channel.DeletedAt != nil {
 		return TemplatePreview{}, fmt.Errorf("notification channel: %w", shared.ErrNotFound)
 	}
+	if channel.RawEvent {
+		return TemplatePreview{}, fmt.Errorf("%w: raw-event webhooks bypass templates; disable raw event mode to preview or test a template", shared.ErrValidation)
+	}
 	family, ok := domain.FamilyForChannelType(channel.Type)
 	if !ok {
 		return TemplatePreview{}, fmt.Errorf("%w: channel type %q has no template family", shared.ErrValidation, channel.Type)
@@ -186,20 +225,71 @@ func (s *Service) PreviewTemplate(ctx context.Context, in PreviewInput) (Templat
 	}
 	out.prepared = preparedPreview{channel: channel, event: event}
 
-	if in.TemplateID.IsZero() && in.Fields == nil {
-		resolution, err := s.resolveForChannel(ctx, tenant, channel, in.EventType)
+	if !in.TemplateID.IsZero() || in.Fields != nil {
+		draft, named, err := s.previewDraft(ctx, tenant, in, family)
 		if err != nil {
 			return TemplatePreview{}, err
 		}
-		out.Resolution = &resolution
-		return out, nil
+		out.Draft, out.prepared.draft = &named, &draft
 	}
-	draft, named, err := s.previewDraft(ctx, tenant, in, family)
+
+	engagement, err := s.previewEngagement(ctx, tenant, event)
 	if err != nil {
 		return TemplatePreview{}, err
 	}
-	out.Draft, out.prepared.draft = &named, &draft
+	rendered, err := s.RenderMessage(ctx, RenderInput{Channel: channel, Event: event, Engagement: engagement, Draft: out.prepared.draft})
+	if err != nil {
+		return TemplatePreview{}, err
+	}
+	if out.Draft == nil {
+		// The rendered version is authoritative for metadata and the queued test snapshot.
+		// Resolving separately could race a template activation between the two reads.
+		resolution := rendered.Resolution
+		if rendered.Suppressed {
+			resolution, err = s.resolveForChannel(ctx, tenant, channel, in.EventType)
+			if err != nil {
+				return TemplatePreview{}, err
+			}
+		}
+		out.Resolution = &resolution
+	}
+	out.Rendered, out.Suppressed, out.Class, out.Fallback = true, rendered.Suppressed, rendered.Class, rendered.Fallback || rendered.Message.TemplateRef == refFallback
+	if !rendered.Suppressed {
+		out.Message = &PreviewMessage{Fields: rendered.Message.Fields, Links: previewLinks(rendered.Message.Links), TemplateRef: rendered.Message.TemplateRef, Severity: rendered.Message.Severity}
+		if rendered.Formatted != nil {
+			out.Formatted = &PreviewFormatted{ContentType: rendered.Formatted.ContentType, Body: string(rendered.Formatted.Body), HTMLBody: string(rendered.Formatted.HTMLBody), Subject: rendered.Formatted.Subject}
+		}
+		if len(rendered.CustomBody) != 0 {
+			out.Webhook = &PreviewWebhookBody{ContentType: "application/json", Body: string(rendered.CustomBody), Custom: true}
+		} else if len(rendered.WebhookBody) != 0 {
+			out.Webhook = &PreviewWebhookBody{ContentType: "application/json", Body: string(rendered.WebhookBody)}
+		}
+	}
 	return out, nil
+}
+
+func previewLinks(links []ports.RenderedLink) []PreviewLink {
+	if len(links) == 0 {
+		return nil
+	}
+	out := make([]PreviewLink, len(links))
+	for index, link := range links {
+		out[index] = PreviewLink{Label: link.Label, URL: link.URL}
+	}
+	return out
+}
+
+// previewEngagement reads an override only for a real engagement. Fixtures deliberately carry no
+// engagement, so they always render at the channel's own class.
+func (s *Service) previewEngagement(ctx context.Context, tenant shared.ID, event domain.Event) (domain.EngagementNotifications, error) {
+	if event.EngagementID.IsZero() {
+		return domain.EngagementNotificationsInherit, nil
+	}
+	setting, err := s.repo.GetEngagementNotificationSetting(ctx, tenant, event.EngagementID)
+	if err != nil {
+		return "", err
+	}
+	return setting.ExternalNotifications, nil
 }
 
 // previewSample loads the event a preview renders against and projects it through the event's
@@ -226,6 +316,20 @@ func (s *Service) previewSample(ctx context.Context, tenant shared.ID, in Previe
 		if event.Type != in.EventType {
 			return domain.Event{}, "", fmt.Errorf("%w: event %s is a %s event, not %s", shared.ErrValidation, in.EventID, event.Type, in.EventType)
 		}
+		recent, err := s.eventReader.ListRecentNotificationEvents(ctx, tenant, in.EventType, PreviewEventLimit)
+		if err != nil {
+			return domain.Event{}, "", err
+		}
+		readable := false
+		for _, candidate := range recent {
+			if candidate.ID == event.ID {
+				readable = true
+				break
+			}
+		}
+		if !readable {
+			return domain.Event{}, "", fmt.Errorf("preview event: %w", shared.ErrNotFound)
+		}
 	}
 	projected, err := s.events.Project(ctx, event)
 	if err != nil {
@@ -241,7 +345,8 @@ func (s *Service) fixtureEvent(tenant shared.ID, eventType domain.EventType) (do
 	if s.fixtures == nil {
 		return domain.Event{}, errPreviewFixturesUnavailable
 	}
-	raw, err := fs.ReadFile(s.fixtures, string(eventType)+".v1.fixture.json")
+	spec, _ := domain.LookupEvent(eventType)
+	raw, err := fs.ReadFile(s.fixtures, fmt.Sprintf("%s.v%d.fixture.json", eventType, spec.SchemaVersion))
 	if err != nil {
 		return domain.Event{}, fmt.Errorf("read %s fixture: %w", eventType, err)
 	}
@@ -253,6 +358,7 @@ func (s *Service) fixtureEvent(tenant shared.ID, eventType domain.EventType) (do
 		return domain.Event{}, fmt.Errorf("%s fixture declares type %s", eventType, event.Type)
 	}
 	event.TenantID, event.EngagementID = tenant, ""
+	event.SourceKind = "template_fixture"
 	return event, nil
 }
 

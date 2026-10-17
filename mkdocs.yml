@@ -70,6 +70,7 @@ nav:
       - Notification content and capture rollout: notification-content.md
       - Notification event live validation: notification-events-e2e.md
       - Lifecycle notification delivery: notification-lifecycle-events.md
+      - Notification delivery acceptance: notification-delivery-acceptance.md
       - SIEM streams: siem-stream.md
       - Finding ownership and routing: finding-ownership.md
       - Assessment lifecycle rollout: assessment-lifecycle-operations.md

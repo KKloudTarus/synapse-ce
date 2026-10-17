@@ -5,6 +5,7 @@ import "sort"
 // catalog is the source of truth for every event type. A filter is listed only when the producer
 // fills the field it reads, so a rule can never be saved with a filter that cannot match.
 var catalog = map[EventType]EventSpec{
+	EventDigest: {Type: EventDigest, Label: "Notification digest", SchemaVersion: 1, SubjectKind: "digest", HasSeverity: true, OperatorOnly: true, MaxDataClass: DataClassDetail, Variables: variables(signal("severity", "Highest allowed member severity"), signal("cadence", "UTC digest cadence"), instant("window_start", "Inclusive publication window start"), instant("window_end", "Exclusive publication window end"), signal("item_count", "Allowed events in the window"), signal("omitted_count", "Events beyond the displayed list bound"), list("items", "Events filtered individually before aggregation", DataClassSignal, MaxDigestItems, "event_type", "severity", "occurred_at", "title", "target"))},
 	EventFindingCreated: {
 		Type: EventFindingCreated, Label: "Finding created", SchemaVersion: 1, SubjectKind: "finding",
 		HasEngagement: true, HasSeverity: true,
@@ -157,7 +158,7 @@ var catalog = map[EventType]EventSpec{
 		),
 	},
 	EventDestinationChanged: {
-		Type: EventDestinationChanged, Label: "Destination changed", SchemaVersion: 1, SubjectKind: "user_contact",
+		Type: EventDestinationChanged, Label: "Destination changed", SchemaVersion: 2, SubjectKind: "user_contact",
 		MaxDataClass: DataClassSummary, OperatorOnly: true,
 		Variables: variables(),
 	},

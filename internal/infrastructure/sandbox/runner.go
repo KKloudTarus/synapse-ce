@@ -899,7 +899,7 @@ func (r *Runner) systemdArgs(spec ports.ToolSpec) []string {
 	}
 	a := []string{r.systemdRun, "--user", "--scope", "--quiet", "--collect"}
 	if mem > 0 {
-		// Match the direct cgroup's no-swap policy.
+		// Match the direct cgroup path: swapping must not extend the memory budget.
 		a = append(a, "-p", fmt.Sprintf("MemoryMax=%d", mem), "-p", "MemorySwapMax=0")
 	}
 	if pids > 0 {

@@ -159,7 +159,9 @@ event data never causes closure or resolution to be inferred.
 Telegram replies to the selected message ID and permits a missing parent to fall
 back to a new message. Google Chat derives a stable thread key from the tenant,
 channel, secret version, and subject, and asks Google Chat to fall back to a new
-thread when necessary. Slack app delivery uses the bot adapter merged in PR #1570;
+thread when necessary. Messages without a subject, including digests, are sent as
+standalone messages without a reply option; Google Chat rejects a reply option
+without a thread. Slack app delivery uses the bot adapter merged in PR #1570;
 the reconciled adapter passes the shared subject anchor as `thread_ts` and retries
 without that anchor when Slack reports that its parent no longer exists.
 

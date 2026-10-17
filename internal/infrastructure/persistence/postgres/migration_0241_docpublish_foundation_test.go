@@ -11,8 +11,8 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func TestMigration0239DocpublishFoundationUpgradeRollbackAndReapply(t *testing.T) {
-	isolate := newIsolatedMigrationDB(t, 239, 238)
+func TestMigration0241DocpublishFoundationUpgradeRollbackAndReapply(t *testing.T) {
+	isolate := newIsolatedMigrationDB(t, 241, 240)
 	db := isolate.db
 	const tenant = "doc-migration"
 	const engagement = "doc-migration-engagement"
@@ -48,7 +48,7 @@ func TestMigration0239DocpublishFoundationUpgradeRollbackAndReapply(t *testing.T
 		}
 	})
 
-	if err := goose.UpTo(db, ".", 239); err != nil {
+	if err := goose.UpTo(db, ".", 241); err != nil {
 		t.Fatalf("upgrade documentation publishing foundation: %v", err)
 	}
 	for _, table := range []string{"document_links", "document_intents"} {
@@ -139,7 +139,7 @@ func TestMigration0239DocpublishFoundationUpgradeRollbackAndReapply(t *testing.T
 		}
 	})
 
-	if err := goose.DownTo(db, ".", 238); err == nil {
+	if err := goose.DownTo(db, ".", 240); err == nil {
 		t.Fatal("rollback with durable document data succeeded")
 	}
 	withMigrationTenant(t, db, tenant, func(tx *sql.Tx) {
@@ -156,13 +156,13 @@ func TestMigration0239DocpublishFoundationUpgradeRollbackAndReapply(t *testing.T
 			}
 		}
 	})
-	if err := goose.DownTo(db, ".", 238); err != nil {
+	if err := goose.DownTo(db, ".", 240); err != nil {
 		t.Fatalf("rollback empty documentation publishing foundation: %v", err)
 	}
 	for _, table := range []string{"document_links", "document_intents"} {
 		requireMigrationTable(t, db, table, false)
 	}
-	if err := goose.UpTo(db, ".", 239); err != nil {
+	if err := goose.UpTo(db, ".", 241); err != nil {
 		t.Fatalf("reapply documentation publishing foundation: %v", err)
 	}
 	withMigrationTenant(t, db, tenant, func(tx *sql.Tx) {
@@ -173,10 +173,10 @@ func TestMigration0239DocpublishFoundationUpgradeRollbackAndReapply(t *testing.T
 	})
 }
 
-func TestMigration0239RollbackWaitsForConcurrentDocumentData(t *testing.T) {
-	isolate := newIsolatedMigrationDB(t, 239, 238)
+func TestMigration0241RollbackWaitsForConcurrentDocumentData(t *testing.T) {
+	isolate := newIsolatedMigrationDB(t, 241, 240)
 	db := isolate.db
-	if err := goose.UpTo(db, ".", 239); err != nil {
+	if err := goose.UpTo(db, ".", 241); err != nil {
 		t.Fatalf("apply documentation publishing foundation: %v", err)
 	}
 	const tenant = "doc-rollback-race"
@@ -218,8 +218,8 @@ func TestMigration0239RollbackWaitsForConcurrentDocumentData(t *testing.T) {
 	}
 
 	downResult := make(chan error, 1)
-	go func() { downResult <- goose.DownTo(db, ".", 238) }()
-	waitForMigration0239ExclusiveLock(t, ctx, db)
+	go func() { downResult <- goose.DownTo(db, ".", 240) }()
+	waitForMigration0241ExclusiveLock(t, ctx, db)
 	if err := writerTx.Commit(); err != nil {
 		t.Fatalf("commit concurrent document link: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestMigration0239RollbackWaitsForConcurrentDocumentData(t *testing.T) {
 	})
 }
 
-func waitForMigration0239ExclusiveLock(t *testing.T, ctx context.Context, db *sql.DB) {
+func waitForMigration0241ExclusiveLock(t *testing.T, ctx context.Context, db *sql.DB) {
 	t.Helper()
 	const query = `SELECT EXISTS (
 		SELECT 1 FROM pg_locks

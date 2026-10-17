@@ -18,6 +18,7 @@ vi.mock('../../lib/api', () => ({
     createNotificationRule: vi.fn(),
     listEngagements: vi.fn(),
     ownershipTeams: vi.fn(),
+    notificationUserChoices: vi.fn(),
     notificationDeliveryPage: vi.fn(),
   },
   AlertNotEnabledError: class AlertNotEnabledError extends Error {},
@@ -73,6 +74,7 @@ describe('rule recipient roles (#1415)', () => {
     vi.mocked(api.notificationDeliveryPage).mockResolvedValue({ items: [] } as never)
     vi.mocked(api.listEngagements).mockResolvedValue([])
     vi.mocked(api.ownershipTeams).mockResolvedValue({ items: [] } as never)
+    vi.mocked(api.notificationUserChoices).mockResolvedValue({ items: [] } as never)
     vi.mocked(api.updateNotificationRule).mockResolvedValue(rule('scan.completed', []))
   })
 
@@ -105,4 +107,15 @@ describe('rule recipient roles (#1415)', () => {
     render(<Alerting />)
     expect(await screen.findByText(/People: engagement lead/)).toBeInTheDocument()
   })
+  it('preserves missing user selections and digest cadence through save', async () => {
+    const initial = { ...rule('scan.completed', []), channel_ids: [], recipient_user_ids: ['missing-user'], cadence: 'daily' as const }
+    const save = await editRule(initial)
+    expect(screen.getByRole('list', { name: 'Selected People (optional)' })).toHaveTextContent('missing-user')
+    expect(save).toBeEnabled()
+    fireEvent.click(save)
+    await waitFor(() => expect(api.updateNotificationRule).toHaveBeenCalledWith('rule-1', expect.objectContaining({
+      recipient_user_ids: ['missing-user'], cadence: 'daily', channel_ids: [],
+    })))
+  })
+
 })

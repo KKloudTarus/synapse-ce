@@ -210,20 +210,7 @@ func slaDueSQL() string {
 }
 
 func lifecycleLeads(ctx context.Context, tx pgx.Tx, tenant shared.ID) ([]int64, error) {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT lead_time_secs FROM notification_rules WHERE tenant_id=$1 AND enabled AND event_type='risk_acceptance.expiring' AND lead_time_secs>0 ORDER BY lead_time_secs`, tenant)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []int64
-	for rows.Next() {
-		var lead int64
-		if err := rows.Scan(&lead); err != nil {
-			return nil, err
-		}
-		out = append(out, lead)
-	}
-	return out, rows.Err()
+	return notificationRuleLeads(ctx, tx, tenant, notification.EventRiskAcceptanceExpiring)
 }
 
 func (s *NotificationSource) pollRiskThreshold(ctx context.Context, tx pgx.Tx, tenant shared.ID, activated, now time.Time, lead int64, expired bool, limit int) (int, error) {

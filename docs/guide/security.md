@@ -45,6 +45,13 @@ capability set, `NoNewPrivileges`, delegated cgroup v2, strict executable integr
 redaction, and an exact-runner startup check. API, web, and migration workloads remain on EKS. No execution
 component uses a privileged container, broad `SYS_ADMIN`, unrestricted sudo, an SSH daemon, or a public IP.
 
+Bounded tool runs disable swap as well as setting a memory limit. The direct cgroup path
+writes `memory.swap.max=0`; the development `systemd-run --user --scope` fallback uses
+`MemorySwapMax=0` alongside `MemoryMax` and `TasksMax`. A memory limit alone does not
+bound swap usage. Failure to create the constrained scope is an execution error, not
+permission to run the tool without limits. See the
+[systemd resource-control specification](https://github.com/systemd/systemd/blob/main/man/systemd.resource-control.xml).
+
 Default network posture is an isolated namespace. For supported live recon, the trust chain is:
 
 1. The worker resolves exact allowed domains once to canonical IPv4 addresses, compiles CIDR/port rules, and

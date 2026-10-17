@@ -83,6 +83,10 @@ func (r *NotificationRepository) RecordChannelOutcome(ctx context.Context, tenan
 			tenant, o.ChannelID, pausedDeliveryReason, next.PausedAt); err != nil {
 			return fmt.Errorf("cancel paused channel deliveries: %w", err)
 		}
+		if _, err := tx.Exec(ctx, `UPDATE notification_digest_windows SET outcome='suppressed',finalized_at=$3
+			WHERE tenant_id=$1 AND channel_id=$2 AND outcome='pending'`, tenant, o.ChannelID, next.PausedAt); err != nil {
+			return fmt.Errorf("suppress paused channel digests: %w", err)
+		}
 		event, err := notification.NewChannelPausedEvent(tenant, o.ChannelID, notification.ChannelType(typ), name, next, pauseID)
 		if err != nil {
 			return err

@@ -152,10 +152,13 @@ func deleteInbox(ctx context.Context, tx pgx.Tx, query string, args ...any) erro
 func (r *NotificationRepository) EnableDestinationNotices() { r.destinationNotices = true }
 
 func (r *NotificationRepository) maybeDestinationNotice(ctx context.Context, tx pgx.Tx, channel notification.Channel, action string) error {
-	if !r.destinationNotices || !channel.Type.HTTPEndpoint() {
+	if !r.destinationNotices || (!channel.Type.HTTPEndpoint() && channel.Type != notification.ChannelEmail) {
 		return nil
 	}
 	event, err := notification.NewDestinationEvent(channel.TenantID, channel.ID, channel.Type, channel.Destination, action, notification.ActorFrom(ctx), channel.UpdatedAt)
+	if channel.Type == notification.ChannelEmail {
+		event, err = notification.NewEmailDestinationEvent(channel.TenantID, channel.ID, channel.Recipients, action, notification.ActorFrom(ctx), channel.UpdatedAt)
+	}
 	if err != nil {
 		return err
 	}
@@ -193,12 +196,12 @@ var personalJobKinds = map[string]string{
 // projectPersonal writes the inbox rows of one event and queues its personal messages. ruleRoles
 // are the recipient roles of the rules that matched it (#1415).
 func (r *NotificationRepository) projectPersonal(ctx context.Context, tx pgx.Tx, e notification.Event, ruleRoles []string) error {
-	subject, err := personalSubject(e, ruleRoles)
-	if err != nil || !subject.ok {
-		return err
-	}
 	recipients, err := r.resolvePersonalRecipients(ctx, tx, e, ruleRoles)
 	if err != nil || len(recipients) == 0 {
+		return err
+	}
+	subject, err := personalSubject(e, append(append([]string(nil), ruleRoles...), notification.RoleExplicitUser))
+	if err != nil || !subject.ok {
 		return err
 	}
 	users := make([]shared.ID, len(recipients))
@@ -392,6 +395,16 @@ var roleResolvers = map[string]roleResolver{
 var personalRoleOrder = []string{notification.RoleAssignee, notification.RoleTeamMember, notification.RoleEngagementLead, notification.RoleMentionedUser, notification.RoleApprover, notification.RoleTenantAdmin}
 
 func (r *NotificationRepository) resolvePersonalRecipients(ctx context.Context, tx pgx.Tx, e notification.Event, ruleRoles []string) ([]notification.ResolvedRecipient, error) {
+	if e.Type == notification.EventDigest || e.SourceKind == "template_test" || e.Type == notification.EventTest {
+		return nil, nil
+	}
+	explicit, err := explicitRuleRecipients(ctx, tx, e)
+	if err != nil {
+		return nil, err
+	}
+	if len(explicit) > 0 {
+		ruleRoles = append(append([]string(nil), ruleRoles...), notification.RoleExplicitUser)
+	}
 	projected, err := personalSubject(e, ruleRoles)
 	if err != nil || !projected.ok {
 		return nil, err
@@ -412,6 +425,9 @@ func (r *NotificationRepository) resolvePersonalRecipients(ctx context.Context, 
 		}
 	}
 	var groups []notification.RoleRecipients
+	if len(explicit) > 0 {
+		groups = append(groups, notification.RoleRecipients{Role: notification.RoleExplicitUser, Users: explicit})
+	}
 	for _, role := range personalRoleOrder {
 		if !wanted[role] {
 			continue
@@ -527,4 +543,16 @@ func (r *NotificationRepository) resolveApprovers(ctx context.Context, tx pgx.Tx
 		}
 	}
 	return resolveCapturedUsers(ctx, tx, e, ids, []string{"admin", "reviewer"})
+}
+
+// Only the event's matched rule revision can add explicit recipients. Editing a rule cannot
+// retroactively address a retained event. Disabled, removed or foreign users remain saved IDs
+// on the rule but never become recipients.
+func explicitRuleRecipients(ctx context.Context, tx pgx.Tx, e notification.Event) ([]shared.ID, error) {
+	return queryUserIDs(ctx, tx, `SELECT DISTINCT u.id FROM notification_events e
+ JOIN notification_rules r ON r.tenant_id=e.tenant_id AND e.matched_rules ? r.id
+ AND (e.rule_revisions->>r.id)::integer=r.revision
+ CROSS JOIN LATERAL jsonb_array_elements_text(r.recipient_user_ids) selected(user_id)
+ JOIN users u ON u.id=selected.user_id AND u.ownership_tenant_id=e.tenant_id
+ WHERE e.tenant_id=$1 AND e.id=$2 AND NOT u.disabled AND u.role=ANY($3) ORDER BY u.id`, e.TenantID, e.ID, humanNotificationRoles)
 }

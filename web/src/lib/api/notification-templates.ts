@@ -80,6 +80,64 @@ export interface NotificationTemplateQuery {
   status?: NotificationTemplateStatus
 }
 
+/** A recent tenant event that can supply data for a template preview. It deliberately omits event data. */
+export interface NotificationTemplatePreviewEvent {
+  id: string
+  event_type: string
+  occurred_at: string
+  engagement_id?: string
+  severity?: string
+  subject_kind?: string
+}
+
+export interface NotificationTemplatePreviewInput {
+  channel_id: string
+  event_type: string
+  /** Omitted renders the published fixture for event_type. */
+  event_id?: string
+  /** A saved template whose unsaved fields are being previewed. */
+  template_id?: string
+  fields?: Record<string, string>
+}
+
+export interface NotificationTemplatePreviewMessage {
+  fields: Record<string, string>
+  links?: Array<{ label: string; url: string }>
+  template_ref: string
+  severity?: string
+}
+
+export interface NotificationTemplateFormattedPreview {
+  content_type: string
+  body: string
+  html_body?: string
+  subject?: string
+}
+
+export interface NotificationTemplateWebhookPreview {
+  content_type: string
+  body: string
+  custom: boolean
+}
+
+/** The rendered, send-parity preview. Values are presentation-only and contain no event context. */
+export interface NotificationTemplatePreview {
+  channel: { id: string; name: string; type: string; family: NotificationTemplateFamily }
+  sample: { source: 'fixture' | 'event'; id?: string; event_type: string; occurred_at?: string; severity?: string; subject_kind?: string }
+  rendered: boolean
+  suppressed?: boolean
+  class?: string
+  fallback?: boolean
+  message?: NotificationTemplatePreviewMessage
+  formatted?: NotificationTemplateFormattedPreview
+  webhook?: NotificationTemplateWebhookPreview
+}
+
+export interface NotificationTemplatePreviewTestResult {
+  delivery_id: string
+  state: 'pending'
+}
+
 /** The 400 body of a field the template engine rejected. It never repeats the template source. */
 export interface NotificationTemplateValidationError {
   error: string
@@ -180,4 +238,11 @@ export const notificationTemplatesApi = {
       throw error
     }
   },
+  listNotificationTemplatePreviewEvents: async (eventType: string): Promise<NotificationTemplatePreviewEvent[]> =>
+    ((await req(`/notifications/templates/preview/events?event_type=${encodeURIComponent(eventType)}`)) as { items?: NotificationTemplatePreviewEvent[] } | null)?.items ?? [],
+  previewNotificationTemplate: (input: NotificationTemplatePreviewInput): Promise<NotificationTemplatePreview> =>
+    req('/notifications/templates/preview', { method: 'POST', body: JSON.stringify(input) }),
+  /** Queues a selected channel's fixture-only test send. Stored event IDs are never accepted here. */
+  sendNotificationTemplatePreviewTest: (input: Omit<NotificationTemplatePreviewInput, 'event_id'>): Promise<NotificationTemplatePreviewTestResult> =>
+    req('/notifications/templates/preview/send-test', { method: 'POST', body: JSON.stringify(input) }),
 }

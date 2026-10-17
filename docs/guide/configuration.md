@@ -918,3 +918,15 @@ Pushes scan distinct live branch/ref and commit pairs; branch deletion and tags 
 A PR whose source and destination repository UUIDs differ, or whose identities are missing/invalid, uses the restricted fork path: no Git credentials (including ambient credential helpers), no Maven/Gradle/npm or other build execution, and no forge status/comment writes. Acquisition still uses only the stored origin. Consequently, a fork commit must be reachable anonymously from that origin; unavailable fork commits and private origins fail closed. This change does not fetch arbitrary fork URLs or add Bitbucket PR decoration.
 
 Protocol references: [Bitbucket Cloud webhook management](https://support.atlassian.com/bitbucket-cloud/docs/manage-webhooks/), [event payloads](https://support.atlassian.com/bitbucket-cloud/docs/event-payloads/), and the [Jenkins Bitbucket plugin signature verifier](https://github.com/jenkinsci/bitbucket-push-and-pull-request-plugin/blob/b5b8b6a134d513e80ed62307306168d6c906584f/src/main/java/io/jenkins/plugins/bitbucketpushandpullrequest/receiver/SignatureUtils.java). This implementation targets Bitbucket Cloud, not Server/Data Center payloads.
+
+### Notification digest rollout
+
+No new environment switch is required. With notifications enabled and a durable database,
+notification workers materialize rule cadences (`immediate`, `hourly`, `daily`) in UTC
+publication windows and present timestamps in the tenant time zone. Apply migration `0239`
+first, upgrade every notification worker, then enable digest or template-test producers in
+the API. Apply `0240` and upgrade all API/source publishers and workers before enabling
+explicit multi-event rule selections. Older matching publishers fail closed instead of
+ignoring secondary event types. Keep these migrations and queued work across application
+rollback; see
+[notification batching and rollback](notifications.md#digests-and-explicit-recipients).
