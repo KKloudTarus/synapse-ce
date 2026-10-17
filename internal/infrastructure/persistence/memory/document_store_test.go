@@ -20,6 +20,7 @@ func docFixture() docpublishconformance.Fixture {
 		Tenant: "doc-a", Other: "doc-b", Integration: "doc-integration-a",
 		Engagement: "doc-engagement-a", Project: "doc-project-a",
 		OtherEngagement: "doc-engagement-b", OtherProject: "doc-project-b",
+		SiblingEngagement: "doc-engagement-sibling", SiblingProject: "doc-project-sibling",
 	}
 }
 
@@ -33,6 +34,7 @@ func seedDocumentParents(t *testing.T, engagements *EngagementRepository, projec
 	}{
 		{f.Tenant, f.Engagement, f.Project, "doc-project-a"},
 		{f.Other, f.OtherEngagement, f.OtherProject, "doc-project-b"},
+		{f.Tenant, f.SiblingEngagement, f.SiblingProject, "doc-project-sibling"},
 	} {
 		e, err := engagement.New(row.engagement, row.tenant, "Documents", "Synapse", now)
 		if err != nil {
@@ -67,6 +69,7 @@ func newDocumentStoreForTest(t *testing.T) (*DocumentStore, docpublishconformanc
 func TestDocumentStoreConformance(t *testing.T) {
 	store, f := newDocumentStoreForTest(t)
 	docpublishconformance.Run(t, store, f)
+	docpublishconformance.ScopeIsolation(t, store, f)
 	docpublishconformance.ConcurrentReplay(t, store, f)
 	docpublishconformance.ConcurrentClaim(t, store, f)
 	docpublishconformance.ConcurrentCompletionConflict(t, store, f)

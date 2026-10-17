@@ -20,9 +20,10 @@ import (
 // Fixture names rows the caller seeded. Engagement and Project belong to Tenant; the Other*
 // rows belong to Other. Integration belongs to Tenant.
 type Fixture struct {
-	Tenant, Other, Integration    shared.ID
-	Engagement, Project           shared.ID
-	OtherEngagement, OtherProject shared.ID
+	Tenant, Other, Integration        shared.ID
+	Engagement, Project               shared.ID
+	OtherEngagement, OtherProject     shared.ID
+	SiblingEngagement, SiblingProject shared.ID
 }
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -431,6 +432,53 @@ func Run(t *testing.T, store ports.DocumentStore, f Fixture) {
 			t.Fatalf("lease aliased its caller: %+v %v", again, err)
 		}
 	})
+}
+
+// ScopeIsolation checks that opaque source references are local to their parent scope.
+func ScopeIsolation(t *testing.T, store ports.DocumentStore, f Fixture) {
+	t.Helper()
+	ctx := context.Background()
+	for _, tc := range []struct {
+		target           docpublish.Target
+		sibling, foreign shared.ID
+	}{
+		{f.engagementTarget("SCOPE"), f.SiblingEngagement, f.OtherEngagement},
+		{f.projectTarget("SCOPE"), f.SiblingProject, f.OtherProject},
+		{docpublish.Target{IntegrationID: f.Integration, SourceKind: docpublish.ProjectQualitySummary,
+			SourceRef: "quality-summary", Scope: docpublish.Project, ScopeID: f.Project, Container: "SCOPE"},
+			f.SiblingProject, f.OtherProject},
+	} {
+		t.Run(string(tc.target.SourceKind), func(t *testing.T) {
+			x := h{t: t, store: store, f: f}
+			prefix := "doc-scope-" + string(tc.target.SourceKind)
+			x.publish(x.open(f.intent(shared.ID(prefix+"-first"), tc.target, prefix+"-first", "b")), remote(prefix+"-first", 1), 200)
+			first := x.link(tc.target)
+			for _, parent := range []shared.ID{tc.sibling, tc.foreign, "doc-scope-missing"} {
+				target := tc.target
+				target.ScopeID = parent
+				_, err := store.FindLink(ctx, f.Tenant, target)
+				is(t, "lookup in another parent", err, shared.ErrNotFound)
+			}
+			sibling := tc.target
+			sibling.ScopeID = tc.sibling
+			x.publish(x.open(f.intent(shared.ID(prefix+"-sibling"), sibling, prefix+"-sibling", "c")), remote(prefix+"-sibling", 1), 210)
+			second := x.link(sibling)
+			if second.Target != sibling || first.ID == second.ID {
+				t.Fatalf("distinct parent targets shared a link: first=%+v second=%+v", first, second)
+			}
+			crossed := f.update(shared.ID(prefix+"-crossed"), first, prefix+"-crossed", "d")
+			crossed.Target = sibling
+			_, _, err := store.CreateOrGetIntent(ctx, f.Tenant, crossed)
+			is(t, "update another parent's link", err, shared.ErrValidation)
+			x.publish(x.open(f.update(shared.ID(prefix+"-update"), second, prefix+"-update", "d")), remote(second.RemotePageID, 2), 220)
+			if got := x.link(sibling); got.Target != sibling || got.RemoteVersion != 2 || got.ContentHash != hash("d") {
+				t.Fatalf("sibling update: %+v", got)
+			}
+			if got := x.link(tc.target); !sameLink(got, first) {
+				t.Fatalf("sibling update changed original link: %+v", got)
+			}
+		})
+	}
 }
 
 // ConcurrentReplay proves a request key can be won by just one caller, even when many

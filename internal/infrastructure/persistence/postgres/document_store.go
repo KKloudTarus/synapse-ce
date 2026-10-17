@@ -126,9 +126,14 @@ func (s *DocumentStore) GetLink(ctx context.Context, tenant, id shared.ID) (docp
 
 // selectDocumentLinkByTarget reads the one link a target addresses, optionally locking it.
 func selectDocumentLinkByTarget(ctx context.Context, tx pgx.Tx, tenant shared.ID, t docpublish.Target, lock string) (docpublish.Link, error) {
+	scopePredicate := "project_id=$6 AND engagement_id IS NULL"
+	if t.Scope == docpublish.Engagement {
+		scopePredicate = "engagement_id=$6 AND project_id IS NULL"
+	}
 	return scanDocumentLink(tx.QueryRow(ctx, `SELECT `+documentLinkCols+` FROM document_links
-        WHERE tenant_id=$1 AND integration_id=$2 AND source_kind=$3 AND source_ref=$4 AND container=$5 `+lock,
-		tenant.String(), t.IntegrationID.String(), string(t.SourceKind), t.SourceRef, t.Container))
+        WHERE tenant_id=$1 AND integration_id=$2 AND source_kind=$3 AND source_ref=$4 AND container=$5
+            AND `+scopePredicate+` `+lock,
+		tenant.String(), t.IntegrationID.String(), string(t.SourceKind), t.SourceRef, t.Container, t.ScopeID.String()))
 }
 
 func (s *DocumentStore) FindLink(ctx context.Context, tenant shared.ID, target docpublish.Target) (docpublish.Link, error) {
@@ -233,7 +238,19 @@ func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID,
 			// The link exists, so its page does: a second create would make a duplicate page.
 			_, e = selectDocumentLinkByTarget(ctx, tx, tenant, i.Target, "FOR KEY SHARE")
 			if e == nil {
-				return shared.ErrConflict
+				// The original command may have committed and completed since byKey's
+				// first READ COMMITTED snapshot. Give an identical replay its result.
+				saved, e = byKey()
+				if errors.Is(e, pgx.ErrNoRows) {
+					return shared.ErrConflict
+				}
+				if e != nil {
+					return e
+				}
+				if !saved.SameCommand(i) {
+					return shared.ErrConflict
+				}
+				return nil
 			}
 			if !errors.Is(e, pgx.ErrNoRows) {
 				return e
@@ -381,7 +398,7 @@ func completeDocumentLink(ctx context.Context, tx pgx.Tx, tenant shared.ID, done
         (id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,
          remote_page_id,remote_version,remote_url,content_hash,revision,created_at,updated_at)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-        ON CONFLICT (tenant_id,integration_id,source_kind,source_ref,container) DO NOTHING`,
+        ON CONFLICT ON CONSTRAINT document_links_target_unique DO NOTHING`,
 		link.ID.String(), tenant.String(), link.IntegrationID.String(), string(link.SourceKind), link.SourceRef,
 		engagement, project, link.Container, link.RemotePageID, link.RemoteVersion, link.RemoteURL,
 		link.ContentHash, link.Revision, link.CreatedAt.UTC(), link.UpdatedAt.UTC())

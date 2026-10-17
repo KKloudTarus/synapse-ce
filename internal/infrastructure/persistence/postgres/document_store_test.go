@@ -50,6 +50,7 @@ func documentFixture() docpublishconformance.Fixture {
 		Tenant: "doc-a", Other: "doc-b", Integration: "doc-integration-a",
 		Engagement: "doc-engagement-a", Project: "doc-project-a",
 		OtherEngagement: "doc-engagement-b", OtherProject: "doc-project-b",
+		SiblingEngagement: "doc-engagement-sibling", SiblingProject: "doc-project-sibling",
 	}
 }
 
@@ -60,6 +61,7 @@ func seedDocumentTenants(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 	for _, row := range []struct{ tenant, engagement, project, integration string }{
 		{"doc-a", "doc-engagement-a", "doc-project-a", "doc-integration-a"},
 		{"doc-b", "doc-engagement-b", "doc-project-b", "doc-integration-b"},
+		{"doc-a", "doc-engagement-sibling", "doc-project-sibling", "doc-integration-a"},
 	} {
 		if _, err := pool.Exec(ctx, `INSERT INTO tenants (id,name) VALUES ($1,$1) ON CONFLICT(id) DO NOTHING`, row.tenant); err != nil {
 			t.Fatal(err)
@@ -115,6 +117,7 @@ func TestDocumentStoreConformanceAndRLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	docpublishconformance.Run(t, store, f)
+	docpublishconformance.ScopeIsolation(t, store, f)
 	docpublishconformance.ConcurrentReplay(t, store, f)
 	docpublishconformance.ConcurrentClaim(t, store, f)
 	docpublishconformance.ConcurrentCompletionConflict(t, store, f)

@@ -24,8 +24,10 @@ CREATE TABLE document_links (
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     UNIQUE (tenant_id,id),
-    -- The same artifact published to another container is another page, so another link.
-    CONSTRAINT document_links_target_unique UNIQUE (tenant_id,integration_id,source_kind,source_ref,container),
+    -- Source references are local to their parent scope; another container is another page.
+    -- Treat the unused scope column's NULL as equal so duplicate targets still conflict.
+    CONSTRAINT document_links_target_unique UNIQUE NULLS NOT DISTINCT
+        (tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container),
     FOREIGN KEY (tenant_id,integration_id) REFERENCES integrations(tenant_id,id),
     CONSTRAINT document_links_engagement_fk FOREIGN KEY (tenant_id,engagement_id)
         REFERENCES engagements(tenant_id,id) ON DELETE RESTRICT,

@@ -24,7 +24,9 @@ intent is left exactly as it was.
 
 ## What a target is
 
-A target is `(integration, source kind, source reference, container)` inside one tenant.
+A target is `(integration, source kind, source reference, scope parent, container)` inside
+one tenant. Source references are local to their engagement or project: two parents can
+publish the same reference into the same container without sharing a link.
 
 | Source kind | Scope | Notes |
 |---|---|---|
@@ -75,6 +77,9 @@ Intents are idempotent by `(tenant, integration, request key)`. A replay with th
 content returns the original intent, also after its link exists. The same key with a
 different payload digest, content hash, target, action or link is a conflict, not a second
 outbound write. The correlation marker derives from the intent ID.
+
+An identical replay also returns the original intent when that command completes between
+the replay's initial request-key lookup and its check for an existing link.
 
 An expired in-flight lease leads to `uncertain`, which is never submitted again without
 remote reconciliation: exactly zero marker matches permit `reconcile_absent` back to
