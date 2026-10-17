@@ -21,6 +21,32 @@ func (f transport) RoundTrip(r *http.Request) (*http.Response, error) { return f
 
 func testAdapter(t *testing.T, cloud bool, main, policy transport) *Adapter {
 	t.Helper()
+	return testAdapterWithCloudV2(t, cloud, main, policy, transport(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/restriction-state"):
+			return response(200, `{"state":"VIEW_RESTRICTED"}`), nil
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/permissions"):
+			return response(200, `{"results":[{"operation":"update","principal":{"principalType":"group","principalId":"synapse-readers"}}],"_links":{}}`), nil
+		case r.Method == http.MethodPut:
+			return response(200, `{}`), nil
+		default:
+			t.Fatalf("unexpected Cloud V2 request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
+	}))
+}
+
+func testAdapterWithCloudV2(t *testing.T, cloud bool, main, policy, cloudV2 transport) *Adapter {
+	t.Helper()
+	if cloud {
+		mainTransport := main
+		main = transport(func(r *http.Request) (*http.Response, error) {
+			if strings.HasPrefix(r.URL.Path, "/wiki/api/v2/pages/") && (strings.HasSuffix(r.URL.Path, "/permissions") || strings.HasSuffix(r.URL.Path, "/restriction-state")) {
+				return cloudV2(r)
+			}
+			return mainTransport(r)
+		})
+	}
 	base, err := url.Parse("https://space.atlassian.net")
 	if err != nil {
 		t.Fatal(err)
@@ -126,6 +152,7 @@ func TestRestrictionWriteUsesDocumentedArrayAndProviderGroupIdentity(t *testing.
 		t.Run(map[bool]string{true: "cloud", false: "dc"}[cloud], func(t *testing.T) {
 			storage := neutralShellStorage("synapse-intent-a")
 			writes := 0
+			cloudWrites := 0
 			main := transport(func(r *http.Request) (*http.Response, error) {
 				switch {
 				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1"):
@@ -169,15 +196,54 @@ func TestRestrictionWriteUsesDocumentedArrayAndProviderGroupIdentity(t *testing.
 				}
 				return response(200, `{}`), nil
 			})
-			a := testAdapter(t, cloud, main, transport(func(*http.Request) (*http.Response, error) {
+			cloudV2 := transport(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/restriction-state"):
+					return response(200, `{"state":"OPEN"}`), nil
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/permissions"):
+					return response(200, `{"results":[],"_links":{}}`), nil
+				case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/permissions"):
+					cloudWrites++
+					if r.URL.RawQuery != "" {
+						t.Fatalf("Cloud V2 permissions must retain default self-lockout protection: %q", r.URL.RawQuery)
+					}
+					var body struct {
+						Permissions []struct {
+							Operation  string `json:"operation"`
+							Principals []struct {
+								Type string `json:"principalType"`
+								ID   string `json:"principalId"`
+							} `json:"principals"`
+						} `json:"permissions"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Permissions) != 1 || body.Permissions[0].Operation != "update" || len(body.Permissions[0].Principals) != 1 || body.Permissions[0].Principals[0].Type != "group" || body.Permissions[0].Principals[0].ID != "synapse-readers" {
+						t.Fatalf("invalid Cloud V2 permission replacement: %+v %v", body, err)
+					}
+					return response(200, `{}`), nil
+				case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/restriction-state"):
+					cloudWrites++
+					var body map[string]string
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["state"] != "VIEW_RESTRICTED" || len(body) != 1 {
+						t.Fatalf("invalid Cloud V2 restriction state: %+v %v", body, err)
+					}
+					return response(200, `{}`), nil
+				default:
+					t.Fatalf("unexpected Cloud V2 request %s %s", r.Method, r.URL.Path)
+					return nil, nil
+				}
+			})
+			a := testAdapterWithCloudV2(t, cloud, main, transport(func(*http.Request) (*http.Response, error) {
 				t.Fatal("policy consulted before exact ACL verified")
 				return nil, nil
-			}))
+			}), cloudV2)
 			if err := a.RestrictDocument(context.Background(), "1", "synapse-readers"); err != nil {
 				t.Fatal(err)
 			}
-			if writes != 1 {
+			if !cloud && writes != 1 {
 				t.Fatalf("writes=%d", writes)
+			}
+			if cloud && cloudWrites != 2 {
+				t.Fatalf("Cloud V2 writes=%d", cloudWrites)
 			}
 			if got := providerCode(t, a.VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers")); got.Code != "restriction_unverified" {
 				t.Fatalf("%+v", got)
@@ -226,7 +292,21 @@ func TestRestrictDocumentSkipsWriteWhenCurrentACLAlreadyVerifies(t *testing.T) {
 					return response(500, "{}"), nil
 				})
 			}
-			if err := testAdapter(t, cloud, main, policy).RestrictDocument(context.Background(), "1", "synapse-readers"); err != nil {
+			cloudV2 := transport(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/restriction-state"):
+					return response(200, `{"state":"VIEW_RESTRICTED"}`), nil
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/permissions"):
+					return response(200, `{"results":[{"operation":"update","principal":{"principalType":"group","principalId":"synapse-readers"}}],"_links":{}}`), nil
+				case r.Method == http.MethodPut:
+					t.Fatal("Cloud V2 mutation issued after current ACL was verified")
+					return nil, nil
+				default:
+					t.Fatalf("unexpected Cloud V2 request %s %s", r.Method, r.URL.Path)
+					return nil, nil
+				}
+			})
+			if err := testAdapterWithCloudV2(t, cloud, main, policy, cloudV2).RestrictDocument(context.Background(), "1", "synapse-readers"); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -235,7 +315,7 @@ func TestRestrictDocumentSkipsWriteWhenCurrentACLAlreadyVerifies(t *testing.T) {
 
 func TestRestrictDocumentDoesNotBypassUnverifiableCloudSharing(t *testing.T) {
 	storage := neutralShellStorage("synapse-intent-a")
-	posts := 0
+	writes := 0
 	main := transport(func(r *http.Request) (*http.Response, error) {
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1"):
@@ -246,23 +326,153 @@ func TestRestrictDocumentDoesNotBypassUnverifiableCloudSharing(t *testing.T) {
 			return response(200, emptyRestriction("update")), nil
 		case r.Method == http.MethodGet && r.URL.Path == "/_edge/tenant_info":
 			return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/content/1/restriction"):
-			posts++
-			return response(200, `{}`), nil
 		}
 		return response(500, "{}"), nil
 	})
-	a := testAdapter(t, true, main, transport(func(*http.Request) (*http.Response, error) {
+	a := testAdapterWithCloudV2(t, true, main, transport(func(*http.Request) (*http.Response, error) {
 		return response(500, "{}"), nil
+	}), transport(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/restriction-state"):
+			if writes == 2 {
+				return response(200, `{"state":"VIEW_RESTRICTED"}`), nil
+			}
+			return response(200, `{"state":"OPEN"}`), nil
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/permissions"):
+			if writes == 2 {
+				return response(200, `{"results":[{"operation":"update","principal":{"principalType":"group","principalId":"synapse-readers"}}],"_links":{}}`), nil
+			}
+			return response(200, `{"results":[],"_links":{}}`), nil
+		case r.Method == http.MethodPut && (strings.HasSuffix(r.URL.Path, "/permissions") || strings.HasSuffix(r.URL.Path, "/restriction-state")):
+			writes++
+			return response(200, `{}`), nil
+		default:
+			t.Fatalf("unexpected Cloud V2 request %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}
 	}))
 	if err := a.RestrictDocument(context.Background(), "1", "synapse-readers"); err != nil {
 		t.Fatal(err)
 	}
-	if posts != 1 {
-		t.Fatalf("posts=%d", posts)
+	if writes != 2 {
+		t.Fatalf("writes=%d", writes)
 	}
 	if got := providerCode(t, a.VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers")); got.Code != "public_sharing_unverifiable" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestCloudV2RestrictionVerificationRequiresSingleConfiguredGroup(t *testing.T) {
+	valid := `{"results":[{"operation":"update","principal":{"principalType":"group","principalId":"synapse-readers"}}],"_links":{}}`
+	for name, test := range map[string]struct {
+		state       string
+		permissions string
+		wantOK      bool
+	}{
+		"update-group":      {state: `{"state":"VIEW_RESTRICTED"}`, permissions: valid, wantOK: true},
+		"read-group":        {state: `{"state":"VIEW_RESTRICTED"}`, permissions: strings.Replace(valid, `"update"`, `"read"`, 1), wantOK: true},
+		"wrong-state":       {state: `{"state":"EDIT_RESTRICTED"}`, permissions: valid},
+		"missing-state":     {state: `{}`, permissions: valid},
+		"missing-results":   {state: `{"state":"VIEW_RESTRICTED"}`, permissions: `{}`},
+		"null-results":      {state: `{"state":"VIEW_RESTRICTED"}`, permissions: `{"results":null,"_links":{}}`},
+		"missing-links":     {state: `{"state":"VIEW_RESTRICTED"}`, permissions: `{"results":[]}`},
+		"next-page":         {state: `{"state":"VIEW_RESTRICTED"}`, permissions: strings.Replace(valid, `"_links":{}`, `"_links":{"next":"more"}`, 1)},
+		"extra-principal":   {state: `{"state":"VIEW_RESTRICTED"}`, permissions: `{"results":[{"operation":"update","principal":{"principalType":"group","principalId":"synapse-readers"}},{"operation":"read","principal":{"principalType":"user","principalId":"publisher"}}],"_links":{}}`},
+		"wrong-principal":   {state: `{"state":"VIEW_RESTRICTED"}`, permissions: `{"results":[{"operation":"update","principal":{"principalType":"user","principalId":"publisher"}}],"_links":{}}`},
+		"wrong-group":       {state: `{"state":"VIEW_RESTRICTED"}`, permissions: `{"results":[{"operation":"update","principal":{"principalType":"group","principalId":"other"}}],"_links":{}}`},
+		"unknown-operation": {state: `{"state":"VIEW_RESTRICTED"}`, permissions: strings.Replace(valid, `"update"`, `"delete"`, 1)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			adapter := testAdapterWithCloudV2(t, true, transport(func(r *http.Request) (*http.Response, error) {
+				t.Fatalf("unexpected V1 request %s %s", r.Method, r.URL.Path)
+				return nil, nil
+			}), nil, transport(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/restriction-state"):
+					return response(200, test.state), nil
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/permissions"):
+					if r.URL.Query().Get("limit") != "100" || len(r.URL.Query()) != 1 {
+						t.Fatalf("permissions query=%q", r.URL.RawQuery)
+					}
+					return response(200, test.permissions), nil
+				default:
+					t.Fatalf("unexpected Cloud V2 request %s %s", r.Method, r.URL.Path)
+					return nil, nil
+				}
+			}))
+			err := adapter.verifyCloudV2Restriction(context.Background(), "1", "synapse-readers")
+			if test.wantOK {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if got := providerCode(t, err); got.Code != "restriction_unverified" {
+				t.Fatalf("%+v", got)
+			}
+		})
+	}
+}
+
+func TestCloudV2RestrictionWriteFailuresStopAndRedact(t *testing.T) {
+	for name, failure := range map[string]struct {
+		permissionsStatus int
+		stateStatus       int
+		wantStateWrites   int
+	}{
+		"permissions": {permissionsStatus: http.StatusInternalServerError, wantStateWrites: 0},
+		"state":       {permissionsStatus: http.StatusOK, stateStatus: http.StatusInternalServerError, wantStateWrites: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			storage := neutralShellStorage("synapse-intent-a")
+			permissionWrites, stateWrites := 0, 0
+			adapter := testAdapterWithCloudV2(t, true, transport(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1"):
+					return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+				default:
+					t.Fatalf("unexpected V1 request %s %s", r.Method, r.URL.Path)
+					return nil, nil
+				}
+			}), nil, transport(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/restriction-state"):
+					return response(200, `{"state":"OPEN"}`), nil
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/permissions"):
+					return response(200, `{"results":[],"_links":{}}`), nil
+				case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/permissions"):
+					permissionWrites++
+					return response(failure.permissionsStatus, "provider-secret"), nil
+				case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/restriction-state"):
+					stateWrites++
+					return response(failure.stateStatus, "provider-secret"), nil
+				default:
+					t.Fatalf("unexpected Cloud V2 request %s %s", r.Method, r.URL.Path)
+					return nil, nil
+				}
+			}))
+			got := providerCode(t, adapter.RestrictDocument(context.Background(), "1", "synapse-readers"))
+			if got.Code != "server_error" || !got.Ambiguous || strings.Contains(got.Error(), "provider-secret") {
+				t.Fatalf("%+v", got)
+			}
+			if permissionWrites != 1 || stateWrites != failure.wantStateWrites {
+				t.Fatalf("permissionWrites=%d stateWrites=%d", permissionWrites, stateWrites)
+			}
+		})
+	}
+}
+
+func TestCloudV2RestrictionReadHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	adapter := testAdapterWithCloudV2(t, true, transport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("unexpected V1 request")
+		return nil, nil
+	}), nil, transport(func(r *http.Request) (*http.Response, error) {
+		return nil, r.Context().Err()
+	}))
+	if err := adapter.verifyCloudV2Restriction(ctx, "1", "synapse-readers"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v", err)
 	}
 }
 

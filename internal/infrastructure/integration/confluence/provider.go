@@ -66,7 +66,7 @@ var (
 	dcDescriptor = integration.ProviderDescriptor{
 		Provider: DCProvider, Name: "Confluence Data Center", Description: "Confluence Data Center governed document publishing.", SelfHosted: true,
 		Capabilities: []integration.Capability{integration.CapabilityTestConnection},
-		ConfigFields: []integration.FieldDescriptor{{Name: "space", Label: "Confluence space key", Kind: integration.FieldText, Required: true}, {Name: "read_group", Label: "Exact read group", Kind: integration.FieldText, Required: true}, {Name: "data_class", Label: "Data classification", Kind: integration.FieldText, Required: true}},
+		ConfigFields: []integration.FieldDescriptor{{Name: "space", Label: "Confluence space key", Kind: integration.FieldText, Required: true}, {Name: "read_group", Label: "Exact read group", Kind: integration.FieldText, Required: true}, {Name: "data_class", Label: "Data classification", Kind: integration.FieldText, Required: true}, {Name: "legacy_xmlrpc_restrictions", Label: "Confluence 10.2 XML-RPC restriction compatibility", Kind: integration.FieldBoolean, Description: "Use only for Confluence Data Center 10.2 when its REST API rejects a safe group-only restriction."}},
 		SecretFields: []integration.FieldDescriptor{{Name: "pat", Label: "Personal access token", Kind: integration.FieldPassword, Required: true}},
 	}
 	markerPattern       = regexp.MustCompile(`^synapse-intent-[a-z0-9][a-z0-9-]{0,127}$`)
@@ -81,19 +81,20 @@ var (
 // Adapter implements the application-owned document port.  It has no durable
 // policy cache: every sensitive write is preceded by a fresh verification call.
 type Adapter struct {
-	descriptor integration.ProviderDescriptor
-	base       *url.URL
-	client     *http.Client
-	policy     *http.Client
-	cloud      bool
-	email      string
-	token      string
-	orgKey     string
-	orgID      string
-	siteARI    string
-	policyID   string
-	space      string
-	readGroup  string
+	descriptor   integration.ProviderDescriptor
+	base         *url.URL
+	client       *http.Client
+	policy       *http.Client
+	cloud        bool
+	email        string
+	token        string
+	orgKey       string
+	orgID        string
+	siteARI      string
+	policyID     string
+	space        string
+	readGroup    string
+	legacyXMLRPC bool
 }
 
 var _ integration.ConnectionTester = (*Adapter)(nil)
@@ -138,6 +139,7 @@ func New(item integration.Integration, credentials integration.CredentialBundle,
 	a := &Adapter{descriptor: descriptor, base: base, cloud: cloud, email: credentials["email"], orgKey: credentials["org_api_key"]}
 	a.space, _ = config["space"].(string)
 	a.readGroup, _ = config["read_group"].(string)
+	a.legacyXMLRPC, _ = config["legacy_xmlrpc_restrictions"].(bool)
 	dataClass, _ := config["data_class"].(string)
 	if !spacePattern.MatchString(a.space) || !groupPattern.MatchString(a.readGroup) || dataClass != "detail" {
 		return nil, fmt.Errorf("%w: Confluence destination configuration is invalid", shared.ErrValidation)
@@ -214,6 +216,9 @@ func (a *Adapter) TestConnection(ctx context.Context) error {
 	if space.Key != a.space || a.containsCredential(space.Key) {
 		return providerError(200, "invalid_space", false)
 	}
+	if a.legacyXMLRPC {
+		return a.legacyXMLRPCPreflight(ctx, identity)
+	}
 	return nil
 }
 
@@ -255,29 +260,43 @@ func (a *Adapter) RestrictDocument(ctx context.Context, page, group string) erro
 	if err := a.VerifyDocumentRestriction(ctx, page, a.space, group); err == nil {
 		return nil
 	}
+	if a.cloud {
+		// Cloud's V1 restriction endpoint cannot safely replace a direct grant
+		// when the publisher is a member of the target group: it rejects the
+		// self-eviction even though the group preserves effective access. The
+		// documented V2 replacement endpoint represents that single effective
+		// grant directly. Keep the provider default self-lockout protection; a
+		// caller that would lose access receives a fail-closed error instead.
+		permissions := map[string]any{"permissions": []map[string]any{{
+			"operation":  "update",
+			"principals": []map[string]string{{"principalType": "group", "principalId": group}},
+		}}}
+		if err := a.requestCloudV2JSON(ctx, http.MethodPut, "/pages/"+page+"/permissions", nil, permissions, nil, true, http.StatusOK); err != nil {
+			return err
+		}
+		return a.requestCloudV2JSON(ctx, http.MethodPut, "/pages/"+page+"/restriction-state", nil, map[string]string{"state": "VIEW_RESTRICTED"}, nil, true, http.StatusOK)
+	}
+	if a.legacyXMLRPC {
+		return a.setLegacyXMLRPCPermissions(ctx, page, group)
+	}
 	groupField := "name"
-	if a.cloud {
-		groupField = "id"
-	}
 	restrictions := map[string]any{"group": []map[string]string{{"type": "group", groupField: group}}}
-	method := http.MethodPost
-	if !a.cloud {
-		// Data Center's documented update endpoint replaces only the supplied
-		// operation. An explicit empty user list removes direct read grants while
-		// omitting update preserves its separate restriction state.
-		restrictions["user"] = []map[string]string{}
-		method = http.MethodPut
-	}
+	// Data Center's documented update endpoint replaces only the supplied
+	// operation. An explicit empty user list removes direct read grants while
+	// omitting update preserves its separate restriction state.
+	restrictions["user"] = []map[string]string{}
 	body := []map[string]any{{"operation": "read", "restrictions": restrictions}}
-	if a.cloud {
-		return a.requestJSON(ctx, method, "/content/"+page+"/restriction", nil, body, nil, true, http.StatusOK, http.StatusCreated)
-	}
-	return a.requestJSON(ctx, method, "/content/"+page+"/restriction", nil, body, nil, true, http.StatusOK)
+	return a.requestJSON(ctx, http.MethodPut, "/content/"+page+"/restriction", nil, body, nil, true, http.StatusOK)
 }
 
 func (a *Adapter) VerifyDocumentRestriction(ctx context.Context, page, container, group string) error {
 	if !pageIDPattern.MatchString(page) || container != a.space || group != a.readGroup {
 		return providerError(0, "invalid_restriction", false)
+	}
+	if a.legacyXMLRPC {
+		if err := a.legacyXMLRPCPreflight(ctx, ""); err != nil {
+			return err
+		}
 	}
 	state, err := a.GetDocument(ctx, page)
 	if err != nil {
@@ -285,6 +304,11 @@ func (a *Adapter) VerifyDocumentRestriction(ctx context.Context, page, container
 	}
 	if state.Container != container {
 		return providerError(200, "wrong_container", false)
+	}
+	if a.cloud {
+		if err := a.verifyCloudV2Restriction(ctx, page, group); err != nil {
+			return err
+		}
 	}
 	for _, operation := range []string{"read", "update"} {
 		var restrictions restrictionResponse
@@ -297,6 +321,24 @@ func (a *Adapter) VerifyDocumentRestriction(ctx context.Context, page, container
 	}
 	if a.cloud {
 		return a.verifyCloudPublicSharing(ctx)
+	}
+	return nil
+}
+
+func (a *Adapter) verifyCloudV2Restriction(ctx context.Context, page, group string) error {
+	var state cloudRestrictionState
+	if err := a.requestCloudV2JSON(ctx, http.MethodGet, "/pages/"+page+"/restriction-state", nil, nil, &state, false, http.StatusOK); err != nil {
+		return err
+	}
+	if state.State != "VIEW_RESTRICTED" {
+		return providerError(http.StatusOK, "restriction_unverified", false)
+	}
+	var permissions cloudPermissionsResponse
+	if err := a.requestCloudV2JSON(ctx, http.MethodGet, "/pages/"+page+"/permissions", url.Values{"limit": {strconv.Itoa(maxPageSize)}}, nil, &permissions, false, http.StatusOK); err != nil {
+		return err
+	}
+	if !permissions.exactGroup(group) {
+		return providerError(http.StatusOK, "restriction_unverified", false)
 	}
 	return nil
 }
@@ -687,6 +729,17 @@ func (a *Adapter) policyRequest(ctx context.Context, resource string, query url.
 }
 
 func (a *Adapter) requestJSON(ctx context.Context, method, resource string, query url.Values, value, out any, write bool, wanted ...int) error {
+	return a.requestJSONPath(ctx, method, a.apiPath(resource), query, value, out, write, wanted...)
+}
+
+func (a *Adapter) requestCloudV2JSON(ctx context.Context, method, resource string, query url.Values, value, out any, write bool, wanted ...int) error {
+	if !a.cloud {
+		return providerError(0, "invalid_request", false)
+	}
+	return a.requestJSONPath(ctx, method, "/wiki/api/v2"+resource, query, value, out, write, wanted...)
+}
+
+func (a *Adapter) requestJSONPath(ctx context.Context, method, resource string, query url.Values, value, out any, write bool, wanted ...int) error {
 	var data []byte
 	if value != nil {
 		var err error
@@ -695,7 +748,7 @@ func (a *Adapter) requestJSON(ctx context.Context, method, resource string, quer
 			return providerError(0, "invalid_request", false)
 		}
 	}
-	return a.request(ctx, a.client, method, a.apiPath(resource), query, data, out, write, wanted...)
+	return a.request(ctx, a.client, method, resource, query, data, out, write, wanted...)
 }
 
 func (a *Adapter) request(ctx context.Context, client *http.Client, method, resource string, query url.Values, body []byte, out any, write bool, wanted ...int) error {
@@ -752,7 +805,14 @@ func (a *Adapter) requestWithHeaders(ctx context.Context, client *http.Client, m
 		return nil
 	}
 	b, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
-	if err != nil || len(b) > maxResponseBytes || json.Unmarshal(b, out) != nil {
+	if err != nil || len(b) > maxResponseBytes {
+		return providerError(res.StatusCode, "invalid_response", write)
+	}
+	if raw, ok := out.(*responseBytes); ok {
+		*raw = append((*raw)[:0], b...)
+		return nil
+	}
+	if json.Unmarshal(b, out) != nil {
 		return providerError(res.StatusCode, "invalid_response", write)
 	}
 	return nil
@@ -984,6 +1044,33 @@ type restrictionResponse struct {
 			} `json:"_links"`
 		} `json:"user"`
 	} `json:"restrictions"`
+}
+
+type responseBytes []byte
+
+type cloudRestrictionState struct {
+	State string `json:"state"`
+}
+
+type cloudPermissionsResponse struct {
+	Results *[]struct {
+		Operation string `json:"operation"`
+		Principal struct {
+			Type string `json:"principalType"`
+			ID   string `json:"principalId"`
+		} `json:"principal"`
+	} `json:"results"`
+	Links *struct {
+		Next string `json:"next"`
+	} `json:"_links"`
+}
+
+func (r cloudPermissionsResponse) exactGroup(want string) bool {
+	if r.Results == nil || r.Links == nil || r.Links.Next != "" || len(*r.Results) != 1 {
+		return false
+	}
+	permission := (*r.Results)[0]
+	return (permission.Operation == "read" || permission.Operation == "update") && permission.Principal.Type == "group" && permission.Principal.ID == want
 }
 
 func (r restrictionResponse) exactGroup(operation, want string, cloud bool) bool {
