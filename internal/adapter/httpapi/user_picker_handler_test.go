@@ -110,3 +110,26 @@ func TestUserPickerPurposeRejectsUnknownAndFailsClosedWhenMentionReaderIsUnavail
 		})
 	}
 }
+
+func TestNotificationRuleUserOptionsRequiresRuleManagement(t *testing.T) {
+	rt := previewRouter(t)
+	fake := &userPickerHandlerFake{mentions: []ports.UserChoice{{ID: "recipient", Name: "Recipient"}}}
+	rt.SetUserPickerReader(fake)
+	for _, tc := range []struct {
+		role string
+		want int
+	}{{"admin", 200}, {"integration_admin", 200}, {"consultant", 403}, {"readonly", 403}, {"mcp", 403}} {
+		t.Run(tc.role, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/notifications/rules/user-options?q=Rec", nil)
+			req = req.WithContext(context.WithValue(req.Context(), principalKey, testPrincipal("caller", tc.role, "tenant-picker")))
+			rec := httptest.NewRecorder()
+			rt.routes().ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if tc.want == 200 && fake.tenantID != "tenant-picker" {
+				t.Fatalf("tenant=%q", fake.tenantID)
+			}
+		})
+	}
+}

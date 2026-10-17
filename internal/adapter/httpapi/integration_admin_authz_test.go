@@ -95,6 +95,8 @@ var integrationRoutePermissions = map[string]string{
 	"POST /api/v1/notifications/templates/{nid}/archive":           "PermManageIntegrations",
 	"GET /api/v1/notifications/channels/{nid}/template-resolution": "PermManageIntegrations",
 	"POST /api/v1/notifications/templates/preview":                 "PermManageIntegrations",
+	"POST /api/v1/notifications/templates/preview/send-test":       "PermManageIntegrations",
+	"GET /api/v1/notifications/rules/user-options":                 "PermManageIntegrations",
 	"GET /api/v1/notifications/templates/preview/events":           "PermManageIntegrations",
 	"GET /api/v1/siem/sinks":                                       "PermManageIntegrations",
 	"POST /api/v1/siem/sinks":                                      "PermAdminister",

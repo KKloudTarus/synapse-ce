@@ -92,22 +92,7 @@ func (s *NotificationSource) baselineEngagementWindows(ctx context.Context, tx p
 }
 
 func engagementWindowLeads(ctx context.Context, tx pgx.Tx, tenant shared.ID, event notification.EventType) ([]int64, error) {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT lead_time_secs FROM notification_rules
-		WHERE tenant_id=$1 AND enabled AND event_type=$2 AND lead_time_secs>0
-		ORDER BY lead_time_secs`, tenant, event)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var leads []int64
-	for rows.Next() {
-		var lead int64
-		if err := rows.Scan(&lead); err != nil {
-			return nil, err
-		}
-		leads = append(leads, lead)
-	}
-	return leads, rows.Err()
+	return notificationRuleLeads(ctx, tx, tenant, event)
 }
 
 func (s *NotificationSource) pollEngagementWindow(ctx context.Context, tx pgx.Tx, tenant shared.ID, activated, now time.Time, event notification.EventType, stateKind, column, boundaryName string, lead int64, limit int) (int, error) {

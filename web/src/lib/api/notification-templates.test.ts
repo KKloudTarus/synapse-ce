@@ -75,4 +75,26 @@ describe('notification template API', () => {
     respond({ items: [{ version: 5 }] })
     await expect(notificationTemplatesApi.getNotificationTemplateVersion('a', 7)).rejects.toMatchObject({ status: 404 })
   })
+
+  it('requests fixture and recent-event previews without putting tenant data in the URL', async () => {
+    respond({ items: [{ id: 'event-1', event_type: 'incident.created', occurred_at: '2026-10-16T00:00:00Z' }] })
+    await expect(notificationTemplatesApi.listNotificationTemplatePreviewEvents('incident.created')).resolves.toHaveLength(1)
+    const eventsURL = new URL(String(vi.mocked(fetch).mock.calls[0][0]), 'http://x')
+    expect(eventsURL.pathname).toBe('/api/v1/notifications/templates/preview/events')
+    expect(eventsURL.searchParams.get('event_type')).toBe('incident.created')
+
+    respond({ rendered: true, channel: { id: 'channel-1' } })
+    await notificationTemplatesApi.previewNotificationTemplate({
+      channel_id: 'channel-1', event_type: 'incident.created', fields: { body: 'Current draft' },
+    })
+    const [url, options] = vi.mocked(fetch).mock.calls[1]
+    expect(String(url)).toBe('/api/v1/notifications/templates/preview')
+    expect(options).toMatchObject({ method: 'POST', body: JSON.stringify({ channel_id: 'channel-1', event_type: 'incident.created', fields: { body: 'Current draft' } }) })
+
+    respond({ delivery_id: 'delivery-1', state: 'pending' }, 202)
+    await notificationTemplatesApi.sendNotificationTemplatePreviewTest({ channel_id: 'channel-1', event_type: 'incident.created', fields: { body: 'Current draft' } })
+    const [testURL, testOptions] = vi.mocked(fetch).mock.calls[2]
+    expect(String(testURL)).toBe('/api/v1/notifications/templates/preview/send-test')
+    expect(testOptions).toMatchObject({ method: 'POST', body: JSON.stringify({ channel_id: 'channel-1', event_type: 'incident.created', fields: { body: 'Current draft' } }) })
+  })
 })

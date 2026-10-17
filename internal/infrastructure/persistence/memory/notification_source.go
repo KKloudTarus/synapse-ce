@@ -86,7 +86,11 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 		s.outbox.Activate(tenant, now)
 		return 0, nil
 	}
-	records := s.outbox.pending(tenant, limit)
+	recordBudget := limit
+	if limit > 1 {
+		recordBudget-- // reserve progress for one closed digest under continuous source traffic
+	}
+	records := s.outbox.pending(tenant, recordBudget)
 	for _, record := range records {
 		event := eventFromSourceRecord(record)
 		if _, err := s.repo.Publish(ctx, event); err != nil {
@@ -97,7 +101,15 @@ func (s *NotificationSource) pollTenant(ctx context.Context, tenant shared.ID, n
 		}
 		s.outbox.markProcessed(record)
 	}
-	return len(records), nil
+	remaining := limit - len(records)
+	if remaining <= 0 {
+		return len(records), nil
+	}
+	digests, err := s.repo.materializeDigests(ctx, tenant, now, remaining)
+	if err != nil {
+		return len(records), err
+	}
+	return len(records) + digests, nil
 }
 
 // quarantineReason is the fixed reason code the Postgres poller stores in failed_reason.

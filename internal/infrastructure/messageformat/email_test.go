@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -155,5 +156,28 @@ func TestEmailHTMLRefusesUncheckedLinks(t *testing.T) {
 	}
 	if _, err := (Email{}).Format(ports.RenderedMessage{Links: []ports.RenderedLink{{Label: "x", URL: "http://x.test"}}}); !errors.Is(err, ErrInvalidLink) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEmailPresentsOnlyTypedSeverityInBothParts(t *testing.T) {
+	for severity, badge := range map[shared.Severity]string{shared.SeverityCritical: "🔴", shared.SeverityHigh: "🟠", shared.SeverityMedium: "🟡", shared.SeverityLow: "🔵", shared.SeverityInfo: "⚪"} {
+		message := ports.RenderedMessage{Severity: severity, Fields: map[string]string{"subject": "Review", "body": "Ordinary facts"}}
+		out, err := (Email{}).Format(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		label := badge + " Severity: " + string(severity)
+		if !strings.HasPrefix(string(out.Body), label+"\n\n") || !strings.Contains(string(out.HTMLBody), "<p>"+label+"</p>") {
+			t.Fatalf("severity %s not consistently presented: %s / %s", severity, out.Body, out.HTMLBody)
+		}
+	}
+	for _, severity := range []shared.Severity{"", shared.SeverityUnknown, "<script>"} {
+		out, err := (Email{}).Format(ports.RenderedMessage{Severity: severity, Fields: map[string]string{"body": "Ordinary facts"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(out.Body), "Severity:") || strings.Contains(string(out.HTMLBody), "Severity:") {
+			t.Fatalf("unrecognized severity was presented: %s", severity)
+		}
 	}
 }

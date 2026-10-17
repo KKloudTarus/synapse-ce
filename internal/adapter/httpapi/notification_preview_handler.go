@@ -49,3 +49,20 @@ func (rt *Router) previewNotificationTemplate(w http.ResponseWriter, r *http.Req
 	}
 	writeJSON(w, http.StatusOK, preview)
 }
+
+// sendNotificationTemplateTest queues the same fixture/template combination the preview renders.
+// Stored events are deliberately rejected by the use case: a test never republishes tenant event
+// data to an external destination.
+func (rt *Router) sendNotificationTemplateTest(w http.ResponseWriter, r *http.Request) {
+	var in notificationuc.PreviewInput
+	if err := decodeNotificationBody(w, r, &in); err != nil {
+		writeError(w, rt.log, err)
+		return
+	}
+	delivery, err := rt.notifications.SendTemplateTest(r.Context(), PrincipalFrom(r.Context()), in)
+	if err != nil {
+		rt.writeTemplateError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"delivery_id": delivery, "state": "pending"})
+}

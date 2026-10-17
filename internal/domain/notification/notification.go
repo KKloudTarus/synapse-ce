@@ -69,6 +69,7 @@ const (
 	EventDestinationChanged       EventType = "notification.destination_changed"
 	EventChannelPaused            EventType = "notification.channel_paused"
 	EventTest                     EventType = "notification.test"
+	EventDigest                   EventType = "notification.digest"
 	EventFindingCreated           EventType = "finding.created"
 	EventFindingStatusChanged     EventType = "finding.status_changed"
 	EventFindingRetestCompleted   EventType = "finding.retest_completed"
@@ -157,11 +158,17 @@ func (c Channel) Validate() error {
 }
 
 type Rule struct {
-	TenantID      shared.ID       `json:"tenant_id"`
-	ID            shared.ID       `json:"id"`
-	Name          string          `json:"name"`
-	Enabled       bool            `json:"enabled"`
-	EventType     EventType       `json:"event_type"`
+	Cadence          DeliveryCadence `json:"cadence"`
+	RecipientUserIDs []shared.ID     `json:"recipient_user_ids,omitempty"`
+	TenantID         shared.ID       `json:"tenant_id"`
+	ID               shared.ID       `json:"id"`
+	Name             string          `json:"name"`
+	Enabled          bool            `json:"enabled"`
+	EventType        EventType       `json:"event_type"`
+	// EventTypes is an explicit, bounded selection in input order. EventType stays the first
+	// selected type for compatibility with existing API clients and stored rules. A nil or empty
+	// selection means this legacy single-event rule selects EventType only.
+	EventTypes    []EventType     `json:"event_types,omitempty"`
 	MinSeverity   shared.Severity `json:"min_severity,omitempty"`
 	ActionTypes   []string        `json:"action_types,omitempty"`
 	EngagementIDs []shared.ID     `json:"engagement_ids,omitempty"`
@@ -187,36 +194,63 @@ const DisabledEngagementFilterUnsupported = "engagement_filter_unsupported"
 
 func (r *Rule) Normalize() error {
 	r.Name = strings.TrimSpace(r.Name)
-	spec, known := catalog[r.EventType]
+	if r.Cadence == "" {
+		r.Cadence = CadenceImmediate
+	}
+	if !r.Cadence.Valid() {
+		return fmt.Errorf("%w: invalid delivery cadence", shared.ErrValidation)
+	}
+	r.RecipientUserIDs = uniqueIDs(r.RecipientUserIDs)
+	if len(r.RecipientUserIDs) > 200 {
+		return fmt.Errorf("%w: too many recipient users", shared.ErrValidation)
+	}
+	selected, specs, err := r.selectedEventSpecs()
+	if err != nil {
+		return err
+	}
+	for _, eventType := range selected {
+		if eventType != EventFindingMentioned {
+			continue
+		}
+		if len(selected) != 1 || len(r.RecipientUserIDs) > 0 {
+			return fmt.Errorf("%w: mentions address only the mentioned user", shared.ErrValidation)
+		}
+	}
 	if r.LeadTimeSecs < 0 || r.LeadTimeSecs > 2592000 {
 		return fmt.Errorf("%w: invalid lead time", shared.ErrValidation)
 	}
 	if r.LeadTime == 0 && r.LeadTimeSecs > 0 {
 		r.LeadTime = time.Duration(r.LeadTimeSecs) * time.Second
 	}
-	if spec.HasLeadTime && r.LeadTime == 0 {
+	if anyHasLeadTime(specs) && r.LeadTime == 0 {
 		r.LeadTime = 24 * time.Hour
 	}
 	r.LeadTimeSecs = int64(r.LeadTime / time.Second)
-	if r.TenantID.IsZero() || r.ID.IsZero() || r.Name == "" || !known || spec.OperatorOnly || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
+	if r.TenantID.IsZero() || r.ID.IsZero() || r.Name == "" || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: invalid notification rule", shared.ErrValidation)
 	}
 	if r.MinSeverity != "" && shared.SeverityRank(r.MinSeverity) == 0 {
 		return fmt.Errorf("%w: invalid notification minimum severity", shared.ErrValidation)
 	}
-	if r.MinSeverity != "" && !spec.Allows(FilterMinSeverity) {
-		return unsupportedFilter(r.EventType, "minimum severity")
+	if r.MinSeverity != "" {
+		if err := requireAllFilters(selected, specs, FilterMinSeverity, "minimum severity"); err != nil {
+			return err
+		}
 	}
-	if len(r.ActionTypes) > 0 && !spec.Allows(FilterActionTypes) {
-		return unsupportedFilter(r.EventType, "action types")
+	if len(r.ActionTypes) > 0 {
+		if err := requireAllFilters(selected, specs, FilterActionTypes, "action types"); err != nil {
+			return err
+		}
 	}
 	for _, action := range r.ActionTypes {
 		if !validActionType(strings.TrimSpace(action)) {
 			return fmt.Errorf("%w: invalid vulnerability action type", shared.ErrValidation)
 		}
 	}
-	if r.LeadTime != 0 && !spec.Allows(FilterLeadTime) {
-		return unsupportedFilter(r.EventType, "lead time")
+	if r.LeadTime != 0 {
+		if err := requireAllFilters(selected, specs, FilterLeadTime, "lead time"); err != nil {
+			return err
+		}
 	}
 	if r.LeadTime < 0 || r.LeadTime > 30*24*time.Hour {
 		return fmt.Errorf("%w: notification lead time must be between zero and 30 days", shared.ErrValidation)
@@ -224,26 +258,92 @@ func (r *Rule) Normalize() error {
 	r.ActionTypes = uniqueStrings(r.ActionTypes)
 	r.ChannelIDs = uniqueIDs(r.ChannelIDs)
 	r.EngagementIDs = uniqueIDs(r.EngagementIDs)
-	if len(r.EngagementIDs) > 0 && !spec.Allows(FilterEngagements) {
-		return unsupportedFilter(r.EventType, "engagement scope")
+	if len(r.EngagementIDs) > 0 {
+		if err := requireAllFilters(selected, specs, FilterEngagements, "engagement scope"); err != nil {
+			return err
+		}
 	}
-	if err := r.normalizeTeamScope(spec); err != nil {
+	if err := r.normalizeTeamScope(selected, specs); err != nil {
 		return err
 	}
-	if err := r.normalizeEventFilters(spec); err != nil {
+	if err := r.normalizeEventFilters(selected, specs); err != nil {
 		return err
 	}
-	if err := r.normalizeRecipientRoles(); err != nil {
+	if err := r.normalizeRecipientRoles(selected); err != nil {
 		return err
 	}
-	if r.EventType == EventFindingMentioned && len(r.ChannelIDs) > 0 {
+	if selected[0] == EventFindingMentioned && len(r.ChannelIDs) > 0 {
 		return fmt.Errorf("%w: mentions require personal recipient routing", shared.ErrValidation)
 	}
-	if len(r.ChannelIDs) == 0 && len(r.RecipientRoles) == 0 {
+	if len(r.ChannelIDs) == 0 && len(r.RecipientRoles) == 0 && len(r.RecipientUserIDs) == 0 {
 		return fmt.Errorf("%w: a rule needs a channel or a recipient role", shared.ErrValidation)
 	}
 	if len(r.ChannelIDs) > 50 || len(r.EngagementIDs) > 200 || len(r.Name) > 200 {
 		return fmt.Errorf("%w: invalid rule bounds", shared.ErrValidation)
+	}
+	return nil
+}
+
+// SelectedEventTypes returns the explicit selection, or the legacy primary selector when the
+// array is absent or empty. It returns a copy so callers cannot mutate a stored rule's selection.
+func (r Rule) SelectedEventTypes() []EventType {
+	if len(r.EventTypes) == 0 {
+		return []EventType{r.EventType}
+	}
+	return append([]EventType(nil), r.EventTypes...)
+}
+
+// MatchesEventType reports whether an event type belongs to this rule's explicit selection.
+func (r Rule) MatchesEventType(eventType EventType) bool {
+	if len(r.EventTypes) == 0 {
+		return r.EventType == eventType
+	}
+	for _, selected := range r.EventTypes {
+		if selected == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func (r Rule) selectedEventSpecs() ([]EventType, []EventSpec, error) {
+	if len(r.EventTypes) > 8 {
+		return nil, nil, fmt.Errorf("%w: a rule can select at most eight event types", shared.ErrValidation)
+	}
+	selected := r.SelectedEventTypes()
+	if len(r.EventTypes) > 0 && r.EventType != selected[0] {
+		return nil, nil, fmt.Errorf("%w: event type must be the first selected event type", shared.ErrValidation)
+	}
+	seen := make(map[EventType]struct{}, len(selected))
+	specs := make([]EventSpec, 0, len(selected))
+	for _, eventType := range selected {
+		if _, duplicate := seen[eventType]; duplicate {
+			return nil, nil, fmt.Errorf("%w: duplicate selected event type %s", shared.ErrValidation, eventType)
+		}
+		seen[eventType] = struct{}{}
+		spec, known := catalog[eventType]
+		if !known || spec.OperatorOnly {
+			return nil, nil, fmt.Errorf("%w: invalid notification rule", shared.ErrValidation)
+		}
+		specs = append(specs, spec)
+	}
+	return selected, specs, nil
+}
+
+func anyHasLeadTime(specs []EventSpec) bool {
+	for _, spec := range specs {
+		if spec.HasLeadTime {
+			return true
+		}
+	}
+	return false
+}
+
+func requireAllFilters(selected []EventType, specs []EventSpec, filter Filter, name string) error {
+	for index, spec := range specs {
+		if !spec.Allows(filter) {
+			return unsupportedFilter(selected[index], name)
+		}
 	}
 	return nil
 }
@@ -253,16 +353,20 @@ func unsupportedFilter(t EventType, filter string) error {
 }
 
 type Event struct {
-	TenantID      shared.ID       `json:"-"`
-	ID            shared.ID       `json:"id"`
-	Type          EventType       `json:"type"`
-	SourceKind    string          `json:"source_kind"`
-	SourceID      string          `json:"source_id"`
-	EngagementID  shared.ID       `json:"engagement_id,omitempty"`
-	Severity      shared.Severity `json:"severity,omitempty"`
-	SchemaVersion int             `json:"schema_version"`
-	OccurredAt    time.Time       `json:"occurred_at"`
-	Data          json.RawMessage `json:"data"`
+	// DigestItems are authoritative members hydrated only for send-time filtering and links.
+	DigestItems []DigestItem `json:"-"`
+	// TestTemplate is the immutable template snapshot for a fixture-only console test.
+	TestTemplate  *TemplateVersion `json:"-"`
+	TenantID      shared.ID        `json:"-"`
+	ID            shared.ID        `json:"id"`
+	Type          EventType        `json:"type"`
+	SourceKind    string           `json:"source_kind"`
+	SourceID      string           `json:"source_id"`
+	EngagementID  shared.ID        `json:"engagement_id,omitempty"`
+	Severity      shared.Severity  `json:"severity,omitempty"`
+	SchemaVersion int              `json:"schema_version"`
+	OccurredAt    time.Time        `json:"occurred_at"`
+	Data          json.RawMessage  `json:"data"`
 	// SubjectKind and SubjectID name the entity the event is about (EPIC D8), and Context is the
 	// template context snapshot its builder took at projection (D5). They are not part of the
 	// webhook body, which is the raw event and a public contract (D4).
@@ -299,7 +403,7 @@ func (e Event) Validate() error {
 
 func (r Rule) Matches(e Event) bool {
 	spec, known := catalog[e.Type]
-	if !known || spec.OperatorOnly || !r.Enabled || r.TenantID != e.TenantID || r.EventType != e.Type {
+	if !known || spec.OperatorOnly || !r.Enabled || r.TenantID != e.TenantID || !r.MatchesEventType(e.Type) {
 		return false
 	}
 	if r.MinSeverity != "" && (e.Severity == "" || shared.SeverityRank(e.Severity) < shared.SeverityRank(r.MinSeverity)) {

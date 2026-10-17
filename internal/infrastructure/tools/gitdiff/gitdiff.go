@@ -37,8 +37,10 @@ func Changed(ctx context.Context, dir, base string) (ChangedLines, error) {
 	var stdout, stderr bytes.Buffer
 	// --relative makes diff paths relative to dir (so they match finding paths, which are filepath.Rel to
 	// dir) and scopes the diff to dir. --end-of-options ensures base is treated as a revision, never an
-	// option (defense-in-depth with the leading-dash check). argv only, no shell.
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "diff", "--relative", "--unified=0", "--no-color", "--diff-filter=d", "--end-of-options", base, "--", ".")
+	// option (defense-in-depth with the leading-dash check). Pin machine-readable prefixes and
+	// disable external diff/text conversion so Git presentation settings cannot change line identity
+	// or execute repository-configured converters. argv only, no shell.
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "diff", "--relative", "--unified=0", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--no-ext-diff", "--no-textconv", "--diff-filter=d", "--end-of-options", base, "--", ".")
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

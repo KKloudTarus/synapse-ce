@@ -80,6 +80,22 @@ describe('notification API', () => {
     const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))
     expect(body).toMatchObject({ channel_ids: [], recipient_roles: ['assignee', 'engagement_lead'] })
   })
+  it('retains the complete explicit event selection when replacing a multi-event rule', async () => {
+    respond({})
+    await notificationsApi.updateNotificationRule('r', {
+      name: 'Lifecycle',
+      enabled: true,
+      event_type: 'finding.created',
+      event_types: ['finding.created', 'finding.status_changed'],
+      channel_ids: ['c'],
+      revision: 3,
+    })
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))
+    expect(body).toMatchObject({
+      event_type: 'finding.created',
+      event_types: ['finding.created', 'finding.status_changed'],
+    })
+  })
   it('resends every B03 event filter when replacing a rule', async () => {
     respond({})
     await notificationsApi.updateNotificationRule('r', {

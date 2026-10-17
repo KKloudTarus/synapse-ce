@@ -224,8 +224,8 @@ func TestFailingTemplateFallsBackAndDelivers(t *testing.T) {
 	if err := h.svc.HandleJob(h.ctx, job); err != nil {
 		t.Fatalf("handle job: %v", err)
 	}
-	if h.sender.sent[0].Formatted != nil {
-		t.Fatal("a template that failed to render still produced a payload")
+	if h.sender.sent[0].Formatted == nil || strings.Contains(string(h.sender.sent[0].Formatted.Body), "retired_variable") {
+		t.Fatal("a failed template did not produce the shared safe fallback")
 	}
 	d, attempts := h.delivery(t, job)
 	if d.State != domain.DeliverySucceeded || d.TemplateRef != refFallback || attempts[0].TemplateRef != refFallback {
@@ -261,7 +261,7 @@ func TestRenderThatLeavesNothingFallsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !capped.Fallback || capped.Formatted != nil || capped.Message.TemplateRef != refFallback {
+	if !capped.Fallback || capped.Formatted == nil || capped.Message.TemplateRef != refFallback {
 		t.Fatalf("capped at signal = %+v, want the built-in content with the fallback recorded", capped)
 	}
 }

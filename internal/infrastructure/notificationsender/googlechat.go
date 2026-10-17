@@ -40,7 +40,8 @@ func (d googleChatDriver) Send(ctx context.Context, w ports.NotificationWork, co
 	if json.Unmarshal(payload, &message) != nil {
 		return ports.NotificationSendResult{ErrorCode: "format_failed", TemplateFallback: fallback}
 	}
-	if threadKey := googleChatThreadKey(w); threadKey != "" {
+	threadKey := googleChatThreadKey(w)
+	if threadKey != "" {
 		message["thread"] = map[string]string{"threadKey": threadKey}
 		var err error
 		payload, err = json.Marshal(message)
@@ -48,7 +49,7 @@ func (d googleChatDriver) Send(ctx context.Context, w ports.NotificationWork, co
 			return ports.NotificationSendResult{ErrorCode: "encode_failed", TemplateFallback: fallback}
 		}
 	}
-	target, err := googleChatReplyTarget(cfg.URL)
+	target, err := googleChatReplyTarget(cfg.URL, threadKey != "")
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "channel_config_invalid", TemplateFallback: fallback}
 	}
@@ -75,13 +76,18 @@ func googleChatThreadKey(w ports.NotificationWork) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func googleChatReplyTarget(raw string) (string, error) {
+func googleChatReplyTarget(raw string, threaded bool) (string, error) {
 	target, err := url.Parse(raw)
 	if err != nil || target.Scheme == "" || target.Host == "" {
 		return "", err
 	}
 	query := target.Query()
-	query.Set("messageReplyOption", "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD")
+	if threaded {
+		query.Set("messageReplyOption", "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD")
+	} else {
+		// Standalone messages have no reply target; Google Chat rejects a reply option.
+		query.Del("messageReplyOption")
+	}
 	target.RawQuery = query.Encode()
 	return target.String(), nil
 }

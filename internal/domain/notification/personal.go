@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -70,6 +71,9 @@ func PersonalRoleSupported(event EventType, role string) error {
 	}
 	return RuleRoleSupported(event, role)
 }
+
+// RoleExplicitUser records that a matched rule selected this person by ID.
+const RoleExplicitUser = "explicit_user"
 
 type PersonalSubject struct {
 	MentionedIDs, ApproverIDs []shared.ID
@@ -155,7 +159,7 @@ func SubjectFromEvent(e Event) (PersonalSubject, error) {
 		return PersonalSubject{LeadID: data.LeadID, CapturedLead: e.Type == EventFindingCommented, AssigneeIDs: compactIDs(data.AssigneeID), TeamIDs: compactIDs(data.TeamID), EngagementID: data.EngagementID, FindingID: data.FindingID, Title: data.Title, Summary: data.Summary, Link: FindingLink(data.EngagementID, data.FindingID)}, nil
 	case EventDestinationChanged:
 		var data DestinationNotice
-		if json.Unmarshal(e.Data, &data) != nil || (data.Action != "created" && data.Action != "host_changed") {
+		if json.Unmarshal(e.Data, &data) != nil || (data.Action != "created" && data.Action != "host_changed" && data.Action != "domains_changed") {
 			return PersonalSubject{}, fmt.Errorf("%w: destination notice payload", shared.ErrValidation)
 		}
 		return PersonalSubject{
@@ -215,8 +219,56 @@ func NewDestinationEvent(tenant, channel shared.ID, channelType ChannelType, des
 	return Event{TenantID: tenant, Type: EventDestinationChanged, SourceKind: "notification_destination", SourceID: source, SchemaVersion: 1, OccurredAt: at.UTC(), Data: raw}, nil
 }
 
+// RecipientDomains is the canonical notice identity for an email destination.
+// Full addresses are never accepted as a notice host.
+func RecipientDomains(recipients []string) []string {
+	seen := map[string]bool{}
+	for _, address := range recipients {
+		index := strings.LastIndexByte(address, '@')
+		host := ""
+		ok := index >= 0
+		if ok {
+			host = address[index+1:]
+		}
+		host = strings.ToLower(strings.TrimSpace(host))
+		if ok && host != "" && !strings.ContainsAny(host, "@/\\?# :\r\n") {
+			seen[host] = true
+		}
+	}
+	domains := make([]string, 0, len(seen))
+	for host := range seen {
+		domains = append(domains, host)
+	}
+	sort.Strings(domains)
+	return domains
+}
+
+func NewEmailDestinationEvent(tenant, channel shared.ID, recipients []string, action, actor string, at time.Time) (Event, error) {
+	domains := RecipientDomains(recipients)
+	if len(domains) == 0 || (action != "created" && action != "domains_changed") {
+		return Event{}, fmt.Errorf("%w: invalid email destination notice", shared.ErrValidation)
+	}
+	actor = ScrubPersonalText(strings.TrimSpace(actor), 200)
+	if strings.Contains(actor, "@") {
+		actor = "administrator"
+	}
+	if actor == "" {
+		actor = "system"
+	}
+	title := "Notification email destination created"
+	if action == "domains_changed" {
+		title = "Notification email destination domains changed"
+	}
+	host := strings.Join(domains, ",")
+	raw, err := json.Marshal(DestinationNotice{Title: title, Summary: fmt.Sprintf("%s %s the email destination domains: %s.", actor, verb(action), host), Actor: actor, Action: action, Class: string(ChannelEmail), Scheme: "mailto", Host: host})
+	if err != nil {
+		return Event{}, err
+	}
+	return Event{TenantID: tenant, Type: EventDestinationChanged, SourceKind: "notification_destination", SourceID: "dest:" + channel.String() + ":" + action + ":" + host, SchemaVersion: 2, OccurredAt: at.UTC(), Data: raw}, nil
+}
+
 func verb(action string) string {
-	if action == "host_changed" {
+	if action == "host_changed" || action == "domains_changed" {
 		return "changed"
 	}
 	return "created"

@@ -23,6 +23,10 @@ vi.mock('../../../lib/api', async (original) => ({
     activateNotificationTemplate: vi.fn(),
     rollbackNotificationTemplate: vi.fn(),
     archiveNotificationTemplate: vi.fn(),
+    listNotificationChannels: vi.fn(),
+    listNotificationTemplatePreviewEvents: vi.fn(),
+    previewNotificationTemplate: vi.fn(),
+    sendNotificationTemplatePreviewTest: vi.fn(),
   },
 }))
 
@@ -98,6 +102,10 @@ beforeEach(() => {
   vi.mocked(api.getNotificationTemplate).mockResolvedValue(DETAIL)
   vi.mocked(api.listNotificationTemplateVersions).mockResolvedValue([V2, V1])
   vi.mocked(api.getNotificationTemplateVersion).mockRejectedValue(new Error('unexpected single-version read'))
+  vi.mocked(api.listNotificationChannels).mockResolvedValue([])
+  vi.mocked(api.listNotificationTemplatePreviewEvents).mockResolvedValue([])
+  vi.mocked(api.previewNotificationTemplate).mockResolvedValue({ rendered: true, channel: { id: 'preview', name: 'Preview', type: 'slack', family: 'chat' }, sample: { source: 'fixture', event_type: 'incident.created' } } as never)
+  vi.mocked(api.sendNotificationTemplatePreviewTest).mockResolvedValue({ delivery_id: 'preview-test', state: 'pending' } as never)
 })
 
 describe('template library', () => {

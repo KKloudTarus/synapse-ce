@@ -87,8 +87,13 @@ func (s *Service) validateBinding(ctx context.Context, tenant shared.ID, channel
 		return nil
 	}
 	for _, rule := range rules {
-		if containsChannel(rule.ChannelIDs, channel.ID) && !head.Covers(rule.EventType) {
-			return fmt.Errorf("%w: template %s only covers %s, but rule %s routes %s to this channel; bind a \"*\" template or change the rule", shared.ErrValidation, head.ID, head.EventType, rule.ID, rule.EventType)
+		if !containsChannel(rule.ChannelIDs, channel.ID) {
+			continue
+		}
+		for _, eventType := range rule.SelectedEventTypes() {
+			if !head.Covers(eventType) {
+				return fmt.Errorf("%w: template %s only covers %s, but rule %s routes %s to this channel; bind a \"*\" template or change the rule", shared.ErrValidation, head.ID, head.EventType, rule.ID, eventType)
+			}
 		}
 	}
 	return nil
@@ -122,8 +127,10 @@ func (s *Service) checkRuleBindings(ctx context.Context, tenant shared.ID, rule 
 		if err != nil {
 			return err
 		}
-		if !head.Covers(rule.EventType) {
-			return fmt.Errorf("%w: channel %s is bound to template %s, which only covers %s; unbind it or bind a \"*\" template to route %s there", shared.ErrValidation, channelID, head.ID, head.EventType, rule.EventType)
+		for _, eventType := range rule.SelectedEventTypes() {
+			if !head.Covers(eventType) {
+				return fmt.Errorf("%w: channel %s is bound to template %s, which only covers %s; unbind it or bind a \"*\" template to route %s there", shared.ErrValidation, channelID, head.ID, head.EventType, eventType)
+			}
 		}
 	}
 	return nil

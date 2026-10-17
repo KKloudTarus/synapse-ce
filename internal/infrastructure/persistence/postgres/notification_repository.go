@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -79,7 +80,8 @@ func (r *NotificationRepository) UpdateChannel(ctx context.Context, c notificati
 	err := WithTenant(ctx, r.pool, c.TenantID.String(), func(tx pgx.Tx) error {
 		var currentVersion int
 		var previousDestination string
-		if err := tx.QueryRow(ctx, `SELECT secret_version, destination FROM notification_channels WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL AND revision=$3 FOR UPDATE`, c.TenantID, c.ID, c.Revision-1).Scan(&currentVersion, &previousDestination); err != nil {
+		var previousRecipients []byte
+		if err := tx.QueryRow(ctx, `SELECT secret_version, destination, recipients FROM notification_channels WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL AND revision=$3 FOR UPDATE`, c.TenantID, c.ID, c.Revision-1).Scan(&currentVersion, &previousDestination, &previousRecipients); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("notification channel revision is stale: %w", shared.ErrConflict)
 			}
@@ -118,6 +120,16 @@ func (r *NotificationRepository) UpdateChannel(ctx context.Context, c notificati
 				err = cancelPendingDeliveries(ctx, tx, c.TenantID, c.ID, "destination_changed", c.UpdatedAt)
 			}
 		}
+		if err == nil && c.Type == notification.ChannelEmail {
+			var previous []string
+			if err = json.Unmarshal(previousRecipients, &previous); err != nil {
+				return err
+			}
+			if strings.Join(notification.RecipientDomains(previous), ",") != strings.Join(notification.RecipientDomains(c.Recipients), ",") {
+				return r.maybeDestinationNotice(ctx, tx, c, "domains_changed")
+			}
+			return nil
+		}
 		if err != nil || !replace || notification.SameEndpoint(previousDestination, c.Destination) {
 			return err
 		}
@@ -131,6 +143,11 @@ func (r *NotificationRepository) UpdateChannel(ctx context.Context, c notificati
 // canceling underneath that attempt would let a delivery end up both cancelled and finished.
 func cancelPendingDeliveries(ctx context.Context, tx pgx.Tx, tenant, channelID shared.ID, reason string, at time.Time) error {
 	_, err := tx.Exec(ctx, `UPDATE notification_deliveries d SET state='cancelled',last_error=$3,next_attempt_at=NULL,updated_at=$4 WHERE tenant_id=$1 AND channel_id=$2 AND state IN ('pending','retrying') AND NOT EXISTS(SELECT 1 FROM notification_delivery_attempts a WHERE a.tenant_id=d.tenant_id AND a.delivery_id=d.id AND a.outcome='started')`, tenant, channelID, reason, at)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE notification_digest_windows SET outcome='suppressed',finalized_at=$3
+		WHERE tenant_id=$1 AND channel_id=$2 AND outcome='pending'`, tenant, channelID, at)
 	return err
 }
 
@@ -259,9 +276,18 @@ func insertRule(ctx context.Context, tx pgx.Tx, r notification.Rule, update bool
 		roles = []string{}
 	}
 	recipientRoles, _ := json.Marshal(roles)
+	recipientUsers := r.RecipientUserIDs
+	if recipientUsers == nil {
+		recipientUsers = []shared.ID{}
+	}
+	recipientUserIDs, _ := json.Marshal(recipientUsers)
 	eventFilters, _ := json.Marshal(r.EventFilters)
+	eventTypes := make([]string, len(r.EventTypes))
+	for i, typ := range r.EventTypes {
+		eventTypes[i] = string(typ)
+	}
 	if update {
-		tag, err := tx.Exec(ctx, `UPDATE notification_rules SET name=$3,enabled=$4,event_type=$5,min_severity=$6,action_types=$7,engagement_ids=$8,lead_time_secs=$9,revision=$10,updated_at=$11,all_teams=$13,disabled_reason=$14,recipient_roles=$15,event_filters=$16 WHERE tenant_id=$1 AND id=$2 AND revision=$12`, r.TenantID, r.ID, r.Name, r.Enabled, r.EventType, r.MinSeverity, actions, engs, r.LeadTimeSecs, r.Revision, r.UpdatedAt, r.Revision-1, r.AllTeams, r.DisabledReason, recipientRoles, eventFilters)
+		tag, err := tx.Exec(ctx, `UPDATE notification_rules SET name=$3,enabled=$4,event_type=$5,min_severity=$6,action_types=$7,engagement_ids=$8,lead_time_secs=$9,revision=$10,updated_at=$11,all_teams=$13,disabled_reason=$14,recipient_roles=$15,event_filters=$16,cadence=$17,recipient_user_ids=$18,event_types=$19 WHERE tenant_id=$1 AND id=$2 AND revision=$12`, r.TenantID, r.ID, r.Name, r.Enabled, r.EventType, r.MinSeverity, actions, engs, r.LeadTimeSecs, r.Revision, r.UpdatedAt, r.Revision-1, r.AllTeams, r.DisabledReason, recipientRoles, eventFilters, r.Cadence, recipientUserIDs, eventTypes)
 		if err != nil {
 			return err
 		}
@@ -275,7 +301,7 @@ func insertRule(ctx context.Context, tx pgx.Tx, r notification.Rule, update bool
 			return err
 		}
 	} else {
-		if _, err := tx.Exec(ctx, `INSERT INTO notification_rules(tenant_id,id,name,enabled,event_type,min_severity,action_types,engagement_ids,lead_time_secs,revision,created_at,updated_at,all_teams,disabled_reason,recipient_roles,event_filters) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, r.TenantID, r.ID, r.Name, r.Enabled, r.EventType, r.MinSeverity, actions, engs, r.LeadTimeSecs, r.Revision, r.CreatedAt, r.UpdatedAt, r.AllTeams, r.DisabledReason, recipientRoles, eventFilters); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO notification_rules(tenant_id,id,name,enabled,event_type,min_severity,action_types,engagement_ids,lead_time_secs,revision,created_at,updated_at,all_teams,disabled_reason,recipient_roles,event_filters,cadence,recipient_user_ids,event_types) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`, r.TenantID, r.ID, r.Name, r.Enabled, r.EventType, r.MinSeverity, actions, engs, r.LeadTimeSecs, r.Revision, r.CreatedAt, r.UpdatedAt, r.AllTeams, r.DisabledReason, recipientRoles, eventFilters, r.Cadence, recipientUserIDs, eventTypes); err != nil {
 			return err
 		}
 	}
@@ -337,17 +363,22 @@ func (r *NotificationRepository) ListRules(ctx context.Context, tenant shared.ID
 	return out, err
 }
 
-const ruleSelect = `SELECT r.tenant_id,r.id,r.name,r.enabled,r.event_type,r.min_severity,r.action_types,r.engagement_ids,r.lead_time_secs,r.revision,r.created_at,r.updated_at,COALESCE(jsonb_agg(rc.channel_id ORDER BY rc.channel_id) FILTER(WHERE rc.channel_id IS NOT NULL),'[]'),r.all_teams,COALESCE((SELECT jsonb_agg(rt.team_id ORDER BY rt.team_id) FROM notification_rule_teams rt WHERE rt.tenant_id=r.tenant_id AND rt.rule_id=r.id),'[]'),r.disabled_reason,r.recipient_roles,r.event_filters FROM notification_rules r LEFT JOIN notification_rule_channels rc ON rc.tenant_id=r.tenant_id AND rc.rule_id=r.id`
+const ruleSelect = `SELECT r.tenant_id,r.id,r.name,r.enabled,r.event_type,r.min_severity,r.action_types,r.engagement_ids,r.lead_time_secs,r.revision,r.created_at,r.updated_at,COALESCE(jsonb_agg(rc.channel_id ORDER BY rc.channel_id) FILTER(WHERE rc.channel_id IS NOT NULL),'[]'),r.all_teams,COALESCE((SELECT jsonb_agg(rt.team_id ORDER BY rt.team_id) FROM notification_rule_teams rt WHERE rt.tenant_id=r.tenant_id AND rt.rule_id=r.id),'[]'),r.disabled_reason,r.recipient_roles,r.event_filters,r.cadence,r.recipient_user_ids,r.event_types FROM notification_rules r LEFT JOIN notification_rule_channels rc ON rc.tenant_id=r.tenant_id AND rc.rule_id=r.id`
 
 type scanner interface{ Scan(...any) error }
 
 func scanRule(row scanner, out *notification.Rule) error {
 	var typ string
-	var actions, engs, channels, teams, roles, eventFilters []byte
-	if err := row.Scan(&out.TenantID, &out.ID, &out.Name, &out.Enabled, &typ, &out.MinSeverity, &actions, &engs, &out.LeadTimeSecs, &out.Revision, &out.CreatedAt, &out.UpdatedAt, &channels, &out.AllTeams, &teams, &out.DisabledReason, &roles, &eventFilters); err != nil {
+	var eventTypes []string
+	var actions, engs, channels, teams, roles, eventFilters, recipientUsers []byte
+	if err := row.Scan(&out.TenantID, &out.ID, &out.Name, &out.Enabled, &typ, &out.MinSeverity, &actions, &engs, &out.LeadTimeSecs, &out.Revision, &out.CreatedAt, &out.UpdatedAt, &channels, &out.AllTeams, &teams, &out.DisabledReason, &roles, &eventFilters, &out.Cadence, &recipientUsers, &eventTypes); err != nil {
 		return err
 	}
 	out.EventType = notification.EventType(typ)
+	out.EventTypes = nil
+	for _, selected := range eventTypes {
+		out.EventTypes = append(out.EventTypes, notification.EventType(selected))
+	}
 	out.LeadTime = time.Duration(out.LeadTimeSecs) * time.Second
 	if err := json.Unmarshal(actions, &out.ActionTypes); err != nil {
 		return err
@@ -362,6 +393,9 @@ func scanRule(row scanner, out *notification.Rule) error {
 		return err
 	}
 	if err := json.Unmarshal(eventFilters, &out.EventFilters); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(recipientUsers, &out.RecipientUserIDs); err != nil {
 		return err
 	}
 	if len(out.RecipientRoles) == 0 {
@@ -384,7 +418,7 @@ func (r *NotificationRepository) PublishToChannel(ctx context.Context, e notific
 	}
 	var ids []shared.ID
 	err := WithTenant(ctx, r.pool, e.TenantID.String(), func(tx pgx.Tx) error {
-		if e.Type == notification.EventTest {
+		if e.Type == notification.EventTest || e.SourceKind == "template_test" {
 			var paused bool
 			if err := tx.QueryRow(ctx, `SELECT paused_at IS NOT NULL FROM notification_channels WHERE tenant_id=$1 AND id=$2 AND enabled AND deleted_at IS NULL FOR UPDATE`, e.TenantID, cid).Scan(&paused); err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
@@ -396,7 +430,7 @@ func (r *NotificationRepository) PublishToChannel(ctx context.Context, e notific
 				return fmt.Errorf("notification channel is paused; resume it before sending a test: %w", shared.ErrConflict)
 			}
 			var recent int
-			if err := tx.QueryRow(ctx, `SELECT count(DISTINCT d.event_id) FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id WHERE d.tenant_id=$1 AND d.channel_id=$2 AND e.event_type='notification.test' AND d.created_at >= now()-interval '1 hour'`, e.TenantID, cid).Scan(&recent); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT count(DISTINCT d.event_id) FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id WHERE d.tenant_id=$1 AND d.channel_id=$2 AND (e.event_type='notification.test' OR e.source_kind='template_test') AND d.created_at >= now()-interval '1 hour'`, e.TenantID, cid).Scan(&recent); err != nil {
 				return err
 			}
 			if recent >= 5 {
@@ -429,8 +463,11 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 		}
 		e = projected
 	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('synapse.notification_rule_selector','explicit-v1',true)`); err != nil {
+		return nil, fmt.Errorf("declare notification rule selection support: %w", err)
+	}
 	data := []byte(e.Data)
-	tag, err := tx.Exec(ctx, `INSERT INTO notification_events(tenant_id,id,event_type,source_kind,source_id,engagement_id,severity,schema_version,occurred_at,data,subject_kind,subject_id,context) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(tenant_id,source_kind,source_id) DO NOTHING`, e.TenantID, e.ID, e.Type, e.SourceKind, e.SourceID, e.EngagementID, e.Severity, e.SchemaVersion, e.OccurredAt, data, e.SubjectKind, e.SubjectID, contextJSON(e.Context))
+	tag, err := tx.Exec(ctx, `INSERT INTO notification_events(tenant_id,id,event_type,source_kind,source_id,engagement_id,severity,schema_version,occurred_at,data,subject_kind,subject_id,context,test_template) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(tenant_id,source_kind,source_id) DO NOTHING`, e.TenantID, e.ID, e.Type, e.SourceKind, e.SourceID, e.EngagementID, e.Severity, e.SchemaVersion, e.OccurredAt, data, e.SubjectKind, e.SubjectID, contextJSON(e.Context), testTemplateJSON(e.TestTemplate))
 	if err != nil {
 		return nil, err
 	}
@@ -473,10 +510,12 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 	}
 	targets := map[shared.ID]*target{}
 	revisions := map[shared.ID]int{}
-	// personalRoles are the recipient roles (#1415) of every matching rule; roleRules the rules that
-	// named them, which count as matched even when they route to no channel.
+	var digestTargets []digestMembershipTarget
+	// Targeted publication (tests and digest materialization) has no matching
+	// rule, but notification_events requires a JSON array rather than null.
+	allRules := []shared.ID{}
+	// personalRoles are the recipient roles (#1415) of every matching rule.
 	var personalRoles []string
-	var roleRules []shared.ID
 	// A paused channel (#1464) receives no new deliveries, exactly like a disabled one.
 	if !only.IsZero() {
 		var c notification.Channel
@@ -485,7 +524,7 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 		}
 		targets[c.ID] = &target{channel: c}
 	} else {
-		rows, err := tx.Query(ctx, ruleSelect+` WHERE r.tenant_id=$1 AND r.enabled AND r.event_type=$2 GROUP BY r.tenant_id,r.id`, e.TenantID, e.Type)
+		rows, err := tx.Query(ctx, ruleSelect+` WHERE r.tenant_id=$1 AND r.enabled AND (r.event_type=$2 OR r.event_types @> ARRAY[$2]::text[]) GROUP BY r.tenant_id,r.id`, e.TenantID, e.Type)
 		if err != nil {
 			return nil, err
 		}
@@ -497,11 +536,17 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 			}
 			if rule.Matches(e) {
 				revisions[rule.ID] = rule.Revision
+				if !containsSharedID(allRules, rule.ID) {
+					allRules = append(allRules, rule.ID)
+				}
 				if len(rule.RecipientRoles) > 0 {
 					personalRoles = append(personalRoles, rule.RecipientRoles...)
-					roleRules = append(roleRules, rule.ID)
 				}
 				for _, cid := range rule.ChannelIDs {
+					if rule.DigestEligible(e) {
+						digestTargets = append(digestTargets, digestMembershipTarget{rule: rule, channelID: cid})
+						continue
+					}
 					if e.Type == notification.EventFindingMentioned {
 						continue
 					}
@@ -519,6 +564,9 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 			return nil, err
 		}
 		rows.Close()
+		if err := r.recordDigestMemberships(ctx, tx, e, digestTargets); err != nil {
+			return nil, err
+		}
 		for cid, t := range targets {
 			if err := scanChannel(tx.QueryRow(ctx, channelSelect+` WHERE tenant_id=$1 AND id=$2 AND enabled AND deleted_at IS NULL AND paused_at IS NULL`, e.TenantID, cid), &t.channel); err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
@@ -529,7 +577,6 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 			}
 		}
 	}
-	allRules := []shared.ID{}
 	ids := []shared.ID{}
 	if len(targets) > 0 {
 		if err := notificationAdmission(ctx, tx, e.TenantID, "delivery", 10000); err != nil {
@@ -560,12 +607,6 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 				}
 				ids = append(ids, did)
 			}
-		}
-		allRules = append(allRules, t.rules...)
-	}
-	for _, id := range roleRules {
-		if !containsSharedID(allRules, id) {
-			allRules = append(allRules, id)
 		}
 	}
 	matched, _ := json.Marshal(allRules)
@@ -735,10 +776,10 @@ func (r *NotificationRepository) ListAttempts(ctx context.Context, tenant, did s
 
 func (r *NotificationRepository) LoadWork(ctx context.Context, tenant, did shared.ID) (ports.NotificationWork, error) {
 	var w ports.NotificationWork
-	var rules, eventData, eventContext, recipients []byte
+	var rules, eventData, eventContext, eventTemplate, recipients []byte
 	var ctyp, state, etype string
 	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,d.remote_ref,d.provider_request_ref,e.event_type,e.source_kind,e.source_id,e.engagement_id,e.severity,e.schema_version,e.occurred_at,e.data,e.subject_kind,e.subject_id,e.context,c.name,c.enabled,c.destination,c.recipients,c.revision,d.channel_version,c.created_at,c.updated_at,v.sealed_config,c.consecutive_permanent_failures,c.last_failure_code,c.last_failure_at,c.paused_at,COALESCE(c.paused_reason,''),COALESCE(c.template_id,''),COALESCE(c.locale,''),c.custom_body,c.data_class,c.raw_event,COALESCE((SELECT s.external_notifications FROM notification_engagement_settings s WHERE s.tenant_id=d.tenant_id AND s.engagement_id=e.engagement_id),'inherit') FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id JOIN notification_channels c ON c.tenant_id=d.tenant_id AND c.id=d.channel_id JOIN notification_channel_versions v ON v.tenant_id=d.tenant_id AND v.channel_id=d.channel_id AND v.version=d.channel_version WHERE d.tenant_id=$1 AND d.id=$2`, tenant, did).Scan(&w.Delivery.TenantID, &w.Delivery.ID, &w.Delivery.EventID, &w.Delivery.ChannelID, &ctyp, &w.Delivery.Recipient, &rules, &state, &w.Delivery.Attempts, &w.Delivery.LastError, &w.Delivery.NextAttemptAt, &w.Delivery.DeliveredAt, &w.Delivery.CreatedAt, &w.Delivery.UpdatedAt, &w.Delivery.TemplateRef, &w.Delivery.RemoteRef, &w.Delivery.ProviderRequestRef, &etype, &w.Event.SourceKind, &w.Event.SourceID, &w.Event.EngagementID, &w.Event.Severity, &w.Event.SchemaVersion, &w.Event.OccurredAt, &eventData, &w.Event.SubjectKind, &w.Event.SubjectID, &eventContext, &w.Channel.Name, &w.Channel.Enabled, &w.Channel.Destination, &recipients, &w.Channel.Revision, &w.Channel.SecretVersion, &w.Channel.CreatedAt, &w.Channel.UpdatedAt, &w.Sealed, &w.Channel.Health.ConsecutiveFailures, &w.Channel.Health.LastFailureCode, &w.Channel.Health.LastFailureAt, &w.Channel.Health.PausedAt, &w.Channel.Health.PausedReason, &w.Channel.TemplateID, &w.Channel.Locale, &w.Channel.CustomBody, &w.Channel.DataClass, &w.Channel.RawEvent, &w.Engagement)
+		return tx.QueryRow(ctx, `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,d.remote_ref,d.provider_request_ref,e.event_type,e.source_kind,e.source_id,e.engagement_id,e.severity,e.schema_version,e.occurred_at,e.data,e.subject_kind,e.subject_id,e.context,e.test_template,c.name,c.enabled,c.destination,c.recipients,c.revision,d.channel_version,c.created_at,c.updated_at,v.sealed_config,c.consecutive_permanent_failures,c.last_failure_code,c.last_failure_at,c.paused_at,COALESCE(c.paused_reason,''),COALESCE(c.template_id,''),COALESCE(c.locale,''),c.custom_body,c.data_class,c.raw_event,COALESCE((SELECT s.external_notifications FROM notification_engagement_settings s WHERE s.tenant_id=d.tenant_id AND s.engagement_id=e.engagement_id),'inherit') FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id JOIN notification_channels c ON c.tenant_id=d.tenant_id AND c.id=d.channel_id JOIN notification_channel_versions v ON v.tenant_id=d.tenant_id AND v.channel_id=d.channel_id AND v.version=d.channel_version WHERE d.tenant_id=$1 AND d.id=$2`, tenant, did).Scan(&w.Delivery.TenantID, &w.Delivery.ID, &w.Delivery.EventID, &w.Delivery.ChannelID, &ctyp, &w.Delivery.Recipient, &rules, &state, &w.Delivery.Attempts, &w.Delivery.LastError, &w.Delivery.NextAttemptAt, &w.Delivery.DeliveredAt, &w.Delivery.CreatedAt, &w.Delivery.UpdatedAt, &w.Delivery.TemplateRef, &w.Delivery.RemoteRef, &w.Delivery.ProviderRequestRef, &etype, &w.Event.SourceKind, &w.Event.SourceID, &w.Event.EngagementID, &w.Event.Severity, &w.Event.SchemaVersion, &w.Event.OccurredAt, &eventData, &w.Event.SubjectKind, &w.Event.SubjectID, &eventContext, &eventTemplate, &w.Channel.Name, &w.Channel.Enabled, &w.Channel.Destination, &recipients, &w.Channel.Revision, &w.Channel.SecretVersion, &w.Channel.CreatedAt, &w.Channel.UpdatedAt, &w.Sealed, &w.Channel.Health.ConsecutiveFailures, &w.Channel.Health.LastFailureCode, &w.Channel.Health.LastFailureAt, &w.Channel.Health.PausedAt, &w.Channel.Health.PausedReason, &w.Channel.TemplateID, &w.Channel.Locale, &w.Channel.CustomBody, &w.Channel.DataClass, &w.Channel.RawEvent, &w.Engagement)
 	})
 	w.Channel.Health.State = healthState(w.Channel.Health.PausedAt)
 	w.Delivery.ChannelType = notification.ChannelType(ctyp)
@@ -748,6 +789,9 @@ func (r *NotificationRepository) LoadWork(ctx context.Context, tenant, did share
 	w.Event.Type = notification.EventType(etype)
 	w.Event.Data = eventData
 	w.Event.Context = eventContext
+	if err == nil {
+		w.Event.TestTemplate, err = decodeTestTemplate(eventTemplate)
+	}
 	w.Channel.TenantID = tenant
 	w.Channel.ID = w.Delivery.ChannelID
 	w.Channel.Type = w.Delivery.ChannelType
@@ -755,6 +799,45 @@ func (r *NotificationRepository) LoadWork(ctx context.Context, tenant, did share
 	_ = json.Unmarshal(recipients, &w.Channel.Recipients)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = fmt.Errorf("notification delivery %s: %w", did, shared.ErrNotFound)
+	}
+	if err == nil && w.Event.Type == notification.EventDigest && w.Event.SourceKind == "digest" {
+		var digest notification.DigestData
+		if decodeErr := json.Unmarshal(w.Event.Data, &digest); decodeErr != nil {
+			return ports.NotificationWork{}, fmt.Errorf("decode notification digest: %w", decodeErr)
+		}
+		var items []notification.DigestItem
+		err = WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
+			var ruleID shared.ID
+			var chunk int
+			if queryErr := tx.QueryRow(ctx, `SELECT rule_id,chunk FROM notification_digest_windows WHERE tenant_id=$1 AND event_id=$2`, tenant, w.Event.ID).Scan(&ruleID, &chunk); queryErr != nil {
+				return queryErr
+			}
+			window := digestWindow{ruleID: ruleID, channelID: w.Delivery.ChannelID, cadence: digest.Cadence, start: digest.WindowStart, end: digest.WindowEnd, chunk: chunk}
+			var loadErr error
+			items, loadErr = loadDigestItems(ctx, tx, tenant, window)
+			return loadErr
+		})
+		if err == nil {
+			if items == nil {
+				items = []notification.DigestItem{}
+			}
+			context, safeCount, buildErr := notification.BuildDigestContext(items, digest.Cadence, digest.WindowStart, digest.WindowEnd, w.Channel.Class())
+			if buildErr != nil {
+				return ports.NotificationWork{}, fmt.Errorf("build notification digest context: %w", buildErr)
+			}
+			w.Event.Context, err = context.Encode()
+			if err == nil {
+				w.Event.Data, safeCount, err = currentDigestData(items, digest.Cadence, digest.WindowStart, digest.WindowEnd, w.Channel.Class())
+			}
+			if err == nil {
+				w.Event.DigestItems = slices.Clone(items)
+				w.Event.Severity = notification.DigestSeverity(items)
+				w.DigestPolicy = notification.DigestPolicy(items, w.Channel.Class())
+				if safeCount == 0 {
+					w.Engagement = notification.EngagementNotificationsNone
+				}
+			}
+		}
 	}
 	return w, err
 }
@@ -800,6 +883,9 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 			return fmt.Errorf("%w: channel rate limited", ports.ErrRetryable)
 		}
 		if err := admitRendered(ctx, tx, tenant, did, class, admission.DataClass); err != nil {
+			return err
+		}
+		if err := admitDigestPolicy(ctx, tx, tenant, did, class, admission.DigestPolicy); err != nil {
 			return err
 		}
 		if admission.RawEvent {
@@ -1096,6 +1182,17 @@ func contextJSON(raw json.RawMessage) []byte {
 		return []byte(`{}`)
 	}
 	return raw
+}
+
+func testTemplateJSON(version *notification.TemplateVersion) []byte {
+	if version == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(version)
+	if err != nil {
+		return nil
+	}
+	return encoded
 }
 
 // GetChannelSealedConfig implements ports.NotificationChannelSecretReader: a live channel and the

@@ -12,6 +12,7 @@ import (
 	eventschemas "github.com/KKloudTarus/synapse-ce/docs/guide/schemas/events"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
 // previewEvents is a NotificationEventReader over a fixed list, scoped by tenant like RLS.
@@ -96,8 +97,8 @@ func TestPreviewAgainstTheFixtureResolvesTheTemplate(t *testing.T) {
 	if preview.Draft != nil || preview.Resolution == nil || preview.Resolution.Tier != TierTenantEvent || preview.Resolution.Template.ID != bound.ID {
 		t.Fatalf("resolution = %+v draft = %+v", preview.Resolution, preview.Draft)
 	}
-	if preview.Rendered {
-		t.Fatal("nothing renders before #1365")
+	if !preview.Rendered || preview.Suppressed || preview.Fallback || preview.Message == nil || preview.Message.Fields["title"] != "T" || preview.Message.TemplateRef == "" {
+		t.Fatalf("rendered preview = %+v", preview)
 	}
 	// The prepared input carries the projected template context for the renderer.
 	var context domain.TemplateContext
@@ -138,6 +139,20 @@ func TestPreviewAgainstAStoredEvent(t *testing.T) {
 	}
 	if _, err := f.svc.PreviewTemplate(f.ctx, PreviewInput{ChannelID: channel.ID, EventType: domain.EventScanCompleted, EventID: "ev-old"}); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("event of another type: %v", err)
+	}
+}
+
+func TestPreviewUsesARealEventEngagementOverride(t *testing.T) {
+	f, _ := newPreviewFixture(t)
+	channel := f.slackChannel(t)
+	f.repo.engagementOverrides["eng-1"] = domain.EngagementNotificationsNone
+
+	preview, err := f.svc.PreviewTemplate(f.ctx, PreviewInput{ChannelID: channel.ID, EventType: domain.EventIncidentCreated, EventID: "ev-old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preview.Rendered || !preview.Suppressed || preview.Message != nil || preview.Formatted != nil || preview.Webhook != nil {
+		t.Fatalf("suppressed preview = %+v", preview)
 	}
 }
 
@@ -262,7 +277,8 @@ func TestListPreviewEventsIsTenantScopedAndCapped(t *testing.T) {
 	}
 }
 
-// The JSON form never carries the prepared render input: no template context, no draft text.
+// The JSON form never carries the prepared render input or template source. Rendered content is
+// intentionally present, so an administrator can inspect the bytes the channel would receive.
 func TestPreviewResponseCarriesNoContextOrSource(t *testing.T) {
 	f, _ := newPreviewFixture(t)
 	channel := f.slackChannel(t)
@@ -274,9 +290,74 @@ func TestPreviewResponseCarriesNoContextOrSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, leak := range []string{"SECRET-DRAFT-TEXT", "Real incident", "prepared", "context"} {
+	for _, leak := range []string{`"data"`, "prepared", `"context"`, "source_kind", "src-ev-new"} {
 		if strings.Contains(string(raw), leak) {
 			t.Errorf("response contains %q: %s", leak, raw)
 		}
+	}
+	if !strings.Contains(string(raw), "SECRET-DRAFT-TEXT") {
+		t.Fatalf("response omitted rendered content: %s", raw)
+	}
+}
+
+func TestPreviewRefusesEventsOutsideTheRecentSelection(t *testing.T) {
+	f, reader := newPreviewFixture(t)
+	channel := f.slackChannel(t)
+	reader.events = nil
+	for n := 0; n < 21; n++ {
+		reader.events = append(reader.events, storedIncident("tenant", shared.ID(fmt.Sprintf("event-%d", n)), time.Date(2026, 10, 16, 8, 0, 0, 0, time.UTC)))
+	}
+	_, err := f.svc.PreviewTemplate(f.ctx, PreviewInput{ChannelID: channel.ID, EventType: domain.EventIncidentCreated, EventID: "event-20"})
+	if !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("old event preview=%v", err)
+	}
+}
+
+func TestPreviewRefusesRawWebhookMode(t *testing.T) {
+	f, _ := newPreviewFixture(t)
+	c := f.slackChannel(t)
+	c.Type, c.RawEvent, c.DataClass = domain.ChannelWebhook, true, domain.DataClassDetail
+	f.repo.channels[c.ID] = c
+	_, err := f.svc.PreviewTemplate(f.ctx, PreviewInput{ChannelID: c.ID, EventType: domain.EventIncidentCreated})
+	if !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("raw webhook preview=%v", err)
+	}
+}
+
+// Each read models an activation committed after the previous resolution.
+type changingActiveTemplates struct {
+	ports.NotificationTemplateStore
+	reads int
+}
+
+func (s *changingActiveTemplates) ActiveNotificationTemplate(ctx context.Context, tenant shared.ID, key domain.TemplateKey) (domain.Template, domain.TemplateVersion, bool, error) {
+	head, version, found, err := s.NotificationTemplateStore.ActiveNotificationTemplate(ctx, tenant, key)
+	if found && err == nil {
+		s.reads++
+		version.Fields = domain.CloneFields(version.Fields)
+		version.Fields["title"] = fmt.Sprintf("Revision %d", s.reads)
+	}
+	return head, version, found, err
+}
+
+func TestPreviewMetadataAndSnapshotNameTheVersionActuallyRendered(t *testing.T) {
+	h := newRenderHarness(t)
+	h.svc.SetEventFixtures(eventschemas.Fixtures)
+	h.template(t, "Original")
+	store := &changingActiveTemplates{NotificationTemplateStore: h.templates}
+	h.svc.SetTemplateStore(store)
+	out, err := h.svc.PreviewTemplate(h.ctx, PreviewInput{ChannelID: h.channel.ID, EventType: domain.EventScanCompleted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Resolution == nil || out.Resolution.Version == nil || out.Message == nil {
+		t.Fatalf("preview=%+v", out)
+	}
+	snapshot := previewTemplateSnapshot(out)
+	if out.Message.Fields["title"] != snapshot.Fields["title"] {
+		t.Fatalf("rendered %q but snapshot selected %q", out.Message.Fields["title"], snapshot.Fields["title"])
+	}
+	if out.Message.TemplateRef != templateRef(*out.Resolution) {
+		t.Fatalf("metadata does not identify rendered template: %+v", out)
 	}
 }

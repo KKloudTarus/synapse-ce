@@ -368,14 +368,19 @@ func (s *Service) ListChannels(ctx context.Context) ([]domain.Channel, error) {
 }
 
 type RuleInput struct {
-	Name          string           `json:"name"`
-	Enabled       bool             `json:"enabled"`
-	EventType     domain.EventType `json:"event_type"`
-	MinSeverity   shared.Severity  `json:"min_severity,omitempty"`
-	ActionTypes   []string         `json:"action_types,omitempty"`
-	EngagementIDs []shared.ID      `json:"engagement_ids,omitempty"`
-	TeamIDs       []shared.ID      `json:"team_ids,omitempty"`
-	AllTeams      bool             `json:"all_teams,omitempty"`
+	Cadence          domain.DeliveryCadence `json:"cadence"`
+	RecipientUserIDs []shared.ID            `json:"recipient_user_ids,omitempty"`
+	Name             string                 `json:"name"`
+	Enabled          bool                   `json:"enabled"`
+	EventType        domain.EventType       `json:"event_type"`
+	// EventTypes is optional for legacy clients. A nonempty array is the complete ordered
+	// selection; an explicit empty array deliberately returns the rule to its primary selector.
+	EventTypes    []domain.EventType `json:"event_types,omitempty"`
+	MinSeverity   shared.Severity    `json:"min_severity,omitempty"`
+	ActionTypes   []string           `json:"action_types,omitempty"`
+	EngagementIDs []shared.ID        `json:"engagement_ids,omitempty"`
+	TeamIDs       []shared.ID        `json:"team_ids,omitempty"`
+	AllTeams      bool               `json:"all_teams,omitempty"`
 	domain.EventFilters
 	ChannelIDs []shared.ID `json:"channel_ids"`
 	// RecipientRoles address people by their relation to the event (#1415): assignee, team_member
@@ -398,7 +403,7 @@ func (s *Service) createRule(ctx context.Context, actor string, in RuleInput) (d
 		return domain.Rule{}, fmt.Errorf("notification rule limit reached: %w", shared.ErrSaturated)
 	}
 	now := s.clock.Now().UTC()
-	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	r := domain.Rule{TenantID: tenant, ID: s.ids.NewID(), Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, EventTypes: in.EventTypes, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, Cadence: in.Cadence, RecipientUserIDs: in.RecipientUserIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}
@@ -409,7 +414,7 @@ func (s *Service) createRule(ctx context.Context, actor string, in RuleInput) (d
 	if err != nil {
 		return domain.Rule{}, err
 	}
-	if err = s.record(ctx, actor, "notification.rule.created", r.ID.String(), map[string]string{"event_type": string(r.EventType), "recipient_roles": strings.Join(r.RecipientRoles, ",")}); err != nil {
+	if err = s.record(ctx, actor, "notification.rule.created", r.ID.String(), ruleAuditMetadata(r)); err != nil {
 		return domain.Rule{}, err
 	}
 	return r, nil
@@ -426,7 +431,16 @@ func (s *Service) updateRule(ctx context.Context, actor string, id shared.ID, in
 	if current.Revision != in.Revision {
 		return domain.Rule{}, fmt.Errorf("notification rule revision is stale: %w", shared.ErrConflict)
 	}
-	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
+	if len(current.EventTypes) > 0 && in.EventTypes == nil {
+		return domain.Rule{}, fmt.Errorf("%w: event_types is required when updating a multi-event rule", shared.ErrValidation)
+	}
+	if current.Cadence != "" && current.Cadence != domain.CadenceImmediate && in.Cadence == "" {
+		return domain.Rule{}, fmt.Errorf("%w: cadence is required when updating a digest rule", shared.ErrValidation)
+	}
+	if len(current.RecipientUserIDs) > 0 && in.RecipientUserIDs == nil {
+		return domain.Rule{}, fmt.Errorf("%w: recipient_user_ids is required when updating a rule with explicit recipients", shared.ErrValidation)
+	}
+	r := domain.Rule{TenantID: tenant, ID: id, Name: in.Name, Enabled: in.Enabled, EventType: in.EventType, EventTypes: in.EventTypes, MinSeverity: in.MinSeverity, ActionTypes: in.ActionTypes, EngagementIDs: in.EngagementIDs, TeamIDs: in.TeamIDs, AllTeams: in.AllTeams, EventFilters: in.EventFilters, ChannelIDs: in.ChannelIDs, RecipientRoles: in.RecipientRoles, Cadence: in.Cadence, RecipientUserIDs: in.RecipientUserIDs, LeadTimeSecs: in.LeadTimeSeconds, Revision: current.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: s.clock.Now().UTC()}
 	if err = r.Normalize(); err != nil {
 		return domain.Rule{}, err
 	}
@@ -437,10 +451,26 @@ func (s *Service) updateRule(ctx context.Context, actor string, id shared.ID, in
 	if err != nil {
 		return domain.Rule{}, err
 	}
-	if err = s.record(ctx, actor, "notification.rule.updated", id.String(), map[string]string{"event_type": string(r.EventType), "recipient_roles": strings.Join(r.RecipientRoles, ",")}); err != nil {
+	if err = s.record(ctx, actor, "notification.rule.updated", id.String(), ruleAuditMetadata(r)); err != nil {
 		return domain.Rule{}, err
 	}
 	return r, nil
+}
+
+func ruleAuditMetadata(rule domain.Rule) map[string]string {
+	return map[string]string{
+		"event_type":      string(rule.EventType),
+		"event_types":     strings.Join(eventTypeStrings(rule.SelectedEventTypes()), ","),
+		"recipient_roles": strings.Join(rule.RecipientRoles, ","),
+	}
+}
+
+func eventTypeStrings(types []domain.EventType) []string {
+	values := make([]string, len(types))
+	for index, eventType := range types {
+		values[index] = string(eventType)
+	}
+	return values
 }
 func (s *Service) deleteRule(ctx context.Context, actor string, id shared.ID, revision int) error {
 	tenant, err := tenantFrom(ctx)
@@ -715,17 +745,31 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	if _, deliver := domain.EffectiveDataClass(work.Channel.Class(), work.Engagement); !deliver {
 		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, domain.CodeEngagementSuppressed)
 	}
-	relevant, err := s.events.StillRelevant(ctx, s.repo, work)
-	if err != nil {
-		return err
-	}
-	if !relevant {
-		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, "source_no_longer_relevant")
+	// A fixture test pins its template and has no live source entity to recheck.
+	// Ordinary deliveries still require their source to remain relevant.
+	if work.Event.SourceKind != "template_test" || work.Event.TestTemplate == nil {
+		relevant, err := s.events.StillRelevant(ctx, s.repo, work)
+		if err != nil {
+			return err
+		}
+		if !relevant {
+			return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, "source_no_longer_relevant")
+		}
 	}
 	// Render before the attempt starts: a retry reuses the template the first attempt pinned.
-	render, err := s.RenderMessage(ctx, RenderInput{Channel: work.Channel, Event: work.Event, Engagement: work.Engagement, Pin: work.Delivery.TemplateRef})
+	render, err := s.RenderMessage(ctx, RenderInput{Channel: work.Channel, Event: work.Event, Engagement: work.Engagement, Pin: work.Delivery.TemplateRef, Draft: work.Event.TestTemplate})
 	if err != nil {
 		return err
+	}
+	if render.Suppressed {
+		reason := render.suppressionReason
+		if reason == "" {
+			reason = domain.CodeEngagementSuppressed
+		}
+		return s.repo.CancelDelivery(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, reason)
+	}
+	if render.event != nil {
+		work.Event = *render.event
 	}
 	work.Formatted, work.CustomWebhookBody, work.WebhookBody = render.Formatted, render.CustomBody, render.WebhookBody
 	if err := s.prepareSubjectThread(ctx, &work); err != nil {
@@ -733,7 +777,7 @@ func (s *Service) HandleJob(ctx context.Context, job ports.QueuedJob) error {
 	}
 	now := s.clock.Now().UTC()
 	aid := s.ids.NewID()
-	admission := ports.AttemptAdmission{TemplateRef: render.Message.TemplateRef, DataClass: render.Class,
+	admission := ports.AttemptAdmission{TemplateRef: render.Message.TemplateRef, DataClass: render.Class, DigestPolicy: work.DigestPolicy,
 		RawEvent: work.Channel.RawEvent && render.Class == domain.DataClassDetail}
 	if _, err = s.repo.BeginAttempt(ctx, job.TenantID, payload.DeliveryID, job.ID, job.Fence, aid, now, admission); err != nil {
 		return err

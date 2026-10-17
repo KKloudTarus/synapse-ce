@@ -21,6 +21,7 @@ import {
 import type { TemplateCloneState } from './TemplateLibrary'
 import { VariablePicker } from './VariablePicker'
 import { VersionHistory } from './VersionHistory'
+import { PreviewPanel } from './PreviewPanel'
 import {
   ANY_EVENT,
   FAMILY_INFO,
@@ -499,6 +500,7 @@ function Editor({ id }: { id: string | undefined }) {
           <Card>
             <VariablePicker eventType={eventType} variables={variables} disabled={busy !== null} onInsert={insertVariable} />
           </Card>
+          <PreviewPanel templateId={detail?.id} templateEventType={eventType} family={family} fields={fields} catalog={catalog ?? []} />
         </div>
       </div>
 

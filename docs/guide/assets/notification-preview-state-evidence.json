@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "scope": "Actual local full-stack preview UI states; one theme accepted by maintainer",
+  "captures": [
+    {
+      "path": "docs/guide/assets/ui/notification-delivery/states/preview-loading-light.png",
+      "sha256": "cde6dec92176d51299a47a87e2557d04894c489690a2043f14b5c11f9ff1319c",
+      "original_sha256": "25c724ca196c35c9eddf1f2b5f46faff016ea0e4bda36aa9661f9a6f44457aa7",
+      "rect": {
+        "height": 494,
+        "width": 343,
+        "x": 998,
+        "y": 144
+      },
+      "theme": "light",
+      "trigger": "Actual local API container paused while Refresh preview request is outstanding; no intercepted/fake API response",
+      "observed_state": "Live preview\nRefresh\nCHANNEL\nDiscord B06 acceptance (discord)\nEVENT\nFinding created\nSAMPLE\nFixtures never expose tenant event data. Recent events require view permission.\nPublished fixture (safe sample)\nRendering the current draft\u2026\nSend fixture test\n\nTest sends always use the published fixture, even when this preview uses a recent event.",
+      "operation": "Literal pixel rectangle extraction from original native screenshot; no retouching, generated pixels or content replacement."
+    },
+    {
+      "path": "docs/guide/assets/ui/notification-delivery/states/preview-error-light.png",
+      "sha256": "c325608fccf71fa5372d53362ad256ea6e5924a4e6ee1a095f90d6c3a36602ef",
+      "original_sha256": "1b62a8edbfc38f1a0837424609b829331f228a6f2c89a2cc4823cd1c3f622dbd",
+      "rect": {
+        "height": 439,
+        "width": 343,
+        "x": 998,
+        "y": 199
+      },
+      "theme": "light",
+      "trigger": "Actual local API container killed after loading capture; nginx returned HTTP502, no fake payload",
+      "observed_state": "Live preview\nRefresh\nCHANNEL\nDiscord B06 acceptance (discord)\nEVENT\nFinding created\nSAMPLE\nFixtures never expose tenant event data. Recent events require view permission.\nPublished fixture (safe sample)\nCould not render preview: HTTP 502\nSend fixture test\n\nTest sends always use the published fixture, even when this preview uses a recent event.",
+      "operation": "Literal pixel rectangle extraction from original native screenshot; no retouching, generated pixels or content replacement."
+    },
+    {
+      "path": "docs/guide/assets/ui/notification-delivery/states/preview-empty-light.png",
+      "sha256": "a5c12e2220c1eebdaccc25aff4722ac71b7a03dd83346420460da1641e16617a",
+      "original_sha256": "3d82a8b010e94b0f0ebc37c1a1d2a59c9b5c3e571ae278c6d21d069fe6b22858",
+      "rect": {
+        "height": 323,
+        "width": 343,
+        "x": 998,
+        "y": 314
+      },
+      "theme": "light",
+      "trigger": "Unsaved draft family changed to Pager; actual tenant has no compatible enabled channels; no channel/config mutation",
+      "observed_state": "Live preview\n\nNo enabled channel for this template\n\nCreate or enable a channel in this family to preview the current draft.",
+      "operation": "Literal pixel rectangle extraction from original native screenshot; no retouching, generated pixels or content replacement."
+    }
+  ],
+  "review": {
+    "verdict": "pass",
+    "images_individually_read": 3,
+    "hashes_and_exact_pixel_rectangles_verified": true,
+    "limits": "Visual QA only; actual container fault/recovery performed separately by parent."
+  },
+  "recovery": {
+    "api_restarted": true,
+    "running": true,
+    "paused": false,
+    "health": "healthy"
+  },
+  "limits": [
+    "Unsaved Pager draft for no-compatible-channel state; no PagerDuty delivery acceptance.",
+    "No fake or intercepted API responses.",
+    "No extra theme/device/accessibility claim."
+  ]
+}
