@@ -5,6 +5,18 @@ baseline `b88812e15fce7c88604bc735872532fe5cae75f3`. Issue ownership is unchange
 `pho-veteran` retains the preview/digest assignments and progress; the existing
 `XUanhoa04` claims and merged personal-delivery/inbox implementation are retained.
 
+## Current acceptance scope
+
+The maintainer accepts **one theme per client** for this PR. Additional theme/device
+permutations are not merge requirements. Earlier reviewed captures remain as evidence;
+they do not require another replay. Teams and PagerDuty are the only provider deferrals,
+tracked in #1576 with Teams personal delivery retained in open #1420.
+
+The final packet adds actual Outlook and Discord native receipts, six paired VI/signal
+console previews, and representative mixed Slack/Telegram receipts from the existing
+cohort. The chronological sections below retain the limits that applied at each earlier
+checkpoint; the final reconciliation section supersedes their outstanding capture lists.
+
 ## Acceptance ledger
 
 | Issue | Merged baseline and remaining implementation | Closure condition |
@@ -489,3 +501,61 @@ mismatches despite correct DOM state. They cannot establish preview/send visual 
 The browser connection then became unavailable before Outlook correlation and replacement
 captures could finish. These are outstanding acceptance work, not additional provider
 deferrals. Teams and PagerDuty remain the only maintainer-approved deferrals.
+
+
+## Final native-client reconciliation on 2026-10-17
+
+The machine restart preserved the private receipts, original native frames, logs and
+runtime configuration in a repository-local private checkpoint. The same Docker volumes
+and binaries were restored. API, worker, PostgreSQL, MinIO, Mailpit, web and HTTPS resumed;
+readiness passed. All 69 recorded deliveries retained exactly one successful attempt;
+nonempty expected provider references were unchanged. No new delivery cohort was needed for the remaining Slack/Telegram
+captures, and no mock stands in for a client receipt.
+
+| Client | Accepted current evidence |
+| --- | --- |
+| Gmail | Thirteen exact Message-ID Inbox receipts with subject/plain/HTML parity; reviewed fixture and mixed digest body crops; actual editor send and settings/finding destination journeys. |
+| Outlook web | Twelve exact native Message-ID/decoded-subject bindings: five Inbox and seven Junk. Visible body/link parity and 24 reviewed native crops; actual settings and finding navigation. Transport is Google OAuth SMTP to Outlook, not Microsoft SMTP. |
+| Discord | Twelve provider-ID-bound receipts and twelve reviewed dark native crops. Visible title/text/link groups match all twelve previews after native Markdown normalization. Actual fixture settings and digest finding links reached the authenticated console. This is semantic rendered parity, not original HTTP payload-byte equality. |
+| Slack | Existing HTTP-200 queued cohort and native timestamp/source/cadence correlations; new light hourly EN/detail, daily VI/signal and VI fixture crops. Prior accepted personal-link/DM and trusted HTTPS destination evidence is retained with its original provenance. |
+| Telegram | Existing HTTP-200 cohort and native timestamp/cadence/content correlations; new dark hourly EN/detail, daily VI/signal and VI fixture crops. DOM IDs differ from Bot API IDs. The fixture's English reply quote is native client context; the current VI message is complete. |
+| Google Chat | Existing exact provider-reference mixed cohort and reviewed captures; one new exact-reference VI fixture crop paired with its console preview. Clicking that fixture's Open notifications button reached Channels at the correct settings route with the existing authenticated session. |
+| Signed webhook | Existing eight parsed real HTTPS requests contain five typed members and verify HMAC; receipt and available preview-byte comparisons remain in the mixed packet. |
+
+The [mail/Discord manifest](assets/notification-mail-delivery-evidence.json) and
+[paired console/client manifest](assets/notification-preview-client-evidence.json)
+retain exact delivery identities, hashes and normalization boundaries. Six console
+previews use an unsaved clone of the same built-in finding fixture fields; no template
+was activated. Native fixture receipts are paired by provider and locale, rather than
+claiming that a screenshot itself proves transport. The earlier editor-initiated Gmail
+send and Google Chat test journey establish the actual queued UI action separately.
+
+The new console images show light visible panels. Telegram and Discord native images
+show their existing dark appearance; each satisfies the one-theme scope. Every new crop
+was individually inspected and its hash checked. Crops are literal rectangles of native
+screenshots, with original/crop hashes and coordinates retained. Full frames, mailbox
+headers, addresses, credentials and unrelated sidebars are withheld. Truncated provider
+selector labels are normal UI truncation; the rendered message is complete.
+
+The [preview state manifest](assets/notification-preview-state-evidence.json) links the
+reviewed [loading](assets/ui/notification-delivery/states/preview-loading-light.png),
+[error](assets/ui/notification-delivery/states/preview-error-light.png) and
+[empty](assets/ui/notification-delivery/states/preview-empty-light.png) panels.
+Preview loading was captured while the actual API container was paused with a request
+outstanding. Killing that local container produced nginx HTTP 502 and the displayed
+preview error; restarting it restored healthy readiness. The empty state uses an unsaved
+Pager draft with no compatible enabled channel. No intercepted or fabricated response was
+used. Existing permission-denied, inbox/bell, loading/error/empty, missing-ID picker and
+domain-only administrator-notice evidence and their regression tests remain unchanged.
+
+Telegram labels at the localhost base are not clickable anchors. Navigation acceptance
+reuses #1583's reviewed trusted-HTTPS journeys for the unchanged provider/link path,
+together with current source/destination existence and routing checks; this packet does
+not claim a fresh Telegram localhost click. The old newest-twenty preview 404 observations
+remain recorded rather than relabeled successful. Fixture parity uses the captured
+previews and real receipts, and no elapsed hourly/daily soak, production capacity,
+Microsoft SMTP, mobile matrix or screen-reader certification is claimed.
+
+Only Teams/PagerDuty remain deferred. Issue ownership and the existing #1418/#1419
+integration closures are unchanged. This PR keeps `Refs` where an issue's complete
+cross-provider acceptance includes those deferrals; it does not close #1420 or #1576.

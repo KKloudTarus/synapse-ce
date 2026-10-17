@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "captured_on": "2026-10-17",
-  "scope": "Dedicated synthetic Gmail and Discord notification-delivery cohort on the local full Compose stack. This record publishes only reviewed Gmail native body crops and sanitized correlation metadata.",
+  "scope": "Dedicated synthetic Gmail, Discord, and Outlook notification-delivery cohorts on the local full Compose stack. This record publishes only reviewed native body crops and sanitized correlation metadata.",
   "runtime": {
     "base_url": "https://localhost:8443",
     "topology": "local full Compose stack; no public host, tunnel, Tailscale Serve, or Funnel",
@@ -410,7 +410,7 @@
       "all_delivery_attempts": 12,
       "attempt_result": "Each delivery was delivered after one HTTP 200 attempt."
     },
-    "receipt_boundary": "Native DOM correlation was captured for each provider reference. No Discord screenshot is published because the browser capture viewport did not reliably follow the selected message.",
+    "receipt_boundary": "Each provider reference has native DOM correlation, a reviewed native body crop, and a parity record. The complete native frames remain private because they include browser chrome and account data.",
     "provider_receipts": [
       {
         "kind": "fixture",
@@ -528,13 +528,823 @@
         "attempts": 1,
         "response_code": 200
       }
-    ]
+    ],
+    "native_render_parity": {
+      "summary": "For all 12 deliveries, the Discord-rendered title, visible text, and link groups match the captured API preview. This compares rendered provider content, not webhook payload bytes; Discord's non-visible accessibility punctuation is excluded from the visible-text comparison.",
+      "records": [
+        {
+          "delivery_id": "c7cc2bdbe4a54dec4aa0ac7fe2d34565",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 1,
+          "native_visible_text_sha256": "f54ba823a17a1f999f262e5a4e2272c997756fe90a381a4bb4d96f5bd34e4ed9",
+          "preview_visible_text_sha256": "f54ba823a17a1f999f262e5a4e2272c997756fe90a381a4bb4d96f5bd34e4ed9"
+        },
+        {
+          "delivery_id": "cdc44398c39ec864e2a889dad988ec3a",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 1,
+          "native_visible_text_sha256": "f54ba823a17a1f999f262e5a4e2272c997756fe90a381a4bb4d96f5bd34e4ed9",
+          "preview_visible_text_sha256": "f54ba823a17a1f999f262e5a4e2272c997756fe90a381a4bb4d96f5bd34e4ed9"
+        },
+        {
+          "delivery_id": "4690bb6722f1dd91aae8fd5543b1ac3d",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 1,
+          "native_visible_text_sha256": "b6ed655a77b1d651665376e19c2ecb428f96a0e4e17d40be6dc67c0bd1557cd9",
+          "preview_visible_text_sha256": "b6ed655a77b1d651665376e19c2ecb428f96a0e4e17d40be6dc67c0bd1557cd9"
+        },
+        {
+          "delivery_id": "935cd452a53e4c48cb230b75ff88f9a6",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 1,
+          "native_visible_text_sha256": "b6ed655a77b1d651665376e19c2ecb428f96a0e4e17d40be6dc67c0bd1557cd9",
+          "preview_visible_text_sha256": "b6ed655a77b1d651665376e19c2ecb428f96a0e4e17d40be6dc67c0bd1557cd9"
+        },
+        {
+          "delivery_id": "e69626590c9e271ed3ab798c450ec30b",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 5,
+          "native_visible_text_sha256": "076cc3db97830151ed0c80522ad134cf3929ef85de0e0f18e688453615286d51",
+          "preview_visible_text_sha256": "076cc3db97830151ed0c80522ad134cf3929ef85de0e0f18e688453615286d51"
+        },
+        {
+          "delivery_id": "b3273f0f3a0ba76c6666de7e79d348da",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 5,
+          "native_visible_text_sha256": "dffde316dd34fd60ed326857227e7b5a79b8699cccf4a4b745cf3c7c49f803aa",
+          "preview_visible_text_sha256": "dffde316dd34fd60ed326857227e7b5a79b8699cccf4a4b745cf3c7c49f803aa"
+        },
+        {
+          "delivery_id": "a0d99ff62bc1c29344eb14d5479b888d",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 5,
+          "native_visible_text_sha256": "92eeccefbbea69fd71661f1a5ac4f4dfe8c297c65b4e920828eb40ba942b9f31",
+          "preview_visible_text_sha256": "92eeccefbbea69fd71661f1a5ac4f4dfe8c297c65b4e920828eb40ba942b9f31"
+        },
+        {
+          "delivery_id": "d0c23c228248c8f20d134da3b624d1a4",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 5,
+          "native_visible_text_sha256": "677c054579f0ec2fb62ca9c1915be5bd5a600f32d9a3eea2847033157b717696",
+          "preview_visible_text_sha256": "677c054579f0ec2fb62ca9c1915be5bd5a600f32d9a3eea2847033157b717696"
+        },
+        {
+          "delivery_id": "3d85aa6bab69892d147e76fa56d8c403",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 5,
+          "native_visible_text_sha256": "195079d772b1c2c2ca0f25557f3ba733f1b74467f182dc39b42c17f61965473a",
+          "preview_visible_text_sha256": "195079d772b1c2c2ca0f25557f3ba733f1b74467f182dc39b42c17f61965473a"
+        },
+        {
+          "delivery_id": "d873a334fcd97248dfda60f2b9519b38",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 5,
+          "native_visible_text_sha256": "01710e7de8c054cfd1d0c3dfe438460bfcedecffcc9b5494b30aec2b34c76727",
+          "preview_visible_text_sha256": "01710e7de8c054cfd1d0c3dfe438460bfcedecffcc9b5494b30aec2b34c76727"
+        },
+        {
+          "delivery_id": "828d9f1b0d67092b3dcb23e92b7af956",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 5,
+          "native_visible_text_sha256": "acd945586285f8a9bedc6f35c38cbdd453c6740be897249265ef9429d8cf99d0",
+          "preview_visible_text_sha256": "acd945586285f8a9bedc6f35c38cbdd453c6740be897249265ef9429d8cf99d0"
+        },
+        {
+          "delivery_id": "5fcd1305075a6643e8a3f30c627fbd2e",
+          "title_match": true,
+          "visible_text_match": true,
+          "links_match": true,
+          "link_count": 5,
+          "native_visible_text_sha256": "0ce87335c5437e2f324875116afa4c24e713bcaa0b7e525132c04aa9dedcec04",
+          "preview_visible_text_sha256": "0ce87335c5437e2f324875116afa4c24e713bcaa0b7e525132c04aa9dedcec04"
+        }
+      ]
+    },
+    "navigation": {
+      "fixture": "The native Open notifications link from delivery c7cc2bdbe4a54dec4aa0ac7fe2d34565 reached local settings/alerting; normal API-token UI login was completed and the Channels heading was visible.",
+      "digest": "The native 3 · Open finding link from delivery 5fcd1305075a6643e8a3f30c627fbd2e reached the matching local finding after normal API-token UI login; its details were expanded."
+    },
+    "reviewed_native_body_crops": {
+      "count": 12,
+      "theme": "Discord dark/darker. One provider theme is intentionally sufficient for this acceptance record.",
+      "provenance": "Each PNG is a literal pixel rectangle from its corresponding private native Discord screenshot. No retouching, generated pixels, or content replacement was used. Original frames stay private because they contain browser chrome and account data.",
+      "crops": [
+        {
+          "file": "discord-fixture-en-detail-dark.png",
+          "kind": "fixture",
+          "cell": "en-detail",
+          "delivery_id": "c7cc2bdbe4a54dec4aa0ac7fe2d34565",
+          "provider_reference": "1560843425383845910",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843425383845910",
+          "rect": [
+            446,
+            488,
+            230,
+            166
+          ],
+          "original_sha256": "9722d89a6b9b2904d62258f4acd27d750b2862c7e4e0777d2d491cfc9f767418",
+          "crop_sha256": "147bbee00a3d69ae1290bc00d43240fd29d8a6d9483410091ef90cd737a1618b"
+        },
+        {
+          "file": "discord-fixture-en-signal-dark.png",
+          "kind": "fixture",
+          "cell": "en-signal",
+          "delivery_id": "cdc44398c39ec864e2a889dad988ec3a",
+          "provider_reference": "1560843426612645945",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843426612645945",
+          "rect": [
+            446,
+            488,
+            230,
+            166
+          ],
+          "original_sha256": "1d5b2335e22addddfd4479e7231a89229686e00263381f6fe3dd17acd16757e6",
+          "crop_sha256": "5495bcb42919f25329874382220e56a2bc60bc9c82a4a742aced009f81d8bb57"
+        },
+        {
+          "file": "discord-fixture-vi-detail-dark.png",
+          "kind": "fixture",
+          "cell": "vi-detail",
+          "delivery_id": "4690bb6722f1dd91aae8fd5543b1ac3d",
+          "provider_reference": "1560843428521320571",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843428521320571",
+          "rect": [
+            446,
+            488,
+            228,
+            166
+          ],
+          "original_sha256": "e6b61e60e887f694174431fd8ebe0dc52fb9ade9a2bf2d290b4a56404ae539cc",
+          "crop_sha256": "d6e2b782803c513f321440980ce0e1564ba3aeb5e1345fa7fba3fd87bfd1815c"
+        },
+        {
+          "file": "discord-fixture-vi-signal-dark.png",
+          "kind": "fixture",
+          "cell": "vi-signal",
+          "delivery_id": "935cd452a53e4c48cb230b75ff88f9a6",
+          "provider_reference": "1560843430400237679",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843430400237679",
+          "rect": [
+            446,
+            488,
+            228,
+            166
+          ],
+          "original_sha256": "bfa8ab200476fae264628e152d2166993d1cfa805d712c8bcb9dcc71257627ac",
+          "crop_sha256": "e88b93178a0f5b3156f22ad4f363e4024ea5d99e63f23c094dc4531f96b1d68c"
+        },
+        {
+          "file": "discord-mixed-hourly-en-detail-dark.png",
+          "kind": "mixed-digest",
+          "cell": "en-detail",
+          "cadence": "hourly",
+          "delivery_id": "e69626590c9e271ed3ab798c450ec30b",
+          "provider_reference": "1560843753814626427",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843753814626427",
+          "rect": [
+            446,
+            386,
+            521,
+            370
+          ],
+          "original_sha256": "8dbb013ee372a777af9a0dbe72f5a54ba616c80e4cae48012acf13b2daaf286e",
+          "crop_sha256": "4a1f5a554c3b9f7d21c2c20f1d4bc4548aeac97fdf4760d6f0d19d89d969e741"
+        },
+        {
+          "file": "discord-mixed-daily-en-detail-dark.png",
+          "kind": "mixed-digest",
+          "cell": "en-detail",
+          "cadence": "daily",
+          "delivery_id": "b3273f0f3a0ba76c6666de7e79d348da",
+          "provider_reference": "1560843802472615966",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843802472615966",
+          "rect": [
+            446,
+            646,
+            521,
+            370
+          ],
+          "original_sha256": "118aecf2cd81ec6f7f2dc61db160933773224fdff06044bde7cd658c5c06b885",
+          "crop_sha256": "fcdc50a0a695684a996c95d9e7059d8e9388bf81fd1f22e61144220851088eb8"
+        },
+        {
+          "file": "discord-mixed-hourly-en-signal-dark.png",
+          "kind": "mixed-digest",
+          "cell": "en-signal",
+          "cadence": "hourly",
+          "delivery_id": "a0d99ff62bc1c29344eb14d5479b888d",
+          "provider_reference": "1560843747871162413",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843747871162413",
+          "rect": [
+            446,
+            403,
+            312,
+            334
+          ],
+          "original_sha256": "3b14b50b079a259e97001e42071ede173673c87df707d18754e97b8f9b4f7554",
+          "crop_sha256": "e91478edfd63f74bbc5000b0ef8cd1ce9fc8abdf774d7ba245243d41970b3ee9"
+        },
+        {
+          "file": "discord-mixed-daily-en-signal-dark.png",
+          "kind": "mixed-digest",
+          "cell": "en-signal",
+          "cadence": "daily",
+          "delivery_id": "d0c23c228248c8f20d134da3b624d1a4",
+          "provider_reference": "1560843792557539389",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843792557539389",
+          "rect": [
+            446,
+            404,
+            313,
+            334
+          ],
+          "original_sha256": "1d9109f8bbead6bdde37f42fe3e024ec8bff61dbd99fa67818a34422ca445efe",
+          "crop_sha256": "059e28d8a360722a63e02b5e2fefefb3d8bea6376a130422107705f5340b1066"
+        },
+        {
+          "file": "discord-mixed-hourly-vi-detail-dark.png",
+          "kind": "mixed-digest",
+          "cell": "vi-detail",
+          "cadence": "hourly",
+          "delivery_id": "3d85aa6bab69892d147e76fa56d8c403",
+          "provider_reference": "1560843755471241247",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843755471241247",
+          "rect": [
+            446,
+            386,
+            521,
+            370
+          ],
+          "original_sha256": "69bd9b126316bae8d695c625ca7e68e5b7ac73f69e0e7123271b2f9506c11e8c",
+          "crop_sha256": "9b7841fb909058d589d36dd8187db1273730f02308ac8e8b80e491b58a04b790"
+        },
+        {
+          "file": "discord-mixed-daily-vi-detail-dark.png",
+          "kind": "mixed-digest",
+          "cell": "vi-detail",
+          "cadence": "daily",
+          "delivery_id": "d873a334fcd97248dfda60f2b9519b38",
+          "provider_reference": "1560843749997813863",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843749997813863",
+          "rect": [
+            446,
+            386,
+            521,
+            370
+          ],
+          "original_sha256": "dcac0d22f99b62111a2d873b3161e22ae2310b51d5f2980fa668965c8347a912",
+          "crop_sha256": "6f67b8688c56e9782b4b7500a6d7f193c8bcd545b16e105adbb51756d18ecb29"
+        },
+        {
+          "file": "discord-mixed-hourly-vi-signal-dark.png",
+          "kind": "mixed-digest",
+          "cell": "vi-signal",
+          "cadence": "hourly",
+          "delivery_id": "828d9f1b0d67092b3dcb23e92b7af956",
+          "provider_reference": "1560843752078049431",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843752078049431",
+          "rect": [
+            446,
+            403,
+            312,
+            334
+          ],
+          "original_sha256": "034dbf6b887f0a419f8689ef3d37f1df7ceb14a01005604ce8bda735590fcbd4",
+          "crop_sha256": "f23fa129f7083d277f39f886c165a419f414f5e52f4d7246b744d1ccf1fa5151"
+        },
+        {
+          "file": "discord-mixed-daily-vi-signal-dark.png",
+          "kind": "mixed-digest",
+          "cell": "vi-signal",
+          "cadence": "daily",
+          "delivery_id": "5fcd1305075a6643e8a3f30c627fbd2e",
+          "provider_reference": "1560843756721274986",
+          "native_dom_id": "chat-messages-1558058436766466141-1560843756721274986",
+          "rect": [
+            446,
+            403,
+            313,
+            334
+          ],
+          "original_sha256": "81717aac30542bd09bcc9dd60762422028f66317ce78bd3bc5c3c60a745e8c3f",
+          "crop_sha256": "711dbb353c4fe535c105de7f9293605b7d52f24873ec8e014334e31c2ae4bb5d"
+        }
+      ]
+    }
+  },
+  "outlook": {
+    "provider": "outlook_web",
+    "transport_boundary": "The cohort used the configured Google SMTP OAuth relay. It proves Outlook web receipt and does not claim Microsoft SMTP transport.",
+    "deliveries": {
+      "fixture_preview_send_test_pairs": 4,
+      "mixed_digest_deliveries": 8,
+      "native_receiver_receipts": 12,
+      "all_cohort_attempts": 12,
+      "attempt_result": "Each cohort delivery was delivered after one SMTP 250 attempt."
+    },
+    "native_parity": {
+      "header_source": "Outlook web View message source",
+      "header_message_id": "All 12 synthetic Message-ID values match their delivery IDs.",
+      "content": "All 12 subjects, visible text after whitespace collapse, and link groups after strict SafeLinks unwrap match API-rendered HTML.",
+      "not_claimed": "This is not raw-MIME byte parity."
+    },
+    "receiver_folders": {
+      "Inbox": 5,
+      "Junk Email": 7
+    },
+    "navigation": {
+      "fixture": "The native Open notifications link reached local settings after normal API login.",
+      "digest": "The native Open finding link reached the local finding detail after normal API login."
+    },
+    "theme": "Native settings began light, were temporarily switched to dark for capture, then restored to light.",
+    "native_receipts": [
+      {
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "hourly",
+        "delivery_id": "0cc31d99a1455df88d4f94d4a068fab0",
+        "message_id": "<0cc31d99a1455df88d4f94d4a068fab0@synapse.local>",
+        "folder": "Inbox",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 5,
+        "header_sha256": "4350fd649734f4249b434466ac9bf54f6c886d89262162f0ad5efdd88f4727f4",
+        "visible_text_sha256": "b30d6f31c99f3959c3b64d3adb09f8cd7c2796d2b4297f170e046a62b7d93787"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "daily",
+        "delivery_id": "16f7fee3cf873fbe821c141ebd8de43e",
+        "message_id": "<16f7fee3cf873fbe821c141ebd8de43e@synapse.local>",
+        "folder": "Junk Email",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 5,
+        "header_sha256": "1f6f6ce97aa8b5b1b3f62ded0d4f45710ef9c7a8d72b72021828890774e643a5",
+        "visible_text_sha256": "fa26cec0b11dda9421c9835150e7850ab63be752df864186e8f8b571f5a0b72c"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "hourly",
+        "delivery_id": "4cc0bbecc220e794d2474f7d6177cbc9",
+        "message_id": "<4cc0bbecc220e794d2474f7d6177cbc9@synapse.local>",
+        "folder": "Junk Email",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 5,
+        "header_sha256": "bfaea4ff5deda9355db1b78fd1c7428c5b4f13c0ece4d123f27c7db13e0e22e0",
+        "visible_text_sha256": "2de3fde936b92c38d743c816844648c23feaf53e3db1d3d4858e7367bfa6556d"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "en-signal",
+        "cadence": "daily",
+        "delivery_id": "16eaf3e8b63bdd2c7c8fe380fe06ca97",
+        "message_id": "<16eaf3e8b63bdd2c7c8fe380fe06ca97@synapse.local>",
+        "folder": "Junk Email",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 5,
+        "header_sha256": "aafdc506882ba2c193619e226cfeecdbe3dbe94fb74de880624adc671c729060",
+        "visible_text_sha256": "492699cbd11bd6c96dad14eab2aec07fd4a3441d0c853321428077159e7bb97b"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "hourly",
+        "delivery_id": "807738ccd6441cdaad02f131d1c7e284",
+        "message_id": "<807738ccd6441cdaad02f131d1c7e284@synapse.local>",
+        "folder": "Junk Email",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 5,
+        "header_sha256": "afe3fa9f0f18335d653106a53ee4cfa79eccef2fef78448cb4b6cfe618b7bd1d",
+        "visible_text_sha256": "c8dedf787f3d50e0da58eea57cd468e72c5e80d81163bbf19ac21ee40bd44098"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-detail",
+        "cadence": "daily",
+        "delivery_id": "68f7893acac7c988359e8ea5407dc6ac",
+        "message_id": "<68f7893acac7c988359e8ea5407dc6ac@synapse.local>",
+        "folder": "Inbox",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 5,
+        "header_sha256": "32e2d00d8ba58f1dd61af307d722d197177180cd94c1f2e5e9c54f00c6ce12be",
+        "visible_text_sha256": "abb625b8939d1a7f02f5617df604ac94be03e9699d28a85c6824cfe5eb1fd4b5"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "hourly",
+        "delivery_id": "66dd095da7cc878ce8fcebf3627453d6",
+        "message_id": "<66dd095da7cc878ce8fcebf3627453d6@synapse.local>",
+        "folder": "Inbox",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 5,
+        "header_sha256": "d7f16af43e667ccfbffadc651add7e6ec115f35eb10123e4a64c10d1bda08799",
+        "visible_text_sha256": "f955121e1cbec7ec8e071ddc2e612ca7221d2a090e0aeaecb81b8099493e92df"
+      },
+      {
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "daily",
+        "delivery_id": "973afb0e873b251bd1dc9173906abf6b",
+        "message_id": "<973afb0e873b251bd1dc9173906abf6b@synapse.local>",
+        "folder": "Junk Email",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 5,
+        "header_sha256": "68390e3806de7818e412cc94c445eb3e75f5a2cf8901f21acefde2ff2af8b4c5",
+        "visible_text_sha256": "0d0361e50268d2da3e077aeda74731ac784591b91d1131eeec3487e37d117d54"
+      },
+      {
+        "kind": "fixture",
+        "cell": "en-detail",
+        "delivery_id": "af7be87491f93e7ec17b29bafa12667c",
+        "message_id": "<af7be87491f93e7ec17b29bafa12667c@synapse.local>",
+        "folder": "Junk Email",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 1,
+        "header_sha256": "9b8c9ba9343cbcc9b39b996e35e155392966e7474351ece01293c0249ff5cfbb",
+        "visible_text_sha256": "297497b20eb128d2c87c9be0df2ca27ec35b5ba575d8c1502438fc1577c8603b"
+      },
+      {
+        "kind": "fixture",
+        "cell": "en-signal",
+        "delivery_id": "3e1b3ee601c11b06b6be764851bc0138",
+        "message_id": "<3e1b3ee601c11b06b6be764851bc0138@synapse.local>",
+        "folder": "Inbox",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 1,
+        "header_sha256": "0fb22d79337f16a22efd7eb6aeafcb78d92c42150219366149d60493cc76f40e",
+        "visible_text_sha256": "297497b20eb128d2c87c9be0df2ca27ec35b5ba575d8c1502438fc1577c8603b"
+      },
+      {
+        "kind": "fixture",
+        "cell": "vi-detail",
+        "delivery_id": "d91592fcd24b7b462e610af4e8070f21",
+        "message_id": "<d91592fcd24b7b462e610af4e8070f21@synapse.local>",
+        "folder": "Junk Email",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 1,
+        "header_sha256": "6e0d805c636500acfee5b08f54e41567381e32ca338629c1d3f0a74ab818b721",
+        "visible_text_sha256": "9d50c4f3d68174d419cc4d2186c0667cf7c493eff2b8a4530e7cc132439d1526"
+      },
+      {
+        "kind": "fixture",
+        "cell": "vi-signal",
+        "delivery_id": "8e663460e29944e3be78f414e4bc88a6",
+        "message_id": "<8e663460e29944e3be78f414e4bc88a6@synapse.local>",
+        "folder": "Inbox",
+        "subject_match": true,
+        "visible_text_match": true,
+        "links_match": true,
+        "link_count": 1,
+        "header_sha256": "a3e20006875893d7ef01b38cbe23085e14f51bc0dd18f5378872ff54ce37b1bb",
+        "visible_text_sha256": "9d50c4f3d68174d419cc4d2186c0667cf7c493eff2b8a4530e7cc132439d1526"
+      }
+    ],
+    "reviewed_native_body_crops": {
+      "count": 24,
+      "provenance": "Each PNG is a literal rectangle from its private native Outlook screenshot. No retouching, generated pixels, or content replacement; all captures were active on tab 567544192 at 1831x935.",
+      "crops": [
+        {
+          "file": "outlook-fixture-en-detail-dark.png",
+          "delivery_id": "af7be87491f93e7ec17b29bafa12667c",
+          "rect": [
+            695,
+            331,
+            1080,
+            150
+          ],
+          "original_sha256": "b9f5720c30e2d519504b03fbd786f1671d26330cc9d7789936b5a9ec5f03b394",
+          "crop_sha256": "df871d5fec745c4bd4909f1ddf1630e9b6fceb2d939fe243129fb02f39816b66"
+        },
+        {
+          "file": "outlook-fixture-en-detail-light.png",
+          "delivery_id": "af7be87491f93e7ec17b29bafa12667c",
+          "rect": [
+            695,
+            331,
+            1080,
+            150
+          ],
+          "original_sha256": "a24768665e5857c0f4d17292d0920a667fe38d215ec772d16bc96657da905e01",
+          "crop_sha256": "b2ac91d498b45cf1d8ea2256ca8ea23090824c93b90422c22e138fbca7765d35"
+        },
+        {
+          "file": "outlook-fixture-en-signal-dark.png",
+          "delivery_id": "3e1b3ee601c11b06b6be764851bc0138",
+          "rect": [
+            696,
+            285,
+            1078,
+            150
+          ],
+          "original_sha256": "73ab1e2f102be86ec896f54b9b6585b30bc339aeb47cf86795a2c21c65380eac",
+          "crop_sha256": "6432bca51a8157d33c31fa689ce139a4cc0765be689bcc16ad5fa97edb9dc802"
+        },
+        {
+          "file": "outlook-fixture-en-signal-light.png",
+          "delivery_id": "3e1b3ee601c11b06b6be764851bc0138",
+          "rect": [
+            696,
+            286,
+            1078,
+            150
+          ],
+          "original_sha256": "906bddd9e2681d855be47d65d97fc0b071dd0ecfba6349e4acd460b754a7af83",
+          "crop_sha256": "c33e173a1d5cfe023b28168b83b9fb20d12f786b184c5e0126da84b85c15ca93"
+        },
+        {
+          "file": "outlook-fixture-vi-detail-dark.png",
+          "delivery_id": "d91592fcd24b7b462e610af4e8070f21",
+          "rect": [
+            695,
+            331,
+            1080,
+            150
+          ],
+          "original_sha256": "e03036a82c2bee829286d979f1ea997dc6d38b9d73f75083fe4dd6ca52a92776",
+          "crop_sha256": "43148c2874d02b1dda159a182f400ab879e879b362a762541328abb681470706"
+        },
+        {
+          "file": "outlook-fixture-vi-detail-light.png",
+          "delivery_id": "d91592fcd24b7b462e610af4e8070f21",
+          "rect": [
+            695,
+            331,
+            1080,
+            150
+          ],
+          "original_sha256": "bfaddd5ccff76a32cef642c9f83488ce7dcf945c2983be1695930cb6df27024c",
+          "crop_sha256": "1df4e12c37726076deb4f63f20dcbc441712508d4d73caf47942a13f74f3705d"
+        },
+        {
+          "file": "outlook-fixture-vi-signal-dark.png",
+          "delivery_id": "8e663460e29944e3be78f414e4bc88a6",
+          "rect": [
+            696,
+            285,
+            1078,
+            150
+          ],
+          "original_sha256": "02f14e40bfdc651b4c5f5dc6a7b30353f70bb4428b962e79e9f700aabda40908",
+          "crop_sha256": "36820549c3ee7feb84afdb4f66c57b9d65c790af50250ab8d120715d29bb1849"
+        },
+        {
+          "file": "outlook-fixture-vi-signal-light.png",
+          "delivery_id": "8e663460e29944e3be78f414e4bc88a6",
+          "rect": [
+            696,
+            286,
+            1078,
+            150
+          ],
+          "original_sha256": "7476fe669b67683b043d178a4e8a48dd395cf93d8e855bf68c4fe87aa550be5e",
+          "crop_sha256": "e3b744e5bf466b523d16cc82f3bf0130e82b9493dfab6a6c0d40c74bdefe62bb"
+        },
+        {
+          "file": "outlook-mixed-daily-en-detail-dark.png",
+          "delivery_id": "16f7fee3cf873fbe821c141ebd8de43e",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "783928d569092aeac5799bdcd1b9673ceed4b2718506e4fb350906ec9571f9c7",
+          "crop_sha256": "700cd1b2b017358e98f8843930684664999de99bb89b0031bbf04d5c1b3cbe04"
+        },
+        {
+          "file": "outlook-mixed-daily-en-detail-light.png",
+          "delivery_id": "16f7fee3cf873fbe821c141ebd8de43e",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "01ae50ced8763414585321e6c4ac3779b4525585464786a3287627fea8ef129d",
+          "crop_sha256": "33681c1e7628a0927bd1b24ab25b757244b4bf1dffa7cc9dda3fec1d6cb8d26b"
+        },
+        {
+          "file": "outlook-mixed-daily-en-signal-dark.png",
+          "delivery_id": "16eaf3e8b63bdd2c7c8fe380fe06ca97",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "e7a68280363a735f5a24de1d375a2100b7ac716ad64c2edd086558319fc1eaf5",
+          "crop_sha256": "d165a8d43c8e21a188b814ad1b65fe9900b5c1a770458b92af8b0e2a921987fe"
+        },
+        {
+          "file": "outlook-mixed-daily-en-signal-light.png",
+          "delivery_id": "16eaf3e8b63bdd2c7c8fe380fe06ca97",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "71e579e0134c386096e06e07de941c44b0da95579b4a97c8297f9428cbe4eb6b",
+          "crop_sha256": "0fc408ee15a1ab6f6c0df9568ff9b777c59a88c5ca42624e31126df01374883e"
+        },
+        {
+          "file": "outlook-mixed-daily-vi-detail-dark.png",
+          "delivery_id": "68f7893acac7c988359e8ea5407dc6ac",
+          "rect": [
+            696,
+            285,
+            1078,
+            225
+          ],
+          "original_sha256": "b1340b81cc0336dd3ad10e9de594d116dec4127688c271be3d99ebae2f390d58",
+          "crop_sha256": "6eec8039b7f14106debd3a8569c3a3ea1255f0d6494b4da98a6c0d9b4f58ce06"
+        },
+        {
+          "file": "outlook-mixed-daily-vi-detail-light.png",
+          "delivery_id": "68f7893acac7c988359e8ea5407dc6ac",
+          "rect": [
+            696,
+            286,
+            1078,
+            225
+          ],
+          "original_sha256": "725b37ff4855519e556a1ea3fcd45d34457d8bbc2406abda175293f955332592",
+          "crop_sha256": "1e849b6bd34e2fcc10777d483368743bf0ffa51702c57b94e7a719fed1fd0f3b"
+        },
+        {
+          "file": "outlook-mixed-daily-vi-signal-dark.png",
+          "delivery_id": "973afb0e873b251bd1dc9173906abf6b",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "ba2f1c8fa10cf8fb847f34efddb58fe17e839b151cb73b96b3afb4dfdb465e93",
+          "crop_sha256": "2321ea25b4889e4850aa82b32feb4978b66d8ffcacd4d3e4561daa24395b903a"
+        },
+        {
+          "file": "outlook-mixed-daily-vi-signal-light.png",
+          "delivery_id": "973afb0e873b251bd1dc9173906abf6b",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "f691fd806bd573d61df0963331db95cfae5a5e85bbdc27c5d762164088b7a26a",
+          "crop_sha256": "7d4e1fc9025894fd37ea5790bc353fb87faa8193c2cee46b527ce3b2137b518b"
+        },
+        {
+          "file": "outlook-mixed-hourly-en-detail-dark.png",
+          "delivery_id": "0cc31d99a1455df88d4f94d4a068fab0",
+          "rect": [
+            696,
+            285,
+            1078,
+            225
+          ],
+          "original_sha256": "e2fafc653b79a0873d60efbe7c86584fceea6357c5a988d19cb608650cfeb5af",
+          "crop_sha256": "80c6b8f8cb993b3df2fc2c0547fb943bd9e59c8f383a87b8f8cb4a4475fd955e"
+        },
+        {
+          "file": "outlook-mixed-hourly-en-detail-light.png",
+          "delivery_id": "0cc31d99a1455df88d4f94d4a068fab0",
+          "rect": [
+            696,
+            286,
+            1078,
+            225
+          ],
+          "original_sha256": "0d787003c84c9708be0aa2d1cd4275a50edc6daf38cafdbe55901c1c15fe9640",
+          "crop_sha256": "47e866e87ae1a74477387ebe0c94a65617e1e2ae645d34f77346e5e9899e2074"
+        },
+        {
+          "file": "outlook-mixed-hourly-en-signal-dark.png",
+          "delivery_id": "4cc0bbecc220e794d2474f7d6177cbc9",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "0dc565bc4ac44ebacac22626aa074a865563e933f8c630551ce5d168d7415134",
+          "crop_sha256": "59bee2aad03f00e6b6d29c2293e799ca4939855d943b88bf22bd58b68efdc104"
+        },
+        {
+          "file": "outlook-mixed-hourly-en-signal-light.png",
+          "delivery_id": "4cc0bbecc220e794d2474f7d6177cbc9",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "1be8103c549c839bb9852dd64e958bef56dfcca32db21a108278853b202a2948",
+          "crop_sha256": "8833dc078341803c62981102b69437095f7cbf23cc21e861474b9d120b0fbe97"
+        },
+        {
+          "file": "outlook-mixed-hourly-vi-detail-dark.png",
+          "delivery_id": "807738ccd6441cdaad02f131d1c7e284",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "89117c3f20bd6b7f69af503aaef581fb13b5d9ce62e7f645fe31f8d53ba52d6c",
+          "crop_sha256": "ac126f85b029bbf8bb2ad9f856581e6021eb4e5bc7f2b1d7f31d075811c9178a"
+        },
+        {
+          "file": "outlook-mixed-hourly-vi-detail-light.png",
+          "delivery_id": "807738ccd6441cdaad02f131d1c7e284",
+          "rect": [
+            695,
+            331,
+            1080,
+            225
+          ],
+          "original_sha256": "c423d303561689298cd9f6c5ca9bb0e1f3811911be58d439b7601c7762785dae",
+          "crop_sha256": "e0398c3c9c1cf964b3aa17a58e48c85306dddd017ad2be8b4fe33d1b9b0854ed"
+        },
+        {
+          "file": "outlook-mixed-hourly-vi-signal-dark.png",
+          "delivery_id": "66dd095da7cc878ce8fcebf3627453d6",
+          "rect": [
+            696,
+            285,
+            1078,
+            225
+          ],
+          "original_sha256": "1f14701bf575056119563eb4b0a08686b15797d3df06adbb553289e8d783682a",
+          "crop_sha256": "9d981cc351dbfab40173c963cc29b37a81e1aa6acbfaeab1a98134a729e3e42b"
+        },
+        {
+          "file": "outlook-mixed-hourly-vi-signal-light.png",
+          "delivery_id": "66dd095da7cc878ce8fcebf3627453d6",
+          "rect": [
+            696,
+            286,
+            1078,
+            225
+          ],
+          "original_sha256": "b79d0825c2313354861cdf00e1e1296e9300cc94080cfadf7f716020e6510dd0",
+          "crop_sha256": "243012ab2ffea4511f8787eb4af083b59fe92fdf9401bc8f0cb82d3601eb9dd0"
+        }
+      ]
+    }
   },
   "excluded_or_limited": [
     "No mobile, full browser/theme-state matrix, or elapsed hourly/daily soak is claimed.",
-    "No console/editor/navigation image is published; only the 24 independently reviewed native Gmail body crops are included.",
-    "No Discord pixels are published because the capture viewport was inconsistent, although the corresponding native DOM receipts are recorded.",
-    "Outlook has one native probe receipt and a separate cohort with SMTP acceptance only. This artifact makes no Outlook cohort receiver-receipt claim.",
+    "This manifest contains 24 reviewed Gmail, 24 Outlook and 12 Discord native body crops; console pairs and state captures are in separate manifests. No private navigation/fullframe screenshot is published.",
+    "Discord coverage publishes one reviewed dark/darker native body crop for each of the 12 correlated deliveries; full native frames remain private because they contain browser chrome and account data.",
+    "Outlook coverage is Outlook web receiver/header/text/link parity for this synthetic cohort; it is neither raw-MIME byte parity nor Microsoft SMTP transport evidence.",
     "Teams and PagerDuty are not covered by this cohort and remain deferred.",
     "No recipient address, OAuth credential, webhook URL, DSN, raw MIME, or SMTP transcript is included."
   ]

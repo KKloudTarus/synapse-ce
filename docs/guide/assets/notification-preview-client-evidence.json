@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "captured_on": "2026-10-17",
+  "scope": "Sanitized native client evidence for the finding.created fixture preview and matching delivery receipts. The acceptance scope intentionally uses one visible theme per provider, as directed for this PR.",
+  "fixture": {
+    "event": "finding.created",
+    "locale": "vi",
+    "data_class": "signal",
+    "title": "Phát hiện mới",
+    "severity": "high",
+    "body_fields": [
+      "Mức độ: high",
+      "Loại: sast",
+      "Trạng thái: open",
+      "Thời gian: 2026-10-10 08:00 UTC"
+    ],
+    "link": {
+      "label": "Open notifications",
+      "url": "https://localhost:8443/settings/alerting"
+    },
+    "template_fields": {
+      "title": "Phát hiện mới",
+      "body": "Mức độ: {{.severity}}\nLoại: {{.finding_kind}}\nTrạng thái: {{.status}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .finding_title}}\nPhát hiện: {{.finding_title}}{{end}}"
+    }
+  },
+  "console_previews": {
+    "capture_method": "Each public PNG is a literal pixel rectangle from a private native browser screenshot. Original frames are not published; no retouching, generated pixels, or content replacement was used.",
+    "visible_theme": "light",
+    "root_theme_note": "Some full-page captures had a dark root class while the captured preview panel was visibly light. The visible panel pixels, not the root class, define the theme recorded here.",
+    "records": [
+      {
+        "provider": "slack",
+        "file": "ui/notification-delivery/console/console-slack-fixture-vi-signal.png",
+        "delivery_id": "5598e5174df9a1766e3827b7496454bc",
+        "delivery_evidence": "notification-mixed-delivery-evidence.json fixture_tests: Slack vi/signal; one HTTP 200 attempt; stored preview hash 527363847aaa02b46938a1f1eea3b6e4072659c15322bc50fabe3e49781949df",
+        "rectangle": [998, 88, 343, 618],
+        "original_sha256": "785d6187fdf08d10a379b1b923c36adca8b9f0463ba4242beede0e198efaa190",
+        "crop_sha256": "dd6e451da26b0789c78017028cac206afbf1e178006e3f855c82efa03d44324b"
+      },
+      {
+        "provider": "gmail",
+        "file": "ui/notification-delivery/console/console-gmail-fixture-vi-signal.png",
+        "delivery_id": "33d2f287bbcd3f08921e398b18d7fd87",
+        "delivery_evidence": "notification-mail-delivery-evidence.json gmail receipt: one SMTP 250 attempt; the received subject, plain text, and HTML body each match the API preview after CRLF and terminal-newline normalization only",
+        "rectangle": [998, 87, 343, 551],
+        "original_sha256": "e67ba6436aaa561fa8163d926c11ea04ffb6a2033053d2d285a41ff0a9636b68",
+        "crop_sha256": "faa4f631c479e284868ee213fa34d0cff879e4ac460937b5ef84c690ef4a5c9e"
+      },
+      {
+        "provider": "outlook",
+        "file": "ui/notification-delivery/console/console-outlook-fixture-vi-signal.png",
+        "delivery_id": "8e663460e29944e3be78f414e4bc88a6",
+        "delivery_evidence": "notification-mail-delivery-evidence.json outlook receipt: native message header, decoded subject, visible text, and links match the API preview; this is visible-content parity, not raw-MIME byte parity",
+        "rectangle": [998, 87, 343, 551],
+        "original_sha256": "cae3d63e56347feb9941ee0acfe19e4e20b7290f68cb46d8d8263b4bebaddeaf",
+        "crop_sha256": "5ded791f9e383e6cf9f655b79d5aabdc33993037c04294e3ab4d82ea69d48616"
+      },
+      {
+        "provider": "telegram",
+        "file": "ui/notification-delivery/console/console-telegram-fixture-vi-signal.png",
+        "delivery_id": "4aab1db3236ae1b52d4d4a2fc63dbc96",
+        "delivery_evidence": "notification-mixed-delivery-evidence.json fixture_tests: Telegram vi/signal; one HTTP 200 attempt; stored preview hash 5196a7d51f7b282ff08bac652a15becf4862009dd07abf6d40236b3ed3cd48a0",
+        "rectangle": [998, 87, 343, 618],
+        "original_sha256": "d33d716236fc192675931266bc3da62196565cc0ca67d52a3c41ed7ef2d728c6",
+        "crop_sha256": "d9506ed75cd769413a7b1c13a92f220dbbd8857bbb381ae8eef9cf42340e2a38"
+      },
+      {
+        "provider": "google_chat",
+        "file": "ui/notification-delivery/console/console-google-chat-fixture-vi-signal.png",
+        "delivery_id": "b378b63c00a8396642674b3a9004b005",
+        "delivery_evidence": "notification-mixed-delivery-evidence.json fixture_tests: Google Chat vi/signal; one HTTP 200 attempt; stored preview hash 0d2b4be2aac8eb844b6179c71d6a056d321838128b0e079a82944d153fdced55",
+        "rectangle": [998, 87, 343, 618],
+        "original_sha256": "2bd23ca676d44c8684eddbdc4dd394f85bdb7d17c11938d9b9bb27d88f2649ea",
+        "crop_sha256": "01c8da08e4bdb7039392042ee6c556e7693acb9a0af407f4ee7dd11311bae1fc"
+      },
+      {
+        "provider": "discord",
+        "file": "ui/notification-delivery/console/console-discord-fixture-vi-signal.png",
+        "delivery_id": "935cd452a53e4c48cb230b75ff88f9a6",
+        "delivery_evidence": "notification-mail-delivery-evidence.json discord receipt: one HTTP 200 attempt; native rendered title, visible text, and link group each match the captured API preview",
+        "rectangle": [998, 87, 343, 618],
+        "original_sha256": "dc82b968fd5d0fb410b9c2e3551a1f32ddd0decc387af308661c9ba8588d3f92",
+        "crop_sha256": "40a1d99eba5da7a0236296f49700ed84ce0c756d54c13043d3c1a7759ad0c0db"
+      }
+    ]
+  },
+  "native_chat_receipts": {
+    "capture_method": "Each public PNG is a literal pixel rectangle from a private native provider screenshot. Original frames are not published; no retouching, generated pixels, or content replacement was used.",
+    "records": [
+      {
+        "provider": "slack",
+        "file": "ui/notification-delivery/chat/slack-mixed-hourly-en-detail-light.png",
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "hourly",
+        "delivery_id": "898570631189b8f792b462bb201e13e2",
+        "correlation": "Native timestamp 13:25:11 is inside the recorded actual attempt interval and matches the exact source engagement and cadence.",
+        "rectangle": [383, 224, 996, 214],
+        "original_sha256": "6f057e8798c61ead11d79fa6096344b502608b21f109e114856c0c843048bd24",
+        "crop_sha256": "4ccf92223991f7a32eb340d5b6dabec1247b6f1405593acde5837cc02c939c50"
+      },
+      {
+        "provider": "slack",
+        "file": "ui/notification-delivery/chat/slack-mixed-daily-vi-signal-light.png",
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "daily",
+        "delivery_id": "4df33d66ab008ada666c76800c56fc59",
+        "correlation": "Unique source engagement and cadence, with the native timestamp recorded in the provider document.",
+        "rectangle": [383, 222, 996, 214],
+        "original_sha256": "1bae41f540d21a08ccfe253efcecbbf153f8f420ee0800be3039f5d4972983d5",
+        "crop_sha256": "b39eba707840cf1724898152ccc9370ae0dcd1bd3486b75d3dea0ee4aaa6fb60"
+      },
+      {
+        "provider": "slack",
+        "file": "ui/notification-delivery/chat/slack-fixture-vi-signal-light.png",
+        "kind": "fixture",
+        "cell": "vi-signal",
+        "delivery_id": "5598e5174df9a1766e3827b7496454bc",
+        "correlation": "Native timestamp is inside the recorded attempt interval and the VI fixture text and link match.",
+        "rectangle": [383, 364, 996, 148],
+        "original_sha256": "9577caf2101e78e6ba55fca2a542a2a67a198ae3dae67e85037643cd32f8832e",
+        "crop_sha256": "4cfcdc67ba2d835ec68bfd3aad879c292c71d3b3958de54aecf3c6d92cd06698"
+      },
+      {
+        "provider": "telegram",
+        "file": "ui/notification-delivery/chat/telegram-mixed-hourly-en-detail-dark.png",
+        "kind": "mixed-digest",
+        "cell": "en-detail",
+        "cadence": "hourly",
+        "delivery_id": "0adcfe80d861629ac8732fa880b7eea1",
+        "remote_ref": "504",
+        "native_dom_id": "92761",
+        "correlation": "Native server timestamp is within the recorded request interval with one-second rounding and matches the cadence and content; the DOM ID differs from the Bot API ID.",
+        "rectangle": [531, 165, 696, 387],
+        "original_sha256": "d7237df70b994bf4fe3f214c84327d973ea88ee1f2a9f7239a5abb10fd0eb27b",
+        "crop_sha256": "d5c2e0865660dceba9c5fff8946cfed49428d542e53f1aed8f011d15f9425a72"
+      },
+      {
+        "provider": "telegram",
+        "file": "ui/notification-delivery/chat/telegram-mixed-daily-vi-signal-dark.png",
+        "kind": "mixed-digest",
+        "cell": "vi-signal",
+        "cadence": "daily",
+        "delivery_id": "68c4f142f73dd34f0f1d872a6f2c2592",
+        "remote_ref": "511",
+        "native_dom_id": "92770",
+        "correlation": "Native server timestamp is within the recorded request interval with one-second rounding and matches the cadence and content; the DOM ID differs from the Bot API ID.",
+        "rectangle": [531, 186, 696, 345],
+        "original_sha256": "10b7eded483744736baac4f9c17db7716a2e4870098e43e75a7e1e206ffd3120",
+        "crop_sha256": "6da7e3821d9f36d313490d4b963eaa0d65bea224c46075799b883471aa857ce7"
+      },
+      {
+        "provider": "telegram",
+        "file": "ui/notification-delivery/chat/telegram-fixture-vi-signal-dark.png",
+        "kind": "fixture",
+        "cell": "vi-signal",
+        "delivery_id": "4aab1db3236ae1b52d4d4a2fc63dbc96",
+        "remote_ref": "513",
+        "native_dom_id": "92772",
+        "correlation": "Native server timestamp 13:32:14 is within the recorded request interval with one-second rounding and matches the VI fixture. The preceding English reply quote is provider context, not the current body.",
+        "rectangle": [531, 422, 696, 225],
+        "original_sha256": "56e99278acc7bee62e563db1df0df5723b46af2f463bdc5ee37ac7b671773d48",
+        "crop_sha256": "0327ec1fbe5bd56d512ca7f0950630b1c4084989f2e61b78fe6146b36c97718d"
+      },
+      {
+        "provider": "google_chat",
+        "file": "ui/notification-delivery/chat/google-chat-fixture-vi-signal-light.png",
+        "kind": "fixture",
+        "cell": "vi-signal",
+        "delivery_id": "b378b63c00a8396642674b3a9004b005",
+        "remote_ref": "spaces/AAQAypJNJKI/messages/z8DDurI3Dhk.XTxQji4omNE",
+        "correlation": "The stored remote reference suffix equals the observed native data-id; title and body parity are recorded in notification-mixed-delivery-evidence.json.",
+        "rectangle": [820, 388, 470, 209],
+        "original_sha256": "2a999beddf79228fecd4bf3ac1708b1851b02bae89e65325779684e8742387fc",
+        "crop_sha256": "e3fe789cdf46fd2201d3ecabdceda20a49b008632cdb84f4b032f50d78341a2f"
+      }
+    ]
+  },
+  "navigation": {
+    "google_chat_fixture": {
+      "delivery_id": "b378b63c00a8396642674b3a9004b005",
+      "result": "The native Open notifications control reached https://localhost:8443/settings/alerting and the Channels heading was visible in an existing authenticated local session."
+    },
+    "telegram": "Current localhost provider labels did not expose an anchor, so this record makes no fresh Telegram click claim. Historical trusted-HTTPS navigation evidence from #1583 is reused only for the unchanged adapter path."
+  },
+  "review": {
+    "visual_review": "Independent native image QA opened all thirteen public PNGs and passed each image. Hashes and exact RGBA rectangles were rechecked against the private originals.",
+    "content_boundary": "The console preview and each referenced provider receipt show the same selected fixture fields and visible link. Pixel inspection does not establish raw API or provider payload-byte parity; byte-level claims remain limited to the Gmail evidence that records MIME/preview comparisons."
+  },
+  "limits": [
+    "The record intentionally covers one visible theme per provider; it does not claim a theme, device, browser-engine, mobile, or accessibility matrix.",
+    "No fresh-send, elapsed-window soak, or production-capacity result is claimed here.",
+    "Some older stored-event previews fall outside the newest-twenty sample limit already recorded in notification-mixed-delivery-evidence.json; this record does not claim they were rerun.",
+    "No recipient address, OAuth credential, webhook URL, raw provider payload, full browser screenshot, or private DOM/HTML is published."
+  ]
+}
