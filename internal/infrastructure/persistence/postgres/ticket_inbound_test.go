@@ -175,4 +175,35 @@ func TestTicketInboundReducerPostgresSerializesFindingProposalWindow(t *testing.
 			t.Fatal("invalid batch committed an earlier observation")
 		}
 	}
+
+	comment := ticketing.ExternalTicketComment{
+		ID: "inbound-comment-pg-snapshot", TenantID: tenant, IntegrationID: integrationA,
+		EngagementID: engagement, FindingID: finding, RemoteID: "SEC-1", AuthorID: "human-comment-author",
+		Body: "same provider comment snapshot", ProviderAt: base, CreatedAt: base,
+	}
+	start = make(chan struct{})
+	errs = make(chan error, 2)
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			errs <- store.ReduceInboundTicket(context.Background(), tenant, nil, []ticketing.ExternalTicketComment{comment}, base)
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent duplicate comment snapshot: %v", err)
+		}
+	}
+	view, err = store.ListInboundTicketView(ctx, tenant, engagement, finding)
+	if err != nil {
+		t.Fatalf("list duplicate comment snapshot: %v", err)
+	}
+	if len(view.Comments) != 1 || view.Comments[0].ID != comment.ID {
+		t.Fatalf("duplicate comment snapshot was not idempotent: %+v", view.Comments)
+	}
 }

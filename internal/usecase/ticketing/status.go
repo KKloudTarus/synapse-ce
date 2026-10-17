@@ -102,10 +102,24 @@ func (w *Workflow) tickTicketStatuses(ctx context.Context, tenant shared.ID, sto
 			}
 		}
 		// A status transition is deliberately a separate remote operation from the
-		// field refresh. A retry can therefore resume the latter only after the
-		// transition has been durably acknowledged, and never falls back to Create.
+		// field refresh. Versioned commands also persist the explanatory comment
+		// separately because Jira Cloud can accept a bundled transition yet omit its
+		// comment. Legacy snapshots retain the historical bundled semantics and are
+		// never backfilled automatically.
 		if intent.State != writeintent.Done {
 			continue
+		}
+		if statusTransitionNeedsComment(intent) {
+			comment, wasFresh, commentErr := w.openStatusCommentIntent(ctx, tenant, target, preview, intent, progress, state, source, ticketStatusRequestKey(target, progress.Episode, "comment"))
+			if commentErr != nil {
+				return created, commentErr
+			}
+			if wasFresh {
+				created++
+			}
+			if comment.State != writeintent.Done {
+				continue
+			}
 		}
 		update, fresh, err := w.openStatusUpdateIntent(ctx, tenant, target, preview, source, ticketStatusRequestKey(target, progress.Episode, "update"))
 		if err != nil {
@@ -285,6 +299,9 @@ func ticketStatusRequestKey(target ports.TicketStatusTarget, episode int, stage 
 }
 
 func (w *Workflow) openStatusUpdateIntent(ctx context.Context, tenant shared.ID, target ports.TicketStatusTarget, preview Preview, source, key string) (domain.Intent, bool, error) {
+	if existing, found, err := w.statusIntentByKey(ctx, tenant, target, key, domain.Update); err != nil || found {
+		return existing, false, err
+	}
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(preview.Payload, &payload); err != nil {
 		return domain.Intent{}, false, shared.ErrValidation
@@ -342,7 +359,7 @@ func (w *Workflow) openStatusUpdateIntent(ctx context.Context, tenant shared.ID,
 		UpdatedAt:          now,
 	}
 	entry := ports.AuditEntry{Actor: "system:ticket_status", Action: "ticket.intent.status_update", Target: id.String(), At: now, Metadata: map[string]string{"source": source}}
-	return w.intentAudit.CreateOrGetIntentAudited(ctx, tenant, i, entry)
+	return w.createOrAdoptStatusIntent(ctx, tenant, target, i, entry)
 }
 
 func (w *Workflow) ticketSyncState(ctx context.Context, tenant shared.ID, f finding.Finding) (domain.SyncState, string, error) {
@@ -363,6 +380,9 @@ func (w *Workflow) ticketSyncState(ctx context.Context, tenant shared.ID, f find
 }
 
 func (w *Workflow) openStatusIntent(ctx context.Context, tenant shared.ID, target ports.TicketStatusTarget, preview Preview, state domain.SyncState, source, transition, key string) (domain.Intent, bool, error) {
+	if existing, found, err := w.statusIntentByKey(ctx, tenant, target, key, domain.Transition); err != nil || found {
+		return existing, false, err
+	}
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(preview.Payload, &payload); err != nil {
 		return domain.Intent{}, false, shared.ErrValidation
@@ -374,7 +394,9 @@ func (w *Workflow) openStatusIntent(ctx context.Context, tenant shared.ID, targe
 	id := w.ids.NewID()
 	facts.UpdateRemoteID, facts.UpdateRemoteURL = target.Intent.RemoteID, target.Intent.RemoteURL
 	facts.StatusTransitionID, facts.StatusSource = transition, source
-	facts.StatusComment = ticketStatusComment(state, target.Mapping.Locale)
+	// Version one changes only the provider transition. Its comment is a durable
+	// follow-up command, rather than a best-effort field on a 204 response.
+	facts.StatusCommandVersion, facts.StatusMode = 1, "transition_only"
 	payload["_synapse"], _ = json.Marshal(facts)
 	raw, _ := json.Marshal(payload)
 	digest := ticketDigest(raw)
@@ -391,7 +413,107 @@ func (w *Workflow) openStatusIntent(ctx context.Context, tenant shared.ID, targe
 	now := w.clock.Now().UTC()
 	i := domain.Intent{ID: id, TenantID: tenant, IntegrationID: target.Mapping.IntegrationID, MappingID: target.Mapping.ID, FindingID: target.Intent.FindingID, EngagementID: target.Intent.EngagementID, Action: domain.Transition, RequestKey: key, PayloadDigest: digest, Marker: "synapse-intent-" + id.String(), State: writeintent.Pending, Version: 1, Snapshot: raw, MappingVersion: target.Mapping.Version, ConnectionRevision: facts.ConnectionRevision, CredentialRevision: facts.CredentialRevision, SecurityLevel: target.Mapping.SecurityLevel, CreatedAt: now, UpdatedAt: now}
 	entry := ports.AuditEntry{Actor: "system:ticket_status", Action: "ticket.intent.status_transition", Target: id.String(), At: now, Metadata: map[string]string{"state": string(state), "source": source}}
-	return w.intentAudit.CreateOrGetIntentAudited(ctx, tenant, i, entry)
+	return w.createOrAdoptStatusIntent(ctx, tenant, target, i, entry)
+}
+
+func (w *Workflow) createOrAdoptStatusIntent(ctx context.Context, tenant shared.ID, target ports.TicketStatusTarget, i domain.Intent, entry ports.AuditEntry) (domain.Intent, bool, error) {
+	saved, created, err := w.intentAudit.CreateOrGetIntentAudited(ctx, tenant, i, entry)
+	if !errors.Is(err, shared.ErrConflict) {
+		return saved, created, err
+	}
+	// A competing planner can create this stable request key after our lookup but
+	// before our insert. Its immutable marker is authoritative; adopt it instead
+	// of treating an ID/digest mismatch as permission to create another command.
+	if existing, found, lookupErr := w.statusIntentByKey(ctx, tenant, target, i.RequestKey, i.Action); lookupErr != nil || !found {
+		if lookupErr != nil {
+			return domain.Intent{}, false, lookupErr
+		}
+		return domain.Intent{}, false, err
+	} else {
+		return existing, false, nil
+	}
+}
+
+func statusTransitionNeedsComment(i domain.Intent) bool {
+	facts, _, err := readTicketSnapshot(i)
+	return err == nil && i.Action == domain.Transition && facts.StatusCommandVersion == 1 && facts.StatusMode == "transition_only"
+}
+
+// statusIntentByKey adopts an already-created durable command before a planner
+// rebuilds a snapshot. This closes the crash window between CreateOrGet and the
+// status checkpoint update without generating a second marker or digest.
+func (w *Workflow) statusIntentByKey(ctx context.Context, tenant shared.ID, target ports.TicketStatusTarget, key string, action domain.Action) (domain.Intent, bool, error) {
+	requests, ok := w.store.(ports.TicketRequestReader)
+	if !ok {
+		return domain.Intent{}, false, shared.ErrConflict
+	}
+	item, found, err := requests.FindTicketRequest(ctx, tenant, target.Mapping.ID, target.Intent.EngagementID, target.Intent.FindingID, key)
+	if err != nil {
+		return domain.Intent{}, false, err
+	}
+	if !found {
+		return domain.Intent{}, false, nil
+	}
+	if item.Action != action || item.TenantID != tenant || item.IntegrationID != target.Mapping.IntegrationID || item.MappingID != target.Mapping.ID || item.EngagementID != target.Intent.EngagementID || item.FindingID != target.Intent.FindingID {
+		return domain.Intent{}, false, shared.ErrConflict
+	}
+	return item, true, nil
+}
+
+func (w *Workflow) openStatusCommentIntent(ctx context.Context, tenant shared.ID, target ports.TicketStatusTarget, preview Preview, parent domain.Intent, progress ports.TicketStatusProgress, state domain.SyncState, source, key string) (domain.Intent, bool, error) {
+	if existing, found, err := w.statusIntentByKey(ctx, tenant, target, key, domain.Comment); err != nil || found {
+		return existing, false, err
+	}
+	if parent.ID != progress.TransitionIntentID || parent.State != writeintent.Done || progress.Episode < 1 || progress.IntegrationAuthor == "" {
+		return domain.Intent{}, false, shared.ErrConflict
+	}
+	var payload map[string]json.RawMessage
+	if json.Unmarshal(preview.Payload, &payload) != nil {
+		return domain.Intent{}, false, shared.ErrValidation
+	}
+	var facts snapshotFacts
+	if json.Unmarshal(payload["_synapse"], &facts) != nil {
+		return domain.Intent{}, false, shared.ErrValidation
+	}
+	id := w.ids.NewID()
+	facts.UpdateRemoteID, facts.UpdateRemoteURL = target.Intent.RemoteID, target.Intent.RemoteURL
+	facts.StatusComment = ticketStatusComment(state, target.Mapping.Locale) + "\n\n[" + "synapse-intent-" + id.String() + "]"
+	facts.StatusSource, facts.StatusCommandVersion, facts.StatusMode = source, 1, "comment"
+	facts.StatusParentID, facts.StatusEpisode, facts.StatusAuthor = parent.ID, progress.Episode, progress.IntegrationAuthor
+	payload["_synapse"], _ = json.Marshal(facts)
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(payload["fields"], &fields) != nil {
+		return domain.Intent{}, false, shared.ErrValidation
+	}
+	digestPayload := cloneTicketPayload(payload)
+	digest := ticketDigest(digestPayload)
+	labels := ticketLabels(fields)
+	labels = append(labels, "synapse-intent-"+id.String())
+	fields["labels"], _ = json.Marshal(labels)
+	payload["fields"], _ = json.Marshal(fields)
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return domain.Intent{}, false, shared.ErrValidation
+	}
+	now := w.clock.Now().UTC()
+	i := domain.Intent{ID: id, TenantID: tenant, IntegrationID: target.Mapping.IntegrationID, MappingID: target.Mapping.ID, FindingID: target.Intent.FindingID, EngagementID: target.Intent.EngagementID, Action: domain.Comment, RequestKey: key, PayloadDigest: digest, Marker: "synapse-intent-" + id.String(), State: writeintent.Pending, Version: 1, Snapshot: raw, MappingVersion: target.Mapping.Version, ConnectionRevision: facts.ConnectionRevision, CredentialRevision: facts.CredentialRevision, SecurityLevel: target.Mapping.SecurityLevel, CreatedAt: now, UpdatedAt: now}
+	entry := ports.AuditEntry{Actor: "system:ticket_status", Action: "ticket.intent.status_comment", Target: id.String(), At: now, Metadata: map[string]string{"source": source, "parent": parent.ID.String()}}
+	return w.createOrAdoptStatusIntent(ctx, tenant, target, i, entry)
+}
+
+func cloneTicketPayload(payload map[string]json.RawMessage) []byte {
+	clone := make(map[string]json.RawMessage, len(payload))
+	for key, value := range payload {
+		clone[key] = append(json.RawMessage(nil), value...)
+	}
+	raw, _ := json.Marshal(clone)
+	return raw
+}
+
+func ticketLabels(fields map[string]json.RawMessage) []string {
+	var labels []string
+	_ = json.Unmarshal(fields["labels"], &labels)
+	return labels
 }
 
 func ticketStatusComment(state domain.SyncState, locale string) string {

@@ -2,6 +2,8 @@ package ticketing
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -116,7 +118,14 @@ func (w *Workflow) ReceiveInboundWebhook(ctx context.Context, identity ports.Inb
 				observations = append(observations, domain.ExternalTicketObservation{TenantID: identity.TenantID, IntegrationID: integrationID, MappingID: target.Mapping.ID, EngagementID: target.Intent.EngagementID, FindingID: target.Intent.FindingID, RemoteID: parsed.RemoteID, StatusCategory: parsed.StatusCategory, ProviderUpdatedAt: parsed.UpdatedAt, StatusChangedAt: parsed.StatusChangedAt, AuthorID: parsed.StatusAuthorID, StatusAuthorKnown: parsed.StatusAuthorKnown, OwnWrite: ownStatusWrite, CheckedAt: now, Version: 1})
 			}
 			if parsed.Comment != "" && !ownComment {
-				comments = append(comments, domain.ExternalTicketComment{ID: w.ids.NewID(), TenantID: identity.TenantID, IntegrationID: integrationID, EngagementID: target.Intent.EngagementID, FindingID: target.Intent.FindingID, RemoteID: parsed.RemoteID, AuthorID: parsed.CommentAuthorID, Body: parsed.Comment, ProviderAt: parsed.CommentAt, CreatedAt: now})
+				providerCommentID := parsed.CommentID
+				if providerCommentID == "" {
+					providerCommentID = strings.TrimSpace(event.EventID)
+				}
+				if len(providerCommentID) > 255 {
+					return shared.ErrValidation
+				}
+				comments = append(comments, domain.ExternalTicketComment{ID: inboundCommentSnapshotID(identity.TenantID, integrationID, target.Intent.EngagementID, target.Intent.FindingID, parsed.RemoteID, providerCommentID, parsed.CommentAt, parsed.Comment), TenantID: identity.TenantID, IntegrationID: integrationID, EngagementID: target.Intent.EngagementID, FindingID: target.Intent.FindingID, RemoteID: parsed.RemoteID, AuthorID: parsed.CommentAuthorID, Body: parsed.Comment, ProviderAt: parsed.CommentAt, CreatedAt: now})
 			}
 		}
 		if len(observations) == 0 && len(comments) == 0 {
@@ -148,9 +157,21 @@ func isInboundJiraTicketEvent(eventType string) bool {
 }
 
 type inboundJiraEvent struct {
-	RemoteID, StatusCategory, StatusAuthorID, CommentAuthorID, Comment string
-	UpdatedAt, StatusChangedAt, CommentAt                              time.Time
-	StatusAuthorKnown                                                  bool
+	RemoteID, StatusCategory, StatusAuthorID, CommentID, CommentAuthorID, Comment string
+	UpdatedAt, StatusChangedAt, CommentAt                                         time.Time
+	StatusAuthorKnown                                                             bool
+}
+
+type inboundJiraActor struct {
+	AccountID string `json:"accountId"`
+	Name      string `json:"name"`
+}
+
+func (a inboundJiraActor) id() string {
+	if accountID := strings.TrimSpace(a.AccountID); accountID != "" {
+		return accountID
+	}
+	return strings.TrimSpace(a.Name)
 }
 
 var inboundJiraKey = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,254}-[1-9][0-9]{0,18}$`)
@@ -170,14 +191,14 @@ func parseInboundJira(eventType string, body []byte) (inboundJiraEvent, bool, er
 				} `json:"status"`
 			} `json:"fields"`
 		} `json:"issue"`
-		User struct {
-			AccountID string `json:"accountId"`
-			Name      string `json:"name"`
-		} `json:"user"`
+		User    inboundJiraActor `json:"user"`
 		Comment struct {
-			Body    json.RawMessage `json:"body"`
-			Created string          `json:"created"`
-			Updated string          `json:"updated"`
+			ID           string           `json:"id"`
+			Author       inboundJiraActor `json:"author"`
+			UpdateAuthor inboundJiraActor `json:"updateAuthor"`
+			Body         json.RawMessage  `json:"body"`
+			Created      string           `json:"created"`
+			Updated      string           `json:"updated"`
 		} `json:"comment"`
 		Changelog struct {
 			Created string `json:"created"`
@@ -190,36 +211,38 @@ func parseInboundJira(eventType string, body []byte) (inboundJiraEvent, bool, er
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return inboundJiraEvent{}, false, shared.ErrValidation
 	}
-	author := strings.TrimSpace(payload.User.AccountID)
-	if author == "" {
-		author = strings.TrimSpace(payload.User.Name)
-	}
-	out := inboundJiraEvent{RemoteID: strings.TrimSpace(payload.Issue.Key), CommentAuthorID: author}
-	if !inboundJiraKey.MatchString(out.RemoteID) || len(author) > 255 {
+	statusEvent := eventType == "jira:issue_created" || eventType == "jira:issue_updated"
+	statusAuthor := payload.User.id()
+	out := inboundJiraEvent{RemoteID: strings.TrimSpace(payload.Issue.Key)}
+	if !inboundJiraKey.MatchString(out.RemoteID) || (statusEvent && len(statusAuthor) > 255) {
 		return inboundJiraEvent{}, false, shared.ErrValidation
 	}
-	category := strings.TrimSpace(payload.Issue.Fields.Status.StatusCategory.Key)
-	if category != "" && category != "new" && category != "indeterminate" && category != "done" {
-		return inboundJiraEvent{}, false, shared.ErrValidation
-	}
-	out.StatusCategory = category
-	if payload.Issue.Fields.Updated != "" {
-		at, err := parseInboundJiraTime(payload.Issue.Fields.Updated)
-		if err != nil {
+	if statusEvent {
+		category := strings.TrimSpace(payload.Issue.Fields.Status.StatusCategory.Key)
+		if category != "" && category != "new" && category != "indeterminate" && category != "done" {
 			return inboundJiraEvent{}, false, shared.ErrValidation
 		}
-		out.UpdatedAt = at
-	}
-	if hasStatusChange(payload.Changelog.Items) || (strings.TrimSpace(eventType) == "jira:issue_created" && payload.Changelog.Total == 0) {
-		out.StatusAuthorID, out.StatusAuthorKnown = author, author != ""
-		if payload.Changelog.Created != "" {
-			at, err := parseInboundJiraTime(payload.Changelog.Created)
+		out.StatusCategory = category
+		if payload.Issue.Fields.Updated != "" {
+			at, err := parseInboundJiraTime(payload.Issue.Fields.Updated)
 			if err != nil {
 				return inboundJiraEvent{}, false, shared.ErrValidation
 			}
-			out.StatusChangedAt = at
-		} else {
-			out.StatusChangedAt = out.UpdatedAt
+			out.UpdatedAt = at
+		}
+		if hasStatusChange(payload.Changelog.Items) || (eventType == "jira:issue_created" && payload.Changelog.Total == 0) {
+			// Jira's top-level user describes a status-changing issue event only.
+			// It is not a comment author: Cloud comment webhooks omit it entirely.
+			out.StatusAuthorID, out.StatusAuthorKnown = statusAuthor, statusAuthor != ""
+			if payload.Changelog.Created != "" {
+				at, err := parseInboundJiraTime(payload.Changelog.Created)
+				if err != nil {
+					return inboundJiraEvent{}, false, shared.ErrValidation
+				}
+				out.StatusChangedAt = at
+			} else {
+				out.StatusChangedAt = out.UpdatedAt
+			}
 		}
 	}
 	if len(payload.Comment.Body) > 0 && string(payload.Comment.Body) != "null" {
@@ -231,11 +254,28 @@ func parseInboundJira(eventType string, body []byte) (inboundJiraEvent, bool, er
 		if len(out.Comment) > 16<<10 {
 			return inboundJiraEvent{}, false, shared.ErrValidation
 		}
-		stamp := payload.Comment.Updated
-		if stamp == "" {
-			stamp = payload.Comment.Created
+		out.CommentID = strings.TrimSpace(payload.Comment.ID)
+		if len(out.CommentID) > 255 {
+			return inboundJiraEvent{}, false, shared.ErrValidation
 		}
-		if stamp != "" {
+		// Jira can embed an edited comment in issue_updated before it delivers the
+		// matching comment_updated callback. Both shapes describe the same version.
+		// A comment_created payload remains a creation even if Jira includes updated.
+		isEdit := eventType == "comment_updated" || (eventType == "jira:issue_updated" && strings.TrimSpace(payload.Comment.Updated) != "")
+		out.CommentAuthorID = payload.Comment.Author.id()
+		stamp := payload.Comment.Created
+		if isEdit {
+			if updateAuthor := payload.Comment.UpdateAuthor.id(); updateAuthor != "" {
+				out.CommentAuthorID = updateAuthor
+			}
+			stamp = payload.Comment.Updated
+		}
+		if len(out.CommentAuthorID) > 255 {
+			return inboundJiraEvent{}, false, shared.ErrValidation
+		}
+		if strings.TrimSpace(out.CommentAuthorID) == "" || strings.TrimSpace(stamp) == "" {
+			out.Comment, out.CommentAuthorID = "", ""
+		} else {
 			at, err := parseInboundJiraTime(stamp)
 			if err != nil {
 				return inboundJiraEvent{}, false, shared.ErrValidation
@@ -243,7 +283,22 @@ func parseInboundJira(eventType string, body []byte) (inboundJiraEvent, bool, er
 			out.CommentAt = at
 		}
 	}
-	return out, out.StatusCategory != "" || out.Comment != "", nil
+	return out, (statusEvent && out.StatusCategory != "") || out.Comment != "", nil
+}
+
+// inboundCommentSnapshotID deduplicates a provider comment version across Jira
+// webhook shapes while preserving an append-only snapshot when the provider
+// changes its timestamp or literal, redacted body.
+func inboundCommentSnapshotID(tenantID, integrationID, engagementID, findingID shared.ID, remoteID, providerCommentID string, revisionAt time.Time, body string) shared.ID {
+	payload, _ := json.Marshal(struct {
+		TenantID, IntegrationID, EngagementID, FindingID string
+		RemoteID, ProviderCommentID, RevisionAt, Body    string
+	}{
+		TenantID: tenantID.String(), IntegrationID: integrationID.String(), EngagementID: engagementID.String(), FindingID: findingID.String(),
+		RemoteID: remoteID, ProviderCommentID: providerCommentID, RevisionAt: revisionAt.UTC().Format(time.RFC3339Nano), Body: body,
+	})
+	sum := sha256.Sum256(payload)
+	return shared.ID("inbound-comment-" + hex.EncodeToString(sum[:16]))
 }
 
 func hasStatusChange(items []struct {

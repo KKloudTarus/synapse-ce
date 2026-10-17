@@ -1,202 +1,165 @@
 # Jira sync and report publishing acceptance
 
-Acceptance ledger established before implementation on 2026-10-17 against
-`origin/main` at `8a6c785b`. Delivery is one Draft PR under `pho-veteran`, with no
-merge. The implementation reuses B04 (#1423–#1430, PR #1582), the inbound plane
-(#1434, PR #1500), WS3 email (#1368), finding status events (#1393), and the
-shipped document foundation (#1442, PR #1577). Historical captures prove only
-those original scopes.
+This is the current acceptance ledger for Draft PR #1586. It is owned by
+`pho-veteran`; it is not merged and must not be merged by this work. The refreshed
+`origin/main` at `caa6b1ea` is integrated into the PR work. The implementation
+reuses the shipped B04 and #1434 foundations and the
+#1442 document foundation from PR #1577 (`8a6c785b`), rather than recreating them.
 
-## Acceptance ledger
+The original ledger was established before implementation against `8a6c785b`.
+Its early captures remain useful only for the limited paths they actually recorded:
+for example, a Cloud restriction refusal, Free-plan behavior, and earlier mail
+delivery. They are superseded by the continuation results below wherever they
+conflict. In particular, they do not prove current restricted publication, current
+strict sharing, or the final visual review requirement.
 
-| Order | Issue | Implementation | Current acceptance and PR disposition |
+## Current acceptance ledger
+
+| Order | Issue | Verified continuation evidence | PR disposition |
 | --- | --- | --- | --- |
-| 1 | #1431 | Administrator opt-in; current confirmed/native/severity eligibility; durable event receipts and dispatch rechecks | Cloud en/vi auto-created tickets, no open/high or confirmed/low submission; DC and restricted issue security not demonstrated. Refs. |
-| 2 | #1432 | Finding or vulnerability/Project grouping; canonical observed assets, immutable group facts, membership/revision fencing and update-in-place | Real PostgreSQL and Cloud/DC formatting contracts pass. No genuine multi-asset Project fixture through the current API. Refs. |
-| 3 | #1433 | Remediated, accepted-risk, false-positive and reopen transitions; transition before field update; independent episodes | Cloud same-ticket close → reopen → close observed. Accepted-risk, false-positive and DC live captures remain missing. Refs. |
-| 4 | #1435 | WS10 signed hook admission, atomic two-hour dedupe, hourly proposal limit, status-author attribution, own-write suppression, literal external comments | Real Cloud polling created one pending proposal from Automation for Jira while finding stayed open; own-principal closure created none. Cloud-origin webhook/comment delivery and DC remain unproven. Refs. |
-| 5 | #1436 | Default-on fair polling; at most 250 actual provider requests per pass; status drift repair and unreadable/deleted detection | Real Cloud deletion detected, watermark retained; drift/budget/deletion/tenant contracts pass. Closes: full reconciliation acceptance is supported by the current tests and real deletion evidence. |
-| 6 | #1443 | Cloud/DC adapter, escaped allowlisted storage, PDF/images, neutral shell, exact read-group/public-sharing checks before content, update/hash skip/footer | Real connection and neutral-shell path pass; Free restriction API refuses with HTTP 403 before any attachment/body. Successful restricted publish, republish/history/hash skip/footer and DC remain missing. Refs. |
-| 7 | #1444 | Current human PermReview, detail/source/legal-hold checks at admission and every write; audited release/purge, retired targets | Permission/legal-hold/RLS/purge contracts pass. No successful live restricted release or purge because the available destination cannot establish restricted sharing. Refs. |
-| 8 | #1445 | Weekly/monthly IANA schedules; frozen durable occurrences, current authority/recipient checks, WS3 PDF MIME/size limits, uncertain SMTP recovery and safe history | Final occurrence delivered to Gmail with a Vietnamese-complete PDF preview; a prior occurrence reached Outlook Junk with its attachment listed but blocked from opening. Both used the independently checked owner addresses. Scheduled Confluence version remains unavailable. Refs. |
+| 1 | #1431 | Cloud Jira company-managed project `B7R` uses an issue-security level whose only member is a personal one-member group, plus a sole administrator role. `B7R-1` demonstrates Vietnamese auto-push and `B7R-2` English auto-push of confirmed high findings. Open/high and confirmed/low fixtures create zero tickets. The same ticket exercised false-positive → Done (`statusCategory.key == "done"`) → To Do (`new`) with three independent durable-comment intent markers and stable quiescence without a duplicate. | Closes; acceptance supported by the recorded evidence. |
+| 2 | #1432 | A real bounded source run evolved private rooted source `a → b → a`, preserving the canonical advisory ID and existing-asset attribution. Cloud `B7R-3` and DC `SYNACC-6` each grouped two observed assets under security level 10000, then updated the same issue from English to Vietnamese. Removing the Log4j dependency from service `a` and submitting the normal review preview updated the same issues with only service `b`; no duplicate group was created. | Closes; acceptance supported by the recorded evidence. |
+| 3 | #1433 | Cloud and DC exercised same-ticket lifecycle paths. Cloud `B7R-1` covered false-positive and reopen. DC covered `SYNACC-3` remediated → reopen, `SYNACC-4` false-positive → reopen, and genuine SCA accepted-risk on `SYNACC-5` to Done/Highest. Locale, priority, security, and deep links were inspected against live providers. | Closes; acceptance supported by the recorded evidence. |
+| 4 | #1435 | Signed native Cloud and DC webhooks each received real HMAC `issue_updated` and `comment_created` deliveries (202). The Cloud Automation-for-Jira Done change created a proposal only; the finding stayed open. DC reviewer Done likewise created a proposal while the finding remained confirmed. DC native create and edit event pairs each added exactly one snapshot; repeated To Do → Done retained one proposal. Earlier duplicate historical rows remain retained. The Cloud and DC hook registrations, tunnels, and proxies are closed. | Closes; acceptance supported by the recorded evidence. |
+| 5 | #1436 | Cloud polling and reconciliation contracts remain covered, including deleted/unreadable detection, watermark retention, fair request budgeting, drift repair, and tenant isolation. | Closes; acceptance supported by the recorded evidence. |
+| 6 | #1443 | Cloud and DC adapters used real providers. Cloud current strict sharing is exact read and update ACLs: zero explicit users and only the configured group. A published workspace public-link block overrides the organization default. Cloud page `131244` was republished at version 5, and a real weekly IANA occurrence created version 6. The latest PDF attachment downloaded successfully and its two rendered pages were inspected with no warning/table overlap. DC provider behavior was verified through a real page and PDF after the documented PUT restriction contract fix. | Refs; unassisted fresh Cloud/DC restriction creation still fails due the provider self-eviction behavior. |
+| 7 | #1444 | Admission and recovery recheck human `PermReview`, source/detail/legal-hold conditions, tenant fences, destination revisions, and receipt history. The Cloud publish was resumed from a neutral prepared page with the original actor and version-fenced audit record. Real Cloud and DC release/purge paths completed and were verified absent. A real legal hold was placed and read back, blocked valid publish and unpublish with 403, and was released; runtime flags were restored. Loading, empty, error, and read-only UI states were inspected. | Closes; acceptance supported by the recorded evidence. |
+| 8 | #1445 | The Cloud weekly schedule ran at 21:15 Asia/Ho_Chi_Minh (14:15 UTC), reached Done with no failed or uncertain delivery, and was disabled by a versioned request. An unchanged-hash run skipped publication. Earlier real Gmail PDF delivery and preview remain in scope; Outlook only proves a prior Junk-folder attachment listing, not a final attachment preview. | Refs; a final Outlook PDF opened-preview is still missing. |
 
-One theme per client is sufficient under the user's instruction. Captures are
-inspected before inclusion. A local contract test never substitutes for a live
-provider result. Native browser captures are JPEG. Console captures currently cover
-the engagement panel, safe refusal, proposal and run history; new settings/Project
-screens and all loading/permission-denied states are not fully captured. The final PR uses `Closes` only for an issue whose entire
-acceptance is supported by current evidence.
+One theme is sufficient for acceptance. Provider mocks and UI fixtures do not
+substitute for the live results above. The final visual gallery and manifest cover
+49 inspected images, two PDFs, and all three rendered PDF pages; they are ready for
+the Draft PR's inline review material.
 
-## Safety and recovery
+## Environment and credential boundaries
 
-- Every command, group, observation, occurrence and recipient delivery is tenant
-  bound; forced RLS and same-tenant parent checks remain enforced.
-- Inbound input creates proposals/comments only. Done means
-  `statusCategory.key == "done"`; a resolution name does not confer authority.
-  Status-change author attribution is independent of a later comment author.
-- Current human release permission, source privacy/state, detail classification,
-  legal hold and destination revisions are rechecked before sensitive writes.
-- Content comes from stored report facts and verified evidence chains. A neutral
-  page contains only a preparation message and correlation marker. No report
-  title, body, PDF or image is uploaded before exact restricted sharing is proven.
-  Cloud additionally requires current public-link blocking policy proof; an
-  operator assertion cannot substitute for it.
-- Ambiguous remote writes retain their target fence. Lost SMTP acknowledgement
-  stays uncertain and is not automatically resent. Frozen occurrence artifacts
-  cannot be changed by lease recovery. Purge guards every attachment/page DELETE.
-- The `integrations` worker uses fail-closed dispatch-only tool adapters for stored
-  report generation. It claims only integration and enabled notification work;
-  `all` retains its mandatory sandbox. Profiles have independent maintenance
-  leases. The operator email kill switch also gates scheduled PDF delivery.
+- The real stack is the isolated `synapse-b07-runtime` Docker Compose project:
+  API, worker, web, PostgreSQL, MinIO, Mailpit, and trusted local TLS. Provider
+  acceptance uses real API/worker/web paths, not mocks.
+- The local Data Center lab runs pinned Jira 11.3.12 and Confluence 10.2.17 with
+  official three-hour, ten-user Atlassian test licenses. Fresh lab administrator
+  credentials and personal access tokens remain private and are retained through
+  the PR as directed.
+- Personal no-card Confluence Standard, Atlassian Guard Standard, and Jira Standard
+  trials are retained through acceptance under the user's instruction. Jira Standard
+  was activated unexpectedly by a read-style “Try now” navigation; no card, billing,
+  or school-organization resource was added or changed.
+- The Gmail OAuth client and grant remain private until this PR merges, even after
+  the earlier credential exposure. Do not revoke or delete them before merge. The
+  organization policy read key is private/vault-only and has only policy-read scope
+  through 2026-10-18.
+- The temporary Cloud webhook tunnel exposed only the signed webhook route during
+  the test. It is closed; no URL, path, HMAC material, or credential is recorded in
+  this directory.
 
-## Real environment and Cloud runs
+## Provider results and limits
 
-A fresh isolated Docker Compose project, `synapse-b07-runtime`, runs current API,
-worker, web, PostgreSQL, MinIO, Mailpit and trusted local TLS at
-`https://localhost:8444`. Current Go binaries are built with `CGO_ENABLED=0` and
-mounted into the existing production images; the frontend serves the current
-production build. Worker runs non-privileged with Docker's default seccomp policy.
-The `all` worker correctly refused startup when the container could not provide
-bubblewrap namespaces; no capability or seccomp exception was added. The supported
-`integrations` composition then started real artifact and scheduled delivery.
-The older full stack and its revoked B06 OAuth credentials were not used for these
-runs. Dedicated PostgreSQL containers isolate integration suites from acceptance.
+### Jira Cloud and Data Center
 
-The personal Atlassian site is `synapse-personal-lab.atlassian.net`, project `KAN`,
-Confluence space `SIL`. Initial Free signup unexpectedly selected a Standard trial;
-only this newly created sandbox was corrected to Free without a payment method.
-No school organization resources were selected or changed. The user approved a
-one-day account token and the displayed Developer Terms; expiry is 2026-10-18.
-Credentials remain private/vault-only, with calls constrained to this lab origin.
-This is an operational boundary, not a claim that an account token is site-scoped.
+Cloud restricted-sharing acceptance uses the dedicated `B7R` project rather than
+the earlier unrestricted personal-lab fixtures. The effective current-user
+permissions include browse, create, set issue security, add comments, transition,
+and project administration; the level is actually selectable by the integration
+actor. English and Vietnamese tickets were inspected after provider writes.
 
-### Jira Cloud
+Data Center acceptance uses restricted `SYNACC` issues: `SYNACC-2` is an English
+confirmed-high auto-push under security level 10000, and the negative fixtures
+remain at zero. `SYNACC-3`, `SYNACC-4`, and `SYNACC-5` cover the Vietnamese lifecycle
+paths listed in the ledger. Reviewer browser login succeeded without a reset; the
+earlier 403 came from Jira's native Basic-auth filtering. These were performed
+against the official local lab, not by direct database changes.
 
-The real API connection test succeeded. A detail mapping with a recorded
-administrator waiver was necessary because Free exposes no issue security levels.
-Only synthetic personal lab data was used. This waiver is not restricted-security
-acceptance.
+The new Project path uses canonical observed assets, not fabricated SQL rows. A
+private bounded source changed from `a` to `b` and back to `a`; the resulting
+Cloud `B7R-3` and DC `SYNACC-6` each represented the same two-asset group, retained
+its canonical advisory identity, and were updated in place across English and
+Vietnamese. A later normal review/preview/submit after removing the Log4j dependency
+from service `a` reduced the group to service `b` without creating another ticket.
+The public [continuation provider proof](continuation-provider-proof.json) records
+only the whitelisted provider states and observed-asset rows used for this run.
 
-- Human confirmation created `KAN-4` once, in Vietnamese, through durable automatic
-  processing. Intent reached `done` with one create attempt. Literal `<script>` and
-  markup delimiters remained text. The finding link opened the correct console
-  finding at `SYNAPSE_PUBLIC_BASE_URL`.
-- The same ticket transitioned To Do → Done → To Do → Done through stored finding
-  state changes, with field refresh after each transition. No replacement issue
-  was created. English confirmed/critical fixture created `KAN-5`; confirmed/low
-  and unconfirmed/high fixtures had no intent.
-- A manual Jira flow was limited by `key = KAN-4`. Its real actor, Automation for
-  Jira, differed from the integration principal. Its Done transition produced one
-  pending retest proposal while the Synapse finding remained `open`. Repeated
-  polling retained the same proposal. Prior own-principal changes produced none.
-- The synthetic `KAN-5` was deleted through Jira's API (HTTP 204). Subsequent polling
-  returned `deleted_or_unreadable: true` and retained the provider update watermark.
-- A literal Vietnamese comment was posted to the sandbox issue. Polling does not
-  import comments; the Cloud-origin webhook cannot reach local-only TLS. No claim
-  of live inbound comment delivery is made.
-
-Inspected captures: [Vietnamese ticket](jira-cloud-auto-push-vi-dark.jpg),
-[English ticket before deletion](jira-cloud-auto-push-en-dark.jpg),
-[pending proposal in console](console-jira-proposal-en-light.jpg).
+The Cloud-origin test is complete and safely closed. The native DC test also
+admitted valid signed `issue_updated` and `comment_created` events (202). A real
+reviewer Done transition created a proposal while the linked finding stayed
+confirmed. Native create and edit event pairs each added one snapshot, preserving
+the original and edited rows; a repeated To Do → Done transition retained one
+proposal. The fix scopes stable hashes, normalizes revisions, and uses PostgreSQL
+primary-key dedupe. Two pre-fix duplicate historical rows are retained rather than
+rewritten. The [DC webhook proof](dc-webhook-provider-proof.json) records these
+facts and the closed hook/tunnel cleanup.
 
 ### Confluence Cloud
 
-The real connection test succeeded. Live testing found and corrected the
-restriction request shape: Atlassian requires an array (or paged results object),
-not a single restriction object. A Cloud/DC request-contract regression now checks
-that shape and the provider-specific group identity.
+The Cloud policy parser now accepts the actual heterogeneous policy list and
+resource representation while failing closed for invalid resource types. Before
+every upload, the adapter verifies both sharing operations: read and update must
+contain no explicit users and only the configured group. It also requires the
+published workspace public-link block that applies to the target site; the broader
+organization default being allow does not satisfy the check.
 
-On the corrected build, publication intent `c3823c49c00f02a0669569e472a2c59a`
-created neutral page `131218`, version 1. Exact read restriction returned HTTP 403.
-The worker retained the restrictions checkpoint and stopped with `provider_refused`;
-independent API reads confirmed the preparation message/marker only and **zero
-attachments**. No report title/body, PDF or image reached the page. The sharing
-UI explicitly states that Free cannot restrict content to specific people.
+The original Cloud page required assisted neutral preparation because Confluence's
+fresh group-only restriction call evicts its own actor even when that actor belongs
+to the configured group. Earlier versions 2–4 carried an explicit publisher update
+grant and are therefore not strict group-only proof. The page was corrected to both
+group-only ACLs, then republished at version 5. A subsequent weekly occurrence
+produced version 6, with no failed or uncertain result, and was disabled. The
+unchanged-hash attempt skipped remote publication. The newest downloaded PDF is
+two pages, and both pages were rendered and visually checked after the auto-height
+layout fix. Five Cloud PDF attachments were produced by the real runs; the newest
+one is the final rendered two-page artifact.
 
-Inspected captures: [provider restriction limitation](confluence-cloud-publication-blocked-en-light.jpg),
-[console refusal](console-publication-refused-en-light.jpg). These prove safe
-refusal, not successful publication. Successful Cloud restricted sharing/public-link
-proof, version+1, unchanged-hash skip, PDF/footer and purge require a suitable
-sandbox. The former Data Center host remains offline; no paid evaluation or trial
-was started to replace it.
+### Confluence Data Center
 
-### Scheduled PDF
+Live testing established that the DC restriction endpoint requires PUT, not POST.
+The adapter sends the read operation with the configured group and explicit empty
+user list while preserving the update operation. A fresh group-only request still
+returns the provider's self-eviction failure, so the successful DC run also used a
+neutral page prepared with the current actor, followed by UI removal of that actor.
+The final API read showed zero read users, one configured read group, and an empty
+explicit update ACL. Resume of the failed intent completed at version 2; a real
+republish completed at version 3; unchanged content then skipped. The final one-page
+PDF was downloaded successfully.
 
-A fresh temporary Desktop OAuth client and Gmail SMTP grant were created in the
-personal Google project `ezquiz` with the user's explicit approval. The grant uses
-`https://mail.google.com/`; its material is private and the relay is sealed in the
-vault. Revoked B06 credentials were never retried. The user subsequently instructed that the temporary grant and client remain until
-after this Draft PR merges. They are retained privately; acceptance schedules are
-disabled after their first occurrence. No merge is performed by this task.
+These assisted Cloud/DC paths prove fail-closed behavior and the resume/recovery
+contract. They do not prove unassisted fresh group-only restriction creation. That
+remaining vendor limitation is tracked as Refs #1443.
 
-The bootstrap operator is deliberately excluded from identity memberships. A
-verified bootstrap contact alone therefore cannot receive governed channel mail.
-The acceptance setup uses an ordinary local administrator provisioned through the
-API and official identity backfill, then actual Mailpit contact verification for
-the user's Gmail and Outlook mailboxes. No recipient-policy SQL or fabricated
-membership/domain proof is used. The actual report endpoint returned a real PDF
-with a recorded digest. The first weekly occurrence completed with two SMTP
-acceptances, no failed or uncertain deliveries, and was disabled. Gmail web showed
-the PDF attachment and intact Vietnamese text; its link opened the correct
-engagement after ordinary sign-in. SMTP acceptance alone did not prove Outlook
-receipt: the autogenerated account alias did not show that message. The final run
-used the owner address independently read from an existing received message.
-Outlook web then showed that occurrence in Junk with the PDF listed (19 KB),
-but blocked attachment opening. The protection was left intact. A further real
-occurrence after the font fix ran at 11:10 UTC, reached `done` with two SMTP
-acceptances and no failures/uncertainty, and was disabled. Gmail received
-`synapse-report-a524134800446a1f.pdf`; its actual PDF preview now shows the complete
-Vietnamese title and finding text. The Outlook capture is the preceding 10:51 UTC
-occurrence, not a claim that the final attachment was opened there.
+## Implementation and safety evidence
 
-## Checks and reviews
+- Jira status progression now separates transition, durable independent comment,
+  and field update. It stores exact receipts for recovery and preserves legacy
+  behavior where no comment is required. Inbound Cloud payload handling uses the
+  actual author and timestamp fields; inbound events create proposals only.
+- Report publication can resume a failed prepared creation only with the original
+  actor, source and authority checks, frozen configuration, current sharing proof,
+  and a version-fenced, stable-checkpoint audit record. It does not retry uncertain
+  remote writes.
+- Confluence policy and ACL validation fail closed. The DC request contract is
+  provider-specific. The worker now wires the real SCA SLA assessor. PDF warning
+  text uses automatic row height so long content cannot overlap the engine table.
+- The rollout guidance documents the required worker ordering; mixed old and new
+  workers are not a supported deployment state for the changed recovery flow.
+- Legacy inbound payloads without a provider comment ID use delivery identity for
+  snapshot dedupe; different deliveries without that ID cannot be correlated.
+  Historical rows are not backfilled. Keep compatible consumers when deduplication
+  is required, following the coordinated rollout guidance.
+- Tenant/RLS, permissions, idempotency, legal holds, secret redaction, bounded
+  receipts, and evidence-chain checks remain required controls. Source changes do
+  not put secrets, provider credentials, webhook material, or private evidence in
+  this public directory.
+- The [legal-hold proof](legal-hold-provider-proof.json) records the placed hold,
+  release-admission 403 denials, release, and restored runtime flags without credential data.
 
-Passing evidence includes:
+## Final verification and retained limits
 
-- Full web suite: 206 files, 1,366 tests (two workers); production build and TypeScript.
-- Current Go build/vet/typecheck, golangci-lint 2.13.2 with zero issues, and hostile
-  tenant HTTP harness.
-- Real PostgreSQL document/group/inbound contracts, non-superuser migration
-  rollback, schedule null/freeze/concurrent admission/recovery, and runtime RLS
-  with `NOSUPERUSER NOBYPASSRLS` (owned/foreign/unbound access and forged INSERT
-  specifically returning SQLSTATE 42501).
-- Actual local SMTP sender contracts for accepted and lost-ACK PDF delivery,
-  current-authority denial and provider-disabled scheduling before SMTP.
-- Combined implementation QA passed after scheduler, closure projection,
-  maintenance lease and provider-disable fixes. It does not replace final Taurus
-  review or real provider acceptance.
+| Item | Current state |
+| --- | --- |
+| Cloud and DC unpublish/purge | Complete. DC completed in one attempt: page, two historical versions, and both PDFs read back 404. A fresh Cloud publication completed purge in one attempt: current/trash page, history, and attachment listing read back 404, and the link is retired. An earlier pre-fix Cloud purge failed before any DELETE because V1 `att` IDs were rejected; that old command remains fenced and its page is retained. The adapter now validates and normalizes Cloud attachment IDs for V2 deletion. |
+| Visual preview inventory | Complete: 49 inspected images, two PDFs, and all three rendered PDF pages cover changed visual components and provider flows. |
+| Current checks | Nine recorded checks passed, including the final full baseline at 16:08:33 UTC, web 208 files / 1,400 tests and production build, final changed-package/HTTP race coverage, and concurrent PostgreSQL snapshot coverage. The final Source Findings icon-focused check passed 12 tests, TypeScript and the production build at 16:15:05 UTC. See [verification summary](verification-summary.md). |
+| Current full gate | All final reviewers, including security's edit fix, performance and reliability's narrow delta, the late DC metadata delta, and implementation QA passed. The worktree-bound report is `.git/taurus/verification.json`; it is validated against the final staged tree before committing and refreshed for the committed tree before pushing. |
+| Project multi-asset provider run | Complete. The real source, Cloud, and DC paths demonstrated canonical advisory identity, existing-asset attribution, group update-in-place, and no duplicate group. |
 
-The full PostgreSQL package passed in the broad run before the final queue fixes;
-current focused PostgreSQL schedule/inbound contracts then passed with migrations
-through 0259. The broad all-package command itself failed an import-graph race
-while a test import changed; a subsequent complete `make test` passed, as did
-current document/composition regressions. The unconstrained web run was stopped after timing failures under machine load;
-the same suite passed with two workers and unchanged assertions. A dirty-database rollback guard failure
-was separately resolved by resetting only an ephemeral test database and rerunning
-its focused contracts. Neither failed command is presented as a pass.
-
-Final QA, security, architecture, performance, reliability, algorithm and font
-provenance review have passed.
-Confirmed findings fixed include fair schedule admission, Jira stage deadlines and
-timeout checkpoints, report paragraph bounds, audit failure admission, schedule
-configuration fencing, visible worker failure signals and civil-date arithmetic
-through Santiago’s midnight DST gap. Actual Gmail PDF inspection found missing
-Vietnamese glyphs in the existing core font; both PDF renderers now embed
-Liberation Sans, with full glyph-range, deterministic rendering and extraction
-checks. Distribution manifests carry its exact license notice. Ordered indexes support
-the new queues; recovery may still inspect an ineligible nonterminal prefix, so
-no constant-time scan or production load claim is made. Frontend review passed after visually inspecting all 17 retained captures.
-The tier 0 verification report is maintained locally at
-`.git/taurus/verification.json`; it must validate against the exact tree before
-commit and push. Remaining live-provider acceptance is listed above and does not
-become complete because the implementation gate passes.
-
-Inspected delivery captures: [Gmail message](gmail-scheduled-report-en-light.jpg),
-[Gmail attachment](gmail-scheduled-pdf-attachment-en-light.jpg),
-[actual Unicode PDF preview](gmail-scheduled-pdf-preview-en-light.jpg),
-[Outlook prior occurrence in Junk](outlook-scheduled-report-en-light.jpg), and
-[console opened from the report link](console-scheduled-report-deep-link-en-light.jpg),
-and [disabled schedule with immutable run history](console-scheduled-history-en-light.jpg).
-The [provider results](provider-results.json), [command records](verification-checks.json),
-[reconciliation output](reconciliation-tests.txt), and [font provenance](font-provenance.json)
-retain the corresponding classifications and limits.
+The PR remains Draft with Refs #1443 and Refs #1445 for the two limits stated
+above. `Closes` is reserved for the six issues whose acceptance and visual review
+material are supported by the recorded evidence.

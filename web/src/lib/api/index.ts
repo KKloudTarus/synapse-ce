@@ -25,6 +25,7 @@ export { type AutoVerifyResult } from './dashboard'
 export { type DetectionProvenanceCurrent, type DetectionProvenanceTransition } from './incidents'
 export { type DastProposal, type DastScanResult, type DastScanInput, type DastRun, type DastDecision, type DastProof, type RuntimeVerifyInput, type RuntimeVerifyOutcome } from './dast'
 export { type TicketChoice, type TicketField, type TicketMetadata, type TicketMapping, type TicketLink, type TicketIntent, type FindingTickets, type TicketPreview, type TicketBulkResult, type TicketDataClass } from './ticketing'
+export { type ProjectSourceFinding, type ProjectSourceFindingPage, type ProjectSourceScanJob } from './project-source-findings'
 export type * from './ownership'
 
 import { authApi, teamApi } from './auth'
@@ -71,6 +72,7 @@ import { assessmentSnapshotsApi } from './assessment-snapshots'
 import { assessmentRelationshipsApi } from './assessment-relationships'
 import { assessmentComparisonsApi } from './assessment-comparisons'
 import { ticketingApi } from './ticketing'
+import { projectSourceFindingsApi } from './project-source-findings'
 
 // projectMeasures was a standalone export in the old api.ts
 export const projectMeasures = codeQualityApi.projectMeasures
@@ -128,6 +130,7 @@ export const api = {
   ...assessmentRelationshipsApi,
   ...assessmentComparisonsApi,
   ...ticketingApi,
+  ...projectSourceFindingsApi,
 }
 export {
   type CoverageWindow,

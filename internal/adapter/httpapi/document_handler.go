@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 type documentPublishing interface {
 	Publish(context.Context, shared.ID, ports.DocumentActor, documentuc.PublishInput) (documentuc.ReleaseResult, error)
 	Unpublish(context.Context, shared.ID, ports.DocumentActor, shared.ID, string) (documentuc.ReleaseResult, error)
+	ResumePreparedPublication(context.Context, shared.ID, ports.DocumentActor, shared.ID, int) (docpublish.Intent, error)
 	Links(context.Context, shared.ID, docpublish.Scope, shared.ID) ([]docpublish.Link, error)
 	Intent(context.Context, shared.ID, shared.ID) (docpublish.Intent, error)
 }
@@ -32,6 +34,10 @@ type documentPublishRequest struct {
 
 type documentUnpublishRequest struct {
 	RequestKey string `json:"request_key"`
+}
+
+type documentResumeRequest struct {
+	Version int `json:"version"`
 }
 
 type documentIntentView struct {
@@ -118,6 +124,31 @@ func (rt *Router) documentIntent(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, documentIntentResponse(item))
+}
+
+func (rt *Router) resumePreparedDocumentPublication(w http.ResponseWriter, r *http.Request) {
+	var body documentResumeRequest
+	if !decodeIntegrationJSON(w, r, &body) {
+		return
+	}
+	actor, ok := documentActor(r)
+	if !ok {
+		writeError(w, rt.log, shared.ErrForbidden)
+		return
+	}
+	item, err := rt.documentPublishing.ResumePreparedPublication(r.Context(), shared.ID(TenantFrom(r.Context())), actor, shared.ID(r.PathValue("id")), body.Version)
+	if err != nil {
+		var refused *ports.DocumentProviderError
+		if errors.As(err, &refused) {
+			w.Header().Set("Cache-Control", "no-store")
+			writeJSON(w, http.StatusConflict, errorBody{Error: "Destination access or restricted sharing could not be verified. Correct access before resuming."})
+			return
+		}
+		writeError(w, rt.log, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusAccepted, documentIntentResponse(item))
 }
 
 func (rt *Router) engagementDocuments(w http.ResponseWriter, r *http.Request) {

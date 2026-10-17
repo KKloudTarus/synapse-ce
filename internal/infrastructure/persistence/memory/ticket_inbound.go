@@ -137,7 +137,7 @@ func (s *TicketStore) ReduceInboundTicket(ctx context.Context, tenant shared.ID,
 		}
 	}
 	for _, comment := range comments {
-		if comment.TenantID != tenant || len(comment.Body) > 16<<10 || comment.Body == "" {
+		if comment.ID.IsZero() || comment.TenantID != tenant || len(comment.Body) > 16<<10 || comment.Body == "" {
 			return shared.ErrValidation
 		}
 	}
@@ -188,7 +188,18 @@ func (s *TicketStore) ReduceInboundTicket(ctx context.Context, tenant shared.ID,
 		item.OwnWrite = false
 		s.inboundObservations[tenant][key] = item
 	}
-	s.inboundComments[tenant] = append(s.inboundComments[tenant], comments...)
+	for _, comment := range comments {
+		duplicate := false
+		for _, existing := range s.inboundComments[tenant] {
+			if existing.ID == comment.ID {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			s.inboundComments[tenant] = append(s.inboundComments[tenant], comment)
+		}
+	}
 	return nil
 }
 

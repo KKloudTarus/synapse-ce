@@ -3,16 +3,28 @@ import { Button, ErrorState, Spinner } from '../../../components/ui'
 import { api } from '../../../lib/api'
 import type { TicketInboundView } from '../../../lib/api/ticketing'
 
-export function TicketObservations({ engagementId, findingId }: { engagementId: string; findingId: string }) {
+export type TicketFindingScope =
+  | { engagementId: string; projectKey?: undefined }
+  | { projectKey: string; engagementId?: undefined }
+
+export function isProjectTicketScope(scope: TicketFindingScope): scope is { projectKey: string; engagementId?: undefined } {
+  return typeof scope.projectKey === 'string'
+}
+
+export function TicketObservations({ findingId, ...scope }: TicketFindingScope & { findingId: string }) {
+  const scopeKey = isProjectTicketScope(scope) ? `project:${scope.projectKey}` : `engagement:${scope.engagementId}`
   const [view, setView] = useState<TicketInboundView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
   useEffect(() => {
     let live = true
     setView(null); setError(null)
-    api.ticketObservations(engagementId, findingId).then((value) => { if (live) setView(value) }, (cause) => { if (live) setError(cause instanceof Error ? cause.message : 'Could not load Jira observations.') })
+    const request = isProjectTicketScope(scope)
+      ? api.projectSourceFindingTicketObservations(scope.projectKey, findingId)
+      : api.ticketObservations(scope.engagementId, findingId)
+    request.then((value) => { if (live) setView(value) }, (cause) => { if (live) setError(cause instanceof Error ? cause.message : 'Could not load Jira observations.') })
     return () => { live = false }
-  }, [engagementId, findingId, refresh])
+  }, [scopeKey, findingId, refresh])
   return <div className="space-y-2 border-t border-secondary pt-3" aria-label="Jira observations">
     <div className="flex items-center justify-between"><p className="text-xs font-medium text-secondary">Jira observations</p><Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setRefresh((value) => value + 1)}>Refresh observations</Button></div>
     {error ? <ErrorState message={error} /> : !view ? <Spinner label="Loading Jira observations…" /> : <>

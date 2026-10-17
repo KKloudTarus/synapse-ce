@@ -1,0 +1,30 @@
+{
+  "at": "2026-10-17T16:12:42.836992+00:00",
+  "engagement_id": "f147d7221e2c2cba4109024964dfe24f",
+  "method": "normal authenticated human API; actual PostgreSQL legal hold; no SQL mutation",
+  "engagement_http": 200,
+  "engagement_state": "active",
+  "place_http": 200,
+  "active_hold_list_http": 200,
+  "active_hold_present": true,
+  "publish": {
+    "http": 403,
+    "response": {
+      "error": "forbidden",
+      "code": "permission_denied",
+      "request_id": "9a0c3c73-9588-4332-9e8c-d7a3e9d0a2fc",
+      "retryable": false
+    }
+  },
+  "unpublish": {
+    "http": 403,
+    "response": {
+      "error": "forbidden",
+      "code": "permission_denied",
+      "request_id": "074aae6f-ed74-4f4f-8b14-8982105ceed7",
+      "retryable": false
+    }
+  },
+  "release_http": 204,
+  "runtime_flags_restored": true
+}

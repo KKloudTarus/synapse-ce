@@ -18,6 +18,8 @@ import (
 
 type documentHTTPFake struct {
 	publishCalls int
+	resumeCalls  int
+	resumeErr    error
 	tenant       shared.ID
 	actor        ports.DocumentActor
 	input        documentuc.PublishInput
@@ -32,6 +34,15 @@ func (f *documentHTTPFake) Publish(_ context.Context, tenant shared.ID, actor po
 
 func (f *documentHTTPFake) Unpublish(context.Context, shared.ID, ports.DocumentActor, shared.ID, string) (documentuc.ReleaseResult, error) {
 	return documentuc.ReleaseResult{}, nil
+}
+
+func (f *documentHTTPFake) ResumePreparedPublication(_ context.Context, tenant shared.ID, actor ports.DocumentActor, id shared.ID, version int) (docpublish.Intent, error) {
+	f.resumeCalls++
+	f.tenant, f.actor = tenant, actor
+	if f.resumeErr != nil {
+		return docpublish.Intent{}, f.resumeErr
+	}
+	return docpublish.Intent{ID: id, State: "pending", Action: docpublish.Create, Version: version + 1, CreatedAt: time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC)}, nil
 }
 
 func (f *documentHTTPFake) Links(_ context.Context, tenant shared.ID, _ docpublish.Scope, _ shared.ID) ([]docpublish.Link, error) {
@@ -102,5 +113,46 @@ func TestDocumentPublishingRoutesRequireHumanReviewerAndKeepReadTenantScoped(t *
 	})(recorder, request)
 	if recorder.Code != http.StatusOK || fake.linksTenant != "tenant-b" {
 		t.Fatalf("read status=%d tenant=%q", recorder.Code, fake.linksTenant)
+	}
+}
+
+func TestResumePreparedDocumentPublicationRequiresReviewPermissionAndUsesServerActor(t *testing.T) {
+	fake := &documentHTTPFake{}
+	router := &Router{log: discardLog(), documentPublishing: fake}
+	valid := documentRequest(http.MethodPost, "/api/v1/document-publications/intent-1/resume", `{"version":4}`, "reviewer", "tenant-a")
+	w := httptest.NewRecorder()
+	router.authz(userdom.PermReview, router.resumePreparedDocumentPublication)(w, valid)
+	if w.Code != http.StatusAccepted || fake.resumeCalls != 1 || fake.tenant != "tenant-a" || fake.actor.UserID != "user-1" {
+		t.Fatalf("resume status=%d calls=%d tenant=%q actor=%+v body=%s", w.Code, fake.resumeCalls, fake.tenant, fake.actor, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body["version"] != float64(5) || body["state"] != "pending" {
+		t.Fatalf("resume response=%s err=%v", w.Body.String(), err)
+	}
+
+	for _, role := range []string{"readonly", "consultant", "agent", ""} {
+		t.Run(role, func(t *testing.T) {
+			r := documentRequest(http.MethodPost, "/api/v1/document-publications/intent-1/resume", `{"version":4}`, role, "tenant-a")
+			recorder := httptest.NewRecorder()
+			router.authz(userdom.PermReview, router.resumePreparedDocumentPublication)(recorder, r)
+			if recorder.Code != http.StatusForbidden || fake.resumeCalls != 1 {
+				t.Fatalf("role %q status=%d calls=%d", role, recorder.Code, fake.resumeCalls)
+			}
+		})
+	}
+}
+
+func TestResumePreparedDocumentPublicationReturnsSafeAccessRefusal(t *testing.T) {
+	fake := &documentHTTPFake{resumeErr: &ports.DocumentProviderError{Status: 403, Code: "public_sharing_unverifiable"}}
+	router := &Router{log: discardLog(), documentPublishing: fake}
+	r := documentRequest(http.MethodPost, "/api/v1/document-publications/intent-1/resume", `{"version":4}`, "reviewer", "tenant-a")
+	w := httptest.NewRecorder()
+	router.authz(userdom.PermReview, router.resumePreparedDocumentPublication)(w, r)
+	var body errorBody
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusConflict || body.Error != "Destination access or restricted sharing could not be verified. Correct access before resuming." || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status=%d body=%+v cache=%q", w.Code, body, w.Header().Get("Cache-Control"))
 	}
 }

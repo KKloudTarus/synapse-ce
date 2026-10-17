@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,20 @@ func (a *releaseAudit) Record(_ context.Context, e ports.AuditEntry) error {
 	return nil
 }
 
+type strictReleaseAudit struct{ entries map[string]ports.AuditEntry }
+
+func (a *strictReleaseAudit) Record(_ context.Context, entry ports.AuditEntry) error {
+	key := entry.Metadata["idempotency_key"]
+	if existing, ok := a.entries[key]; ok {
+		if !reflect.DeepEqual(existing, entry) {
+			return shared.ErrConflict
+		}
+		return nil
+	}
+	a.entries[key] = entry
+	return nil
+}
+
 type releaseProviders struct{ provider *releaseProvider }
 
 func (p releaseProviders) DocumentProvider(context.Context, integration.Integration) (ports.DocumentProvider, error) {
@@ -66,12 +81,12 @@ func (p releaseProviders) DocumentProvider(context.Context, integration.Integrat
 }
 
 type releaseProvider struct {
-	page                                    ports.DocumentRemoteState
-	shells, uploads, writes, purges, checks int
-	restricted, sharing                     bool
-	ambiguous                               string
-	afterVerify                             func()
-	files                                   []string
+	page                                                      ports.DocumentRemoteState
+	shells, uploads, writes, purges, checks                   int
+	restricted, sharing, refuseRestrictions, refuseAttachment bool
+	ambiguous                                                 string
+	afterVerify                                               func()
+	files                                                     []string
 }
 
 func (p *releaseProvider) CreateDocumentShell(_ context.Context, space, marker string) (domain.RemotePage, error) {
@@ -84,6 +99,9 @@ func (p *releaseProvider) CreateDocumentShell(_ context.Context, space, marker s
 	return p.page.RemotePage, nil
 }
 func (p *releaseProvider) RestrictDocument(context.Context, string, string) error {
+	if p.refuseRestrictions {
+		return &ports.DocumentProviderError{Code: "destination_acl", Status: 400}
+	}
 	p.restricted = true
 	return nil
 }
@@ -109,6 +127,9 @@ func (p *releaseProvider) FindDocumentMarker(context.Context, string, string) ([
 func (p *releaseProvider) UploadDocumentAttachment(_ context.Context, _ string, image ports.DocumentImage) error {
 	if !p.restricted || !p.sharing || p.checks == 0 {
 		return errors.New("unprotected upload")
+	}
+	if p.refuseAttachment {
+		return &ports.DocumentProviderError{Code: "attachment_acl", Status: 400}
 	}
 	p.uploads++
 	p.files = append(p.files, image.Name)
@@ -160,6 +181,32 @@ type releaseFixture struct {
 	audit       *releaseAudit
 	actor       ports.DocumentActor
 	input       PublishInput
+}
+
+type documentCommandMutator struct {
+	ports.DocumentCommandStore
+	mutate func(*ports.DocumentCommand)
+}
+
+type failOnceDocumentTransitionStore struct {
+	ports.DocumentCommandStore
+	failed bool
+}
+
+func (s *failOnceDocumentTransitionStore) TransitionIntent(ctx context.Context, tenant, id shared.ID, version int, change domain.IntentTransition, at time.Time) (domain.Intent, error) {
+	if !s.failed {
+		s.failed = true
+		return domain.Intent{}, shared.ErrConflict
+	}
+	return s.DocumentCommandStore.TransitionIntent(ctx, tenant, id, version, change, at)
+}
+
+func (s documentCommandMutator) GetDocumentCommand(ctx context.Context, tenant, id shared.ID) (ports.DocumentCommand, error) {
+	command, err := s.DocumentCommandStore.GetDocumentCommand(ctx, tenant, id)
+	if err == nil && s.mutate != nil {
+		s.mutate(&command)
+	}
+	return command, err
 }
 
 func newReleaseFixture(t *testing.T) *releaseFixture {
@@ -268,6 +315,270 @@ func TestDocumentReleaseRefusesUnverifiedSharingAndCurrentAuthorityChanges(t *te
 			_, _ = f.service.Execute(context.Background(), "tenant", intent.ID)
 			if f.provider.uploads != 0 || f.provider.writes != 0 {
 				t.Fatalf("sensitive write after %s changed: %+v", scenario, f.provider)
+			}
+		})
+	}
+}
+
+func prepareRefusedPublication(t *testing.T, f *releaseFixture) domain.Intent {
+	t.Helper()
+	f.provider.refuseRestrictions = true
+	intent := f.publish(t)
+	failed, err := f.service.Execute(context.Background(), "tenant", intent.ID)
+	if err != nil || failed.State != writeintent.Failed || failed.ErrorCode != "provider_refused" || failed.Attempts != 1 {
+		t.Fatalf("prepared refusal=%+v err=%v", failed, err)
+	}
+	command, err := f.store.GetDocumentCommand(context.Background(), "tenant", intent.ID)
+	if err != nil || command.Progress.Step != "restrictions" || command.Progress.Remote.ID == "" || command.Progress.OutstandingOperation != "" {
+		t.Fatalf("prepared checkpoint=%+v err=%v", command.Progress, err)
+	}
+	f.provider.refuseRestrictions = false
+	f.provider.restricted = true // operator repaired the destination ACL outside Synapse.
+	return failed
+}
+
+func prepareRefusedAttachmentPublication(t *testing.T, f *releaseFixture) domain.Intent {
+	t.Helper()
+	f.provider.refuseAttachment = true
+	intent := f.publish(t)
+	failed, err := f.service.Execute(context.Background(), "tenant", intent.ID)
+	if err != nil || failed.State != writeintent.Failed || failed.ErrorCode != "provider_refused" || failed.Attempts != 1 {
+		t.Fatalf("attachment refusal=%+v err=%v", failed, err)
+	}
+	command, err := f.store.GetDocumentCommand(context.Background(), "tenant", intent.ID)
+	if err != nil || command.Progress.Step != "attachments" || command.Progress.Uploaded != 0 || len(command.Progress.UploadedReceipts) != 0 || command.Progress.OutstandingOperation != "" {
+		t.Fatalf("attachment checkpoint=%+v err=%v", command.Progress, err)
+	}
+	f.provider.refuseAttachment = false
+	return failed
+}
+
+func TestResumePreparedPublicationQueuesOnlyVerifiedNeutralShell(t *testing.T) {
+	f := newReleaseFixture(t)
+	failed := prepareRefusedPublication(t, f)
+	resumed, err := f.service.ResumePreparedPublication(context.Background(), "tenant", f.actor, failed.ID, failed.Version)
+	if err != nil || resumed.State != writeintent.Pending || resumed.Version != failed.Version+1 || resumed.Attempts != failed.Attempts || resumed.ErrorCode != "" {
+		t.Fatalf("resume=%+v err=%v", resumed, err)
+	}
+	if f.provider.shells != 1 || f.provider.uploads != 0 || f.provider.writes != 0 || f.provider.purges != 0 {
+		t.Fatalf("resume wrote content: %+v", f.provider)
+	}
+	if len(f.audit.entries) < 2 {
+		t.Fatalf("resume audit missing: %+v", f.audit.entries)
+	}
+	entry := f.audit.entries[len(f.audit.entries)-1]
+	if entry.Action != "document.prepared_publication_resumed" || entry.Target != failed.ID.String() || entry.Metadata["expected_version"] != fmt.Sprintf("%d", failed.Version) || entry.Metadata["idempotency_key"] != fmt.Sprintf("%s:resume:%d", failed.ID, failed.Version) {
+		t.Fatalf("resume audit=%+v", entry)
+	}
+}
+
+func TestStrictResumeAuditRejectsSameKeyWithDifferentContent(t *testing.T) {
+	audit := &strictReleaseAudit{entries: map[string]ports.AuditEntry{}}
+	first := ports.AuditEntry{Actor: "reviewer", Action: "document.prepared_publication_resumed", Target: "intent", At: time.Date(2026, 10, 17, 1, 0, 0, 0, time.UTC), Metadata: map[string]string{"idempotency_key": "intent:resume:4", "expected_version": "4"}}
+	if err := audit.Record(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	changed := first
+	changed.Metadata = map[string]string{"idempotency_key": "intent:resume:4", "expected_version": "5"}
+	if err := audit.Record(context.Background(), changed); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("same key accepted changed resume admission: %v", err)
+	}
+}
+
+func TestResumePreparedPublicationUsesNewAuditKeyForSecondFailedEpisode(t *testing.T) {
+	f := newReleaseFixture(t)
+	failed := prepareRefusedPublication(t, f)
+	audit := &strictReleaseAudit{entries: map[string]ports.AuditEntry{}}
+	f.service.audit = audit
+	first, err := f.service.ResumePreparedPublication(context.Background(), "tenant", f.actor, failed.ID, failed.Version)
+	if err != nil || first.State != writeintent.Pending {
+		t.Fatalf("first resume=%+v err=%v", first, err)
+	}
+	f.provider.refuseAttachment = true
+	failedAgain, err := f.service.Execute(context.Background(), "tenant", first.ID)
+	if err != nil || failedAgain.State != writeintent.Failed || failedAgain.ErrorCode != "provider_refused" || failedAgain.Version <= first.Version {
+		t.Fatalf("second episode refusal=%+v err=%v", failedAgain, err)
+	}
+	f.provider.refuseAttachment = false
+	second, err := f.service.ResumePreparedPublication(context.Background(), "tenant", f.actor, failedAgain.ID, failedAgain.Version)
+	if err != nil || second.State != writeintent.Pending {
+		t.Fatalf("second resume=%+v err=%v", second, err)
+	}
+	if len(audit.entries) != 2 {
+		t.Fatalf("resume audit entries=%+v", audit.entries)
+	}
+	if _, ok := audit.entries[fmt.Sprintf("%s:resume:%d", failed.ID, failed.Version)]; !ok {
+		t.Fatalf("first episode key missing: %+v", audit.entries)
+	}
+	if _, ok := audit.entries[fmt.Sprintf("%s:resume:%d", failedAgain.ID, failedAgain.Version)]; !ok {
+		t.Fatalf("second episode key missing: %+v", audit.entries)
+	}
+}
+
+func TestResumePreparedPublicationRetriesCASWithStableAuditPayload(t *testing.T) {
+	f := newReleaseFixture(t)
+	failed := prepareRefusedPublication(t, f)
+	audit := &strictReleaseAudit{entries: map[string]ports.AuditEntry{}}
+	f.service.audit = audit
+	f.service.store = &failOnceDocumentTransitionStore{DocumentCommandStore: f.store}
+	if _, err := f.service.ResumePreparedPublication(context.Background(), "tenant", f.actor, failed.ID, failed.Version); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("first resume CAS failure=%v", err)
+	}
+	f.clock.at = f.clock.at.Add(time.Minute)
+	resumed, err := f.service.ResumePreparedPublication(context.Background(), "tenant", f.actor, failed.ID, failed.Version)
+	if err != nil || resumed.State != writeintent.Pending {
+		t.Fatalf("same-version retry=%+v err=%v", resumed, err)
+	}
+	if len(audit.entries) != 1 {
+		t.Fatalf("audit retry appended instead of replaying=%+v", audit.entries)
+	}
+	entry := audit.entries[fmt.Sprintf("%s:resume:%d", failed.ID, failed.Version)]
+	if !entry.At.Equal(failed.UpdatedAt) {
+		t.Fatalf("audit timestamp=%s, want persisted failed timestamp=%s", entry.At, failed.UpdatedAt)
+	}
+}
+
+func TestResumePreparedPublicationAllowsOnlyPreUploadCheckpoints(t *testing.T) {
+	for _, scenario := range []string{"attachments", "upload_count", "receipt", "outstanding", "uncertain", "body"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newReleaseFixture(t)
+			failed := prepareRefusedAttachmentPublication(t, f)
+			if scenario == "attachments" {
+				resumed, err := f.service.ResumePreparedPublication(context.Background(), "tenant", f.actor, failed.ID, failed.Version)
+				if err != nil || resumed.State != writeintent.Pending || resumed.Attempts != failed.Attempts {
+					t.Fatalf("attachments resume=%+v err=%v", resumed, err)
+				}
+				stored, err := f.store.GetDocumentCommand(context.Background(), "tenant", failed.ID)
+				if err != nil || stored.Progress.Step != "attachments" || stored.Progress.Uploaded != 0 || len(stored.Progress.UploadedReceipts) != 0 {
+					t.Fatalf("attachments checkpoint was not preserved=%+v err=%v", stored.Progress, err)
+				}
+				return
+			}
+			f.service.store = documentCommandMutator{DocumentCommandStore: f.store, mutate: func(command *ports.DocumentCommand) {
+				switch scenario {
+				case "upload_count":
+					command.Progress.Uploaded = 1
+				case "receipt":
+					command.Progress.UploadedReceipts = []ports.DocumentUploadReceipt{{Key: "attachment:0", Digest: strings.Repeat("a", 64)}}
+				case "outstanding":
+					command.Progress.OutstandingOperation = "attachment"
+				case "uncertain":
+					command.Intent.State = writeintent.Uncertain
+				case "body":
+					command.Progress.Step = "body"
+				}
+			}}
+			if _, err := f.service.ResumePreparedPublication(context.Background(), "tenant", f.actor, failed.ID, failed.Version); !errors.Is(err, shared.ErrConflict) {
+				t.Fatalf("scenario %s err=%v", scenario, err)
+			}
+			if f.provider.uploads != 0 || f.provider.writes != 0 || f.provider.purges != 0 {
+				t.Fatalf("scenario %s wrote remote content: %+v", scenario, f.provider)
+			}
+		})
+	}
+}
+
+func TestResumePreparedPublicationPreservesAttemptHistoryForOneNewClaim(t *testing.T) {
+	f := newReleaseFixture(t)
+	failed := prepareRefusedPublication(t, f)
+	at := f.clock.Now()
+	for failed.Attempts < 5 {
+		at = at.Add(time.Second)
+		pending, err := f.store.TransitionIntent(context.Background(), "tenant", failed.ID, failed.Version, domain.IntentTransition{Event: writeintent.RetryFailed}, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at = at.Add(time.Second)
+		lease := at.Add(time.Minute)
+		inFlight, err := f.store.TransitionIntent(context.Background(), "tenant", failed.ID, pending.Version, domain.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at = at.Add(time.Second)
+		failed, err = f.store.TransitionIntent(context.Background(), "tenant", failed.ID, inFlight.Version, domain.IntentTransition{Event: writeintent.Reject, ErrorCode: "provider_refused"}, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.clock.at = at.Add(time.Second)
+	resumed, err := f.service.ResumePreparedPublication(context.Background(), "tenant", f.actor, failed.ID, failed.Version)
+	if err != nil || resumed.State != writeintent.Pending || resumed.Attempts != 5 {
+		t.Fatalf("resume after exhausted refusal=%+v err=%v", resumed, err)
+	}
+	f.provider.refuseRestrictions = true
+	first, err := f.service.Execute(context.Background(), "tenant", resumed.ID)
+	if err != nil || first.State != writeintent.Failed || first.Attempts != 6 || f.provider.uploads != 0 || f.provider.writes != 0 {
+		t.Fatalf("explicit post-resume attempt=%+v err=%v provider=%+v", first, err, f.provider)
+	}
+	second, err := f.service.Execute(context.Background(), "tenant", resumed.ID)
+	if err != nil || second.State != writeintent.Failed || second.Attempts != first.Attempts {
+		t.Fatalf("post-resume refusal was retried automatically=%+v err=%v", second, err)
+	}
+}
+
+func TestResumePreparedPublicationRejectsWrongAuthorityOrVersion(t *testing.T) {
+	for _, scenario := range []string{"authority", "actor", "stale_version", "configuration_drift"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newReleaseFixture(t)
+			failed := prepareRefusedPublication(t, f)
+			actor, version := f.actor, failed.Version
+			switch scenario {
+			case "authority":
+				f.authority.allowed = false
+			case "actor":
+				actor.UserID = "another-reviewer"
+			case "stale_version":
+				version++
+			case "configuration_drift":
+				f.provider.afterVerify = func() { f.integration.item.CredentialRevision++ }
+			}
+			if _, err := f.service.ResumePreparedPublication(context.Background(), "tenant", actor, failed.ID, version); !errors.Is(err, shared.ErrForbidden) && !errors.Is(err, shared.ErrConflict) {
+				t.Fatalf("scenario %s err=%v", scenario, err)
+			}
+			stored, err := f.store.GetDocumentCommand(context.Background(), "tenant", failed.ID)
+			if err != nil || stored.Intent.State != writeintent.Failed || stored.Intent.Version != failed.Version {
+				t.Fatalf("scenario %s changed command=%+v err=%v", scenario, stored.Intent, err)
+			}
+		})
+	}
+}
+
+func TestResumePreparedPublicationRequiresExactNeutralAndRestrictedDestination(t *testing.T) {
+	for _, scenario := range []string{"acl", "non_neutral", "version", "marker", "uncertain"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newReleaseFixture(t)
+			failed := prepareRefusedPublication(t, f)
+			switch scenario {
+			case "acl":
+				f.provider.restricted = false
+			case "non_neutral":
+				f.provider.page.Neutral = false
+			case "version":
+				f.provider.page.Version++
+			case "marker":
+				f.provider.page.Marker = "another-marker"
+			case "uncertain":
+				lease := f.clock.Now().Add(time.Minute)
+				inFlight, err := f.store.TransitionIntent(context.Background(), "tenant", failed.ID, failed.Version, domain.IntentTransition{Event: writeintent.RetryFailed}, f.clock.Now().Add(time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+				claimed, err := f.store.TransitionIntent(context.Background(), "tenant", failed.ID, inFlight.Version, domain.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, f.clock.Now().Add(2*time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+				failed, err = f.store.TransitionIntent(context.Background(), "tenant", failed.ID, claimed.Version, domain.IntentTransition{Event: writeintent.Ambiguous}, f.clock.Now().Add(3*time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := f.service.ResumePreparedPublication(context.Background(), "tenant", f.actor, failed.ID, failed.Version)
+			var providerErr *ports.DocumentProviderError
+			if !errors.Is(err, shared.ErrConflict) && !errors.As(err, &providerErr) {
+				t.Fatalf("scenario %s err=%v", scenario, err)
+			}
+			if f.provider.uploads != 0 || f.provider.writes != 0 || f.provider.purges != 0 {
+				t.Fatalf("scenario %s wrote remote content: %+v", scenario, f.provider)
 			}
 		})
 	}

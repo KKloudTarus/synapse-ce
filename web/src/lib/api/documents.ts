@@ -48,6 +48,7 @@ const release = (value: any): DocumentRelease => ({ skipped: value?.skipped === 
 export const documentsApi = {
   publish: async (input: { integrationId: string; sourceKind: DocumentSourceKind; scopeId: string; sourceRef: string; requestKey: string }): Promise<DocumentRelease> => release(await req('/document-publications', { method: 'POST', body: JSON.stringify({ integration_id: input.integrationId, source_kind: input.sourceKind, scope_id: input.scopeId, source_ref: input.sourceRef, request_key: input.requestKey }) })),
   documentIntent: async (intentId: string): Promise<DocumentIntent> => intent(await req(`/document-publications/${id(intentId)}`)),
+  resumePreparedPublication: async (intentId: string, version: number): Promise<DocumentIntent> => intent(await req(`/document-publications/${id(intentId)}/resume`, { method: 'POST', body: JSON.stringify({ version }) })),
   listEngagementDocuments: async (engagementId: string): Promise<DocumentLink[]> => ((await req(`/engagements/${id(engagementId)}/documents`)) ?? []).map(link),
   listProjectDocuments: async (projectKey: string): Promise<DocumentLink[]> => ((await req(`/projects/${id(projectKey)}/documents`)) ?? []).map(link),
   unpublish: async (linkId: string, requestKey: string): Promise<DocumentRelease> => release(await req(`/document-links/${id(linkId)}`, { method: 'DELETE', body: JSON.stringify({ request_key: requestKey }) })),

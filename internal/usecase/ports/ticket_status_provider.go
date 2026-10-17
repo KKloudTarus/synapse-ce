@@ -5,10 +5,26 @@ import (
 	"time"
 )
 
-// TicketStatusWriter performs one transition and its explanatory comment in a
-// single provider request. Field updates are a separate, subsequent command.
+// TicketStatusWriter performs a transition. Legacy commands can carry their
+// bundled explanatory comment; versioned commands deliberately pass an empty
+// comment and use TicketCommentWriter after the transition is durable.
 type TicketStatusWriter interface {
 	TransitionTicket(context.Context, string, string, string) error
+}
+
+// TicketCommentReceipt is deliberately separate from RemoteTicket: an intent's
+// durable remote identity remains the managed issue, while this ID only proves
+// the provider accepted a particular comment on that issue.
+type TicketCommentReceipt struct{ ID string }
+
+// TicketCommentWriter and TicketCommentReader are consumer-owned seams for the
+// dedicated Jira comment endpoint and its bounded recovery read.
+type TicketCommentWriter interface {
+	CommentTicket(context.Context, string, string, string) (TicketCommentReceipt, error)
+}
+
+type TicketCommentReader interface {
+	FindTicketComment(context.Context, string, string, string, string) (bool, error)
 }
 
 type TicketObservation struct {

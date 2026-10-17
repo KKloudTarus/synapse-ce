@@ -29,9 +29,7 @@ func personalCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenant
 	var count int
 	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, query, args...).Scan(&count)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}); err != nil { t.Fatal(err) }
 	return count
 }
 
@@ -313,7 +311,9 @@ func TestDestinationNoticeIsOncePerRevisionAndSkipsSecretRotation(t *testing.T) 
 			notices = append(notices, e)
 		}
 		return rows.Err()
-	}); err != nil { t.Fatal(err) }
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if len(notices) != 3 {
 		t.Fatalf("stored %d destination notices; want 3", len(notices))
 	}

@@ -37,9 +37,21 @@ func jiraEventMetadata(provider string, header http.Header, body []byte) (ports.
 		id = "delivery:" + hex.EncodeToString(identityDigest[:])
 	}
 	var payload struct {
-		Event string `json:"webhookEvent"`
+		Event           string `json:"webhookEvent"`
+		DataCenterEvent string `json:"event"`
 	}
-	if json.Unmarshal(body, &payload) != nil || payload.Event == "" || len(payload.Event) > 64 {
+	if json.Unmarshal(body, &payload) != nil {
+		return ports.InboundWebhookEvent{}, false
+	}
+	if provider == "jira-dc" {
+		if payload.Event != "" && payload.DataCenterEvent != "" && payload.Event != payload.DataCenterEvent {
+			return ports.InboundWebhookEvent{}, false
+		}
+		if payload.Event == "" {
+			payload.Event = payload.DataCenterEvent
+		}
+	}
+	if payload.Event == "" || len(payload.Event) > 64 {
 		return ports.InboundWebhookEvent{}, false
 	}
 	return ports.InboundWebhookEvent{Provider: provider, EventID: id, EventType: payload.Event, PayloadSHA256: hex.EncodeToString(digest[:]), Body: body}, true

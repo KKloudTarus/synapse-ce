@@ -42,4 +42,23 @@ describe('ticketing API contract', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/engagements/eng%201/tickets/bulk', expect.objectContaining({ method: 'POST' }))
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ mapping_id: 'map 1', items: [{ finding_id: 'f 1', preview_digest: 'digest', request_key: 'request' }] })
   })
+
+  it('keeps Project source-finding ticket preview and submit paths Project-scoped', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ links: [], intents: [], mappings: [] }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ digest: 'preview', data_class: 'summary' }), { status: 200, headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'intent', state: 'queued', version: 1 }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await ticketingApi.projectSourceFindingTickets('payments source', 'finding 1')
+    await ticketingApi.previewProjectSourceFindingTicket('payments source', 'finding 1', 'mapping 1')
+    await ticketingApi.submitProjectSourceFindingTicket('payments source', 'finding 1', 'mapping 1', 'preview', 'request')
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      '/api/v1/projects/payments%20source/source-findings/finding%201/tickets',
+      '/api/v1/projects/payments%20source/source-findings/finding%201/ticket-preview',
+      '/api/v1/projects/payments%20source/source-findings/finding%201/ticket-submit',
+    ])
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ mapping_id: 'mapping 1', preview_digest: 'preview', request_key: 'request' })
+  })
 })

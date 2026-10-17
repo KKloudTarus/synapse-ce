@@ -2221,6 +2221,144 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalServerError"}
 
+  /api/v1/projects/{key}/source-scans:
+    parameters: [{$ref: '#/components/parameters/ProjectKey'}]
+    post:
+      tags: [projects, sca]
+      summary: Queue a vulnerabilities-only scan of a Project source subdirectory
+      operationId: startProjectSourceScan
+      description: The server resolves the tenant-owned local Project binding. Callers may select only a non-empty relative subdirectory; this operation does not create a Project quality analysis or baseline. Requires operate permission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [subdirectory]
+              properties:
+                subdirectory: {type: string, minLength: 1, maxLength: 4096}
+      responses:
+        '202': {description: Source scan queued, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectScanJob'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/projects/{key}/source-scans/{jobID}:
+    parameters: [{$ref: '#/components/parameters/ProjectKey'}, {name: jobID, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [projects, sca]
+      summary: Read a Project source scan
+      operationId: getProjectSourceScan
+      description: View permission. The job must be a bounded source scan owned by this Project; the internal analysis engagement is never returned.
+      responses:
+        '200': {description: Source scan, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectScanJob'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/projects/{key}/source-findings:
+    parameters: [{$ref: '#/components/parameters/ProjectKey'}]
+    get:
+      tags: [projects, findings]
+      summary: List findings from Project source scans
+      operationId: listProjectSourceFindings
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: after, in: query, schema: {type: string}, description: Last finding ID from the previous page.}
+      description: View permission. Findings are resolved through the Project's server-owned internal scan context; responses omit that context identifier.
+      responses:
+        '200': {description: Bounded source findings page, content: {application/json: {schema: {type: object, required: [items, next_cursor], properties: {items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/ProjectSourceFinding'}}, next_cursor: {type: string}}}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/projects/{key}/source-findings/{fid}:
+    parameters: [{$ref: '#/components/parameters/ProjectKey'}, {name: fid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [projects, findings]
+      summary: Read one Project source finding independently of the current page
+      operationId: getProjectSourceFinding
+      responses:
+        '200': {description: Source finding, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectSourceFinding'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    patch:
+      tags: [projects, findings]
+      summary: Triage a Project source finding
+      operationId: updateProjectSourceFinding
+      description: Triage permission. Optimistic version is required; the hidden Project scan context is never accepted from or returned to the caller.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FindingStatusUpdate'}
+      responses:
+        '200': {description: Updated source finding, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectSourceFinding'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/projects/{key}/source-findings/{fid}/tickets:
+    parameters: [{$ref: '#/components/parameters/ProjectKey'}, {name: fid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [projects, ticketing]
+      summary: Read ticket links and intents for a Project source finding
+      operationId: getProjectSourceFindingTickets
+      responses:
+        '200': {description: Ticket links and intents, content: {application/json: {schema: {$ref: '#/components/schemas/FindingTickets'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+    post:
+      tags: [projects, ticketing]
+      summary: Link an existing ticket to a Project source finding
+      operationId: linkProjectSourceFindingTicket
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ManualTicketLink'}}}}
+      responses:
+        '201': {description: Linked ticket, content: {application/json: {schema: {$ref: '#/components/schemas/TicketLink'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/projects/{key}/source-findings/{fid}/tickets/{linkID}:
+    parameters: [{$ref: '#/components/parameters/ProjectKey'}, {name: fid, in: path, required: true, schema: {type: string}}, {name: linkID, in: path, required: true, schema: {type: string}}]
+    delete:
+      tags: [projects, ticketing]
+      summary: Unlink a Project source finding ticket
+      operationId: unlinkProjectSourceFindingTicket
+      responses:
+        '204': {description: Ticket unlinked}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/projects/{key}/source-findings/{fid}/ticket-preview:
+    parameters: [{$ref: '#/components/parameters/ProjectKey'}, {name: fid, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [projects, ticketing]
+      summary: Preview a Jira ticket for a Project source finding
+      operationId: previewProjectSourceFindingTicket
+      description: View permission. The server resolves the hidden context and renders a public Project deep link.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketPreviewInput'}}}}
+      responses:
+        '200': {description: Ticket preview, content: {application/json: {schema: {$ref: '#/components/schemas/TicketPreview'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/projects/{key}/source-findings/{fid}/ticket-submit:
+    parameters: [{$ref: '#/components/parameters/ProjectKey'}, {name: fid, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [projects, ticketing]
+      summary: Submit a reviewed Jira ticket for a Project source finding
+      operationId: submitProjectSourceFindingTicket
+      description: Triage permission. Uses the same preview digest, restricted-sharing verification and durable intent admission as engagement tickets.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketSubmitInput'}}}}
+      responses:
+        '202': {description: Ticket intent accepted, content: {application/json: {schema: {$ref: '#/components/schemas/TicketIntent'}}}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/v1/projects/{key}/source-findings/{fid}/ticket-observations:
+    parameters: [{$ref: '#/components/parameters/ProjectKey'}, {name: fid, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [projects, ticketing]
+      summary: Read external Jira observations for a Project source finding
+      operationId: getProjectSourceFindingTicketObservations
+      responses:
+        '200': {description: Redacted external observations}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+
   /api/v1/projects/{key}/analyses/import:
     parameters:
     - $ref: '#/components/parameters/ProjectKey'
@@ -7628,6 +7766,29 @@ paths:
         '200': {description: Tenant-scoped command state, content: {application/json: {schema: {$ref: '#/components/schemas/DocumentIntent'}}}}
         '403': {description: View permission denied}
         '404': {description: Command not found in this tenant}
+  /api/v1/document-publications/{id}/resume:
+    post:
+      tags: [document-publishing]
+      operationId: resumePreparedDocumentPublication
+      summary: Resume one prepared neutral publication after destination access is fixed
+      description: >-
+        Requires review permission and the original reviewing actor. This is available only
+        for a failed provider_refused create command at its restrictions or pre-upload
+        attachments checkpoint. The server re-verifies the same neutral shell and its
+        exact restricted sharing policy before it queues one guarded worker attempt; a
+        202 is not remote completion.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DocumentResumeRequest'}
+      responses:
+        '202': {description: Prepared command queued, content: {application/json: {schema: {$ref: '#/components/schemas/DocumentIntent'}}}}
+        '400': {description: Invalid version}
+        '403': {description: Current actor lacks review authority or release access}
+        '404': {description: Command not found in this tenant}
+        '409': {description: Command changed, is not an eligible prepared neutral shell, or destination evidence is no longer exact}
   /api/v1/document-links/{id}:
     delete:
       tags: [document-publishing]
@@ -12142,6 +12303,43 @@ components:
               CreatedBy: {type: string}
               UpdatedBy: {type: string}
 
+    ProjectScanJob:
+      type: object
+      required: [id, target, kind, status, stage, progress, started_at, debug_events]
+      properties:
+        id: {type: string}
+        target: {type: string, description: Server-selected Project subdirectory target.}
+        kind: {type: string}
+        status: {type: string}
+        stage: {type: string}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        error: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        debug_events: {type: array, items: {type: object}}
+      description: A scan status representation that deliberately omits the internal analysis engagement identifier.
+    ProjectSourceFinding:
+      type: object
+      required: [ID, Title, Severity, Status, Version]
+      properties:
+        ID: {type: string}
+        Title: {type: string}
+        Description: {type: string}
+        Severity: {type: string}
+        Status: {type: string}
+        Version: {type: integer}
+        AdvisoryID: {type: string}
+        Sources: {type: array, items: {type: string}}
+        Confidence: {type: string}
+      description: A finding from the Project's server-owned source scan context. It intentionally has no engagement_id field.
+    FindingStatusUpdate:
+      type: object
+      additionalProperties: false
+      required: [status, version]
+      properties:
+        status: {type: string}
+        note: {type: string, maxLength: 8192}
+        version: {type: integer, minimum: 1}
     ScanRequest:
       type: object
       required: [engagement_id]
@@ -14898,6 +15096,12 @@ components:
       required: [request_key]
       properties:
         request_key: {type: string, minLength: 1, maxLength: 128}
+    DocumentResumeRequest:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1, description: Version observed on the failed prepared publication.}
     DocumentIntent:
       type: object
       required: [id, action, state, version, attempts, created_at, updated_at]

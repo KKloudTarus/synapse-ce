@@ -263,10 +263,10 @@ func (s *TicketStore) reduceInboundTicketTx(ctx context.Context, tx pgx.Tx, tena
 		}
 	}
 	for _, comment := range comments {
-		if comment.TenantID != tenant || len(comment.Body) == 0 || len(comment.Body) > 16<<10 {
+		if comment.ID.IsZero() || comment.TenantID != tenant || len(comment.Body) == 0 || len(comment.Body) > 16<<10 {
 			return shared.ErrValidation
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO ticket_external_comments(id,tenant_id,integration_id,engagement_id,finding_id,remote_id,author_id,body,provider_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::timestamptz,$10)`, comment.ID.String(), tenant.String(), comment.IntegrationID.String(), comment.EngagementID.String(), comment.FindingID.String(), comment.RemoteID, comment.AuthorID, comment.Body, timeOrEmpty(comment.ProviderAt), comment.CreatedAt)
+		_, err := tx.Exec(ctx, `INSERT INTO ticket_external_comments(id,tenant_id,integration_id,engagement_id,finding_id,remote_id,author_id,body,provider_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::timestamptz,$10) ON CONFLICT(id) DO NOTHING`, comment.ID.String(), tenant.String(), comment.IntegrationID.String(), comment.EngagementID.String(), comment.FindingID.String(), comment.RemoteID, comment.AuthorID, comment.Body, timeOrEmpty(comment.ProviderAt), comment.CreatedAt)
 		if err != nil {
 			return err
 		}

@@ -16,9 +16,14 @@ type Service struct {
 	store       ports.TicketStore
 	findings    ports.FindingRepository
 	engagements ports.EngagementRepository
+	projects    ports.ProjectRepository
 	ids         ports.IDGenerator
 	clock       ports.Clock
 }
+
+// SetProjects enables Project-scoped ticket links to use the stable public
+// project key. The caller never supplies this key to ticket rendering.
+func (s *Service) SetProjects(repo ports.ProjectRepository) { s.projects = repo }
 
 func NewService(store ports.TicketStore, findings ports.FindingRepository, engagements ports.EngagementRepository, ids ports.IDGenerator, clock ports.Clock) (*Service, error) {
 	if store == nil || findings == nil || engagements == nil || ids == nil || clock == nil {

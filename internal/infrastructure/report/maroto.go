@@ -242,16 +242,16 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 		coverage := reportEngineCoverage(insight)
 		m.AddRow(5, text.NewCol(12, fmt.Sprintf("Required-engine coverage: %s (%d/%d completed).", coverage.Status, coverage.Completed, coverage.Required), props.Text{Size: 9, Style: fontstyle.Bold}))
 		if insight.ExecutionMode != "" {
-			m.AddRow(5, text.NewCol(12, "Current execution mode: "+insight.ExecutionMode+".", props.Text{Size: 8, Color: gray()}))
+			m.AddAutoRow(text.NewCol(12, "Current execution mode: "+insight.ExecutionMode+".", props.Text{Size: 8, Color: gray()}))
 		}
 		if insight.IncludesPreviousResults {
-			m.AddRow(8, text.NewCol(12, "This report includes retained findings from a previous result. Required-engine coverage applies only to the current execution and does not establish whole-assessment coverage.", props.Text{Size: 8, Color: gray()}))
+			m.AddAutoRow(text.NewCol(12, "This report includes retained findings from a previous result. Required-engine coverage applies only to the current execution and does not establish whole-assessment coverage.", props.Text{Size: 8, Color: gray()}))
 		}
 		note := insight.CompletenessNote
 		if note == "" {
 			note = "Dependency versions resolved with confidence."
 		}
-		m.AddRow(8, text.NewCol(12, note, props.Text{Size: 9, Color: gray()}))
+		m.AddAutoRow(text.NewCol(12, note, props.Text{Size: 9, Color: gray()}))
 		if outcomes := reportEngineOutcomes(insight.EngineOutcomes); len(outcomes) > 0 {
 			m.AddRow(5,
 				text.NewCol(3, "ENGINE", hdr()),

@@ -74,6 +74,7 @@ var (
 	groupPattern        = regexp.MustCompile(`^[\pL\pN][\pL\pN _.-]{0,127}$`)
 	spacePattern        = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
 	cloudIDPattern      = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
+	policyTypePattern   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 	pageIDPattern       = regexp.MustCompile(`^[0-9]{1,20}$`)
 )
 
@@ -247,12 +248,31 @@ func (a *Adapter) RestrictDocument(ctx context.Context, page, group string) erro
 	if !pageIDPattern.MatchString(page) || group != a.readGroup || a.containsCredential(group) {
 		return providerError(0, "invalid_restriction", false)
 	}
+	// A confirmed existing exact restriction is a completed write. This keeps a
+	// retry idempotent when an operator has already repaired the provider ACL.
+	// Any incomplete proof follows the normal narrowing path and is verified by
+	// the caller before content can be uploaded.
+	if err := a.VerifyDocumentRestriction(ctx, page, a.space, group); err == nil {
+		return nil
+	}
 	groupField := "name"
 	if a.cloud {
 		groupField = "id"
 	}
-	body := []map[string]any{{"operation": "read", "restrictions": map[string]any{"group": []map[string]string{{"type": "group", groupField: group}}}}}
-	return a.requestJSON(ctx, http.MethodPost, "/content/"+page+"/restriction", nil, body, nil, true, http.StatusOK, http.StatusCreated)
+	restrictions := map[string]any{"group": []map[string]string{{"type": "group", groupField: group}}}
+	method := http.MethodPost
+	if !a.cloud {
+		// Data Center's documented update endpoint replaces only the supplied
+		// operation. An explicit empty user list removes direct read grants while
+		// omitting update preserves its separate restriction state.
+		restrictions["user"] = []map[string]string{}
+		method = http.MethodPut
+	}
+	body := []map[string]any{{"operation": "read", "restrictions": restrictions}}
+	if a.cloud {
+		return a.requestJSON(ctx, method, "/content/"+page+"/restriction", nil, body, nil, true, http.StatusOK, http.StatusCreated)
+	}
+	return a.requestJSON(ctx, method, "/content/"+page+"/restriction", nil, body, nil, true, http.StatusOK)
 }
 
 func (a *Adapter) VerifyDocumentRestriction(ctx context.Context, page, container, group string) error {
@@ -266,12 +286,14 @@ func (a *Adapter) VerifyDocumentRestriction(ctx context.Context, page, container
 	if state.Container != container {
 		return providerError(200, "wrong_container", false)
 	}
-	var restrictions restrictionResponse
-	if err := a.requestJSON(ctx, http.MethodGet, "/content/"+page+"/restriction/byOperation/read", url.Values{"expand": {"restrictions.user,restrictions.group"}, "start": {"0"}, "limit": {"100"}}, nil, &restrictions, false, http.StatusOK); err != nil {
-		return err
-	}
-	if !restrictions.exactGroup(group, a.cloud) {
-		return providerError(200, "restriction_unverified", false)
+	for _, operation := range []string{"read", "update"} {
+		var restrictions restrictionResponse
+		if err := a.requestJSON(ctx, http.MethodGet, "/content/"+page+"/restriction/byOperation/"+operation, url.Values{"expand": {"restrictions.user,restrictions.group"}, "start": {"0"}, "limit": {"100"}}, nil, &restrictions, false, http.StatusOK); err != nil {
+			return err
+		}
+		if !restrictions.exactGroup(operation, group, a.cloud) {
+			return providerError(200, "restriction_unverified", false)
+		}
 	}
 	if a.cloud {
 		return a.verifyCloudPublicSharing(ctx)
@@ -426,10 +448,14 @@ func (a *Adapter) listAttachments(ctx context.Context, page string) ([]string, e
 			return nil, providerError(200, "attachment_list_truncated", false)
 		}
 		for _, item := range out.Results {
-			if !pageIDPattern.MatchString(item.ID) || a.containsCredential(item.ID) {
+			id := item.ID
+			if a.cloud && strings.HasPrefix(id, "att") {
+				id = strings.TrimPrefix(id, "att")
+			}
+			if !pageIDPattern.MatchString(id) || a.containsCredential(item.ID) || a.containsCredential(id) {
 				return nil, providerError(200, "invalid_attachment_response", false)
 			}
-			seen[item.ID] = struct{}{}
+			seen[id] = struct{}{}
 		}
 		if len(out.Results) < maxPageSize {
 			break
@@ -486,10 +512,16 @@ func (a *Adapter) verifyCloudPublicSharing(ctx context.Context) error {
 	orgDefault := false
 	targetFound := false
 	for _, listed := range policies {
-		if !safeIdentifier(listed.ID, 255) || seen[listed.ID] || listed.Attributes.Type != "data-security" {
+		if !safeIdentifier(listed.ID, 255) || seen[listed.ID] || !policyTypePattern.MatchString(listed.Attributes.Type) {
 			return refuse()
 		}
 		seen[listed.ID] = true
+		// The policy collection is heterogeneous in practice, even when its
+		// request is filtered. Only data-security policies govern public links;
+		// their unrelated rule encodings must not make this proof undecodable.
+		if listed.Attributes.Type != "data-security" {
+			continue
+		}
 		if listed.Attributes.Status == "draft" {
 			continue
 		}
@@ -504,13 +536,21 @@ func (a *Adapter) verifyCloudPublicSharing(ctx context.Context) error {
 		}
 		attrs := full.Attributes
 		old := listed.Attributes
-		if full.ID != listed.ID || attrs.Type != old.Type || attrs.Status != old.Status || attrs.Metadata.PolicyCoverageLevel != old.Metadata.PolicyCoverageLevel || attrs.Rule.PublicLinks.present != old.Rule.PublicLinks.present || attrs.Rule.PublicLinks.Effect != old.Rule.PublicLinks.Effect {
+		listedLinks, err := listed.publicLinks()
+		if err != nil {
 			return refuse()
 		}
-		if !attrs.Rule.PublicLinks.present {
+		fullLinks, err := full.publicLinks()
+		if err != nil {
+			return refuse()
+		}
+		if full.ID != listed.ID || attrs.Type != old.Type || attrs.Status != old.Status || attrs.Metadata.PolicyCoverageLevel != old.Metadata.PolicyCoverageLevel || fullLinks.present != listedLinks.present || fullLinks.Effect != listedLinks.Effect {
+			return refuse()
+		}
+		if !fullLinks.present {
 			continue
 		}
-		effect := attrs.Rule.PublicLinks.Effect
+		effect := fullLinks.Effect
 		if effect != "allow" && effect != "block" {
 			return refuse()
 		}
@@ -530,7 +570,7 @@ func (a *Adapter) verifyCloudPublicSharing(ctx context.Context) error {
 			}
 			exact := 0
 			for _, r := range resources {
-				if r.applicationStatus() != "applied" {
+				if r.Type != "resource" || !safeIdentifier(r.resourceARI(), 1024) || r.applicationStatus() != "applied" {
 					return refuse()
 				}
 				if r.resourceARI() == a.siteARI {
@@ -946,12 +986,18 @@ type restrictionResponse struct {
 	} `json:"restrictions"`
 }
 
-func (r restrictionResponse) exactGroup(want string, cloud bool) bool {
+func (r restrictionResponse) exactGroup(operation, want string, cloud bool) bool {
 	g, u := r.Restrictions.Group, r.Restrictions.User
-	if r.Operation != "read" || g.Size == nil || u.Size == nil || *g.Size != 1 || len(g.Results) != 1 || *u.Size != 0 || u.Results == nil || len(u.Results) != 0 || g.Start != 0 || u.Start != 0 || g.Links.Next != "" || u.Links.Next != "" {
+	if r.Operation != operation || g.Size == nil || u.Size == nil || g.Start != 0 || u.Start != 0 || g.Links.Next != "" || u.Links.Next != "" {
 		return false
 	}
-	if (g.Total != nil && *g.Total != 1) || (u.Total != nil && *u.Total != 0) {
+	if *u.Size != 0 || u.Results == nil || len(u.Results) != 0 || (u.Total != nil && *u.Total != 0) {
+		return false
+	}
+	if *g.Size == 0 && g.Results != nil && len(g.Results) == 0 && (g.Total == nil || *g.Total == 0) {
+		return operation == "update"
+	}
+	if *g.Size != 1 || len(g.Results) != 1 || (g.Total != nil && *g.Total != 1) {
 		return false
 	}
 	if cloud {
@@ -980,16 +1026,34 @@ func (r *publicLinksRule) UnmarshalJSON(b []byte) error {
 type policy struct {
 	ID         string `json:"id"`
 	Attributes struct {
-		Type   string `json:"type"`
-		Status string `json:"status"`
-		Rule   struct {
-			PublicLinks publicLinksRule `json:"publicLinks"`
-		} `json:"rule"`
+		Type     string          `json:"type"`
+		Status   string          `json:"status"`
+		Rule     json.RawMessage `json:"rule"`
 		Metadata struct {
 			PolicyCoverageLevel string `json:"policyCoverageLevel"`
 		} `json:"metadata"`
 	} `json:"attributes"`
 }
+
+func (p policy) publicLinks() (publicLinksRule, error) {
+	var out publicLinksRule
+	if p.Attributes.Type != "data-security" || len(p.Attributes.Rule) == 0 {
+		return out, nil
+	}
+	var rules map[string]json.RawMessage
+	if err := json.Unmarshal(p.Attributes.Rule, &rules); err != nil {
+		return publicLinksRule{}, err
+	}
+	raw, ok := rules["publicLinks"]
+	if !ok {
+		return out, nil
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return publicLinksRule{}, err
+	}
+	return out, nil
+}
+
 type policyPagination struct {
 	Next string `json:"next"`
 }
@@ -1002,12 +1066,15 @@ type policyPage struct {
 	Links policyLinks       `json:"links"`
 }
 type policyResource struct {
-	ResourceID        string `json:"resourceId"`
-	ApplicationStatus string `json:"applicationStatus"`
+	Type       string `json:"type"`
+	Attributes struct {
+		ResourceID        string `json:"resourceId"`
+		ApplicationStatus string `json:"applicationStatus"`
+	} `json:"attributes"`
 }
 
-func (r policyResource) resourceARI() string       { return r.ResourceID }
-func (r policyResource) applicationStatus() string { return r.ApplicationStatus }
+func (r policyResource) resourceARI() string       { return r.Attributes.ResourceID }
+func (r policyResource) applicationStatus() string { return r.Attributes.ApplicationStatus }
 
 type policyResourcePage struct {
 	Data  []policyResource  `json:"data"`

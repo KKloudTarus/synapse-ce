@@ -409,7 +409,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_FLEET_ENABLED` | `false` | Fleet transport + agent-admin routes. |
-| `SYNAPSE_FLEET_ASSETS_ENABLED` | `false` | Fleet asset model + attack paths. |
+| `SYNAPSE_FLEET_ASSETS_ENABLED` | `false` | Fleet asset model, attack paths and canonical SCA target attribution. Enable on both API and SCA workers when Project Jira grouping needs observed asset rows. |
 | `SYNAPSE_FLEET_HOST_INGEST_ENABLED` | `false` | Accept host-inventory from `synapse-agent`. |
 | `SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED` | `false` | Accept Kubernetes inventory from `synapse-cluster-agent`. |
 | `SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED` | `false` | Accept signed agent telemetry batches (A3, `POST /api/v1/fleet/telemetry`); verified + idempotently sequenced server-side. |

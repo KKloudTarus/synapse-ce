@@ -60,6 +60,9 @@ func TestJiraHookRequiresNativeBodySignatureAndDeliveryID(t *testing.T) {
 			endpoint.Provider = provider
 			store.records[hookIDA] = endpoint
 			body := []byte(`{"webhookEvent":"jira:issue_updated","issue":{"key":"SEC-1"}}`)
+			if provider == "jira-dc" {
+				body = []byte(`{"event":"jira:issue_updated","issue":{"key":"SEC-1"}}`)
+			}
 			for _, tc := range []struct {
 				name, header, signature, delivery string
 				code                              int
@@ -126,5 +129,29 @@ func TestJiraHookMetadataRejectsDuplicateOrUnsafeDelivery(t *testing.T) {
 	event, ok := jiraEventMetadata("jira-cloud", h, []byte(`{"webhookEvent":"comment_created"}`))
 	if !ok || len(event.PayloadSHA256) != 64 {
 		t.Fatal("missing signed-body receipt")
+	}
+}
+
+func TestJiraDataCenterEventMetadataUsesNativeEventField(t *testing.T) {
+	for _, tc := range []struct {
+		provider, body string
+		accepted       bool
+	}{
+		{"jira-dc", `{"event":"jira:issue_updated"}`, true},
+		{"jira-dc", `{"webhookEvent":"comment_created"}`, true},
+		{"jira-dc", `{"event":"jira:issue_updated","webhookEvent":"comment_created"}`, false},
+		{"jira-cloud", `{"event":"jira:issue_updated"}`, false},
+	} {
+		h := make(http.Header)
+		if tc.provider == "jira-cloud" {
+			h.Set("X-Atlassian-Webhook-Identifier", "delivery")
+		}
+		event, ok := jiraEventMetadata(tc.provider, h, []byte(tc.body))
+		if ok != tc.accepted {
+			t.Fatalf("provider=%s accepted=%v want=%v", tc.provider, ok, tc.accepted)
+		}
+		if ok && (event.EventType == "" || !strings.HasPrefix(event.EventID, "body:")) {
+			t.Fatalf("invalid signed body identity: %+v", event)
+		}
 	}
 }

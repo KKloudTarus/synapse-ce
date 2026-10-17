@@ -73,6 +73,10 @@ type workflowProvider struct {
 	posts          int
 	updates        int
 	transitions    int
+	comments       int
+	commentBodies  []string
+	commentErr     error
+	commentFound   bool
 	created        domain.RemoteTicket
 	createErr      error
 	hits           []domain.RemoteTicket
@@ -137,11 +141,27 @@ func (p *workflowProvider) UpdateTicket(_ context.Context, _ string, raw json.Ra
 	p.createdPayload = append(json.RawMessage(nil), raw...)
 	return nil
 }
-func (p *workflowProvider) TransitionTicket(_ context.Context, _ string, _ string, _ string) error {
+func (p *workflowProvider) TransitionTicket(_ context.Context, _ string, _ string, comment string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.transitions++
+	p.commentBodies = append(p.commentBodies, comment)
 	return nil
+}
+func (p *workflowProvider) CommentTicket(_ context.Context, _ string, body string, _ string) (ports.TicketCommentReceipt, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.comments++
+	p.commentBodies = append(p.commentBodies, body)
+	if p.commentErr != nil {
+		return ports.TicketCommentReceipt{}, p.commentErr
+	}
+	return ports.TicketCommentReceipt{ID: fmt.Sprintf("comment-%d", p.comments)}, nil
+}
+func (p *workflowProvider) FindTicketComment(context.Context, string, string, string, string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.commentFound, nil
 }
 func (p *workflowProvider) TicketIdentity(context.Context) (string, error) {
 	return "jira-integration", nil
@@ -1350,6 +1370,211 @@ func TestWorkflowStatusTransitionIsIdempotent(t *testing.T) {
 	progress, err := progresses.GetTicketStatusProgress(ctx, "tenant-a", m.ID, "eng-a", "finding-a")
 	if err != nil || progress.AppliedState != domain.SyncRemediated || progress.UpdateIntentID.IsZero() || progress.IntegrationAuthor != "jira-integration" {
 		t.Fatalf("status progress=%+v err=%v", progress, err)
+	}
+}
+
+func TestWorkflowStatusCommentRequiresDedicatedReceiptBeforeFieldRefresh(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "durable-comment-origin", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("submit created=%t err=%v", created, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // create
+		t.Fatal(err)
+	}
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // transition-only, Jira 204
+		t.Fatal(err)
+	}
+	f.provider.mu.Lock()
+	bundled := append([]string(nil), f.provider.commentBodies...)
+	f.provider.commentErr = &ports.TicketProviderError{Code: "network", Ambiguous: true}
+	f.provider.mu.Unlock()
+	if len(bundled) != 1 || bundled[0] != "" {
+		t.Fatalf("versioned transition carried bundled comment: %#v", bundled)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // dedicated comment becomes uncertain
+		t.Fatal(err)
+	}
+	if f.provider.comments != 1 || f.provider.updates != 0 {
+		t.Fatalf("comment writes=%d field refreshes=%d", f.provider.comments, f.provider.updates)
+	}
+	intents, err := f.store.ListFindingIntents(ctx, "tenant-a", "finding-a", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var comment domain.Intent
+	for _, candidate := range intents {
+		if candidate.Action == domain.Comment {
+			comment = candidate
+		}
+	}
+	if comment.ID.IsZero() || comment.State != writeintent.Uncertain {
+		t.Fatalf("comment intent=%+v", comment)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // uncertain is never resent
+		t.Fatal(err)
+	}
+	if f.provider.comments != 1 || f.provider.updates != 0 {
+		t.Fatalf("lost acknowledgement retried comment=%d updates=%d", f.provider.comments, f.provider.updates)
+	}
+	f.provider.mu.Lock()
+	f.provider.commentFound = true
+	f.provider.mu.Unlock()
+	if _, err = f.workflow.Reconcile(ctx, "tenant-a", comment.ID, comment.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // only now can a field refresh run
+		t.Fatal(err)
+	}
+	if f.provider.comments != 1 || f.provider.updates != 1 {
+		t.Fatalf("reconciliation comment=%d updates=%d", f.provider.comments, f.provider.updates)
+	}
+}
+
+func TestWorkflowStatusCommentPreflightRejectsStatusChangedDuringMetadata(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "comment-metadata-fence", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("submit created=%t err=%v", created, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // transition-only
+		t.Fatal(err)
+	}
+	fresh, err := usecase.NewWorkflow(f.store, f.integrations, workflowProviders{f.provider}, f.findings, f.engagements, f.policy, f.audit, &ticketIDs{}, f.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh.SetSLAStore(memory.NewSLAStore())
+	fresh.SetPublicBaseURL("https://console.example")
+	release := make(chan struct{})
+	f.provider.discoverStart = make(chan struct{}, 1)
+	f.provider.discoverWait = release
+	done := make(chan error, 1)
+	go func() { _, tickErr := fresh.Tick(ctx, "tenant-a", 10); done <- tickErr }()
+	select {
+	case <-f.provider.discoverStart:
+	case <-time.After(time.Second):
+		t.Fatal("comment metadata discovery did not start")
+	}
+	item, err = f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusOpen, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.comments != 0 || f.provider.updates != 0 {
+		t.Fatalf("stale comment wrote comments=%d updates=%d", f.provider.comments, f.provider.updates)
+	}
+	intents, err := f.store.ListFindingIntents(ctx, "tenant-a", "finding-a", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenComment := false
+	for _, candidate := range intents {
+		if candidate.Action == domain.Comment {
+			seenComment = true
+			if candidate.State != writeintent.Failed || candidate.ErrorCode != "preflight_refused" {
+				t.Fatalf("comment preflight=%+v", candidate)
+			}
+		}
+	}
+	if !seenComment {
+		t.Fatal("metadata race did not create a durable comment command")
+	}
+}
+
+func TestWorkflowStatusCommentConcurrentPlanningCreatesOneDurableCommand(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.workflow.SetSLAStore(memory.NewSLAStore())
+	ctx := context.Background()
+	m, err := f.workflow.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.workflow.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := f.workflow.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "concurrent-comment-origin", PreviewDigest: p.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("submit created=%t err=%v", created, err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Tick(ctx, "tenant-a", 10); err != nil { // transition completes
+		t.Fatal(err)
+	}
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, tickErr := f.workflow.Tick(ctx, "tenant-a", 10)
+			errs <- tickErr
+		}()
+	}
+	for range 2 {
+		if tickErr := <-errs; tickErr != nil {
+			t.Fatal(tickErr)
+		}
+	}
+	intents, err := f.store.ListFindingIntents(ctx, "tenant-a", "finding-a", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments := 0
+	for _, candidate := range intents {
+		if candidate.Action == domain.Comment {
+			comments++
+		}
+	}
+	if comments != 1 || f.provider.comments != 1 {
+		t.Fatalf("comment intents=%d provider writes=%d", comments, f.provider.comments)
 	}
 }
 

@@ -461,6 +461,7 @@ func main() {
 			os.Exit(1)
 		}
 		workflow.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
+		workflow.SetProjects(postgres.NewProjectRepository(pool))
 		workflow.SetAutoPushSourceAvailable(cfg.NotificationEnabled)
 		workflow.SetSLAStore(postgres.NewSLAStore(pool))
 		runner, ticketErr := ticketruntime.New(workflow, repo, log)
@@ -608,8 +609,25 @@ func main() {
 		scaService.SetScanRunProvenance(scanRunStore, assessmentTransactions)
 		scaService.SetAssessmentCycleMembership(assessmentCycleStore, assessmentSnapshotStore)
 	}
+	scaService.SetProjectSourceProjects(postgres.NewProjectRepository(pool))
+	if cfg.FleetAssetsEnabled {
+		assets := postgres.NewAssetRepository(pool)
+		attributor, err := attackpathuc.NewRecorder(assets, postgres.NewAttackPathStore(pool), repo)
+		if err != nil {
+			log.Error("SCA attribution init failed", "err", err)
+			os.Exit(1)
+		}
+		if err := scaService.SetFindingAttribution(assets, attributor); err != nil {
+			log.Error("SCA attribution setup failed", "err", err)
+			os.Exit(1)
+		}
+	}
 	scaService.SetImportedSBOMStore(importedSBOMStore)
 	scaService.SetUploadedSourceStore(uploadedSources)
+	if err := configureWorkerSCASLAAssessor(cfg, scaService, postgres.NewSLAStore(pool), clock, ids); err != nil {
+		log.Error("SCA SLA governance init failed", "err", err)
+		os.Exit(1)
+	}
 	configureCleanup := func() {}
 	if !usesDispatchOnlySCA(cfg) {
 		configureCleanup = scacompose.Configure(scaService, cfg, scaSandbox, log)
@@ -1523,6 +1541,25 @@ func runWorkerRuntime(
 	}
 	loops.Wait()
 	log.Info("synapse-worker stopped", "loops", cfg.WorkerConcurrency)
+}
+
+// scaSLAAssessorWiring keeps the composition boundary narrow: SCA only needs the
+// finding-facing SLA assessment port, while the concrete service remains owned by
+// the SLA use case.
+type scaSLAAssessorWiring interface {
+	SetSLAAssessor(ports.FindingSLAAssessor)
+}
+
+func configureWorkerSCASLAAssessor(cfg config.Config, target scaSLAAssessorWiring, store ports.SLAStore, clock ports.Clock, ids ports.IDGenerator) error {
+	if !cfg.SLAEnabled {
+		return nil
+	}
+	assessor, err := slauc.NewService(store, clock, ids)
+	if err != nil {
+		return err
+	}
+	target.SetSLAAssessor(assessor)
+	return nil
 }
 
 // mustVaultCipher builds the vault cipher from the master key (ephemeral in dev), exiting

@@ -1655,6 +1655,7 @@ func main() {
 			os.Exit(1)
 		}
 		workflow.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
+		workflow.SetProjects(projectRepo)
 		workflow.SetAutoPushSourceAvailable(databasePool != nil && cfg.NotificationEnabled)
 		workflow.SetSLAStore(slaStore)
 		router.SetTicketing(workflow)
@@ -2423,6 +2424,7 @@ func main() {
 		os.Exit(1)
 	}
 	projectService.SetBitbucketCommitResolver(bitbucketCommits)
+	scaService.SetProjectSourceProjects(projectRepo)
 	scaService.SetProjectAnalysisRecorder(projectService)
 	scaService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
 	projectService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)

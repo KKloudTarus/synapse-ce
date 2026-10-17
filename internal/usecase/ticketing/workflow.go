@@ -387,23 +387,31 @@ func (w *Workflow) ResetBreaker(ctx context.Context, tenant, integrationID share
 }
 
 type snapshotFacts struct {
-	Provider             integration.Provider   `json:"provider"`
-	Endpoint             string                 `json:"endpoint"`
-	DataClass            notification.DataClass `json:"data_class"`
-	PolicyRevision       int                    `json:"policy_revision"`
-	MappingVersion       int                    `json:"mapping_version"`
-	ConnectionRevision   int                    `json:"connection_revision"`
-	CredentialRevision   int                    `json:"credential_revision"`
-	WaiverReason         string                 `json:"waiver_reason"`
-	UpdateRemoteID       string                 `json:"update_remote_id,omitempty"`
-	UpdateRemoteURL      string                 `json:"update_remote_url,omitempty"`
-	StatusTransitionID   string                 `json:"status_transition_id,omitempty"`
-	StatusComment        string                 `json:"status_comment,omitempty"`
-	StatusSource         string                 `json:"status_source,omitempty"`
-	GroupRevision        int                    `json:"group_revision,omitempty"`
-	GroupVulnerability   string                 `json:"group_vulnerability,omitempty"`
-	GroupFactsDigest     string                 `json:"group_facts_digest,omitempty"`
-	RequestPreviewDigest string                 `json:"request_preview_digest,omitempty"`
+	Provider           integration.Provider   `json:"provider"`
+	Endpoint           string                 `json:"endpoint"`
+	DataClass          notification.DataClass `json:"data_class"`
+	PolicyRevision     int                    `json:"policy_revision"`
+	MappingVersion     int                    `json:"mapping_version"`
+	ConnectionRevision int                    `json:"connection_revision"`
+	CredentialRevision int                    `json:"credential_revision"`
+	WaiverReason       string                 `json:"waiver_reason"`
+	UpdateRemoteID     string                 `json:"update_remote_id,omitempty"`
+	UpdateRemoteURL    string                 `json:"update_remote_url,omitempty"`
+	StatusTransitionID string                 `json:"status_transition_id,omitempty"`
+	StatusComment      string                 `json:"status_comment,omitempty"`
+	StatusSource       string                 `json:"status_source,omitempty"`
+	// StatusCommandVersion is zero for legacy bundled transition commands. A
+	// versioned transition has no bundled comment; its following Comment intent
+	// freezes this parent, episode and authenticated Jira principal.
+	StatusCommandVersion int       `json:"status_command_version,omitempty"`
+	StatusMode           string    `json:"status_mode,omitempty"`
+	StatusParentID       shared.ID `json:"status_parent_id,omitempty"`
+	StatusEpisode        int       `json:"status_episode,omitempty"`
+	StatusAuthor         string    `json:"status_author,omitempty"`
+	GroupRevision        int       `json:"group_revision,omitempty"`
+	GroupVulnerability   string    `json:"group_vulnerability,omitempty"`
+	GroupFactsDigest     string    `json:"group_facts_digest,omitempty"`
+	RequestPreviewDigest string    `json:"request_preview_digest,omitempty"`
 }
 
 // Preview never writes to Jira. Destination/security/policy facts participate in
@@ -449,7 +457,7 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 	if err = w.validateSelections(m, meta); err != nil {
 		return Preview{}, err
 	}
-	summary, body, links, err := RenderTicket(m, f, class, m.Locale, w.publicBase)
+	summary, body, links, err := w.renderTicket(tenantCtx, m, f, class)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -801,6 +809,14 @@ func (w *Workflow) tickOutboundIntents(tenantCtx context.Context, tenant shared.
 			}
 			continue
 		}
+		if claimed.Action == domain.Comment {
+			if preflightErr = w.statusCommentPreflight(tenantCtx, tenant, claimed, facts); preflightErr != nil {
+				if _, e = w.dispatch.FinishDispatch(tenantCtx, tenant, claimed.ID, claimed.Version, domain.IntentTransition{Event: writeintent.Reject, ErrorCode: "preflight_refused"}, w.clock.Now().UTC(), nil, ""); e != nil && !errors.Is(e, shared.ErrConflict) {
+					return completed, e
+				}
+				continue
+			}
+		}
 		provider, e := w.providers.TicketProvider(tenantCtx, in)
 		if e != nil {
 			_, e = w.dispatch.FinishDispatch(tenantCtx, tenant, claimed.ID, claimed.Version, domain.IntentTransition{Event: writeintent.Reject, ErrorCode: "provider_unavailable"}, w.clock.Now().UTC(), nil, "")
@@ -814,11 +830,19 @@ func (w *Workflow) tickOutboundIntents(tenantCtx context.Context, tenant shared.
 		var sendErr error
 		if claimed.Action == domain.Transition {
 			writer, ok := provider.(ports.TicketStatusWriter)
-			if !ok || facts.UpdateRemoteID == "" || facts.StatusTransitionID == "" || facts.StatusComment == "" {
+			if !ok || facts.UpdateRemoteID == "" || facts.StatusTransitionID == "" || facts.StatusSource == "" || (facts.StatusCommandVersion == 0 && facts.StatusComment == "") {
 				sendErr = &ports.TicketProviderError{Code: "transition_unsupported"}
 			} else {
 				remote = domain.RemoteTicket{ID: facts.UpdateRemoteID, URL: facts.UpdateRemoteURL}
 				sendErr = writer.TransitionTicket(callCtx, facts.UpdateRemoteID, facts.StatusTransitionID, facts.StatusComment)
+			}
+		} else if claimed.Action == domain.Comment {
+			writer, ok := provider.(ports.TicketCommentWriter)
+			if !ok || facts.UpdateRemoteID == "" || facts.UpdateRemoteURL == "" || facts.StatusComment == "" || facts.StatusAuthor == "" {
+				sendErr = &ports.TicketProviderError{Code: "comment_unsupported"}
+			} else {
+				remote = domain.RemoteTicket{ID: facts.UpdateRemoteID, URL: facts.UpdateRemoteURL}
+				_, sendErr = writer.CommentTicket(callCtx, facts.UpdateRemoteID, facts.StatusComment, facts.StatusAuthor)
 			}
 		} else if claimed.Action == domain.Update {
 			updater, ok := provider.(ports.TicketUpdater)
@@ -847,7 +871,7 @@ func (w *Workflow) tickOutboundIntents(tenantCtx context.Context, tenant shared.
 		} else {
 			var refusal *ports.TicketProviderError
 			if errors.As(sendErr, &refusal) && !refusal.Ambiguous {
-				if refusal.Status == 0 && (refusal.Code == "unsupported_action" || refusal.Code == "update_unsupported" || refusal.Code == "transition_unsupported") {
+				if refusal.Status == 0 && (refusal.Code == "unsupported_action" || refusal.Code == "update_unsupported" || refusal.Code == "transition_unsupported" || refusal.Code == "comment_unsupported") {
 					code = "invalid_action"
 					change = domain.IntentTransition{Event: writeintent.Reject, ErrorCode: code}
 				}
@@ -1001,6 +1025,17 @@ func (w *Workflow) Reconcile(ctx context.Context, tenant, id shared.ID, version 
 		return domain.Intent{}, safeTicketError(err)
 	}
 	defer closeTicketProvider(p)
+	if i.Action == domain.Comment {
+		reader, ok := p.(ports.TicketCommentReader)
+		if !ok {
+			return i, nil
+		}
+		found, readErr := reader.FindTicketComment(ctx, facts.UpdateRemoteID, facts.StatusComment, i.Marker, facts.StatusAuthor)
+		if readErr != nil || !found {
+			return i, readErr
+		}
+		return w.store.TransitionIntent(ctx, tenant, id, i.Version, domain.IntentTransition{Event: writeintent.ReconcileFound, Remote: &domain.RemoteTicket{ID: facts.UpdateRemoteID, URL: facts.UpdateRemoteURL}}, w.clock.Now().UTC())
+	}
 	target, err := i.DispatchTarget()
 	if err != nil {
 		return domain.Intent{}, err
@@ -1020,6 +1055,33 @@ func (w *Workflow) Reconcile(ctx context.Context, tenant, id shared.ID, version 
 		change = domain.IntentTransition{Event: writeintent.ReconcileFound, Remote: &hits[0]}
 	}
 	return w.store.TransitionIntent(ctx, tenant, id, i.Version, change, w.clock.Now().UTC())
+}
+
+// statusCommentPreflight binds a versioned comment to the exact completed
+// transition episode. It is deliberately after the common double-read authority
+// preflight, immediately before the provider write; a later close/reopen cannot
+// use an old comment command as proof for the new episode.
+func (w *Workflow) statusCommentPreflight(ctx context.Context, tenant shared.ID, i domain.Intent, facts snapshotFacts) error {
+	progresses, ok := w.store.(ports.TicketStatusProgressStore)
+	if !ok {
+		return shared.ErrConflict
+	}
+	progress, err := progresses.GetTicketStatusProgress(ctx, tenant, i.MappingID, i.EngagementID, i.FindingID)
+	if err != nil {
+		return err
+	}
+	if progress.TransitionIntentID != facts.StatusParentID || progress.Episode != facts.StatusEpisode || progress.SourceRevision != facts.StatusSource || progress.IntegrationAuthor != facts.StatusAuthor {
+		return shared.ErrConflict
+	}
+	parent, err := w.store.GetIntent(ctx, tenant, facts.StatusParentID)
+	if err != nil || parent.State != writeintent.Done || parent.Action != domain.Transition || parent.TenantID != tenant || parent.MappingID != i.MappingID || parent.EngagementID != i.EngagementID || parent.FindingID != i.FindingID || parent.IntegrationID != i.IntegrationID {
+		return shared.ErrConflict
+	}
+	parentFacts, _, err := readTicketSnapshot(parent)
+	if err != nil || parentFacts.StatusCommandVersion != 1 || parentFacts.StatusMode != "transition_only" || parentFacts.StatusSource != facts.StatusSource || parent.RemoteID != facts.UpdateRemoteID || parent.RemoteURL != facts.UpdateRemoteURL {
+		return shared.ErrConflict
+	}
+	return nil
 }
 func (w *Workflow) ListFindingIntents(ctx context.Context, tenant, finding shared.ID, limit int) ([]domain.Intent, error) {
 	return w.store.ListFindingIntents(ctx, tenant, finding, limit)

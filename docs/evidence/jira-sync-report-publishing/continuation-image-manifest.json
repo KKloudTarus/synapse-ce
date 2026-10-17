@@ -1,0 +1,321 @@
+{
+  "scope": "49 inspected real continuation previews; original 17 captures remain separately recorded. PDFs below have all 3 rendered page previews.",
+  "capture_notes": [
+    "All listed images were visually reviewed before publication.",
+    "Loading states use real API responses temporarily rate-limited for capture and then restored; empty and error states use real API responses.",
+    "Provider and console captures are real acceptance captures, not UI fixtures or mocks. One theme is sufficient for acceptance; the gallery retains the providers' observed light and dark themes.",
+    "The fresh Cloud purge report was deleted before its attachment was downloaded, so this inventory deliberately contains no individual preview for that artifact."
+  ],
+  "images": [
+    {
+      "path": "confluence-cloud-final-footer-en-light.jpg",
+      "bytes": 113799,
+      "sha256": "bf56910295066fdce94a97197b5d4d20555419a355a0a37ee1ba2a0ba278e1ce",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-cloud-final-pdf-page-1.png",
+      "bytes": 222816,
+      "sha256": "78d0e0b3a669eacc4fa1acadf0b096c227762adb70cb4e692a0369ee722ce0d4",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-cloud-final-pdf-page-2.png",
+      "bytes": 216098,
+      "sha256": "b3aae5b5fe9fb8fdfbf20d990a177c775677e8acf5166d272859a37426237cdb",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-cloud-group-only-read-edit-en-light.jpg",
+      "bytes": 109764,
+      "sha256": "761b07adab12eccd8cf3f725ee80b4d1946d402f0de464cbc829a6083563f79c",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-cloud-restrictions-dialog-en-light.jpg",
+      "bytes": 77693,
+      "sha256": "73060181164251496a3ce01ad703db7a807086a9f847eb27a76262ebaa710ca8",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-cloud-scheduled-history-en-light.jpg",
+      "bytes": 114076,
+      "sha256": "3440dabbbe80b9fd0de44fd69e226e42ffef2de532a36414331598f126d86a3f",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-dc-final-pdf-page-1.png",
+      "bytes": 183524,
+      "sha256": "cc46a99f6351cebf40aaf9806a065d2f7fd7fe82c44862148c148da5c94dd751",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-dc-footer-en-dark.jpg",
+      "bytes": 77150,
+      "sha256": "a2cd3c93d0411c8c973a2477fa60ecc32d7f4a0dac7f6551458fb1481d9a0aff",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-dc-group-only-en-dark.jpg",
+      "bytes": 86446,
+      "sha256": "e74fc07925371e621150f3eda5d27d0daf20dac3927702c706ec87ff67d48d14",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-dc-pdf-attachments-en-dark.jpg",
+      "bytes": 48723,
+      "sha256": "c2875cf9fa9b6406f3431d8440cb8638eb35b153e5e5490c31ff75465aa43bc3",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-dc-published-body-en-dark.jpg",
+      "bytes": 108480,
+      "sha256": "774002776ec5382f5faecd006fa3763aee12e758620f7db972899002134aa14e",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-dc-republished-history-en-dark.jpg",
+      "bytes": 67757,
+      "sha256": "15657724c703c67d4c98dc1def5b166ec1b1de5ebe36eb8512ace06bc8a560cd",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-jira-dc-linked-finding-en-light.jpg",
+      "bytes": 62689,
+      "sha256": "cabf249f6d44431e4d840158845da043aa6c0748953e6ad6c50bf6a5b5342fba",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-jira-inbound-settings-en-light.jpg",
+      "bytes": 64191,
+      "sha256": "66ab975663ceca229cf00f2bec14ca6f76a91babd65b11bf95eeece10923b5d2",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-jira-mapping-en-light.jpg",
+      "bytes": 76053,
+      "sha256": "222c08cb0baa7f6dfb10f515a5319a31eb9a104336ef8a4c3167a43451f9d808",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-jira-webhook-comment-vi-light.jpg",
+      "bytes": 74757,
+      "sha256": "dbb127a47fe28ffa016735b84507cb23933a5c441b825df205f21209e8963a17",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-project-publication-empty-en-light.jpg",
+      "bytes": 65047,
+      "sha256": "4fc01dbee208f9b913f510b97564476ef6fc67c149cdaffc8dc2cff92d89ba4a",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-project-schedule-controls-en-light.jpg",
+      "bytes": 65925,
+      "sha256": "8b30443c8e753f2d0e8b01a09ddd38cf89919a6e64348c101c47bea74d8ce62e",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-project-source-empty-en-light.jpg",
+      "bytes": 60191,
+      "sha256": "dd2af6e80743a0c11df2a96aad54ead625238ab599e4f508f5a0dc4cb15f4aea",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-project-source-error-en-light.jpg",
+      "bytes": 57356,
+      "sha256": "45c64917ce066405de69181df15d0ef4a8a1920700f16cb395ea81b2ee929696",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-project-source-linked-en-light.jpg",
+      "bytes": 82548,
+      "sha256": "2b8ee62b91a1cb8d019e812767e075e391749ad68343c046858aa95b758b5988",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-project-source-loading-en-light.jpg",
+      "bytes": 53731,
+      "sha256": "dad955862e386a748fdcb1f7e82c30f7b9d07f5197607d1ac571968d2c36d112",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-project-ticket-state-en-light.jpg",
+      "bytes": 53166,
+      "sha256": "48bf54c4dd1bc400ba17354c938b168fc174b89b733415c7588ab13478c377b4",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-publication-loading-en-light.jpg",
+      "bytes": 76408,
+      "sha256": "d5eff2d92ebd99019b94de30b0adb41c29885641cc718a7e9d4fc292e58e9b63",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-publication-resume-refused-en-light.jpg",
+      "bytes": 72813,
+      "sha256": "8419dc03ca64e8c43e1edacac21bdfb474d886d6fd19d2b5220cde60d8d6af7f",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-publication-schedule-timezone-en-light.jpg",
+      "bytes": 75851,
+      "sha256": "6db21e1b799faaf0aca7d5a9bf3e9b4a7be1275f4c7379aef5be50acb9e96f99",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-publishing-readonly-en-light.jpg",
+      "bytes": 63390,
+      "sha256": "04046d0424417188f8e77d8ac8486cbee92ce1bb7d601d3ccbae5e668904d00a",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-publishing-schedule-en-light.jpg",
+      "bytes": 76535,
+      "sha256": "c418e28b2a170d2d4eafdcca65c39bea0b624e1fdbb83483b340b3f130711351",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-unpublish-confirm-en-light.jpg",
+      "bytes": 26216,
+      "sha256": "4a3df7786340ba9f3b92dd7efc94204e375bc13ebad5f5d8c4b2cb38d8524661",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-cloud-grouped-after-rescan-vi-dark.jpg",
+      "bytes": 94562,
+      "sha256": "608f45b68dece7575114c790e88b81363c148c29f6d91e867de6cf4fca2989d6",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-cloud-grouped-assets-en-dark.jpg",
+      "bytes": 88405,
+      "sha256": "6e6f5c0775a46381af9d0f9d96da8edd96868262421b4a99e5177cc83a37d102",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-cloud-grouped-assets-vi-dark.jpg",
+      "bytes": 86929,
+      "sha256": "86a0aeb14e252143f228a468f164abf80948691eb1584442df8282f5251267d7",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-cloud-grouped-body-vi-dark.jpg",
+      "bytes": 100164,
+      "sha256": "501c9d7ff19b5d9db657a517b94073e32078032f31d192331bb7f7b5155df52f",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-cloud-grouped-en-dark.jpg",
+      "bytes": 96986,
+      "sha256": "c13e66a87ac0e8e60638e640b27739a9128c3654bc697639d54cc9b631cbd5b2",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-cloud-restricted-lifecycle-comments-en-dark.jpg",
+      "bytes": 84642,
+      "sha256": "835e7ada5c0ee2aa3fc46f899df9a5b40bb1f485ab57c2878c0286df6882012e",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-cloud-restricted-remediated-en-dark.jpg",
+      "bytes": 82265,
+      "sha256": "8978f664f33e6a44eba379bc8fa50aabb34df33e477d8cc007bddbfb641b1670",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-cloud-restricted-reopen-vi-dark.jpg",
+      "bytes": 83236,
+      "sha256": "94150c92091057986c123f4dbf7b5de2d519a4604a1169697b09b9fcb26076c4",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-cloud-restricted-security-vi-dark.jpg",
+      "bytes": 85029,
+      "sha256": "34fa6a52a1f556f14999aca6e1ee30e425d1c76cf0a769913aea3c125230893f",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-dc-accepted-risk-comment-vi-light.jpg",
+      "bytes": 85438,
+      "sha256": "1e6150316e2ce03bf98ebb97d0d4c413b1d4608cdd8461d9cfb39b6bceed0027",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-dc-auto-push-en-light.jpg",
+      "bytes": 95827,
+      "sha256": "53a13f0213e3e2312dfa1220c3d6ef6597be5caf54b2a3d5a409eab454c30110",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-dc-false-positive-reopen-vi-light.jpg",
+      "bytes": 90971,
+      "sha256": "4eb7002290dce5e6893e73a37be1c139128a79b40ae726a396cb0236dc592970",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-dc-grouped-after-rescan-vi-light.jpg",
+      "bytes": 82299,
+      "sha256": "c92a818b7415eb9ff981c83604213a7f448e6dbbcba8e84e93f5a2a0b23392f9",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-dc-grouped-assets-en-light.jpg",
+      "bytes": 89398,
+      "sha256": "640233ca159e7f0043e025458953e5be54f98701b058c073d64da7504088c72d",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-dc-grouped-assets-vi-light.jpg",
+      "bytes": 84896,
+      "sha256": "47b1457a1020bd2a0565a2d34d119ef860b26d0f9ecc26c50572a08594ec6ba1",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-dc-grouped-body-en-light.jpg",
+      "bytes": 99326,
+      "sha256": "65ca35eb0592ca9b27dad2437df0d1851e2195f7a5b197197fcfcb9a709bdbfa",
+      "visually_reviewed": true
+    },
+    {
+      "path": "jira-dc-grouped-body-vi-light.jpg",
+      "bytes": 100531,
+      "sha256": "d05a2194310de5e6aa9bf40fb2ec1ca8ae03d82779c1b24a753720eff7a1f085",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-jira-dc-webhook-proposal-en-light.jpg",
+      "bytes": 68338,
+      "sha256": "95c72ce823b959777f1d257a49c60cbef9d90f2990739e36a5e66311b3dba9f0",
+      "visually_reviewed": true
+    },
+    {
+      "path": "console-jira-dc-finding-confirmed-en-light.jpg",
+      "bytes": 86219,
+      "sha256": "31dce898d0dc1652572529478268c5f86361cc0f49fc0a0bae86a6d57f490651",
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-cloud-final-body-en-light.jpg",
+      "bytes": 99594,
+      "sha256": "fe1281977e3dd68c523836d94b73ef1475d5f007dac168d9ef6151b255be5334",
+      "visually_reviewed": true
+    }
+  ],
+  "pdfs": [
+    {
+      "path": "confluence-cloud-scheduled-report.pdf",
+      "bytes": 83266,
+      "sha256": "4ddabd3bfcfbd96ac34e768a850b89bf13debbb1df0d749c6cb782e7adce0486",
+      "rendered_pages": 2,
+      "visually_reviewed": true
+    },
+    {
+      "path": "confluence-dc-republished-report.pdf",
+      "bytes": 53469,
+      "sha256": "df9836a474d8257f1497512dcf7b5debb0a7c9690a57148b5f6cd17ac2b72491",
+      "rendered_pages": 1,
+      "visually_reviewed": true
+    }
+  ]
+}

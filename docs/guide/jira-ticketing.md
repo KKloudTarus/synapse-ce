@@ -60,6 +60,20 @@ Deploy migrations before API and worker. Disable Jira integrations before applic
 rollback and retain intent, snapshot and breaker history. Memory persistence is for
 development only. PostgreSQL is required for durable production recovery.
 
+Do not mix old and new Jira consumers when deploying separate durable status
+comments. Disable the affected Jira integrations, let in-flight provider calls
+finish, then stop every old Jira worker before starting the new planner or worker.
+Deploy the new API and workers together, verify their versions, and re-enable only
+the canary connection first. New workers retain support for legacy bundled
+transition snapshots; old workers cannot execute the new transition-only snapshots
+or dedicated comment intents.
+
+Before rollback, disable the affected integrations, drain in-flight calls and stop
+the new workers. Keep Jira disabled on the older binary. Retain all new snapshots,
+intents and audit records for recovery with a compatible forward version; do not
+rewrite them into legacy commands or replay uncertain writes. An old binary is
+not a recovery executor for these records.
+
 The deployment operator should first enable only a dedicated test connection and
 test engagement. Create one English and one Vietnamese finding ticket on each
 supported Jira deployment, inspect the resulting fields and correlation label,
@@ -126,6 +140,21 @@ create a second remote ticket while the first outcome is unresolved. Later membe
 and rescans update the same remote issue. Lowering the effective destination class
 blocks grouped content until the privacy configuration permits detail again.
 
+## Project source scans and Jira
+
+An operator can run a vulnerabilities-only scan for one relative subdirectory of a
+local Project binding with `POST /api/v1/projects/{key}/source-scans`. The server
+selects the Project root and internal scan context; do not send a filesystem root,
+an engagement ID, or an absolute/traversal path. This scan does not replace the
+Project quality-analysis status or baseline.
+
+Use `/api/v1/projects/{key}/source-findings` to review and triage the resulting
+findings. The scoped ticket preview and submit routes under each finding use the
+same permissions, preview digest, destination checks, restricted-sharing checks,
+and durable intent rules as engagement tickets. For a Project vulnerability mapping,
+the rendered Jira link points to the Project source-finding view, so the hidden scan
+context is never exposed in the ticket body or API response.
+
 ## Outbound status transitions
 
 Administrators can configure transition IDs for `remediated`, `accepted`,
@@ -177,3 +206,34 @@ visible. A Jira 404 means deleted **or unreadable**, not remediated.
 Contract references: [Cloud signed webhooks](https://developer.atlassian.com/cloud/jira/software/webhooks/),
 [Data Center webhook administration](https://confluence.atlassian.com/adminjiraserver/managing-webhooks-938846912.html),
 and [Cloud issue history](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/).
+
+Project source findings use bounded ID-keyset pages (50 by default, at most 100).
+The console resolves a finding deep link through its scoped single-finding route,
+so selection does not depend on which page is visible. Source-job diagnostics and
+errors retain the internal execution context on the server.
+
+For observed asset rows, enable the existing `SYNAPSE_FLEET_ASSETS_ENABLED` flag
+on both the API and SCA worker. Both use the same canonical asset store and
+producer attribution recorder; each source target replaces only its own observed
+bindings. A source scan does not create a full quality analysis or replace its
+latest-analysis status. Deploy migration 0260 with the migration credential
+before deploying the matching API and worker.
+
+Project source scans use the existing `sca` queue kind. Stop and drain old SCA
+consumers before enabling source-scan admission; do not run mixed versions against
+this queue. Older binaries ignore the server-owned selection and purpose fields,
+so they cannot preserve the confined snapshot or current-binding checks. Apply
+migration 0260 first, then deploy the matching API and workers, and only then admit
+source scans.
+
+For rollback, stop source-scan admission first. Drain source jobs with compatible
+workers or retain them until compatible workers are restored. Keep migration 0260
+and the immutable purpose values while any source records or queued jobs remain;
+do not down-migrate, relabel, or hand those jobs to older workers.
+
+Jira Data Center 11.3 administrative webhook registration uses
+`/rest/jira-webhook/1.0/webhooks` with the signing secret in
+`configuration.SECRET`. A top-level `secret` field is not this native contract.
+Keep the secret in private administration state and verify a real signed delivery
+before considering registration complete. Data Center callbacks can use the root
+`event` field; Cloud uses `webhookEvent`. Conflicting event fields are refused.

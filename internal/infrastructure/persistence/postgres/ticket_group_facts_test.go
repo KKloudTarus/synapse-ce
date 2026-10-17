@@ -88,6 +88,13 @@ func TestTicketGroupFactsPostgresAttribution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stored, found, err := store.GetTicketGroup(ctx, tenant, mapping.ID, mapping.ScopeID, "CVE-2026-12345")
+	if err != nil || !found {
+		t.Fatalf("load unsubmitted group: found=%t group=%+v err=%v", found, stored, err)
+	}
+	if !stored.IntentID.IsZero() || stored.Remote.ID != "" || stored.Remote.URL != "" {
+		t.Fatalf("unsubmitted group should not have intent or remote ticket: %+v", stored)
+	}
 	candidate := ports.TicketGroupMember{EngagementID: id("eng"), FindingID: id("two")}
 	facts, err := store.GroupTicketFacts(ctx, tenant, mapping.ID, mapping.ScopeID, "CVE-2026-12345", candidate)
 	if err != nil || len(facts) != 2 {

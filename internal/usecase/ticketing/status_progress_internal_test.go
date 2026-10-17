@@ -2,6 +2,7 @@ package ticketing
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -45,5 +46,22 @@ func TestTicketStatusProgressMembershipSourceChangeDoesNotReopenAppliedState(t *
 	}
 	if got.Episode != 3 || got.TransitionIntentID != "transition" || got.UpdateIntentID != "update" || got.AppliedState != domain.SyncReopen || got.SourceRevision != "group:member-added" {
 		t.Fatalf("membership source started a duplicate transition: %+v", got)
+	}
+}
+
+func TestLegacyBundledTransitionSnapshotRetainsCommentAndDoesNotScheduleDedicatedComment(t *testing.T) {
+	facts := snapshotFacts{Provider: "jira-cloud", Endpoint: "https://tenant.atlassian.net", DataClass: "summary", MappingVersion: 1, ConnectionRevision: 1, CredentialRevision: 1, UpdateRemoteID: "SEC-1", UpdateRemoteURL: "https://tenant.atlassian.net/browse/SEC-1", StatusTransitionID: "31", StatusComment: "Legacy bundled explanation", StatusSource: "finding:remediated"}
+	factsRaw, _ := json.Marshal(facts)
+	payload := map[string]json.RawMessage{
+		"_synapse": factsRaw,
+		"fields":   json.RawMessage(`{"labels":["synapse"],"project":{"key":"SEC"},"issuetype":{"id":"10001"}}`),
+	}
+	unsigned, _ := json.Marshal(payload)
+	intent := domain.Intent{ID: "legacy-transition", TenantID: "tenant", IntegrationID: "integration", MappingID: "mapping", EngagementID: "engagement", FindingID: "finding", Action: domain.Transition, Marker: "synapse-intent-legacy-transition", PayloadDigest: ticketDigest(unsigned), MappingVersion: 1, ConnectionRevision: 1, CredentialRevision: 1}
+	payload["fields"] = json.RawMessage(`{"labels":["synapse","synapse-intent-legacy-transition"],"project":{"key":"SEC"},"issuetype":{"id":"10001"}}`)
+	intent.Snapshot, _ = json.Marshal(payload)
+	got, _, err := readTicketSnapshot(intent)
+	if err != nil || got.StatusComment != facts.StatusComment || got.StatusCommandVersion != 0 || statusTransitionNeedsComment(intent) {
+		t.Fatalf("legacy transition changed semantics facts=%+v needsComment=%t err=%v", got, statusTransitionNeedsComment(intent), err)
 	}
 }

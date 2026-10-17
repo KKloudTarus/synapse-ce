@@ -20,4 +20,13 @@ describe('document publishing API contract', () => {
     expect(link).toMatchObject({ scopeId: 'eng 1', retiredAt: '2026-10-17T00:00:00Z' })
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/engagements/eng%201/documents', expect.anything())
   })
+
+  it('resumes only a named publication with its observed version', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'intent 1', state: 'pending', action: 'create', version: 5, attempts: 5 }), { status: 202, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await documentsApi.resumePreparedPublication('intent 1', 4)
+    expect(result).toMatchObject({ id: 'intent 1', state: 'pending', action: 'create', version: 5, attempts: 5 })
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/document-publications/intent%201/resume', expect.objectContaining({ method: 'POST' }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ version: 4 })
+  })
 })

@@ -55,6 +55,24 @@ func stringInt(v int) string {
 func jsonString(v string) string {
 	return `"` + strings.ReplaceAll(strings.ReplaceAll(v, `\`, `\\`), `"`, `\"`) + `"`
 }
+
+// policyResourceResponse mirrors the documented Admin Control resource envelope.
+// It deliberately includes nullable presentation fields returned by the live API.
+func policyResourceResponse(resourceID, status string) string {
+	return `{"type":"resource","id":"resource-1","attributes":{"resourceId":` + jsonString(resourceID) + `,"applicationStatus":` + jsonString(status) + `},"links":null,"message":null}`
+}
+
+func exactRestriction(operation, group string, cloud bool) string {
+	principal := `{"name":` + jsonString(group) + `}`
+	if cloud {
+		principal = `{"id":` + jsonString(group) + `}`
+	}
+	return `{"operation":` + jsonString(operation) + `,"restrictions":{"group":{"size":1,"results":[` + principal + `]},"user":{"size":0,"results":[]}}}`
+}
+
+func emptyRestriction(operation string) string {
+	return `{"operation":` + jsonString(operation) + `,"restrictions":{"group":{"size":0,"results":[]},"user":{"size":0,"results":[]}}}`
+}
 func providerCode(t *testing.T, err error) *ports.DocumentProviderError {
 	t.Helper()
 	var got *ports.DocumentProviderError
@@ -106,14 +124,30 @@ func TestRegisterAndEndpointPolicy(t *testing.T) {
 func TestRestrictionWriteUsesDocumentedArrayAndProviderGroupIdentity(t *testing.T) {
 	for _, cloud := range []bool{true, false} {
 		t.Run(map[bool]string{true: "cloud", false: "dc"}[cloud], func(t *testing.T) {
+			storage := neutralShellStorage("synapse-intent-a")
+			writes := 0
 			main := transport(func(r *http.Request) (*http.Response, error) {
-				if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/content/1/restriction") {
+				switch {
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1"):
+					return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1/restriction/byOperation/read"):
+					return response(200, `{"operation":"read","restrictions":{"group":{"size":0,"results":[]},"user":{"size":0,"results":[]}}}`), nil
+				case !strings.HasSuffix(r.URL.Path, "/content/1/restriction"):
 					t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 				}
+				wantMethod := http.MethodPut
+				if cloud {
+					wantMethod = http.MethodPost
+				}
+				if r.Method != wantMethod {
+					t.Fatalf("method=%s want=%s", r.Method, wantMethod)
+				}
+				writes++
 				var body []struct {
 					Operation    string `json:"operation"`
 					Restrictions struct {
-						Group []map[string]string `json:"group"`
+						Group []map[string]string  `json:"group"`
+						User  *[]map[string]string `json:"user"`
 					} `json:"restrictions"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body) != 1 || body[0].Operation != "read" || len(body[0].Restrictions.Group) != 1 {
@@ -127,12 +161,108 @@ func TestRestrictionWriteUsesDocumentedArrayAndProviderGroupIdentity(t *testing.
 				if group[key] != "synapse-readers" || group[absent] != "" || group["type"] != "group" {
 					t.Fatalf("wrong provider group identity: %v", group)
 				}
+				if cloud && body[0].Restrictions.User != nil {
+					t.Fatalf("Cloud body unexpectedly changes direct users: %v", *body[0].Restrictions.User)
+				}
+				if !cloud && (body[0].Restrictions.User == nil || len(*body[0].Restrictions.User) != 0) {
+					t.Fatalf("DC body must explicitly clear direct read users: %v", body[0].Restrictions.User)
+				}
 				return response(200, `{}`), nil
 			})
-			if err := testAdapter(t, cloud, main, nil).RestrictDocument(context.Background(), "1", "synapse-readers"); err != nil {
+			a := testAdapter(t, cloud, main, transport(func(*http.Request) (*http.Response, error) {
+				t.Fatal("policy consulted before exact ACL verified")
+				return nil, nil
+			}))
+			if err := a.RestrictDocument(context.Background(), "1", "synapse-readers"); err != nil {
+				t.Fatal(err)
+			}
+			if writes != 1 {
+				t.Fatalf("writes=%d", writes)
+			}
+			if got := providerCode(t, a.VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers")); got.Code != "restriction_unverified" {
+				t.Fatalf("%+v", got)
+			}
+		})
+	}
+}
+
+func TestRestrictDocumentSkipsWriteWhenCurrentACLAlreadyVerifies(t *testing.T) {
+	for _, cloud := range []bool{true, false} {
+		t.Run(map[bool]string{true: "cloud", false: "dc"}[cloud], func(t *testing.T) {
+			storage := neutralShellStorage("synapse-intent-a")
+			main := transport(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1"):
+					return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1/restriction/byOperation/read"):
+					return response(200, exactRestriction("read", "synapse-readers", cloud)), nil
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1/restriction/byOperation/update"):
+					return response(200, emptyRestriction("update")), nil
+				case cloud && r.Method == http.MethodGet && r.URL.Path == "/_edge/tenant_info":
+					return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
+				case r.Method == http.MethodPost:
+					t.Fatal("restriction write issued after current ACL was verified")
+				}
+				return response(500, "{}"), nil
+			})
+			policy := transport(func(*http.Request) (*http.Response, error) {
+				t.Fatal("Data Center must not consult Cloud policy")
+				return nil, nil
+			})
+			if cloud {
+				org := `{"id":"org-default","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"allow"}},"metadata":{"policyCoverageLevel":"ORG"}}}`
+				block := `{"id":"policy-1","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"block"}},"metadata":{"policyCoverageLevel":"WORKSPACE"}}}`
+				policy = transport(func(r *http.Request) (*http.Response, error) {
+					switch {
+					case strings.HasSuffix(r.URL.Path, "/policies"):
+						return response(200, `{"data":[`+org+`,`+block+`],"meta":{}}`), nil
+					case strings.HasSuffix(r.URL.Path, "/policies/org-default"):
+						return response(200, `{"data":`+org+`}`), nil
+					case strings.HasSuffix(r.URL.Path, "/policies/policy-1"):
+						return response(200, `{"data":`+block+`}`), nil
+					case strings.HasSuffix(r.URL.Path, "/resources"):
+						return response(200, `{"data":[`+policyResourceResponse("ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111", "applied")+`],"meta":{}}`), nil
+					}
+					return response(500, "{}"), nil
+				})
+			}
+			if err := testAdapter(t, cloud, main, policy).RestrictDocument(context.Background(), "1", "synapse-readers"); err != nil {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestRestrictDocumentDoesNotBypassUnverifiableCloudSharing(t *testing.T) {
+	storage := neutralShellStorage("synapse-intent-a")
+	posts := 0
+	main := transport(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1"):
+			return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1/restriction/byOperation/read"):
+			return response(200, exactRestriction("read", "synapse-readers", true)), nil
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/content/1/restriction/byOperation/update"):
+			return response(200, emptyRestriction("update")), nil
+		case r.Method == http.MethodGet && r.URL.Path == "/_edge/tenant_info":
+			return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/content/1/restriction"):
+			posts++
+			return response(200, `{}`), nil
+		}
+		return response(500, "{}"), nil
+	})
+	a := testAdapter(t, true, main, transport(func(*http.Request) (*http.Response, error) {
+		return response(500, "{}"), nil
+	}))
+	if err := a.RestrictDocument(context.Background(), "1", "synapse-readers"); err != nil {
+		t.Fatal(err)
+	}
+	if posts != 1 {
+		t.Fatalf("posts=%d", posts)
+	}
+	if got := providerCode(t, a.VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers")); got.Code != "public_sharing_unverifiable" {
+		t.Fatalf("%+v", got)
 	}
 }
 
@@ -153,13 +283,108 @@ func TestVerifyRestrictionRejectsForgedACLAndCloudWithoutProof(t *testing.T) {
 	}
 	cloud := testAdapter(t, true, transport(func(r *http.Request) (*http.Response, error) {
 		if strings.Contains(r.URL.Path, "restriction") {
-			return response(200, `{"operation":"read","restrictions":{"group":{"size":1,"results":[{"name":"synapse-readers","id":"synapse-readers"}]},"user":{"size":0,"results":[]}}}`), nil
+			operation := "read"
+			if strings.HasSuffix(r.URL.Path, "/update") {
+				operation = "update"
+			}
+			return response(200, exactRestriction(operation, "synapse-readers", true)), nil
 		}
 		return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
 	}), transport(func(*http.Request) (*http.Response, error) { return response(500, "{}"), nil }))
 	cloud.orgKey = ""
 	if got := providerCode(t, cloud.VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers")); got.Code != "public_sharing_unverifiable" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestVerifyDocumentRestrictionRejectsUnsafeUpdateACL(t *testing.T) {
+	storage := neutralShellStorage("synapse-intent-a")
+	updates := map[string]string{
+		"explicit-user":   `{"operation":"update","restrictions":{"group":{"size":1,"results":[{"id":"synapse-readers","name":"synapse-readers"}]},"user":{"size":1,"results":[{"accountId":"publisher"}]}}}`,
+		"different-group": `{"operation":"update","restrictions":{"group":{"size":1,"results":[{"id":"other-group","name":"other-group"}]},"user":{"size":0,"results":[]}}}`,
+		"incomplete-page": `{"operation":"update","restrictions":{"group":{"size":1,"results":[{"id":"synapse-readers","name":"synapse-readers"}],"_links":{"next":"more"}},"user":{"size":0,"results":[]}}}`,
+		"missing-results": `{"operation":"update","restrictions":{"group":{"size":0},"user":{"size":0,"results":[]}}}`,
+	}
+	for name, update := range updates {
+		t.Run(name, func(t *testing.T) {
+			for _, cloud := range []bool{true, false} {
+				t.Run(map[bool]string{true: "cloud", false: "dc"}[cloud], func(t *testing.T) {
+					main := transport(func(r *http.Request) (*http.Response, error) {
+						switch {
+						case strings.HasSuffix(r.URL.Path, "/content/1"):
+							return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+						case strings.HasSuffix(r.URL.Path, "/restriction/byOperation/read"):
+							return response(200, exactRestriction("read", "synapse-readers", cloud)), nil
+						case strings.HasSuffix(r.URL.Path, "/restriction/byOperation/update"):
+							return response(200, update), nil
+						}
+						return response(500, "{}"), nil
+					})
+					policy := transport(func(*http.Request) (*http.Response, error) {
+						t.Fatal("Cloud policy consulted before update ACL was proven")
+						return nil, nil
+					})
+					if got := providerCode(t, testAdapter(t, cloud, main, policy).VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers")); got.Code != "restriction_unverified" {
+						t.Fatalf("%+v", got)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestVerifyDocumentRestrictionAllowsGroupOnlyUpdateACL(t *testing.T) {
+	storage := neutralShellStorage("synapse-intent-a")
+	for name, update := range map[string]string{
+		"empty":            emptyRestriction("update"),
+		"configured-group": exactRestriction("update", "synapse-readers", true),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, cloud := range []bool{true, false} {
+				t.Run(map[bool]string{true: "cloud", false: "dc"}[cloud], func(t *testing.T) {
+					main := transport(func(r *http.Request) (*http.Response, error) {
+						switch {
+						case strings.HasSuffix(r.URL.Path, "/content/1"):
+							return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+						case strings.HasSuffix(r.URL.Path, "/restriction/byOperation/read"):
+							return response(200, exactRestriction("read", "synapse-readers", cloud)), nil
+						case strings.HasSuffix(r.URL.Path, "/restriction/byOperation/update"):
+							if name == "configured-group" {
+								return response(200, exactRestriction("update", "synapse-readers", cloud)), nil
+							}
+							return response(200, update), nil
+						case cloud && r.URL.Path == "/_edge/tenant_info":
+							return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
+						}
+						return response(500, "{}"), nil
+					})
+					policy := transport(func(*http.Request) (*http.Response, error) {
+						t.Fatal("Data Center must not consult Cloud policy")
+						return nil, nil
+					})
+					if cloud {
+						org := `{"id":"org-default","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"allow"}},"metadata":{"policyCoverageLevel":"ORG"}}}`
+						block := `{"id":"policy-1","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"block"}},"metadata":{"policyCoverageLevel":"WORKSPACE"}}}`
+						policy = transport(func(r *http.Request) (*http.Response, error) {
+							switch {
+							case strings.HasSuffix(r.URL.Path, "/policies"):
+								return response(200, `{"data":[`+org+`,`+block+`],"meta":{}}`), nil
+							case strings.HasSuffix(r.URL.Path, "/policies/org-default"):
+								return response(200, `{"data":`+org+`}`), nil
+							case strings.HasSuffix(r.URL.Path, "/policies/policy-1"):
+								return response(200, `{"data":`+block+`}`), nil
+							case strings.HasSuffix(r.URL.Path, "/resources"):
+								return response(200, `{"data":[`+policyResourceResponse("ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111", "applied")+`],"meta":{}}`), nil
+							}
+							return response(500, "{}"), nil
+						})
+					}
+					if err := testAdapter(t, cloud, main, policy).VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers"); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -170,7 +395,11 @@ func TestCloudVerificationRejectsIncompletePolicyPagination(t *testing.T) {
 			return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
 		}
 		if strings.Contains(r.URL.Path, "restriction") {
-			return response(200, `{"operation":"read","restrictions":{"group":{"size":1,"results":[{"name":"synapse-readers","id":"synapse-readers"}]},"user":{"size":0,"results":[]}}}`), nil
+			operation := "read"
+			if strings.HasSuffix(r.URL.Path, "/update") {
+				operation = "update"
+			}
+			return response(200, exactRestriction(operation, "synapse-readers", true)), nil
 		}
 		return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
 	})
@@ -196,22 +425,30 @@ func TestCloudVerificationRequiresExactPublishedPolicyAndAppliedSite(t *testing.
 			return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
 		}
 		if strings.Contains(r.URL.Path, "restriction") {
-			return response(200, `{"operation":"read","restrictions":{"group":{"size":1,"results":[{"name":"synapse-readers","id":"synapse-readers"}]},"user":{"size":0,"results":[]}}}`), nil
+			operation := "read"
+			if strings.HasSuffix(r.URL.Path, "/update") {
+				operation = "update"
+			}
+			return response(200, exactRestriction(operation, "synapse-readers", true)), nil
 		}
 		return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
 	})
-	orgData := `{"id":"org-default","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"allow"}},"metadata":{"policyCoverageLevel":"ORG"}}}`
-	policyData := `{"id":"policy-1","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"block"}},"metadata":{"policyCoverageLevel":"WORKSPACE"}}}`
+	orgData := `{"type":"policy","id":"org-default","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"allow"}},"metadata":{"policyCoverageLevel":"ORG"}},"links":null,"message":null}`
+	policyData := `{"type":"policy","id":"policy-1","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"block"}},"metadata":{"policyCoverageLevel":"WORKSPACE"}},"links":null,"message":null}`
+	// The API can return non-data-security policies even when requesting the
+	// data-security collection. Their rule contract is unrelated and must not
+	// make a valid public-links proof undecodable.
+	unrelated := `{"type":"policy","id":"unrelated","attributes":{"type":"hipaa","status":"enabled","rule":[],"metadata":{}},"links":null,"message":null}`
 	policy := transport(func(r *http.Request) (*http.Response, error) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/policies"):
-			return response(200, `{"data":[`+orgData+`,`+policyData+`],"meta":{}}`), nil
+			return response(200, `{"data":[`+orgData+`,`+policyData+`,`+unrelated+`],"meta":{}}`), nil
 		case strings.HasSuffix(r.URL.Path, "/policies/org-default"):
 			return response(200, `{"data":`+orgData+`}`), nil
 		case strings.HasSuffix(r.URL.Path, "/policies/policy-1"):
 			return response(200, `{"data":`+policyData+`}`), nil
 		case strings.HasSuffix(r.URL.Path, "/resources"):
-			return response(200, `{"data":[{"resourceId":"ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111","applicationStatus":"applied"}],"meta":{}}`), nil
+			return response(200, `{"data":[`+policyResourceResponse("ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111", "applied")+`],"meta":{}}`), nil
 		}
 		return response(500, "{}"), nil
 	})
@@ -332,6 +569,68 @@ func TestPurgeCloudUsesPermanentAttachmentAndPageEndpoints(t *testing.T) {
 	}
 }
 
+func TestPurgeCloudNormalizesV1AttachmentPrefixesForV2(t *testing.T) {
+	var calls []string
+	guards := 0
+	a := testAdapter(t, true, transport(func(r *http.Request) (*http.Response, error) {
+		calls = append(calls, r.Method+" "+r.URL.RequestURI())
+		if r.Method == http.MethodGet {
+			return response(200, `{"results":[{"id":"att131320"},{"id":"att131306"},{"id":"att164115"},{"id":"att131280"},{"id":"att98536"}],"size":5,"start":0}`), nil
+		}
+		if r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/attachments/att") {
+			t.Fatalf("v1 attachment prefix leaked into v2 path %q", r.URL.Path)
+		}
+		return response(204, ""), nil
+	}), nil)
+	if err := a.PurgeDocument(context.Background(), "1", func(context.Context) error { guards++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"GET /wiki/rest/api/content/1/child/attachment?expand=version&limit=100&start=0",
+		"DELETE /wiki/api/v2/attachments/131280", "DELETE /wiki/api/v2/attachments/131280?purge=true",
+		"DELETE /wiki/api/v2/attachments/131306", "DELETE /wiki/api/v2/attachments/131306?purge=true",
+		"DELETE /wiki/api/v2/attachments/131320", "DELETE /wiki/api/v2/attachments/131320?purge=true",
+		"DELETE /wiki/api/v2/attachments/164115", "DELETE /wiki/api/v2/attachments/164115?purge=true",
+		"DELETE /wiki/api/v2/attachments/98536", "DELETE /wiki/api/v2/attachments/98536?purge=true",
+		"DELETE /wiki/api/v2/pages/1", "DELETE /wiki/api/v2/pages/1?purge=true",
+	}
+	if strings.Join(calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("calls=%v", calls)
+	}
+	if guards != 12 {
+		t.Fatalf("guards=%d", guards)
+	}
+}
+
+func TestPurgeRejectsInvalidAttachmentIDsBeforeDeleting(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		cloud bool
+		id    string
+	}{
+		{name: "dc-v1-prefix", cloud: false, id: "att131320"},
+		{name: "cloud-nonnumeric-suffix", cloud: true, id: "att131320x"},
+		{name: "cloud-repeated-prefix", cloud: true, id: "attatt131320"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deletes := 0
+			a := testAdapter(t, test.cloud, transport(func(r *http.Request) (*http.Response, error) {
+				if r.Method == http.MethodDelete {
+					deletes++
+					t.Fatal("delete issued for invalid attachment ID")
+				}
+				return response(200, `{"results":[{"id":`+jsonString(test.id)+`}],"size":1,"start":0}`), nil
+			}), nil)
+			if got := providerCode(t, a.PurgeDocument(context.Background(), "1", func(context.Context) error { return nil })); got.Code != "invalid_attachment_response" {
+				t.Fatalf("%+v", got)
+			}
+			if deletes != 0 {
+				t.Fatalf("deletes=%d", deletes)
+			}
+		})
+	}
+}
+
 func TestPurgeRefusesIncompleteAttachmentEnumerationBeforeDeleting(t *testing.T) {
 	for _, body := range []string{`{"results":[],"start":0}`, `{"results":[],"size":0}`, `{"results":[],"size":0,"start":1}`, `{"results":[{"id":"7"}],"size":0,"start":0}`, `{"results":[],"size":0,"start":0,"_links":{"next":"more"}}`} {
 		t.Run(body, func(t *testing.T) {
@@ -390,8 +689,8 @@ func TestReadRestrictionRequiresCompleteExactPrincipals(t *testing.T) {
 func TestCloudSharingProofRejectsStaleForeignOrUnappliedPolicies(t *testing.T) {
 	const org = `{"id":"org-default","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"allow"}},"metadata":{"policyCoverageLevel":"ORG"}}}`
 	const block = `{"id":"policy-1","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"block"}},"metadata":{"policyCoverageLevel":"WORKSPACE"}}}`
-	const resource = `{"resourceId":"ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111","applicationStatus":"applied"}`
-	for _, name := range []string{"foreign-site", "missing-org", "missing-meta", "pending-resource", "unsupported-resource-shape", "stale-effect", "stale-coverage", "unknown-status", "hidden-override"} {
+	resource := policyResourceResponse("ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111", "applied")
+	for _, name := range []string{"foreign-site", "missing-org", "missing-meta", "pending-resource", "unsupported-resource-shape", "stale-effect", "stale-coverage", "unknown-status", "hidden-override", "missing-type", "null-type", "empty-type", "malformed-type", "unrelated-missing-id", "unrelated-duplicate-id"} {
 		t.Run(name, func(t *testing.T) {
 			list, full, res, cloudID := `{"data":[`+org+`,`+block+`],"meta":{}}`, block, resource, "11111111-1111-1111-1111-111111111111"
 			switch name {
@@ -413,6 +712,23 @@ func TestCloudSharingProofRejectsStaleForeignOrUnappliedPolicies(t *testing.T) {
 				list = strings.ReplaceAll(list, "published", "unknown")
 			case "hidden-override":
 				hidden := strings.ReplaceAll(strings.ReplaceAll(block, "policy-1", "hidden"), `"rule":{"publicLinks":{"effect":"block"}}`, `"rule":{}`)
+				list = `{"data":[` + org + `,` + block + `,` + hidden + `],"meta":{}}`
+			case "missing-type", "null-type", "empty-type", "malformed-type", "unrelated-missing-id", "unrelated-duplicate-id":
+				hidden := `{"id":"hidden","attributes":{"type":"hipaa","status":"published","rule":{"publicLinks":{"effect":"allow"}}}}`
+				switch name {
+				case "missing-type":
+					hidden = strings.ReplaceAll(hidden, `"type":"hipaa",`, "")
+				case "null-type":
+					hidden = strings.ReplaceAll(hidden, `"type":"hipaa"`, `"type":null`)
+				case "empty-type":
+					hidden = strings.ReplaceAll(hidden, `"type":"hipaa"`, `"type":""`)
+				case "malformed-type":
+					hidden = strings.ReplaceAll(hidden, `"type":"hipaa"`, `"type":"data security"`)
+				case "unrelated-missing-id":
+					hidden = strings.ReplaceAll(hidden, `"id":"hidden",`, "")
+				case "unrelated-duplicate-id":
+					hidden = strings.ReplaceAll(hidden, `"id":"hidden"`, `"id":"org-default"`)
+				}
 				list = `{"data":[` + org + `,` + block + `,` + hidden + `],"meta":{}}`
 			}
 			a := testAdapter(t, true, transport(func(*http.Request) (*http.Response, error) { return response(200, `{"cloudId":"`+cloudID+`"}`), nil }), transport(func(r *http.Request) (*http.Response, error) {

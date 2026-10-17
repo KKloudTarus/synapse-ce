@@ -29,6 +29,9 @@ func NewScanJobStore() *ScanJobStore {
 var _ ports.ScanJobStore = (*ScanJobStore)(nil)
 
 func (s *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error {
+	if err := validateScanJobPurpose(j.Purpose); err != nil {
+		return err
+	}
 	if _, err := scanrun.CanonicalEngineOutcomes(j.EngineOutcomes); err != nil {
 		return err
 	}
@@ -52,6 +55,9 @@ func (s *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error
 
 // Save upserts a job; a newly-seen id becomes the latest for its engagement.
 func (s *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
+	if err := validateScanJobPurpose(j.Purpose); err != nil {
+		return err
+	}
 	if _, err := scanrun.CanonicalEngineOutcomes(j.EngineOutcomes); err != nil {
 		return err
 	}
@@ -68,6 +74,9 @@ func (s *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 		}
 		// Match the PostgreSQL status-only upsert: admission identity and source
 		// cannot be rewritten by a later progress/status update.
+		if j.Purpose != stored.Purpose {
+			return fmt.Errorf("%w: scan job purpose is immutable", shared.ErrValidation)
+		}
 		j.EngagementID, j.Target, j.Kind = stored.EngagementID, stored.Target, stored.Kind
 		j.StartedAt = stored.StartedAt
 		j.SourcePackage = stored.SourcePackage
@@ -206,6 +215,49 @@ func (s *ScanJobStore) LatestForEngagements(_ context.Context, engagementIDs []s
 		}
 	}
 	return out, nil
+}
+
+func (s *ScanJobStore) LatestProjectAnalysisForEngagement(_ context.Context, engagementID shared.ID) (ports.ScanJob, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	job, found := latestProjectAnalysisJob(s.byID, engagementID)
+	if !found {
+		return ports.ScanJob{}, fmt.Errorf("project analysis scan job: %w", shared.ErrNotFound)
+	}
+	return cloneScanJobSource(job), nil
+}
+
+func (s *ScanJobStore) LatestProjectAnalysisForEngagements(_ context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.ScanJob, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[shared.ID]ports.ScanJob, len(engagementIDs))
+	for _, engagementID := range engagementIDs {
+		if job, found := latestProjectAnalysisJob(s.byID, engagementID); found {
+			out[engagementID] = cloneScanJobSource(job)
+		}
+	}
+	return out, nil
+}
+
+func latestProjectAnalysisJob(jobs map[string]ports.ScanJob, engagementID shared.ID) (ports.ScanJob, bool) {
+	var latest ports.ScanJob
+	found := false
+	for _, candidate := range jobs {
+		if candidate.EngagementID != engagementID.String() || candidate.Purpose == ports.ScanPurposeProjectSource {
+			continue
+		}
+		if !found || candidate.StartedAt.After(latest.StartedAt) || (candidate.StartedAt.Equal(latest.StartedAt) && candidate.ID > latest.ID) {
+			latest, found = candidate, true
+		}
+	}
+	return latest, found
+}
+
+func validateScanJobPurpose(purpose string) error {
+	if purpose == "" || purpose == ports.ScanPurposeProjectSource {
+		return nil
+	}
+	return fmt.Errorf("%w: invalid scan job purpose", shared.ErrValidation)
 }
 
 func cloneScanJobSource(job ports.ScanJob) ports.ScanJob {

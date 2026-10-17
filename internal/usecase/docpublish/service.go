@@ -208,6 +208,63 @@ func (s *Service) Unpublish(ctx context.Context, tenant shared.ID, actor ports.D
 	return ReleaseResult{Intent: &saved.Intent}, nil
 }
 
+// ResumePreparedPublication admits one additional attempt only after the same
+// reviewer has corrected destination access for a neutral, content-free shell.
+// It never writes remote content itself.
+func (s *Service) ResumePreparedPublication(ctx context.Context, tenant shared.ID, actor ports.DocumentActor, id shared.ID, expectedVersion int) (domain.Intent, error) {
+	ctx = shared.WithTenant(ctx, tenant)
+	if tenant.IsZero() || id.IsZero() || expectedVersion < 1 {
+		return domain.Intent{}, shared.ErrValidation
+	}
+	if err := s.authorize(ctx, tenant, actor); err != nil {
+		return domain.Intent{}, err
+	}
+	c, err := s.store.GetDocumentCommand(ctx, tenant, id)
+	if err != nil {
+		return domain.Intent{}, err
+	}
+	if c.Actor != actor {
+		return domain.Intent{}, shared.ErrForbidden
+	}
+	if c.Intent.Version != expectedVersion {
+		return domain.Intent{}, shared.ErrConflict
+	}
+	if c.Intent.State != writeintent.Failed || c.Intent.ErrorCode != "provider_refused" || c.Intent.Action != domain.Create ||
+		(c.Progress.Step != "restrictions" && c.Progress.Step != "attachments") || c.Progress.Remote.ID == "" || c.Progress.Remote.Version < 1 ||
+		c.Progress.Uploaded != 0 || len(c.Progress.UploadedReceipts) != 0 || c.Progress.OutstandingOperation != "" ||
+		c.Progress.OutstandingKey != "" || c.Progress.OutstandingDigest != "" || c.Progress.ExpectedRemoteVersion != 0 {
+		return domain.Intent{}, shared.ErrConflict
+	}
+	in, err := s.guard(ctx, c)
+	if err != nil {
+		return domain.Intent{}, err
+	}
+	p, err := s.providers.DocumentProvider(ctx, in)
+	if err != nil {
+		return domain.Intent{}, err
+	}
+	defer closeProvider(p)
+	remote, err := p.GetDocument(ctx, c.Progress.Remote.ID)
+	if err != nil {
+		return domain.Intent{}, err
+	}
+	if remote.ID != c.Progress.Remote.ID || remote.Container != c.Intent.Container || remote.Version != c.Progress.Remote.Version || remote.Marker != c.Intent.Marker || !remote.Neutral {
+		return domain.Intent{}, shared.ErrConflict
+	}
+	if err := p.VerifyDocumentRestriction(ctx, remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
+		return domain.Intent{}, err
+	}
+	// Re-read the release guard after the provider observations. This fences a
+	// concurrent credentials, destination, authority, or hold change before CAS.
+	if _, err := s.guard(ctx, c); err != nil {
+		return domain.Intent{}, err
+	}
+	if err := s.audit.Record(ctx, ports.AuditEntry{Actor: actor.UserID.String(), Action: "document.prepared_publication_resumed", Target: id.String(), At: c.Intent.UpdatedAt.UTC(), Metadata: map[string]string{"expected_version": fmt.Sprintf("%d", expectedVersion), "page_id": remote.ID, "space": c.Intent.Container, "idempotency_key": fmt.Sprintf("%s:resume:%d", id, expectedVersion)}}); err != nil {
+		return domain.Intent{}, err
+	}
+	return s.store.TransitionIntent(ctx, tenant, id, expectedVersion, domain.IntentTransition{Event: writeintent.RetryFailed}, s.clock.Now().UTC())
+}
+
 func (s *Service) authorize(ctx context.Context, tenant shared.ID, actor ports.DocumentActor) error {
 	if tenant.IsZero() || actor.UserID.IsZero() {
 		return shared.ErrForbidden

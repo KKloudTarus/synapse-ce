@@ -144,7 +144,7 @@ func ticketGroupFromRow(row rowScanner) (ports.TicketGroup, error) {
 	return group, err
 }
 
-const ticketGroupCols = `id,tenant_id,mapping_id,project_id,vulnerability_id,integration_id,endpoint,project_key,issue_type,security_level,intent_id,remote_id,remote_url,created_at,updated_at,revision`
+const ticketGroupCols = `id,tenant_id,mapping_id,project_id,vulnerability_id,integration_id,endpoint,project_key,issue_type,security_level,COALESCE(intent_id,''),COALESCE(remote_id,''),COALESCE(remote_url,''),created_at,updated_at,revision`
 
 func sameTicketGroupDestination(a, b ports.TicketGroup) bool {
 	return a.IntegrationID == b.IntegrationID && a.Endpoint == b.Endpoint && a.ProjectKey == b.ProjectKey &&

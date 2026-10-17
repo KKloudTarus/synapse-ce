@@ -1,0 +1,158 @@
+{
+  "checks": [
+    {
+      "name": "final-comment-delivery-baseline",
+      "argv": [
+        "make",
+        "lint",
+        "build",
+        "vet",
+        "test",
+        "typecheck"
+      ],
+      "started_at": "2026-10-17T16:08:04.424868+00:00",
+      "finished_at": "2026-10-17T16:08:33.874411+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false
+    },
+    {
+      "name": "source-ui-full-final",
+      "argv": [
+        "bash",
+        "-c",
+        "cd web && pnpm exec vitest run --maxWorkers=2 && pnpm build"
+      ],
+      "started_at": "2026-10-17T15:25:37.820728+00:00",
+      "finished_at": "2026-10-17T15:29:25.639851+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false
+    },
+    {
+      "name": "source-race-final",
+      "argv": [
+        "go",
+        "test",
+        "-race",
+        "./internal/infrastructure/acquire",
+        "./internal/usecase/sca",
+        "./internal/usecase/findings",
+        "./internal/usecase/projectuc",
+        "./internal/usecase/ticketing",
+        "./internal/usecase/docpublish",
+        "./internal/adapter/httpapi"
+      ],
+      "started_at": "2026-10-17T15:29:32.119653+00:00",
+      "finished_at": "2026-10-17T15:30:54.725155+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false
+    },
+    {
+      "name": "source-pg-ready",
+      "argv": [
+        "go",
+        "test",
+        "./internal/infrastructure/persistence/postgres",
+        "-run",
+        "Test(ScanJobStore.*ProjectAnalysis|FindingRepositoryListFindingPage|Ticket|Document)",
+        "-count=1"
+      ],
+      "started_at": "2026-10-17T15:24:12.709861+00:00",
+      "finished_at": "2026-10-17T15:24:34.136751+00:00",
+      "exit_code": 0,
+      "postgres_enabled": true
+    },
+    {
+      "name": "dc-event-contract",
+      "argv": [
+        "go",
+        "test",
+        "-race",
+        "./internal/adapter/httpapi",
+        "-run",
+        "Test(Jira|HostileHarness)",
+        "-count=1"
+      ],
+      "started_at": "2026-10-17T15:43:50.219248+00:00",
+      "finished_at": "2026-10-17T15:44:02.823307+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false
+    },
+    {
+      "name": "inbound-comment-snapshot-race",
+      "argv": [
+        "go",
+        "test",
+        "-race",
+        "./internal/usecase/ticketing",
+        "./internal/infrastructure/persistence/memory",
+        "-run",
+        "TestReceiveInboundWebhook(DeduplicatesProviderCommentAcrossJiraWebhookShapes|CommentSnapshotsKeepProviderIdentityAndEdits|NormalizesEmbeddedAndDedicatedCommentEdits)|TestTicket",
+        "-count=1"
+      ],
+      "started_at": "2026-10-17T16:08:07.037691+00:00",
+      "finished_at": "2026-10-17T16:08:09.333119+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false
+    },
+    {
+      "name": "inbound-comment-snapshot-pg-final",
+      "argv": [
+        "go",
+        "test",
+        "-race",
+        "./internal/infrastructure/persistence/postgres",
+        "-run",
+        "^TestTicketInboundReducerPostgresSerializesFindingProposalWindow$",
+        "-count=1"
+      ],
+      "started_at": "2026-10-17T16:07:08.566143+00:00",
+      "finished_at": "2026-10-17T16:07:53.189051+00:00",
+      "exit_code": 0,
+      "postgres_enabled": true
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "-race",
+        "./internal/adapter/httpapi",
+        "-run",
+        "Test(Jira|HostileHarness)",
+        "-count=1"
+      ],
+      "started_at": "2026-10-17T16:14:15.665433+00:00",
+      "finished_at": "2026-10-17T16:14:35.195588+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "final-comment-http-race"
+    },
+    {
+      "argv": [
+        "bash",
+        "-c",
+        "cd web && pnpm exec vitest run src/pages/CodeQuality/ProjectSourceFindings.test.tsx --maxWorkers=2 && pnpm typecheck && pnpm build"
+      ],
+      "started_at": "2026-10-17T16:14:57.735768+00:00",
+      "finished_at": "2026-10-17T16:15:05.589415+00:00",
+      "exit_code": 0,
+      "postgres_enabled": false,
+      "name": "final-source-icon-web"
+    }
+  ],
+  "web_test_files": 208,
+  "web_tests": 1400,
+  "runtime": {
+    "at": "2026-10-17T16:07:49.774157+00:00",
+    "CGO_ENABLED": "0",
+    "exit_code": 0,
+    "sha256": {
+      "synapse-api": "5ba4f8144f6396c0724902625d86eaa6cee19c2b94f2a4ba18ee9e2a62c62938",
+      "synapse-worker": "93ed97cd023d189f2e4a8acd9c900cf80ef4211b09ffa091e74f404992a2206b"
+    }
+  },
+  "limits": [
+    "No production performance benchmark",
+    "Original broad race evidence supplemented by final changed-package race and real PostgreSQL concurrent snapshot regression",
+    "Known provider acceptance gaps use Refs in the ledger"
+  ]
+}

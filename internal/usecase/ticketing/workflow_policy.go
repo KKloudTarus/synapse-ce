@@ -388,13 +388,30 @@ func readTicketSnapshot(i domain.Intent) (snapshotFacts, json.RawMessage, error)
 	if ticketDigest(raw) != i.PayloadDigest {
 		return facts, nil, fmt.Errorf("%w: ticket snapshot digest mismatch", shared.ErrConflict)
 	}
-	if i.Action == domain.Update || i.Action == domain.Transition {
+	if i.Action == domain.Update || i.Action == domain.Transition || i.Action == domain.Comment {
 		if facts.UpdateRemoteID == "" || facts.UpdateRemoteURL == "" {
 			return facts, nil, fmt.Errorf("%w: update ticket target missing", shared.ErrValidation)
 		}
 		if i.Action == domain.Transition {
-			if facts.StatusTransitionID == "" || facts.StatusComment == "" || facts.StatusSource == "" {
+			if facts.StatusTransitionID == "" || facts.StatusSource == "" {
 				return facts, nil, fmt.Errorf("%w: transition ticket snapshot missing status facts", shared.ErrValidation)
+			}
+			if facts.StatusCommandVersion == 0 && facts.StatusComment == "" {
+				return facts, nil, fmt.Errorf("%w: legacy transition ticket snapshot missing status comment", shared.ErrValidation)
+			}
+			if facts.StatusCommandVersion != 0 && facts.StatusCommandVersion != 1 {
+				return facts, nil, fmt.Errorf("%w: transition ticket snapshot version invalid", shared.ErrValidation)
+			}
+			if facts.StatusCommandVersion == 1 && facts.StatusMode != "transition_only" {
+				return facts, nil, fmt.Errorf("%w: transition ticket snapshot mode invalid", shared.ErrValidation)
+			}
+			delete(base, "_synapse")
+			request, _ := json.Marshal(base)
+			return facts, request, nil
+		}
+		if i.Action == domain.Comment {
+			if facts.StatusCommandVersion != 1 || facts.StatusMode != "comment" || facts.StatusComment == "" || facts.StatusSource == "" || facts.StatusParentID.IsZero() || facts.StatusEpisode < 1 || facts.StatusAuthor == "" {
+				return facts, nil, fmt.Errorf("%w: comment ticket snapshot missing status facts", shared.ErrValidation)
 			}
 			delete(base, "_synapse")
 			request, _ := json.Marshal(base)
@@ -466,7 +483,7 @@ func (w *Workflow) executionAuthority(ctx context.Context, i domain.Intent, fact
 	if _, err = w.findings.GetByEngagementAndID(ctx, i.EngagementID, i.FindingID); err != nil {
 		return in, domain.Mapping{}, err
 	}
-	if i.Action == domain.Transition || (i.Action == domain.Update && facts.StatusSource != "") {
+	if i.Action == domain.Transition || i.Action == domain.Comment || (i.Action == domain.Update && facts.StatusSource != "") {
 		f, stateErr := w.findings.GetByEngagementAndID(ctx, i.EngagementID, i.FindingID)
 		if stateErr != nil {
 			return in, domain.Mapping{}, stateErr

@@ -1,0 +1,99 @@
+{
+  "provider": "Jira Data Center 11.3.12",
+  "integration_id": "1eca97562f73793403747c61271ccabd",
+  "engagement_id": "3c9d4500dc154dc01c1d4486c1864b2c",
+  "finding_id": "030deb39152e4cfa056e3384f767e436",
+  "issue_key": "SYNACC-2",
+  "registration_secret_field": "configuration.SECRET",
+  "provider_deliveries": [
+    {
+      "at": "2026-10-17T16:06:12.838191+00:00",
+      "event": "jira:issue_updated",
+      "result": "new",
+      "signature": "HMAC-SHA256 valid",
+      "http_status": 202
+    },
+    {
+      "at": "2026-10-17T16:06:26.972774+00:00",
+      "event": "jira:issue_updated",
+      "result": "done",
+      "signature": "HMAC-SHA256 valid",
+      "http_status": 202
+    },
+    {
+      "at": "2026-10-17T16:08:44.281257+00:00",
+      "event": "jira:issue_updated",
+      "comment_id": "10009",
+      "actor": "synapse-b07-reviewer",
+      "signature": "HMAC-SHA256 valid",
+      "http_status": 202
+    },
+    {
+      "at": "2026-10-17T16:08:44.344131+00:00",
+      "event": "comment_created",
+      "comment_id": "10009",
+      "actor": "synapse-b07-reviewer",
+      "signature": "HMAC-SHA256 valid",
+      "http_status": 202
+    },
+    {
+      "at": "2026-10-17T16:09:35.894766+00:00",
+      "event": "jira:issue_updated",
+      "comment_id": "10009",
+      "actor": "synapse-b07-reviewer",
+      "signature": "HMAC-SHA256 valid",
+      "http_status": 202
+    },
+    {
+      "at": "2026-10-17T16:09:35.907877+00:00",
+      "event": "comment_updated",
+      "comment_id": "10009",
+      "actor": "synapse-b07-reviewer",
+      "signature": "HMAC-SHA256 valid",
+      "http_status": 202
+    }
+  ],
+  "synthetic_comment": "Sau sửa idempotency: tiếng Việt ✅ <script>alert(\"test\")</script> @all [~synapse-admin]",
+  "synthetic_comment_edit": "Sau sửa idempotency: tiếng Việt ✅ <script>alert(\"test\")</script> @all [~synapse-admin] — đã chỉnh sửa",
+  "comment_snapshot_counts": {
+    "old_duplicate_rows_retained": 2,
+    "before_new_comment": 2,
+    "after_create_event_pair": 3,
+    "create_pair_delta": 1,
+    "exact_original_snapshot_rows": 1,
+    "after_edit_event_pair": 4,
+    "edit_pair_delta": 1,
+    "exact_edited_snapshot_rows": 1
+  },
+  "pre_fix_old_duplicate_comment_id": "10008",
+  "proposal": {
+    "count": 1,
+    "id": "inbound-proposal-0ae3a19ce7a1e1cd4b84f0d4171dc4b8",
+    "integration_id": "1eca97562f73793403747c61271ccabd",
+    "issue_key": "SYNACC-2",
+    "state": "pending",
+    "observed_at": "2026-10-17 15:58:15.500656+00",
+    "finding_mutated": false,
+    "finding_state": "confirmed"
+  },
+  "status_observation": "done",
+  "provider_restricted_ingress": {
+    "post_only": true,
+    "exact_hook_route_only": true,
+    "requests": 6,
+    "query_strings": 0
+  },
+  "cleanup": {
+    "registration_id": 3,
+    "deleted": true,
+    "remaining_native_registrations": 0,
+    "tunnel_stopped": true,
+    "proxy_stopped": true
+  },
+  "limitations": [
+    "Two duplicate comment rows from pre-fix deliveries are retained and documented.",
+    "A direct same-body replay was not injected; the real creation pair (`jira:issue_updated` + `comment_created`) and edit pair (`jira:issue_updated` + `comment_updated`) tested cross-event deduplication."
+  ],
+  "runtime_api_sha_for_comment_pairs": "5ba4f814",
+  "runtime_worker_sha_for_comment_pairs": "93ed97cd"
+}

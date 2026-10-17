@@ -1,6 +1,7 @@
 package ticketing
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -44,8 +45,46 @@ func RenderTicket(m domain.Mapping, f finding.Finding, class notification.DataCl
 	if err != nil {
 		return "", "", nil, err
 	}
-	links = []ports.RenderedLink{{Label: "Open finding", URL: link.Href()}}
+	return renderTicketWithLink(m, f, class, locale, link)
+}
 
+// renderTicket preserves the established engagement route except when the
+// mapping's Project owns the hidden analysis context. In that case it resolves
+// the stable project key from the repository and never accepts it from the
+// request or mapping payload.
+func (w *Workflow) renderTicket(ctx context.Context, m domain.Mapping, f finding.Finding, class notification.DataClass) (summary, body string, links []ports.RenderedLink, err error) {
+	if m.Scope != domain.Project {
+		return RenderTicket(m, f, class, m.Locale, w.publicBase)
+	}
+	if w.projects == nil {
+		// Existing runtimes may carry Project mappings before composition has
+		// wired Project links. Preserve their frozen legacy rendering; new
+		// Project-source wiring always supplies the repository.
+		return RenderTicket(m, f, class, m.Locale, w.publicBase)
+	}
+	builder, err := consolelink.NewBuilder(w.publicBase)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("%w: configure a trusted HTTPS public console URL before previewing Jira tickets", shared.ErrValidation)
+	}
+	p, err := w.projects.GetByID(ctx, m.TenantID, m.ScopeID)
+	if err != nil || p == nil {
+		if err == nil {
+			err = shared.ErrNotFound
+		}
+		return "", "", nil, err
+	}
+	link, err := builder.ProjectSourceFinding(p.Key, f.ID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return renderTicketWithLink(m, f, class, m.Locale, link)
+}
+
+func renderTicketWithLink(m domain.Mapping, f finding.Finding, class notification.DataClass, locale string, link consolelink.Link) (summary, body string, links []ports.RenderedLink, err error) {
+	if class != notification.DataClassSignal && class != notification.DataClassSummary && class != notification.DataClassDetail {
+		return "", "", nil, fmt.Errorf("%w: ticket data class is invalid", shared.ErrValidation)
+	}
+	links = []ports.RenderedLink{{Label: "Open finding", URL: link.Href()}}
 	vars := ticketContext(f, class, link.Href(), normalizedLocale(locale))
 	summarySource, bodySource := m.SummaryTemplate, m.DescriptionTemplate
 	if strings.TrimSpace(summarySource) == "" || strings.TrimSpace(bodySource) == "" {
