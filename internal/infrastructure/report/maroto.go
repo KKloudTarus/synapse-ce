@@ -13,7 +13,6 @@ import (
 
 	"github.com/johnfercher/maroto/v2"
 	"github.com/johnfercher/maroto/v2/pkg/components/text"
-	"github.com/johnfercher/maroto/v2/pkg/config"
 	"github.com/johnfercher/maroto/v2/pkg/consts/align"
 	"github.com/johnfercher/maroto/v2/pkg/consts/fontstyle"
 	"github.com/johnfercher/maroto/v2/pkg/core"
@@ -45,7 +44,10 @@ var _ ports.ReportRenderer = (*Renderer)(nil)
 // service – the document is derived solely from eng + findings.
 func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings []finding.Finding, insight ports.ReportInsight, generatedAt time.Time, version string) ([]byte, error) {
 	at := generatedAt.UTC()
-	cfg := config.NewBuilder().WithCreationDate(at).Build()
+	cfg, err := documentConfig(at)
+	if err != nil {
+		return nil, err
+	}
 	m := maroto.New(cfg)
 
 	// Title block.

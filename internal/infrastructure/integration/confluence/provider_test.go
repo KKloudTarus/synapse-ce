@@ -1,0 +1,437 @@
+package confluence
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+
+	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+)
+
+type transport func(*http.Request) (*http.Response, error)
+
+func (f transport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func testAdapter(t *testing.T, cloud bool, main, policy transport) *Adapter {
+	t.Helper()
+	base, err := url.Parse("https://space.atlassian.net")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cloud {
+		base, err = url.Parse("https://confluence.example.test/confluence")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := &http.Client{Transport: main, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	policyClient := &http.Client{Transport: policy, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return &Adapter{base: base, client: client, policy: policyClient, cloud: cloud, email: "person@example.test", token: "secret-token", orgKey: "org-secret", orgID: "org-1", siteARI: "ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111", policyID: "policy-1", space: "SIL", readGroup: "synapse-readers"}
+}
+
+func response(status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}
+}
+
+func content(id, title, storage string, version int) string {
+	return `{"id":"` + id + `","title":"` + title + `","status":"current","space":{"key":"SIL"},"version":{"number":` + stringInt(version) + `},"body":{"storage":{"value":` + jsonString(storage) + `}},"_links":{"webui":"/spaces/SIL/pages/` + id + `"}}`
+}
+func stringInt(v int) string {
+	if v == 1 {
+		return "1"
+	}
+	if v == 2 {
+		return "2"
+	}
+	return "3"
+}
+func jsonString(v string) string {
+	return `"` + strings.ReplaceAll(strings.ReplaceAll(v, `\`, `\\`), `"`, `\"`) + `"`
+}
+func providerCode(t *testing.T, err error) *ports.DocumentProviderError {
+	t.Helper()
+	var got *ports.DocumentProviderError
+	if !errors.As(err, &got) {
+		t.Fatalf("error %T %v", err, err)
+	}
+	return got
+}
+
+func TestRegisterAndEndpointPolicy(t *testing.T) {
+	registry := integration.NewRegistry()
+	if err := Register(registry); err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []integration.Provider{CloudProvider, DCProvider} {
+		d, err := registry.Descriptor(provider)
+		if err != nil || !d.Supports(integration.CapabilityTestConnection) {
+			t.Fatalf("descriptor %q: %+v %v", provider, d, err)
+		}
+	}
+	cloud := integration.Integration{ID: "cloud", TenantID: "tenant", Name: "cloud", Provider: CloudProvider, Version: 1, Endpoint: "https://unit.atlassian.net", Config: []byte(`{"space":"SIL","read_group":"synapse-readers","data_class":"detail"}`)}
+	if _, err := New(cloud, integration.CredentialBundle{"email": "p@example.test", "api_token": "secret"}, selfhosted.Rules{}); err != nil {
+		t.Fatalf("cloud: %v", err)
+	}
+	for _, endpoint := range []string{"https://atlassian.net", "https://unit.atlassian.net/wiki", "https://evil.example"} {
+		cloud.Endpoint = endpoint
+		if _, err := New(cloud, integration.CredentialBundle{"email": "p@example.test", "api_token": "secret"}, selfhosted.Rules{}); err == nil {
+			t.Errorf("accepted cloud endpoint %q", endpoint)
+		}
+	}
+	cloud.Endpoint = "https://unit.atlassian.net"
+	cloud.Config = []byte(`{"space":"SIL","read_group":"synapse-readers","data_class":"internal"}`)
+	if _, err := New(cloud, integration.CredentialBundle{"email": "p@example.test", "api_token": "secret"}, selfhosted.Rules{}); err == nil {
+		t.Fatal("accepted non-detail data class")
+	}
+	dc := integration.Integration{ID: "dc", TenantID: "tenant", Name: "dc", Provider: DCProvider, Version: 1, Endpoint: "https://confluence.example.test/confluence", Config: []byte(`{"space":"SIL","read_group":"synapse-readers","data_class":"detail"}`)}
+	if _, err := New(dc, integration.CredentialBundle{"pat": "secret"}, selfhosted.Rules{}); err == nil {
+		t.Fatal("accepted unallowlisted DC")
+	}
+	hosts, err := selfhosted.ParseHostAllowlist([]string{"confluence.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(dc, integration.CredentialBundle{"pat": "secret"}, selfhosted.Rules{Hosts: hosts}); err != nil {
+		t.Fatalf("DC: %v", err)
+	}
+}
+
+func TestRestrictionWriteUsesDocumentedArrayAndProviderGroupIdentity(t *testing.T) {
+	for _, cloud := range []bool{true, false} {
+		t.Run(map[bool]string{true: "cloud", false: "dc"}[cloud], func(t *testing.T) {
+			main := transport(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/content/1/restriction") {
+					t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+				}
+				var body []struct {
+					Operation    string `json:"operation"`
+					Restrictions struct {
+						Group []map[string]string `json:"group"`
+					} `json:"restrictions"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body) != 1 || body[0].Operation != "read" || len(body[0].Restrictions.Group) != 1 {
+					t.Fatalf("invalid restriction array: %+v %v", body, err)
+				}
+				key, absent := "name", "id"
+				if cloud {
+					key, absent = "id", "name"
+				}
+				group := body[0].Restrictions.Group[0]
+				if group[key] != "synapse-readers" || group[absent] != "" || group["type"] != "group" {
+					t.Fatalf("wrong provider group identity: %v", group)
+				}
+				return response(200, `{}`), nil
+			})
+			if err := testAdapter(t, cloud, main, nil).RestrictDocument(context.Background(), "1", "synapse-readers"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestVerifyRestrictionRejectsForgedACLAndCloudWithoutProof(t *testing.T) {
+	storage := neutralShellStorage("synapse-intent-a")
+	main := transport(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/confluence/rest/api/content/1":
+			return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+		case "/confluence/rest/api/content/1/restriction/byOperation/read":
+			return response(200, `{"operation":"read","restrictions":{"group":{"size":1,"results":[{"name":"other"}]},"user":{"size":0,"results":[]}}}`), nil
+		}
+		return response(500, "{}"), nil
+	})
+	dc := testAdapter(t, false, main, transport(func(*http.Request) (*http.Response, error) { return response(500, "{}"), nil }))
+	if got := providerCode(t, dc.VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers")); got.Code != "restriction_unverified" {
+		t.Fatalf("%+v", got)
+	}
+	cloud := testAdapter(t, true, transport(func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "restriction") {
+			return response(200, `{"operation":"read","restrictions":{"group":{"size":1,"results":[{"name":"synapse-readers","id":"synapse-readers"}]},"user":{"size":0,"results":[]}}}`), nil
+		}
+		return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+	}), transport(func(*http.Request) (*http.Response, error) { return response(500, "{}"), nil }))
+	cloud.orgKey = ""
+	if got := providerCode(t, cloud.VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers")); got.Code != "public_sharing_unverifiable" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestCloudVerificationRejectsIncompletePolicyPagination(t *testing.T) {
+	storage := neutralShellStorage("synapse-intent-a")
+	main := transport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/_edge/tenant_info" {
+			return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
+		}
+		if strings.Contains(r.URL.Path, "restriction") {
+			return response(200, `{"operation":"read","restrictions":{"group":{"size":1,"results":[{"name":"synapse-readers","id":"synapse-readers"}]},"user":{"size":0,"results":[]}}}`), nil
+		}
+		return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+	})
+	calls := 0
+	policy := transport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Host != "api.atlassian.com" {
+			t.Error("wrong policy host")
+		}
+		return response(200, `{"data":[],"meta":{"next":"again"}}`), nil
+	})
+	a := testAdapter(t, true, main, policy)
+	got := providerCode(t, a.VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers"))
+	if got.Code != "public_sharing_unverifiable" || calls != 2 {
+		t.Fatalf("error=%+v calls=%d", got, calls)
+	}
+}
+
+func TestCloudVerificationRequiresExactPublishedPolicyAndAppliedSite(t *testing.T) {
+	storage := neutralShellStorage("synapse-intent-a")
+	main := transport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/_edge/tenant_info" {
+			return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
+		}
+		if strings.Contains(r.URL.Path, "restriction") {
+			return response(200, `{"operation":"read","restrictions":{"group":{"size":1,"results":[{"name":"synapse-readers","id":"synapse-readers"}]},"user":{"size":0,"results":[]}}}`), nil
+		}
+		return response(200, content("1", neutralShellTitle("synapse-intent-a"), storage, 1)), nil
+	})
+	orgData := `{"id":"org-default","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"allow"}},"metadata":{"policyCoverageLevel":"ORG"}}}`
+	policyData := `{"id":"policy-1","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"block"}},"metadata":{"policyCoverageLevel":"WORKSPACE"}}}`
+	policy := transport(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/policies"):
+			return response(200, `{"data":[`+orgData+`,`+policyData+`],"meta":{}}`), nil
+		case strings.HasSuffix(r.URL.Path, "/policies/org-default"):
+			return response(200, `{"data":`+orgData+`}`), nil
+		case strings.HasSuffix(r.URL.Path, "/policies/policy-1"):
+			return response(200, `{"data":`+policyData+`}`), nil
+		case strings.HasSuffix(r.URL.Path, "/resources"):
+			return response(200, `{"data":[{"resourceId":"ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111","applicationStatus":"applied"}],"meta":{}}`), nil
+		}
+		return response(500, "{}"), nil
+	})
+	if err := testAdapter(t, true, main, policy).VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers"); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+}
+
+func TestWriteValidationRejectsSecretsHostileStorageAndUncertainWrites(t *testing.T) {
+	a := testAdapter(t, false, transport(func(*http.Request) (*http.Response, error) { return response(500, "secret-token"), nil }), transport(func(*http.Request) (*http.Response, error) { return response(500, "{}"), nil }))
+	if got := providerCode(t, a.ValidateDocumentText("x secret-token")); got.Code != "credential_in_document" || strings.Contains(got.Error(), "secret-token") {
+		t.Fatalf("%+v", got)
+	}
+	for _, storage := range []string{"<script>x</script>", `<a href="javascript:alert(1)">x</a>`, `<p onclick="x">x</p>`} {
+		if _, err := a.WriteDocument(context.Background(), "1", 1, "Title", storage, "synapse-intent-a"); err == nil {
+			t.Fatalf("hostile storage accepted %q", storage)
+		}
+	}
+	if !validStorage(`<h1>Report</h1><p><ac:link><ri:attachment ri:filename="report.pdf" /><ac:plain-text-link-body><![CDATA[PDF report]]></ac:plain-text-link-body></ac:link></p><ac:image><ri:attachment ri:filename="chart.png" /></ac:image><p>synapse-intent-a</p>`) {
+		t.Fatal("provider rejected the storage projection it is required to accept")
+	}
+	_, err := a.WriteDocument(context.Background(), "1", 1, "Title", `<p>safe</p><p>synapse-intent-a</p>`, "synapse-intent-a")
+	if got := providerCode(t, err); !got.Ambiguous || got.Code != "server_error" || strings.Contains(got.Error(), "secret-token") {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestDocumentStateRetainsExactStorageAndRejectsVersionMismatch(t *testing.T) {
+	storage := `<p>final</p><p>synapse-intent-a</p>`
+	stateAdapter := testAdapter(t, false, transport(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/content/1") {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL)
+		}
+		return response(200, content("1", "Final report", storage, 2)), nil
+	}), transport(func(*http.Request) (*http.Response, error) { return response(500, "{}"), nil }))
+	state, err := stateAdapter.GetDocument(context.Background(), "1")
+	if err != nil || state.Title != "Final report" || state.Storage != storage || state.Neutral || state.Marker != "synapse-intent-a" || state.Version != 2 {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	writeAdapter := testAdapter(t, false, transport(func(*http.Request) (*http.Response, error) {
+		return response(200, content("1", "Final report", storage, 9)), nil
+	}), transport(func(*http.Request) (*http.Response, error) { return response(500, "{}"), nil }))
+	_, err = writeAdapter.WriteDocument(context.Background(), "1", 1, "Final report", storage, "synapse-intent-a")
+	if got := providerCode(t, err); got.Code != "version_conflict" || !got.Ambiguous {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestPurgeEnumeratesAttachmentsBeforeTrashAndPurge(t *testing.T) {
+	var calls []string
+	a := testAdapter(t, false, transport(func(r *http.Request) (*http.Response, error) {
+		calls = append(calls, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		switch {
+		case r.URL.Path == "/confluence/rest/api/content/1/child/attachment":
+			return response(200, `{"results":[{"id":"7"}],"size":1,"start":0}`), nil
+		case r.Method == http.MethodGet && r.URL.Path == "/confluence/rest/api/content/7":
+			return response(200, `{"version":{"number":2}}`), nil
+		case r.Method == http.MethodDelete:
+			return response(204, ""), nil
+		default:
+			return response(204, ""), nil
+		}
+	}), transport(func(*http.Request) (*http.Response, error) { return response(500, "{}"), nil }))
+	guards := 0
+	if err := a.PurgeDocument(context.Background(), "1", func(context.Context) error { guards++; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GET /confluence/rest/api/content/1/child/attachment?expand=version&limit=100&start=0", "DELETE /confluence/rest/api/content/7?status=current", "DELETE /confluence/rest/api/content/7?status=trashed", "DELETE /confluence/rest/api/content/1?status=current", "DELETE /confluence/rest/api/content/1?status=trashed"}
+	if strings.Join(calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("calls=%v", calls)
+	}
+	if guards != 4 {
+		t.Fatalf("guards=%d", guards)
+	}
+}
+
+func TestPurgeLeavesPartialDeleteAmbiguousWhenLaterDeletionIsRejected(t *testing.T) {
+	calls := 0
+	a := testAdapter(t, false, transport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		switch calls {
+		case 1:
+			return response(200, `{"results":[{"id":"7"}],"size":1,"start":0}`), nil
+		case 2:
+			return response(204, ""), nil
+		default:
+			return response(403, "{}"), nil
+		}
+	}), transport(func(*http.Request) (*http.Response, error) { return response(500, "{}"), nil }))
+	err := a.PurgeDocument(context.Background(), "1", func(context.Context) error { return nil })
+	if got := providerCode(t, err); !got.Ambiguous || got.Code != "unauthorized" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestAttachmentBoundsAndExactResponseState(t *testing.T) {
+	a := testAdapter(t, false, transport(func(*http.Request) (*http.Response, error) { t.Fatal("network called"); return nil, nil }), transport(func(*http.Request) (*http.Response, error) { return nil, nil }))
+	if err := a.UploadDocumentAttachment(context.Background(), "1", ports.DocumentImage{Name: "x.svg", MediaType: "image/svg+xml", Data: []byte("x")}); err == nil {
+		t.Fatal("accepted SVG")
+	}
+}
+
+func TestPurgeCloudUsesPermanentAttachmentAndPageEndpoints(t *testing.T) {
+	var calls []string
+	a := testAdapter(t, true, transport(func(r *http.Request) (*http.Response, error) {
+		calls = append(calls, r.Method+" "+r.URL.RequestURI())
+		if r.Method == http.MethodGet {
+			return response(200, `{"results":[{"id":"7"}],"size":1,"start":0}`), nil
+		}
+		return response(204, ""), nil
+	}), nil)
+	if err := a.PurgeDocument(context.Background(), "1", func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GET /wiki/rest/api/content/1/child/attachment?expand=version&limit=100&start=0", "DELETE /wiki/api/v2/attachments/7", "DELETE /wiki/api/v2/attachments/7?purge=true", "DELETE /wiki/api/v2/pages/1", "DELETE /wiki/api/v2/pages/1?purge=true"}
+	if strings.Join(calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("calls=%v", calls)
+	}
+}
+
+func TestPurgeRefusesIncompleteAttachmentEnumerationBeforeDeleting(t *testing.T) {
+	for _, body := range []string{`{"results":[],"start":0}`, `{"results":[],"size":0}`, `{"results":[],"size":0,"start":1}`, `{"results":[{"id":"7"}],"size":0,"start":0}`, `{"results":[],"size":0,"start":0,"_links":{"next":"more"}}`} {
+		t.Run(body, func(t *testing.T) {
+			a := testAdapter(t, false, transport(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					t.Fatal("deletion before complete enumeration")
+				}
+				return response(200, body), nil
+			}), nil)
+			if err := a.PurgeDocument(context.Background(), "1", func(context.Context) error { return nil }); err == nil {
+				t.Fatal("accepted incomplete attachment enumeration")
+			}
+		})
+	}
+}
+
+func TestMalformedSuccessfulWriteResponseRemainsAmbiguous(t *testing.T) {
+	for _, shell := range []bool{true, false} {
+		a := testAdapter(t, false, transport(func(*http.Request) (*http.Response, error) { return response(200, `{"id":"1"}`), nil }), nil)
+		var err error
+		if shell {
+			_, err = a.CreateDocumentShell(context.Background(), "SIL", "synapse-intent-a")
+		} else {
+			_, err = a.WriteDocument(context.Background(), "1", 1, "Report", `<p>synapse-intent-a</p>`, "synapse-intent-a")
+		}
+		if got := providerCode(t, err); !got.Ambiguous {
+			t.Fatalf("shell=%v got=%+v", shell, got)
+		}
+	}
+}
+
+func TestReadRestrictionRequiresCompleteExactPrincipals(t *testing.T) {
+	for _, acl := range []string{
+		`{"operation":"read","restrictions":{"group":{"size":1,"results":[{"name":"synapse-readers","id":"synapse-readers"}]}}}`,
+		`{"operation":"read","restrictions":{"group":{"size":1,"results":[{"name":"synapse-readers","id":"wrong"}]},"user":{"size":0,"results":[]}}}`,
+		`{"operation":"read","restrictions":{"group":{"size":1,"results":[{"id":"synapse-readers"}],"_links":{"next":"more"}},"user":{"size":0,"results":[]}}}`,
+		`{"operation":"read","restrictions":{"group":{"size":1,"results":[{"id":"synapse-readers"}]},"user":{"size":0,"results":[],"totalSize":1}}}`,
+	} {
+		t.Run(acl, func(t *testing.T) {
+			a := testAdapter(t, true, transport(func(r *http.Request) (*http.Response, error) {
+				if strings.Contains(r.URL.Path, "restriction") {
+					return response(200, acl), nil
+				}
+				return response(200, content("1", "Report", `<p>synapse-intent-a</p>`, 1)), nil
+			}), transport(func(*http.Request) (*http.Response, error) {
+				t.Fatal("policy consulted before exact ACL verified")
+				return nil, nil
+			}))
+			if got := providerCode(t, a.VerifyDocumentRestriction(context.Background(), "1", "SIL", "synapse-readers")); got.Code != "restriction_unverified" {
+				t.Fatalf("%+v", got)
+			}
+		})
+	}
+}
+
+func TestCloudSharingProofRejectsStaleForeignOrUnappliedPolicies(t *testing.T) {
+	const org = `{"id":"org-default","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"allow"}},"metadata":{"policyCoverageLevel":"ORG"}}}`
+	const block = `{"id":"policy-1","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"block"}},"metadata":{"policyCoverageLevel":"WORKSPACE"}}}`
+	const resource = `{"resourceId":"ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111","applicationStatus":"applied"}`
+	for _, name := range []string{"foreign-site", "missing-org", "missing-meta", "pending-resource", "unsupported-resource-shape", "stale-effect", "stale-coverage", "unknown-status", "hidden-override"} {
+		t.Run(name, func(t *testing.T) {
+			list, full, res, cloudID := `{"data":[`+org+`,`+block+`],"meta":{}}`, block, resource, "11111111-1111-1111-1111-111111111111"
+			switch name {
+			case "foreign-site":
+				cloudID = "22222222-2222-2222-2222-222222222222"
+			case "missing-org":
+				list = `{"data":[` + block + `],"meta":{}}`
+			case "missing-meta":
+				list = `{"data":[` + org + `,` + block + `]}`
+			case "pending-resource":
+				res = strings.ReplaceAll(resource, "applied", "pending")
+			case "unsupported-resource-shape":
+				res = strings.ReplaceAll(resource, "resourceId", "resourceAri")
+			case "stale-effect":
+				full = strings.ReplaceAll(block, `"block"`, `"allow"`)
+			case "stale-coverage":
+				full = strings.ReplaceAll(block, "WORKSPACE", "ORG")
+			case "unknown-status":
+				list = strings.ReplaceAll(list, "published", "unknown")
+			case "hidden-override":
+				hidden := strings.ReplaceAll(strings.ReplaceAll(block, "policy-1", "hidden"), `"rule":{"publicLinks":{"effect":"block"}}`, `"rule":{}`)
+				list = `{"data":[` + org + `,` + block + `,` + hidden + `],"meta":{}}`
+			}
+			a := testAdapter(t, true, transport(func(*http.Request) (*http.Response, error) { return response(200, `{"cloudId":"`+cloudID+`"}`), nil }), transport(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/policies"):
+					return response(200, list), nil
+				case strings.HasSuffix(r.URL.Path, "/org-default"):
+					return response(200, `{"data":`+org+`}`), nil
+				case strings.HasSuffix(r.URL.Path, "/resources"):
+					return response(200, `{"data":[`+res+`],"meta":{}}`), nil
+				case strings.HasSuffix(r.URL.Path, "/hidden"):
+					return response(200, `{"data":`+strings.ReplaceAll(block, "policy-1", "hidden")+`}`), nil
+				default:
+					return response(200, `{"data":`+full+`}`), nil
+				}
+			}))
+			if got := providerCode(t, a.verifyCloudPublicSharing(context.Background())); got.Code != "public_sharing_unverifiable" {
+				t.Fatalf("%+v", got)
+			}
+		})
+	}
+}

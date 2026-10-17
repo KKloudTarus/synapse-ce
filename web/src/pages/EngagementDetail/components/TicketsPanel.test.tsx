@@ -3,17 +3,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../../lib/api'
 import { TicketsPanel } from './TicketsPanel'
 
-vi.mock('../../../lib/api', () => ({ api: { findingTickets: vi.fn(), me: vi.fn(), previewTicket: vi.fn(), submitTicket: vi.fn(), linkTicket: vi.fn(), unlinkTicket: vi.fn(), reconcileTicketIntent: vi.fn(), retryTicketIntent: vi.fn() } }))
+vi.mock('../../../lib/api', () => ({ api: { findingTickets: vi.fn(), ticketObservations: vi.fn(), me: vi.fn(), previewTicket: vi.fn(), submitTicket: vi.fn(), linkTicket: vi.fn(), unlinkTicket: vi.fn(), reconcileTicketIntent: vi.fn(), retryTicketIntent: vi.fn() } }))
 vi.mock('../../../lib/api/client', () => ({ newIdempotencyKey: () => 'request-key' }))
 
 const ticketData = (over: Record<string, unknown> = {}) => ({
-  links: [], intents: [], mappings: [{ id: 'mapping-1', integrationId: 'jira-1', scope: 'engagement' as const, scopeId: 'eng-1', projectKey: 'SEC', issueType: 'Bug', component: '', labels: [], priorityMap: {}, securityLevel: '', waiverReason: '', dataClass: 'summary' as const, locale: 'en' as const, summaryTemplate: '', descriptionTemplate: '', fieldValues: {}, transitionId: '', version: 1 }], ...over,
+  links: [], intents: [], mappings: [{ id: 'mapping-1', integrationId: 'jira-1', scope: 'engagement' as const, scopeId: 'eng-1', projectKey: 'SEC', issueType: 'Bug', component: '', labels: [], priorityMap: {}, securityLevel: '', waiverReason: '', dataClass: 'summary' as const, locale: 'en' as const, summaryTemplate: '', descriptionTemplate: '', fieldValues: {}, transitionId: '', statusTransitions: {}, groupingMode: 'finding' as const, autoPushEnabled: false, autoPushMinSeverity: 'high' as const, version: 1 }], ...over,
 })
 
 describe('TicketsPanel', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.mocked(api.findingTickets).mockResolvedValue(ticketData())
+    vi.mocked(api.ticketObservations).mockResolvedValue({ observations: [], proposals: [], comments: [] })
     vi.mocked(api.me).mockResolvedValue({ role: 'reviewer' } as never)
   })
 

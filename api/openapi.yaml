@@ -48,6 +48,8 @@ tags:
   - name: findings
   - name: ticketing
     description: Manual links and governed Jira Cloud or Data Center creation
+  - name: document-publishing
+    description: Tenant-scoped governed Confluence publication and scheduled PDF delivery
   - name: sca
   - name: export
   - name: projects
@@ -256,6 +258,96 @@ paths:
           description: Tenant-owned integration or breaker not found
         '409':
           description: Retry-After cooldown remains active
+  /api/v1/integrations/{integrationID}/jira/inbound-webhook:
+    parameters:
+      - name: integrationID
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [ticketing]
+      summary: Configure or rotate a signed Jira webhook
+      description: Tenant administrator only. Verifies the current integration principal and signed-webhook capability. The caller supplies the same secret configured in Jira. Returns only an opaque path; never the secret. Requires durable inbound webhooks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [secret]
+              properties:
+                secret: {type: string, format: password, writeOnly: true, minLength: 32, maxLength: 128}
+      responses:
+        '200':
+          description: Signed webhook configured; path must be kept out of evidence captures
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: {type: string}
+                  version: {type: integer}
+                  rotated: {type: boolean}
+                  previous_secret_expires_at: {type: string, format: date-time}
+        '400': {description: Invalid secret or unsupported Jira capability}
+        '403': {description: Human permission denied}
+        '404': {description: Tenant-owned integration not found}
+        '409': {description: Connection changed or webhook secret capability unsupported}
+  /api/v1/engagements/{id}/findings/{fid}/ticket-observations:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: fid
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [ticketing]
+      summary: Read Jira observations, human retest proposals and external comments
+      description: View permission. These records never change finding security state. Comments are redacted literal text, capped at 16 KiB, and never interpreted for mentions.
+      responses:
+        '200':
+          description: Tenant-scoped observation view
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  observations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        remote_id: {type: string}
+                        status_category: {type: string, enum: [new, indeterminate, done, ''], description: Empty when a deleted or unreadable issue has no known status}
+                        deleted_or_unreadable: {type: boolean}
+                        checked_at: {type: string, format: date-time}
+                        provider_updated_at: {type: string, format: date-time}
+                  proposals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        remote_id: {type: string}
+                        state: {type: string, enum: [pending]}
+                        observed_at: {type: string, format: date-time}
+                        resolution_context: {type: string, maxLength: 255, description: Redacted context only; never a proposal trigger}
+                  comments:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        remote_id: {type: string}
+                        origin: {type: string, enum: [external]}
+                        body: {type: string, maxLength: 16384}
+                        created_at: {type: string, format: date-time}
+        '403': {description: Human permission denied}
+        '404': {description: Tenant-owned finding not found}
   /api/v1/engagements/{id}/findings/{fid}/tickets:
     parameters:
       - name: id
@@ -7506,6 +7598,144 @@ paths:
       summary: List approved connections available to the active browser-session person
       responses: {'200': {description: Approved connection choices}, '403': {description: Browser session proof required}}
 
+  /api/v1/document-publications:
+    post:
+      tags: [document-publishing]
+      operationId: publishDocument
+      summary: Admit a governed Confluence document command
+      description: >-
+        Requires review permission. The server derives the source scope from source_kind,
+        validates current authority and source policy, and returns a durable command or an
+        existing idempotent command. A 202 is not remote completion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DocumentPublishRequest'}
+      responses:
+        '202': {description: Command admitted or identical completed/link result returned, content: {application/json: {schema: {$ref: '#/components/schemas/DocumentReleaseResult'}}}}
+        '400': {description: Invalid source, request key, or current release policy}
+        '403': {description: Current actor lacks release authority or a hold blocks release}
+        '404': {description: Tenant-owned source or integration not found}
+        '409': {description: Request key names a different command or target is retired}
+  /api/v1/document-publications/{id}:
+    get:
+      tags: [document-publishing]
+      operationId: getDocumentPublication
+      summary: Read one governed document command
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Tenant-scoped command state, content: {application/json: {schema: {$ref: '#/components/schemas/DocumentIntent'}}}}
+        '403': {description: View permission denied}
+        '404': {description: Command not found in this tenant}
+  /api/v1/document-links/{id}:
+    delete:
+      tags: [document-publishing]
+      operationId: unpublishDocument
+      summary: Admit a governed page and attachment purge
+      description: >-
+        Requires review permission and a unique request key. An ambiguous purge remains
+        uncertain for reconciliation and is never blindly repeated.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DocumentUnpublishRequest'}
+      responses:
+        '202': {description: Purge command admitted or idempotent result returned, content: {application/json: {schema: {$ref: '#/components/schemas/DocumentReleaseResult'}}}}
+        '400': {description: Invalid request key}
+        '403': {description: Current actor lacks release authority or a hold blocks release}
+        '404': {description: Link not found in this tenant}
+        '409': {description: Request key conflict or link cannot be purged}
+  /api/v1/engagements/{id}/documents:
+    get:
+      tags: [document-publishing]
+      operationId: listEngagementDocuments
+      summary: List current and retired document links for one engagement
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Tenant-scoped document links, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/DocumentLink'}}}}}
+        '403': {description: View permission denied}
+        '404': {description: Engagement not found in this tenant}
+  /api/v1/projects/{key}/documents:
+    get:
+      tags: [document-publishing]
+      operationId: listProjectDocuments
+      summary: List current and retired document links for one project
+      parameters: [{name: key, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Tenant-scoped document links, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/DocumentLink'}}}}}
+        '403': {description: View permission denied}
+        '404': {description: Project not found in this tenant}
+
+  /api/v1/document-schedules:
+    get:
+      tags: [document-publishing]
+      operationId: listDocumentSchedules
+      summary: List schedules for one source scope
+      parameters:
+        - {name: scope, in: query, required: true, schema: {type: string, enum: [engagement, project]}}
+        - {name: scope_id, in: query, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Tenant-scoped schedules, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/DocumentSchedule'}}}}}
+        '400': {description: Invalid scope query}
+        '403': {description: View permission denied}
+    post:
+      tags: [document-publishing]
+      operationId: saveDocumentSchedule
+      summary: Create a weekly or monthly frozen-report schedule
+      description: >-
+        Requires review permission. Source scope is derived from source_kind. Confluence schedules
+        use integration_id; email schedules use an existing verified detail email channel ID. Delivery requires
+        an enabled synapse-worker with the `all` or `integrations` profile.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DocumentScheduleRequest'}
+      responses:
+        '201': {description: Schedule stored, content: {application/json: {schema: {$ref: '#/components/schemas/DocumentSchedule'}}}}
+        '400': {description: Invalid cadence, destination, source, or current source policy}
+        '403': {description: Current actor lacks release authority, recipient eligibility, or hold permits no release}
+        '404': {description: Tenant-owned source, integration, or channel not found}
+        '409': {description: Stale expected version}
+  /api/v1/document-schedules/{id}:
+    delete:
+      tags: [document-publishing]
+      operationId: disableDocumentSchedule
+      summary: Disable a schedule with compare-and-swap versioning
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DocumentScheduleDisableRequest'}
+      responses:
+        '204': {description: Schedule disabled}
+        '400': {description: Invalid expected version}
+        '403': {description: Current actor lacks release authority}
+        '404': {description: Schedule not found in this tenant}
+        '409': {description: Stale expected version}
+  /api/v1/document-schedules/email-destinations:
+    get:
+      tags: [document-publishing]
+      operationId: listDocumentScheduleEmailDestinations
+      summary: List selectable verified detail email channels
+      responses:
+        '200': {description: Safe channel metadata only; no recipients or relay data, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/DocumentScheduleEmailDestination'}}}}}
+        '403': {description: Current actor lacks release authority}
+  /api/v1/document-schedules/{id}/runs:
+    get:
+      tags: [document-publishing]
+      operationId: listDocumentScheduleRuns
+      summary: List safe occurrence history for one schedule
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Bounded safe run history, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/DocumentScheduleRun'}}}}}
+        '403': {description: View permission denied}
+        '404': {description: Schedule not found in this tenant}
+
 components:
   securitySchemes:
     inboundWebhookHMAC:
@@ -7785,8 +8015,8 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
-    TicketMappingInput: {"type":"object","additionalProperties":false,"required":["integration_id","scope","scope_id","project_key","issue_type"],"properties":{"integration_id":{"type":"string"},"scope":{"type":"string","enum":["project","engagement"]},"scope_id":{"type":"string"},"project_key":{"type":"string"},"issue_type":{"type":"string"},"component":{"type":"string"},"security_level":{"type":"string"},"summary_template":{"type":"string"},"description_template":{"type":"string"},"transition_id":{"type":"string"},"data_class":{"type":"string","enum":["signal","summary","detail"]},"locale":{"type":"string","enum":["en","vi"]},"waiver_reason":{"type":"string"},"labels":{"type":"array","maxItems":32,"items":{"type":"string"}},"priority_map":{"type":"object","additionalProperties":{"type":"string"}},"field_values":{"type":"object","additionalProperties":{"type":"string"}},"version":{"type":"integer","minimum":1}}}
-    TicketMapping: {"type":"object","properties":{"integration_id":{"type":"string"},"scope":{"type":"string","enum":["project","engagement"]},"scope_id":{"type":"string"},"project_key":{"type":"string"},"issue_type":{"type":"string"},"component":{"type":"string"},"security_level":{"type":"string"},"summary_template":{"type":"string"},"description_template":{"type":"string"},"transition_id":{"type":"string"},"data_class":{"type":"string","enum":["signal","summary","detail"]},"locale":{"type":"string","enum":["en","vi"]},"waiver_reason":{"type":"string"},"labels":{"type":"array","maxItems":32,"items":{"type":"string"}},"priority_map":{"type":"object","additionalProperties":{"type":"string"}},"field_values":{"type":"object","additionalProperties":{"type":"string"}},"version":{"type":"integer","minimum":1},"id":{"type":"string"}}}
+    TicketMappingInput: {"type":"object","additionalProperties":false,"required":["integration_id","scope","scope_id","project_key","issue_type"],"properties":{"integration_id":{"type":"string"},"scope":{"type":"string","enum":["project","engagement"]},"scope_id":{"type":"string"},"project_key":{"type":"string"},"issue_type":{"type":"string"},"component":{"type":"string"},"security_level":{"type":"string"},"summary_template":{"type":"string"},"description_template":{"type":"string"},"transition_id":{"type":"string"},"data_class":{"type":"string","enum":["signal","summary","detail"]},"locale":{"type":"string","enum":["en","vi"]},"waiver_reason":{"type":"string"},"labels":{"type":"array","maxItems":32,"items":{"type":"string"}},"priority_map":{"type":"object","additionalProperties":{"type":"string"}},"field_values":{"type":"object","additionalProperties":{"type":"string"}},"version":{"type":"integer","minimum":1},"auto_push_enabled":{"type":"boolean","default":false,"description":"Administrator opt-in to automatic confirmed-finding ticket creation."},"auto_push_min_severity":{"type":"string","enum":["critical","high","medium","low","info"],"default":"high"},"grouping_mode":{"type":"string","enum":["finding","vulnerability_project"],"default":"finding","description":"Vulnerability grouping requires a project scope and effective detail class."},"status_transitions":{"type":"object","additionalProperties":false,"properties":{"remediated":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"accepted":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"false_positive":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"reopen":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"}},"description":"Outbound transition IDs by Synapse state; empty disables status sync."}}}
+    TicketMapping: {"type":"object","properties":{"integration_id":{"type":"string"},"scope":{"type":"string","enum":["project","engagement"]},"scope_id":{"type":"string"},"project_key":{"type":"string"},"issue_type":{"type":"string"},"component":{"type":"string"},"security_level":{"type":"string"},"summary_template":{"type":"string"},"description_template":{"type":"string"},"transition_id":{"type":"string"},"data_class":{"type":"string","enum":["signal","summary","detail"]},"locale":{"type":"string","enum":["en","vi"]},"waiver_reason":{"type":"string"},"labels":{"type":"array","maxItems":32,"items":{"type":"string"}},"priority_map":{"type":"object","additionalProperties":{"type":"string"}},"field_values":{"type":"object","additionalProperties":{"type":"string"}},"version":{"type":"integer","minimum":1},"id":{"type":"string"},"auto_push_enabled":{"type":"boolean","default":false,"description":"Administrator opt-in to automatic confirmed-finding ticket creation."},"auto_push_min_severity":{"type":"string","enum":["critical","high","medium","low","info"],"default":"high"},"grouping_mode":{"type":"string","enum":["finding","vulnerability_project"],"default":"finding","description":"Vulnerability grouping requires a project scope and effective detail class."},"status_transitions":{"type":"object","additionalProperties":false,"properties":{"remediated":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"accepted":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"false_positive":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"reopen":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"}},"description":"Outbound transition IDs by Synapse state; empty disables status sync."}}}
     ManualTicketLink: {"type":"object","additionalProperties":false,"required":["url"],"properties":{"url":{"type":"string","format":"uri","maxLength":2048}}}
     TicketLink: {"type":"object","properties":{"id":{"type":"string"},"external_id":{"type":"string"},"external_url":{"type":"string"},"integration_id":{"type":"string"},"created_at":{"type":"string"}}}
     TicketIntent: {"type":"object","properties":{"id":{"type":"string"},"finding_id":{"type":"string"},"mapping_id":{"type":"string"},"error_code":{"type":"string"},"remote_id":{"type":"string"},"remote_url":{"type":"string"},"created_at":{"type":"string"},"state":{"type":"string","enum":["pending","in_flight","done","failed","uncertain"]},"version":{"type":"integer"},"attempts":{"type":"integer"}}}
@@ -14640,3 +14870,144 @@ components:
         response_code: {type: integer}
         error_code: {type: string}
         template_ref: {type: string, description: 'The template a message renders with (#1365): tenant:<template>@<version>, builtin:<event>:<family>:<locale>@<build>, or fallback for the channel built-in content'}
+
+    DocumentSourceKind:
+      type: string
+      enum: [engagement_report, assessment_closure_report, project_quality_summary]
+      description: Engagement reports use engagement scope; closure and quality reports use project scope.
+    DocumentScope:
+      type: string
+      enum: [engagement, project]
+    DocumentPublishRequest:
+      type: object
+      additionalProperties: false
+      required: [integration_id, source_kind, scope_id, source_ref, request_key]
+      properties:
+        integration_id: {type: string, minLength: 1}
+        source_kind: {$ref: '#/components/schemas/DocumentSourceKind'}
+        scope_id: {type: string, minLength: 1}
+        source_ref:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: Stable stored-source identity. It must match the selected kind and scope, for example engagement:<id>, assessment-cycle:<id>, or project:<id>.
+        request_key: {type: string, minLength: 1, maxLength: 128, description: Idempotency key; changing the command under a reused key conflicts.}
+    DocumentUnpublishRequest:
+      type: object
+      additionalProperties: false
+      required: [request_key]
+      properties:
+        request_key: {type: string, minLength: 1, maxLength: 128}
+    DocumentIntent:
+      type: object
+      required: [id, action, state, version, attempts, created_at, updated_at]
+      properties:
+        id: {type: string}
+        link_id: {type: string}
+        action: {type: string, enum: [create, update, purge]}
+        state: {type: string, enum: [pending, in_flight, done, failed, uncertain]}
+        version: {type: integer, minimum: 1}
+        attempts: {type: integer, minimum: 0}
+        error_code: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        remote_url: {type: string, format: uri}
+        remote_id: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    DocumentLink:
+      type: object
+      required: [id, integration_id, source_kind, source_ref, scope, scope_id, container, remote_url, remote_version, content_hash, revision, updated_at]
+      properties:
+        id: {type: string}
+        integration_id: {type: string}
+        source_kind: {$ref: '#/components/schemas/DocumentSourceKind'}
+        source_ref: {type: string, maxLength: 512}
+        scope: {$ref: '#/components/schemas/DocumentScope'}
+        scope_id: {type: string}
+        container: {type: string, maxLength: 255, description: Confluence space key}
+        remote_url: {type: string, format: uri}
+        remote_version: {type: integer, minimum: 1}
+        content_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        revision: {type: integer, minimum: 1}
+        retired_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    DocumentReleaseResult:
+      type: object
+      required: [skipped]
+      properties:
+        skipped: {type: boolean}
+        intent: {$ref: '#/components/schemas/DocumentIntent'}
+        link: {$ref: '#/components/schemas/DocumentLink'}
+    DocumentScheduleDestination:
+      type: string
+      enum: [confluence, email]
+    DocumentScheduleFrequency:
+      type: string
+      enum: [weekly, monthly]
+    DocumentScheduleRequest:
+      type: object
+      additionalProperties: false
+      required: [source_kind, source_ref, scope_id, destination, timezone, frequency, hour, minute, enabled]
+      properties:
+        source_kind: {$ref: '#/components/schemas/DocumentSourceKind'}
+        source_ref: {type: string, minLength: 1, maxLength: 512}
+        scope_id: {type: string, minLength: 1}
+        destination: {$ref: '#/components/schemas/DocumentScheduleDestination'}
+        integration_id: {type: string, description: Required only for destination confluence.}
+        email_channel_id: {type: string, description: Required only for destination email; must identify a currently verified detail email channel.}
+        timezone: {type: string, minLength: 1, maxLength: 128, description: IANA time-zone name.}
+        frequency: {$ref: '#/components/schemas/DocumentScheduleFrequency'}
+        weekday: {type: integer, minimum: 0, maximum: 6, description: Required for weekly schedules; Sunday is 0.}
+        day: {type: integer, minimum: 1, maximum: 31, description: Required for monthly schedules; clamps to month end.}
+        hour: {type: integer, minimum: 0, maximum: 23}
+        minute: {type: integer, minimum: 0, maximum: 59}
+        enabled: {type: boolean}
+        expected_version: {type: integer, minimum: 1, description: Accepted by the current DTO; this POST creates a new schedule ID and does not update an existing schedule.}
+    DocumentScheduleDisableRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+    DocumentSchedule:
+      type: object
+      required: [id, source_kind, source_ref, scope, scope_id, destination, timezone, frequency, hour, minute, enabled, version, next_due_at, updated_at]
+      properties:
+        id: {type: string}
+        source_kind: {$ref: '#/components/schemas/DocumentSourceKind'}
+        source_ref: {type: string, maxLength: 512}
+        scope: {$ref: '#/components/schemas/DocumentScope'}
+        scope_id: {type: string}
+        destination: {$ref: '#/components/schemas/DocumentScheduleDestination'}
+        integration_id: {type: string}
+        email_channel_id: {type: string}
+        timezone: {type: string}
+        frequency: {$ref: '#/components/schemas/DocumentScheduleFrequency'}
+        weekday: {type: integer, minimum: 0, maximum: 6}
+        day: {type: integer, minimum: 0, maximum: 31}
+        hour: {type: integer, minimum: 0, maximum: 23}
+        minute: {type: integer, minimum: 0, maximum: 59}
+        enabled: {type: boolean}
+        version: {type: integer, minimum: 1}
+        next_due_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    DocumentScheduleEmailDestination:
+      type: object
+      required: [id, name, recipient_count]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        recipient_count: {type: integer, minimum: 1, maximum: 20}
+    DocumentScheduleRun:
+      type: object
+      required: [id, due_at, state, delivered_count, uncertain_count, failed_count, updated_at]
+      properties:
+        id: {type: string}
+        due_at: {type: string, format: date-time}
+        state: {type: string, enum: [pending, in_flight, done, uncertain, failed]}
+        content_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        remote_page_id: {type: string}
+        remote_version: {type: integer, minimum: 1}
+        delivered_count: {type: integer, minimum: 0}
+        uncertain_count: {type: integer, minimum: 0}
+        failed_count: {type: integer, minimum: 0}
+        updated_at: {type: string, format: date-time}

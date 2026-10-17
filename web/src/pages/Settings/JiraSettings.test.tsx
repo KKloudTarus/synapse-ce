@@ -12,7 +12,7 @@ vi.mock('../../lib/api', () => ({
 }))
 
 const integration = { id: 'jira-1', provider: 'jira-cloud', name: 'Jira Cloud', endpoint: 'https://team.atlassian.net', archived: false, enabled: false, version: 1, connectionRevision: 1, credentialRevision: 0, credentialConfigured: true }
-const mapping = { id: 'mapping-1', integrationId: 'jira-1', scope: 'project' as const, scopeId: 'project-1', projectKey: 'SEC', issueType: '10001', component: '', labels: [], priorityMap: {}, securityLevel: 'security-1', waiverReason: '', dataClass: 'summary' as const, locale: 'en' as const, summaryTemplate: '', descriptionTemplate: '', fieldValues: {}, transitionId: '', version: 1 }
+const mapping = { id: 'mapping-1', integrationId: 'jira-1', scope: 'project' as const, scopeId: 'project-1', projectKey: 'SEC', issueType: '10001', component: '', labels: [], priorityMap: {}, securityLevel: 'security-1', waiverReason: '', dataClass: 'summary' as const, locale: 'en' as const, summaryTemplate: '', descriptionTemplate: '', fieldValues: {}, transitionId: '', statusTransitions: {}, groupingMode: 'finding' as const, autoPushEnabled: false, autoPushMinSeverity: 'high' as const, version: 1 }
 
 describe('JiraSettings', () => {
   beforeEach(() => {
@@ -26,6 +26,14 @@ describe('JiraSettings', () => {
     vi.mocked(api.jiraMetadata).mockResolvedValue({ projects: [{ id: 'SEC', name: 'Security' }], issueTypes: [{ id: '10001', name: 'Bug' }], priorities: [{ id: '1', name: 'Highest' }], securityLevels: [{ id: 'security-1', name: 'Internal' }], components: [], transitions: [{ id: '31', name: 'Start progress' }], fields: [{ id: 'customfield_101', name: 'Owning team', required: true, values: [], type: '', itemType: '', hasDefault: true }] })
     vi.mocked(api.createTicketMapping).mockResolvedValue(mapping)
     vi.mocked(api.listIntegrationOperations).mockResolvedValue([])
+  })
+
+  it('keeps automatic creation controls unavailable to integration administrators', async () => {
+    vi.mocked(api.me).mockResolvedValue({ role: 'integration_admin' } as never)
+    render(<JiraSettings />)
+    await screen.findByText(/Only tenant administrators can change a Jira destination/)
+    expect(screen.queryByLabelText('Automatically push confirmed findings')).not.toBeInTheDocument()
+    expect(api.createTicketMapping).not.toHaveBeenCalled()
   })
 
   it.each([true, false])('keeps required reporter mapping blocked unless its authenticated identity is resolved (%s)', async (resolved) => {
@@ -52,6 +60,8 @@ describe('JiraSettings', () => {
   it('creates a project mapping with the selected Synapse project and no unsupported transition', async () => {
     render(<JiraSettings />)
     const scope = await screen.findByLabelText('Mapping scope')
+    expect(screen.getByLabelText('Ticket grouping')).toHaveValue('finding')
+    expect(screen.getByRole('option', { name: 'One ticket per vulnerability and project' })).toBeDisabled()
     expect(screen.queryByLabelText('Transition')).not.toBeInTheDocument()
     expect(screen.getByText(/new tickets use Jira's initial workflow status/)).toBeInTheDocument()
 
@@ -67,8 +77,23 @@ describe('JiraSettings', () => {
     fireEvent.change(screen.getByLabelText('Jira field Owning team'), { target: { value: 'blue-team' } })
     fireEvent.change(screen.getByLabelText('Jira priority for critical'), { target: { value: '' } })
     fireEvent.change(screen.getByLabelText('Jira field Owning team'), { target: { value: '' } })
+    expect(screen.getByRole('option', { name: 'One ticket per vulnerability and project' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Data class'), { target: { value: 'detail' } })
+    expect(screen.getByRole('option', { name: 'One ticket per vulnerability and project' })).toBeEnabled()
+    fireEvent.change(screen.getByLabelText('Ticket grouping'), { target: { value: 'vulnerability_project' } })
+    expect(screen.getByLabelText('Automatically push confirmed findings')).not.toBeChecked()
+    expect(screen.getByLabelText('Minimum auto-push severity')).toBeDisabled()
+    fireEvent.click(screen.getByLabelText('Automatically push confirmed findings'))
+    fireEvent.change(screen.getByLabelText('Minimum auto-push severity'), { target: { value: 'critical' } })
+    fireEvent.change(screen.getByLabelText('Remediated transition ID'), { target: { value: '../invalid' } })
+    expect(screen.getByRole('button', { name: 'Create mapping' })).toBeDisabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('Transition IDs must contain')
+    fireEvent.change(screen.getByLabelText('Remediated transition ID'), { target: { value: '31' } })
+    fireEvent.change(screen.getByLabelText('Reopen transition ID'), { target: { value: '41' } })
+    fireEvent.change(screen.getByLabelText('Accepted risk transition ID'), { target: { value: '51' } })
+    fireEvent.change(screen.getByLabelText('Accepted risk transition ID'), { target: { value: '' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create mapping' }))
-    await waitFor(() => expect(api.createTicketMapping).toHaveBeenCalledWith(expect.objectContaining({ scope: 'project', scopeId: 'project-1', projectKey: 'SEC', issueType: '10001', securityLevel: 'security-1', priorityMap: {}, fieldValues: {}, dataClass: 'summary', summaryTemplate: '', descriptionTemplate: '', transitionId: '' })))
+    await waitFor(() => expect(api.createTicketMapping).toHaveBeenCalledWith(expect.objectContaining({ statusTransitions: { remediated: '31', reopen: '41' }, groupingMode: 'vulnerability_project', autoPushEnabled: true, autoPushMinSeverity: 'critical', scope: 'project', scopeId: 'project-1', projectKey: 'SEC', issueType: '10001', securityLevel: 'security-1', priorityMap: {}, fieldValues: {}, dataClass: 'detail', summaryTemplate: '', descriptionTemplate: '', transitionId: '' })))
   })
 
   it('discovers transitions only for an explicit existing Jira issue and never saves one into the mapping', async () => {
@@ -85,7 +110,7 @@ describe('JiraSettings', () => {
     fireEvent.change(screen.getByLabelText('Existing Jira issue key'), { target: { value: 'SEC-123' } })
     fireEvent.click(screen.getByRole('button', { name: 'Discover transitions' }))
     await waitFor(() => expect(api.jiraMetadata).toHaveBeenCalledWith('jira-1', 'SEC', '10001', 'SEC-123'))
-    expect(await screen.findByText('Start progress')).toHaveProperty('tagName', 'LI')
+    expect(await screen.findByText('Start progress (31)')).toHaveProperty('tagName', 'LI')
     expect(screen.queryByLabelText('Transition')).not.toBeInTheDocument()
   })
 

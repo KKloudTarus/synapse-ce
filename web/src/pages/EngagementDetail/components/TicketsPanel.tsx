@@ -4,6 +4,7 @@ import { Button, EmptyState, ErrorState, Input, Spinner } from '../../../compone
 import { api, type FindingTickets, type TicketIntent, type TicketPreview } from '../../../lib/api'
 import { newIdempotencyKey } from '../../../lib/api/client'
 import { TicketPreviewView } from './TicketPreviewView'
+import { TicketObservations } from './TicketObservations'
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : 'The ticket request failed.'
 const triageRoles = new Set(['admin', 'consultant', 'member', 'reviewer'])
@@ -40,6 +41,7 @@ export function TicketsPanel({ engagementId, findingId }: { engagementId: string
     <div className="space-y-2 border-t border-secondary pt-3">{data?.mappings.length ? <><label htmlFor={`ticket-mapping-${findingId}`} className="text-xs font-medium text-secondary">Jira mapping</label><select id={`ticket-mapping-${findingId}`} value={mappingId} disabled={busy} onChange={(event) => { generation.current++; setMappingId(event.target.value); setPreview(null); requestKey.current = '' }} className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm text-primary">{data.mappings.map((mapping) => <option key={mapping.id} value={mapping.id}>{mapping.projectKey} · {mapping.issueType} ({mapping.locale})</option>)}</select><Button variant="secondary" disabled={busy || !allowed} onClick={() => void previewTicket()}>Preview Jira ticket</Button></> : <EmptyState icon={CheckDone01} title="No Jira mapping for this engagement" hint="An administrator can add one in Settings → Jira." />}
       {preview && <div className="space-y-2"><TicketPreviewView preview={preview} /><Button disabled={busy || !allowed} onClick={() => void submit()}><Send01 className="size-4" /> Submit Jira ticket</Button></div>}</div>
     <Intents intents={data?.intents ?? []} busy={busy} allowed={allowed} canRetry={canRetry} onAction={replacedIntent} />
+    {data && <TicketObservations key={`${engagementId}:${findingId}`} engagementId={engagementId} findingId={findingId} />}
   </section>
 }
 

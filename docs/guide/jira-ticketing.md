@@ -97,3 +97,83 @@ the local crash and lease tests do not establish those operational targets.
 Contract references: [Jira Cloud issues](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/),
 [Cloud search consistency](https://developer.atlassian.com/cloud/jira/platform/search-and-reconcile/),
 and [Data Center REST examples](https://developer.atlassian.com/server/jira/platform/jira-rest-api-examples/).
+
+## Automatic creation policy
+
+Automatic creation requires PostgreSQL and enabled notification event producers
+(`SYNAPSE_NOTIFICATIONS_ENABLED=true`). It is off on new and existing mappings. A tenant administrator can
+opt in and select the minimum severity in Jira settings. The policy applies only to
+confirmed findings; unconfirmed observations and external imports cannot authorize
+an automatic ticket. Manual preview and submit remain available under their existing
+permissions. The worker rechecks current confirmation, severity, mapping policy,
+destination security and privacy settings before dispatching a queued command.
+
+Policy admission consumes stored `finding.status_changed` business events with durable
+consumer progress; a worker restart must not lose or duplicate a logical command.
+Changing or disabling a policy invalidates stale queued automatic work. Historical
+status events preceding opt-in do not trigger a backfill.
+
+## Vulnerability grouping
+
+The default remains one ticket per finding. Project mappings at `detail` class can
+select one ticket per vulnerability and project. Group identity includes the tenant,
+mapping, Project and authoritative vulnerability identity. Missing vulnerability
+identity never merges unrelated findings. The asset table uses stored attribution;
+free-text descriptions do not establish an asset relationship.
+
+A pending or uncertain initial write reserves its group, so another request cannot
+create a second remote ticket while the first outcome is unresolved. Later members
+and rescans update the same remote issue. Lowering the effective destination class
+blocks grouped content until the privacy configuration permits detail again.
+
+## Outbound status transitions
+
+Administrators can configure transition IDs for `remediated`, `accepted`,
+`false_positive` and `reopen`. Empty configuration disables status sync. Discover
+IDs on an existing Jira issue in each relevant workflow state; a transition can be
+available from one state and absent from another. The worker records a durable
+command for the existing ticket, sends the transition and explanatory comment
+first, then updates fields. An uncertain transition is retained for recovery.
+Accepted risk comes from the effective SLA lifecycle; an expired acceptance is open.
+For a grouped ticket, any active member keeps the ticket open.
+
+## Signed inbound observations
+
+With PostgreSQL, the vault master key and `SYNAPSE_INBOUND_WEBHOOKS_ENABLED=true`,
+a tenant administrator can configure or rotate a webhook in **Settings → Jira**.
+Enter the same randomly generated 32–128 byte secret in Synapse and Jira. Synapse
+returns an opaque relative hook path once; append it to the public Synapse origin.
+Keep the secret and path out of logs and screenshots. Rotation retains the path
+and permits the previous key for two hours. Disabling the integration stops hook
+admission and outbound work.
+
+Cloud is supported. Data Center currently requires version 11.3 or newer; older
+and unknown versions are refused rather than accepting unsigned delivery. This is
+the supported minimum for this adapter, not the first Jira release with webhook
+secrets. Configure HMAC-SHA256 on the exact body through `X-Hub-Signature`, and
+preserve `X-Atlassian-Webhook-Identifier` on retries. Subscribe to issue updates
+and comment creation/updates. Delivery identifiers and signed body digests are
+deduplicated for two hours, together with all local effects in one transaction.
+Cloud requires its delivery identifier. For Data Center deliveries without that
+header, the authenticated body digest is the receipt identity; malformed supplied
+headers are rejected.
+
+The finding's ticket panel shows external status, retest proposals and external
+comments. A transition into `fields.status.statusCategory.key == "done"` can
+request a retest at most once per finding in a rolling hour. Resolution is context,
+never the trigger. The authenticated integration principal suppresses its own
+status writes. A later human comment does not become evidence that the human
+closed the issue. Comments are redacted literal text, capped at 16 KiB, and never
+passed through the mention or triage parser. A reviewer records the retest through
+the existing finding workflow; Jira never changes finding security state.
+
+Polling reads current linked issues through the same reducer. It requests recent
+status history with the issue and attributes a status author only when the history
+proves that transition. Missing or truncated history leaves a retest decision
+pending until trustworthy attribution is available; a missed webhook plus missing
+history can therefore delay a proposal. The current external status remains
+visible. A Jira 404 means deleted **or unreadable**, not remediated.
+
+Contract references: [Cloud signed webhooks](https://developer.atlassian.com/cloud/jira/software/webhooks/),
+[Data Center webhook administration](https://confluence.atlassian.com/adminjiraserver/managing-webhooks-938846912.html),
+and [Cloud issue history](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/).

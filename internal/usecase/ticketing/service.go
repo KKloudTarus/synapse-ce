@@ -33,7 +33,7 @@ func (s *Service) CreateMapping(ctx context.Context, tenant, integration, scopeI
 	now := s.clock.Now().UTC()
 	m := domain.Mapping{ID: s.ids.NewID(), TenantID: tenant, IntegrationID: integration,
 		Scope: scope, ScopeID: scopeID, ProjectKey: projectKey, IssueType: issueType,
-		Version: 1, CreatedAt: now, UpdatedAt: now}
+		GroupingMode: domain.GroupingFinding, Version: 1, CreatedAt: now, UpdatedAt: now}
 	if err := s.store.CreateMapping(ctx, tenant, m); err != nil {
 		return domain.Mapping{}, err
 	}

@@ -39,6 +39,7 @@ var routeRegistrationFiles = []string{
 	"../internal/adapter/httpapi/ownership_handler.go",
 	"../internal/adapter/httpapi/enterprise_handler.go",
 	"../internal/adapter/httpapi/enterprise_admin_handler.go",
+	"../internal/adapter/httpapi/jira_webhook_admin.go",
 }
 
 // nonAPIRouteRegistrationFiles register routes on their own mux outside /api/v1, so this
