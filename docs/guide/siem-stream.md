@@ -184,6 +184,17 @@ system trust store, optionally add `ca_pem` for a private CA, and provide both
 key is rejected. Private self-hosted collectors stay blocked until the shared
 egress allowlist lands. Do not turn on private-network dialing to bypass that.
 
+The Elasticsearch credential is one API key, sent as
+`Authorization: ApiKey <credential>`. Store the `encoded` field that
+`POST /_security/api_key` returns, which is the base64 of `id:api_key`. Pasting
+the bare `api_key` or the `id` gives a 401 on every send, recorded as a blocked
+batch. Give the key index privileges on the destination index only.
+
+The Elasticsearch target is the index name. The sink rejects a name that holds
+a path separator, starts with `_`, or carries a line break, and the cluster
+rejects the rest of what it disallows, including uppercase, so a refused name
+fails the whole batch rather than part of it.
+
 ## Operations
 
 Pause stops new sends and leaves cursors where they are. Resume clears a
@@ -225,17 +236,50 @@ Reading sinks and their status, and pausing, resuming or testing a sink, need th
 sink, editing it (data class, allowed hosts), rotating its secret and changing its host
 need `administer`, which only `admin` holds. Machine roles hold neither.
 
+## Verifying a destination against a real service
+
+Each destination has an opt-in live contract suite next to its driver. It is
+skipped unless the cluster is configured, the way the Postgres suite is skipped
+without `SYNAPSE_TEST_DB_DSN`. Elasticsearch:
+
+```bash
+export SYNAPSE_TEST_ELASTIC_URL=https://127.0.0.1:19243
+export SYNAPSE_TEST_ELASTIC_API_KEY="$(…the encoded field of POST /_security/api_key…)"
+export SYNAPSE_TEST_ELASTIC_CA=/path/to/ca.pem   # optional, for a private CA
+export SYNAPSE_TEST_ELASTIC_INDEX=synapse-siem-live   # optional
+go test ./internal/infrastructure/siem/elastic -run TestLive -count=1 -v
+```
+
+The suite delivers the three record shapes a real export produces (the audit
+envelope, an OCSF detection finding and an OCSF incident finding), then reads
+each document back and asserts the stored body is what was sent and that the
+cursor fields survived: `source.id` with `source.hash_version` and
+`source.source_hash` for the envelope, `unmapped.synapse_source_position` with
+`unmapped.synapse_source_hash` for a detection finding, and
+`unmapped.synapse_source_position.stream_seq` with the event identity for an
+incident finding. Those are the fields a consumer reads to place an event in
+the stream and notice a hole. It also replays the batch to show a replay
+acknowledges without duplicating a document, and drives the rejection paths: a
+wrong credential, an index the cluster refuses, and a record the index mapping
+cannot accept.
+
+The API key needs index management on the test index, because the suite creates
+and drops it. A sink in production needs only write access.
+
+The live client dials under `safehttp.OperatorPolicy`, which admits a loopback
+address. A tenant-configured destination never gets that policy: private,
+loopback and metadata addresses stay blocked for sinks. TLS verification is on
+in the suite as it is in production; only the trust anchor changes when
+`SYNAPSE_TEST_ELASTIC_CA` is set.
+
 ## What this release does not prove
 
-No Splunk, Elasticsearch, syslog, or Microsoft Sentinel service was available
-while this was built, so there are no screenshots of received English or
-Vietnamese events. Provider behavior is covered by contract tests against
-local test servers. Browser screenshots of the settings page in light and dark
-themes were not captured in a running console. The page uses the existing
-settings components.
-behavior is covered by contract tests against a local TLS server. Browser
-screenshots of the settings page in light and dark themes were not captured in
-a running console. The page uses the existing settings components.
+No Splunk, syslog, or Microsoft Sentinel service was available while this was
+built, so there are no screenshots of received English or Vietnamese events for
+those three. Their behavior is covered by contract tests against local test
+servers. Browser screenshots of the settings page in light and dark themes were
+not captured in a running console. The page uses the existing settings
+components.
 
 These shared pieces were still open, so this stream does not replace them:
 
