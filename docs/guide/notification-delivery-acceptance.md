@@ -559,3 +559,39 @@ Microsoft SMTP, mobile matrix or screen-reader certification is claimed.
 Only Teams/PagerDuty remain deferred. Issue ownership and the existing #1418/#1419
 integration closures are unchanged. This PR keeps `Refs` where an issue's complete
 cross-provider acceptance includes those deferrals; it does not close #1420 or #1576.
+
+## Personal inbox and bell state matrix on 2026-10-18
+
+The light/dark/state matrix the section above records as missing, for the notification bell
+and the inbox page (#1417). Every capture comes from the console in Chromium against an
+API serving PostgreSQL, authenticated as the bootstrap administrator and as a separate
+read-only operator. The two notices in the list are the real administrator notices the
+product raised when a webhook destination was created and then moved, so the inbox content
+is product output rather than seeded rows.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| Inbox list, bell carrying two unread | [Light](assets/ui/ws4-console/inbox-list-light.png) | [Dark](assets/ui/ws4-console/inbox-list-dark.png) |
+| Transport failure while loading the list | [Light](assets/ui/ws4-console/inbox-error-light.png) | [Dark](assets/ui/ws4-console/inbox-error-dark.png) |
+| Unread-only filter | [Light](assets/ui/ws4-console/inbox-unread-filter-light.png) | |
+| Loading, request outstanding | [Light](assets/ui/ws4-console/inbox-loading-light.png) | |
+| Unread empty after Mark all read | [Light](assets/ui/ws4-console/inbox-mark-all-empty-light.png) | |
+| Bell with no badge after Mark all read | [Light](assets/ui/ws4-console/inbox-after-mark-all-bell-light.png) | |
+| A second operator's own empty inbox | [Light](assets/ui/ws4-console/inbox-reader-empty-light.png) | |
+| 390-pixel viewport | [Light](assets/ui/ws4-console/inbox-mobile-light.png) | |
+
+How each state was produced, since a state that cannot be reproduced is not evidence:
+
+- The loading capture delays the real `GET /api/v1/me/inbox` by six seconds and screenshots
+  while it is outstanding. The response is the server's own.
+- The error capture aborts that request at the transport, which is what a dropped connection
+  looks like to the browser. No response body is substituted.
+- The empty capture is the state after the page's own Mark all read, with the unread filter
+  on. The bell capture that follows it is a fresh load of the same account.
+- The second operator is a real `readonly` user with their own API key, so their empty inbox
+  is the product's per-user scoping rather than a filtered view.
+
+One copy defect is visible in the error captures: the message names port 8080
+("Cannot reach the API. Is the server running on :8080?") even when the console reaches the
+API through another origin. It is recorded here rather than changed, because the string is
+shared by every page's error surface and belongs in its own change.
