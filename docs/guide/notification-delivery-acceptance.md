@@ -559,3 +559,25 @@ Microsoft SMTP, mobile matrix or screen-reader certification is claimed.
 Only Teams/PagerDuty remain deferred. Issue ownership and the existing #1418/#1419
 integration closures are unchanged. This PR keeps `Refs` where an issue's complete
 cross-provider acceptance includes those deferrals; it does not close #1420 or #1576.
+
+## Rule builder picker state matrix on 2026-10-18
+
+The pickers #1421 added, captured from the console in Chromium against an API serving
+PostgreSQL. The directory behind them is real: two users, three engagements and three
+ownership teams created through the API before the run.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| People picker open, options named `label (id)` | [Light](assets/ui/ws4-console/rule-people-picker-light.png) | [Dark](assets/ui/ws4-console/rule-people-picker-dark.png) |
+| Engagement picker filtered by a typed query | [Light](assets/ui/ws4-console/rule-engagement-picker-light.png) | [Dark](assets/ui/ws4-console/rule-engagement-picker-dark.png) |
+| A query the directory cannot match | [Light](assets/ui/ws4-console/rule-picker-no-match-light.png) | |
+| Alerting as a read-only operator | [Light](assets/ui/ws4-console/alerting-permission-denied-light.png) | [Dark](assets/ui/ws4-console/alerting-permission-denied-dark.png) |
+
+Each option carries its identifier, which is the point of the change: two people with the
+same display name stay apart, and a saved rule that names someone no longer in the
+directory keeps its selection rather than silently dropping it.
+
+The permission-denied capture is a real `readonly` operator with their own API key, so the
+page is reporting the server's own 403 on `GET /api/v1/notifications/rules`, not a
+client-side guess. The same account's bell carries no badge, because the notices in this
+tenant are addressed to administrators.
