@@ -47,6 +47,13 @@ var classifiedEnv = map[string]string{
 	// setting them in production would not change product behavior.
 	"SYNAPSE_TEST_DB_DSN":              "test-only: Postgres DSN for integration tests",
 	"SYNAPSE_TEST_DUR":                 "test-only: bounded duration for time-sensitive tests",
+	"SYNAPSE_TEST_SPLUNK_URL":          "test-only: opts into the live Splunk event-collector contract",
+	"SYNAPSE_TEST_SPLUNK_TOKEN":        "test-only: HEC token for the live Splunk contract",
+	"SYNAPSE_TEST_SPLUNK_ACK_TOKEN":    "test-only: HEC token with indexer acknowledgement for the live Splunk contract",
+	"SYNAPSE_TEST_SPLUNK_CA":           "test-only: private CA bundle for the live Splunk collector",
+	"SYNAPSE_TEST_SPLUNK_MGMT_URL":     "test-only: Splunk management origin the live contract searches through",
+	"SYNAPSE_TEST_SPLUNK_MGMT_AUTH":    "test-only: Splunk management credential for the live contract search",
+	"SYNAPSE_TEST_SPLUNK_INDEX":        "test-only: index the live Splunk contract searches",
 	"SYNAPSE_LIVE_AI":                  "test-only: opts into live-provider AI tests",
 	"SYNAPSE_LIVE_LLM_TEST":            "test-only: opts into live LLM wire tests",
 	"SYNAPSE_K8S_INTEGRATION":          "test-only: opts into the kind-based Kubernetes suite",
