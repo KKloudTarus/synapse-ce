@@ -9,9 +9,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- **The syslog sink's RFC 5424 timestamp was out of specification (#1458).** `TIME-SECFRAC` is bounded at six digits and the sink wrote nine, because it formatted with `time.RFC3339Nano` and `time.Now` has nanosecond resolution on Linux. Every message a nanosecond clock produced was malformed. The timestamp is now capped at six fractional digits; nothing else about the frame changes, and a receiver that tolerated the nine-digit form keeps working.
+
 - **BREAKING CHANGE: default notification webhooks use a class-filtered envelope.** Receivers now get `synapse.notification.v1` with declared, scrubbed variables, lists and trusted console links instead of the raw event. Update receivers before upgrading notification workers. An administrator can explicitly enable `raw_event` on a `detail` webhook without a custom body; engagement disclosure limits still apply. Existing channels configured at `detail` also begin receiving finding titles in the `scan.completed` findings list. Review their recipients before rollout. Scan messages use immutable completion snapshots, bounded comparison keys and explicit unavailable deltas; built-in English and Vietnamese templates cover the routable events. Email includes escaped HTML alongside text. Follow the worker compatibility, capture-mode drain and rollback steps in [Notification content and capture rollout](docs/guide/notification-content.md).
 
 ### Added
+
+- **Syslog RFC 5424 over TLS verified against a real receiver (#1458).** An opt-in live contract suite (`SYNAPSE_TEST_SYSLOG_ORIGIN`, `SYNAPSE_TEST_SYSLOG_ADDR`, optionally `SYNAPSE_TEST_SYSLOG_CA`, `SYNAPSE_TEST_SYSLOG_LOG_URL` and `SYNAPSE_TEST_SYSLOG_APP`) delivers the three exported record shapes to a real syslog receiver over TLS and reads the receiver's own parsed output back, asserting the app name, the message id, the priority and the message. It also proves a receiver the sink cannot verify is blocked rather than delivered to. The offline contract tests now pin the RFC 5424 grammar field by field, the RFC 5425 octet count, the `APP-NAME` and `MSGID` rules, the sealed TLS credential shapes and the inputs refused before a connection is opened. [SIEM streaming](docs/guide/siem-stream.md) documents the frame and how to run the suite.
 
 - Ticketing foundation: tenant-scoped project/engagement mappings, manual finding links, durable idempotent write intents, and a reusable write-intent state machine with explicit uncertain reconciliation (#1423).
 

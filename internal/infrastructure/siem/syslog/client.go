@@ -174,12 +174,17 @@ func credentials(secret, host string) (*tls.Config, error) {
 	return config, nil
 }
 
+// rfc5424Time is RFC 3339 with at most six fractional digits. RFC 5424 bounds the fraction at
+// `TIME-SECFRAC = "." 1*6DIGIT`, so time.RFC3339Nano is not a legal TIMESTAMP: a clock with
+// nanosecond resolution, which time.Now has on Linux, writes nine digits.
+const rfc5424Time = "2006-01-02T15:04:05.999999Z07:00"
+
 func frame(timestamp time.Time, app string, record siem.DeliveryRecord) ([]byte, error) {
 	if !json.Valid(record.Body) {
 		return nil, fmt.Errorf("body is not JSON")
 	}
 	recordID := messageID(record.ID)
-	message := fmt.Sprintf(`<134>1 %s - %s - %s - `, timestamp.Format(time.RFC3339Nano), app, recordID) + "\ufeff" + string(record.Body)
+	message := fmt.Sprintf(`<134>1 %s - %s - %s - `, timestamp.Format(rfc5424Time), app, recordID) + "\ufeff" + string(record.Body)
 	if len(message) > siem.MaxRecordBytes {
 		return nil, fmt.Errorf("message exceeds the byte cap")
 	}
