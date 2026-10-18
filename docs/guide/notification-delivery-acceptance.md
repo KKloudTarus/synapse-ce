@@ -559,3 +559,31 @@ Microsoft SMTP, mobile matrix or screen-reader certification is claimed.
 Only Teams/PagerDuty remain deferred. Issue ownership and the existing #1418/#1419
 integration closures are unchanged. This PR keeps `Refs` where an issue's complete
 cross-provider acceptance includes those deferrals; it does not close #1420 or #1576.
+
+## Verified contact state matrix on 2026-10-18
+
+The My profile surface #1412 added, captured from the console in Chromium against an API
+serving PostgreSQL.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| No contacts yet | [Light](assets/ui/ws4-console/profile-contacts-empty-light.png) | [Dark](assets/ui/ws4-console/profile-contacts-empty-dark.png) |
+| Added, pending verification, with the code form | [Light](assets/ui/ws4-console/profile-contact-added-light.png) | [Dark](assets/ui/ws4-console/profile-contact-added-dark.png) |
+| An address the server rejects | [Light](assets/ui/ws4-console/profile-contact-invalid-light.png) | |
+| Verification asked for with no relay configured | [Light](assets/ui/ws4-console/profile-contact-verify-unavailable-light.png) | |
+
+Each state is the server's own answer. The added contact is a real row created through
+`POST /api/v1/me/contacts`, the rejection is the API's validation of a malformed address,
+and the unavailable state is what an operator sees when the deployment has no SMTP relay:
+`RequestVerification` reports `email verification is unavailable` rather than queueing a
+code nobody can receive.
+
+The emailed code itself is not captured here. The operator relay is dialled through the
+same SSRF guard as every other destination, so it refuses a loopback or private address,
+and no public relay was available for this run. The code path is covered by
+`TestContactVerificationUsesExistingSMTPTransport` and by the PostgreSQL verification
+tests, which assert the single-use, per-user scoping of each challenge.
+
+There is no permission-denied state for this surface: every signed-in person manages
+their own contacts, and the routes derive the identity from the principal rather than
+from anything the caller sends.
