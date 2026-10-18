@@ -184,6 +184,20 @@ system trust store, optionally add `ca_pem` for a private CA, and provide both
 key is rejected. Private self-hosted collectors stay blocked until the shared
 egress allowlist lands. Do not turn on private-network dialing to bypass that.
 
+The Splunk credential is one HTTP Event Collector token, sent as
+`Authorization: Splunk <token>`. The target is the collector path, normally
+`/services/collector/event`. HTTP 200 is not success on its own: the HEC code
+in the body must be zero, and a non-zero code blocks the batch instead of
+retrying it, because the same token would answer the same way.
+
+Indexer acknowledgement needs both sides set. Create the token with
+`use-ack 1` and select `indexer_ack` on the sink. The sink then sends its
+channel as the `X-Splunk-Request-Channel` header and as the `channel` query
+parameter, keeps the numeric receipt the collector returns, and polls
+`/services/collector/ack` until the indexer confirms it. A receipt is not an
+acknowledgement: nothing advances until the poll comes back true. With a token
+that has acknowledgement off, select `hec_acceptance` instead.
+
 ## Operations
 
 Pause stops new sends and leaves cursors where they are. Resume clears a
@@ -225,17 +239,54 @@ Reading sinks and their status, and pausing, resuming or testing a sink, need th
 sink, editing it (data class, allowed hosts), rotating its secret and changing its host
 need `administer`, which only `admin` holds. Machine roles hold neither.
 
+## Verifying a destination against a real service
+
+Each destination has an opt-in live contract suite next to its driver. It is
+skipped unless the service is configured, the way the Postgres suite is skipped
+without `SYNAPSE_TEST_DB_DSN`. Splunk:
+
+```bash
+export SYNAPSE_TEST_SPLUNK_URL=https://127.0.0.1:18088
+export SYNAPSE_TEST_SPLUNK_TOKEN=<token with acknowledgement off>
+export SYNAPSE_TEST_SPLUNK_ACK_TOKEN=<token created with use-ack 1>   # optional
+export SYNAPSE_TEST_SPLUNK_CA=/path/to/ca.pem                         # optional
+export SYNAPSE_TEST_SPLUNK_MGMT_URL=https://127.0.0.1:18089           # to search
+export SYNAPSE_TEST_SPLUNK_MGMT_AUTH=admin:password                   # to search
+go test ./internal/infrastructure/siem/splunk -run TestLive -count=1 -v
+```
+
+The suite delivers the three record shapes a real export produces (the audit
+envelope, an OCSF detection finding and an OCSF incident finding), then searches
+them back through the management API and asserts each one is indexed under the
+`synapse:siem` sourcetype, findable by its indexed `record_id`, with the body
+unchanged and the cursor fields intact: `source.id` with `source.source_hash`
+for the envelope, and `unmapped.synapse_source_position` for a finding. Those
+are the fields a consumer reads to place an event in the stream and notice a
+hole. `record_id` is an indexed field, so a search has to select it explicitly.
+
+With an acknowledgement token it also exercises the receipt: the delivery
+returns a receipt and acknowledges nothing, the poll confirms it once the
+indexer has the data, and a receipt the collector never issued stays
+unconfirmed. Then it drives the rejection paths: a wrong token, an empty batch,
+and indexer acknowledgement asked of a token that does not have it.
+
+The management credential is separate because a collector token cannot search.
+A sink in production needs only the collector token.
+
+The live client dials under `safehttp.OperatorPolicy`, which admits a loopback
+address. A tenant-configured destination never gets that policy: private,
+loopback and metadata addresses stay blocked for sinks. TLS verification is on
+in the suite as it is in production; only the trust anchor changes when
+`SYNAPSE_TEST_SPLUNK_CA` is set.
+
 ## What this release does not prove
 
-No Splunk, Elasticsearch, syslog, or Microsoft Sentinel service was available
-while this was built, so there are no screenshots of received English or
-Vietnamese events. Provider behavior is covered by contract tests against
-local test servers. Browser screenshots of the settings page in light and dark
-themes were not captured in a running console. The page uses the existing
-settings components.
-behavior is covered by contract tests against a local TLS server. Browser
-screenshots of the settings page in light and dark themes were not captured in
-a running console. The page uses the existing settings components.
+No Elasticsearch, syslog, or Microsoft Sentinel service was available while this
+was built, so there are no screenshots of received English or Vietnamese events
+for those three. Their behavior is covered by contract tests against local test
+servers. Browser screenshots of the settings page in light and dark themes were
+not captured in a running console. The page uses the existing settings
+components.
 
 These shared pieces were still open, so this stream does not replace them:
 
