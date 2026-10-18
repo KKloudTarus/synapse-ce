@@ -559,3 +559,42 @@ Microsoft SMTP, mobile matrix or screen-reader certification is claimed.
 Only Teams/PagerDuty remain deferred. Issue ownership and the existing #1418/#1419
 integration closures are unchanged. This PR keeps `Refs` where an issue's complete
 cross-provider acceptance includes those deferrals; it does not close #1420 or #1576.
+
+## Canonical assignee state matrix on 2026-10-18
+
+The surfaces #1414 added, captured from the console in Chromium against an API serving
+PostgreSQL. Both findings and both assignments are real rows written through
+`PUT /api/v1/engagements/{id}/findings/{id}/assignee`.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| Finding ownership and the assignee picker | [Light](assets/ui/ws4-console/finding-assignee-light.png) | [Dark](assets/ui/ws4-console/finding-assignee-dark.png) |
+| Assignee review with a label that bound to nobody | [Light](assets/ui/ws4-console/assignee-review-light.png) | [Dark](assets/ui/ws4-console/assignee-review-dark.png) |
+| Assignee review as a read-only operator | [Light](assets/ui/ws4-console/assignee-review-denied-light.png) | |
+
+The run exercises both outcomes of the identity bridge, which is the point of the change:
+
+- A finding assigned to the administrator binds. `findings.assignee_user_id` holds
+  `operator`, and no review row exists.
+- A finding assigned to a `readonly` person does not bind. `assignee_user_id` stays null and
+  the review queue carries one `unmatched` row.
+
+That second outcome is the rule in migration `0182`, not a defect. The bridge binds only a
+person who could act on the finding:
+
+```sql
+NEW.assignee_user_id := (
+ SELECT u.id FROM users u WHERE u.ownership_tenant_id=NEW.tenant_id
+  AND u.id=NEW.assignee AND NOT u.disabled
+  AND u.role IN ('admin','consultant','reviewer','member') LIMIT 1
+);
+```
+
+The console says the same thing in its own words next to the picker: "Legacy assignee label
+has no user binding. Choose a user above to enable personal routing." Personal routing skips
+the row until someone picks a person who can own it.
+
+One observation recorded rather than changed: the ownership panel prints the assignee as the
+raw identifier (`manual assign · Assignee: 70db0073427a1ec832d97b106a2295c1`) while the picker
+below shows the same person as `Operator (bootstrap admin) (operator)`. The stored reference
+is right; the panel's rendering of it is less readable than the picker's.
