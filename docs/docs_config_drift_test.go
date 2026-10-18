@@ -47,6 +47,11 @@ var classifiedEnv = map[string]string{
 	// setting them in production would not change product behavior.
 	"SYNAPSE_TEST_DB_DSN":              "test-only: Postgres DSN for integration tests",
 	"SYNAPSE_TEST_DUR":                 "test-only: bounded duration for time-sensitive tests",
+	"SYNAPSE_TEST_SYSLOG_ORIGIN":       "test-only: opts into the live syslog RFC 5425 contract",
+	"SYNAPSE_TEST_SYSLOG_ADDR":         "test-only: address the live syslog contract dials",
+	"SYNAPSE_TEST_SYSLOG_CA":           "test-only: private CA bundle for the live syslog receiver",
+	"SYNAPSE_TEST_SYSLOG_LOG_URL":      "test-only: URL returning what the live syslog receiver parsed",
+	"SYNAPSE_TEST_SYSLOG_APP":          "test-only: APP-NAME the live syslog contract sends",
 	"SYNAPSE_LIVE_AI":                  "test-only: opts into live-provider AI tests",
 	"SYNAPSE_LIVE_LLM_TEST":            "test-only: opts into live LLM wire tests",
 	"SYNAPSE_K8S_INTEGRATION":          "test-only: opts into the kind-based Kubernetes suite",
