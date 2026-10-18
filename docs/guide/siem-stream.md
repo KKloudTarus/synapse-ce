@@ -184,6 +184,21 @@ system trust store, optionally add `ca_pem` for a private CA, and provide both
 key is rejected. Private self-hosted collectors stay blocked until the shared
 egress allowlist lands. Do not turn on private-network dialing to bypass that.
 
+A syslog message is one RFC 5424 frame, octet counted as RFC 5425 requires:
+
+```
+147 <134>1 2026-10-18T13:28:56.123456Z - synapse - syn-ac63669f1be0… - ﻿{"schema":"synapse.siem.audit.v1",…}
+```
+
+Priority 134 is facility `local0` with severity `informational`. Hostname,
+process id and structured data are the nil value. The app name is the sink
+target, one to 48 printable US-ASCII characters. The message id is a digest of
+the record id, 32 characters, so a receiver can deduplicate a replay without
+reading the body. The message is the exported record after a byte order mark,
+which is how RFC 5424 marks a UTF-8 payload. The timestamp carries at most six
+fractional digits, because RFC 5424 bounds the fraction at
+`TIME-SECFRAC = "." 1*6DIGIT`.
+
 ## Operations
 
 Pause stops new sends and leaves cursors where they are. Resume clears a
@@ -225,17 +240,46 @@ Reading sinks and their status, and pausing, resuming or testing a sink, need th
 sink, editing it (data class, allowed hosts), rotating its secret and changing its host
 need `administer`, which only `admin` holds. Machine roles hold neither.
 
+## Verifying a destination against a real service
+
+Each destination has an opt-in live contract suite next to its driver. It is
+skipped unless the service is configured, the way the Postgres suite is skipped
+without `SYNAPSE_TEST_DB_DSN`. Syslog over TLS:
+
+```bash
+export SYNAPSE_TEST_SYSLOG_ORIGIN=tls://syslog.example:6514   # must match the receiver certificate
+export SYNAPSE_TEST_SYSLOG_ADDR=127.0.0.1:16514               # where to dial
+export SYNAPSE_TEST_SYSLOG_CA=/path/to/ca.pem                 # optional, for a private CA
+export SYNAPSE_TEST_SYSLOG_LOG_URL=http://127.0.0.1:16515/parsed.log   # optional read-back
+export SYNAPSE_TEST_SYSLOG_APP=synapse-live                    # optional
+go test ./internal/infrastructure/siem/syslog -run TestLive -count=1 -v
+```
+
+The suite delivers the three record shapes a real export produces, then reads
+the receiver's own parsed output back and asserts each frame arrived with its
+app name, its message id, priority 134 as `local0`/`informational`, and the
+exported record as the message. A completed TLS write is the only
+acknowledgement syslog gives a sender, so the read-back is what turns that
+write into evidence that the receiver's RFC 5424 parser accepted the frame.
+
+It also proves verification is mandatory: against a receiver signed by a
+private CA, a credential of `{}` is blocked with
+`syslog TLS certificate verification failed` rather than delivered or retried.
+
+The origin and the dial address are separate because a sink origin can never
+name a loopback address: `siem.ForbiddenHost` refuses it in the domain layer,
+before any dial policy runs. The suite therefore resolves the origin itself and
+leaves address policy to the shared dialer's own tests. Hostname verification
+is real: the origin host has to match the receiver certificate.
+
 ## What this release does not prove
 
-No Splunk, Elasticsearch, syslog, or Microsoft Sentinel service was available
-while this was built, so there are no screenshots of received English or
-Vietnamese events. Provider behavior is covered by contract tests against
+No Splunk, Elasticsearch, or Microsoft Sentinel service was available while
+this was built, so there are no screenshots of received English or Vietnamese
+events for those three. Their behavior is covered by contract tests against
 local test servers. Browser screenshots of the settings page in light and dark
 themes were not captured in a running console. The page uses the existing
 settings components.
-behavior is covered by contract tests against a local TLS server. Browser
-screenshots of the settings page in light and dark themes were not captured in
-a running console. The page uses the existing settings components.
 
 These shared pieces were still open, so this stream does not replace them:
 
