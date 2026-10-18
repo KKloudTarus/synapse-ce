@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Authentication } from './Authentication'
 import { identityApi } from '../lib/api/identity'
+import { ApiError } from '../lib/api/client'
 
 vi.mock('../lib/api/identity', () => ({
   identityApi: {
@@ -49,6 +50,21 @@ describe('Authentication', () => {
       graceCutoff: null,
     })
     mockedIdentityApi.alerts.mockResolvedValue([])
+  })
+
+
+  it('keeps the connection list when the organization has no policy row yet', async () => {
+    mockedIdentityApi.policy.mockRejectedValue(new ApiError(404, 'not found', { code: 'not_found' }))
+    render(<Authentication enabled />)
+    expect(await screen.findByText('Primary identity')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByText(/has not been enabled for shared identity/)).toBeInTheDocument()
+  })
+
+  it('still reports a failure that is not the missing policy', async () => {
+    mockedIdentityApi.connections.mockRejectedValue(new ApiError(503, 'identity store unavailable'))
+    render(<Authentication enabled />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('identity store unavailable')
   })
 
   it('uses the draft revision when an administrator confirms activation', async () => {

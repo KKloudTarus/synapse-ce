@@ -38,6 +38,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
   const auth = useOptionalAuth()
   const [connections, setConnections] = useState<EnterpriseConnection[]>([])
   const [policy, setPolicy] = useState<IdentityPolicy | null>(null)
+  const [policyDeclared, setPolicyDeclared] = useState(true)
   const [alerts, setAlerts] = useState<RecoveryAlert[]>([])
   const [draft, setDraft] = useState<ConnectionDraft>(emptyDraft)
   const [membershipId, setMembershipId] = useState('')
@@ -59,22 +60,33 @@ export function Authentication({ enabled }: AuthenticationProps) {
     loadController.current = controller
     setLoading(true)
     setError(null)
-    try {
-      const [nextConnections, nextPolicy, nextAlerts] = await Promise.all([
-        identityApi.connections(controller.signal),
-        identityApi.policy(controller.signal),
-        identityApi.alerts(controller.signal),
-      ])
-      if (generation.current !== requestGeneration) return
-      setConnections(nextConnections)
-      setPolicy(nextPolicy)
-      setAlerts(nextAlerts)
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return
-      if (generation.current === requestGeneration) setError(messageFor(cause, 'Could not load authentication settings.'))
-    } finally {
-      if (generation.current === requestGeneration) setLoading(false)
+    // Each read lands on its own. One unavailable part must not blank the page: an
+    // organization that has not been declared for shared identity has no policy row yet,
+    // and its connections still have to be visible and administrable.
+    const [connectionResult, policyResult, alertResult] = await Promise.allSettled([
+      identityApi.connections(controller.signal),
+      identityApi.policy(controller.signal),
+      identityApi.alerts(controller.signal),
+    ])
+    if (generation.current !== requestGeneration) return
+    const failures: unknown[] = []
+    if (connectionResult.status === 'fulfilled') setConnections(connectionResult.value)
+    else failures.push(connectionResult.reason)
+    if (policyResult.status === 'fulfilled') {
+      setPolicy(policyResult.value)
+      setPolicyDeclared(true)
+    } else if (policyResult.reason instanceof ApiError && policyResult.reason.status === 404) {
+      // Not an error: this organization has not been declared for shared identity.
+      setPolicy(null)
+      setPolicyDeclared(false)
+    } else {
+      failures.push(policyResult.reason)
     }
+    if (alertResult.status === 'fulfilled') setAlerts(alertResult.value)
+    else failures.push(alertResult.reason)
+    const reported = failures.find((cause) => !(cause instanceof DOMException && cause.name === 'AbortError'))
+    if (reported !== undefined) setError(messageFor(reported, 'Could not load authentication settings.'))
+    setLoading(false)
   }, [])
 
   useEffect(() => {
@@ -194,6 +206,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
           <section aria-labelledby="policy-heading" className="rounded-lg border border-secondary p-5">
             <h2 id="policy-heading" className="text-lg font-semibold text-primary">Sign-in requirement</h2>
             <p className="mt-1 text-sm text-secondary">Required mode admits browser sessions only after approved organization SSO.</p>
+            {!policyDeclared ? <p className="mt-2 text-sm text-secondary">This organization has not been enabled for shared identity, so it has no sign-in requirement to change yet. Connections below can still be prepared and tested.</p> : null}
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'optional'} onChange={() => setPolicy((current) => current && { ...current, requirement: 'optional' })} /> Optional</label>
               <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'required'} onChange={() => setPolicy((current) => current && { ...current, requirement: 'required' })} /> Required</label>
