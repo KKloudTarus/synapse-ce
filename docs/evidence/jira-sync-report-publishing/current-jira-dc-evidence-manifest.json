@@ -1,0 +1,40 @@
+{
+  "scope": "Isolated Jira Data Center acceptance evidence",
+  "artifacts": [
+    {
+      "path": "current-jira-dc-policy-lifecycle-proof.json",
+      "sha256": "f5291255d000a716ec50b42a9d4c777f0b32fca508cb5c6cced216c570ddc94e"
+    },
+    {
+      "path": "current-jira-dc-policy-console-context.jpg",
+      "sha256": "91114e317bdc7c631aee00b0da9bba7a588b8262c4a6e5127cae4bfa2aadb27d",
+      "format": "jpeg",
+      "dimensions": "1383x718",
+      "subject": "Authenticated Synapse finding detail for DC policy lifecycle acceptance — confirmed-high, before following the existing provider backlink."
+    },
+    {
+      "path": "current-jira-dc-policy-console.jpg",
+      "sha256": "7b001c9abe2d2daad6be663fdaa1d3cafeb490e6429eaeeaa437e79904ee04d8",
+      "format": "jpeg",
+      "dimensions": "1383x718",
+      "subject": "Authenticated Synapse ticket-observation panel after the rendered Jira Open finding backlink: SYNACC-3 new, pending retest, and Done resolution context."
+    },
+    {
+      "path": "current-jira-dc-policy-linked-ticket.jpg",
+      "sha256": "7b001c9abe2d2daad6be663fdaa1d3cafeb490e6429eaeeaa437e79904ee04d8",
+      "format": "jpeg",
+      "dimensions": "1383x718",
+      "subject": "Rendered linked-ticket observation state for SYNACC-3 in the same authenticated source-finding detail."
+    }
+  ],
+  "notes": [
+    "The proof contains metadata and rendered evidence only. Provider payloads, callback configuration, session material, and raw receipts remain in private acceptance state.",
+    "Diagnostic only: one discarded unauthenticated local Nginx readiness probe used wget --no-check-certificate during proxy repair. It made no provider write and is not acceptance evidence. Final browser/API acceptance used valid localhost TLS and CA verification."
+  ],
+  "backlink_assertion": {
+    "provider_issue": "SYNACC-3",
+    "action": "Clicked the rendered Open finding backlink in the native Jira issue UI.",
+    "source_finding_id": "a6416d065126c029b00abb37d7379f16",
+    "result": "The authenticated Synapse finding detail rendered SYNACC-3 in its linked-ticket panel and recorded its Jira observation state."
+  }
+}

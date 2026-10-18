@@ -1,0 +1,89 @@
+{
+  "engagement_id": "0a08f0d045ac8974f884eb835fbcdb88",
+  "governed_purge": {
+    "integration_disabled_http": 200,
+    "provider_404_checks": {
+      "attachment-1409031": {
+        "curl_exit": 0,
+        "http": 404
+      },
+      "attachment-1409033": {
+        "curl_exit": 0,
+        "http": 404
+      },
+      "current": {
+        "curl_exit": 0,
+        "http": 404
+      },
+      "history": {
+        "curl_exit": 0,
+        "http": 404
+      },
+      "trashed": {
+        "curl_exit": 0,
+        "http": 404
+      }
+    }
+  },
+  "legal_hold": {
+    "active_hold_list_http": 200,
+    "active_hold_present": true,
+    "api_route": "/api/v1/fleet/engagements/{id}/legal-hold",
+    "place_http": 200,
+    "publish_refusal_http": 403,
+    "release_http": 204,
+    "unpublish_refusal_http": 403
+  },
+  "native_browser_screenshots": "not captured in this REST fixture; API evidence does not substitute for required UI capture.",
+  "pdf": {
+    "all_pdf_pages_previewed": true,
+    "before": [
+      {
+        "bytes": 51239,
+        "file": "provider-attachment-1409031-report-cbb7920f06b9e8c4.pdf",
+        "id": "1409031",
+        "pages": 1,
+        "sha256": "dc913f7be6725f79411b660552d0af47e528ecf6cbce1498d43b06bba4bf8939",
+        "title": "report-cbb7920f06b9e8c4.pdf",
+        "tls_verified_authenticated_download": true
+      }
+    ],
+    "new_scheduled_pdf": [
+      {
+        "bytes": 53551,
+        "file": "provider-attachment-1409033-report-7baf7afff6ad4c96.pdf",
+        "id": "1409033",
+        "pages": 1,
+        "sha256": "a84a5d1b3140121c17aaa6ae9716297595ce84315c573f5be25fe6d16dcf59c9",
+        "title": "report-7baf7afff6ad4c96.pdf",
+        "tls_verified_authenticated_download": true
+      }
+    ]
+  },
+  "provider_page_version": {
+    "after_schedule": 3,
+    "before_schedule": 2
+  },
+  "remote_page_id": "1409030",
+  "restrictions": {
+    "read_group_count_after": 1,
+    "read_group_count_before": 1,
+    "read_group_names_after": [
+      "confluence-users"
+    ],
+    "script_tag_absent_after": true,
+    "update_group_count_after": 1,
+    "update_group_count_before": 1,
+    "update_group_names_after": [
+      "confluence-users"
+    ]
+  },
+  "scheduled_occurrence": {
+    "delivered_count": 0,
+    "disabled_http": 204,
+    "remote_page_id": "1409030",
+    "remote_version": 3,
+    "state": "done"
+  },
+  "scope": "isolated local Confluence Data Center REST acceptance fixture"
+}

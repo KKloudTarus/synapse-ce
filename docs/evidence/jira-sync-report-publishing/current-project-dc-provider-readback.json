@@ -1,0 +1,23 @@
+{
+  "provider": "jira-data-center",
+  "issue_key": "SYNACC-2",
+  "issue_id": "10100",
+  "summary": "Ph\u00e1t hi\u1ec7n nghi\u00eam tr\u1ecdng: CVE-2021-44228 in org.apache.logging.log4j:log4j-core@2.14.1",
+  "labels": [
+    "synapse-current-project-grouping",
+    "synapse-dc",
+    "synapse-intent-cae698caabd64f11f1cd50c910781001"
+  ],
+  "priority": "Highest",
+  "security": "Fresh lab restricted",
+  "issue_type": "Story",
+  "project": "SYNACC",
+  "description": "Ph\u00e1t hi\u1ec7n&#58; CVE\\-2021\\-44228 in org.apache.logging.log4j&#58;log4j\\-core@2.14.1\nM\u00e3&#58; 8a67b8c41d73cf930e162e09b3cff048\nM\u1ee9c \u0111\u1ed9&#58; nghi\u00eam tr\u1ecdng\nTr\u1ea1ng th\u00e1i&#58; \u0111\u00e3 x\u00e1c nh\u1eadn\n\nM\u00f4 t\u1ea3&#58;\nRemote code injection in Log4j Fixed in&#58; 2.15.0\n\n[Open finding|https://localhost:8444/code-quality/projects/current-project-grouping/source-findings#finding-8a67b8c41d73cf930e162e09b3cff048]\n\n||T\u00e0i s\u1ea3n||Ph\u00e1t hi\u1ec7n||M\u1ee9c \u0111\u1ed9||Tr\u1ea1ng th\u00e1i||\n|/home/vihn/.local/state/synapse\\-acceptance\\-continuation/project/source/a|CVE\\-2021\\-44228 in org.apache.logging.log4j&#58;log4j\\-core@2.14.1|nghi\u00eam tr\u1ecdng|\u0111\u00e3 x\u00e1c nh\u1eadn|",
+  "observed_asset_subdirectories": [
+    "a"
+  ],
+  "project_deep_links": [
+    "Ph\u00e1t hi\u1ec7n&#58; CVE\\-2021\\-44228 in org.apache.logging.log4j&#58;log4j\\-core@2.14.1\nM\u00e3&#58; 8a67b8c41d73cf930e162e09b3cff048\nM\u1ee9c \u0111\u1ed9&#58; nghi\u00eam tr\u1ecdng\nTr\u1ea1ng th\u00e1i&#58; \u0111\u00e3 x\u00e1c nh\u1eadn\n\nM\u00f4 t\u1ea3&#58;\nRemote code injection in Log4j Fixed in&#58; 2.15.0\n\n[Open finding|https://localhost:8444/code-quality/projects/current-project-grouping/source-findings#finding-8a67b8c41d73cf930e162e09b3cff048]\n\n||T\u00e0i s\u1ea3n||Ph\u00e1t hi\u1ec7n||M\u1ee9c \u0111\u1ed9||Tr\u1ea1ng th\u00e1i||\n|/home/vihn/.local/state/synapse\\-acceptance\\-continuation/project/source/a|CVE\\-2021\\-44228 in org.apache.logging.log4j&#58;log4j\\-core@2.14.1|nghi\u00eam tr\u1ecdng|\u0111\u00e3 x\u00e1c nh\u1eadn|"
+  ],
+  "http_status": 200
+}

@@ -1,0 +1,121 @@
+{
+  "project": {
+    "key": "current-project-grouping",
+    "id": "5056c48fd551213b3ac4ea0c66ba967c",
+    "source_root": "/home/vihn/.local/state/synapse-acceptance-continuation/project/source"
+  },
+  "finding": {
+    "id": "8a67b8c41d73cf930e162e09b3cff048",
+    "advisory": "CVE-2021-44228",
+    "package": "org.apache.logging.log4j:log4j-core@2.14.1",
+    "state": "confirmed",
+    "deep_link": "https://localhost:8444/code-quality/projects/current-project-grouping/source-findings#finding-8a67b8c41d73cf930e162e09b3cff048"
+  },
+  "source_scans": [
+    {
+      "id": "a62424aaeb2dc48a51dc23a0639660d7",
+      "subdirectory": "a",
+      "status": "succeeded"
+    },
+    {
+      "id": "1d7aead53521469874bc8b9cdff8e700",
+      "subdirectory": "b",
+      "status": "succeeded"
+    },
+    {
+      "id": "a57b8ec574615b764ec2c3c30fe55482",
+      "subdirectory": "a",
+      "status": "succeeded"
+    },
+    {
+      "id": "b975af2241baf1a2226a6b49f94ab92b",
+      "subdirectory": "b",
+      "status": "succeeded",
+      "dependency_removed_before_scan": true
+    }
+  ],
+  "initial_group": {
+    "observed_asset_subdirectories": [
+      "a",
+      "b"
+    ],
+    "source": "two successful source scans and ticket previews"
+  },
+  "after_dependency_removal": {
+    "observed_asset_subdirectories": [
+      "a"
+    ],
+    "source": "successful b rescan, source-scoped previews, and native provider readbacks"
+  },
+  "providers": {
+    "jira_cloud": {
+      "mapping_id": "ade53bdff8d5276d888293eda398d89f",
+      "scope": "project",
+      "grouping_mode": "vulnerability_project",
+      "issue": "B7R-8",
+      "issue_type": "10010",
+      "security_level": "10000",
+      "locale_submissions": [
+        "en",
+        "vi",
+        "en_visual_capture",
+        "vi_visual_capture"
+      ],
+      "after_removal_intent": "06fbf60fb182bac7292059649d563a99",
+      "after_removal_state": "done",
+      "native_readback": "current-project-cloud-provider-readback-after-removal.json"
+    },
+    "jira_data_center": {
+      "mapping_id": "7ac8b3909befb12495e84c7dad393ae6",
+      "scope": "project",
+      "grouping_mode": "vulnerability_project",
+      "issue": "SYNACC-2",
+      "issue_type": "10001",
+      "security_level": "10000",
+      "locale_submissions": [
+        "en",
+        "vi",
+        "en_after_removal",
+        "vi_after_removal",
+        "en_visual_capture",
+        "vi_visual_capture",
+        "en_clean_visual_capture",
+        "vi_final_visual_capture",
+        "vi_overlay_clean_final_visual_capture",
+        "en_asset_table_visual_capture",
+        "vi_asset_table_final_visual_capture"
+      ],
+      "after_removal_intent": "2f8d45f0dc777fb75b2f2a87973a0fe4",
+      "after_removal_state": "done",
+      "native_readback": "current-project-dc-provider-readback.json"
+    }
+  },
+  "assertions": {
+    "one_external_issue_per_provider": true,
+    "after_removal_updated_existing_issue": true,
+    "no_duplicate_external_link_after_removal": true,
+    "current_worker_binary_sha256": "25c9fa7299ed241e240253792355df609dad36c8fd94f1d44259bafc2ce3982b"
+  },
+  "worker_execution": {
+    "profile": "all",
+    "sandbox_enabled": true,
+    "source_scan_input": "project/source/a and project/source/b Maven manifests"
+  },
+  "diagnostics": {
+    "failed_dc_preflight_intents": [
+      "3a099bdec42df85a7263ec612d94d395",
+      "425e3a69771ab0a6f0ca6f43abcab1eb"
+    ],
+    "failed_dc_preflight_outcome": "No external issue was created; later integration-worker intents updated SYNACC-2."
+  },
+  "visual_capture_intents": {
+    "jira_cloud": {
+      "english": "bbafe86593ab9dd223b26a20eb0f22e4",
+      "final_vietnamese": "06fbf60fb182bac7292059649d563a99"
+    },
+    "jira_data_center": {
+      "english": "c35cce1d63d87d9d4d83935040b770e1",
+      "final_vietnamese": "2f8d45f0dc777fb75b2f2a87973a0fe4"
+    }
+  }
+}

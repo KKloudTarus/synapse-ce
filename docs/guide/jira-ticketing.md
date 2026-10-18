@@ -133,7 +133,13 @@ destination security and privacy settings before dispatching a queued command.
 Policy admission consumes stored `finding.status_changed` business events with durable
 consumer progress; a worker restart must not lose or duplicate a logical command.
 Changing or disabling a policy invalidates stale queued automatic work. Historical
-status events preceding opt-in do not trigger a backfill.
+status events preceding opt-in do not trigger a backfill. Automatic creation is once per
+finding and mapping: later confirmation events retain its linked ticket or the
+initial command, including an uncertain or refused command that requires explicit
+operator recovery. Existing links on that integration suppress automatic creation;
+use a reviewed manual preview when a different destination is intended. Initial
+command discovery reads at most 200 recent intents; if a full page cannot establish
+absence, admission defers rather than risking another ticket.
 
 ## Vulnerability grouping
 
@@ -194,6 +200,12 @@ deduplicated for two hours, together with all local effects in one transaction.
 Cloud requires its delivery identifier. For Data Center deliveries without that
 header, the authenticated body digest is the receipt identity; malformed supplied
 headers are rejected.
+
+The WS10 hook route requires a query-free request. Native Jira Cloud deliveries
+can append the informational `triggeredByUser` query parameter. When using an
+ingress proxy, match only the configured opaque hook path and forward that path
+without its query; preserve the body, signature and delivery identifier unchanged.
+Do not forward other application routes through a webhook-only ingress.
 
 The finding's ticket panel shows external status, retest proposals and external
 comments. A transition into `fields.status.statusCategory.key == "done"` can

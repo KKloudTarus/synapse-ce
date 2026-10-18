@@ -399,11 +399,18 @@ func (a *Acquirer) gitAuth(ctx context.Context, rawURL string) (cloneURL string,
 		cleanup()
 		return "", nil, nil, noop, fmt.Errorf("write credential: %w", werr)
 	}
+	usernameFile := filepath.Join(credDir, "username")
+	if werr := os.WriteFile(usernameFile, []byte(cred.Username), 0o600); werr != nil {
+		cleanup()
+		return "", nil, nil, noop, fmt.Errorf("write credential username: %w", werr)
+	}
 	askpass := filepath.Join(credDir, "askpass")
 	// git invokes the helper for the password; it prints the token file's contents. A fixed PATH stops a
 	// repo-provided `cat` on an inherited PATH (cwd is the cloned repo during the comparison fetch) from
 	// running in place of the system one. /bin/sh is on the host and, in the sandbox, under the ro-bound /bin.
-	script := "#!/bin/sh\nPATH=/usr/bin:/bin\nexec cat \"$SYNAPSE_GIT_TOKEN_FILE\"\n"
+	// Git may ask for the username again after an HTTP authentication challenge.
+	// Return the corresponding field, and never return a token for an unknown prompt.
+	script := "#!/bin/sh\nPATH=/usr/bin:/bin\ncase \"$1\" in\nUsername*) exec cat \"$SYNAPSE_GIT_USERNAME_FILE\" ;;\nPassword*) exec cat \"$SYNAPSE_GIT_TOKEN_FILE\" ;;\n*) exit 1 ;;\nesac\n"
 	if runtime.GOOS == "windows" {
 		askpass += ".cmd"
 		script = "@echo off\r\ntype \"%SYNAPSE_GIT_TOKEN_FILE%\"\r\n"
@@ -418,7 +425,7 @@ func (a *Acquirer) gitAuth(ctx context.Context, rawURL string) (cloneURL string,
 		return "", nil, nil, noop, fmt.Errorf("%w: invalid git url", shared.ErrValidation)
 	}
 	u.User = neturl.User(cred.Username) // username only; the token is supplied via askpass
-	authEnv = []string{"GIT_ASKPASS=" + askpass, "SYNAPSE_GIT_TOKEN_FILE=" + tokenFile}
+	authEnv = []string{"GIT_ASKPASS=" + askpass, "SYNAPSE_GIT_TOKEN_FILE=" + tokenFile, "SYNAPSE_GIT_USERNAME_FILE=" + usernameFile}
 	return u.String(), authEnv, []string{credDir}, cleanup, nil
 }
 
@@ -500,7 +507,7 @@ func (a *Acquirer) acquireGit(ctx context.Context, url, ref, fetchRef, commit, b
 	// GIT_CONFIG_NOSYSTEM + GIT_CONFIG_GLOBAL=/dev/null run git with NO ambient config, so no
 	// system/global credential helper, smudge/clean filter, or LFS process can load and read the
 	// token file or run during checkout. This applies to the clone and every follow-on git op.
-	gitEnv := []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
+	gitEnv := []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "LC_ALL=C"}
 	if len(authEnv) > 0 {
 		gitEnv = append(gitEnv, authEnv...)
 	} else {

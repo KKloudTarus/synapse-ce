@@ -917,8 +917,9 @@ func (w *Workflow) tickOutboundIntents(tenantCtx context.Context, tenant shared.
 }
 
 // tickAutoPush consumes the durable finding.status_changed stream rather than a
-// recent-events view. Replays are harmless because every event/mapping pair has
-// a stable request key; malformed or no-longer-eligible events advance so they
+// recent-events view. Automatic creation has one finding/mapping request key;
+// later confirmation events retain the existing ticket or its recovery fence.
+// Malformed or no-longer-eligible events advance so they
 // cannot block later healthy changes.
 func (w *Workflow) tickAutoPush(ctx context.Context, tenant shared.ID, store ports.TicketAutoPushStore, limit int) (int, error) {
 	now := w.clock.Now().UTC()
@@ -960,6 +961,14 @@ func (w *Workflow) tickAutoPush(ctx context.Context, tenant shared.ID, store por
 			if f.Status != finding.StatusConfirmed || f.Kind == finding.KindExternal || !f.CanPromote() || shared.SeverityRank(f.Severity) < shared.SeverityRank(mapping.AutoPushMinSeverity) {
 				continue
 			}
+			exists, err := w.automaticTicketExists(ctx, tenant, mapping, f.ID)
+			if err != nil {
+				retry = true
+				break
+			}
+			if exists {
+				continue
+			}
 			preview, err := w.Preview(ctx, PreviewRequest{TenantID: tenant, MappingID: mapping.ID, FindingID: f.ID, EngagementID: event.EngagementID})
 			if err != nil {
 				if autoPushPermanent(err) {
@@ -968,7 +977,7 @@ func (w *Workflow) tickAutoPush(ctx context.Context, tenant shared.ID, store por
 				retry = true
 				break
 			}
-			sum := sha256.Sum256([]byte(event.ID.String() + "\x00" + mapping.ID.String()))
+			sum := sha256.Sum256([]byte("finding\x00" + f.ID.String() + "\x00" + mapping.ID.String()))
 			key := "auto:" + hex.EncodeToString(sum[:])
 			_, wasCreated, err := w.Submit(ctx, SubmitRequest{TenantID: tenant, MappingID: mapping.ID, FindingID: f.ID, EngagementID: event.EngagementID, RequestKey: key, PreviewDigest: preview.Digest, Actor: "system:auto_push"})
 			if err != nil {
@@ -993,6 +1002,35 @@ func (w *Workflow) tickAutoPush(ctx context.Context, tenant shared.ID, store por
 		}
 	}
 	return created, nil
+}
+
+func (w *Workflow) automaticTicketExists(ctx context.Context, tenant shared.ID, mapping domain.Mapping, findingID shared.ID) (bool, error) {
+	links, err := w.store.ListLinks(ctx, tenant, findingID)
+	if err != nil {
+		return false, err
+	}
+	for _, link := range links {
+		if link.IntegrationID == mapping.IntegrationID {
+			return true, nil
+		}
+	}
+	// Retain pending, uncertain and failed initial commands, including commands
+	// admitted with the earlier per-event key. Reconfirmation is not operator
+	// authorization to bypass their recovery fence.
+	const historyLimit = 200
+	intents, err := w.store.ListFindingIntents(ctx, tenant, findingID, historyLimit)
+	if err != nil {
+		return false, err
+	}
+	for _, intent := range intents {
+		if intent.MappingID == mapping.ID && intent.Action == domain.Create {
+			return true, nil
+		}
+	}
+	if len(intents) == historyLimit {
+		return false, shared.ErrConflict
+	}
+	return false, nil
 }
 
 func autoPushPermanent(err error) bool {
