@@ -9,9 +9,13 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Changed
 
+- A blocked or throttled Splunk sink now reads plainly in the console. The driver's own wording started with `splunk `, which the diagnostic scrubber treats as a credential marker, so "splunk rejected the credential" reached the operator as "[secret] the credential" (#1459).
+
 - **BREAKING CHANGE: default notification webhooks use a class-filtered envelope.** Receivers now get `synapse.notification.v1` with declared, scrubbed variables, lists and trusted console links instead of the raw event. Update receivers before upgrading notification workers. An administrator can explicitly enable `raw_event` on a `detail` webhook without a custom body; engagement disclosure limits still apply. Existing channels configured at `detail` also begin receiving finding titles in the `scan.completed` findings list. Review their recipients before rollout. Scan messages use immutable completion snapshots, bounded comparison keys and explicit unavailable deltas; built-in English and Vietnamese templates cover the routable events. Email includes escaped HTML alongside text. Follow the worker compatibility, capture-mode drain and rollback steps in [Notification content and capture rollout](docs/guide/notification-content.md).
 
 ### Added
+
+- **Splunk HEC sink verified against a real collector (#1459).** An opt-in live contract suite (`SYNAPSE_TEST_SPLUNK_URL`, `SYNAPSE_TEST_SPLUNK_TOKEN`, optionally `SYNAPSE_TEST_SPLUNK_ACK_TOKEN`, `SYNAPSE_TEST_SPLUNK_CA`, `SYNAPSE_TEST_SPLUNK_MGMT_URL`, `SYNAPSE_TEST_SPLUNK_MGMT_AUTH` and `SYNAPSE_TEST_SPLUNK_INDEX`) delivers the three exported record shapes to a real Splunk over TLS, searches them back through the management API, and exercises the indexer-acknowledgement receipt and poll. The offline contract tests now also pin the collector wire format, the `Splunk` credential scheme, every transport, HEC-code and poll classification, and the inputs refused before a connection is opened. [SIEM streaming](docs/guide/siem-stream.md) documents the token, the `use-ack` pairing and how to run the suite.
 
 - Ticketing foundation: tenant-scoped project/engagement mappings, manual finding links, durable idempotent write intents, and a reusable write-intent state machine with explicit uncertain reconciliation (#1423).
 
