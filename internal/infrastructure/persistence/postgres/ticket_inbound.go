@@ -19,6 +19,12 @@ var _ ports.TicketInboundStore = (*TicketStore)(nil)
 
 type ticketTargetRef struct{ intentID, mappingID shared.ID }
 
+type ticketInboundBackfillRow struct {
+	id, mappingID, engagementID, findingID shared.ID
+	remoteID                               string
+	action, state                          string
+}
+
 func loadTicketStatusTarget(ctx context.Context, tx pgx.Tx, tenant, intentID, mappingID shared.ID) (ports.TicketStatusTarget, error) {
 	mapping, err := scanTicketMapping(tx.QueryRow(ctx, `SELECT `+mappingCols+` FROM ticket_mappings WHERE tenant_id=$1 AND id=$2`, tenant.String(), mappingID.String()))
 	if err != nil {
@@ -31,11 +37,66 @@ func loadTicketStatusTarget(ctx context.Context, tx pgx.Tx, tenant, intentID, ma
 	return ports.TicketStatusTarget{Mapping: mapping, Intent: intent}, nil
 }
 
+// catchUpInboundTicketTargets incrementally discovers eligible intents that
+// existed before the inbound-progress trigger was installed. The cursor scans
+// every historical row at most once, including ineligible rows, so a tenant
+// with a large prefix cannot repeatedly pay to rediscover it.
+func catchUpInboundTicketTargets(ctx context.Context, tx pgx.Tx, tenant shared.ID, limit int) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO ticket_inbound_poll_backfill_cursors(tenant_id) VALUES($1) ON CONFLICT DO NOTHING`, tenant.String()); err != nil {
+		return err
+	}
+	var after string
+	var complete bool
+	if err := tx.QueryRow(ctx, `SELECT after_intent_id,complete FROM ticket_inbound_poll_backfill_cursors WHERE tenant_id=$1 FOR UPDATE`, tenant.String()).Scan(&after, &complete); err != nil {
+		return err
+	}
+	if complete {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id,mapping_id,engagement_id,finding_id,remote_id,action,state
+		FROM ticket_intents WHERE tenant_id=$1 AND id>$2 ORDER BY id LIMIT $3`, tenant.String(), after, limit)
+	if err != nil {
+		return err
+	}
+	batch := make([]ticketInboundBackfillRow, 0, limit)
+	for rows.Next() {
+		var item ticketInboundBackfillRow
+		if err = rows.Scan(&item.id, &item.mappingID, &item.engagementID, &item.findingID, &item.remoteID, &item.action, &item.state); err != nil {
+			rows.Close()
+			return err
+		}
+		batch = append(batch, item)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, item := range batch {
+		if item.state != "done" || item.action != "create" || strings.TrimSpace(item.remoteID) == "" {
+			continue
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO ticket_inbound_poll_progress(tenant_id,intent_id,mapping_id,engagement_id,finding_id,remote_id)
+			VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,intent_id) DO NOTHING`, tenant.String(), item.id.String(), item.mappingID.String(), item.engagementID.String(), item.findingID.String(), item.remoteID); err != nil {
+			return err
+		}
+	}
+	if len(batch) == 0 {
+		_, err = tx.Exec(ctx, `UPDATE ticket_inbound_poll_backfill_cursors SET complete=TRUE WHERE tenant_id=$1`, tenant.String())
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE ticket_inbound_poll_backfill_cursors SET after_intent_id=$2,complete=$3 WHERE tenant_id=$1`, tenant.String(), batch[len(batch)-1].id.String(), len(batch) < limit)
+	return err
+}
+
 func (s *TicketStore) ListInboundTicketTargets(ctx context.Context, tenant shared.ID, limit int) (out []ports.TicketStatusTarget, err error) {
 	if tenant.IsZero() || limit < 1 || limit > 250 {
 		return nil, shared.ErrValidation
 	}
 	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		if e := catchUpInboundTicketTargets(ctx, tx, tenant, limit); e != nil {
+			return e
+		}
 		rows, e := tx.Query(ctx, `SELECT p.intent_id,p.mapping_id FROM ticket_inbound_poll_progress p
 			JOIN ticket_intents i ON i.tenant_id=p.tenant_id AND i.id=p.intent_id
 			WHERE p.tenant_id=$1 AND i.state='done' AND i.action='create' AND i.remote_id=p.remote_id
@@ -202,7 +263,7 @@ func (s *TicketStore) reduceInboundTicketTx(ctx context.Context, tx pgx.Tx, tena
 		var previous string
 		var previousUpdated *time.Time
 		var previousAuthor string
-		var previousAuthorKnown, previousPending bool
+		var previousAuthorKnown, previousPending, previousDeletedOrUnreadable bool
 		var previousStatusChanged *time.Time
 		var mapped bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ticket_mappings WHERE tenant_id=$1 AND id=$2 AND integration_id=$3)`, tenant.String(), item.MappingID.String(), item.IntegrationID.String()).Scan(&mapped); err != nil || !mapped {
@@ -211,7 +272,7 @@ func (s *TicketStore) reduceInboundTicketTx(ctx context.Context, tx pgx.Tx, tena
 			}
 			return shared.ErrForbidden
 		}
-		err := tx.QueryRow(ctx, `SELECT status_category,provider_updated_at,author_id,status_author_known,pending_done,status_changed_at FROM ticket_external_observations WHERE tenant_id=$1 AND mapping_id=$2 AND engagement_id=$3 AND finding_id=$4 AND remote_id=$5 FOR UPDATE`, tenant.String(), item.MappingID.String(), item.EngagementID.String(), item.FindingID.String(), item.RemoteID).Scan(&previous, &previousUpdated, &previousAuthor, &previousAuthorKnown, &previousPending, &previousStatusChanged)
+		err := tx.QueryRow(ctx, `SELECT status_category,provider_updated_at,author_id,status_author_known,pending_done,status_changed_at,deleted_or_unreadable FROM ticket_external_observations WHERE tenant_id=$1 AND mapping_id=$2 AND engagement_id=$3 AND finding_id=$4 AND remote_id=$5 FOR UPDATE`, tenant.String(), item.MappingID.String(), item.EngagementID.String(), item.FindingID.String(), item.RemoteID).Scan(&previous, &previousUpdated, &previousAuthor, &previousAuthorKnown, &previousPending, &previousStatusChanged, &previousDeletedOrUnreadable)
 		found := err == nil
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
@@ -221,6 +282,9 @@ func (s *TicketStore) reduceInboundTicketTx(ctx context.Context, tx pgx.Tx, tena
 		}
 		if item.DeletedOrUnreadable && item.ProviderUpdatedAt.IsZero() && previousUpdated != nil {
 			item.ProviderUpdatedAt = previousUpdated.UTC()
+		}
+		if found && previousDeletedOrUnreadable && !item.DeletedOrUnreadable && (item.ProviderUpdatedAt.IsZero() || (previousUpdated != nil && !item.ProviderUpdatedAt.After(*previousUpdated))) {
+			continue
 		}
 		if found && previousUpdated != nil && !item.ProviderUpdatedAt.IsZero() {
 			if item.ProviderUpdatedAt.Before(*previousUpdated) || (item.ProviderUpdatedAt.Equal(*previousUpdated) && item.StatusCategory != previous) {

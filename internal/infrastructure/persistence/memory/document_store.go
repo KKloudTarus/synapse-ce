@@ -250,6 +250,10 @@ func (s *DocumentStore) TransitionIntent(ctx context.Context, tenant, id shared.
 		}
 	}
 	if written != nil {
+		written.RestrictionStatus = "unchecked"
+		written.RestrictionCheckedAt = nil
+		written.RestrictionNextAt = time.Time{}
+		written.RestrictionCheckVersion++
 		if s.links[tenant] == nil {
 			s.links[tenant] = make(map[shared.ID]docpublish.Link)
 		}

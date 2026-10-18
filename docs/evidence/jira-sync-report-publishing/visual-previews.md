@@ -1,4 +1,29 @@
-# Continuation visual previews
+# Visual previews
+
+## Review-remediation previews — 18 October 2026
+
+These images are current observations of the restored Docker stack and downloaded
+Cloud PDFs. All pages were rendered with Poppler and visually inspected. They do
+not imply a fresh DC, native webhook or SMTP run. Hashes and capture scope are in
+[the current manifest](review-report-previews.json).
+
+![Sharing unavailable](review-sharing-unverifiable.png)
+![Configured sharing group mismatch](review-sharing-lost.png)
+
+| PDF | Current rendered pages |
+| --- | --- |
+| [Governed stored report](review-governed-report.pdf) | ![Page 1](review-governed-report-1.png) |
+| [Stored vulnerability report](review-vulnerability-report.pdf) | ![Page 1](review-vulnerability-report-1.png) ![Page 2](review-vulnerability-report-2.png) |
+| [Fresh Cloud publication](review-cloud-initial-report.pdf) | ![Page 1](review-cloud-initial-report-1.png) |
+| [Cloud update](review-cloud-updated-report.pdf) | ![Page 1](review-cloud-updated-report-1.png) |
+| [Real scheduled Cloud report](review-cloud-scheduled-report.pdf) | ![Page 1](review-cloud-scheduled-report-1.png) |
+
+## Historical visual previews
+
+These captures/PDF pages belong to the 17 October acceptance run. They are retained
+for design/history and do not establish current provider acceptance after review
+corrections. The current warning preview is linked from [README.md](README.md).
+
 
 This gallery provides inline review previews for every continuation JPG/PNG and
 every rendered page of the downloaded report PDFs. The files and integrity

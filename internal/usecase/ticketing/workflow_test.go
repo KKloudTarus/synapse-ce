@@ -72,6 +72,7 @@ type workflowProvider struct {
 	mu             sync.Mutex
 	posts          int
 	updates        int
+	updateErr      error
 	transitions    int
 	comments       int
 	commentBodies  []string
@@ -139,7 +140,7 @@ func (p *workflowProvider) UpdateTicket(_ context.Context, _ string, raw json.Ra
 	defer p.mu.Unlock()
 	p.updates++
 	p.createdPayload = append(json.RawMessage(nil), raw...)
-	return nil
+	return p.updateErr
 }
 func (p *workflowProvider) TransitionTicket(_ context.Context, _ string, _ string, comment string) error {
 	p.mu.Lock()
@@ -1370,6 +1371,90 @@ func TestWorkflowStatusTransitionIsIdempotent(t *testing.T) {
 	progress, err := progresses.GetTicketStatusProgress(ctx, "tenant-a", m.ID, "eng-a", "finding-a")
 	if err != nil || progress.AppliedState != domain.SyncRemediated || progress.UpdateIntentID.IsZero() || progress.IntegrationAuthor != "jira-integration" {
 		t.Fatalf("status progress=%+v err=%v", progress, err)
+	}
+}
+
+func TestWorkflowTerminalStatusFieldRefreshWaitsForExplicitRetry(t *testing.T) {
+	f := newWorkflowFixture(t)
+	ctx := context.Background()
+	clock := &mutableWorkflowClock{now: f.clock.Now()}
+	w, err := usecase.NewWorkflow(f.store, f.integrations, workflowProviders{f.provider}, f.findings, f.engagements, f.policy, f.audit, &ticketIDs{}, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SetPublicBaseURL("https://console.example")
+	w.SetSLAStore(memory.NewSLAStore())
+	m, err := w.SaveMapping(ctx, "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "10001", Labels: []string{"synapse"}, SecurityLevel: "security-1", SummaryTemplate: "Title: {{.title}}", DescriptionTemplate: "Description: {{.title}}", StatusTransitions: map[domain.SyncState]string{domain.SyncRemediated: "123"}, Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := w.Preview(ctx, usecase.PreviewRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := w.Submit(ctx, usecase.SubmitRequest{TenantID: "tenant-a", MappingID: m.ID, FindingID: "finding-a", EngagementID: "eng-a", RequestKey: "terminal-field-refresh", PreviewDigest: preview.Digest, Actor: "admin"}); err != nil || !created {
+		t.Fatalf("submit created=%t err=%v", created, err)
+	}
+	tick := func() {
+		t.Helper()
+		clock.now = clock.now.Add(31 * time.Second)
+		if _, err := w.Tick(ctx, "tenant-a", 10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tick() // create
+	item, err := f.findings.GetByEngagementAndID(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.findings.UpdateStatus(shared.WithTenant(ctx, "tenant-a"), "eng-a", "finding-a", finding.StatusRemediated, item.Version); err != nil {
+		t.Fatal(err)
+	}
+	tick() // transition
+	tick() // comment
+	f.provider.mu.Lock()
+	f.provider.updateErr = &ports.TicketProviderError{Status: 400, Code: "field_not_editable"}
+	f.provider.mu.Unlock()
+	tick() // update refusal
+	intents, err := f.store.ListFindingIntents(ctx, "tenant-a", "finding-a", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failed domain.Intent
+	for _, intent := range intents {
+		if intent.Action == domain.Update {
+			failed = intent
+		}
+	}
+	if failed.State != writeintent.Failed {
+		t.Fatalf("field refresh=%+v, want terminal failed", failed)
+	}
+	f.provider.mu.Lock()
+	discoveries, transitions, comments, updates := f.provider.discoveries, f.provider.transitions, f.provider.comments, f.provider.updates
+	f.provider.mu.Unlock()
+	for range 3 {
+		tick()
+	}
+	f.provider.mu.Lock()
+	if f.provider.discoveries != discoveries || f.provider.transitions != transitions || f.provider.comments != comments || f.provider.updates != updates {
+		t.Fatalf("terminal status refresh replayed discovery or a remote write: discoveries=%d/%d transitions=%d/%d comments=%d/%d updates=%d/%d", f.provider.discoveries, discoveries, f.provider.transitions, transitions, f.provider.comments, comments, f.provider.updates, updates)
+	}
+	f.provider.updateErr = nil
+	f.provider.mu.Unlock()
+	if _, err = w.RetryUncertain(ctx, "tenant-a", failed.ID, failed.Version, true, "field was added to the edit screen", "admin"); err != nil {
+		t.Fatalf("explicit retry field refresh: %v", err)
+	}
+	tick() // explicit retry dispatches only the failed update
+	tick() // checkpoint the completed update
+	progresses := any(f.store).(ports.TicketStatusProgressStore)
+	progress, err := progresses.GetTicketStatusProgress(ctx, "tenant-a", m.ID, "eng-a", "finding-a")
+	if err != nil || progress.AppliedState != domain.SyncRemediated {
+		t.Fatalf("recovered status progress=%+v err=%v", progress, err)
+	}
+	f.provider.mu.Lock()
+	defer f.provider.mu.Unlock()
+	if f.provider.transitions != 1 || f.provider.comments != 1 || f.provider.updates != 2 {
+		t.Fatalf("explicit retry duplicated status side effects: transitions=%d comments=%d updates=%d", f.provider.transitions, f.provider.comments, f.provider.updates)
 	}
 }
 

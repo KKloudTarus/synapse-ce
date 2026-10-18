@@ -360,11 +360,14 @@ func (s *Service) Tick(ctx context.Context, tenant shared.ID, limit int) error {
 	if limit < 1 || limit > 100 {
 		return shared.ErrValidation
 	}
+	// Reserve the bounded read-only sweep before command execution, so a busy
+	// publication queue cannot indefinitely hide post-publication sharing drift.
+	checkErr := s.checkRestrictions(ctx, tenant, limit)
 	commands, err := s.store.ListDocumentCommands(ctx, tenant, limit, s.clock.Now().UTC())
 	if err != nil {
-		return err
+		return errors.Join(checkErr, err)
 	}
-	var failures []error
+	failures := []error{checkErr}
 	for _, c := range commands {
 		if ctx.Err() != nil {
 			return ctx.Err()

@@ -1060,7 +1060,7 @@ func (s *TicketStore) FinishDispatch(ctx context.Context, tenant, id shared.ID, 
 		code = "rate_limited"
 	}
 	b.code = code
-	if change.Event == writeintent.Reject && (code == "http_400" || code == "http_401" || code == "http_403" || code == "http_404") {
+	if change.Event == writeintent.Reject && (code == "http_401" || code == "http_403" || (i.Action == ticketing.Create && (code == "http_400" || code == "http_404"))) {
 		far := at.AddDate(100, 0, 0)
 		b.gate = &far
 	}

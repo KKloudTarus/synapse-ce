@@ -15,6 +15,18 @@ afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); vi.useRealTimers(); 
 function ready(role = 'reviewer', identity: Record<string, unknown> = {}) { vi.mocked(api.me).mockResolvedValue({ role, ...identity } as never); vi.mocked(api.listAssessmentCycles).mockResolvedValue({ items: [], nextCursor: '' } as never); vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([{ id: 'confluence', name: 'Confluence', provider: 'confluence-cloud', enabled: true, archived: false, credentialConfigured: true }] as never); vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([]); vi.mocked(documentsApi.listProjectDocuments).mockResolvedValue([]) }
 
 describe('DocumentPublishingPanel', () => {
+  it.each([
+    ['restriction_lost', 'Restricted sharing lost'],
+    ['unverifiable', 'Sharing could not be verified'],
+  ])('shows %s without claiming that a published page is safely shared', async (restrictionStatus, label) => {
+    ready('readonly')
+    vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([{ id: 'link', remoteUrl: 'https://confluence.test/page', remoteVersion: 3, contentHash: 'a'.repeat(64), restrictionStatus, restrictionCheckedAt: '2026-10-18T07:00:00Z' }] as never)
+    render(<DocumentPublishingPanel engagementId="eng-1" />)
+    expect(await screen.findByRole('status')).toHaveTextContent(label)
+    expect(screen.getByText(/Last sharing check/)).toBeInTheDocument()
+    expect(screen.queryByText('Published · v3')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Unpublish' })).not.toBeInTheDocument()
+  })
   it('derives the engagement source and does not expose destination controls', async () => {
     ready(); vi.mocked(documentsApi.publish).mockResolvedValue({ skipped: false, intent: { id: 'intent', state: 'pending' } } as never)
     render(<DocumentPublishingPanel engagementId="eng-1" />)

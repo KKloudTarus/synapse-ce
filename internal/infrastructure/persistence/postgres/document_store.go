@@ -46,7 +46,8 @@ func documentWriteError(err error) error {
 }
 
 const documentLinkCols = `id,tenant_id,integration_id,source_kind,source_ref,COALESCE(engagement_id,''),COALESCE(project_id,''),
-    container,remote_page_id,remote_version,remote_url,content_hash,revision,retired_at,created_at,updated_at`
+    container,remote_page_id,remote_version,remote_url,content_hash,revision,retired_at,created_at,updated_at,
+    restriction_status,restriction_checked_at,restriction_next_at,restriction_check_version`
 
 const documentIntentCols = `id,tenant_id,integration_id,source_kind,source_ref,COALESCE(engagement_id,''),COALESCE(project_id,''),
     container,COALESCE(link_id,''),action,request_key,payload_digest,content_hash,correlation_marker,state,version,attempts,
@@ -72,7 +73,7 @@ func scanDocumentLink(row rowScanner) (docpublish.Link, error) {
 	var engagement, project string
 	err := row.Scan(&l.ID, &l.TenantID, &l.IntegrationID, &l.SourceKind, &l.SourceRef, &engagement, &project,
 		&l.Container, &l.RemotePageID, &l.RemoteVersion, &l.RemoteURL, &l.ContentHash, &l.Revision,
-		&l.RetiredAt, &l.CreatedAt, &l.UpdatedAt)
+		&l.RetiredAt, &l.CreatedAt, &l.UpdatedAt, &l.RestrictionStatus, &l.RestrictionCheckedAt, &l.RestrictionNextAt, &l.RestrictionCheckVersion)
 	if err != nil {
 		return docpublish.Link{}, err
 	}
@@ -447,7 +448,9 @@ func completeDocumentLink(ctx context.Context, tx pgx.Tx, tenant shared.ID, done
 
 func updateDocumentLink(ctx context.Context, tx pgx.Tx, tenant shared.ID, link docpublish.Link, expectedRevision int) error {
 	tag, err := tx.Exec(ctx, `UPDATE document_links
-		SET remote_version=$3,remote_url=$4,content_hash=$5,revision=$6,retired_at=$7,updated_at=$8
+		SET remote_version=$3,remote_url=$4,content_hash=$5,revision=$6,retired_at=$7,updated_at=$8,
+        restriction_status='unchecked',restriction_checked_at=NULL,restriction_next_at='epoch'::timestamptz,
+        restriction_check_version=restriction_check_version+1
         WHERE tenant_id=$1 AND id=$2 AND revision=$9`,
 		tenant.String(), link.ID.String(), link.RemoteVersion, link.RemoteURL, link.ContentHash,
 		link.Revision, link.RetiredAt, link.UpdatedAt.UTC(), expectedRevision)

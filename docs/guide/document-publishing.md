@@ -50,7 +50,11 @@ Cloud restriction creation uses the V2 direct-permissions replacement and
 through the configured group. Synapse leaves the provider's self-lockout protection
 enabled. Before upload, both V2 state/complete direct grants and V1 read/update
 ACLs must agree with the configured group, followed by the current public-link
-policy proof. A tenant without the required V2 API fails closed.
+policy proof. A tenant without the required V2 API fails closed. The known control
+names follow the [Atlassian data-security cookbook](https://developer.atlassian.com/cloud/admin/cookbook-dsp/).
+Recognized control effects and observed vendor audit fields are explicitly typed;
+unknown fields, conditions, duplicate keys or malformed values cannot prove an
+unconditional public-link block.
 
 For Confluence Data Center 10.2 LTS, setting the optional boolean
 `legacy_xmlrpc_restrictions` to `true` selects the vendor-documented compatibility
@@ -95,6 +99,35 @@ A timeout, crash, expired lease, partial purge, or ambiguous provider response i
 `uncertain`. Synapse does not retry an uncertain operation blindly. It reconciles
 the durable marker and requires a unique verified remote result before it can
 finish. Keep the intent and audit history while resolving an uncertain state.
+
+## Sharing after publication
+
+The integrations worker also checks existing, non-retired links. Each tenant tick
+claims one due link through an indexed queue, with a twelve-second pass
+budget and a ten-second observation budget. The remaining two seconds are reserved
+for audit/checkpoint persistence. The 45-second worker pass defers the next tenant
+without advancing its rotation when less than twelve seconds remain. A claimed link becomes eligible again
+after five minutes if the worker crashes. Verified links are checked again after
+15 minutes; lost or unverifiable sharing is checked again after five minutes.
+These are queue intervals, not a guaranteed freshness bound under provider outages
+or a backlog. Inspect the last-check timestamp in the console.
+
+The sweep reads the page identity, exact group restrictions and Cloud public-link
+policy using current destination credentials. It never uploads content or silently
+changes a remote ACL. A lost restriction records `document.restriction_lost` and
+shows **Restricted sharing lost**; unavailable credentials, disabled connections or
+unreadable providers show **Sharing could not be verified** and record
+`document.restriction_unverifiable`. After a successful checkpoint, repeated failures do not repeat the event
+unless the observed state changes. A crash between the append-only audit write and
+the checkpoint can leave another observation event on the next attempt. Audit records include the observed link revision;
+concurrent republish, purge and worker claims fence stale checkpoints.
+
+A remote administrator can still change access between checks. Investigate a
+warning in Confluence immediately, restore the approved exact group restrictions,
+and verify the next check, or request governed unpublish. Every subsequent publish
+still rechecks sharing immediately before each sensitive upload. Unknown policy
+keys, conditions, duplicate JSON keys and unsupported effects fail closed; they
+cannot prove an unconditional public-link block.
 
 ## Scheduled delivery
 

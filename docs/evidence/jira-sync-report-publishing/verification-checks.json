@@ -1,4 +1,5 @@
 {
+  "scope_status": "historical before review remediation; see README.md and review-remediation.md for current acceptance and checks",
   "checks": [
     {
       "argv": [

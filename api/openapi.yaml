@@ -15132,6 +15132,8 @@ components:
         remote_version: {type: integer, minimum: 1}
         content_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
         revision: {type: integer, minimum: 1}
+        restriction_status: {type: string, enum: [unchecked, verified, restriction_lost, unverifiable], description: Latest periodic sharing observation; remote access can change between checks}
+        restriction_checked_at: {type: string, format: date-time}
         retired_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     DocumentReleaseResult:

@@ -667,6 +667,36 @@ func TestCloudVerificationRequiresExactPublishedPolicyAndAppliedSite(t *testing.
 	}
 }
 
+func TestCloudSharingProofAcceptsDocumentedControlsAndAuditMetadata(t *testing.T) {
+	const audit = `"addedAt":"2026-10-17T01:02:03.123456789Z","lastUpdatedAt":"2026-10-17T01:02:04.123456789Z","addedBy":"ari:cloud:identity::user/00000000-0000-0000-0000-000000000001","lastUpdatedBy":"ari:cloud:identity::user/00000000-0000-0000-0000-000000000002"`
+	const orgRule = `{"publicLinks":{"effect":"allow",` + audit + `},"export":{"effect":"block",` + audit + `},"anonymousAccess":{"effect":"block",` + audit + `},"appAccess":{"effect":"allow",` + audit + `},"attachmentDownload":{"effect":"block",` + audit + `},"mcpAccess":{"effect":"block",` + audit + `}}`
+	const workspaceRule = `{"publicLinks":{"effect":"block",` + audit + `}}`
+	org := `{"id":"org-default","attributes":{"type":"data-security","status":"published","rule":` + orgRule + `,"metadata":{"policyCoverageLevel":"ORG"}}}`
+	workspace := `{"id":"policy-1","attributes":{"type":"data-security","status":"published","rule":` + workspaceRule + `,"metadata":{"policyCoverageLevel":"WORKSPACE"}}}`
+	resource := policyResourceResponse("ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111", "applied")
+
+	a := testAdapter(t, true, transport(func(*http.Request) (*http.Response, error) {
+		return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
+	}), transport(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/policies"):
+			return response(200, `{"data":[`+org+`,`+workspace+`],"meta":{}}`), nil
+		case strings.HasSuffix(r.URL.Path, "/org-default"):
+			return response(200, `{"data":`+org+`}`), nil
+		case strings.HasSuffix(r.URL.Path, "/policy-1"):
+			return response(200, `{"data":`+workspace+`}`), nil
+		case strings.HasSuffix(r.URL.Path, "/resources"):
+			return response(200, `{"data":[`+resource+`],"meta":{}}`), nil
+		default:
+			t.Fatalf("unexpected policy request %s", r.URL.Path)
+			return nil, nil
+		}
+	}))
+	if err := a.verifyCloudPublicSharing(context.Background()); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+}
+
 func TestWriteValidationRejectsSecretsHostileStorageAndUncertainWrites(t *testing.T) {
 	a := testAdapter(t, false, transport(func(*http.Request) (*http.Response, error) { return response(500, "secret-token"), nil }), transport(func(*http.Request) (*http.Response, error) { return response(500, "{}"), nil }))
 	if got := providerCode(t, a.ValidateDocumentText("x secret-token")); got.Code != "credential_in_document" || strings.Contains(got.Error(), "secret-token") {
@@ -953,6 +983,57 @@ func TestCloudSharingProofRejectsStaleForeignOrUnappliedPolicies(t *testing.T) {
 					return response(200, `{"data":`+strings.ReplaceAll(block, "policy-1", "hidden")+`}`), nil
 				default:
 					return response(200, `{"data":`+full+`}`), nil
+				}
+			}))
+			if got := providerCode(t, a.verifyCloudPublicSharing(context.Background())); got.Code != "public_sharing_unverifiable" {
+				t.Fatalf("%+v", got)
+			}
+		})
+	}
+}
+
+func TestCloudSharingProofFailsClosedForAmbiguousPublicLinkRules(t *testing.T) {
+	const org = `{"id":"org-default","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"allow"}},"metadata":{"policyCoverageLevel":"ORG"}}}`
+	const block = `{"id":"policy-1","attributes":{"type":"data-security","status":"published","rule":{"publicLinks":{"effect":"block"}},"metadata":{"policyCoverageLevel":"WORKSPACE"}}}`
+	resource := policyResourceResponse("ari:cloud:confluence::site/11111111-1111-1111-1111-111111111111", "applied")
+
+	for _, tc := range []struct {
+		name string
+		rule string
+	}{
+		{name: "unknown rule key", rule: `{"publicLinks":{"effect":"block"},"conditions":{"actor":"admin"}}`},
+		{name: "unknown nested key", rule: `{"publicLinks":{"effect":"block","conditions":[]}}`},
+		{name: "null rule", rule: `null`},
+		{name: "array rule", rule: `[]`},
+		{name: "null public links", rule: `{"publicLinks":null}`},
+		{name: "array public links", rule: `{"publicLinks":[]}`},
+		{name: "unknown effect", rule: `{"publicLinks":{"effect":"audit"}}`},
+		{name: "null effect", rule: `{"publicLinks":{"effect":null}}`},
+		{name: "missing effect", rule: `{"publicLinks":{}}`},
+		{name: "duplicate rule key", rule: `{"publicLinks":{"effect":"block"},"publicLinks":{"effect":"allow"}}`},
+		{name: "duplicate nested key", rule: `{"publicLinks":{"effect":"block","effect":"allow"}}`},
+		{name: "audit metadata type", rule: `{"publicLinks":{"effect":"block","addedAt":123}}`},
+		{name: "null audit metadata", rule: `{"publicLinks":{"effect":"block","addedBy":null}}`},
+		{name: "duplicate audit metadata", rule: `{"publicLinks":{"effect":"block","addedAt":"2026-10-17T01:02:03Z","addedAt":"2026-10-17T01:02:04Z"}}`},
+		{name: "conditioned known sibling", rule: `{"publicLinks":{"effect":"block"},"export":{"effect":"block","conditions":[]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			malformed := strings.Replace(block, `{"publicLinks":{"effect":"block"}}`, tc.rule, 1)
+			a := testAdapter(t, true, transport(func(*http.Request) (*http.Response, error) {
+				return response(200, `{"cloudId":"11111111-1111-1111-1111-111111111111"}`), nil
+			}), transport(func(r *http.Request) (*http.Response, error) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/policies"):
+					return response(200, `{"data":[`+org+`,`+malformed+`],"meta":{}}`), nil
+				case strings.HasSuffix(r.URL.Path, "/org-default"):
+					return response(200, `{"data":`+org+`}`), nil
+				case strings.HasSuffix(r.URL.Path, "/policy-1"):
+					return response(200, `{"data":`+malformed+`}`), nil
+				case strings.HasSuffix(r.URL.Path, "/resources"):
+					return response(200, `{"data":[`+resource+`],"meta":{}}`), nil
+				default:
+					t.Fatalf("unexpected policy request %s", r.URL.Path)
+					return nil, nil
 				}
 			}))
 			if got := providerCode(t, a.verifyCloudPublicSharing(context.Background())); got.Code != "public_sharing_unverifiable" {

@@ -55,19 +55,21 @@ type documentIntentView struct {
 }
 
 type documentLinkView struct {
-	ID            shared.ID             `json:"id"`
-	IntegrationID shared.ID             `json:"integration_id"`
-	SourceKind    docpublish.SourceKind `json:"source_kind"`
-	SourceRef     string                `json:"source_ref"`
-	Scope         docpublish.Scope      `json:"scope"`
-	ScopeID       shared.ID             `json:"scope_id"`
-	Container     string                `json:"container"`
-	RemoteURL     string                `json:"remote_url"`
-	RemoteVersion int                   `json:"remote_version"`
-	ContentHash   string                `json:"content_hash"`
-	Revision      int                   `json:"revision"`
-	RetiredAt     *time.Time            `json:"retired_at,omitempty"`
-	UpdatedAt     time.Time             `json:"updated_at"`
+	ID                   shared.ID             `json:"id"`
+	IntegrationID        shared.ID             `json:"integration_id"`
+	SourceKind           docpublish.SourceKind `json:"source_kind"`
+	SourceRef            string                `json:"source_ref"`
+	Scope                docpublish.Scope      `json:"scope"`
+	ScopeID              shared.ID             `json:"scope_id"`
+	Container            string                `json:"container"`
+	RemoteURL            string                `json:"remote_url"`
+	RemoteVersion        int                   `json:"remote_version"`
+	ContentHash          string                `json:"content_hash"`
+	Revision             int                   `json:"revision"`
+	RestrictionStatus    string                `json:"restriction_status"`
+	RestrictionCheckedAt *time.Time            `json:"restriction_checked_at,omitempty"`
+	RetiredAt            *time.Time            `json:"retired_at,omitempty"`
+	UpdatedAt            time.Time             `json:"updated_at"`
 }
 
 func documentActor(r *http.Request) (ports.DocumentActor, bool) {
@@ -83,7 +85,7 @@ func documentIntentResponse(value docpublish.Intent) documentIntentView {
 }
 
 func documentLinkResponse(value docpublish.Link) documentLinkView {
-	return documentLinkView{ID: value.ID, IntegrationID: value.IntegrationID, SourceKind: value.SourceKind, SourceRef: value.SourceRef, Scope: value.Scope, ScopeID: value.ScopeID, Container: value.Container, RemoteURL: value.RemoteURL, RemoteVersion: value.RemoteVersion, ContentHash: value.ContentHash, Revision: value.Revision, RetiredAt: value.RetiredAt, UpdatedAt: value.UpdatedAt}
+	return documentLinkView{ID: value.ID, IntegrationID: value.IntegrationID, SourceKind: value.SourceKind, SourceRef: value.SourceRef, Scope: value.Scope, ScopeID: value.ScopeID, Container: value.Container, RemoteURL: value.RemoteURL, RemoteVersion: value.RemoteVersion, ContentHash: value.ContentHash, Revision: value.Revision, RestrictionStatus: value.RestrictionStatus, RestrictionCheckedAt: value.RestrictionCheckedAt, RetiredAt: value.RetiredAt, UpdatedAt: value.UpdatedAt}
 }
 
 func documentReleaseResponse(value documentuc.ReleaseResult) any {

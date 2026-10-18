@@ -150,6 +150,9 @@ func (s *TicketStore) ReduceInboundTicket(ctx context.Context, tenant shared.ID,
 		if item.DeletedOrUnreadable && item.ProviderUpdatedAt.IsZero() && found {
 			item.ProviderUpdatedAt = previous.ProviderUpdatedAt
 		}
+		if found && previous.DeletedOrUnreadable && !item.DeletedOrUnreadable && (item.ProviderUpdatedAt.IsZero() || (!previous.ProviderUpdatedAt.IsZero() && !item.ProviderUpdatedAt.After(previous.ProviderUpdatedAt))) {
+			continue
+		}
 		if found && !previous.ProviderUpdatedAt.IsZero() && !item.ProviderUpdatedAt.IsZero() {
 			if item.ProviderUpdatedAt.Before(previous.ProviderUpdatedAt) || (item.ProviderUpdatedAt.Equal(previous.ProviderUpdatedAt) && item.StatusCategory != previous.StatusCategory) {
 				continue

@@ -2,6 +2,9 @@
         rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down kind-smoke helm-render-test clean web-dev web-build smoke release-smoke
 
 GO ?= go
+# Cold PostgreSQL migration/teardown suites exceeded forty-four minutes in review.
+# Keep a finite per-package budget with headroom; callers may override it.
+GO_TEST_TIMEOUT ?= 90m
 IMAGE ?= synapse-api:dev
 AI_EVAL_DATASET ?= internal/usecase/sca/testdata/fptriage-golden-v2.json
 AI_EVAL_OUTPUT ?= ai-triage-eval.json
@@ -46,7 +49,7 @@ run: ## Run the API server (:8080)
 	$(GO) run ./cmd/synapse-api
 
 test: ## Run Go tests
-	$(GO) test -timeout 45m ./...
+	$(GO) test -timeout $(GO_TEST_TIMEOUT) ./...
 
 harness: ## Run the hostile tenant-isolation harness
 	$(GO) test ./internal/adapter/httpapi -run '^TestHostileHarness$$'

@@ -56,17 +56,13 @@ After changing a mapping, policy or credentials, prepare and approve a new previ
 before submitting a replacement command. Retained commands preserve the originally
 approved authority revisions and payload.
 
-Use a maintenance window for the Jira sync and report delivery migrations. Drain
-requests and stop all database clients, including API, worker, MCP, and scanner
-processes, before running `synapse-migrate`; migrate-first alone does not make this
-an online upgrade. The inbound backfill holds an access-exclusive lock on
-`ticket_intents`, and the source-job constraint/index migration blocks reads and
-writes on `scan_jobs`. A local million-row fixture measured approximately 65 seconds
-for the inbound backfill; size the window from a rehearsal on a restored database,
-not that synthetic measurement. See the
-[migration measurements and limits](../evidence/jira-sync-report-publishing/migration-measurements.md).
-Start the matching API and workers only after migration completes and readiness
-checks pass.
+Use a maintenance window for the source-job migration and drain requests and all
+database clients, including API, worker, MCP, and scanner processes, before running
+`synapse-migrate`. Migration `0260` changes `scan_jobs` under an access-exclusive
+lock. Migration `0251` has no deployment-time ticket-intent backfill: the runtime
+uses a tenant-scoped, forced-RLS keyset cursor to catch up durable completed creates
+in bounded batches, while a trigger captures later eligible writes. Start matching
+API and workers only after migration completes and readiness checks pass.
 
 Deploy migrations before API and worker. Disable Jira integrations before application
 rollback and retain intent, snapshot and breaker history. Memory persistence is for
@@ -213,7 +209,10 @@ status history with the issue and attributes a status author only when the histo
 proves that transition. Missing or truncated history leaves a retest decision
 pending until trustworthy attribution is available; a missed webhook plus missing
 history can therefore delay a proposal. The current external status remains
-visible. A Jira 404 means deleted **or unreadable**, not remediated.
+visible. A Jira 404 means deleted **or unreadable**, not remediated. Once a
+provider timestamp is known, equal or older readable replays cannot clear that
+flag; a strictly newer timestamp is required. If no provider timestamp was ever
+known, the first timestamped readable observation establishes that baseline.
 
 Contract references: [Cloud signed webhooks](https://developer.atlassian.com/cloud/jira/software/webhooks/),
 [Data Center webhook administration](https://confluence.atlassian.com/adminjiraserver/managing-webhooks-938846912.html),
@@ -249,3 +248,25 @@ Jira Data Center 11.3 administrative webhook registration uses
 Keep the secret in private administration state and verify a real signed delivery
 before considering registration complete. Data Center callbacks can use the root
 `event` field; Cloud uses `webhookEvent`. Conflicting event fields are refused.
+
+## Refused status updates and historical catch-up
+
+A definite refusal of a transition, comment or field refresh remains attached to
+that durable intent. A per-ticket HTTP 400/404 does not pause unrelated creates or
+status work. Credential HTTP 401/403 still fence the shared destination, and a
+rejected Create 400/404 still diagnoses the mapping. The planner adopts retained
+status commands before preview discovery, so a refused field update remains quiet.
+After fixing the provider edit screen or destination configuration, an administrator
+can use the existing version-fenced intent retry with an acknowledgement and reason.
+It retries the failed update; it does not repeat its completed transition or comment.
+
+Migration 0251 defers discovery of historical intents to the tenant worker. The
+keyset cursor advances across eligible and ineligible rows and resumes after a
+restart; the trigger captures newly eligible writes immediately. The current
+worker admits ten raw historical rows per successful tick. At one tick every five
+seconds, one million retained rows require at least about 5.8 days to discover;
+two million require about 11.6 days. Tenant rotation and slow providers lengthen
+that interval. This is a derived lower bound, not a benchmark or a recovery SLO.
+The first batch can be polled immediately; the whole history is not blocked until
+catch-up finishes. Check the tenant cursor's progress during rollout and rehearse
+with representative retained-history volume before relying on a recovery window.

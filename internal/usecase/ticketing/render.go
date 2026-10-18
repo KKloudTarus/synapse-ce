@@ -160,7 +160,25 @@ func ticketText(value string) string {
 func ticketRenderedText(value string) string {
 	value = privacy.ScrubURLCredentials(privacy.ScrubSecretPatterns(value))
 	value = redact.String(value, nil)
+	value = sanitizeTicketRenderedText(value)
 	return privacy.ScrubURLCredentials(privacy.ScrubSecretPatterns(value))
+}
+
+// sanitizeTicketRenderedText closes invisible-character redaction bypasses
+// without changing the deliberate line layout of an operator's template.
+func sanitizeTicketRenderedText(value string) string {
+	var out strings.Builder
+	for len(value) > 0 {
+		index := strings.IndexAny(value, "\n\r\t")
+		if index < 0 {
+			out.WriteString(msgtemplate.Sanitize(value))
+			break
+		}
+		out.WriteString(msgtemplate.Sanitize(value[:index]))
+		out.WriteByte(value[index])
+		value = value[index+1:]
+	}
+	return out.String()
 }
 
 // msgtemplate escapes interpolated values for a CommonMark sink. Jira summaries are plain fields,

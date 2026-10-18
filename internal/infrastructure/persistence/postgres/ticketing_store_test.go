@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,9 +110,12 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	storetest.CanceledContext(t, store, fixture)
 	assertTicketAuditedCreateFence(t, ctx, pool, store, fixture)
 	storetest.Dispatch(t, store, fixture)
+	storetest.StatusRefusalDoesNotGateTuple(t, store, fixture)
+	storetest.InboundTombstone(t, store, fixture)
+	assertTicketInboundTargetCatchup(t, ctx, pool, store, fixture)
 	assertTicketRetryAuditRollback(t, ctx, pool, store, fixture)
 	assertTicketStoreAuthoritativeProjectReferences(t, ctx, pool, store, fixture)
-	for _, table := range []string{"ticket_mappings", "ticket_links", "ticket_intents", "ticket_dispatch_breakers", "ticket_auto_push_receipts", "ticket_external_observations", "ticket_retest_proposals", "ticket_external_comments", "ticket_inbound_poll_progress"} {
+	for _, table := range []string{"ticket_mappings", "ticket_links", "ticket_intents", "ticket_dispatch_breakers", "ticket_auto_push_receipts", "ticket_external_observations", "ticket_retest_proposals", "ticket_external_comments", "ticket_inbound_poll_progress", "ticket_inbound_poll_backfill_cursors"} {
 		var enabled, forced bool
 		err = pool.QueryRow(ctx, `SELECT relrowsecurity,relforcerowsecurity
             FROM pg_class WHERE oid=$1::regclass`, table).Scan(&enabled, &forced)
@@ -127,7 +131,7 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	for _, statement := range []string{
 		`CREATE ROLE ` + role + ` NOSUPERUSER NOBYPASSRLS`,
 		`GRANT USAGE ON SCHEMA public TO ` + role,
-		`GRANT SELECT,INSERT,UPDATE,DELETE ON ticket_mappings,ticket_links,ticket_intents,ticket_dispatch_breakers,ticket_auto_push_receipts,ticket_external_observations,ticket_retest_proposals,ticket_external_comments,ticket_inbound_poll_progress TO ` + role,
+		`GRANT SELECT,INSERT,UPDATE,DELETE ON ticket_mappings,ticket_links,ticket_intents,ticket_dispatch_breakers,ticket_auto_push_receipts,ticket_external_observations,ticket_retest_proposals,ticket_external_comments,ticket_inbound_poll_progress,ticket_inbound_poll_backfill_cursors TO ` + role,
 	} {
 		if _, err = pool.Exec(ctx, statement); err != nil {
 			t.Fatalf("RLS role: %v", err)
@@ -235,6 +239,106 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	_, err = store.GetMapping(ctx, "ticket-b", "ticket-map-a")
 	if !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("other tenant mapping visible: %v", err)
+	}
+}
+
+func assertTicketInboundTargetCatchup(t *testing.T, ctx context.Context, pool *pgxpool.Pool, store *TicketStore, f storetest.Fixture) {
+	t.Helper()
+	now := time.Date(2026, 2, 4, 10, 0, 0, 0, time.UTC)
+	makeIntent := func(id string) ticketing.Intent {
+		return ticketing.Intent{ID: shared.ID(id), TenantID: f.Tenant, IntegrationID: f.Integration, MappingID: "ticket-map-a", FindingID: f.Finding, EngagementID: f.Engagement, Action: ticketing.Create, RequestKey: "catchup-" + id, PayloadDigest: strings.Repeat("c", 64), Marker: "synapse-intent-" + id, State: writeintent.Pending, Version: 1, MappingVersion: 1, ConnectionRevision: 1, CredentialRevision: 1, Snapshot: []byte(`{"fields":{"project":{"key":"SEC"},"issuetype":{"id":"Bug"}}}`), CreatedAt: now, UpdatedAt: now}
+	}
+	ineligible := []ticketing.Intent{makeIntent("a-catchup-00"), makeIntent("a-catchup-01")}
+	eligible := []ticketing.Intent{makeIntent("a-catchup-02"), makeIntent("a-catchup-03")}
+	for _, intent := range append(append([]ticketing.Intent{}, ineligible...), eligible...) {
+		if _, created, err := store.CreateOrGetIntent(ctx, f.Tenant, intent); err != nil || !created {
+			t.Fatalf("create catchup intent %s: created=%t err=%v", intent.ID, created, err)
+		}
+	}
+	for index, intent := range eligible {
+		lease := now.Add(time.Minute)
+		claimed, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, 1, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now.Add(time.Duration(index+1)*time.Second))
+		if err != nil {
+			t.Fatalf("claim catchup intent %s: %v", intent.ID, err)
+		}
+		remote := ticketing.RemoteTicket{ID: "SEC-CATCHUP-" + string(rune('2'+index)), URL: "https://jira.example/browse/SEC-CATCHUP-" + string(rune('2'+index))}
+		if _, err = store.TransitionIntent(ctx, f.Tenant, intent.ID, claimed.Version, ticketing.IntentTransition{Event: writeintent.Acknowledge, Remote: &remote}, now.Add(time.Duration(index+2)*time.Second)); err != nil {
+			t.Fatalf("complete catchup intent %s: %v", intent.ID, err)
+		}
+	}
+	if err := WithTenant(ctx, pool, f.Tenant.String(), func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM ticket_inbound_poll_progress WHERE tenant_id=$1 AND intent_id LIKE 'a-catchup-%'`, f.Tenant.String()); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM ticket_inbound_poll_backfill_cursors WHERE tenant_id=$1`, f.Tenant.String())
+		return err
+	}); err != nil {
+		t.Fatalf("reset catchup state: %v", err)
+	}
+	if _, err := store.ListInboundTicketTargets(ctx, f.Tenant, 2); err != nil {
+		t.Fatalf("first bounded catchup scan: %v", err)
+	}
+	assertCatchupCursor(t, ctx, pool, f.Tenant, "a-catchup-01", false, 0)
+	if _, err := store.ListInboundTicketTargets(ctx, f.Tenant, 2); err != nil {
+		t.Fatalf("second bounded catchup scan: %v", err)
+	}
+	assertCatchupCursor(t, ctx, pool, f.Tenant, "a-catchup-03", false, 2)
+	for attempt := 0; attempt < 100; attempt++ {
+		if _, err := store.ListInboundTicketTargets(ctx, f.Tenant, 2); err != nil {
+			t.Fatalf("complete catchup scan %d: %v", attempt, err)
+		}
+		if catchupComplete(t, ctx, pool, f.Tenant) {
+			break
+		}
+	}
+	if !catchupComplete(t, ctx, pool, f.Tenant) {
+		t.Fatal("bounded catchup did not finish scanning historical intents")
+	}
+	assertCatchupProgress(t, ctx, pool, f.Tenant, 2)
+}
+
+func assertCatchupCursor(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenant shared.ID, after string, complete bool, progress int) {
+	t.Helper()
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		var gotAfter string
+		var gotComplete bool
+		if err := tx.QueryRow(ctx, `SELECT after_intent_id,complete FROM ticket_inbound_poll_backfill_cursors WHERE tenant_id=$1`, tenant.String()).Scan(&gotAfter, &gotComplete); err != nil {
+			return err
+		}
+		if gotAfter != after || gotComplete != complete {
+			return fmt.Errorf("cursor after=%q complete=%t", gotAfter, gotComplete)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("catchup cursor want after=%q complete=%t progress=%d: %v", after, complete, progress, err)
+	}
+	assertCatchupProgress(t, ctx, pool, tenant, progress)
+}
+
+func catchupComplete(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenant shared.ID) bool {
+	t.Helper()
+	complete := false
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT complete FROM ticket_inbound_poll_backfill_cursors WHERE tenant_id=$1`, tenant.String()).Scan(&complete)
+	}); err != nil {
+		t.Fatalf("read catchup completion: %v", err)
+	}
+	return complete
+}
+
+func assertCatchupProgress(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenant shared.ID, want int) {
+	t.Helper()
+	if err := WithTenant(ctx, pool, tenant.String(), func(tx pgx.Tx) error {
+		var got int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM ticket_inbound_poll_progress WHERE tenant_id=$1 AND intent_id LIKE 'a-catchup-%'`, tenant.String()).Scan(&got); err != nil {
+			return err
+		}
+		if got != want {
+			return fmt.Errorf("progress=%d", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("catchup progress want=%d: %v", want, err)
 	}
 }
 
@@ -678,6 +782,7 @@ func deleteTicketFixtureRows(ctx context.Context, tx pgx.Tx, tenant string) erro
 		"ticket_retest_proposals",
 		"ticket_external_observations",
 		"ticket_inbound_poll_progress",
+		"ticket_inbound_poll_backfill_cursors",
 		"ticket_inbound_config",
 		"ticket_status_sync",
 		"ticket_group_members",
@@ -698,7 +803,7 @@ func deleteTicketFixtureRows(ctx context.Context, tx pgx.Tx, tenant string) erro
 func assertTicketFixtureRowsAbsent(t *testing.T, pool *pgxpool.Pool, tenant string) {
 	t.Helper()
 	if err := WithTenant(context.Background(), pool, tenant, func(tx pgx.Tx) error {
-		for _, table := range []string{"ticket_intents", "ticket_inbound_poll_progress"} {
+		for _, table := range []string{"ticket_intents", "ticket_inbound_poll_progress", "ticket_inbound_poll_backfill_cursors"} {
 			var count int
 			if err := tx.QueryRow(context.Background(), "SELECT count(*) FROM "+table+" WHERE tenant_id=$1", tenant).Scan(&count); err != nil {
 				return fmt.Errorf("count %s: %w", table, err)

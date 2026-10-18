@@ -155,6 +155,12 @@ type Link struct {
 	ContentHash   string
 	// Revision counts the writes applied to this link, starting at 1.
 	Revision int
+	// RestrictionStatus describes the last background sharing observation, not
+	// a guarantee that a remote administrator cannot change access afterwards.
+	RestrictionStatus       string
+	RestrictionCheckedAt    *time.Time
+	RestrictionNextAt       time.Time
+	RestrictionCheckVersion int
 	// RetiredAt retains the page's immutable identity after a governed purge.
 	// A retired target cannot be created or updated again.
 	RetiredAt *time.Time
@@ -480,6 +486,10 @@ func (i Intent) Clone() Intent {
 }
 
 func (l Link) Clone() Link {
+	if l.RestrictionCheckedAt != nil {
+		at := *l.RestrictionCheckedAt
+		l.RestrictionCheckedAt = &at
+	}
 	if l.RetiredAt != nil {
 		at := *l.RetiredAt
 		l.RetiredAt = &at

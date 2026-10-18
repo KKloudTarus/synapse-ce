@@ -63,32 +63,58 @@ func (w *Workflow) tickTicketStatuses(ctx context.Context, tenant shared.ID, sto
 		if progress.AppliedState == state && progress.SourceRevision == source {
 			continue
 		}
-		if progress.IntegrationAuthor == "" || progress.TransitionIntentID.IsZero() {
+		var preview Preview
+		previewReady := false
+		loadPreview := func() (Preview, error) {
+			if previewReady {
+				return preview, nil
+			}
+			var previewErr error
+			preview, previewErr = w.Preview(ctx, PreviewRequest{TenantID: tenant, MappingID: target.Mapping.ID, FindingID: f.ID, EngagementID: f.EngagementID})
+			if previewErr == nil {
+				previewReady = true
+			}
+			return preview, previewErr
+		}
+		ensurePrincipal := func() error {
+			if progress.IntegrationAuthor != "" {
+				return nil
+			}
 			principal, identityErr := w.ticketIntegrationPrincipal(ctx, tenant, target.Mapping.IntegrationID)
 			if identityErr != nil {
-				return created, identityErr
+				return identityErr
 			}
 			progress.IntegrationAuthor = principal
 			progress.CheckedAt = w.clock.Now().UTC()
-			progress, err = progressStore.UpdateTicketStatusProgress(ctx, tenant, progress, progress.Version)
-			if err != nil {
+			var updateErr error
+			progress, updateErr = progressStore.UpdateTicketStatusProgress(ctx, tenant, progress, progress.Version)
+			return updateErr
+		}
+
+		key := ticketStatusRequestKey(target, progress.Episode, "transition")
+		intent, found, err := w.statusIntentByKey(ctx, tenant, target, key, domain.Transition)
+		if err != nil {
+			return created, err
+		}
+		if !found {
+			if err = ensurePrincipal(); err != nil {
 				if errors.Is(err, shared.ErrConflict) {
 					continue
 				}
 				return created, err
 			}
-		}
-		key := ticketStatusRequestKey(target, progress.Episode, "transition")
-		preview, err := w.Preview(ctx, PreviewRequest{TenantID: tenant, MappingID: target.Mapping.ID, FindingID: f.ID, EngagementID: f.EngagementID})
-		if err != nil {
-			return created, err
-		}
-		intent, fresh, err := w.openStatusIntent(ctx, tenant, target, preview, state, source, transition, key)
-		if err != nil {
-			return created, err
-		}
-		if fresh {
-			created++
+			preview, err = loadPreview()
+			if err != nil {
+				return created, err
+			}
+			var fresh bool
+			intent, fresh, err = w.openStatusIntent(ctx, tenant, target, preview, state, source, transition, key)
+			if err != nil {
+				return created, err
+			}
+			if fresh {
+				created++
+			}
 		}
 		if progress.TransitionIntentID.IsZero() {
 			progress.TransitionIntentID = intent.ID
@@ -110,23 +136,53 @@ func (w *Workflow) tickTicketStatuses(ctx context.Context, tenant shared.ID, sto
 			continue
 		}
 		if statusTransitionNeedsComment(intent) {
-			comment, wasFresh, commentErr := w.openStatusCommentIntent(ctx, tenant, target, preview, intent, progress, state, source, ticketStatusRequestKey(target, progress.Episode, "comment"))
+			commentKey := ticketStatusRequestKey(target, progress.Episode, "comment")
+			comment, found, commentErr := w.statusIntentByKey(ctx, tenant, target, commentKey, domain.Comment)
 			if commentErr != nil {
 				return created, commentErr
 			}
-			if wasFresh {
-				created++
+			if !found {
+				if commentErr = ensurePrincipal(); commentErr != nil {
+					if errors.Is(commentErr, shared.ErrConflict) {
+						continue
+					}
+					return created, commentErr
+				}
+				preview, commentErr = loadPreview()
+				if commentErr != nil {
+					return created, commentErr
+				}
+				var wasFresh bool
+				comment, wasFresh, commentErr = w.openStatusCommentIntent(ctx, tenant, target, preview, intent, progress, state, source, commentKey)
+				if commentErr != nil {
+					return created, commentErr
+				}
+				if wasFresh {
+					created++
+				}
 			}
 			if comment.State != writeintent.Done {
 				continue
 			}
 		}
-		update, fresh, err := w.openStatusUpdateIntent(ctx, tenant, target, preview, source, ticketStatusRequestKey(target, progress.Episode, "update"))
+		updateKey := ticketStatusRequestKey(target, progress.Episode, "update")
+		update, found, err := w.statusIntentByKey(ctx, tenant, target, updateKey, domain.Update)
 		if err != nil {
 			return created, err
 		}
-		if fresh {
-			created++
+		if !found {
+			preview, err = loadPreview()
+			if err != nil {
+				return created, err
+			}
+			var fresh bool
+			update, fresh, err = w.openStatusUpdateIntent(ctx, tenant, target, preview, source, updateKey)
+			if err != nil {
+				return created, err
+			}
+			if fresh {
+				created++
+			}
 		}
 		if progress.UpdateIntentID.IsZero() {
 			progress.UpdateIntentID = update.ID

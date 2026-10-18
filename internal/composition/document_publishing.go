@@ -28,6 +28,11 @@ type DocumentPublicationRunner struct {
 	next    int
 }
 
+const (
+	documentPublicationTickBudget   = 45 * time.Second
+	documentPublicationTenantBudget = 12 * time.Second
+)
+
 func NewDocumentPublicationRunner(ticker DocumentPublicationTicker, tenants ports.TenantLister, log *slog.Logger) (*DocumentPublicationRunner, error) {
 	if ticker == nil || tenants == nil || log == nil {
 		return nil, fmt.Errorf("%w: document publication runner dependencies are required", shared.ErrValidation)
@@ -53,7 +58,11 @@ func (r *DocumentPublicationRunner) Run(ctx context.Context) {
 }
 
 func (r *DocumentPublicationRunner) tick(ctx context.Context) {
-	tickCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	r.tickWithBudget(ctx, documentPublicationTickBudget)
+}
+
+func (r *DocumentPublicationRunner) tickWithBudget(ctx context.Context, budget time.Duration) {
+	tickCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	tenants, err := r.tenants.ListTenantIDs(tickCtx)
 	if err != nil {
@@ -67,6 +76,10 @@ func (r *DocumentPublicationRunner) tick(ctx context.Context) {
 	}
 	start := r.next % len(tenants)
 	for n := 0; n < min(len(tenants), 10) && tickCtx.Err() == nil; n++ {
+		deadline, _ := tickCtx.Deadline()
+		if time.Until(deadline) < documentPublicationTenantBudget {
+			break
+		}
 		index := (start + n) % len(tenants)
 		r.next = (index + 1) % len(tenants)
 		tenant := tenants[index]

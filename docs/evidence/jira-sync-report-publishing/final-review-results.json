@@ -1,4 +1,5 @@
 {
+  "scope_status": "historical before review remediation; see README.md and review-remediation.md for current acceptance and checks",
   "tier": 0,
   "decision": "pass for Ready and Closes all eight remaining B07 issues, subject to current worktree gate validation before publication",
   "scope": "Cumulative implementation reviews plus final automatic restriction, PostgreSQL cleanup and timeout, Documentation permission guard and fresh licensed native Jira evidence. Earlier review-results.json remains historical.",

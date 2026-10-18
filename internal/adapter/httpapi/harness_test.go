@@ -316,6 +316,7 @@ func (fakeRules) Get(context.Context, rule.Key) (rule.Rule, error)        { retu
 // handler runs, so they need no downstream service. This is deliberate – the security-critical
 // assertions are the denials.
 func TestHostileHarness(t *testing.T) {
+	t.Run("document integration egress rejects foreign tenants", runDocumentIntegrationEgressHarness)
 	t.Run("ticket manual routes isolate finding and tenant", runTicketManualHostileHarness)
 	t.Run("notification event rules reject foreign tenants", func(t *testing.T) {
 		for _, eventType := range []notification.EventType{

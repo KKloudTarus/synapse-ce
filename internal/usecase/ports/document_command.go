@@ -57,6 +57,12 @@ type DocumentUploadReceipt struct {
 
 type DocumentCommandStore interface {
 	DocumentStore
+	// ClaimDocumentRestrictionChecks advances a bounded, fair tenant queue before
+	// remote reads. A crashed worker's claim expires; it never grants remote writes.
+	ClaimDocumentRestrictionChecks(context.Context, shared.ID, int, time.Time) ([]docpublish.Link, error)
+	// SaveDocumentRestrictionCheck fences a concurrent republish, purge or claim
+	// using both link revision and check version. It leaves publication history intact.
+	SaveDocumentRestrictionCheck(context.Context, shared.ID, docpublish.Link, string, time.Time, time.Time) error
 	// Admission serializes the target, answers exact replays before mutable
 	// target checks, and rejects another pending/in-flight/uncertain command.
 	CreateDocumentCommand(context.Context, shared.ID, DocumentCommand) (DocumentCommand, bool, error)

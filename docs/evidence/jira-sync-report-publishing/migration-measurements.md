@@ -1,4 +1,12 @@
-# Migration lock measurements
+# Historical migration lock measurements
+
+These measurements describe the pre-remediation SQL only. Migration 0251 no
+longer performs that 64.693-second whole-table backfill or lifts forced RLS. Its
+current bounded tenant cursor/trigger path is covered by real PostgreSQL tests.
+The old SQL hashes and timings remain below for provenance; they are not timing
+claims for the revised migration. Migration 0261 adds a transactional active-link
+index and still needs the documented maintenance-window rehearsal.
+
 
 These are focused local PostgreSQL 17.11 measurements, not a production capacity
 claim or a complete replay benchmark. Each measured table had one million

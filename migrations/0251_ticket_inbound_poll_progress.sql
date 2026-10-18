@@ -9,13 +9,17 @@ CREATE TABLE ticket_inbound_poll_progress (
  FOREIGN KEY(tenant_id,engagement_id,finding_id) REFERENCES findings(tenant_id,engagement_id,id)
 );
 CREATE INDEX ticket_inbound_poll_progress_pending_idx ON ticket_inbound_poll_progress(tenant_id,checked_at,version,intent_id);
-LOCK TABLE ticket_intents IN SHARE ROW EXCLUSIVE MODE;
-ALTER TABLE ticket_intents NO FORCE ROW LEVEL SECURITY;
-INSERT INTO ticket_inbound_poll_progress(tenant_id,intent_id,mapping_id,engagement_id,finding_id,remote_id)
- SELECT tenant_id,id,mapping_id,engagement_id,finding_id,remote_id FROM ticket_intents
- WHERE state='done' AND action='create' AND remote_id<>''
- ON CONFLICT DO NOTHING;
-ALTER TABLE ticket_intents FORCE ROW LEVEL SECURITY;
+-- Existing durable intents are discovered by a bounded, tenant-scoped keyset
+-- sweep in TicketStore. Do not scan ticket_intents while migrating: on a busy
+-- installation that would make migration duration depend on retained history.
+-- The trigger below covers every eligible write made after this migration; the
+-- cursor lets the runtime resume a pre-existing tenant without skipping rows.
+CREATE TABLE ticket_inbound_poll_backfill_cursors (
+ tenant_id TEXT PRIMARY KEY REFERENCES tenants(id),
+ after_intent_id TEXT NOT NULL DEFAULT '',
+ complete BOOLEAN NOT NULL DEFAULT FALSE
+);
+CALL synapse_enable_tenant_rls('ticket_inbound_poll_backfill_cursors');
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION synapse_ticket_inbound_poll_target() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -35,4 +39,5 @@ CALL synapse_enable_tenant_rls('ticket_inbound_poll_progress');
 -- +goose Down
 DROP TRIGGER ticket_inbound_poll_target_after_write ON ticket_intents;
 DROP FUNCTION synapse_ticket_inbound_poll_target();
+DROP TABLE ticket_inbound_poll_backfill_cursors;
 DROP TABLE ticket_inbound_poll_progress;

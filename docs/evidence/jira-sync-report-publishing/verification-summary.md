@@ -1,52 +1,25 @@
-# B07 verification summary
+# Review-remediation verification
 
-This summary records published command and provider evidence as of 2026-10-17.
-It records public scope, timing and outcomes. Credentials, signing material and
-raw runtime output remain outside the repository; the linked synthetic report
-artifacts and provider captures are included for review.
-It accompanies the worktree-bound Taurus gate and final review record.
+This supersedes earlier current-baseline claims. The [17 October snapshot](verification-2026-10-17.md) remains historical. [Command evidence](review-verification-checks.json) records commands, UTC timestamps, exit codes and selected source fingerprints before/after each check. Commit dates are not used to infer source-edit times.
 
-| Check | Result | Evidence covered |
-| --- | --- | --- |
-| `make lint build vet test typecheck` | Passed, exit 0; 18:02:00–18:02:48 UTC | Current Go lint, builds, tests, vet, and web TypeScript baseline after the Documentation capability update. |
-| `pnpm --dir web exec vitest run --maxWorkers=2` | Passed, exit 0; 18:18:36–18:21:39 UTC | 208 test files and 1,405 tests, including Documentation grouping, navigation, and delayed-identity read-only empty-editor tests. |
-| `pnpm --dir web typecheck` | Passed, exit 0; 18:23:41–18:23:45 UTC | Current web TypeScript check after the read-only role guard. |
-| `pnpm --dir web run build` | Passed, exit 0; 18:18:36–18:18:39 UTC | Production web build after the Documentation UI update and read-only role-state guard. |
-| `go test -timeout 45m -count=1 ./internal/infrastructure/persistence/postgres` | Passed twice on the same clean PostgreSQL database, exit 0; 17:27:36–17:48:51 and 17:49:20–18:10:55 UTC | Full PostgreSQL persistence suite, including the fixture-cleanup regression. |
-| `go test -race -count=1 ./internal/infrastructure/integration/confluence ./internal/usecase/docpublish` | Passed, exit 0 | Confluence restriction and governed document-publication paths. |
-| `go test -v -count=1 ./internal/usecase/ticketing -run 'TestWorkflowTickReconcilesProviderStateAndMarksUnreadable\|TestInboundReconcileTimeoutCheckpointsAttemptedTargetForNextFairTick\|TestInboundReconcileChargesIdentityWithinReadBudget'` | Passed, exit 0 | Inbound Jira reconciliation fairness, timeout checkpointing, and unreadable provider state. |
-| Earlier B07 focused race and PostgreSQL checks | Passed, exit 0 | Acquisition, SCA, finding, Project, ticketing, document publication, HTTP, inbound comment snapshot, and concurrent PostgreSQL proposal-window paths. The individual public records remain in `continuation-verification-checks.json`. |
+| Check | Command | UTC start → finish | Result |
+| --- | --- | --- | --- |
+| postgres-full-first | `go test -timeout 90m -p 1 -count=1 ./...` | 2026-10-18T11:33:22.125681+00:00 → 2026-10-18T12:02:39.691940+00:00 | Pass |
+| final-baseline | `make lint build vet test typecheck` | 2026-10-18T12:22:02.539823+00:00 → 2026-10-18T12:22:48.077823+00:00 | Pass |
+| final-web-full | `pnpm exec vitest run --maxWorkers=2` | 2026-10-18T12:22:48.078152+00:00 → 2026-10-18T12:25:45.098428+00:00 | Pass |
+| final-web-build | `pnpm build` | 2026-10-18T12:25:45.098650+00:00 → 2026-10-18T12:25:47.364666+00:00 | Pass |
+| final-sharing-race | `go test -race ./internal/usecase/docpublish ./internal/composition ./internal/infrastructure/persistence/memory ./internal/infrastructure/integration/confluence -count=1` | 2026-10-18T12:25:47.364846+00:00 → 2026-10-18T12:25:51.152360+00:00 | Pass |
+| final-hostile-harness | `make harness` | 2026-10-18T12:25:51.152571+00:00 → 2026-10-18T12:25:52.505113+00:00 | Pass |
+| postgres-repeat-current | `go test -timeout 90m -count=1 ./internal/infrastructure/persistence/postgres` | 2026-10-18T12:26:28.470675+00:00 → 2026-10-18T12:53:23.168429+00:00 | Pass |
 
-The final Tier 0 architecture/QA/security panel and required specialist reviews
-passed with no open findings. The readonly UI and fresh licensed Jira findings
-were resolved with regression tests and live proof. The public
-[final review record](final-review-results.json) preserves reviewer scope and
-limitations; the current worktree-bound `.git/taurus/verification.json` is validated
-before commit/push. GitHub Actions are disabled for this repository, so no hosted-CI result is
-claimed. A frontend role-state guard was added after review identified a newly
-reachable read-only empty-editor path; its three regression cases failed before the fix, then both focused suites passed
-(37 tests). The complete UI suite and production build passed after the fix.
-Real configured, empty, delayed-response loading, upstream-502, and read-only empty
-journeys were inspected in Edge; the isolated fixture was restored after capture.
-See [Documentation proof](documentation-discovery-proof.json).
+The final selected-source fingerprint is `7a79755dd200bbe1c3c33a277eeb1f587404f484de64c04c943a00e2d5b13729`. It covers Go/SQL, web source and selected build inputs; documentation/evidence are excluded. The Taurus gate separately binds the entire Git worktree. Full frontend passed 208 files / 1408 tests. Inputs did not change during the final baseline, frontend/build, affected race/harness checks or current PostgreSQL repeat.
 
-Live provider proof includes automatic group-only restriction creation before
-content upload for Confluence Cloud page `131374` and fresh Confluence Data Center
-page `327686`: each completed create in one attempt, a republish reached version 3,
-the scheduled run reached version 4, and governed purge returned the current page,
-history, trash, and report attachments as absent. See the public
-[Cloud proof](automatic-cloud-provider-proof.json) and
-[Data Center proof](automatic-dc-provider-proof.json). The scheduled PDF email
-proof records receipt by both approved personal mailboxes and a two-page native
-Gmail PDF view. Outlook received the same attachment, but its native preview
-reported a client-side preview error; that limitation is recorded without treating
-it as an attachment-delivery failure. See the
-[scheduled email proof](scheduled-email-provider-proof.json).
+The earlier all-package PostgreSQL pass used `fdfee4b3ca346b6937f6ea7ede3bacdea2ca54daa9cc264f820dc33380d2f1df`; its PostgreSQL package took 1472.376 s. Persistence and migration source remained unchanged thereafter. Vendor-schema decoding and monitor/tenant budgets were then corrected after live Cloud reads exposed defects. The final baseline, affected tests and current PostgreSQL repeat exercise that final source. Both successful database passes used the same isolated `review_final` database, without an operator reset between attempts. Fixtures retain their normal schema-reset and cleanup behavior.
 
-Fresh Jira DC acceptance used normal Synapse API/worker creation of restricted
-`SYNACC-1` followed by an independent reviewer's genuine native callbacks. Seven
-valid HMAC forwards returned 202 at 18:39:28–18:40:36 UTC, before the official
-three-hour test license expired at 20:54:31. Final readback retained one pending
-proposal, a confirmed finding and two distinct snapshots for one remote comment.
-The native registration, proxy and temporary route were closed. The older expired-lab
-callback record is historical only. See [fresh Jira proof](fresh-jira-native-provider-proof.json).
+One intervening repeat ended with `signal: killed`, exit 1, without an assertion failure in its terminal log. That log does not establish its cause. It is not a pass; it also compiled an earlier snapshot while later policy/monitor edits were made. The successful retry used a 1 GiB Go GC target and fewer concurrent processes, with the same database and unchanged assertions. Initial resource-unbounded lint/build attempts were also killed; one baseline found an unset Helm shim. Passing commands use the installed pinned Go/Helm/lint/Node/pnpm paths.
+
+Behavioral regressions cover shared status refusals, monotonic deletion, explicit refused-field retry, template secrets, strict vendor policy shapes, actual Router tenant/egress denial, monitor claim/timeout/configuration/CAS behavior, forced RLS and migrations 0242–0261 round trips/protected rollback/repair. Tier 0 QA/security/performance/architecture/reliability/platform/frontend reviews passed their source scopes. Final combined QA, security and performance followup inspected the policy/monitor correction and current logs; [review scope](review-remediation-results.json) is explicit.
+
+[Current Cloud proof](review-cloud-provider-proof.json) covers create/update/hash-skip, real calendar version 4, three PDF attachment downloads and authenticated purge readbacks. [Monitor proof](review-provider-availability.json) records successful refreshed connections and the configured-group mismatch warning. Missing DC/native callbacks/multi-asset producer/mail reruns keep all eight issues at `Refs`. Historical captures and mocks do not establish those reruns. Actions is disabled; no hosted-CI pass is claimed.
+
+CI YAML parsed with a finite 240-minute backend job and 90-minute test budget. `make -n GO_TEST_TIMEOUT=7m test` propagated the override. The production migration deadline remains two minutes. Prose publishing-policy validation and the local known-credential scan pass; the latter includes raw changed files, extracted PDF text and the assembled PR body/comment.

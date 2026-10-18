@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -69,5 +70,24 @@ func TestNewDocumentPublicationRunnerRequiresDependencies(t *testing.T) {
 				t.Fatalf("NewDocumentPublicationRunner error = %v", err)
 			}
 		})
+	}
+}
+
+func TestDocumentPublicationRunnerDefersTenantWithoutEnoughMonitorBudget(t *testing.T) {
+	var logs bytes.Buffer
+	ticker := &documentPublicationTestTicker{}
+	runner, err := NewDocumentPublicationRunner(ticker, documentPublicationTestTenants{"tenant-1", "tenant-2"}, slog.New(slog.NewTextHandler(&logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.next = 1
+
+	runner.tickWithBudget(context.Background(), documentPublicationTenantBudget-time.Millisecond)
+	if len(ticker.seen) != 0 || runner.next != 1 {
+		t.Fatalf("short pass dispatched=%#v next=%d, want no dispatch and next=1", ticker.seen, runner.next)
+	}
+	runner.tick(context.Background())
+	if len(ticker.seen) == 0 || ticker.seen[0] != "tenant-2" {
+		t.Fatalf("next pass started at %#v, want tenant-2", ticker.seen)
 	}
 }

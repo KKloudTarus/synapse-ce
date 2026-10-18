@@ -75,6 +75,7 @@ var (
 	spacePattern        = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
 	cloudIDPattern      = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
 	policyTypePattern   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
+	identityARIPattern  = regexp.MustCompile(`^ari:cloud:identity::[a-z][a-z0-9-]*/[A-Za-z0-9._:-]+$`)
 	pageIDPattern       = regexp.MustCompile(`^[0-9]{1,20}$`)
 )
 
@@ -1098,18 +1099,6 @@ type publicLinksRule struct {
 	present bool
 }
 
-func (r *publicLinksRule) UnmarshalJSON(b []byte) error {
-	var v struct {
-		Effect string `json:"effect"`
-	}
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-	r.Effect = v.Effect
-	r.present = true
-	return nil
-}
-
 type policy struct {
 	ID         string `json:"id"`
 	Attributes struct {
@@ -1127,18 +1116,117 @@ func (p policy) publicLinks() (publicLinksRule, error) {
 	if p.Attributes.Type != "data-security" || len(p.Attributes.Rule) == 0 {
 		return out, nil
 	}
-	var rules map[string]json.RawMessage
-	if err := json.Unmarshal(p.Attributes.Rule, &rules); err != nil {
+	rules, err := strictPolicyObject(p.Attributes.Rule, "publicLinks", "export", "anonymousAccess", "appAccess", "attachmentDownload", "mcpAccess")
+	if err != nil {
 		return publicLinksRule{}, err
 	}
-	raw, ok := rules["publicLinks"]
-	if !ok {
-		return out, nil
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return publicLinksRule{}, err
+	for name, raw := range rules {
+		effect, err := policyControlEffect(raw)
+		if err != nil {
+			return publicLinksRule{}, err
+		}
+		if name == "publicLinks" {
+			out.Effect = effect
+			out.present = true
+		}
 	}
 	return out, nil
+}
+
+// policyControlEffect accepts known data-security controls and the audit fields
+// observed in vendor responses. Every supplied field has an explicit type;
+// unknown extensions and conditions cannot establish an unconditional block.
+func policyControlEffect(raw json.RawMessage) (string, error) {
+	control, err := strictPolicyObject(raw, "effect", "addedAt", "lastUpdatedAt", "addedBy", "lastUpdatedBy")
+	if err != nil {
+		return "", err
+	}
+	effect, ok := control["effect"]
+	if !ok {
+		return "", errors.New("policy control effect is required")
+	}
+	var value string
+	if json.Unmarshal(effect, &value) != nil || (value != "allow" && value != "block") {
+		return "", errors.New("invalid policy control effect")
+	}
+	for _, name := range []string{"addedAt", "lastUpdatedAt"} {
+		raw, ok := control[name]
+		if !ok {
+			continue
+		}
+		var timestamp string
+		if json.Unmarshal(raw, &timestamp) != nil || timestamp == "" {
+			return "", errors.New("invalid policy audit timestamp")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
+			return "", errors.New("invalid policy audit timestamp")
+		}
+	}
+	for _, name := range []string{"addedBy", "lastUpdatedBy"} {
+		raw, ok := control[name]
+		if !ok {
+			continue
+		}
+		var identity string
+		if json.Unmarshal(raw, &identity) != nil || !identityARIPattern.MatchString(identity) {
+			return "", errors.New("invalid policy audit identity")
+		}
+	}
+	return value, nil
+}
+
+// strictPolicyObject rejects an ambiguous policy rule rather than silently
+// accepting fields whose access semantics the provider cannot prove. Policy
+// responses are untrusted admin-plane input; duplicate keys are just as
+// ambiguous as unknown conditions because different consumers can retain a
+// different occurrence.
+func strictPolicyObject(raw json.RawMessage, allowed ...string) (map[string]json.RawMessage, error) {
+	accept := make(map[string]struct{}, len(allowed))
+	for _, name := range allowed {
+		accept[name] = struct{}{}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	start, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	delim, ok := start.(json.Delim)
+	if !ok || delim != '{' {
+		return nil, errors.New("policy rule must be an object")
+	}
+	values := make(map[string]json.RawMessage, len(allowed))
+	for decoder.More() {
+		name, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := name.(string)
+		if !ok {
+			return nil, errors.New("policy rule key must be a string")
+		}
+		if _, ok := accept[key]; !ok {
+			return nil, errors.New("unknown policy rule field")
+		}
+		if _, exists := values[key]; exists {
+			return nil, errors.New("duplicate policy rule field")
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		values[key] = value
+	}
+	end, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delim, ok := end.(json.Delim); !ok || delim != '}' {
+		return nil, errors.New("invalid policy rule object")
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("trailing policy rule data")
+	}
+	return values, nil
 }
 
 type policyPagination struct {
