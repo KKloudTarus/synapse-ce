@@ -107,6 +107,8 @@ describe('InboxPage over the real client', () => {
     inboxStatus = 503
     render(<MemoryRouter><InboxPage /></MemoryRouter>)
     expect(await screen.findByText(/No notifications\./)).toBeInTheDocument()
-    await waitFor(() => expect(document.body.textContent).toMatch(/unavailable|error|failed|Cannot/i))
+    // The page subtitle is permanent prose, so the assertion has to be the alert itself.
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('HTTP 503')
   })
 })

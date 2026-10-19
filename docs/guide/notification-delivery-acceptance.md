@@ -565,19 +565,25 @@ cross-provider acceptance includes those deferrals; it does not close #1420 or #
 The light/dark/state matrix the section above records as missing, for the notification bell
 and the inbox page (#1417). Every capture comes from the console in Chromium against an
 API serving PostgreSQL, authenticated as the bootstrap administrator and as a separate
-read-only operator. The two notices in the list are the real administrator notices the
-product raised when a webhook destination was created and then moved, so the inbox content
-is product output rather than seeded rows.
+read-only operator. The notices in the list are the real administrator notices the product
+raised when a webhook destination was created and then moved, so the inbox content is
+product output rather than seeded rows. The dark captures and the deep-link journey were
+taken on 2026-10-19 against the same stack, with fresh notices raised the same way.
 
 | Surface | Light | Dark |
 | --- | --- | --- |
 | Inbox list, bell carrying two unread | [Light](assets/ui/ws4-console/inbox-list-light.png) | [Dark](assets/ui/ws4-console/inbox-list-dark.png) |
 | Transport failure while loading the list | [Light](assets/ui/ws4-console/inbox-error-light.png) | [Dark](assets/ui/ws4-console/inbox-error-dark.png) |
 | Unread-only filter | [Light](assets/ui/ws4-console/inbox-unread-filter-light.png) | |
-| Loading, request outstanding | [Light](assets/ui/ws4-console/inbox-loading-light.png) | |
-| Unread empty after Mark all read | [Light](assets/ui/ws4-console/inbox-mark-all-empty-light.png) | |
+| Loading, request outstanding | [Light](assets/ui/ws4-console/inbox-loading-light.png) | [Dark](assets/ui/ws4-console/inbox-loading-dark.png) |
+| Unread list before Mark all read | | [Dark](assets/ui/ws4-console/inbox-unread-list-dark.png) |
+| The list straight after Mark all read | | [Dark](assets/ui/ws4-console/inbox-mark-all-dark.png) |
+| Unread empty after Mark all read | [Light](assets/ui/ws4-console/inbox-mark-all-empty-light.png) | [Dark](assets/ui/ws4-console/inbox-empty-dark.png) |
 | Bell with no badge after Mark all read | [Light](assets/ui/ws4-console/inbox-after-mark-all-bell-light.png) | |
-| A second operator's own empty inbox | [Light](assets/ui/ws4-console/inbox-reader-empty-light.png) | |
+| A second operator's own empty inbox | [Light](assets/ui/ws4-console/inbox-reader-empty-light.png) | [Dark](assets/ui/ws4-console/inbox-reader-empty-dark.png) |
+| An unread notice about to be opened | [Light](assets/ui/ws4-console/inbox-deep-link-source-light.png) | [Dark](assets/ui/ws4-console/inbox-deep-link-source-dark.png) |
+| Where its own link lands | [Light](assets/ui/ws4-console/inbox-deep-link-destination-light.png) | [Dark](assets/ui/ws4-console/inbox-deep-link-destination-dark.png) |
+| The same destination for a reader | [Light](assets/ui/ws4-console/inbox-deep-link-denied-light.png) | [Dark](assets/ui/ws4-console/inbox-deep-link-denied-dark.png) |
 | 390-pixel viewport | [Light](assets/ui/ws4-console/inbox-mobile-light.png) | |
 
 How each state was produced, since a state that cannot be reproduced is not evidence:
@@ -590,6 +596,26 @@ How each state was produced, since a state that cannot be reproduced is not evid
   on. The bell capture that follows it is a fresh load of the same account.
 - The second operator is a real `readonly` user with their own API key, so their empty inbox
   is the product's per-user scoping rather than a filtered view.
+- The deep-link journey clicks the unread notice in the list. The row names
+  `/settings/alerting`, the console navigates there, and the destination capture is that
+  screen. The notice itself was raised by creating and then moving a webhook destination
+  through `POST` and `PATCH /api/v1/notifications/channels`, so the link target is the
+  screen the event came from.
+
+### Where authorization is refused in this journey
+
+`GET /api/v1/me/inbox` answers 200 for every authenticated principal and returns only that
+principal's own rows, so the inbox page has no denial state to capture: a `readonly`
+operator reaches their own list and finds it empty, which the capture above shows. The
+refusal in this journey is at the destination a notice links to. The same `readonly` user
+opening `/settings/alerting` gets `403` from `GET /api/v1/notifications/rules` and the
+screen says so:
+
+> Administrator access required. Only tenant administrators and integration administrators
+> can manage notification settings and delivery history.
+
+That is the permission-denied state for the notification surfaces, captured in both themes
+in the row above.
 
 One copy defect is visible in the error captures: the message names port 8080
 ("Cannot reach the API. Is the server running on :8080?") even when the console reaches the
