@@ -7,6 +7,17 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Added
+
+- Jira Cloud and Data Center finding synchronization, Project vulnerability grouping,
+  proposal-only inbound status/comment observations, and bounded reconciliation.
+  Per-ticket refusals remain isolated from unrelated ticket creation.
+- Governed Confluence Cloud and Data Center PDF publication, update and permanent
+  unpublish with group-only sharing checks before content upload, periodic sharing
+  drift observations, and weekly PDF delivery to verified email destinations.
+  Delivery retains tenant permissions, legal holds, durable idempotency and an
+  explicit uncertain state when a remote acknowledgement is lost.
+
 ### Changed
 
 - **BREAKING CHANGE: default notification webhooks use a class-filtered envelope.** Receivers now get `synapse.notification.v1` with declared, scrubbed variables, lists and trusted console links instead of the raw event. Update receivers before upgrading notification workers. An administrator can explicitly enable `raw_event` on a `detail` webhook without a custom body; engagement disclosure limits still apply. Existing channels configured at `detail` also begin receiving finding titles in the `scan.completed` findings list. Review their recipients before rollout. Scan messages use immutable completion snapshots, bounded comparison keys and explicit unavailable deltas; built-in English and Vietnamese templates cover the routable events. Email includes escaped HTML alongside text. Follow the worker compatibility, capture-mode drain and rollback steps in [Notification content and capture rollout](docs/guide/notification-content.md).

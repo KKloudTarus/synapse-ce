@@ -60,6 +60,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/fleetca"
 	azurepipelinesintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/azurepipelines"
 	bitbucketintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/bitbucket"
+	confluenceintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/confluence"
 	githubintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/github"
 	gitlabintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/gitlab"
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
@@ -154,6 +155,7 @@ import (
 	dastsessionuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastsession"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
+	docpublishuc "github.com/KKloudTarus/synapse-ce/internal/usecase/docpublish"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/egressgrant"
 	emulationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/emulation"
@@ -1004,6 +1006,10 @@ func main() {
 		log.Error("Jira provider registry init failed", "err", err)
 		os.Exit(1)
 	}
+	if err := confluenceintegration.Register(integrationRegistry); err != nil {
+		log.Error("Confluence provider registry init failed", "err", err)
+		os.Exit(1)
+	}
 	if err := azurepipelinesintegration.Register(integrationRegistry); err != nil {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
@@ -1290,7 +1296,8 @@ func main() {
 		log.Error("exploitation service init failed", "err", err)
 		os.Exit(1)
 	}
-	reportService := reportuc.NewService(repo, findingRepo, retestRepo, evidenceService, report.NewRenderer(), scaService, clock, buildinfo.App())
+	reportRenderer := report.NewRenderer()
+	reportService := reportuc.NewService(repo, findingRepo, retestRepo, evidenceService, reportRenderer, scaService, clock, buildinfo.App())
 
 	// Report builder formats: deterministic HTML/DOCX renderers consume the
 	// same assembled document; PDF keeps its own typed maroto path.
@@ -1490,7 +1497,7 @@ func main() {
 		if err != nil {
 			return httpapi.Principal{}, err
 		}
-		return httpapi.Principal{ID: p.ActorID, Name: u.Name, Role: string(p.Role), TenantID: u.TenantID, Credential: p.Credential.Kind, Provenance: p.Provenance}, nil
+		return controlPlanePrincipal(p, u), nil
 	})
 	// Audit read/verify use case: same signer as evidence, so the audit head is
 	// origin-attested at parity with the evidence chain.
@@ -1634,6 +1641,7 @@ func main() {
 		} else {
 			store, err = memory.NewTicketStore(repo.(*memory.EngagementRepository), findingRepo.(*memory.FindingRepository))
 			if err == nil {
+				store.(*memory.TicketStore).SetGroupAssetSources(assetStore, attackPathStore)
 				policy, err = memory.NewTicketPolicyReader(repo)
 			}
 		}
@@ -1647,7 +1655,20 @@ func main() {
 			os.Exit(1)
 		}
 		workflow.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
+		workflow.SetProjects(projectRepo)
+		workflow.SetAutoPushSourceAvailable(databasePool != nil && cfg.NotificationEnabled)
+		workflow.SetSLAStore(slaStore)
 		router.SetTicketing(workflow)
+		if cfg.InboundWebhooksEnabled && databasePool != nil {
+			hooks := postgres.NewInboundWebhookRepository(databasePool)
+			workflow.SetInboundWebhookDeduper(hooks)
+			admin, adminErr := ticketuc.NewWebhookAdmin(workflow, hooks, store.(ports.TicketInboundConfigurationStore), vaultCipher, postgres.NewTenantTransactionRunner(databasePool))
+			if adminErr != nil {
+				log.Error("Jira inbound webhook administration init failed", "err", adminErr)
+				os.Exit(1)
+			}
+			router.SetJiraInboundWebhooks(admin, workflow)
+		}
 		if databasePool == nil {
 			developmentTicketRunner, ticketErr = ticketruntime.New(workflow, repo.(ports.TenantLister), log)
 			if ticketErr != nil {
@@ -1656,6 +1677,8 @@ func main() {
 			}
 		}
 	}
+	var notificationService *notificationuc.Service
+	var notificationErr error
 	var userContactService *usercontacts.Service
 	if databasePool != nil {
 		router.SetAssigneeReviewReader(postgres.NewAssigneeReviewReader(databasePool))
@@ -1690,7 +1713,7 @@ func main() {
 			log.Error("finding notification producers init failed", "err", err)
 			os.Exit(1)
 		}
-		notificationService, notificationErr := notificationuc.NewService(notificationRepository, vaultCipher, nil, auditLog, clock, ids)
+		notificationService, notificationErr = notificationuc.NewService(notificationRepository, vaultCipher, nil, auditLog, clock, ids)
 		if notificationErr != nil {
 			log.Error("notification service init failed", "err", notificationErr)
 			os.Exit(1)
@@ -1963,6 +1986,10 @@ func main() {
 		InboundWebhooks:      cfg.InboundWebhooksEnabled,
 		Notifications:        cfg.NotificationEnabled,
 		Ticketing:            cfg.TicketingEnabled,
+		// Document publishing has no feature switch. Its routes are wired below only after a
+		// durable PostgreSQL pool exists and all constructors succeed, so advertise the same
+		// composition condition rather than telling operators to set a nonexistent boolean.
+		DocumentPublishing: databasePool != nil,
 		// Read from the driver registry, so a newly registered driver is advertised without a
 		// catalog edit; the kill switch then removes the types the operator turned off.
 		NotificationChannelTypes:      channelTypeNames(notificationSender.ChannelTypes()),
@@ -2146,6 +2173,73 @@ func main() {
 			}
 		}
 		log.Info("assessment lifecycle shadow writers configured", "tenant_count", len(cfg.AssessmentShadowTenants))
+	}
+	if databasePool != nil {
+		if closureDecisionReader == nil {
+			closureDecisionReader, err = cycleuc.NewClosureDecisionReader(findingLineageStore, assessmentSnapshotStore, retestRepo, slaStore)
+			if err != nil {
+				log.Error("document closure decision reader init failed", "err", err)
+				os.Exit(1)
+			}
+		}
+		if assessmentClosureReportService == nil {
+			assessmentClosureReportService, err = cycleuc.NewClosureReportService(assessmentCycleStore, assessmentCycleStore, assessmentSnapshotStore, assessmentComparisonStore, closureDecisionReader, auditLog)
+			if err != nil {
+				log.Error("document closure report service init failed", "err", err)
+				os.Exit(1)
+			}
+		}
+		documentStore, documentErr := postgres.NewDocumentStore(databasePool)
+		if documentErr != nil {
+			log.Error("document store init failed", "err", documentErr)
+			os.Exit(1)
+		}
+		documentAuthority, documentErr := postgres.NewDocumentAuthorityReader(databasePool)
+		if documentErr != nil {
+			log.Error("document authority init failed", "err", documentErr)
+			os.Exit(1)
+		}
+		documentSourcePolicy, documentErr := postgres.NewDocumentSourceReleaseReader(databasePool)
+		if documentErr != nil {
+			log.Error("document source policy init failed", "err", documentErr)
+			os.Exit(1)
+		}
+		documentArtifacts, documentErr := docpublishuc.NewArtifactBuilder(repo, reportService, assessmentCycleStore, assessmentCycleStore, assessmentClosureReportService, projectService, reportRenderer)
+		if documentErr != nil {
+			log.Error("document artifact builder init failed", "err", documentErr)
+			os.Exit(1)
+		}
+		documentArtifacts.SetEvidenceProvider(evidenceService)
+		documentArtifacts.SetEvidenceIntegrityProvider(scaService)
+		documentService, documentErr := docpublishuc.NewService(documentStore, integrationStore, integrationService, documentArtifacts, documentAuthority, documentSourcePolicy, auditLog, ids, clock)
+		if documentErr != nil {
+			log.Error("document publishing service init failed", "err", documentErr)
+			os.Exit(1)
+		}
+		router.SetDocumentPublishing(documentService)
+		if notificationService != nil {
+			documentSchedules, scheduleErr := docpublishuc.NewScheduleService(docpublishuc.ScheduleDependencies{
+				Store: documentStore, Authority: documentAuthority, ReportPolicy: documentSourcePolicy,
+				Integrations: integrationStore, Projects: projectRepo,
+				Artifacts: documentArtifacts, Channels: postgres.NewNotificationRepository(databasePool),
+				EmailConfig: notificationService, EmailSender: notificationSender,
+				Publisher: documentService, Executor: documentService,
+				Audit: auditLog, IDs: ids, Clock: clock, PublicBaseURL: cfg.EffectivePublicBaseURL(),
+			})
+			if scheduleErr != nil {
+				log.Error("document schedule service init failed", "err", scheduleErr)
+				os.Exit(1)
+			}
+			documentScheduleHistory, scheduleErr := docpublishuc.NewScheduleHistoryService(documentStore, documentStore)
+			if scheduleErr != nil {
+				log.Error("document schedule history init failed", "err", scheduleErr)
+				os.Exit(1)
+			}
+			router.SetDocumentScheduling(documentSchedules, ids)
+			router.SetDocumentScheduleHistory(documentScheduleHistory)
+			log.Info("document schedule admission enabled", "persistence", "postgres")
+		}
+		log.Info("document publishing enabled", "persistence", "postgres")
 	}
 	vulnerabilityRollout, err := vulnerabilityrollout.New(vulnerabilityrollout.Config{
 		ProviderSync: cfg.VulnerabilityProviderSyncEnabled, OccurrenceWrites: cfg.VulnerabilityOccurrenceWritesEnabled,
@@ -2334,6 +2428,7 @@ func main() {
 		os.Exit(1)
 	}
 	projectService.SetBitbucketCommitResolver(bitbucketCommits)
+	scaService.SetProjectSourceProjects(projectRepo)
 	scaService.SetProjectAnalysisRecorder(projectService)
 	scaService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)
 	projectService.SetProjectAnalysisCompletionTimeout(cfg.ProjectAnalysisCompletionTimeout)

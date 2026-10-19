@@ -1,0 +1,95 @@
+{
+  "checked_at": "2026-10-18T12:35:57.994999+00:00",
+  "scope": "Current read-only Cloud connections, configured-group mismatch and sharing monitor; fresh successful Cloud release is separately recorded in review-cloud-provider-proof.json",
+  "link": {
+    "id": "85f6018a054de40518a42427687174b2",
+    "integration_id": "102f216630436784557c034e9526c12e",
+    "source_kind": "engagement_report",
+    "source_ref": "engagement:f147d7221e2c2cba4109024964dfe24f",
+    "scope": "engagement",
+    "scope_id": "f147d7221e2c2cba4109024964dfe24f",
+    "container": "SIL",
+    "remote_url": "https://synapse-personal-lab.atlassian.net/wiki/spaces/SIL/pages/131244",
+    "remote_version": 6,
+    "content_hash": "4172b4ca075dab1fa95965f4e12ee85e78b6656628f317fc6125968d2f6531ca",
+    "revision": 5,
+    "restriction_status": "restriction_lost",
+    "restriction_checked_at": "2026-10-18T12:35:11.593952Z",
+    "updated_at": "2026-10-17T14:15:17.544734Z"
+  },
+  "audit_events": [
+    {
+      "action": "document.restriction_lost",
+      "target": "85f6018a054de40518a42427687174b2",
+      "created_at": "2026-10-18T12:13:05.444254+00:00"
+    },
+    {
+      "action": "document.restriction_unverifiable",
+      "target": "85f6018a054de40518a42427687174b2",
+      "created_at": "2026-10-18T11:32:16.495091+00:00"
+    }
+  ],
+  "enabled_acceptance_schedules": 0,
+  "runtime": "Restored isolated Docker API, integrations worker, web, PostgreSQL and MinIO; loopback-only HTTP console used for preview",
+  "lab_rehydration": "Retained development database predated changes to unmerged0251; missing cursor DDL from the current migration was installed in this disposable lab. Fresh-database migration tests independently exercise the production migration entry point.",
+  "data_center": "Unavailable for current rerun: the retained official three-hour licenses expired on2026-10-17; application/TLS remain stopped and data is preserved.",
+  "artifacts": {
+    "review-sharing-unverifiable.png": "ac9988a257eb69f7330f0a70d8a8a2825716e4ec8313427b41da63d55f5e48f9",
+    "review-sharing-lost.png": "292408d5c1c7b1465349c5736e8e835d6e325419547ff43a9fb6ba15ac745caa"
+  },
+  "sensitive_content_uploaded_during_probe": false,
+  "mailpit": "Unavailable: temporary SMTP TLS certificate lost on restart; no email acceptance rerun",
+  "preview_captured_at": "2026-10-18T11:40:02.256098+00:00",
+  "before_credential_refresh": [
+    {
+      "at": "2026-10-18T11:42:42.613134477Z",
+      "page_read": {
+        "code": "unauthorized",
+        "pass": false,
+        "status": 403
+      },
+      "provider": "confluence-cloud",
+      "test": {
+        "code": "unauthorized",
+        "pass": false,
+        "status": 403
+      }
+    },
+    {
+      "at": "2026-10-18T11:42:43.277560364Z",
+      "provider": "jira-cloud",
+      "test": {
+        "code": "unauthorized",
+        "pass": false,
+        "status": 401
+      }
+    }
+  ],
+  "provider_probes": [
+    {
+      "at": "2026-10-18T12:35:55.244650236Z",
+      "page_read": {
+        "pass": true
+      },
+      "provider": "confluence-cloud",
+      "restriction_check": {
+        "code": "restriction_unverified",
+        "pass": false,
+        "status": 200
+      },
+      "test": {
+        "pass": true
+      },
+      "version": 6
+    },
+    {
+      "at": "2026-10-18T12:35:57.711139712Z",
+      "provider": "jira-cloud",
+      "test": {
+        "pass": true
+      }
+    }
+  ],
+  "atlassian_api_keys_refreshed": "Same one-day lifetime and existing account/policy-read scopes; values private/vault-only",
+  "google_grant_or_client_created": false
+}

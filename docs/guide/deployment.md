@@ -376,6 +376,30 @@ forward schema only when every additional database migration is applied and has 
 above that binary's embedded maximum. Missing, down, or divergent required migrations remain
 unready.
 
+For the Jira sync and report delivery upgrade, drain traffic and stop every API,
+worker, MCP and scanner database client before migration `0260`, because its
+`scan_jobs` schema change takes an access-exclusive table lock. Migration `0261`
+also builds its active-link queue index transactionally, so it can wait behind a
+conflicting table lock; it is not an online-migration guarantee. Migration `0251`
+does not scan retained ticket intents during deployment. It creates a forced-RLS
+per-tenant cursor; the matching runtime advances that cursor in bounded keyset
+batches and records only eligible completed creates. New eligible writes are
+captured by the migration trigger, so a restart resumes rather than skipping old
+intents.
+
+Set a bounded PostgreSQL `lock_timeout` on the migration connection (for example,
+`5s`) so unexpected contention aborts instead of waiting behind a live client.
+Rehearse `0260` against a representative restored database to determine the
+maintenance window; no fixed outage duration is assumed. The CI PostgreSQL test
+budget is 90 minutes and is unrelated to `synapse-migrate`'s two-minute command
+deadline. If the rehearsal cannot complete within that command deadline, stop and
+use a reviewed deployment plan. After success, verify the applied migration version,
+enabled and forced RLS on affected tenant tables, and readiness before starting
+matching consumers and restoring traffic. On failure, keep traffic drained, inspect
+applied versions, and retry only after resolving the cause; do not down-migrate
+retained command or evidence history. The coordinated Jira and source-worker rollout
+requirements still apply.
+
 The distinction is intentional: an API with a stale schema stays running but reports `503` from
 `/readyz`, allowing the orchestrator to remove it from traffic. `synapse-worker` and `synapse-mcp`
 have no equivalent HTTP readiness endpoint, so they refuse startup until migrations are ready.

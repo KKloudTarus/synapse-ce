@@ -154,7 +154,16 @@ type Link struct {
 	RemoteURL     string
 	ContentHash   string
 	// Revision counts the writes applied to this link, starting at 1.
-	Revision  int
+	Revision int
+	// RestrictionStatus describes the last background sharing observation, not
+	// a guarantee that a remote administrator cannot change access afterwards.
+	RestrictionStatus       string
+	RestrictionCheckedAt    *time.Time
+	RestrictionNextAt       time.Time
+	RestrictionCheckVersion int
+	// RetiredAt retains the page's immutable identity after a governed purge.
+	// A retired target cannot be created or updated again.
+	RetiredAt *time.Time
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -163,6 +172,9 @@ func (l Link) Validate() error {
 	if l.ID.IsZero() || l.TenantID.IsZero() || l.Revision < 1 ||
 		l.CreatedAt.IsZero() || l.UpdatedAt.Before(l.CreatedAt) {
 		return fmt.Errorf("%w: invalid document link", shared.ErrValidation)
+	}
+	if l.RetiredAt != nil && (l.RetiredAt.Before(l.CreatedAt) || l.RetiredAt.Before(l.UpdatedAt)) {
+		return fmt.Errorf("%w: document retirement time is invalid", shared.ErrValidation)
 	}
 	if err := l.Target.Validate(); err != nil {
 		return err
@@ -184,6 +196,9 @@ const (
 	Create Action = "create"
 	// Update writes a new version of the page an existing link points to.
 	Update Action = "update"
+	// Purge permanently removes a previously published page and retires its
+	// local target. It cannot create a replacement page for that target.
+	Purge Action = "purge"
 )
 
 // Intent is one durable publish or republish command.
@@ -221,6 +236,7 @@ type IntentTransition struct {
 	LeaseUntil *time.Time
 	Remote     *RemotePage
 	ErrorCode  string
+	Resumable  bool
 }
 
 // MarkerFor derives the correlation marker a remote object carries for an intent ID.
@@ -242,9 +258,9 @@ func (i Intent) Validate() error {
 		if !i.LinkID.IsZero() {
 			return fmt.Errorf("%w: a create intent has no existing link", shared.ErrValidation)
 		}
-	case Update:
+	case Update, Purge:
 		if i.LinkID.IsZero() {
-			return fmt.Errorf("%w: an update intent needs the link it writes to", shared.ErrValidation)
+			return fmt.Errorf("%w: a document update or purge needs an existing link", shared.ErrValidation)
 		}
 	default:
 		return fmt.Errorf("%w: invalid document intent action", shared.ErrValidation)
@@ -280,6 +296,11 @@ func (i Intent) Validate() error {
 	return nil
 }
 
+// ReconcileResumable is intentionally document-local: a conclusive checkpoint
+// permits an uncertain document command to resume, while other write domains
+// continue to reject an unknown event.
+const ReconcileResumable writeintent.Event = "reconcile_resumable"
+
 // SameCommand reports whether two intents are the same logical command, which is what a
 // replayed request key must be. Identity fields that the server issues (ID, marker, state,
 // timestamps) are deliberately not compared.
@@ -298,9 +319,23 @@ func (i Intent) Apply(change IntentTransition, at time.Time) (Intent, error) {
 	if at.IsZero() || at.Before(i.UpdatedAt) {
 		return Intent{}, fmt.Errorf("%w: document intent transition time is invalid", shared.ErrValidation)
 	}
-	next, err := writeintent.Next(i.State, change.Event)
-	if err != nil {
-		return Intent{}, err
+	var (
+		next writeintent.State
+		err  error
+	)
+	if change.Event == ReconcileResumable {
+		if i.State != writeintent.Uncertain || !change.Resumable {
+			return Intent{}, fmt.Errorf("%w: document reconciliation is not resumable", shared.ErrConflict)
+		}
+		next = writeintent.Pending
+	} else {
+		if change.Resumable {
+			return Intent{}, fmt.Errorf("%w: resumable evidence only applies to document reconciliation", shared.ErrValidation)
+		}
+		next, err = writeintent.Next(i.State, change.Event)
+		if err != nil {
+			return Intent{}, err
+		}
 	}
 	if change.Event == writeintent.LeaseExpired &&
 		(i.LeaseUntil == nil || at.Before(*i.LeaseUntil)) {
@@ -396,11 +431,28 @@ func (i Intent) Complete(existing *Link) (Link, bool, error) {
 	if existing.TenantID != i.TenantID || existing.Target != i.Target {
 		return Link{}, false, fmt.Errorf("%w: document link target differs", shared.ErrConflict)
 	}
-	if i.Action == Update && existing.ID != i.LinkID {
+	if (i.Action == Update || i.Action == Purge) && existing.ID != i.LinkID {
 		return Link{}, false, fmt.Errorf("%w: document update targets another link", shared.ErrConflict)
 	}
 	if existing.RemotePageID != i.RemoteID {
 		return Link{}, false, fmt.Errorf("%w: document page identity differs", shared.ErrConflict)
+	}
+	if existing.RetiredAt != nil {
+		return Link{}, false, fmt.Errorf("%w: document link is retired", shared.ErrConflict)
+	}
+	if i.Action == Purge {
+		if i.RemoteVersion != existing.RemoteVersion || i.RemoteURL != existing.RemoteURL {
+			return Link{}, false, fmt.Errorf("%w: document purge must retain the existing page identity and version", shared.ErrConflict)
+		}
+		next := *existing
+		retired := i.UpdatedAt.UTC()
+		next.RetiredAt = &retired
+		next.UpdatedAt = retired
+		next.Revision++
+		if err := next.Validate(); err != nil {
+			return Link{}, false, err
+		}
+		return next, true, nil
 	}
 	switch {
 	case i.RemoteVersion < existing.RemoteVersion:
@@ -431,4 +483,16 @@ func (i Intent) Clone() Intent {
 		i.LeaseUntil = &at
 	}
 	return i
+}
+
+func (l Link) Clone() Link {
+	if l.RestrictionCheckedAt != nil {
+		at := *l.RestrictionCheckedAt
+		l.RestrictionCheckedAt = &at
+	}
+	if l.RetiredAt != nil {
+		at := *l.RetiredAt
+		l.RetiredAt = &at
+	}
+	return l
 }

@@ -1,0 +1,322 @@
+{
+  "scope_status": "historical before review remediation; see README.md and review-remediation.md for current acceptance and checks",
+  "checks": [
+    {
+      "argv": [
+        "make",
+        "test"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T11:08:05.966232+00:00",
+      "log_sha256": "d27583b25239eece80cc037eae1fe7969602c612204e2c664681b907be513f52",
+      "postgres_enabled": false,
+      "record": "final-unicode-go-suite",
+      "started_at": "2026-10-17T11:04:06.064192+00:00"
+    },
+    {
+      "argv": [
+        "make",
+        "build",
+        "vet",
+        "typecheck"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T11:07:20.103182+00:00",
+      "log_sha256": "179f5baed47502e9987f47ae82558bed62827284845fe3627a3042293d19458c",
+      "postgres_enabled": false,
+      "record": "final-unicode-static",
+      "started_at": "2026-10-17T11:04:06.052341+00:00"
+    },
+    {
+      "argv": [
+        "/home/vihn/.local/share/mise/installs/golangci-lint/2.13.2/golangci-lint-2.13.2-linux-amd64/golangci-lint",
+        "run"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T11:08:05.645599+00:00",
+      "log_sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+      "postgres_enabled": false,
+      "record": "final-unicode-lint",
+      "started_at": "2026-10-17T11:04:06.053696+00:00"
+    },
+    {
+      "argv": [
+        "pnpm",
+        "-C",
+        "web",
+        "exec",
+        "vitest",
+        "run",
+        "--maxWorkers=2"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:56:57.072681+00:00",
+      "log_sha256": "91b9ba4644ce7647e471236f6d7709cacfdc576449c1489b383109fe8b811826",
+      "postgres_enabled": false,
+      "record": "final-web-bounded-suite",
+      "started_at": "2026-10-17T10:53:36.593685+00:00"
+    },
+    {
+      "argv": [
+        "pnpm",
+        "-C",
+        "web",
+        "build"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:48:39.437029+00:00",
+      "log_sha256": "33ed96da741db7c3eff4dbc68ff12c0004fd6f0e8f24674fbb87cb467a781191",
+      "postgres_enabled": false,
+      "record": "final-ui-production-build",
+      "started_at": "2026-10-17T10:48:34.408551+00:00"
+    },
+    {
+      "argv": [
+        "pnpm",
+        "-C",
+        "web",
+        "typecheck"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:49:39.093411+00:00",
+      "log_sha256": "f582e161f41ac1ff9656aef11c7da220ba71a6d54aef9ac9144fce10a2e985f8",
+      "postgres_enabled": false,
+      "record": "final-ui-current-types",
+      "started_at": "2026-10-17T10:49:36.520210+00:00"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "-count=1",
+        "-timeout=10m",
+        "./internal/infrastructure/persistence/postgres",
+        "-run",
+        "Test(DocumentSchedule|TicketInbound)"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:45:41.157365+00:00",
+      "log_sha256": "df865d022f0b5e5d32ec21524e4d60629b781b9d77d17b11e8d8bfec0a311027",
+      "postgres_enabled": true,
+      "record": "final-queue-predicate-contracts",
+      "started_at": "2026-10-17T10:45:27.823164+00:00"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "./internal/usecase/docpublish",
+        "./internal/infrastructure/persistence/postgres",
+        "-run",
+        "Test(Document|Ticket|JiraWebhook|Migration0069DownDeduplicatesProducers|Migration0221BitbucketWebhookLifecycle)",
+        "-count=1",
+        "-timeout=20m"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:26:22.129366+00:00",
+      "log_sha256": "b097d5d786f8887038334f7a5cbe2cf1c5376b0245bfd7dc168e174ce32d8515",
+      "postgres_enabled": true,
+      "record": "final-postgres-contracts-clean",
+      "started_at": "2026-10-17T10:26:09.125582+00:00"
+    },
+    {
+      "argv": [
+        "/home/vihn/.local/share/mise/installs/go/1.27.0/bin/go",
+        "test",
+        "-race",
+        "./internal/infrastructure/persistence/memory",
+        "-run",
+        "^TestDocumentScheduleMemory",
+        "-count=1"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:37:34.080599+00:00",
+      "log_sha256": "07ac1a9dea05a525f055e82d8999918fcdb96e32a99ac8be7cc176d30c1252fa",
+      "postgres_enabled": false,
+      "record": "schedule-fairness-memory-race",
+      "started_at": "2026-10-17T10:37:25.523970+00:00"
+    },
+    {
+      "argv": [
+        "/home/vihn/.local/share/mise/installs/go/1.27.0/bin/go",
+        "test",
+        "./internal/infrastructure/persistence/postgres",
+        "-run",
+        "^TestDocumentScheduleStorePostgres(ConcurrentAdmissionAndRLS|ClaimsFreshWorkAfterFailedRecoveryBacklog)$",
+        "-count=1"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:37:44.677489+00:00",
+      "log_sha256": "5d0caacdd7ae844dbeb9fe53009fc3dcdce5bc9801fd31880cc4767dbfabef0b",
+      "postgres_enabled": true,
+      "record": "schedule-fairness-postgres",
+      "started_at": "2026-10-17T10:37:34.111480+00:00"
+    },
+    {
+      "argv": [
+        "make",
+        "harness"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:18:05.815584+00:00",
+      "log_sha256": "10898bf9d5dbc7ff333322bf11a04ba1609cfd92ab8669d16fb34073d1e051b8",
+      "postgres_enabled": false,
+      "record": "final-hostile-harness",
+      "started_at": "2026-10-17T10:18:03.848325+00:00"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "-count=1",
+        "./internal/usecase/docpublish",
+        "./internal/composition"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:46:15.278701+00:00",
+      "log_sha256": "bab5a6420ca5bccfa7c9b21e76d46e8de5f58e5a780511205107c4efa74e3716",
+      "postgres_enabled": false,
+      "record": "final-publication-failure-signal",
+      "started_at": "2026-10-17T10:46:13.722291+00:00"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "-count=1",
+        "./internal/domain/docpublish",
+        "./internal/usecase/docpublish",
+        "./internal/infrastructure/persistence/memory"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:53:46.609170+00:00",
+      "log_sha256": "c71d1df7b8dcdf865bc0eb778ad72ba07abdbb06cc5da64a74ef33ba24d012cb",
+      "postgres_enabled": false,
+      "record": "final-calendar-civil-dates",
+      "started_at": "2026-10-17T10:53:36.593706+00:00"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "./internal/infrastructure/integration/confluence",
+        "-count=1"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T10:13:24.797439+00:00",
+      "log_sha256": "41d536513bfaef1132f968e9691aa9ae70102a9a73d6905ec995e0a07737393b",
+      "postgres_enabled": false,
+      "record": "confluence-restriction-schema",
+      "started_at": "2026-10-17T10:13:23.888483+00:00"
+    },
+    {
+      "argv": [
+        "go",
+        "test",
+        "-count=1",
+        "-timeout=10m",
+        "./internal/infrastructure/persistence/postgres",
+        "-run",
+        "Test(Migration0069DownDeduplicatesProducers|Migration0221BitbucketWebhookLifecycle|TicketWorkflowMigrationRollbackPreservesTenantPolicy)"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T09:58:45.978815+00:00",
+      "log_sha256": "9b3353e824dc67d6fcc7f40a33e2e2a71d63079c8bfc39510362dcb0c2ca61d2",
+      "postgres_enabled": true,
+      "record": "new-migration-down-contract",
+      "started_at": "2026-10-17T09:58:30.512234+00:00"
+    },
+    {
+      "argv": [
+        "bash",
+        "packaging/tests/static.sh"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T11:08:20.499376+00:00",
+      "log_sha256": "4abec8f619ce519079f865ed2a370cf2b1fed53afc9cf694a44b2b4986875324",
+      "postgres_enabled": false,
+      "record": "final-native-packaging-static",
+      "started_at": "2026-10-17T11:08:20.446460+00:00"
+    },
+    {
+      "argv": [
+        "docker",
+        "build",
+        "-f",
+        "/tmp/synapse-b07-private/font-context.Dockerfile",
+        "--output",
+        "type=local,dest=/tmp/synapse-b07-private/font-context-output",
+        "."
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T11:07:41.049515+00:00",
+      "log_sha256": "6064b3ecdc0bbe64714c1e6b0fe1fa967f591743daa9af34c2975e23c68d69ba",
+      "postgres_enabled": false,
+      "record": "final-font-docker-context",
+      "started_at": "2026-10-17T11:07:36.389976+00:00"
+    },
+    {
+      "argv": [
+        "docker",
+        "build",
+        "-f",
+        "/tmp/synapse-b07-private/font-context.Dockerfile",
+        "--output",
+        "type=local,dest=/tmp/synapse-b07-private/font-context-output",
+        "."
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T11:10:54.932658+00:00",
+      "log_sha256": "63946769b3da28c1bd0c52b449f24c2d489390a50e054cdc5dcb7496cebf5b53",
+      "postgres_enabled": false,
+      "record": "final-font-license-context",
+      "started_at": "2026-10-17T11:10:35.266856+00:00"
+    },
+    {
+      "argv": [
+        "pacman",
+        "-Qkk",
+        "ttf-liberation"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T11:13:29.385971+00:00",
+      "log_sha256": "31305c37fd8a66dd426e046c8ce0a5dd1b132fb8ca9b8e9a2db5cdc310c1aacb",
+      "postgres_enabled": false,
+      "record": "final-font-source-integrity",
+      "started_at": "2026-10-17T11:13:24.666506+00:00"
+    },
+    {
+      "argv": [
+        "python3",
+        "/tmp/synapse-b07-private/verify-browser-evidence.py"
+      ],
+      "exit_code": 0,
+      "finished_at": "2026-10-17T11:17:04.248135+00:00",
+      "log_sha256": "2bdbb1c84918c5a7f56d13d2a35bf301975f58a5bf95cce7b79f51e7987597a7",
+      "postgres_enabled": false,
+      "record": "final-browser-evidence",
+      "started_at": "2026-10-17T11:17:04.220546+00:00"
+    }
+  ],
+  "classification": "local tests and checks; not live provider acceptance",
+  "resolved_runs": [
+    {
+      "exit_code": 1,
+      "postgres_package_output": [
+        "ok  \tgithub.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres\t840.018s"
+      ],
+      "reason": "A document test import changed during Go graph loading; subsequent complete make test and affected package checks passed.",
+      "record": "final-full-go"
+    },
+    {
+      "exit_code": 1,
+      "reason": "Dirty ephemeral test database retained fixtures; reset only that test database and reran contracts successfully.",
+      "record": "final-document-postgres"
+    },
+    {
+      "exit_code": 143,
+      "reason": "Stopped oversubscribed run after existing UI timing failures; same 206 files passed with maxWorkers=2 and unchanged assertions.",
+      "record": "final-current-web-suite"
+    }
+  ]
+}

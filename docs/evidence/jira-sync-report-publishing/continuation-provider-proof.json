@@ -1,0 +1,143 @@
+{
+  "project_key": "controlled-source-grouping",
+  "producer": "real bounded local source scan through API and host bubblewrap worker",
+  "scans": [
+    {
+      "subdirectory": "service-a",
+      "job_id": "eb7af82cfb40b5b538e172582cb7b19c",
+      "state": "succeeded"
+    },
+    {
+      "subdirectory": "service-b",
+      "job_id": "6f06ee78568176cec7a6c57d326e5810",
+      "state": "succeeded"
+    },
+    {
+      "subdirectory": "service-a",
+      "job_id": "1c01c84aa8878083973dba721699a0a9",
+      "state": "succeeded"
+    }
+  ],
+  "grouped_tickets": {
+    "cloud": {
+      "en": {
+        "ticket_key": "B7R-3",
+        "mapping_version": 1,
+        "finding_id": "f095991b1c50f138ac4eb8f6d5fa0e0c",
+        "security_level": "10000",
+        "asset_rows": [
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-a",
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-b"
+        ],
+        "preview_deep_link": "https://localhost:8444/code-quality/projects/controlled-source-grouping/source-findings#finding-f095991b1c50f138ac4eb8f6d5fa0e0c"
+      },
+      "vi": {
+        "ticket_key": "B7R-3",
+        "mapping_version": 2,
+        "finding_id": "f095991b1c50f138ac4eb8f6d5fa0e0c",
+        "security_level": "10000",
+        "asset_rows": [
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-a",
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-b"
+        ],
+        "preview_deep_link": "https://localhost:8444/code-quality/projects/controlled-source-grouping/source-findings#finding-f095991b1c50f138ac4eb8f6d5fa0e0c"
+      },
+      "after_source_removal": {
+        "ticket_key": "B7R-3",
+        "remaining_asset_rows": [
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-b"
+        ],
+        "state": "done",
+        "intent_id": "8f94549aa3f700a239cecdfae7029eba"
+      }
+    },
+    "dc": {
+      "en": {
+        "ticket_key": "SYNACC-6",
+        "mapping_version": 1,
+        "finding_id": "f095991b1c50f138ac4eb8f6d5fa0e0c",
+        "security_level": "10000",
+        "asset_rows": [
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-a",
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-b"
+        ],
+        "preview_deep_link": "https://localhost:8444/code-quality/projects/controlled-source-grouping/source-findings#finding-f095991b1c50f138ac4eb8f6d5fa0e0c"
+      },
+      "vi": {
+        "ticket_key": "SYNACC-6",
+        "mapping_version": 2,
+        "finding_id": "f095991b1c50f138ac4eb8f6d5fa0e0c",
+        "security_level": "10000",
+        "asset_rows": [
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-a",
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-b"
+        ],
+        "preview_deep_link": "https://localhost:8444/code-quality/projects/controlled-source-grouping/source-findings#finding-f095991b1c50f138ac4eb8f6d5fa0e0c"
+      },
+      "after_source_removal": {
+        "ticket_key": "SYNACC-6",
+        "remaining_asset_rows": [
+          "/tmp/synapse-b07-private/continuation/project-source-fixture/service-b"
+        ],
+        "state": "done",
+        "intent_id": "fe781ec3a4d597ddda98a9072c084ce9"
+      }
+    }
+  },
+  "permission_negative": [
+    {
+      "method": "POST",
+      "path": "/document-publications",
+      "http": 403
+    },
+    {
+      "method": "POST",
+      "path": "/document-schedules",
+      "http": 403
+    },
+    {
+      "method": "DELETE",
+      "path": "/document-links/forbidden-probe",
+      "http": 403
+    },
+    {
+      "method": "POST",
+      "path": "/document-publications/forbidden-probe/resume",
+      "http": 403
+    }
+  ],
+  "purge": {
+    "cloud": {
+      "page-current": {
+        "http": 404
+      },
+      "page-trash": {
+        "http": 404
+      },
+      "history": {
+        "http": 404
+      },
+      "attachments": {
+        "http": 404
+      },
+      "link_retired": true
+    },
+    "dc": {
+      "page": {
+        "http": 404
+      },
+      "old-page-version": {
+        "http": 404
+      },
+      "initial-neutral-version": {
+        "http": 404
+      },
+      "pdf-current": {
+        "http": 404
+      },
+      "pdf-previous": {
+        "http": 404
+      }
+    }
+  }
+}

@@ -19,6 +19,42 @@ type Fixture struct {
 	Tenant, Other, Integration, Project, Engagement, Finding shared.ID
 }
 
+type inboundStore interface {
+	ports.TicketInboundStore
+}
+
+// InboundTombstone proves an equal provider timestamp cannot make an observed
+// deletion or unreadable ticket appear live again. Only a strictly newer
+// readable provider observation may clear the tombstone.
+func InboundTombstone(t *testing.T, store inboundStore, f Fixture) {
+	t.Helper()
+	ctx := context.Background()
+	base := time.Date(2026, 2, 3, 10, 0, 0, 0, time.UTC)
+	observation := func(updated time.Time, deleted bool) ticketing.ExternalTicketObservation {
+		return ticketing.ExternalTicketObservation{TenantID: f.Tenant, IntegrationID: f.Integration, MappingID: "ticket-map-a", EngagementID: f.Engagement, FindingID: f.Finding, RemoteID: "SEC-tombstone", StatusCategory: "done", ProviderUpdatedAt: updated, StatusChangedAt: updated, AuthorID: "human", StatusAuthorKnown: true, DeletedOrUnreadable: deleted, CheckedAt: updated, Version: 1}
+	}
+	if err := store.ReduceInboundTicket(ctx, f.Tenant, []ticketing.ExternalTicketObservation{observation(base, false)}, nil, base); err != nil {
+		t.Fatalf("store readable observation: %v", err)
+	}
+	if err := store.ReduceInboundTicket(ctx, f.Tenant, []ticketing.ExternalTicketObservation{observation(base, true)}, nil, base.Add(time.Second)); err != nil {
+		t.Fatalf("store deletion observation: %v", err)
+	}
+	if err := store.ReduceInboundTicket(ctx, f.Tenant, []ticketing.ExternalTicketObservation{observation(base, false)}, nil, base.Add(2*time.Second)); err != nil {
+		t.Fatalf("replay equal observation: %v", err)
+	}
+	view, err := store.ListInboundTicketView(ctx, f.Tenant, f.Engagement, f.Finding)
+	if err != nil || len(view.Observations) != 1 || !view.Observations[0].DeletedOrUnreadable {
+		t.Fatalf("equal timestamp cleared tombstone: view=%+v err=%v", view, err)
+	}
+	if err = store.ReduceInboundTicket(ctx, f.Tenant, []ticketing.ExternalTicketObservation{observation(base.Add(time.Second), false)}, nil, base.Add(3*time.Second)); err != nil {
+		t.Fatalf("store newer readable observation: %v", err)
+	}
+	view, err = store.ListInboundTicketView(ctx, f.Tenant, f.Engagement, f.Finding)
+	if err != nil || len(view.Observations) != 1 || view.Observations[0].DeletedOrUnreadable {
+		t.Fatalf("newer readable observation did not clear tombstone: view=%+v err=%v", view, err)
+	}
+}
+
 // Run exercises identical tenant isolation, copy safety, idempotency and CAS in both adapters.
 // PostgreSQL callers must first seed matching integration/engagement/finding fixtures.
 func Run(t *testing.T, store ports.TicketStore, f Fixture) {

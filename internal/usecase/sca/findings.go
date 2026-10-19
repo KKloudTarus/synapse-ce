@@ -157,6 +157,7 @@ func buildFindings(engagementID shared.ID, res *ScanResult, now time.Time, minSe
 			DirectBumps:       v.Introducers, // the minimal-upgrade set (D3.8), computed via remediation.Solve in attachDependencyPaths
 			Sources:           v.Sources,
 			Confidence:        v.Confidence,
+			AdvisoryID:        v.ID,
 			Class:             class,
 			Scope:             v.Scope,
 			Reachability:      v.Reachability,

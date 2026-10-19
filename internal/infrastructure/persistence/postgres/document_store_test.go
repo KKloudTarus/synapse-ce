@@ -43,7 +43,7 @@ func TestDocumentStoreRejectsNilPool(t *testing.T) {
 	}
 }
 
-var documentTables = []string{"document_links", "document_intents"}
+var documentTables = []string{"document_commands", "document_links", "document_intents"}
 
 func documentFixture() docpublishconformance.Fixture {
 	return docpublishconformance.Fixture{
@@ -58,6 +58,34 @@ func documentFixture() docpublishconformance.Fixture {
 // removes everything it and the suite created when the test ends.
 func seedDocumentTenants(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
+	clean := func(cleanCtx context.Context) error {
+		for _, tenant := range []string{"doc-a", "doc-b"} {
+			if err := WithTenant(cleanCtx, pool, tenant, func(tx pgx.Tx) error {
+				tables := append([]string{"document_schedule_deliveries", "document_schedule_occurrences", "document_schedules"}, documentTables...)
+				for _, table := range tables {
+					if _, err := tx.Exec(cleanCtx, "DELETE FROM "+table+" WHERE tenant_id=$1", tenant); err != nil {
+						return err
+					}
+				}
+				for _, query := range []string{
+					`DELETE FROM integrations WHERE tenant_id=$1 AND id LIKE 'doc-integration-%'`,
+					`DELETE FROM engagements WHERE tenant_id=$1 AND id LIKE 'doc-engagement-%'`,
+					`DELETE FROM projects WHERE tenant_id=$1 AND id LIKE 'doc-project-%'`,
+				} {
+					if _, err := tx.Exec(cleanCtx, query, tenant); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := clean(ctx); err != nil {
+		t.Fatalf("reset document fixtures: %v", err)
+	}
 	for _, row := range []struct{ tenant, engagement, project, integration string }{
 		{"doc-a", "doc-engagement-a", "doc-project-a", "doc-integration-a"},
 		{"doc-b", "doc-engagement-b", "doc-project-b", "doc-integration-b"},
@@ -85,16 +113,8 @@ func seedDocumentTenants(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 		}
 	}
 	t.Cleanup(func() {
-		for _, tenant := range []string{"doc-a", "doc-b"} {
-			_ = WithTenant(context.Background(), pool, tenant, func(tx pgx.Tx) error {
-				for _, table := range documentTables {
-					_, _ = tx.Exec(context.Background(), "DELETE FROM "+table+" WHERE tenant_id=$1", tenant)
-				}
-				_, _ = tx.Exec(context.Background(), `DELETE FROM integrations WHERE tenant_id=$1 AND id LIKE 'doc-integration-%'`, tenant)
-				_, _ = tx.Exec(context.Background(), `DELETE FROM engagements WHERE tenant_id=$1 AND id LIKE 'doc-engagement-%'`, tenant)
-				_, _ = tx.Exec(context.Background(), `DELETE FROM projects WHERE tenant_id=$1 AND id LIKE 'doc-project-%'`, tenant)
-				return nil
-			})
+		if err := clean(context.Background()); err != nil {
+			t.Errorf("clean document fixtures: %v", err)
 		}
 	})
 }
@@ -157,7 +177,7 @@ func TestDocumentStoreConformanceAndRLS(t *testing.T) {
 	for _, statement := range []string{
 		`CREATE ROLE ` + role + ` NOSUPERUSER NOBYPASSRLS`,
 		`GRANT USAGE ON SCHEMA public TO ` + role,
-		`GRANT SELECT,INSERT,UPDATE,DELETE ON document_links,document_intents TO ` + role,
+		`GRANT SELECT,INSERT,UPDATE,DELETE ON document_links,document_intents,document_commands TO ` + role,
 	} {
 		if _, err = pool.Exec(ctx, statement); err != nil {
 			t.Fatalf("RLS role: %v", err)
@@ -180,7 +200,7 @@ func TestDocumentStoreConformanceAndRLS(t *testing.T) {
 		var own int
 		if err = withRole("doc-a", func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, "SELECT count(*) FROM "+table).Scan(&own)
-		}); err != nil || own == 0 {
+		}); err != nil || (table != "document_commands" && own == 0) {
 			t.Fatalf("tenant doc-a sees %d rows of %s: %v", own, table, err)
 		}
 		for _, tenant := range []string{"doc-b", ""} {

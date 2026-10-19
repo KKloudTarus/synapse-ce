@@ -30,6 +30,14 @@ func (s scanJobsFake) LatestForEngagements(context.Context, []shared.ID) (map[sh
 	return map[shared.ID]ports.ScanJob{}, nil
 }
 
+func (s scanJobsFake) LatestProjectAnalysisForEngagement(context.Context, shared.ID) (ports.ScanJob, error) {
+	return ports.ScanJob{}, shared.ErrNotFound
+}
+
+func (s scanJobsFake) LatestProjectAnalysisForEngagements(context.Context, []shared.ID) (map[shared.ID]ports.ScanJob, error) {
+	return map[shared.ID]ports.ScanJob{}, nil
+}
+
 func (s scanJobsFake) GetJob(_ context.Context, id string) (ports.ScanJob, error) {
 	job, ok := s.jobs[id]
 	if !ok {

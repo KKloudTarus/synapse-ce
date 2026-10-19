@@ -1,0 +1,30 @@
+{
+  "scope": "ticketing_store_test fixture cleanup only",
+  "database": "new disposable PostgreSQL database on the existing test server; dropped after each run",
+  "red": {
+    "command": "go test ./internal/infrastructure/persistence/postgres -run ^TestTicketStorePersistsAfterPoolReopen$ -count=1; then go test ./internal/infrastructure/persistence/postgres -run ^TestMigration0069DownDeduplicatesProducers$ -count=1",
+    "reopen_fixture_rows_after_test": {
+      "ticket_intents": 1,
+      "ticket_inbound_poll_progress": 1
+    },
+    "migration_0069_exit": 1,
+    "failure": "0230 rollback guard found durable ticket data left by the pool-reopen fixture"
+  },
+  "green": {
+    "commands": [
+      "go test ./internal/infrastructure/persistence/postgres -run ^TestTicketStorePersistsAfterPoolReopen$ -count=1",
+      "go test ./internal/infrastructure/persistence/postgres -run ^TestMigration0069DownDeduplicatesProducers$ -count=1",
+      "go test ./internal/infrastructure/persistence/postgres -run ^TestTicketStoreConformanceAndRLS$ -count=1"
+    ],
+    "reopen_fixture_rows_after_test": {
+      "ticket_intents": 0,
+      "ticket_inbound_poll_progress": 0
+    },
+    "conformance_fixture_rows_after_test": {
+      "ticket_intents": 0,
+      "ticket_inbound_poll_progress": 0
+    },
+    "all_exit_codes": 0
+  },
+  "credentials_or_dsn_recorded": false
+}

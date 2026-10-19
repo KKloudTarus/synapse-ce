@@ -1,0 +1,47 @@
+{
+  "capability": {
+    "status": 200,
+    "document_capability_key": "docpublish",
+    "document_publishing_enabled": true,
+    "catalog_sha256": "1700dff4e48bc4e5a3a28e8288e6c92f99b6735a29cb73c8a83cf1dd820d196f"
+  },
+  "readonly": {
+    "create_status": 201,
+    "user_id": "33947d1131eeaa2b7113ef7709ce357a",
+    "role": "readonly",
+    "disabled": false,
+    "aup_version": "1.0",
+    "aup_accept_status": 200,
+    "integrations_status": 200,
+    "integrations_count": 0
+  },
+  "states": {
+    "loading": {
+      "actual_upstream_response": true,
+      "configured_delay_seconds": 20,
+      "response_status": 200,
+      "integration_count": 0
+    },
+    "error": {
+      "actual_api_stopped": true,
+      "web_upstream_status": 502
+    },
+    "restored": {
+      "api_health": "healthy",
+      "response_status": 200,
+      "integration_count": 0,
+      "elapsed_ms": 8,
+      "response_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+    }
+  },
+  "scope": "Real isolated PostgreSQL-backed API/web fixture with zero integrations. The main configured stack remains separate. No mock API responses.",
+  "browser_review": {
+    "empty": true,
+    "loading": true,
+    "upstream_error": true,
+    "readonly_empty": true,
+    "readonly_create_and_credential_controls_absent": true,
+    "build": "production build after permission guard",
+    "engine": "Edge"
+  }
+}

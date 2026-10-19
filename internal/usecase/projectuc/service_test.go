@@ -3,6 +3,7 @@ package projectuc
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -91,6 +92,18 @@ func TestProjectAcquireRequestUsesPriorGitCommit(t *testing.T) {
 	request, err := svc.projectAcquireRequest(context.Background(), p)
 	if err != nil || request.BaseRef != "main" || request.BaseCommit != "immutable-commit" {
 		t.Fatalf("request=%+v err=%v", request, err)
+	}
+}
+
+func TestCanonicalProjectSubdirectoryRejectsTraversalAndPlatformEscapes(t *testing.T) {
+	for _, input := range []string{"", ".", "..", "../private", "/etc", `C:\\windows`, `a\\b`, " a", "a ", "a\x00b"} {
+		if _, err := canonicalProjectSubdirectory(input); err == nil {
+			t.Fatalf("accepted unsafe subdirectory %q", input)
+		}
+	}
+	got, err := canonicalProjectSubdirectory("services/api")
+	if err != nil || got != filepath.Join("services", "api") {
+		t.Fatalf("canonical subdirectory=%q err=%v", got, err)
 	}
 }
 

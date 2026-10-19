@@ -20,10 +20,14 @@ export function ExportButtons({
   engagementId,
   scan,
   onChanged,
+  publishing,
+  onTogglePublishing,
 }: {
   engagementId: string
   scan: ScanResult | null
   onChanged: () => void
+  publishing: boolean
+  onTogglePublishing: () => void
 }) {
   const [busy, setBusy] = useState<
     'sarif' | 'openvex' | 'spdx' | 'cyclonedx' | 'bundle' | 'sbom' | 'vex' | 'excel' | null
@@ -117,6 +121,9 @@ export function ExportButtons({
             the hero below. Report and export are secondary and tertiary. */}
         <Button size="sm" color="secondary" onClick={() => setBuilding(true)} iconLeading={File06}>
           Build report
+        </Button>
+        <Button size="sm" color="tertiary" onClick={onTogglePublishing} iconLeading={File06}>
+          {publishing ? 'Hide publishing' : 'Publish report'}
         </Button>
 
         {/* Export dropdown */}

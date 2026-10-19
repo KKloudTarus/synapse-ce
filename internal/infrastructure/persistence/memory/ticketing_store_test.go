@@ -43,6 +43,8 @@ func TestTicketStoreConformance(t *testing.T) {
 	storetest.ConcurrentCompletionConflict(t, store, f)
 	storetest.CanceledContext(t, store, f)
 	storetest.Dispatch(t, store, f)
+	storetest.StatusRefusalDoesNotGateTuple(t, store, f)
+	storetest.InboundTombstone(t, store, f)
 }
 
 func TestNewTicketStoreRequiresParents(t *testing.T) {
