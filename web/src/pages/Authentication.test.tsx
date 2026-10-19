@@ -73,6 +73,38 @@ describe('Authentication', () => {
     expect(screen.queryByText('Loading authentication settings…')).not.toBeInTheDocument()
   })
 
+  it('shows the missing-policy explanation while another read is still pending', async () => {
+    // The connections read lands, the policy answers 404 and the alerts read never settles.
+    // A page that waits for every read shows none of this.
+    mockedIdentityApi.policy.mockRejectedValue(new ApiError(404, 'not found', { code: 'not_found' }))
+    mockedIdentityApi.alerts.mockReturnValue(new Promise(() => {}) as never)
+    render(<Authentication enabled />)
+    expect(await screen.findByText(/has not been enabled for shared identity/)).toBeInTheDocument()
+    expect(screen.getByText('Primary identity')).toBeInTheDocument()
+    expect(screen.queryByText('Loading authentication settings…')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    // The section that has not answered says so for itself.
+    expect(screen.getByText('Loading recovery alerts…')).toBeInTheDocument()
+  })
+
+  it('re-enables the controls when a refresh after a save does not finish', async () => {
+    render(<Authentication enabled />)
+    await screen.findByText('Primary identity')
+    mockedIdentityApi.savePolicy.mockResolvedValue(undefined as never)
+    // The refresh that follows the save: one read fails, another never answers.
+    mockedIdentityApi.connections.mockRejectedValue(new ApiError(503, 'identity store unavailable'))
+    mockedIdentityApi.alerts.mockReturnValue(new Promise(() => {}) as never)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save policy' }))
+    await waitFor(() => expect(mockedIdentityApi.savePolicy).toHaveBeenCalled())
+    // Every control stays usable: a refresh that never completes must not disable the page.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Rehearse recovery' })).toBeEnabled())
+    expect(screen.getByRole('button', { name: 'Test alert' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Save policy' })).toBeEnabled()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('identity store unavailable')
+  })
+
   it('still reports a failure that is not the missing policy', async () => {
     mockedIdentityApi.connections.mockRejectedValue(new ApiError(503, 'identity store unavailable'))
     render(<Authentication enabled />)

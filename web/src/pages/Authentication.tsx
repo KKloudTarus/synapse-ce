@@ -36,10 +36,12 @@ function formatTime(value: string | null): string {
 
 export function Authentication({ enabled }: AuthenticationProps) {
   const auth = useOptionalAuth()
-  const [connections, setConnections] = useState<EnterpriseConnection[]>([])
+  // null means the read has not landed yet, which each section says for itself. One section
+  // still waiting must not hide the sections that have arrived.
+  const [connections, setConnections] = useState<EnterpriseConnection[] | null>(null)
   const [policy, setPolicy] = useState<IdentityPolicy | null>(null)
-  const [policyDeclared, setPolicyDeclared] = useState(true)
-  const [alerts, setAlerts] = useState<RecoveryAlert[]>([])
+  const [policyDeclared, setPolicyDeclared] = useState<boolean | null>(null)
+  const [alerts, setAlerts] = useState<RecoveryAlert[] | null>(null)
   const [draft, setDraft] = useState<ConnectionDraft>(emptyDraft)
   const [membershipId, setMembershipId] = useState('')
   const [personId, setPersonId] = useState('')
@@ -66,10 +68,10 @@ export function Authentication({ enabled }: AuthenticationProps) {
     // and its connections still have to be visible and administrable. A read that fails
     // is reported the moment it fails, so its Retry is reachable while another read is
     // still outstanding and the client has no deadline of its own.
-    let pending = 3
+    // The page stops being blank as soon as the first read lands. Each section renders its
+    // own state after that, so a read that never answers cannot hide the rest of the page.
     const settled = () => {
-      pending -= 1
-      if (pending === 0 && current()) setLoading(false)
+      if (current()) setLoading(false)
     }
     const report = (cause: unknown) => {
       if (!current() || (cause instanceof DOMException && cause.name === 'AbortError')) return
@@ -107,9 +109,11 @@ export function Authentication({ enabled }: AuthenticationProps) {
       })
       .catch(report)
       .finally(settled)
-    // Each read already absorbs its own failure, so this waits for the page to be whole
-    // without ever rejecting. A save refreshes through it and keeps its own ordering.
-    await Promise.all([connectionRead, policyRead, alertRead])
+    // Nothing awaits all three. A refresh after a save must not leave its controls disabled
+    // because one read never answers, so each read updates its own section as it lands.
+    void connectionRead
+    void policyRead
+    void alertRead
   }, [])
 
   useEffect(() => {
@@ -132,7 +136,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
     try {
       await action()
       setNotice(success)
-      if (refresh) await load()
+      if (refresh) void load()
     } catch (cause) {
       setError(messageFor(cause, 'Authentication settings update failed. Reload and try again.'))
       if (cause instanceof ApiError && cause.status === 409) void load()
@@ -165,7 +169,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
     try {
       await identityApi.savePolicy(prior, bootstrapProof ?? undefined)
       setNotice('Sign-in requirement saved.')
-      await load()
+      void load()
     } catch (cause) {
       setPolicy(prior)
       setError(messageFor(cause, 'Could not save the sign-in requirement.'))
@@ -229,7 +233,8 @@ export function Authentication({ enabled }: AuthenticationProps) {
           <section aria-labelledby="policy-heading" className="rounded-lg border border-secondary p-5">
             <h2 id="policy-heading" className="text-lg font-semibold text-primary">Sign-in requirement</h2>
             <p className="mt-1 text-sm text-secondary">Required mode admits browser sessions only after approved organization SSO.</p>
-            {!policyDeclared ? <p className="mt-2 text-sm text-secondary">This organization has not been enabled for shared identity, so it has no sign-in requirement to change yet. Connections below can still be prepared and tested.</p> : null}
+            {policyDeclared === null ? <p className="mt-2 text-sm text-secondary">Loading the sign-in requirement…</p> : null}
+            {policyDeclared === false ? <p className="mt-2 text-sm text-secondary">This organization has not been enabled for shared identity, so it has no sign-in requirement to change yet. Connections below can still be prepared and tested.</p> : null}
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'optional'} onChange={() => setPolicy((current) => current && { ...current, requirement: 'optional' })} /> Optional</label>
               <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'required'} onChange={() => setPolicy((current) => current && { ...current, requirement: 'required' })} /> Required</label>
@@ -246,9 +251,9 @@ export function Authentication({ enabled }: AuthenticationProps) {
 
           <section aria-labelledby="connections-heading" className="rounded-lg border border-secondary p-5">
             <h2 id="connections-heading" className="text-lg font-semibold text-primary">Approved connections</h2>
-            {connections.length === 0 ? <p className="mt-2 text-secondary">No approved connections yet.</p> : (
+            {connections === null ? <p className="mt-2 text-secondary">Loading connections…</p> : connections.length === 0 ? <p className="mt-2 text-secondary">No approved connections yet.</p> : (
               <ul className="mt-3 space-y-3">
-                {connections.map((connection) => (
+                {(connections ?? []).map((connection) => (
                   <li key={connection.id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-secondary p-3">
                     <span>
                       <strong>{connection.displayName}</strong>
@@ -295,9 +300,9 @@ export function Authentication({ enabled }: AuthenticationProps) {
 
           <section aria-labelledby="alerts-heading" className="rounded-lg border border-secondary p-5">
             <h2 id="alerts-heading" className="text-lg font-semibold text-primary">Recovery alerts</h2>
-            {alerts.length === 0 ? <p className="mt-2 text-secondary">No recovery alerts have been recorded.</p> : (
+            {alerts === null ? <p className="mt-2 text-secondary">Loading recovery alerts…</p> : alerts.length === 0 ? <p className="mt-2 text-secondary">No recovery alerts have been recorded.</p> : (
               <ul className="mt-3 space-y-2">
-                {alerts.map((alert) => <li key={alert.id} className="rounded border border-secondary p-3 text-sm text-secondary"><strong className="text-primary">{alert.state || 'pending'}</strong> · attempts {alert.attempts}/{alert.maxAttempts} · created {formatTime(alert.createdAt || null)}</li>)}
+                {(alerts ?? []).map((alert) => <li key={alert.id} className="rounded border border-secondary p-3 text-sm text-secondary"><strong className="text-primary">{alert.state || 'pending'}</strong> · attempts {alert.attempts}/{alert.maxAttempts} · created {formatTime(alert.createdAt || null)}</li>)}
               </ul>
             )}
           </section>
