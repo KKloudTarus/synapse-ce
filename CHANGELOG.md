@@ -24,6 +24,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- **Elasticsearch bulk sink verified against a real cluster (#1460).** An opt-in live contract suite (`SYNAPSE_TEST_ELASTIC_URL`, `SYNAPSE_TEST_ELASTIC_API_KEY`, optional `SYNAPSE_TEST_ELASTIC_CA` and `SYNAPSE_TEST_ELASTIC_INDEX`) delivers the three exported record shapes to a real Elasticsearch over TLS, reads each document back, and asserts the stored body and the cursor fields a consumer reads to detect a gap. The offline contract tests now also pin the documented bulk wire format, the `ApiKey` credential scheme, every transport and per-item status classification, and the inputs refused before a connection is opened. [SIEM streaming](docs/guide/siem-stream.md) documents the credential form (the base64 `encoded` field of `POST /_security/api_key`, not the bare key), the index-name rules, and how to run the suite.
+
 - Ticketing foundation: tenant-scoped project/engagement mappings, manual finding links, durable idempotent write intents, and a reusable write-intent state machine with explicit uncertain reconciliation (#1423).
 
 - Documentation publishing foundation: tenant-scoped document links and durable, idempotent publish/republish intents on the shared write-intent state machine. A link is the current state of one remote page (page ID, version, URL, content hash) and moves only forward; completing an intent writes its link atomically, never replaces a page's identity and never creates a second page for an existing link. Migration `0241` adds `document_links` and `document_intents` with RLS. No provider, route or UI yet (#1442).
