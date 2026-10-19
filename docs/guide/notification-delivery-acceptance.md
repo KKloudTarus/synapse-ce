@@ -606,7 +606,7 @@ $ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $READONLY_K
 403
 ```
 
-The route carries `rt.authz(userdom.PermAdminister, ...)` in
+The route carries `rt.authz(userdom.PermManageIntegrations, ...)` in
 `internal/adapter/httpapi/router.go`, and the hostile tenant harness covers the refusal
 paths. The same account's bell carries no badge, because the notices in this tenant are
 addressed to administrators.

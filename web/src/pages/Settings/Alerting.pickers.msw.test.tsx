@@ -111,7 +111,13 @@ describe('rule form pickers over the real client', () => {
     await screen.findByText('Rita Reader (70db0073427a1ec832d97b106a2295c1)')
     fireEvent.change(people, { target: { value: 'Rita' } })
     await waitFor(() => expect(asked.users.some((query) => query === 'Rita')).toBe(true))
-    await waitFor(() => expect(screen.queryByText('Operator (bootstrap admin) (operator)')).not.toBeInTheDocument())
+    // The picker empties its list on every query change, so the absence of the other person
+    // proves nothing until this picker has shown the answer the server sent.
+    const picker = within(people.closest('div') as HTMLElement)
+    expect(await picker.findByText('Rita Reader (70db0073427a1ec832d97b106a2295c1)')).toBeInTheDocument()
+    expect(picker.queryByText('Searching…')).not.toBeInTheDocument()
+    expect(picker.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Operator (bootstrap admin) (operator)')).not.toBeInTheDocument()
   })
 
   it('lists engagements with their ids', async () => {
