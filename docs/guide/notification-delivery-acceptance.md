@@ -559,3 +559,80 @@ Microsoft SMTP, mobile matrix or screen-reader certification is claimed.
 Only Teams/PagerDuty remain deferred. Issue ownership and the existing #1418/#1419
 integration closures are unchanged. This PR keeps `Refs` where an issue's complete
 cross-provider acceptance includes those deferrals; it does not close #1420 or #1576.
+
+## Personal inbox and bell state matrix on 2026-10-18
+
+The light/dark/state matrix the section above records as missing, for the notification bell
+and the inbox page (#1417). Every capture comes from the console in Chromium against an
+API serving PostgreSQL, authenticated as the bootstrap administrator and as a separate
+read-only operator. The notices in the list are the real administrator notices the product
+raised when a webhook destination was created and then moved, so the inbox content is
+product output rather than seeded rows. The dark captures and the deep-link journey were
+taken on 2026-10-19 against the same stack, with fresh notices raised the same way.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| Inbox list, bell carrying two unread | [Light](assets/ui/ws4-console/inbox-list-light.png) | [Dark](assets/ui/ws4-console/inbox-list-dark.png) |
+| Transport failure while loading the list | [Light](assets/ui/ws4-console/inbox-error-light.png) | [Dark](assets/ui/ws4-console/inbox-error-dark.png) |
+| Unread-only filter | [Light](assets/ui/ws4-console/inbox-unread-filter-light.png) | |
+| Loading, request outstanding | [Light](assets/ui/ws4-console/inbox-loading-light.png) | [Dark](assets/ui/ws4-console/inbox-loading-dark.png) |
+| Unread list before Mark all read | | [Dark](assets/ui/ws4-console/inbox-unread-list-dark.png) |
+| The list straight after Mark all read | | [Dark](assets/ui/ws4-console/inbox-mark-all-dark.png) |
+| Unread empty after Mark all read | [Light](assets/ui/ws4-console/inbox-mark-all-empty-light.png) | [Dark](assets/ui/ws4-console/inbox-empty-dark.png) |
+| Bell with no badge after Mark all read | [Light](assets/ui/ws4-console/inbox-after-mark-all-bell-light.png) | |
+| A second operator's own empty inbox | [Light](assets/ui/ws4-console/inbox-reader-empty-light.png) | [Dark](assets/ui/ws4-console/inbox-reader-empty-dark.png) |
+| A notice about to be opened | [Light](assets/ui/ws4-console/inbox-deep-link-source-light.png) | [Dark](assets/ui/ws4-console/inbox-deep-link-source-dark.png) |
+| Where its own link lands | [Light](assets/ui/ws4-console/inbox-deep-link-destination-light.png) | [Dark](assets/ui/ws4-console/inbox-deep-link-destination-dark.png) |
+| The same destination for a reader | [Light](assets/ui/ws4-console/inbox-deep-link-denied-light.png) | [Dark](assets/ui/ws4-console/inbox-deep-link-denied-dark.png) |
+| 390-pixel viewport | [Light](assets/ui/ws4-console/inbox-mobile-light.png) | |
+
+How each state was produced, since a state that cannot be reproduced is not evidence:
+
+- The loading capture delays the real `GET /api/v1/me/inbox` by six seconds and screenshots
+  while it is outstanding. The response is the server's own.
+- The error capture aborts that request at the transport, which is what a dropped connection
+  looks like to the browser. No response body is substituted.
+- The empty capture is the state after the page's own Mark all read, with the unread filter
+  on. The bell capture that follows it is a fresh load of the same account.
+- The second operator is a real `readonly` user with their own API key, so their empty inbox
+  is the product's per-user scoping rather than a filtered view.
+- The deep-link journey clicks a notice in the list. The row names `/settings/alerting`,
+  the console navigates there, and the destination capture is that screen. The light
+  capture is taken with the notice unread; the dark one was taken after the light journey
+  had already read it, so it carries no unread badge. The notice itself was raised by
+  creating and then moving a webhook destination through `POST` and
+  `PATCH /api/v1/notifications/channels`, so the link target is the screen the event came
+  from.
+
+### Where authorization is refused in this journey
+
+`GET /api/v1/me/inbox` carries `PermView` and returns only the caller's own rows. Every
+human role in this tenant holds that permission, so no human reaches a denial on the inbox
+page: a `readonly` operator reaches their own list and finds it empty, which the capture
+above shows. A machine principal is refused, and
+`TestInboxRoutesRejectSpoofedIdentityAndMachineRoles` covers that, with no console state to
+capture because an agent has no browser session.
+
+The refusal a person can see in this journey is at the destination a notice links to. The
+`readonly` operator opening `/settings/alerting` gets the administrator-access screen:
+
+> Administrator access required. Only tenant administrators and integration administrators
+> can manage notification settings and delivery history.
+
+That screen is the client role gate: `Alerting.tsx` calls `load()` only when
+`canManageIntegrations(me.role)` is true, so this navigation issues no rules request. The
+server refuses the same read independently, which is a separate observation against the
+running API:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $READONLY_KEY" \
+    http://127.0.0.1:18080/api/v1/notifications/rules
+403
+```
+
+The captures in the row above are the client-side state, in both themes.
+
+One copy defect is visible in the error captures: the message names port 8080
+("Cannot reach the API. Is the server running on :8080?") even when the console reaches the
+API through another origin. It is recorded here rather than changed, because the string is
+shared by every page's error surface and belongs in its own change.
