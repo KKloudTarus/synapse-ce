@@ -1,0 +1,129 @@
+{
+  "scope_status": "historical before review remediation; see README.md and review-remediation.md for current acceptance and checks",
+  "comparison": "origin/main...af613d76b668fd2d747f4d1eea152a0e120924e7",
+  "upgrade_assumption": "Single migrate-first upgrade from the current main schema at 0241; applications and workers stopped during schema migration. B07 tables newly created in this same upgrade have no application rows yet. Incremental deployment of intermediate B07 revisions can invalidate the empty-table assumption.",
+  "migrations": [
+    {
+      "migration": "0242",
+      "pre_existing": [
+        "ticket_mappings",
+        "notification_events"
+      ],
+      "work": "ticket_mappings constant-default columns, CHECK validation and partial index; CREATE TRIGGER on notification_events; ticket_auto_push_receipts is new and not backfilled"
+    },
+    {
+      "migration": "0243",
+      "pre_existing": [
+        "ticket_mappings"
+      ],
+      "work": "mapping grouping columns/CHECK validation; new ticket_groups and ticket_group_members"
+    },
+    {
+      "migration": "0244",
+      "pre_existing": [
+        "ticket_mappings"
+      ],
+      "work": "mapping JSONB default and CHECK validation; new ticket_status_sync"
+    },
+    {
+      "migration": "0245",
+      "pre_existing": [],
+      "work": "new-in-batch ticket_groups column/CHECK"
+    },
+    {
+      "migration": "0246",
+      "pre_existing": [],
+      "work": "new-in-batch ticket_status_sync column/CHECK, UPDATE backfill, NOT NULL validation and replacement partial index"
+    },
+    {
+      "migration": "0247",
+      "pre_existing": [],
+      "work": "new-in-batch ticket_status_sync column/CHECK"
+    },
+    {
+      "migration": "0248",
+      "pre_existing": [],
+      "work": "new ticket_external_observations, ticket_retest_proposals and ticket_external_comments; new indexes and RLS"
+    },
+    {
+      "migration": "0249",
+      "pre_existing": [],
+      "work": "new ticket_inbound_config and runtime provisioning/rotation functions; no existing-row migration"
+    },
+    {
+      "migration": "0250",
+      "pre_existing": [],
+      "work": "new-in-batch inbound tables column/CHECK/FK validation; referenced integrations can take brief FK DDL relation locks"
+    },
+    {
+      "migration": "0251",
+      "pre_existing": [
+        "ticket_intents"
+      ],
+      "work": "new progress table and index populated from all done/create intents with remote IDs; explicit SHARE ROW EXCLUSIVE followed by NO FORCE RLS takes ACCESS EXCLUSIVE held through transaction; four FK checks for each copied row (tenant plus intent, mapping and finding); new trigger"
+    },
+    {
+      "migration": "0252",
+      "pre_existing": [
+        "document_links",
+        "document_intents"
+      ],
+      "work": "nullable retired_at column; replace/revalidate action and link-action CHECK constraints; new document_commands"
+    },
+    {
+      "migration": "0253",
+      "pre_existing": [],
+      "work": "new authorization function only"
+    },
+    {
+      "migration": "0254",
+      "pre_existing": [
+        "document_intents"
+      ],
+      "work": "conditionally validate/add correlation-marker CHECK if absent; existing valid marker constraint makes this a no-op"
+    },
+    {
+      "migration": "0255",
+      "pre_existing": [],
+      "work": "replace authorization function only"
+    },
+    {
+      "migration": "0256",
+      "pre_existing": [
+        "engagements"
+      ],
+      "work": "ordinary partial B-tree index on existing engagements; column/CHECK/index on new-in-batch document_commands"
+    },
+    {
+      "migration": "0257",
+      "pre_existing": [],
+      "work": "new document_schedules, document_schedule_occurrences and document_schedule_deliveries with indexes, FK constraints and RLS"
+    },
+    {
+      "migration": "0258",
+      "pre_existing": [
+        "ticket_intents"
+      ],
+      "work": "ordinary partial covering B-tree index on existing ticket_intents; second index on new-in-batch ticket_external_comments"
+    },
+    {
+      "migration": "0259",
+      "pre_existing": [],
+      "work": "two ordinary partial indexes on new-in-batch schedule tables"
+    },
+    {
+      "migration": "0260",
+      "pre_existing": [
+        "scan_jobs"
+      ],
+      "work": "constant-default purpose column, CHECK validation, immutable-purpose trigger, ordinary partial B-tree index; ACCESS EXCLUSIVE retained through transaction"
+    }
+  ],
+  "general_lock_note": "New tables with foreign keys also take DDL relation locks on referenced pre-existing tables; new/empty describes row volume, not an absence of locks.",
+  "not_measured": [
+    "0242-0244 mapping validation/index at production mapping cardinality",
+    "0252/0254 document-intent CHECK validation at production cardinality",
+    "incremental upgrade with populated intermediate B07 tables",
+    "lock acquisition behind long-running transactions or replica lag"
+  ]
+}

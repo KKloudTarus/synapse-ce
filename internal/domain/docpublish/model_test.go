@@ -239,6 +239,39 @@ func TestSameCommandIgnoresServerIssuedIdentity(t *testing.T) {
 	}
 }
 
+func TestPurgeRetiresExistingLinkAndResumableIsDocumentLocal(t *testing.T) {
+	link := validLink()
+	purge := pendingIntent("purge-1")
+	purge.Action, purge.LinkID = Purge, link.ID
+	lease := t0.Add(time.Minute)
+	claimed, err := purge.Apply(IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := claimed.Apply(IntentTransition{Event: writeintent.Acknowledge, Remote: page(link.RemoteVersion)}, t0.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired, changed, err := done.Complete(&link)
+	if err != nil || !changed || retired.RetiredAt == nil || retired.RemotePageID != link.RemotePageID || retired.RemoteVersion != link.RemoteVersion {
+		t.Fatalf("purge completion=%+v changed=%t err=%v", retired, changed, err)
+	}
+	if _, _, err := done.Complete(&retired); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("second purge err=%v, want conflict", err)
+	}
+	uncertain, err := claimed.Apply(IntentTransition{Event: writeintent.Ambiguous}, t0.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := uncertain.Apply(IntentTransition{Event: ReconcileResumable, Resumable: true}, t0.Add(2*time.Second))
+	if err != nil || resumed.State != writeintent.Pending {
+		t.Fatalf("resumed=%+v err=%v", resumed, err)
+	}
+	if _, err := uncertain.Apply(IntentTransition{Event: ReconcileResumable}, t0.Add(2*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("unproven resume err=%v, want conflict", err)
+	}
+}
+
 func TestApplyFollowsTheSharedStateMachine(t *testing.T) {
 	intent := pendingIntent("i-1")
 	lease := t0.Add(time.Minute)

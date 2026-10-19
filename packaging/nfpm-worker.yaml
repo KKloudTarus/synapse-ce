@@ -33,6 +33,12 @@ overrides:
       - systemd
 
 contents:
+  - src: ./internal/infrastructure/report/assets/LiberationSans-LICENSE.txt
+    dst: /usr/share/licenses/synapse-ce/LiberationSans-LICENSE.txt
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
   - src: ./dist/worker/
     dst: /opt/synapse/
     file_info:

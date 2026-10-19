@@ -62,3 +62,71 @@ type TicketDispatchStore interface {
 	RetryIntentAudited(context.Context, shared.ID, shared.ID, int, time.Time, AuditEntry) (ticketing.Intent, error)
 	ResetBreaker(context.Context, shared.ID, shared.ID, string, string, AuditEntry) error
 }
+
+// TicketAutoPushEvent is a durable finding status change projected from the
+// transactional notification source. It is intentionally narrower than a
+// notification feed: consumers resume through durable per-event receipts.
+type TicketAutoPushEvent struct {
+	ID           shared.ID
+	OccurredAt   time.Time
+	EngagementID shared.ID
+	FindingID    shared.ID
+	ToStatus     string
+}
+
+// TicketAutoPushStore is an optional extension implemented by durable ticket
+// stores. Its receipt is per immutable event, not a time cursor: source events
+// can be projected late or carry an older occurrence timestamp.
+type TicketAutoPushStore interface {
+	ListAutoPushEvents(context.Context, shared.ID, time.Time, int) ([]TicketAutoPushEvent, error)
+	CompleteAutoPushEvent(context.Context, shared.ID, TicketAutoPushEvent, time.Time) error
+	DeferAutoPushEvent(context.Context, shared.ID, TicketAutoPushEvent, time.Time) error
+}
+
+// TicketGroup is a durable reservation for a vulnerability/project ticket. Its
+// destination facts are copied at reservation time: a later mapping edit must
+// never silently write to a ticket created for a different Jira destination.
+type TicketGroup struct {
+	ID            shared.ID
+	TenantID      shared.ID
+	MappingID     shared.ID
+	ProjectID     shared.ID
+	Vulnerability string
+	IntegrationID shared.ID
+	Endpoint      string
+	ProjectKey    string
+	IssueType     string
+	SecurityLevel string
+	IntentID      shared.ID
+	Remote        ticketing.RemoteTicket
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	Revision      int
+}
+
+type TicketGroupMember struct {
+	EngagementID shared.ID
+	FindingID    shared.ID
+}
+
+// TicketGroupStore is deliberately a narrow extension: it reserves a group and
+// its first durable command atomically. A pending or uncertain command remains
+// the reservation, so a rescan cannot create a second remote ticket.
+type TicketGroupStore interface {
+	GetTicketGroup(context.Context, shared.ID, shared.ID, shared.ID, string) (TicketGroup, bool, error)
+	CreateOrGetGroupedIntent(context.Context, shared.ID, TicketGroup, TicketGroupMember, ticketing.Intent, AuditEntry) (ticketing.Intent, bool, error)
+	CompleteGroupedIntent(context.Context, shared.ID, shared.ID, ticketing.RemoteTicket, time.Time) error
+	ValidateTicketGroupDestination(context.Context, shared.ID, TicketGroup) error
+}
+
+// TicketStatusTarget is an existing provider ticket whose originating command
+// proves its mapping and immutable destination. Manual links intentionally do
+// not appear here.
+type TicketStatusTarget struct {
+	Mapping ticketing.Mapping
+	Intent  ticketing.Intent
+}
+
+type TicketStatusStore interface {
+	ListTicketStatusTargets(context.Context, shared.ID, int) ([]TicketStatusTarget, error)
+}

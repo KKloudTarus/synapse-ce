@@ -35,6 +35,7 @@ import (
 )
 
 type notificationWorkerRuntime struct {
+	service         *notificationuc.Service
 	handlers        map[string]worker.Handler
 	maintenance     []func(context.Context)
 	metricsRegistry *prometheus.Registry
@@ -137,7 +138,7 @@ func configureNotificationWorkerRuntime(
 		notificationService.SetConsoleLinkBuilder(builder)
 	}
 
-	runtime := notificationWorkerRuntime{handlers: make(map[string]worker.Handler, len(notificationWorkerKinds())), close: func() {}}
+	runtime := notificationWorkerRuntime{service: notificationService, handlers: make(map[string]worker.Handler, len(notificationWorkerKinds())), close: func() {}}
 	if cfg.MetricsEnabled {
 		metrics := observability.NewWorkerNotificationMetrics(postgres.NewNotificationRepository(pool))
 		runtime.metricsRegistry = metrics.Registry()

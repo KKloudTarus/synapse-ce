@@ -41,6 +41,9 @@ func NewScanJobStore(pool *pgxpool.Pool) *ScanJobStore { return &ScanJobStore{po
 var _ ports.ScanJobStore = (*ScanJobStore)(nil)
 
 func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error {
+	if err := validatePostgresScanJobPurpose(j.Purpose); err != nil {
+		return err
+	}
 	outcomes, err := encodeScanJobEngineOutcomes(j)
 	if err != nil {
 		return err
@@ -56,9 +59,9 @@ func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error
 	// A notification snapshot is admission evidence for a successful terminal
 	// transition only. Never let a caller seed it on a running job.
 	snapshot := []byte("{}")
-	_, err = r.execSourceJob(ctx, j, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes, snapshot)
+	_, err = r.execSourceJob(ctx, j, `INSERT INTO scan_jobs (id, engagement_id, target, kind, purpose, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		j.ID, j.EngagementID, j.Target, j.Kind, j.Purpose, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes, snapshot)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -71,6 +74,9 @@ func (r *ScanJobStore) CreateRunning(ctx context.Context, j ports.ScanJob) error
 
 // Save upserts a scan job (used on create and on every stage/status update).
 func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
+	if err := validatePostgresScanJobPurpose(j.Purpose); err != nil {
+		return err
+	}
 	outcomes, err := encodeScanJobEngineOutcomes(j)
 	if err != nil {
 		return err
@@ -94,16 +100,16 @@ func (r *ScanJobStore) Save(ctx context.Context, j ports.ScanJob) error {
 	// correction, while refusing to create one for a failed first write.
 	snapshot := []byte("{}")
 	_, err = r.execSourceJob(ctx, j,
-		`INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-		 ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
+		`INSERT INTO scan_jobs (id, engagement_id, target, kind, purpose, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		 ON CONFLICT (id) DO UPDATE SET purpose=EXCLUDED.purpose, status=EXCLUDED.status, stage=EXCLUDED.stage,
 		     progress=EXCLUDED.progress, error=EXCLUDED.error,
 		     finished_at=CASE WHEN scan_jobs.notification_snapshot <> '{}'::jsonb
 			     THEN scan_jobs.finished_at ELSE EXCLUDED.finished_at END,
 		     debug_events=EXCLUDED.debug_events, engine_outcomes=EXCLUDED.engine_outcomes,
 		     notification_snapshot=CASE WHEN scan_jobs.notification_snapshot <> '{}'::jsonb
 		         THEN scan_jobs.notification_snapshot ELSE EXCLUDED.notification_snapshot END`,
-		j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes, snapshot)
+		j.ID, j.EngagementID, j.Target, j.Kind, j.Purpose, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes, snapshot)
 	if err != nil {
 		return fmt.Errorf("save scan job: %w", err)
 	}
@@ -125,8 +131,8 @@ func (r *ScanJobStore) saveFailedNotification(ctx context.Context, j ports.ScanJ
 		return fmt.Errorf("%w: scan source tenant context does not match", shared.ErrValidation)
 	}
 	return WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
-		var previousStatus, storedEngagement, storedTarget, storedKind string
-		err := tx.QueryRow(ctx, `SELECT status,engagement_id,target,kind FROM scan_jobs WHERE id=$1 FOR UPDATE`, j.ID).Scan(&previousStatus, &storedEngagement, &storedTarget, &storedKind)
+		var previousStatus, storedEngagement, storedTarget, storedKind, storedPurpose string
+		err := tx.QueryRow(ctx, `SELECT status,engagement_id,target,kind,purpose FROM scan_jobs WHERE id=$1 FOR UPDATE`, j.ID).Scan(&previousStatus, &storedEngagement, &storedTarget, &storedKind, &storedPurpose)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
@@ -134,7 +140,7 @@ func (r *ScanJobStore) saveFailedNotification(ctx context.Context, j ports.ScanJ
 			if storedEngagement != j.EngagementID {
 				return fmt.Errorf("%w: failed scan job engagement does not match stored job", shared.ErrValidation)
 			}
-			j.Target, j.Kind = storedTarget, storedKind
+			j.Target, j.Kind, j.Purpose = storedTarget, storedKind, storedPurpose
 		}
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM engagements WHERE id=$1 AND tenant_id=$2)`, j.EngagementID, tenant).Scan(&exists); err != nil {
@@ -143,12 +149,12 @@ func (r *ScanJobStore) saveFailedNotification(ctx context.Context, j ports.ScanJ
 		if !exists {
 			return fmt.Errorf("scan engagement %s: %w", j.EngagementID, shared.ErrNotFound)
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'{}'::jsonb)
+		_, err = tx.Exec(ctx, `INSERT INTO scan_jobs (id, engagement_id, target, kind, purpose, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'{}'::jsonb)
 			ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage, progress=EXCLUDED.progress,
 			error=EXCLUDED.error, finished_at=CASE WHEN scan_jobs.notification_snapshot <> '{}'::jsonb THEN scan_jobs.finished_at ELSE EXCLUDED.finished_at END,
 			debug_events=EXCLUDED.debug_events, engine_outcomes=EXCLUDED.engine_outcomes`,
-			j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes)
+			j.ID, j.EngagementID, j.Target, j.Kind, j.Purpose, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes)
 		if err != nil {
 			return err
 		}
@@ -202,27 +208,27 @@ func (r *ScanJobStore) saveTerminalSnapshot(ctx context.Context, j ports.ScanJob
 		// Lock the row being saved before examining a predecessor. The stored
 		// target/kind are authoritative for a job created by CreateRunning; a
 		// completion update must not change the comparison identity it carries.
-		var storedEngagement, storedTarget, storedKind string
+		var storedEngagement, storedTarget, storedKind, storedPurpose string
 		var storedSnapshot []byte
 		var frozen bool
-		err := tx.QueryRow(ctx, `SELECT engagement_id,target,kind,notification_snapshot,notification_snapshot <> '{}'::jsonb
-			FROM scan_jobs WHERE id=$1 FOR UPDATE`, j.ID).Scan(&storedEngagement, &storedTarget, &storedKind, &storedSnapshot, &frozen)
+		err := tx.QueryRow(ctx, `SELECT engagement_id,target,kind,purpose,notification_snapshot,notification_snapshot <> '{}'::jsonb
+			FROM scan_jobs WHERE id=$1 FOR UPDATE`, j.ID).Scan(&storedEngagement, &storedTarget, &storedKind, &storedPurpose, &storedSnapshot, &frozen)
 		switch {
 		case err == nil:
 			if storedEngagement != j.EngagementID {
 				return fmt.Errorf("%w: terminal scan job engagement does not match stored job", shared.ErrValidation)
 			}
 		case errors.Is(err, pgx.ErrNoRows):
-			storedEngagement, storedTarget, storedKind = j.EngagementID, j.Target, j.Kind
+			storedEngagement, storedTarget, storedKind, storedPurpose = j.EngagementID, j.Target, j.Kind, j.Purpose
 		default:
 			return err
 		}
 		// Completion metadata may be stale, but the created job owns the target
 		// identity used for both predecessor lookup and persistence.
-		j.Target, j.Kind = storedTarget, storedKind
+		j.Target, j.Kind, j.Purpose = storedTarget, storedKind, storedPurpose
 		upsert := func(snapshot []byte) error {
-			_, err = tx.Exec(ctx, `INSERT INTO scan_jobs (id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+			_, err = tx.Exec(ctx, `INSERT INTO scan_jobs (id, engagement_id, target, kind, purpose, status, stage, progress, error, started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 				ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, stage=EXCLUDED.stage,
 				progress=EXCLUDED.progress, error=EXCLUDED.error,
 				finished_at=CASE WHEN scan_jobs.notification_snapshot <> '{}'::jsonb
@@ -230,7 +236,7 @@ func (r *ScanJobStore) saveTerminalSnapshot(ctx context.Context, j ports.ScanJob
 				debug_events=EXCLUDED.debug_events, engine_outcomes=EXCLUDED.engine_outcomes,
 				notification_snapshot=CASE WHEN scan_jobs.notification_snapshot <> '{}'::jsonb
 					THEN scan_jobs.notification_snapshot ELSE EXCLUDED.notification_snapshot END`,
-				j.ID, j.EngagementID, j.Target, j.Kind, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes, snapshot)
+				j.ID, j.EngagementID, j.Target, j.Kind, j.Purpose, string(j.Status), j.Stage, j.Progress, j.Error, j.StartedAt, j.FinishedAt, debugEvents, sourcePackage, outcomes, snapshot)
 			return err
 		}
 		if frozen {
@@ -413,7 +419,7 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 	for _, tenantID := range tenants {
 		err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
 			rows, err := tx.Query(ctx,
-				`SELECT j.id, j.engagement_id, j.target, j.kind, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.debug_events, j.source_package, j.engine_outcomes, j.notification_snapshot
+				`SELECT j.id, j.engagement_id, j.target, j.kind, j.purpose, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.debug_events, j.source_package, j.engine_outcomes, j.notification_snapshot
 				 FROM scan_jobs j JOIN engagements e ON e.id=j.engagement_id
 				 WHERE e.tenant_id=$1 AND j.status='running' AND j.started_at < $2
 				 ORDER BY j.started_at, j.id COLLATE "C" LIMIT $3`, tenantID.String(), olderThan, limit)
@@ -428,7 +434,7 @@ func (r *ScanJobStore) ListStaleRunning(ctx context.Context, olderThan time.Time
 					finished *time.Time
 				)
 				var debugEvents, sourcePackage, outcomes, snapshot []byte
-				if err := rows.Scan(&item.Job.ID, &item.Job.EngagementID, &item.Job.Target, &item.Job.Kind, &status, &item.Job.Stage, &item.Job.Progress, &item.Job.Error, &item.Job.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes, &snapshot); err != nil {
+				if err := rows.Scan(&item.Job.ID, &item.Job.EngagementID, &item.Job.Target, &item.Job.Kind, &item.Job.Purpose, &status, &item.Job.Stage, &item.Job.Progress, &item.Job.Error, &item.Job.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes, &snapshot); err != nil {
 					return fmt.Errorf("scan stale scan job: %w", err)
 				}
 				item.TenantID = tenantID
@@ -474,9 +480,9 @@ func (r *ScanJobStore) GetJob(ctx context.Context, id string) (ports.ScanJob, er
 		snapshot      []byte
 	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot
+		`SELECT id, engagement_id, target, kind, purpose, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot
 		 FROM scan_jobs WHERE id=$1`, id).
-		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes, &snapshot)
+		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &j.Purpose, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.ScanJob{}, fmt.Errorf("scan job %s: %w", id, shared.ErrNotFound)
 	}
@@ -511,10 +517,10 @@ func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs [
 	}
 	// A LATERAL top-1 per engagement walks idx_scan_jobs_engagement once per id; DISTINCT ON over every
 	// job of every engagement sorted the whole set (an on-disk merge at tens of thousands of jobs).
-	rows, err := r.pool.Query(ctx, `SELECT j.id, j.engagement_id, j.target, j.kind, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.source_package, j.engine_outcomes, j.notification_snapshot
+	rows, err := r.pool.Query(ctx, `SELECT j.id, j.engagement_id, j.target, j.kind, j.purpose, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.source_package, j.engine_outcomes, j.notification_snapshot
 		FROM unnest($1::text[]) AS e(engagement_id)
 		JOIN LATERAL (
-			SELECT id, engagement_id, target, kind, status, stage, progress, error, started_at, finished_at, source_package, engine_outcomes, notification_snapshot
+			SELECT id, engagement_id, target, kind, purpose, status, stage, progress, error, started_at, finished_at, source_package, engine_outcomes, notification_snapshot
 			FROM scan_jobs WHERE engagement_id = e.engagement_id
 			ORDER BY started_at DESC, id DESC LIMIT 1
 		) j ON true`, ids)
@@ -528,7 +534,7 @@ func (r *ScanJobStore) LatestForEngagements(ctx context.Context, engagementIDs [
 		var status string
 		var finished *time.Time
 		var sourcePackage, outcomes, snapshot []byte
-		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &sourcePackage, &outcomes, &snapshot); err != nil {
+		if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &j.Purpose, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &sourcePackage, &outcomes, &snapshot); err != nil {
 			return nil, fmt.Errorf("scan latest scan job: %w", err)
 		}
 		j.Status, j.FinishedAt, j.DebugEvents = ports.ScanStatus(status), finished, []ports.ScanDebugEvent{}
@@ -557,9 +563,9 @@ func (r *ScanJobStore) LatestForEngagement(ctx context.Context, engagementID sha
 		snapshot      []byte
 	)
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, engagement_id, target, kind, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot
+		`SELECT id, engagement_id, target, kind, purpose, status, stage, progress, COALESCE(error,''), started_at, finished_at, debug_events, source_package, engine_outcomes, notification_snapshot
 		 FROM scan_jobs WHERE engagement_id=$1 ORDER BY started_at DESC LIMIT 1`, engagementID.String()).
-		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes, &snapshot)
+		Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &j.Purpose, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &sourcePackage, &outcomes, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.ScanJob{}, fmt.Errorf("scan job for %s: %w", engagementID, shared.ErrNotFound)
 	}
@@ -581,6 +587,108 @@ func (r *ScanJobStore) LatestForEngagement(ctx context.Context, engagementID sha
 		return ports.ScanJob{}, err
 	}
 	return j, nil
+}
+
+func (r *ScanJobStore) LatestProjectAnalysisForEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]ports.ScanJob, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return nil, fmt.Errorf("%w: tenant context is required for project analysis scan jobs", shared.ErrValidation)
+	}
+	ids := make([]string, len(engagementIDs))
+	for i, id := range engagementIDs {
+		ids[i] = id.String()
+	}
+	if len(ids) == 0 {
+		return map[shared.ID]ports.ScanJob{}, nil
+	}
+	out := make(map[shared.ID]ports.ScanJob, len(ids))
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT j.id, j.engagement_id, j.target, j.kind, j.purpose, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.source_package, j.engine_outcomes, j.notification_snapshot
+			FROM unnest($1::text[]) AS e(engagement_id)
+			JOIN LATERAL (
+				SELECT j.id, j.engagement_id, j.target, j.kind, j.purpose, j.status, j.stage, j.progress, j.error, j.started_at, j.finished_at, j.source_package, j.engine_outcomes, j.notification_snapshot
+				FROM scan_jobs j JOIN engagements owner ON owner.id=j.engagement_id
+				WHERE j.engagement_id=e.engagement_id AND owner.tenant_id=$2 AND j.purpose <> 'project_source'
+				ORDER BY j.started_at DESC, j.id DESC LIMIT 1
+			) j ON true`, ids, tenantID.String())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				j                          ports.ScanJob
+				status                     string
+				finished                   *time.Time
+				source, outcomes, snapshot []byte
+			)
+			if err := rows.Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &j.Purpose, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &source, &outcomes, &snapshot); err != nil {
+				return fmt.Errorf("scan latest project analysis job: %w", err)
+			}
+			j.Status, j.FinishedAt, j.DebugEvents = ports.ScanStatus(status), finished, []ports.ScanDebugEvent{}
+			if err := decodeScanJobEngineOutcomes(outcomes, &j); err != nil {
+				return err
+			}
+			if err := decodeScanJobSource(source, &j); err != nil {
+				return err
+			}
+			if err := decodeScanJobNotificationSnapshot(snapshot, &j); err != nil {
+				return err
+			}
+			out[shared.ID(j.EngagementID)] = j
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list latest project analysis scan jobs: %w", err)
+	}
+	return out, nil
+}
+
+func (r *ScanJobStore) LatestProjectAnalysisForEngagement(ctx context.Context, engagementID shared.ID) (ports.ScanJob, error) {
+	tenantID, ok := shared.TenantFrom(ctx)
+	if !ok || tenantID.IsZero() {
+		return ports.ScanJob{}, fmt.Errorf("%w: tenant context is required for project analysis scan job", shared.ErrValidation)
+	}
+	var (
+		j                                       ports.ScanJob
+		status                                  string
+		finished                                *time.Time
+		debugEvents, source, outcomes, snapshot []byte
+	)
+	err := WithTenant(ctx, r.pool, tenantID.String(), func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT j.id, j.engagement_id, j.target, j.kind, j.purpose, j.status, j.stage, j.progress, COALESCE(j.error,''), j.started_at, j.finished_at, j.debug_events, j.source_package, j.engine_outcomes, j.notification_snapshot
+			FROM scan_jobs j JOIN engagements owner ON owner.id=j.engagement_id
+			WHERE j.engagement_id=$1 AND owner.tenant_id=$2 AND j.purpose <> 'project_source' ORDER BY j.started_at DESC, j.id DESC LIMIT 1`, engagementID.String(), tenantID.String()).
+			Scan(&j.ID, &j.EngagementID, &j.Target, &j.Kind, &j.Purpose, &status, &j.Stage, &j.Progress, &j.Error, &j.StartedAt, &finished, &debugEvents, &source, &outcomes, &snapshot)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ports.ScanJob{}, fmt.Errorf("project analysis scan job: %w", shared.ErrNotFound)
+	}
+	if err != nil {
+		return ports.ScanJob{}, fmt.Errorf("load latest project analysis scan job: %w", err)
+	}
+	j.Status, j.FinishedAt = ports.ScanStatus(status), finished
+	if err := decodeScanDebugEvents(debugEvents, &j); err != nil {
+		return ports.ScanJob{}, err
+	}
+	if err := decodeScanJobSource(source, &j); err != nil {
+		return ports.ScanJob{}, err
+	}
+	if err := decodeScanJobEngineOutcomes(outcomes, &j); err != nil {
+		return ports.ScanJob{}, err
+	}
+	if err := decodeScanJobNotificationSnapshot(snapshot, &j); err != nil {
+		return ports.ScanJob{}, err
+	}
+	return j, nil
+}
+
+func validatePostgresScanJobPurpose(purpose string) error {
+	if purpose == "" || purpose == ports.ScanPurposeProjectSource {
+		return nil
+	}
+	return fmt.Errorf("%w: invalid scan job purpose", shared.ErrValidation)
 }
 
 func encodeScanJobSource(job ports.ScanJob) ([]byte, error) {

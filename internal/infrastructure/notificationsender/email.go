@@ -71,6 +71,10 @@ func (s *Sender) sendSMTP(ctx context.Context, destination, title, summary strin
 }
 
 func (s *Sender) sendSMTPPartsWithConfig(ctx context.Context, relay SMTPConfig, destination, title, textBody, htmlBody, unsubscribeURL string, messageID shared.ID) ports.NotificationSendResult {
+	return s.sendSMTPMessageWithConfig(ctx, relay, destination, title, textBody, htmlBody, unsubscribeURL, messageID, nil, nil)
+}
+
+func (s *Sender) sendSMTPMessageWithConfig(ctx context.Context, relay SMTPConfig, destination, title, textBody, htmlBody, unsubscribeURL string, messageID shared.ID, document *ports.DocumentPDFMail, ambiguous *bool) ports.NotificationSendResult {
 	if strings.TrimSpace(relay.Host) == "" || strings.TrimSpace(relay.From) == "" {
 		return ports.NotificationSendResult{ErrorCode: "smtp_not_configured"}
 	}
@@ -92,6 +96,12 @@ func (s *Sender) sendSMTPPartsWithConfig(ctx context.Context, relay SMTPConfig, 
 	body, err := smtpMessage(from.Address, destination, title, textBody, htmlBody, unsubscribeURL, mailID, s.now())
 	if err != nil {
 		return ports.NotificationSendResult{ErrorCode: "smtp_message_invalid"}
+	}
+	if document != nil {
+		body, err = attachDocumentPDF(body, *document)
+		if err != nil {
+			return ports.NotificationSendResult{ErrorCode: "smtp_attachment_invalid"}
+		}
 	}
 	address := net.JoinHostPort(relay.Host, strconv.Itoa(relay.Port))
 	conn, err := s.dial(ctx, "tcp", address)
@@ -146,6 +156,14 @@ func (s *Sender) sendSMTPPartsWithConfig(ctx context.Context, relay SMTPConfig, 
 	if err = client.Rcpt(destination); err != nil {
 		return smtpResult(err)
 	}
+	if document != nil {
+		if document.BeforeData == nil {
+			return ports.NotificationSendResult{ErrorCode: "release_guard_required"}
+		}
+		if err := document.BeforeData(ctx); err != nil {
+			return ports.NotificationSendResult{ErrorCode: "release_authority_changed"}
+		}
+	}
 	writer, err := client.Data()
 	if err != nil {
 		return smtpResult(err)
@@ -154,6 +172,9 @@ func (s *Sender) sendSMTPPartsWithConfig(ctx context.Context, relay SMTPConfig, 
 		err = writer.Close()
 	}
 	if err != nil {
+		if ambiguous != nil {
+			*ambiguous = true
+		}
 		return smtpResult(err)
 	}
 	// DATA's final 250 is the relay's acknowledgement. A disconnect during

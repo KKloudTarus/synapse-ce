@@ -33,7 +33,10 @@ jobs:
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
+    timeout-minutes: 240
     env:
+      # Two cold full-schema passes must fit without removing cleanup assertions.
+      GO_TEST_TIMEOUT: 90m
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${{ github.run_id }}
       POSTGRES_DB: synapse
@@ -85,10 +88,10 @@ jobs:
       - name: Test
         # Postgres integration packages share the configured database and reset schemas in
         # their fixtures. Serialize packages so one fixture cannot invalidate another mid-test.
-        run: go test -p 1 -count=1 ./...
+        run: go test -timeout "$GO_TEST_TIMEOUT" -p 1 -count=1 ./...
 
       - name: Test Postgres suite again on the same database
-        run: go test -count=1 ./internal/infrastructure/persistence/postgres
+        run: go test -timeout "$GO_TEST_TIMEOUT" -count=1 ./internal/infrastructure/persistence/postgres
 
       - name: Build (CGO disabled – distroless parity)
         run: CGO_ENABLED=0 go build ./cmd/...

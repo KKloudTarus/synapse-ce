@@ -1,0 +1,134 @@
+{
+  "scope": "Actual automatic Cloud Create, republish, scheduled update and purge through the Docker API/worker stack",
+  "recorded_at": "2026-10-17T17:03:07.120836+00:00",
+  "page_id": "131374",
+  "create": {
+    "id": "f3e76f0354063e2d2bac80bf4a766fea",
+    "action": "create",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "remote_url": "https://synapse-personal-lab.atlassian.net/wiki/spaces/SIL/pages/131374",
+    "remote_id": "131374",
+    "created_at": "2026-10-17T16:51:51.98858Z",
+    "updated_at": "2026-10-17T16:52:16.06266Z"
+  },
+  "republish": {
+    "id": "9b246b28accc6c8ba7d95484419028ec",
+    "link_id": "f3e76f0354063e2d2bac80bf4a766fea",
+    "action": "update",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "remote_url": "https://synapse-personal-lab.atlassian.net/wiki/spaces/SIL/pages/131374",
+    "remote_id": "131374",
+    "created_at": "2026-10-17T16:54:15.445493Z",
+    "updated_at": "2026-10-17T16:54:39.984937Z"
+  },
+  "manual_acl_repair": false,
+  "resume_used": false,
+  "restriction": {
+    "v2_state": "VIEW_RESTRICTED",
+    "v2_permissions": [
+      {
+        "operation": "update",
+        "principal": {
+          "principalType": "group",
+          "principalId": "fac0fd6a-a0cb-46ff-815d-44de6bc8aab6"
+        }
+      }
+    ],
+    "unfiltered_v2_next": null,
+    "read": {
+      "users": 0,
+      "groups": 1,
+      "group_ids": [
+        "fac0fd6a-a0cb-46ff-815d-44de6bc8aab6"
+      ],
+      "next_user": null,
+      "next_group": null
+    },
+    "update": {
+      "users": 0,
+      "groups": 1,
+      "group_ids": [
+        "fac0fd6a-a0cb-46ff-815d-44de6bc8aab6"
+      ],
+      "next_user": null,
+      "next_group": null
+    }
+  },
+  "content": {
+    "version": 4,
+    "evidence_chain_footer_present": true,
+    "raw_script_element_present": false
+  },
+  "schedule": [
+    {
+      "id": "schedule:502948a99b618a87b8fad78c2622dae8",
+      "due_at": "2026-10-17T16:59:00Z",
+      "state": "done",
+      "content_hash": "a7228356abf3ef04fb028b7b48ee81615c1663abab8cfc9820db4fba0c1a057a",
+      "remote_page_id": "131374",
+      "remote_version": 4,
+      "delivered_count": 0,
+      "uncertain_count": 0,
+      "failed_count": 0,
+      "updated_at": "2026-10-17T16:59:25.921202Z"
+    }
+  ],
+  "schedule_disabled": {
+    "http": 204,
+    "response": null,
+    "schedule_id": "36437d887b26963b885bb2f22129bb4b",
+    "version": 1
+  },
+  "unchanged_hash": true,
+  "pdf_downloads": [
+    {
+      "attachment_id": "att98616",
+      "bytes": 46590,
+      "sha256": "53707b878df18f81b3cf77e60b60400834c7563fb07253e674e06ff3adf23b03",
+      "pages": 1,
+      "authenticated_redirects_leak_prevented": true,
+      "public_pdf": "confluence-cloud-automatic-confirmed-report.pdf"
+    },
+    {
+      "attachment_id": "att164162",
+      "bytes": 46580,
+      "sha256": "85aaae83c5ce90c38c40973820700a1038b50600c099ac12d3ff001057f6ff17",
+      "pages": 1,
+      "authenticated_redirects_leak_prevented": true,
+      "public_pdf": "confluence-cloud-automatic-open-report.pdf"
+    },
+    {
+      "attachment_id": "att164156",
+      "bytes": 46580,
+      "sha256": "85aaae83c5ce90c38c40973820700a1038b50600c099ac12d3ff001057f6ff17",
+      "pages": 1,
+      "authenticated_redirects_leak_prevented": true,
+      "public_pdf": "confluence-cloud-automatic-open-report.pdf"
+    }
+  ],
+  "purge": {
+    "id": "dc672e6dbe0fd265ed370a3e0295ea79",
+    "link_id": "f3e76f0354063e2d2bac80bf4a766fea",
+    "action": "purge",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "remote_url": "https://synapse-personal-lab.atlassian.net/wiki/spaces/SIL/pages/131374",
+    "remote_id": "131374",
+    "created_at": "2026-10-17T17:02:17.640391Z",
+    "updated_at": "2026-10-17T17:02:27.201669Z"
+  },
+  "purged_readback_http": {
+    "current": 404,
+    "trash": 404,
+    "versions": 404,
+    "attachment_att98616": 404,
+    "attachment_att164162": 404,
+    "attachment_att164156": 404
+  },
+  "original_existing_pages": "Earlier assisted pages are separate historical evidence; this run does not imply their purge."
+}

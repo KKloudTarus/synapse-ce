@@ -71,6 +71,13 @@ func (c *capturePDF) Render(_ context.Context, _ *engagement.Engagement, fs []fi
 	return []byte("%PDF-1.7 fake"), nil
 }
 
+type timestampPDF struct{ generatedAt time.Time }
+
+func (c *timestampPDF) Render(_ context.Context, _ *engagement.Engagement, _ []finding.Finding, _ ports.ReportInsight, generatedAt time.Time, _ string) ([]byte, error) {
+	c.generatedAt = generatedAt
+	return []byte("%PDF-1.7 fake"), nil
+}
+
 // captureRenderer records the document it was handed so tests can assert assembly.
 type captureRenderer struct{ last ports.ReportDocument }
 
@@ -178,6 +185,20 @@ func TestRenderAssemblesFullDocument(t *testing.T) {
 	tbl := findTable(cap.last, "Findings Overview")
 	if tbl == nil || len(tbl.Rows) != 2 {
 		t.Fatalf("findings table should list 2 findings, got %v", tbl)
+	}
+}
+
+func TestBuildEngagementPublicationUsesOneStoredReportSnapshot(t *testing.T) {
+	svc, _ := newService(ports.ReportInsight{EvidenceCount: 1, EvidenceIntact: true, EvidenceHead: strings.Repeat("a", 64)}, sampleFindings())
+	publication, err := svc.BuildEngagementPublication(context.Background(), "", "e1")
+	if err != nil {
+		t.Fatalf("build publication: %v", err)
+	}
+	if len(publication.PDF) == 0 || publication.Digest == "" || publication.Document.Title != "acme-q3" {
+		t.Fatalf("incomplete publication: %+v", publication)
+	}
+	if publication.EvidenceHead != strings.Repeat("a", 64) || publication.HighestSeverity != shared.SeverityHigh {
+		t.Fatalf("source facts lost: %+v", publication)
 	}
 }
 
@@ -326,6 +347,21 @@ func TestGeneratePDFStillWorks(t *testing.T) {
 	}
 	if len(pdf) == 0 || sum == "" {
 		t.Fatal("empty PDF or seal")
+	}
+}
+
+func TestGeneratePDFWithoutScanUsesStoredEngagementTime(t *testing.T) {
+	stored := time.Date(2026, 10, 17, 8, 0, 0, 0, time.UTC)
+	pdf := &timestampPDF{}
+	svc := NewService(
+		fakeEngRepo{eng: &engagement.Engagement{ID: "e1", TenantID: "default", Name: "stored", Audit: shared.Audit{UpdatedAt: stored}}},
+		fakeFindingRepo{}, nil, nil, pdf, fakeInsight{}, fakeClock{}, "v1",
+	)
+	if _, _, err := svc.Generate(context.Background(), "", "e1"); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !pdf.generatedAt.Equal(stored) {
+		t.Fatalf("generated time = %s, want stored source time %s", pdf.generatedAt, stored)
 	}
 }
 

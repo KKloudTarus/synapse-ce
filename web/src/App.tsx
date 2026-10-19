@@ -32,6 +32,7 @@ const AssetCoverageView = lazy(() => import('./pages/Assets/AssetDetail').then(m
 const AssetHistory = lazy(() => import('./pages/Assets/AssetDetail').then(m => ({ default: m.AssetHistory })))
 const CodeQualityProjects = lazy(() => import('./pages/CodeQuality/CodeQualityProjects').then(m => ({ default: m.CodeQualityProjects })))
 const CodeQualityProject = lazy(() => import('./pages/CodeQuality/CodeQualityProject').then(m => ({ default: m.CodeQualityProject })))
+const ProjectSourceFindings = lazy(() => import('./pages/CodeQuality/ProjectSourceFindings').then(m => ({ default: m.ProjectSourceFindings })))
 const QualityGates = lazy(() => import('./pages/CodeQuality/QualityGates').then(m => ({ default: m.QualityGates })))
 const QualityProfiles = lazy(() => import('./pages/CodeQuality/QualityProfiles').then(m => ({ default: m.QualityProfiles })))
 const FleetCoverage = lazy(() => import('./pages/Fleet/FleetCoverage').then(m => ({ default: m.FleetCoverage })))
@@ -127,6 +128,7 @@ function Gate() {
           <Route index element={<ProjectOverviewPage />} />
           <Route path="hotspots" element={<SecurityHotspotsPage />} />
           <Route path="issues" element={<ProjectIssuesPage />} />
+          <Route path="source-findings" element={<ProjectSourceFindings />} />
           <Route path="code" element={<ProjectCodePage />} />
           <Route path="dependencies" element={<ProjectDependencyGraphPage />} />
           <Route path="measures" element={<ProjectMeasuresPage />} />

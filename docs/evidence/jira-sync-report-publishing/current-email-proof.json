@@ -1,0 +1,76 @@
+{
+  "recorded_at": "2026-10-18T13:58:13Z",
+  "source_revision": "49234988",
+  "scope": "Personal acceptance-lab scheduled PDF delivery through the existing verified email destination.",
+  "schedule": {
+    "frequency": "weekly",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "due_at": "2026-10-18T13:38:00Z",
+    "worker_state": "done",
+    "delivered_count": 2,
+    "failed_count": 0,
+    "uncertain_count": 0,
+    "content_hash": "7b64208feb40a96ad211581e5965586a24cb7ca3c88820af404d102e2f16aa78",
+    "disabled_after_run": true
+  },
+  "receipts": {
+    "gmail": {
+      "received": true,
+      "attachment_filename": "synapse-report-7b64208feb40a96a.pdf",
+      "attachment_opened": true,
+      "pdf_rendered": true,
+      "pdf_pages": 1,
+      "receipt_screenshot": {
+        "path": "current-email-gmail-receipt-attachment.jpg",
+        "sha256": "dd67e7aa9d23548fb7908eadcb6b938381ba64aa703029b34c7789937add6450",
+        "review": "A visually inspected crop of the Gmail receipt showing the scheduled attachment and the in-message Synapse deep link. The crop excludes provider account and recipient addresses."
+      }
+    },
+    "outlook": {
+      "received": true,
+      "attachment_filename": "synapse-report-7b64208feb40a96a.pdf",
+      "attachment_opened": false,
+      "receipt_screenshot": {
+        "path": "current-email-outlook-receipt-attachment.jpg",
+        "sha256": "249621f23557321c8ca69be435dac3c33fe535ec5236d478ad189e4e494af267",
+        "review": "A visually inspected Outlook receipt crop showing the received report message and visible PDF attachment. Provider account and recipient addresses were redacted."
+      },
+      "native_preview": "provider_preview_creation_error",
+      "normal_download": "provider_download_failed",
+      "whole_message_export": "normal Download as EML action was invoked; Outlook reported that it could not fetch the email content, and no EML or MSG file was made available to the local browser download paths, so attachment MIME bytes could not be parsed or hash-verified",
+      "whole_message_export_error_screenshot": {
+        "path": "current-email-outlook-eml-download-error.jpg",
+        "sha256": "223f378342e7f189bbfa8d1924c18d0860827c05bbb8673803337f025453e92f",
+        "review": "A visually inspected crop of the actual Outlook provider error. The crop excludes provider account and recipient addresses; OCR secret-pattern scan returned zero matches."
+      },
+      "attachment_preview_requested": true
+    }
+  },
+  "deep_link": {
+    "url": "https://localhost:8444/engagements/290ccb99f51df3c6251f96f849505ced",
+    "opened_without_tls_warning": true,
+    "result": "protected engagement route opened without a TLS warning; existing authorized local console sign-in then showed the matching engagement",
+    "screenshot": {
+      "path": "current-email-console-deeplink.jpg",
+      "sha256": "f3bc4b1061dd5ed5d528785c008bee347c514a03e1b8eba785a35f543d12afa9",
+      "review": "A visually inspected current console view of the engagement named by the received deep link."
+    }
+  },
+  "artifact": {
+    "path": "current-email-source-report.pdf",
+    "bytes": 47057,
+    "pages": 1,
+    "sha256": "d06519ac6591cf5c4d6db596903cda62bdbc866b73f90a7aeada554fd0f9d169",
+    "rendered_pages": [
+      {
+        "path": "current-email-source-report-page-1.jpg",
+        "sha256": "111f2c5da01dd57b3c3877b2e3645b9bb542fff4625f8c13550d49359333a529"
+      }
+    ],
+    "review": "The source PDF was retrieved after the completed schedule, all pages were visually inspected, and a secret scan found no private key, bearer credential, password assignment, cloud key, GitHub token, or webhook URL."
+  },
+  "limitations": [
+    "The Gmail and Outlook provider receipts carried the same scheduled-artifact filename, whose 16-hex suffix is the prefix of the worker run content hash. The public PDF is the post-run source rendering, not a browser-exported attachment byte stream.",
+    "Outlook opened the native attachment preview but the provider returned its own preview-creation error. Its normal attachment-download action then returned a provider download failure. The normal message-level Download as EML action was also attempted, but did not make an EML or MSG file available to the local browser download paths. No Outlook attachment-byte or rendered-Outlook-PDF claim is made."
+  ]
+}

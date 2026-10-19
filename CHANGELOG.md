@@ -7,6 +7,17 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Added
+
+- Jira Cloud and Data Center finding synchronization, Project vulnerability grouping,
+  proposal-only inbound status/comment observations, and bounded reconciliation.
+  Per-ticket refusals remain isolated from unrelated ticket creation.
+- Governed Confluence Cloud and Data Center PDF publication, update and permanent
+  unpublish with group-only sharing checks before content upload, periodic sharing
+  drift observations, and weekly PDF delivery to verified email destinations.
+  Delivery retains tenant permissions, legal holds, durable idempotency and an
+  explicit uncertain state when a remote acknowledgement is lost.
+
 ### Changed
 
 - A blocked or throttled Splunk sink now reads plainly in the console. The driver's own wording started with `splunk `, which the diagnostic scrubber treats as a credential marker, so "splunk rejected the credential" reached the operator as "[secret] the credential" (#1459).
@@ -16,6 +27,8 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 ### Added
 
 - **Splunk HEC sink verified against a real collector (#1459).** An opt-in live contract suite (`SYNAPSE_TEST_SPLUNK_URL`, `SYNAPSE_TEST_SPLUNK_TOKEN`, optionally `SYNAPSE_TEST_SPLUNK_ACK_TOKEN`, `SYNAPSE_TEST_SPLUNK_CA`, `SYNAPSE_TEST_SPLUNK_MGMT_URL`, `SYNAPSE_TEST_SPLUNK_MGMT_AUTH` and `SYNAPSE_TEST_SPLUNK_INDEX`) delivers the three exported record shapes to a real Splunk over TLS, searches them back through the management API, and exercises the indexer-acknowledgement receipt and poll. The offline contract tests now also pin the collector wire format, the `Splunk` credential scheme, every transport, HEC-code and poll classification, and the inputs refused before a connection is opened. [SIEM streaming](docs/guide/siem-stream.md) documents the token, the `use-ack` pairing and how to run the suite.
+
+- **Elasticsearch bulk sink verified against a real cluster (#1460).** An opt-in live contract suite (`SYNAPSE_TEST_ELASTIC_URL`, `SYNAPSE_TEST_ELASTIC_API_KEY`, optional `SYNAPSE_TEST_ELASTIC_CA` and `SYNAPSE_TEST_ELASTIC_INDEX`) delivers the three exported record shapes to a real Elasticsearch over TLS, reads each document back, and asserts the stored body and the cursor fields a consumer reads to detect a gap. The offline contract tests now also pin the documented bulk wire format, the `ApiKey` credential scheme, every transport and per-item status classification, and the inputs refused before a connection is opened. [SIEM streaming](docs/guide/siem-stream.md) documents the credential form (the base64 `encoded` field of `POST /_security/api_key`, not the bare key), the index-name rules, and how to run the suite.
 
 - Ticketing foundation: tenant-scoped project/engagement mappings, manual finding links, durable idempotent write intents, and a reusable write-intent state machine with explicit uncertain reconciliation (#1423).
 

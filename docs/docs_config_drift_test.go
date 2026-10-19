@@ -54,6 +54,11 @@ var classifiedEnv = map[string]string{
 	"SYNAPSE_TEST_SPLUNK_MGMT_URL":     "test-only: Splunk management origin the live contract searches through",
 	"SYNAPSE_TEST_SPLUNK_MGMT_AUTH":    "test-only: Splunk management credential for the live contract search",
 	"SYNAPSE_TEST_SPLUNK_INDEX":        "test-only: index the live Splunk contract searches",
+
+	"SYNAPSE_TEST_ELASTIC_URL":         "test-only: opts into the live Elasticsearch bulk contract",
+	"SYNAPSE_TEST_ELASTIC_API_KEY":     "test-only: API key for the live Elasticsearch bulk contract",
+	"SYNAPSE_TEST_ELASTIC_CA":          "test-only: private CA bundle for the live Elasticsearch cluster",
+	"SYNAPSE_TEST_ELASTIC_INDEX":       "test-only: index the live Elasticsearch contract writes to",
 	"SYNAPSE_LIVE_AI":                  "test-only: opts into live-provider AI tests",
 	"SYNAPSE_LIVE_LLM_TEST":            "test-only: opts into live LLM wire tests",
 	"SYNAPSE_K8S_INTEGRATION":          "test-only: opts into the kind-based Kubernetes suite",

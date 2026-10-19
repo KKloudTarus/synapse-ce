@@ -79,6 +79,18 @@ func TestGitAuthInjectsTokenViaAskpassNotArgv(t *testing.T) {
 		if strings.TrimSpace(string(got)) != token {
 			t.Fatalf("askpass emitted %q, want the token", strings.TrimSpace(string(got)))
 		}
+		username := exec.Command(askpass, "Username for 'https://ghe.example.com': ")
+		username.Env = append(os.Environ(), authEnv...)
+		got, err = username.Output()
+		if err != nil || string(got) != user {
+			t.Fatalf("username prompt received the wrong credential field: err=%v", err)
+		}
+		unknown := exec.Command(askpass, "Unrecognized authentication prompt")
+		unknown.Env = append(os.Environ(), authEnv...)
+		got, err = unknown.Output()
+		if err == nil || len(got) != 0 {
+			t.Fatal("unknown prompt disclosed a credential field")
+		}
 	}
 }
 
