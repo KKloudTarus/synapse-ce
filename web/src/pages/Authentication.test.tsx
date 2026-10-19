@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Authentication } from './Authentication'
 import { identityApi } from '../lib/api/identity'
@@ -59,6 +59,18 @@ describe('Authentication', () => {
     expect(await screen.findByText('Primary identity')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByText(/has not been enabled for shared identity/)).toBeInTheDocument()
+  })
+
+  it('surfaces a failed read and its retry while another read is still pending', async () => {
+    // The alert read never settles. A page that waits for every read would stay on its
+    // loading state with no way back, which is the regression this pins.
+    mockedIdentityApi.alerts.mockReturnValue(new Promise(() => {}) as never)
+    mockedIdentityApi.connections.mockRejectedValue(new ApiError(503, 'identity store unavailable'))
+    render(<Authentication enabled />)
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('identity store unavailable')
+    expect(within(alert).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.queryByText('Loading authentication settings…')).not.toBeInTheDocument()
   })
 
   it('still reports a failure that is not the missing policy', async () => {

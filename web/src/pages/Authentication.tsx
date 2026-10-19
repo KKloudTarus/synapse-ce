@@ -60,33 +60,56 @@ export function Authentication({ enabled }: AuthenticationProps) {
     loadController.current = controller
     setLoading(true)
     setError(null)
+    const current = () => generation.current === requestGeneration
     // Each read lands on its own. One unavailable part must not blank the page: an
     // organization that has not been declared for shared identity has no policy row yet,
-    // and its connections still have to be visible and administrable.
-    const [connectionResult, policyResult, alertResult] = await Promise.allSettled([
-      identityApi.connections(controller.signal),
-      identityApi.policy(controller.signal),
-      identityApi.alerts(controller.signal),
-    ])
-    if (generation.current !== requestGeneration) return
-    const failures: unknown[] = []
-    if (connectionResult.status === 'fulfilled') setConnections(connectionResult.value)
-    else failures.push(connectionResult.reason)
-    if (policyResult.status === 'fulfilled') {
-      setPolicy(policyResult.value)
-      setPolicyDeclared(true)
-    } else if (policyResult.reason instanceof ApiError && policyResult.reason.status === 404) {
-      // Not an error: this organization has not been declared for shared identity.
-      setPolicy(null)
-      setPolicyDeclared(false)
-    } else {
-      failures.push(policyResult.reason)
+    // and its connections still have to be visible and administrable. A read that fails
+    // is reported the moment it fails, so its Retry is reachable while another read is
+    // still outstanding and the client has no deadline of its own.
+    let pending = 3
+    const settled = () => {
+      pending -= 1
+      if (pending === 0 && current()) setLoading(false)
     }
-    if (alertResult.status === 'fulfilled') setAlerts(alertResult.value)
-    else failures.push(alertResult.reason)
-    const reported = failures.find((cause) => !(cause instanceof DOMException && cause.name === 'AbortError'))
-    if (reported !== undefined) setError(messageFor(reported, 'Could not load authentication settings.'))
-    setLoading(false)
+    const report = (cause: unknown) => {
+      if (!current() || (cause instanceof DOMException && cause.name === 'AbortError')) return
+      setError(messageFor(cause, 'Could not load authentication settings.'))
+      setLoading(false)
+    }
+    const connectionRead = identityApi
+      .connections(controller.signal)
+      .then((value) => {
+        if (current()) setConnections(value)
+      })
+      .catch(report)
+      .finally(settled)
+    const policyRead = identityApi
+      .policy(controller.signal)
+      .then((value) => {
+        if (!current()) return
+        setPolicy(value)
+        setPolicyDeclared(true)
+      })
+      .catch((cause) => {
+        if (current() && cause instanceof ApiError && cause.status === 404) {
+          // Not an error: this organization has not been declared for shared identity.
+          setPolicy(null)
+          setPolicyDeclared(false)
+          return
+        }
+        report(cause)
+      })
+      .finally(settled)
+    const alertRead = identityApi
+      .alerts(controller.signal)
+      .then((value) => {
+        if (current()) setAlerts(value)
+      })
+      .catch(report)
+      .finally(settled)
+    // Each read already absorbs its own failure, so this waits for the page to be whole
+    // without ever rejecting. A save refreshes through it and keeps its own ordering.
+    await Promise.all([connectionRead, policyRead, alertRead])
   }, [])
 
   useEffect(() => {
