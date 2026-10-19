@@ -726,3 +726,111 @@ tests, which assert the single-use, per-user scoping of each challenge.
 There is no permission-denied state for this surface: every signed-in person manages
 their own contacts, and the routes derive the identity from the principal rather than
 from anything the caller sends.
+
+## Canonical assignee state matrix on 2026-10-18
+
+The original surfaces #1414 added were captured from the console in Chromium against an
+API serving PostgreSQL. Both findings and both assignments in that run are real rows
+written through `PUT /api/v1/engagements/{id}/findings/{id}/assignee`.
+The two assignee-search loading captures were retaken on 2026-10-20 in a focused browser
+fixture rendering the production `OwnershipInbox` and `UserPicker` with the current
+styles. Nonsecret API fixtures supply the team and findings; the browser holds the actual
+`GET /api/v1/users/picker` request before returning a response. Both captures wait for
+`Searching users…` and no eligible-results list. Releasing that request restores the
+Operator result. The other captures remain from the original API/PostgreSQL run.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| A finding whose assignee bound to a user | [Light](assets/ui/ws4-console/finding-assignee-bound-light.png) | [Dark](assets/ui/ws4-console/finding-assignee-bound-dark.png) |
+| A finding whose label bound to nobody | [Light](assets/ui/ws4-console/finding-assignee-unbound-light.png) | [Dark](assets/ui/ws4-console/finding-assignee-unbound-dark.png) |
+| Finding ownership panel above the picker | [Light](assets/ui/ws4-console/finding-assignee-light.png) | [Dark](assets/ui/ws4-console/finding-assignee-dark.png) |
+| Assignee review with a label that bound to nobody | [Light](assets/ui/ws4-console/assignee-review-light.png) | [Dark](assets/ui/ws4-console/assignee-review-dark.png) |
+| Assignee review still loading | [Light](assets/ui/ws4-console/assignee-review-loading-light.png) | [Dark](assets/ui/ws4-console/assignee-review-loading-dark.png) |
+| Assignee review with nothing to review | [Light](assets/ui/ws4-console/assignee-review-empty-light.png) | [Dark](assets/ui/ws4-console/assignee-review-empty-dark.png) |
+| Assignee review when the read fails | [Light](assets/ui/ws4-console/assignee-review-error-light.png) | [Dark](assets/ui/ws4-console/assignee-review-error-dark.png) |
+| Assignee review as a read-only operator | [Light](assets/ui/ws4-console/assignee-review-denied-light.png) | [Dark](assets/ui/ws4-console/assignee-review-denied-dark.png) |
+| Ownership Inbox, where routed findings are taken on | [Light](assets/ui/ws4-console/ownership-inbox-light.png) | [Dark](assets/ui/ws4-console/ownership-inbox-dark.png) |
+| Inbox bulk assignment, with the assignee picker open | [Light](assets/ui/ws4-console/ownership-bulk-assign-light.png) | [Dark](assets/ui/ws4-console/ownership-bulk-assign-dark.png) |
+| The assignee search still outstanding | [Light](assets/ui/ws4-console/ownership-user-picker-loading-light.png) | [Dark](assets/ui/ws4-console/ownership-user-picker-loading-dark.png) |
+| The assignee search matching nobody | [Light](assets/ui/ws4-console/ownership-user-picker-empty-light.png) | [Dark](assets/ui/ws4-console/ownership-user-picker-empty-dark.png) |
+| The assignee search failing | [Light](assets/ui/ws4-console/ownership-user-picker-error-light.png) | [Dark](assets/ui/ws4-console/ownership-user-picker-error-dark.png) |
+| The inbox for an operator who cannot triage | [Light](assets/ui/ws4-console/ownership-inbox-readonly-light.png) | [Dark](assets/ui/ws4-console/ownership-inbox-readonly-dark.png) |
+
+The two finding captures are scrolled to the assignment control, so the picker, the stored
+label and the warning are all in frame. The loading capture holds
+`GET /api/v1/findings/assignee-review` open after the Settings route has mounted, so the
+heading and `Loading unresolved assignees…` are both on screen; the empty capture answers
+that read with no items; the failing capture answers 503 and the page reports it.
+
+### The assignee controls themselves
+
+The second assignment surface is the Ownership Inbox: select findings, choose
+`Assign team / person`, pick the destination team, and the same `UserPicker` the finding
+detail uses appears. Its states are captured on that surface, because it is the one where a
+search is driven by hand:
+
+- Results. `GET /api/v1/users/picker?team_id=…` returns the team's eligible members, and the
+  list shows `name (id)`. `Cloud operations` has two memberships; only `Operator (bootstrap
+  admin)` is offered, because the `readonly` member cannot act on a finding. That is the
+  same rule the bridge applies in migration `0182`.
+- Searching. The picker holds its own `Searching users…` line while the read is outstanding.
+- No match. A search for a name nobody has settles on `No eligible users found.`
+- Failure. A 503 on that read raises `user directory unavailable` beside the field.
+- Permission. An operator without triage permission gets no selection column and no bulk
+  card at all, which is the capture in the row above; the control cannot be reached to show
+  a disabled state, so no such capture exists.
+
+The finding-detail copy of the picker is the control in the bound and unbound captures
+above. Its search states are the same component and are not captured twice.
+
+The run exercises both outcomes of the identity bridge, which is the point of the change:
+
+- A finding assigned to the administrator binds. `findings.assignee_user_id` holds
+  `operator`, and no review row exists.
+- A finding assigned to a `readonly` person does not bind. `assignee_user_id` stays null and
+  the review queue carries one `unmatched` row.
+
+That second outcome is the rule in migration `0182`, not a defect. The bridge binds only a
+person who could act on the finding:
+
+```sql
+NEW.assignee_user_id := (
+ SELECT u.id FROM users u WHERE u.ownership_tenant_id=NEW.tenant_id
+  AND u.id=NEW.assignee AND NOT u.disabled
+  AND u.role IN ('admin','consultant','reviewer','member') LIMIT 1
+);
+```
+
+The console says the same thing in its own words next to the picker: "Legacy assignee label
+has no user binding. Choose a user above to enable personal routing." Personal routing skips
+the row until someone picks a person who can own it.
+
+The two captures show different people, and the difference is the point. On the unbound
+finding the ownership panel prints the stored label
+`manual assign · Assignee: 70db0073427a1ec832d97b106a2295c1`, which is the `readonly` user,
+while `Operator (bootstrap admin) (operator)` below it is an eligible replacement the
+picker offers, not the current assignee: the control's selection is empty because
+`assignee_user_id` is null. On the bound finding the same control reads
+`Selected: operator` with a Clear action and `Stored assignee label: operator`, which is
+what a successful binding looks like.
+
+One observation recorded rather than changed: the ownership panel prints the assignee as the
+raw identifier while the picker renders a person as `name (id)`. The stored reference is
+right; the panel's rendering of it is less readable than the picker's.
+
+### Where authorization is refused
+
+The read-only capture is the client role gate: `AssigneeReview.tsx` calls `load()` only when
+`canAdmin` is true and otherwise renders "Administrator access required", so that account
+issues no read from this page. The server refuses it independently, which is a separate
+observation against the running API:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $READONLY_KEY" \
+    http://127.0.0.1:18080/api/v1/findings/assignee-review
+403
+```
+
+The route carries `rt.authz(userdom.PermAdminister, ...)` in
+`internal/adapter/httpapi/router.go`, and the page also renders the same screen from a 403
+it receives, through its own `denied` state.
