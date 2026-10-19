@@ -636,3 +636,54 @@ One copy defect is visible in the error captures: the message names port 8080
 ("Cannot reach the API. Is the server running on :8080?") even when the console reaches the
 API through another origin. It is recorded here rather than changed, because the string is
 shared by every page's error surface and belongs in its own change.
+
+## Rule builder picker state matrix on 2026-10-18
+
+The pickers #1421 added, captured from the console in Chromium against an API serving
+PostgreSQL. The directory behind them is real: two users, three engagements and three
+ownership teams created through the API before the run.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| People picker open, options named `label (id)` | [Light](assets/ui/ws4-console/rule-people-picker-light.png) | [Dark](assets/ui/ws4-console/rule-people-picker-dark.png) |
+| Engagement picker filtered by a typed query | [Light](assets/ui/ws4-console/rule-engagement-picker-light.png) | [Dark](assets/ui/ws4-console/rule-engagement-picker-dark.png) |
+| Team picker on a rule that watches ownership | [Light](assets/ui/ws4-console/rule-picker-team-light.png) | [Dark](assets/ui/ws4-console/rule-picker-team-dark.png) |
+| A query the directory cannot match | [Light](assets/ui/ws4-console/rule-picker-empty-light.png) | [Dark](assets/ui/ws4-console/rule-picker-empty-dark.png) |
+| The directory read still outstanding | [Light](assets/ui/ws4-console/rule-picker-loading-light.png) | [Dark](assets/ui/ws4-console/rule-picker-loading-dark.png) |
+| The directory read failed | [Light](assets/ui/ws4-console/rule-picker-error-light.png) | [Dark](assets/ui/ws4-console/rule-picker-error-dark.png) |
+| Alerting as a read-only operator | [Light](assets/ui/ws4-console/alerting-permission-denied-light.png) | [Dark](assets/ui/ws4-console/alerting-permission-denied-dark.png) |
+
+All three picker types are covered: people, engagements and teams. The team picker appears
+on a rule whose event carries a team, so the capture selects `Finding ownership changed`
+and clears "All teams in this tenant", which is what enables the field. The three teams it
+lists were created through the API before the run.
+
+Each option carries its identifier, which is the point of the change: two people with the
+same display name stay apart, and a saved rule that names someone no longer in the
+directory keeps its selection rather than silently dropping it.
+
+The loading capture holds `GET /api/v1/notifications/rules/user-options` open and screenshots
+the picker's own "Searching…" line. The failure capture answers that read with 500, and the
+picker says `user directory unavailable` instead of looking like an empty directory. The
+no-match capture is a real search for a name nobody has.
+
+### What the read-only capture proves, and what it does not
+
+The denial screen is client-side: `Alerting.tsx` calls `load()` only when `canManage` is
+true and renders "Administrator access required" when it is not, so a `readonly` operator
+never issues `GET /api/v1/notifications/rules` from this page. The capture is evidence of
+the role gate, not of server enforcement.
+
+The server refuses the same read on its own, which is a separate observation against the
+running API:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $READONLY_KEY" \
+    http://127.0.0.1:18080/api/v1/notifications/rules
+403
+```
+
+The route carries `rt.authz(userdom.PermManageIntegrations, ...)` in
+`internal/adapter/httpapi/router.go`, and the hostile tenant harness covers the refusal
+paths. The same account's bell carries no badge, because the notices in this tenant are
+addressed to administrators.
