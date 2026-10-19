@@ -262,8 +262,8 @@ func (s *Service) ListSummaries(ctx context.Context, tenantID shared.ID) ([]Proj
 		engagementIDs = append(engagementIDs, context.ID)
 	}
 	jobs := map[shared.ID]ports.ScanJob{}
-	if s.scanner != nil {
-		jobs, err = s.scanner.LatestJobs(ctx, engagementIDs)
+	if s.jobs != nil {
+		jobs, err = s.jobs.LatestProjectAnalysisForEngagements(ctx, engagementIDs)
 		if err != nil {
 			return nil, fmt.Errorf("list latest project analysis jobs: %w", err)
 		}
@@ -301,6 +301,85 @@ func (s *Service) analysisContext(ctx context.Context, tenantID shared.ID, key s
 		return nil, nil, fmt.Errorf("get project analysis context: %w", err)
 	}
 	return p, e, nil
+}
+
+// SourceContext resolves the server-owned Project analysis context for callers
+// that operate on Project source findings without exposing that context through
+// a public Project route.
+type SourceContext struct {
+	Project *project.Project
+	Context *engagement.Engagement
+}
+
+func (s *Service) SourceContext(ctx context.Context, tenantID shared.ID, key string) (SourceContext, error) {
+	p, e, err := s.analysisContext(ctx, tenantID, key)
+	if err != nil {
+		return SourceContext{}, err
+	}
+	return SourceContext{Project: p, Context: e}, nil
+}
+
+// StartSourceScan queues a vulnerabilities-only scan of one canonical child of
+// a local Project source. Root and Project identity are server-owned and will
+// be revalidated by the worker before it reads the filesystem.
+func (s *Service) StartSourceScan(ctx context.Context, actor string, tenantID shared.ID, key, subdirectory string) (ports.ScanJob, error) {
+	if err := requireActor(actor); err != nil {
+		return ports.ScanJob{}, err
+	}
+	if s.scanner == nil {
+		return ports.ScanJob{}, fmt.Errorf("%w: project source scans are not configured", shared.ErrValidation)
+	}
+	p, e, err := s.analysisContext(ctx, tenantID, key)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	if !s.allowLocalSource || p.SourceBinding.Kind != project.SourceLocal {
+		return ports.ScanJob{}, fmt.Errorf("%w: project source scans require an enabled local source", shared.ErrValidation)
+	}
+	relative, err := canonicalProjectSubdirectory(subdirectory)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	root, err := filepath.Abs(p.SourceBinding.Value)
+	if err != nil {
+		return ports.ScanJob{}, fmt.Errorf("resolve project source root: %w", err)
+	}
+	request := ports.AcquireRequest{
+		Kind: project.SourceLocal, Value: filepath.Join(root, relative),
+		ProjectSource: &ports.ProjectSourceSelection{ProjectID: p.ID, Root: root, Subdirectory: relative},
+	}
+	return s.scanner.StartQueuedScanWithOptions(ctx, actor, e.ID, request, scauc.ScanOptions{Mode: scauc.ScanModeVulnerabilities})
+}
+
+// SourceScanJob returns a bounded source-scan job only when it belongs to the
+// resolved Project context and was admitted with the source-scan purpose.
+func (s *Service) SourceScanJob(ctx context.Context, tenantID shared.ID, key, jobID string) (ports.ScanJob, error) {
+	if s.jobs == nil || strings.TrimSpace(jobID) == "" {
+		return ports.ScanJob{}, shared.ErrNotFound
+	}
+	_, e, err := s.analysisContext(ctx, tenantID, key)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	job, err := s.jobs.GetJob(ctx, jobID)
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	if job.EngagementID != e.ID.String() || job.Purpose != ports.ScanPurposeProjectSource {
+		return ports.ScanJob{}, shared.ErrNotFound
+	}
+	return job, nil
+}
+
+func canonicalProjectSubdirectory(raw string) (string, error) {
+	if raw == "" || raw != strings.TrimSpace(raw) || strings.ContainsRune(raw, 0) || strings.Contains(raw, "\\") || filepath.IsAbs(raw) || strings.HasPrefix(raw, "//") {
+		return "", fmt.Errorf("%w: subdirectory must be a non-empty relative path", shared.ErrValidation)
+	}
+	clean := filepath.Clean(raw)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: subdirectory must stay below the project source root", shared.ErrValidation)
+	}
+	return clean, nil
 }
 
 func (s *Service) AssignGate(ctx context.Context, actor string, tenantID shared.ID, key, gateID string) (*project.Project, error) {
@@ -510,12 +589,10 @@ func (s *Service) AnalysisStatus(ctx context.Context, tenantID shared.ID, key st
 	if err != nil {
 		return ports.ScanJob{}, err
 	}
-	if s.scanner != nil {
-		return s.scanner.LatestJob(ctx, e.ID)
+	if s.jobs != nil {
+		return s.jobs.LatestProjectAnalysisForEngagement(ctx, e.ID)
 	}
-	// No scanner is wired but a job store is: a deployment that only ever receives pipeline
-	// results still has a latest run to report.
-	return s.jobs.LatestForEngagement(ctx, e.ID)
+	return ports.ScanJob{}, shared.ErrNotFound
 }
 
 type LatestAnalysis struct {

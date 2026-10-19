@@ -1,0 +1,1158 @@
+{
+  "recorded_at": "2026-10-18T14:17:03.694156+00:00",
+  "source_base": "492349883a56a9983ce7915d750d98e1d3ce0293",
+  "runtime_delta": "automatic admission stable finding/mapping key and retained existing initial command/link; private Git helper change does not affect this provider path",
+  "lifecycle": [
+    {
+      "at": "2026-10-18T13:56:49.992704+00:00",
+      "locale": "en",
+      "stage": "initial",
+      "engagement_id": "6aff2b941f5b520beb581dceae437168",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "issue_key": "B7R-10",
+      "intents_count": 4,
+      "links_count": 1,
+      "status_category": "new",
+      "comment_count": 1,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:56:50.260454+00:00",
+      "locale": "vi",
+      "stage": "initial",
+      "engagement_id": "e290ef621d446d2cc2dd58cd153bdb13",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "issue_key": "B7R-9",
+      "intents_count": 4,
+      "links_count": 1,
+      "status_category": "new",
+      "comment_count": 1,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:57:06.560273+00:00",
+      "locale": "en",
+      "stage": "remediated",
+      "engagement_id": "6aff2b941f5b520beb581dceae437168",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "issue_key": "B7R-10",
+      "intents_count": 7,
+      "links_count": 1,
+      "status_category": "done",
+      "comment_count": 2,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:57:06.825252+00:00",
+      "locale": "vi",
+      "stage": "remediated",
+      "engagement_id": "e290ef621d446d2cc2dd58cd153bdb13",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "issue_key": "B7R-9",
+      "intents_count": 7,
+      "links_count": 1,
+      "status_category": "done",
+      "comment_count": 2,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:57:21.134759+00:00",
+      "locale": "en",
+      "stage": "reopen",
+      "engagement_id": "6aff2b941f5b520beb581dceae437168",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "issue_key": "B7R-10",
+      "intents_count": 10,
+      "links_count": 1,
+      "status_category": "new",
+      "comment_count": 3,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:57:21.407991+00:00",
+      "locale": "vi",
+      "stage": "reopen",
+      "engagement_id": "e290ef621d446d2cc2dd58cd153bdb13",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "issue_key": "B7R-9",
+      "intents_count": 10,
+      "links_count": 1,
+      "status_category": "new",
+      "comment_count": 3,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:57:35.717672+00:00",
+      "locale": "en",
+      "stage": "false_positive",
+      "engagement_id": "6aff2b941f5b520beb581dceae437168",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "issue_key": "B7R-10",
+      "intents_count": 13,
+      "links_count": 1,
+      "status_category": "done",
+      "comment_count": 4,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:57:36.014857+00:00",
+      "locale": "vi",
+      "stage": "false_positive",
+      "engagement_id": "e290ef621d446d2cc2dd58cd153bdb13",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "issue_key": "B7R-9",
+      "intents_count": 13,
+      "links_count": 1,
+      "status_category": "done",
+      "comment_count": 4,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:57:50.424994+00:00",
+      "locale": "en",
+      "stage": "reopen_again",
+      "engagement_id": "6aff2b941f5b520beb581dceae437168",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "issue_key": "B7R-10",
+      "intents_count": 16,
+      "links_count": 1,
+      "status_category": "new",
+      "comment_count": 5,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:57:50.756933+00:00",
+      "locale": "vi",
+      "stage": "reopen_again",
+      "engagement_id": "e290ef621d446d2cc2dd58cd153bdb13",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "issue_key": "B7R-9",
+      "intents_count": 16,
+      "links_count": 1,
+      "status_category": "new",
+      "comment_count": 5,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:58:11.049736+00:00",
+      "locale": "en",
+      "stage": "quiet_repeat",
+      "engagement_id": "6aff2b941f5b520beb581dceae437168",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "issue_key": "B7R-10",
+      "intents_count": 16,
+      "links_count": 1,
+      "status_category": "new",
+      "comment_count": 5,
+      "security_level": "10000"
+    },
+    {
+      "at": "2026-10-18T13:58:11.412848+00:00",
+      "locale": "vi",
+      "stage": "quiet_repeat",
+      "engagement_id": "e290ef621d446d2cc2dd58cd153bdb13",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "issue_key": "B7R-9",
+      "intents_count": 16,
+      "links_count": 1,
+      "status_category": "new",
+      "comment_count": 5,
+      "security_level": "10000"
+    }
+  ],
+  "policy_negative_controls": [
+    {
+      "locale": "en",
+      "case": "open-high",
+      "intents": 0,
+      "links": 0
+    },
+    {
+      "locale": "en",
+      "case": "confirmed-low",
+      "intents": 0,
+      "links": 0
+    },
+    {
+      "locale": "vi",
+      "case": "open-high",
+      "intents": 0,
+      "links": 0
+    },
+    {
+      "locale": "vi",
+      "case": "confirmed-low",
+      "intents": 0,
+      "links": 0
+    }
+  ],
+  "sla_accepted_risk": [
+    {
+      "at": "2026-10-18T14:01:38.949262+00:00",
+      "state": "open",
+      "category": "new",
+      "lifecycle_version": 6,
+      "intents": [
+        {
+          "id": "3fb9268a470caf3aab6641780bc54a6b",
+          "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+          "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+          "state": "done",
+          "version": 3,
+          "attempts": 1,
+          "error_code": "",
+          "remote_id": "KAN-6",
+          "remote_url": "https://synapse-personal-lab.atlassian.net/browse/KAN-6",
+          "created_at": "2026-10-18T14:01:36.768052Z"
+        },
+        {
+          "id": "cce33e0a2bb4844393e9f23172db6f5d",
+          "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+          "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+          "state": "done",
+          "version": 3,
+          "attempts": 1,
+          "error_code": "",
+          "remote_id": "KAN-6",
+          "remote_url": "https://synapse-personal-lab.atlassian.net/browse/KAN-6",
+          "created_at": "2026-10-18T14:01:34.339355Z"
+        },
+        {
+          "id": "1e256b440e31f75f446975ac8abbbd3c",
+          "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+          "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+          "state": "done",
+          "version": 3,
+          "attempts": 1,
+          "error_code": "",
+          "remote_id": "KAN-6",
+          "remote_url": "https://synapse-personal-lab.atlassian.net/browse/KAN-6",
+          "created_at": "2026-10-18T14:01:30.128932Z"
+        }
+      ],
+      "comment_count": 7
+    },
+    {
+      "at": "2026-10-18T14:01:53.333046+00:00",
+      "state": "accepted_risk",
+      "category": "done",
+      "lifecycle_version": 7,
+      "intents": [
+        {
+          "id": "0c27440942c35d1b5b7b79613fc3ec9f",
+          "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+          "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+          "state": "done",
+          "version": 3,
+          "attempts": 1,
+          "error_code": "",
+          "remote_id": "KAN-6",
+          "remote_url": "https://synapse-personal-lab.atlassian.net/browse/KAN-6",
+          "created_at": "2026-10-18T14:01:51.006276Z"
+        },
+        {
+          "id": "7b944e9c0848ddb6010c249e8eeab441",
+          "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+          "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+          "state": "done",
+          "version": 3,
+          "attempts": 1,
+          "error_code": "",
+          "remote_id": "KAN-6",
+          "remote_url": "https://synapse-personal-lab.atlassian.net/browse/KAN-6",
+          "created_at": "2026-10-18T14:01:46.003908Z"
+        },
+        {
+          "id": "3fba00053204cd7e2011591d542162ad",
+          "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+          "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+          "state": "done",
+          "version": 3,
+          "attempts": 1,
+          "error_code": "",
+          "remote_id": "KAN-6",
+          "remote_url": "https://synapse-personal-lab.atlassian.net/browse/KAN-6",
+          "created_at": "2026-10-18T14:01:41.190646Z"
+        }
+      ],
+      "comment_count": 8
+    },
+    {
+      "at": "2026-10-18T14:02:07.870894+00:00",
+      "state": "open",
+      "category": "new",
+      "lifecycle_version": 8,
+      "intents": [
+        {
+          "id": "ae9a27d5adb19ad5f71884b9fe0ace2e",
+          "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+          "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+          "state": "done",
+          "version": 3,
+          "attempts": 1,
+          "error_code": "",
+          "remote_id": "KAN-6",
+          "remote_url": "https://synapse-personal-lab.atlassian.net/browse/KAN-6",
+          "created_at": "2026-10-18T14:02:05.235718Z"
+        },
+        {
+          "id": "abef0c2e4441b8a070d200478bcdd5c3",
+          "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+          "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+          "state": "done",
+          "version": 3,
+          "attempts": 1,
+          "error_code": "",
+          "remote_id": "KAN-6",
+          "remote_url": "https://synapse-personal-lab.atlassian.net/browse/KAN-6",
+          "created_at": "2026-10-18T14:01:59.338522Z"
+        },
+        {
+          "id": "4e5dfb860cb809e0d33b6898268bbbce",
+          "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+          "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+          "state": "done",
+          "version": 3,
+          "attempts": 1,
+          "error_code": "",
+          "remote_id": "KAN-6",
+          "remote_url": "https://synapse-personal-lab.atlassian.net/browse/KAN-6",
+          "created_at": "2026-10-18T14:01:56.010674Z"
+        }
+      ],
+      "comment_count": 9
+    }
+  ],
+  "native_webhook": {
+    "provider": "Jira Cloud signed native registration",
+    "gateway": "Exact webhook route only, HMAC checked on unchanged body; informational triggeredByUser query stripped before query-free WS10 endpoint. Initial pre-correction HTTP401 are failures, not acceptance passes.",
+    "receipts": [
+      {
+        "at": "2026-10-18T13:52:38.018446+00:00",
+        "signature_valid": true,
+        "forwarded_status": 401,
+        "event_type": "jira:issue_updated",
+        "issue_key": "KAN-4",
+        "delivery_sha256": "379beb49800b98f5ed7367ad42397344224f181ab6dfc15fe56da24deb8477fa",
+        "payload_sha256": "b6e0b3c799db2ba5da057a06a3b3b67d9d1c363999f0d4f36a422dba4dcf6325"
+      },
+      {
+        "at": "2026-10-18T13:52:38.810734+00:00",
+        "signature_valid": true,
+        "forwarded_status": 401,
+        "event_type": "comment_created",
+        "issue_key": "KAN-4",
+        "delivery_sha256": "663118954aa7990741880356e5ef38d2c316f78bcb7743400997e41232d2227f",
+        "payload_sha256": "204c4f99bac17265da538edea3d29d8da42002db54e8647d174626d596bd0bcc"
+      },
+      {
+        "at": "2026-10-18T13:53:35.530010+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "jira:issue_updated",
+        "issue_key": "KAN-4",
+        "delivery_sha256": "d87990e86e5a790484bebc4249c91ded0b69bf70fc721afd1e0de8e239fc70a8",
+        "payload_sha256": "17cc3ca328134145779bc598902e06cda2640f13b7d74a551ef7575ed81f1576"
+      },
+      {
+        "at": "2026-10-18T13:54:52.819769+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "jira:issue_updated",
+        "issue_key": "KAN-4",
+        "delivery_sha256": "64b2c6dbd8c4104ae0877b84850229794dcffc41f4a3012ab194f778276f0456",
+        "payload_sha256": "a6b44824dea1caec6f15b4551ce2516f161eab400a0e9152777e886d8a609f83"
+      },
+      {
+        "at": "2026-10-18T13:57:45.247394+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "comment_created",
+        "issue_key": "B7R-9",
+        "delivery_sha256": "d187b9531d851d6453e517e0651eb6b6a195b44dfdbebe8c721f1ff898d17834",
+        "payload_sha256": "14b417fe04f381b32a5640b32ac0dbd44fd3b3508a750149b8a39a4d6195a05b"
+      },
+      {
+        "at": "2026-10-18T13:57:45.248436+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "comment_created",
+        "issue_key": "B7R-10",
+        "delivery_sha256": "f391a34bb8678869f774e35535e2644e956503f93fee0888c5c5a0e31374d3f6",
+        "payload_sha256": "c3b71e6ec71f865d4e4972ae0ccd1d1f830f4a88da6b4dd64a2eb6c1e97dd254"
+      },
+      {
+        "at": "2026-10-18T13:57:49.524004+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "jira:issue_updated",
+        "issue_key": "B7R-9",
+        "delivery_sha256": "debcf9141f9910e19c8de9f4e38212e31dd98056019883d1e59160a39dfa4c6c",
+        "payload_sha256": "bff860b29341469615ae1ac0809640cf378af642acc5f21cfcb66f24c01f7f62"
+      },
+      {
+        "at": "2026-10-18T13:57:50.039543+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "jira:issue_updated",
+        "issue_key": "B7R-10",
+        "delivery_sha256": "e2f89f4476fbe8fcdcf1b15189ee246d545ed4cb6447d053bf77924cd38123c5",
+        "payload_sha256": "156a739978cbfba5803dc8fee516f5a943daab05a53e8654ad65783dfee63f7e"
+      },
+      {
+        "at": "2026-10-18T13:58:09.555820+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "jira:issue_updated",
+        "issue_key": "KAN-7",
+        "delivery_sha256": "25b092e9854187b5de4ab93c9b410f01e5d24f7916259ac386cfe1c53be8b664",
+        "payload_sha256": "52fed6a1401cec3acb01805875c31b6d8adc6475d0d6ba8dab181febf347fbf7"
+      },
+      {
+        "at": "2026-10-18T13:58:10.392580+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "comment_created",
+        "issue_key": "KAN-7",
+        "delivery_sha256": "0d5d9893445dde0c4e2dfb78a86cc6185893e7e96ba66d6f5c23c46223cabff9",
+        "payload_sha256": "06814feabe43461cae1269622a58b94aba259e3edac5370dbced82372fb5f560"
+      },
+      {
+        "at": "2026-10-18T13:59:30.210499+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "comment_updated",
+        "issue_key": "KAN-7",
+        "delivery_sha256": "f65f6c7c0f37ba90b7daa1508f3f907212724af4a7cf19f376be3a99152915dc",
+        "payload_sha256": "ab728d452a42a4391b3a794bdfb4816eee3360080f8e32352935bc490573067f"
+      },
+      {
+        "at": "2026-10-18T13:59:30.501777+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "comment_created",
+        "issue_key": "KAN-7",
+        "delivery_sha256": "e6c9394317db3173795abec45257465ce4c5f07b297c4580a8706382b21625b8",
+        "payload_sha256": "54c711280a977c8f6be19a5f0cba6dcee33381540d5257611867f760409cfd52"
+      },
+      {
+        "at": "2026-10-18T14:01:47.258407+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [],
+        "forwarded_status": 202,
+        "event_type": "comment_updated",
+        "issue_key": "KAN-7",
+        "delivery_sha256": "f65f6c7c0f37ba90b7daa1508f3f907212724af4a7cf19f376be3a99152915dc",
+        "payload_sha256": "ab728d452a42a4391b3a794bdfb4816eee3360080f8e32352935bc490573067f"
+      },
+      {
+        "at": "2026-10-18T14:03:16.043133+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [],
+        "forwarded_status": 202,
+        "event_type": "comment_updated",
+        "issue_key": "KAN-7",
+        "delivery_sha256": "f65f6c7c0f37ba90b7daa1508f3f907212724af4a7cf19f376be3a99152915dc",
+        "payload_sha256": "ab728d452a42a4391b3a794bdfb4816eee3360080f8e32352935bc490573067f"
+      },
+      {
+        "at": "2026-10-18T14:03:18.129348+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "jira:issue_updated",
+        "issue_key": "KAN-7",
+        "delivery_sha256": "d1c02bb5add0e8dbd850b79028a808eb9a3fddc7a9a99b4377754f338475a2e7",
+        "payload_sha256": "cab22b39bfc92c874f277cb8b3b4ac60fd1633ff11e28123888a75d140a04b10"
+      },
+      {
+        "at": "2026-10-18T14:05:15.794657+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "jira:issue_updated",
+        "issue_key": "KAN-7",
+        "delivery_sha256": "aee1456448c31e3dadb4ee19bac33b32850be8bc9091aade8d06c15eb6887a60",
+        "payload_sha256": "9d91366616f8b657672a661c93e060a80ba934f91d175c532643578f51375836"
+      },
+      {
+        "at": "2026-10-18T14:05:16.177038+00:00",
+        "signature_valid": true,
+        "dropped_query_keys": [
+          "triggeredByUser"
+        ],
+        "forwarded_status": 202,
+        "event_type": "comment_created",
+        "issue_key": "KAN-7",
+        "delivery_sha256": "cf7e88e64c6c13db263670007b92a67192f77315180281ae5a13939aea2804b4",
+        "payload_sha256": "19a60abcc4355c30c2601db197b1d7af8d6be04726ac72ab8bbae0c1ba571596"
+      }
+    ],
+    "replay": {
+      "recorded_at": "2026-10-18T14:03:16.945573+00:00",
+      "actual_captured_comment_replay_http": 202,
+      "altered_body_without_new_signature_http": 401,
+      "comments_before": 1,
+      "comments_after": 1,
+      "proposals_after": 1,
+      "source": "Replayed exact real Jira own-editor comment_updated delivery; original native callbacks separately recorded",
+      "own_comment_and_own_edit_suppressed": true
+    },
+    "view": {
+      "comments": [
+        {
+          "body": "Kiểm chứng webhook thật — tiếng Việt nguyên dấu. Literal: @all [~not-a-real-user] <script> & |. Không có lệnh triage. Lượt xác minh sau cập nhật: 2026-10-17T13:26Z.",
+          "created_at": "2026-10-18T14:05:16.170363Z",
+          "id": "inbound-comment-98c712303bbffcda8290a5ca6b1c8570",
+          "origin": "external",
+          "remote_id": "KAN-7"
+        },
+        {
+          "body": "Kiểm chứng webhook thật — tiếng Việt nguyên dấu. Literal: @all [~not-a-real-user] <script> & |. Không có lệnh triage. Lượt xác minh sau cập nhật: 2026-10-17T13:26Z.",
+          "created_at": "2026-10-18T13:58:10.387109Z",
+          "id": "inbound-comment-76d14dc5925f6814078313ed1e8657e8",
+          "origin": "external",
+          "remote_id": "KAN-7"
+        }
+      ],
+      "observations": [
+        {
+          "checked_at": "2026-10-18T14:07:07.221326Z",
+          "deleted_or_unreadable": false,
+          "provider_updated_at": "2026-10-18T14:05:15.866Z",
+          "remote_id": "KAN-7",
+          "status_category": "done"
+        }
+      ],
+      "proposals": [
+        {
+          "id": "inbound-proposal-c5df176a7b7907c6149a57980072fba9",
+          "observed_at": "2026-10-18T13:58:08.798922Z",
+          "remote_id": "KAN-7",
+          "resolution_context": "Done",
+          "state": "pending"
+        }
+      ]
+    },
+    "finding_status": "confirmed",
+    "finding_version": 2,
+    "own_author_edit": "Native Automation comment edited by integration user was suppressed; no independent Cloud edit claim.",
+    "cleanup": {
+      "at": "2026-10-18T14:18:44.949168+00:00",
+      "native_registration_delete_http": 204,
+      "native_registration_after_http": 404,
+      "processes": {
+        "proxy": true,
+        "tunnel": true
+      },
+      "automation_rule": {
+        "enabled": false,
+        "jql_restored": "key = KAN-4",
+        "verified": "Jira rule list reloaded: Enable flow checkbox0, DISABLED",
+        "screenshot": "current-cloud-automation-disabled.jpg"
+      }
+    }
+  },
+  "polling": {
+    "issue_key": "KAN-8",
+    "excluded_from_native_filter": true,
+    "native_callbacks": 0,
+    "before_delete": {
+      "comments": [],
+      "observations": [
+        {
+          "checked_at": "2026-10-18T14:14:02.692749Z",
+          "deleted_or_unreadable": false,
+          "provider_updated_at": "2026-10-18T14:14:00.979Z",
+          "remote_id": "KAN-8",
+          "status_category": "done"
+        }
+      ],
+      "proposals": [
+        {
+          "id": "inbound-proposal-1163dd72b78b2166fe57636e489ef4dc",
+          "observed_at": "2026-10-18T14:14:02.692749Z",
+          "remote_id": "KAN-8",
+          "resolution_context": "Done",
+          "state": "pending"
+        }
+      ]
+    },
+    "delete": {
+      "at": "2026-10-18T14:15:00.677499+00:00",
+      "http": 204,
+      "before": {
+        "comments": [],
+        "observations": [
+          {
+            "checked_at": "2026-10-18T14:14:52.653686Z",
+            "deleted_or_unreadable": false,
+            "provider_updated_at": "2026-10-18T14:14:00.979Z",
+            "remote_id": "KAN-8",
+            "status_category": "done"
+          }
+        ],
+        "proposals": [
+          {
+            "id": "inbound-proposal-1163dd72b78b2166fe57636e489ef4dc",
+            "observed_at": "2026-10-18T14:14:02.692749Z",
+            "remote_id": "KAN-8",
+            "resolution_context": "Done",
+            "state": "pending"
+          }
+        ]
+      },
+      "finding_status": "open",
+      "native_callbacks_for_issue": 0
+    },
+    "after_delete": {
+      "comments": [],
+      "observations": [
+        {
+          "checked_at": "2026-10-18T14:15:06.37523Z",
+          "deleted_or_unreadable": true,
+          "provider_updated_at": "2026-10-18T14:14:00.979Z",
+          "remote_id": "KAN-8",
+          "status_category": "done"
+        }
+      ],
+      "proposals": [
+        {
+          "id": "inbound-proposal-1163dd72b78b2166fe57636e489ef4dc",
+          "observed_at": "2026-10-18T14:14:02.692749Z",
+          "remote_id": "KAN-8",
+          "resolution_context": "Done",
+          "state": "pending"
+        }
+      ]
+    },
+    "finding_status": "open"
+  },
+  "read_only_rls_action_order": [
+    {
+      "id": "3614f083cdca3e1caaf97f02bb3d1046",
+      "state": "done",
+      "action": "create",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:52:34.574663+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:52:36.737903+00:00"
+    },
+    {
+      "id": "37d76dc508668aa8fe0df6a7748c1e59",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:52:39.209228+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:52:40.222134+00:00"
+    },
+    {
+      "id": "ee2a4fdf5c096e7fa8ca081937b54273",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:52:43.797703+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:52:44.996015+00:00"
+    },
+    {
+      "id": "b5af3f0b2d05f2c40b70ed6fce757aa4",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:52:48.795922+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:52:49.866408+00:00"
+    },
+    {
+      "id": "eada7e0cb3d0d87ac213830459bc3253",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:56:54.622449+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:56:55.845331+00:00"
+    },
+    {
+      "id": "a561d642d2a5cc64e805ca32247b751e",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:56:58.809623+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:01.120284+00:00"
+    },
+    {
+      "id": "e49eea0d8aaba73933aa0abc58995902",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:03.800416+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:04.984474+00:00"
+    },
+    {
+      "id": "2614dda90b954febfe2e95a844307ff7",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:08.795124+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:09.760839+00:00"
+    },
+    {
+      "id": "dc7a74aaaccf4002fa3723798eb76ca5",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:13.794571+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:15.042224+00:00"
+    },
+    {
+      "id": "5ec52cc69ceb83fff0534c65f179b01f",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:18.795659+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:20.13759+00:00"
+    },
+    {
+      "id": "2a409154a1eecc657ef0f23bc1a3d28e",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:23.800784+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:24.771701+00:00"
+    },
+    {
+      "id": "ee956f50442e4e17c833eefb2efb889a",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:29.587876+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:30.767331+00:00"
+    },
+    {
+      "id": "19c72402bcb8784212a2eea8a1b2e17f",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:33.822117+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:35.139389+00:00"
+    },
+    {
+      "id": "beb6411e8e1795a864c6dcd27dd369e5",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:38.798051+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:39.996912+00:00"
+    },
+    {
+      "id": "98d3dbcd1a3808c5f0761cf44a1e6a9d",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:43.793726+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:45.098465+00:00"
+    },
+    {
+      "id": "f8772a8b1a735bf4a832277bb4978952",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-10",
+      "created_at": "2026-10-18T13:57:48.797895+00:00",
+      "finding_id": "bde6e09e20f8de0814d103b174e303b1",
+      "mapping_id": "56c4d68285ade26360b3b8db0572291f",
+      "updated_at": "2026-10-18T13:57:49.909624+00:00"
+    },
+    {
+      "id": "20aaeb776c8be0b71645eaf3d934f697",
+      "state": "done",
+      "action": "create",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:52:34.551285+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:52:35.68788+00:00"
+    },
+    {
+      "id": "121719f3cf6152bc899f5493aad9b04c",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:52:38.98752+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:52:39.69882+00:00"
+    },
+    {
+      "id": "b5e0927365530fa0b5ef390529cf13e2",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:52:43.783811+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:52:44.384519+00:00"
+    },
+    {
+      "id": "1c157f23eb4a5bee0634c86ad5c110ee",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:52:48.78186+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:52:49.372953+00:00"
+    },
+    {
+      "id": "8857fff9f75d5a2e01ac9a2fa1c16668",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:56:54.606941+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:56:55.201259+00:00"
+    },
+    {
+      "id": "c3926fe0bf6a80302554ba8842575461",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:56:58.790413+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:00.475589+00:00"
+    },
+    {
+      "id": "b80ae9beb7dfa4e365bba190355f75c3",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:03.783334+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:04.405109+00:00"
+    },
+    {
+      "id": "b7275a8bafb3eb75db1d0649e22aaa82",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:08.782024+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:09.310694+00:00"
+    },
+    {
+      "id": "f02e8ee4fc09be8c2bc8cf136f479b4e",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:13.782274+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:14.44818+00:00"
+    },
+    {
+      "id": "6dca27eec8b7cb542122d9d94b9ec5c4",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:18.782345+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:19.489082+00:00"
+    },
+    {
+      "id": "680345e15b6ec6eaf1b91a28f8a426ae",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:23.784783+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:24.321874+00:00"
+    },
+    {
+      "id": "9cf3806a0f61a4a87ff71ce3eb095c25",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:29.575771+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:30.165576+00:00"
+    },
+    {
+      "id": "dfb6c959bce129190c2d184688d6aef4",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:33.802453+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:34.558152+00:00"
+    },
+    {
+      "id": "25eccb7e15b27cab8760742159a79df6",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:38.785476+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:39.403713+00:00"
+    },
+    {
+      "id": "e65ba59e14f24a1cb55236f670fe8b98",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:43.781887+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:44.384594+00:00"
+    },
+    {
+      "id": "8a4d2fe6323f66a5f127d34631bc7992",
+      "state": "done",
+      "action": "update",
+      "remote_id": "B7R-9",
+      "created_at": "2026-10-18T13:57:48.783548+00:00",
+      "finding_id": "294faeef4472d6ff01559fbfc5788215",
+      "mapping_id": "1fce8b5c799f099b2ad0ea37983c44ab",
+      "updated_at": "2026-10-18T13:57:49.395361+00:00"
+    },
+    {
+      "id": "1e256b440e31f75f446975ac8abbbd3c",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "KAN-6",
+      "created_at": "2026-10-18T14:01:30.128932+00:00",
+      "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+      "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+      "updated_at": "2026-10-18T14:01:30.738881+00:00"
+    },
+    {
+      "id": "cce33e0a2bb4844393e9f23172db6f5d",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "KAN-6",
+      "created_at": "2026-10-18T14:01:34.339355+00:00",
+      "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+      "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+      "updated_at": "2026-10-18T14:01:34.988432+00:00"
+    },
+    {
+      "id": "3fb9268a470caf3aab6641780bc54a6b",
+      "state": "done",
+      "action": "update",
+      "remote_id": "KAN-6",
+      "created_at": "2026-10-18T14:01:36.768052+00:00",
+      "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+      "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+      "updated_at": "2026-10-18T14:01:37.560389+00:00"
+    },
+    {
+      "id": "3fba00053204cd7e2011591d542162ad",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "KAN-6",
+      "created_at": "2026-10-18T14:01:41.190646+00:00",
+      "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+      "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+      "updated_at": "2026-10-18T14:01:41.793461+00:00"
+    },
+    {
+      "id": "7b944e9c0848ddb6010c249e8eeab441",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "KAN-6",
+      "created_at": "2026-10-18T14:01:46.003908+00:00",
+      "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+      "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+      "updated_at": "2026-10-18T14:01:46.619312+00:00"
+    },
+    {
+      "id": "0c27440942c35d1b5b7b79613fc3ec9f",
+      "state": "done",
+      "action": "update",
+      "remote_id": "KAN-6",
+      "created_at": "2026-10-18T14:01:51.006276+00:00",
+      "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+      "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+      "updated_at": "2026-10-18T14:01:51.790921+00:00"
+    },
+    {
+      "id": "4e5dfb860cb809e0d33b6898268bbbce",
+      "state": "done",
+      "action": "transition",
+      "remote_id": "KAN-6",
+      "created_at": "2026-10-18T14:01:56.010674+00:00",
+      "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+      "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+      "updated_at": "2026-10-18T14:01:56.720137+00:00"
+    },
+    {
+      "id": "abef0c2e4441b8a070d200478bcdd5c3",
+      "state": "done",
+      "action": "comment",
+      "remote_id": "KAN-6",
+      "created_at": "2026-10-18T14:01:59.338522+00:00",
+      "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+      "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+      "updated_at": "2026-10-18T14:01:59.920598+00:00"
+    },
+    {
+      "id": "ae9a27d5adb19ad5f71884b9fe0ace2e",
+      "state": "done",
+      "action": "update",
+      "remote_id": "KAN-6",
+      "created_at": "2026-10-18T14:02:05.235718+00:00",
+      "finding_id": "b30e6e57644627932ec1e55373f2e03f",
+      "mapping_id": "a5291bc32b11a2ee3a51052196f85e74",
+      "updated_at": "2026-10-18T14:02:05.916869+00:00"
+    }
+  ],
+  "images": [
+    {
+      "path": "current-cloud-automation-disabled.jpg",
+      "sha256": "78855ff33feb26c35c425455af1646607225df659921a3fa784ed24335d6a4c3",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-cloud-native-console.jpg",
+      "sha256": "efd6af5fccfbf12d7017082df150afbc393eb3cbbec82f2ad648d768367726a0",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-cloud-native-finding.jpg",
+      "sha256": "4394b12f701e4cc6ad946c390323e7d79fab8a5ee5fe43b26afc2c67c1e9be6c",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-cloud-native-provider.jpg",
+      "sha256": "ec753b0c4c8d007089630134290924d454259804f7b1e0d10fe16ccf814e19b0",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-cloud-poll-console.jpg",
+      "sha256": "eb9976db434ad74637b577c604020f48c77c587d2cf986cba9edf300205b51e0",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-cloud-poll-provider.jpg",
+      "sha256": "76433bc628ccdf7f5ba7c1d649b3aa7b4c6a100eebeee2c9dc8d27301760ab0b",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-jira-cloud-console-vi-linked.jpg",
+      "sha256": "631acbb38ff351bf64fe785a2d876b9ee3411c29f894df588315ab8126f9d06c",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-jira-cloud-console-vi.jpg",
+      "sha256": "363697e31c83d83896701cbb1d1252c16795933ee0882097474b10d6de797c03",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-jira-cloud-policy-en-security.jpg",
+      "sha256": "42ee2c4f1b2b3a3a950fe8885da3d73cea1d12dbdf9d440ae8f62b4f22f1c725",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-jira-cloud-policy-en.jpg",
+      "sha256": "0d69efdc4cc120d96d00e5090634759106b711049f007ea91e8c39926c9ba5c9",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-jira-cloud-policy-vi-security.jpg",
+      "sha256": "fd65f47985d47d11bea3a85c9e1328c0e0e85864bc166ee84e812328cdd6e770",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    },
+    {
+      "path": "current-jira-cloud-policy-vi.jpg",
+      "sha256": "dcabe5839cb1514b1a46b259ea34911acb43e6189a9b01a0fa695bd515007cef",
+      "captured_from": "Actual Edge browser UI",
+      "theme": "Provider dark / console light; one theme sufficient per user"
+    }
+  ],
+  "deep_link": {
+    "clicked_native_provider_link": true,
+    "host": "https://localhost:8444",
+    "target_finding_id": "fb0fde80d1b2a5fde007625b45917447",
+    "console_status": "Confirmed",
+    "source_finding_version": 2
+  }
+}

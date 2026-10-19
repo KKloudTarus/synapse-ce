@@ -46,6 +46,7 @@ import (
 // Service orchestrates the SCA pipeline over swappable ports.
 type Service struct {
 	engagements                      ports.EngagementRepository
+	projects                         ports.ProjectRepository
 	assets                           ports.AssetRepository
 	attributor                       ports.FindingAttributor
 	findings                         ports.FindingRepository
@@ -2126,6 +2127,9 @@ func (s *Service) ScanWithOptions(ctx context.Context, actor string, engagementI
 	// Synchronous callers persist the same successful terminal boundary as
 	// queued scans. PostgreSQL captures the notification inbox in this write.
 	job := ports.ScanJob{ID: s.ids.NewID().String(), EngagementID: engagementID.String(), Target: req.Value, Kind: kindOrLocal(req.Kind), Status: ports.ScanSucceeded, Stage: "done", Progress: 100, StartedAt: started, FinishedAt: &finished, DebugEvents: []ports.ScanDebugEvent{}, EngineOutcomes: scanrun.CloneEngineOutcomes(result.EngineOutcomes), NotificationSnapshot: result.notificationScanSummary(req.Value, kindOrLocal(req.Kind))}
+	if req.ProjectSource != nil {
+		job.Purpose = ports.ScanPurposeProjectSource
+	}
 	job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
 	completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
@@ -2142,6 +2146,9 @@ func (s *Service) scanWithOptions(ctx context.Context, actor string, engagementI
 		return nil, err
 	}
 	req = normalizeLocalTarget(req)
+	if err := s.validateProjectSourceScan(ctx, engagementID, req, opts); err != nil {
+		return nil, err
+	}
 	req, err = s.pinUploadedSource(ctx, engagementID, req)
 	if err != nil {
 		return nil, err
@@ -2218,6 +2225,9 @@ func (s *Service) startScanWithOptions(ctx context.Context, actor string, engage
 		return ports.ScanJob{}, err
 	}
 	req = normalizeLocalTarget(req)
+	if err := s.validateProjectSourceScan(ctx, engagementID, req, opts); err != nil {
+		return ports.ScanJob{}, err
+	}
 	var imported importedsbom.Record
 	req, err = s.pinUploadedSource(ctx, engagementID, req)
 	if err != nil {
@@ -2265,6 +2275,9 @@ func (s *Service) startScanWithOptions(ctx context.Context, actor string, engage
 		StartedAt:      now,
 		DebugEvents:    []ports.ScanDebugEvent{},
 		EngineOutcomes: s.engineOutcomePlan(opts, useImported, !useImported && req.Kind != ports.TargetImage),
+	}
+	if req.ProjectSource != nil {
+		job.Purpose = ports.ScanPurposeProjectSource
 	}
 	job.EngineCoverage = scanrun.ComputeEngineCoverage(job.EngineOutcomes)
 	if s.jobs != nil && !deferredAdmission {
@@ -2651,6 +2664,9 @@ func (s *Service) gateImportedSBOMAndAudit(ctx context.Context, actor string, en
 }
 
 func (s *Service) loadImportedSBOMForRequest(ctx context.Context, engagementID shared.ID, req ports.AcquireRequest, opts ScanOptions) (importedsbom.Record, *sbom.SBOM, bool, error) {
+	if req.ProjectSource != nil {
+		return importedsbom.Record{}, nil, false, nil
+	}
 	if req.Kind == ports.TargetUpload {
 		return importedsbom.Record{}, nil, false, nil
 	}
@@ -2775,6 +2791,17 @@ func (s *Service) runScanJob(ctx context.Context, actor string, engagementID sha
 	}
 	if opts.ProjectAnalysis {
 		opts.ProjectAnalysisID = job.ID
+	}
+	if err := s.validateProjectSourceScan(ctx, engagementID, req, opts); err != nil {
+		return err
+	}
+	if req.ProjectSource != nil {
+		if job.Purpose != ports.ScanPurposeProjectSource {
+			return fmt.Errorf("%w: project source scan job purpose is invalid", shared.ErrValidation)
+		}
+		if _, err := s.gateAndAudit(ctx, actor, engagementID, req, opts); err != nil {
+			return fmt.Errorf("authorize project source scan execution: %w", err)
+		}
 	}
 	// Async duration is measured from EXECUTION (this claim/delivery), not from the
 	// original enqueue time (job.StartedAt) – the queue wait is not scan work.

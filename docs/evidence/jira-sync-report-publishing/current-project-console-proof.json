@@ -1,0 +1,29 @@
+{
+  "observed_at": "2026-10-18T16:02:42.011392+00:00",
+  "url": "https://localhost:8444/code-quality/projects/current-project-grouping/source-findings#finding-8a67b8c41d73cf930e162e09b3cff048",
+  "finding_id": "8a67b8c41d73cf930e162e09b3cff048",
+  "source_status": "confirmed",
+  "advisory": "CVE-2021-44228",
+  "linked_tickets": [
+    "SYNACC-2",
+    "B7R-8"
+  ],
+  "rendered_observations": {
+    "SYNACC-2": "new",
+    "B7R-8": "new"
+  },
+  "capture_method": "Normal authenticated browser navigation to the rendered Project finding; actual UI scrolling, no injected state or image editing. First frame includes title, severity, status and both linked keys; second frame shows both observed Jira categories.",
+  "diagnostics": "The retained earlier failed preflight intents are visible beside subsequent Done intents; they are not presented as passing deliveries.",
+  "images": [
+    {
+      "path": "current-project-console-linked-tickets.jpg",
+      "bytes": 68450,
+      "sha256": "0df100bd306deb6f7daa42f39004acf6c2c34258ecec64120094a3eadf91c097"
+    },
+    {
+      "path": "current-project-console-ticket-states.jpg",
+      "bytes": 35400,
+      "sha256": "8e8c8877538699fdbfdc0c1a65a8f9eaa2bddf0860b85dd88ea69c85f26a493b"
+    }
+  ]
+}

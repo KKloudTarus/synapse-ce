@@ -1,0 +1,116 @@
+{
+  "recorded_at": "2026-10-18T12:55:14.319380+00:00",
+  "fingerprint_method": "SHA256 of Python json.dumps(mapping,sort_keys=True). Mapping uses sorted unique git ls-files -c -o --exclude-standard paths to file SHA256, selecting .go/.sql, web/src, go.mod/go.sum/Makefile/CI workflow/web package+lock. Documentation/evidence excluded. Taurus gate separately binds the entire worktree.",
+  "final_source_inputs_sha256": "7a79755dd200bbe1c3c33a277eeb1f587404f484de64c04c943a00e2d5b13729",
+  "initial_checks": [
+    {
+      "name": "baseline",
+      "command": "make lint build vet test typecheck",
+      "started_at": "2026-10-18T11:32:14.724639+00:00",
+      "finished_at": "2026-10-18T11:33:22.125498+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "fdfee4b3ca346b6937f6ea7ede3bacdea2ca54daa9cc264f820dc33380d2f1df",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": null
+    },
+    {
+      "name": "postgres-full-first",
+      "command": "go test -timeout 90m -p 1 -count=1 ./...",
+      "started_at": "2026-10-18T11:33:22.125681+00:00",
+      "finished_at": "2026-10-18T12:02:39.691940+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "fdfee4b3ca346b6937f6ea7ede3bacdea2ca54daa9cc264f820dc33380d2f1df",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": "same fresh isolated review_final"
+    },
+    {
+      "name": "postgres-repeat",
+      "command": "go test -timeout 90m -count=1 ./internal/infrastructure/persistence/postgres",
+      "started_at": "2026-10-18T12:02:39.692353+00:00",
+      "finished_at": "2026-10-18T12:22:35.492080+00:00",
+      "exit_code": 1,
+      "source_inputs_sha256": "fdfee4b3ca346b6937f6ea7ede3bacdea2ca54daa9cc264f820dc33380d2f1df",
+      "source_input_count": 5067,
+      "source_unchanged": false,
+      "postgres_database": "same fresh isolated review_final"
+    }
+  ],
+  "final_checks": [
+    {
+      "name": "final-baseline",
+      "command": "make lint build vet test typecheck",
+      "started_at": "2026-10-18T12:22:02.539823+00:00",
+      "finished_at": "2026-10-18T12:22:48.077823+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "7a79755dd200bbe1c3c33a277eeb1f587404f484de64c04c943a00e2d5b13729",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": null
+    },
+    {
+      "name": "final-web-full",
+      "command": "pnpm exec vitest run --maxWorkers=2",
+      "started_at": "2026-10-18T12:22:48.078152+00:00",
+      "finished_at": "2026-10-18T12:25:45.098428+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "7a79755dd200bbe1c3c33a277eeb1f587404f484de64c04c943a00e2d5b13729",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": null
+    },
+    {
+      "name": "final-web-build",
+      "command": "pnpm build",
+      "started_at": "2026-10-18T12:25:45.098650+00:00",
+      "finished_at": "2026-10-18T12:25:47.364666+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "7a79755dd200bbe1c3c33a277eeb1f587404f484de64c04c943a00e2d5b13729",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": null
+    },
+    {
+      "name": "final-sharing-race",
+      "command": "go test -race ./internal/usecase/docpublish ./internal/composition ./internal/infrastructure/persistence/memory ./internal/infrastructure/integration/confluence -count=1",
+      "started_at": "2026-10-18T12:25:47.364846+00:00",
+      "finished_at": "2026-10-18T12:25:51.152360+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "7a79755dd200bbe1c3c33a277eeb1f587404f484de64c04c943a00e2d5b13729",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": null
+    },
+    {
+      "name": "final-hostile-harness",
+      "command": "make harness",
+      "started_at": "2026-10-18T12:25:51.152571+00:00",
+      "finished_at": "2026-10-18T12:25:52.505113+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "7a79755dd200bbe1c3c33a277eeb1f587404f484de64c04c943a00e2d5b13729",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": null
+    }
+  ],
+  "current_postgres_repeat": [
+    {
+      "name": "postgres-repeat-current",
+      "command": "go test -timeout 90m -count=1 ./internal/infrastructure/persistence/postgres",
+      "started_at": "2026-10-18T12:26:28.470675+00:00",
+      "finished_at": "2026-10-18T12:53:23.168429+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "7a79755dd200bbe1c3c33a277eeb1f587404f484de64c04c943a00e2d5b13729",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": "same fresh isolated review_final"
+    }
+  ],
+  "provenance_notes": [
+    "Initial all-package DB pass used an earlier remediation source fingerprint. Persistence/SQL did not change afterwards.",
+    "Final changes were vendor-policy decoding and monitor/tenant budgets; final baseline, affected uncached race suites and current PostgreSQL repeat exercise them.",
+    "The interrupted repeat ended signal:killed and source inputs changed during that earlier compiled-snapshot run. It is retained as failure. The current rerun kept the same database and unchanged assertions, using a 1 GiB Go GC target.",
+    "Actions disabled; no hosted-CI result claimed."
+  ]
+}

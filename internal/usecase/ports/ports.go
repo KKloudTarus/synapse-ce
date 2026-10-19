@@ -987,13 +987,17 @@ type ScanJob struct {
 	EngagementID  string                 `json:"engagement_id"`
 	Target        string                 `json:"target"`
 	Kind          string                 `json:"kind"`
-	Status        ScanStatus             `json:"status"`
-	Stage         string                 `json:"stage"`
-	Progress      int                    `json:"progress"` // 0..100
-	Error         string                 `json:"error,omitempty"`
-	StartedAt     time.Time              `json:"started_at"`
-	FinishedAt    *time.Time             `json:"finished_at,omitempty"`
-	DebugEvents   []ScanDebugEvent       `json:"debug_events"`
+	// Purpose distinguishes a bounded Project source scan from the ordinary
+	// full Project analysis lifecycle. It is assigned by the server and stays
+	// immutable after admission.
+	Purpose     string           `json:"purpose,omitempty"`
+	Status      ScanStatus       `json:"status"`
+	Stage       string           `json:"stage"`
+	Progress    int              `json:"progress"` // 0..100
+	Error       string           `json:"error,omitempty"`
+	StartedAt   time.Time        `json:"started_at"`
+	FinishedAt  *time.Time       `json:"finished_at,omitempty"`
+	DebugEvents []ScanDebugEvent `json:"debug_events"`
 	// EngineOutcomes and EngineCoverage describe the current attempt. Job success
 	// means the worker completed; it is deliberately distinct from coverage.
 	EngineOutcomes []scanrun.EngineOutcome `json:"engine_outcomes,omitempty"`
@@ -1002,6 +1006,8 @@ type ScanJob struct {
 	// terminal transition. It is internal and is never returned by scan APIs.
 	NotificationSnapshot notification.ScanSummary `json:"-"`
 }
+
+const ScanPurposeProjectSource = "project_source"
 
 // StaleScanJob is the daemon-only view of a running scan job. TenantID comes
 // from the engagement owner during stale enumeration and is intentionally not
@@ -1017,6 +1023,10 @@ type ScanJobStore interface {
 	Save(ctx context.Context, job ScanJob) error
 	LatestForEngagement(ctx context.Context, engagementID shared.ID) (ScanJob, error)
 	LatestForEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]ScanJob, error)
+	// LatestProjectAnalysisForEngagement excludes bounded Project source scans,
+	// so their lifecycle cannot decorate the full-analysis status.
+	LatestProjectAnalysisForEngagement(ctx context.Context, engagementID shared.ID) (ScanJob, error)
+	LatestProjectAnalysisForEngagements(ctx context.Context, engagementIDs []shared.ID) (map[shared.ID]ScanJob, error)
 	// GetJob returns a scan job by its own id (shared.ErrNotFound if absent). Used to
 	// finalize a SPECIFIC dead-lettered job rather than the engagement's latest, so a newer
 	// scan for the same engagement cannot mislead the dead-letter terminal-guard.
@@ -1512,6 +1522,9 @@ const (
 
 // AcquireRequest identifies a scan target and how to obtain it.
 type AcquireRequest struct {
+	// ProjectSource is server-resolved for a bounded local Project subtree scan.
+	// Callers cannot use it to select arbitrary filesystem paths.
+	ProjectSource *ProjectSourceSelection `json:"project_source,omitempty"`
 	// SourcePackage is server-resolved and pinned before an upload scan is queued.
 	// HTTP adapters must never accept caller-supplied package metadata or locators.
 	SourcePackage             *sourcepackage.Package
@@ -1525,6 +1538,15 @@ type AcquireRequest struct {
 	BaseRef                   string // optional validated Git comparison base ref
 	BaseCommit                string // optional immutable base commit from a previous analysis
 	RequireCodeQualityHistory bool   // optional hint to clone bounded history for code-quality behavioral hotspots
+}
+
+// ProjectSourceSelection binds a local Project subtree to the server-owned
+// Project identity. Root and Subdirectory are validated at enqueue and again by
+// the worker before acquisition.
+type ProjectSourceSelection struct {
+	ProjectID    shared.ID `json:"project_id"`
+	Root         string    `json:"root"`
+	Subdirectory string    `json:"subdirectory"`
 }
 
 // Workspace is an isolated directory holding a target to analyze (never execute).

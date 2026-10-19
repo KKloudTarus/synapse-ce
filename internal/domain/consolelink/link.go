@@ -130,6 +130,26 @@ func (b Builder) Finding(engagementID, findingID shared.ID) (Link, error) {
 	return b.link(KindFinding, findingID, "/engagements/"+e+"/findings#finding-"+f)
 }
 
+// ProjectSourceFinding links to the Project source-findings panel without
+// disclosing the internal analysis engagement that owns the finding.
+func (b Builder) ProjectSourceFinding(projectKey string, findingID shared.ID) (Link, error) {
+	key := strings.TrimSpace(projectKey)
+	if key == "" || key == "." || key == ".." {
+		return Link{}, ErrInvalidSubject
+	}
+	for _, r := range key {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.IsSpace(r) {
+			return Link{}, ErrInvalidSubject
+		}
+	}
+	k := url.PathEscape(key)
+	f, err := escapeID(findingID)
+	if err != nil {
+		return Link{}, err
+	}
+	return b.link(KindFinding, findingID, "/code-quality/projects/"+k+"/source-findings#finding-"+f)
+}
+
 // Scan opens the scan history and identifies the selected run in the URL fragment.
 func (b Builder) Scan(engagementID, scanID shared.ID) (Link, error) {
 	e, err := escapeID(engagementID)

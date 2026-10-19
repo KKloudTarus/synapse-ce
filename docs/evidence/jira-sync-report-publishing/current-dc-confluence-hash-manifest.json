@@ -1,0 +1,140 @@
+{
+  "scope": "Separate REST fixture1409030 and native-UI fixture1409035; see each proof for source IDs and exact operations.",
+  "files": [
+    {
+      "name": "current-dc-confluence-README.md",
+      "bytes": 1236,
+      "sha256": "f4e13b1a2dff07e37e5eb78982303339415a5cb452d4dafb82e34e044c5eff2d"
+    },
+    {
+      "name": "current-dc-confluence-console-legal-hold.jpg",
+      "bytes": 65416,
+      "sha256": "5568b42dfdc5a579e9b22a7aa781d3d15cfbf540b4b7cd2c92ee547d4546f193"
+    },
+    {
+      "name": "current-dc-confluence-console-readonly.jpg",
+      "bytes": 73759,
+      "sha256": "7c8142eba4de60b219cbe14df8ba83ec111a61017ff5ca5da75c85aedd0547b7"
+    },
+    {
+      "name": "current-dc-confluence-console-unpublished.jpg",
+      "bytes": 65180,
+      "sha256": "5f309b48cca5d41daeb1fb8e0c340838e01c4aaade0f71eb13995b4baa61d642"
+    },
+    {
+      "name": "current-dc-confluence-report-after-scheduled-page-1.png",
+      "bytes": 233545,
+      "sha256": "f37a2989e16f3ba121eccdead1e0c2d1bb10c5b01a86dccc965b2bdf108c6c9e"
+    },
+    {
+      "name": "current-dc-confluence-report-after-scheduled.pdf",
+      "bytes": 53551,
+      "sha256": "a84a5d1b3140121c17aaa6ae9716297595ce84315c573f5be25fe6d16dcf59c9"
+    },
+    {
+      "name": "current-dc-confluence-report-before-page-1.png",
+      "bytes": 216585,
+      "sha256": "8230d83ce60afceeea31115abdcd2d6b477fb3756e90af9ef06d0825fdc61287"
+    },
+    {
+      "name": "current-dc-confluence-report-before.pdf",
+      "bytes": 51239,
+      "sha256": "dc913f7be6725f79411b660552d0af47e528ecf6cbce1498d43b06bba4bf8939"
+    },
+    {
+      "name": "current-dc-confluence-rest-proof.json",
+      "bytes": 2418,
+      "sha256": "5c72559413befb2dbd925999e2969ffec8f3ba612db9aa042da83b5fad5d99f4"
+    },
+    {
+      "name": "current-dc-confluence-visual-body.jpg",
+      "bytes": 102658,
+      "sha256": "27a98b4ed8b3c32b6a3d1fb8fe636027fb70a4567117d0fa27c22b5b41a6d3a2"
+    },
+    {
+      "name": "current-dc-confluence-visual-final-footer.jpg",
+      "bytes": 77102,
+      "sha256": "4b6b4b65b7ea674121831c7d38ef21f58a377951c818b0f8e54cad9213044856"
+    },
+    {
+      "name": "current-dc-confluence-visual-final-pdf.jpg",
+      "bytes": 80785,
+      "sha256": "b4b8e5906450ed1b5d6b25b37f42aef5b81ce0d2788123ee0144bafacb54636d"
+    },
+    {
+      "name": "current-dc-confluence-visual-footer.jpg",
+      "bytes": 83960,
+      "sha256": "4a04456bc18cb2c396f4bf95e2d8fb6704acdc451fbd3cae798f3a1704fb526d"
+    },
+    {
+      "name": "current-dc-confluence-visual-history.jpg",
+      "bytes": 71380,
+      "sha256": "6e9d74d47a9a2f3dad13fa98fd5f4e03afbef01307ac6d4085aa434b59563b20"
+    },
+    {
+      "name": "current-dc-confluence-visual-pdf.jpg",
+      "bytes": 76224,
+      "sha256": "86ccee0e8f7100ddb1073e4e308fb42106dd9107ddd42ab2c908bb5bbc5ef6cc"
+    },
+    {
+      "name": "current-dc-confluence-visual-proof.json",
+      "bytes": 21381,
+      "sha256": "51cb07ba06e69101527d182228fcf486f90cb0809b295d96ffd2890f9e6652cd"
+    },
+    {
+      "name": "current-dc-confluence-visual-purged.jpg",
+      "bytes": 29222,
+      "sha256": "c45a590616c2f5afde5cfe2cd819b5940c14c14db51321a124ebb4bc7830a864"
+    },
+    {
+      "name": "current-dc-confluence-visual-report-0b4ae50d153ef30a-page-1.png",
+      "bytes": 159140,
+      "sha256": "0d6d90a022fddbcb90aeb48f471ec779b53bc0917e0078960327e542d441cbac"
+    },
+    {
+      "name": "current-dc-confluence-visual-report-0b4ae50d153ef30a.pdf",
+      "bytes": 46455,
+      "sha256": "2c390aa8cebbd80cc8d05c9470b2a4e7c312eb6acae6d5b277333ab2b563f1b3"
+    },
+    {
+      "name": "current-dc-confluence-visual-report-0f713e1d73df3454-page-1.png",
+      "bytes": 170437,
+      "sha256": "306c66d8182994f2856e5f348fc4303bb209318b9a229688654b014af12d2bf7"
+    },
+    {
+      "name": "current-dc-confluence-visual-report-0f713e1d73df3454.pdf",
+      "bytes": 48568,
+      "sha256": "fc11e12a3e68b5e2cf506b1ae38e5f60473ef1d7d9cb5d37539f3bb25165eb43"
+    },
+    {
+      "name": "current-dc-confluence-visual-report-3d19c2731147e60d-page-1.png",
+      "bytes": 162660,
+      "sha256": "f1243651c91f700552f93a569e503baea0e73c72a8ef1826399163dc31d94cb9"
+    },
+    {
+      "name": "current-dc-confluence-visual-report-3d19c2731147e60d.pdf",
+      "bytes": 48233,
+      "sha256": "7e230542a514f27951b7066eedc0a0e5d592a7667027963f16eafd7f6d5a1ea8"
+    },
+    {
+      "name": "current-dc-confluence-visual-report-80d8449505e5d94a-page-1.png",
+      "bytes": 159140,
+      "sha256": "0d6d90a022fddbcb90aeb48f471ec779b53bc0917e0078960327e542d441cbac"
+    },
+    {
+      "name": "current-dc-confluence-visual-report-80d8449505e5d94a.pdf",
+      "bytes": 46455,
+      "sha256": "2c390aa8cebbd80cc8d05c9470b2a4e7c312eb6acae6d5b277333ab2b563f1b3"
+    },
+    {
+      "name": "current-dc-confluence-visual-restrictions.jpg",
+      "bytes": 56664,
+      "sha256": "571e41ce82c38489a8586cd0e918ccf9b674cf2112036a3329834d8d1346dbd4"
+    },
+    {
+      "name": "current-dc-confluence-visual-scheduled-history.jpg",
+      "bytes": 75397,
+      "sha256": "b9418d832942713feaef07bd2c84176d95e15803e33086659eef5ab1a4912c9c"
+    }
+  ]
+}

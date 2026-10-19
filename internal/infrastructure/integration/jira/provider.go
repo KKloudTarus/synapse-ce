@@ -154,6 +154,9 @@ func (a *Adapter) authenticatedIdentity(ctx context.Context) (string, error) {
 }
 
 func (a *Adapter) FormatTicketDescription(body string, links []ports.RenderedLink) (json.RawMessage, error) {
+	if err := a.validateDescriptionLiterals(body, links, nil, nil); err != nil {
+		return nil, err
+	}
 	if a.cloud {
 		doc, err := messageformat.JiraADF(body, links)
 		if err != nil {

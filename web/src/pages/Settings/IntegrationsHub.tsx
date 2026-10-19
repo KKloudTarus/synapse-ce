@@ -20,7 +20,7 @@ import { canManageIntegrations } from '../../lib/roles'
 /**
  * Settings → Integrations: one place for every integration, grouped by capability (EPIC #1327 WS9,
  * issue #1463). The hub reads only existing APIs. Configuration stays on the detail pages it links to
- * (CI/CD, Connectors, Alerting); a field an API does not expose is shown as "Not reported" instead of
+ * (external integrations, Connectors, Alerting); a field an API does not expose is shown as "Not reported" instead of
  * being guessed.
  *
  * Gating follows the rest of the console: a capability the deployment reports as disabled renders
@@ -90,19 +90,23 @@ export function IntegrationsHub() {
       </div>
       {!canAdmin && (
         <p className="rounded-lg border border-secondary bg-secondary/40 px-4 py-3 text-sm text-tertiary">
-          You can view CI/CD integrations. Source control, messaging, SIEM and test actions need a tenant administrator or an integration administrator.
+          You can view external integrations. Source control, messaging, SIEM and test actions need a tenant administrator or an integration administrator.
         </p>
       )}
-      <CiCdGroup key={`ci-${generation}`} canAdmin={canAdmin} />
+      <ProviderIntegrationGroup key={`ci-${generation}`} category="ci" canAdmin={canAdmin} />
       <SourceControlGroup key={`scm-${generation}`} canAdmin={canAdmin} />
       <MessagingGroup key={`msg-${generation}`} canAdmin={canAdmin} capabilities={capabilities} />
       <TicketingGroup key={`tickets-${generation}`} canAdmin={canAdmin} capability={capabilities?.get('ticketing') ?? null} />
-      <UnavailableGroup
-        title="Documentation"
-        icon={BookOpen01}
-        info="Publish engagement and assessment reports to Confluence and other documentation spaces."
-        capability={capabilities?.get('docpublish') ?? null}
-      />
+      {capabilities?.get('docpublish')?.enabled ? (
+        <ProviderIntegrationGroup key={`documentation-${generation}`} category="documentation" canAdmin={canAdmin} />
+      ) : (
+        <UnavailableGroup
+          title="Documentation"
+          icon={BookOpen01}
+          info="Publish engagement and assessment reports to Confluence and other documentation spaces."
+          capability={capabilities?.get('docpublish') ?? null}
+        />
+      )}
       <SIEMGroup key={`siem-${generation}`} canAdmin={canAdmin} />
     </div>
   )
@@ -285,7 +289,7 @@ function TestButton({
   )
 }
 
-// ---- CI/CD ----
+// ---- External provider groups ----
 
 const TERMINAL = new Set(['succeeded', 'partial', 'failed', 'cancelled'])
 
@@ -319,15 +323,52 @@ function operationLabel(type: IntegrationOperation['type']) {
   return type === 'test' ? 'Connection test' : type === 'discover' ? 'Discovery' : 'Poll'
 }
 
-interface CiItem {
+interface ProviderItem {
   integration: Integration
   provider: IntegrationProviderDescriptor | undefined
   /** null when the operation history could not be read. */
   operations: IntegrationOperation[] | null
 }
 
-function CiCdGroup({ canAdmin }: { canAdmin: boolean }) {
-  const [items, setItems] = useState<CiItem[] | undefined>(undefined)
+type ProviderCategory = 'ci' | 'documentation'
+
+const JIRA_PROVIDERS = new Set(['jira-cloud', 'jira-dc'])
+const DOCUMENTATION_PROVIDERS = new Set(['confluence-cloud', 'confluence-dc'])
+
+function belongsToProviderCategory(provider: string, category: ProviderCategory) {
+  if (category === 'documentation') return DOCUMENTATION_PROVIDERS.has(provider)
+  return !JIRA_PROVIDERS.has(provider) && !DOCUMENTATION_PROVIDERS.has(provider)
+}
+
+const PROVIDER_GROUP: Record<ProviderCategory, {
+  title: string
+  icon: ComponentType<{ className?: string }>
+  info: string
+  manageLabel: string
+  loadingLabel: string
+  disabledTitle: string
+  emptyTitle: string
+  emptyHint: (canAdmin: boolean) => string
+}> = {
+  ci: {
+    title: 'CI/CD', icon: Dataflow01,
+    info: 'CI/CD and inbound SCM integrations. Poll-capable providers link external runs to Project analyses; inbound-only providers receive authenticated events.',
+    manageLabel: 'Manage CI/CD', loadingLabel: 'Loading CI/CD integrations…',
+    disabledTitle: 'CI/CD integrations are not enabled on this deployment', emptyTitle: 'No CI/CD integrations yet',
+    emptyHint: (canAdmin) => canAdmin ? 'Add one from Manage CI/CD.' : 'A tenant administrator can add one.',
+  },
+  documentation: {
+    title: 'Documentation', icon: BookOpen01,
+    info: 'Publish engagement and assessment reports to Confluence and other documentation spaces.',
+    manageLabel: 'Manage documentation', loadingLabel: 'Loading documentation integrations…',
+    disabledTitle: 'Documentation integrations are not enabled on this deployment', emptyTitle: 'No documentation integrations yet',
+    emptyHint: (canAdmin) => canAdmin ? 'Add Confluence from Manage documentation.' : 'A tenant administrator can add one.',
+  },
+}
+
+function ProviderIntegrationGroup({ category, canAdmin }: { category: ProviderCategory; canAdmin: boolean }) {
+  const copy = PROVIDER_GROUP[category]
+  const [items, setItems] = useState<ProviderItem[] | undefined>(undefined)
   const [unsupported, setUnsupported] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -343,7 +384,7 @@ function CiCdGroup({ canAdmin }: { canAdmin: boolean }) {
     ;(async () => {
       try {
         const [providers, integrations] = await Promise.all([api.listIntegrationProviders(), api.listIntegrations()])
-        const active = integrations.filter((item) => !item.archived)
+        const active = integrations.filter((item) => !item.archived && belongsToProviderCategory(item.provider, category))
         const operations = await Promise.all(active.map((item) => loadOperations(item.id)))
         if (!live) return
         setItems(active.map((integration, index) => ({
@@ -361,9 +402,9 @@ function CiCdGroup({ canAdmin }: { canAdmin: boolean }) {
     return () => {
       live = false
     }
-  }, [])
+  }, [category])
 
-  async function test(item: CiItem) {
+  async function test(item: ProviderItem) {
     setNotice(null)
     setError(null)
     try {
@@ -378,20 +419,20 @@ function CiCdGroup({ canAdmin }: { canAdmin: boolean }) {
 
   return (
     <Group
-      title="CI/CD"
-      icon={Dataflow01}
-      info="CI/CD and inbound SCM integrations. Poll-capable providers link external runs to Project analyses; inbound-only providers receive authenticated events."
+      title={copy.title}
+      icon={copy.icon}
+      info={copy.info}
       status={unsupported ? 'off' : 'on'}
-      manage={unsupported ? undefined : { to: '/settings/integrations/ci', label: 'Manage CI/CD' }}
+      manage={unsupported ? undefined : { to: '/settings/integrations/ci', label: copy.manageLabel }}
     >
       {notice && <Notice tone="success">{notice}</Notice>}
       {error && <ErrorState message={error} />}
       {items === undefined ? (
-        <Spinner label="Loading CI/CD integrations…" />
+        <Spinner label={copy.loadingLabel} />
       ) : unsupported ? (
-        <EmptyState icon={Dataflow01} title="CI/CD integrations are not enabled on this deployment" hint="The server was started without the integrations framework." />
+        <EmptyState icon={copy.icon} title={copy.disabledTitle} hint="The server was started without the integrations framework." />
       ) : items.length === 0 && !error ? (
-        <EmptyState icon={Dataflow01} title="No CI/CD integrations yet" hint={canAdmin ? 'Add one from Manage CI/CD.' : 'A tenant administrator can add one.'} />
+        <EmptyState icon={copy.icon} title={copy.emptyTitle} hint={copy.emptyHint(canAdmin)} />
       ) : (
         <CardGrid>
           {items.map((item) => {
@@ -698,16 +739,17 @@ function UnavailableGroup({
   info: string
   capability: Capability | null
 }) {
-  // A capability switched off names its switch. Planned or unreported both mean there is nothing to
-  // configure in this build. A server that reports it on is ahead of this console, so say that.
-  const off = capability && !capability.enabled && !capability.planned && capability.switch ? capability : null
+  // A capability switched off either names an operator switch or depends on wiring the deployment
+  // does not have. Planned or unreported both mean there is nothing to configure in this build. A
+  // server that reports it on is ahead of this console, so say that.
+  const off = capability && !capability.enabled && !capability.planned ? capability : null
   const onServer = !!capability?.enabled && !capability.planned
   return (
     <Group title={title} icon={icon} info={info} status={off ? 'off' : 'planned'}>
       <EmptyState
         icon={icon}
         title={off ? `${title} is off` : onServer ? `${title} is on, but this console cannot show it yet` : `${title} is not available in this build yet`}
-        hint={off ? capabilityHint(off) : undefined}
+        hint={off ? (off.switch ? capabilityHint(off) : 'This deployment needs durable PostgreSQL persistence before documentation publishing is available.') : undefined}
       />
     </Group>
   )

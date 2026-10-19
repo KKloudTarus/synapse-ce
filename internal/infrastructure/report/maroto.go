@@ -13,7 +13,6 @@ import (
 
 	"github.com/johnfercher/maroto/v2"
 	"github.com/johnfercher/maroto/v2/pkg/components/text"
-	"github.com/johnfercher/maroto/v2/pkg/config"
 	"github.com/johnfercher/maroto/v2/pkg/consts/align"
 	"github.com/johnfercher/maroto/v2/pkg/consts/fontstyle"
 	"github.com/johnfercher/maroto/v2/pkg/core"
@@ -45,7 +44,10 @@ var _ ports.ReportRenderer = (*Renderer)(nil)
 // service – the document is derived solely from eng + findings.
 func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings []finding.Finding, insight ports.ReportInsight, generatedAt time.Time, version string) ([]byte, error) {
 	at := generatedAt.UTC()
-	cfg := config.NewBuilder().WithCreationDate(at).Build()
+	cfg, err := documentConfig(at)
+	if err != nil {
+		return nil, err
+	}
 	m := maroto.New(cfg)
 
 	// Title block.
@@ -240,16 +242,16 @@ func (Renderer) Render(_ context.Context, eng *engagement.Engagement, findings [
 		coverage := reportEngineCoverage(insight)
 		m.AddRow(5, text.NewCol(12, fmt.Sprintf("Required-engine coverage: %s (%d/%d completed).", coverage.Status, coverage.Completed, coverage.Required), props.Text{Size: 9, Style: fontstyle.Bold}))
 		if insight.ExecutionMode != "" {
-			m.AddRow(5, text.NewCol(12, "Current execution mode: "+insight.ExecutionMode+".", props.Text{Size: 8, Color: gray()}))
+			m.AddAutoRow(text.NewCol(12, "Current execution mode: "+insight.ExecutionMode+".", props.Text{Size: 8, Color: gray()}))
 		}
 		if insight.IncludesPreviousResults {
-			m.AddRow(8, text.NewCol(12, "This report includes retained findings from a previous result. Required-engine coverage applies only to the current execution and does not establish whole-assessment coverage.", props.Text{Size: 8, Color: gray()}))
+			m.AddAutoRow(text.NewCol(12, "This report includes retained findings from a previous result. Required-engine coverage applies only to the current execution and does not establish whole-assessment coverage.", props.Text{Size: 8, Color: gray()}))
 		}
 		note := insight.CompletenessNote
 		if note == "" {
 			note = "Dependency versions resolved with confidence."
 		}
-		m.AddRow(8, text.NewCol(12, note, props.Text{Size: 9, Color: gray()}))
+		m.AddAutoRow(text.NewCol(12, note, props.Text{Size: 9, Color: gray()}))
 		if outcomes := reportEngineOutcomes(insight.EngineOutcomes); len(outcomes) > 0 {
 			m.AddRow(5,
 				text.NewCol(3, "ENGINE", hdr()),

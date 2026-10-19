@@ -1419,6 +1419,30 @@ func (f *fakeJobStore) LatestForEngagements(_ context.Context, ids []shared.ID) 
 	return out, nil
 }
 
+func (f *fakeJobStore) LatestProjectAnalysisForEngagement(ctx context.Context, id shared.ID) (ports.ScanJob, error) {
+	jobs, err := f.LatestProjectAnalysisForEngagements(ctx, []shared.ID{id})
+	if err != nil {
+		return ports.ScanJob{}, err
+	}
+	job, ok := jobs[id]
+	if !ok {
+		return ports.ScanJob{}, shared.ErrNotFound
+	}
+	return job, nil
+}
+
+func (f *fakeJobStore) LatestProjectAnalysisForEngagements(_ context.Context, ids []shared.ID) (map[shared.ID]ports.ScanJob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[shared.ID]ports.ScanJob{}
+	for _, id := range ids {
+		if job, ok := f.jobs[id.String()]; ok && job.Purpose != ports.ScanPurposeProjectSource {
+			out[id] = job
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeJobStore) GetJob(_ context.Context, id string) (ports.ScanJob, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

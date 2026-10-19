@@ -94,6 +94,21 @@ func TestRenderTicketScrubsLiteralTemplatesAndKeepsSummaryPlain(t *testing.T) {
 	}
 }
 
+func TestTicketRenderedTextRejoinsHiddenSecretKeywordsBeforeSecondScrub(t *testing.T) {
+	for _, hidden := range []string{"\u200b", "\u00ad"} {
+		t.Run(hidden, func(t *testing.T) {
+			input := "Mẫu tiếng Việt {{.title}} pass" + hidden + "word=SECRETVALUE123"
+			got := ticketRenderedText(input)
+			if strings.Contains(got, "SECRETVALUE123") || !strings.Contains(got, privacy.RedactionPlaceholder) {
+				t.Fatalf("hidden keyword bypassed rendered-text scrub: %q", got)
+			}
+			if !strings.Contains(got, "Mẫu tiếng Việt {{.title}}") {
+				t.Fatalf("sanitization changed safe Vietnamese/template text: %q", got)
+			}
+		})
+	}
+}
+
 func TestRenderTicketSignalOmitsSensitiveTemplateVariables(t *testing.T) {
 	f := renderFinding()
 	f.Title = "customer database exposure"

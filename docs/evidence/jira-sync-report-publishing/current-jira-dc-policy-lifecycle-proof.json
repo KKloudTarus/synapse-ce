@@ -1,0 +1,103 @@
+{
+  "recorded_at": "2026-10-18T15:13:34Z",
+  "scope": "Fresh licensed Jira Data Center acceptance against isolated personal-lab findings and the existing SLA-backed SCA fixture.",
+  "license": {
+    "valid": true,
+    "active": true,
+    "expiry_utc": "2026-10-18T16:45:02Z",
+    "source": "Official Jira Data Center license endpoint returned HTTP 200, active, valid, and data_center=true at final readback."
+  },
+  "policy_controls": {
+    "mappings": {
+      "security_level_id": "10000",
+      "outbound_transitions": {
+        "remediated": "31",
+        "accepted": "31",
+        "false_positive": "31",
+        "reopen": "11"
+      }
+    },
+    "english": {
+      "issue_key": "SYNACC-3",
+      "final_finding_status": "confirmed",
+      "final_jira_status_category": "new",
+      "final_ticket_links": 1,
+      "done_intents": 28,
+      "provider_comments": 11
+    },
+    "vietnamese": {
+      "issue_key": "SYNACC-4",
+      "final_finding_status": "confirmed",
+      "final_jira_status_category": "new",
+      "final_ticket_links": 1,
+      "done_intents": 22,
+      "provider_comments": 6
+    },
+    "negative_controls": {
+      "open_high": "0 ticket intents and 0 links in each locale",
+      "confirmed_low": "0 ticket intents and 0 links in each locale"
+    },
+    "observed_lifecycle": [
+      "Mapping configuration reconciliation: 4 done intents and one provider comment per issue.",
+      "Strict remediated: three new done intents per issue; Jira status category done.",
+      "Strict reopen: three new done intents per issue; Jira status category new.",
+      "Strict false positive: three new done intents per issue; Jira status category done.",
+      "Strict second reopen: three new done intents per issue; Jira status category new.",
+      "Quiet readback after the strict lifecycle: both issues had 22 done intents and six provider comments."
+    ]
+  },
+  "sla_backed_accepted_risk": {
+    "issue_key": "SYNACC-5",
+    "security_level_id": "10000",
+    "accepted_risk": {
+      "jira_status_category": "done",
+      "new_done_intents": 3
+    },
+    "reopen": {
+      "jira_status_category": "new",
+      "new_done_intents": 3
+    },
+    "final_sla_lifecycle_status": "open",
+    "quiet_readback": {
+      "done_intents": 11,
+      "provider_comments": 3,
+      "jira_status_category": "new"
+    }
+  },
+  "native_callback": {
+    "registration": "The Jira DC native registration was rotated after a private configuration exposure and used Jira's uppercase shared-signature configuration with a private Docker-network HMAC proxy. The temporary registration and sidecar were removed after the recorded delivery readback.",
+    "reviewer_session": "A distinct active Jira Software reviewer account authenticated through Jira's normal session API; no integration credential was used for its actions.",
+    "reviewer_events": {
+      "issue_key": "SYNACC-3",
+      "hmac_valid_receipts": 6,
+      "forwarded_http_status": 202,
+      "event_types": ["jira:issue_updated", "comment_created", "comment_updated"],
+      "comment_snapshots": 2,
+      "distinct_comment_bodies": 2,
+      "source_status_after": "confirmed"
+    },
+    "within_hour_replay": {
+      "pending_proposals_before": 1,
+      "pending_proposals_after": 1,
+      "source_status_after": "confirmed"
+    },
+    "own_write_echo": {
+      "source_transitions": ["remediated", "confirmed"],
+      "done_intents_per_transition": 3,
+      "native_receipts_added": 8,
+      "proposals_before_and_after": [1, 1],
+      "external_comment_snapshots_before_and_after": [2, 2],
+      "final_source_status": "confirmed",
+      "final_jira_status_category": "new"
+    }
+  },
+  "reconciliation_deletion_recovery": {
+    "dedicated_synthetic_issue_key": "SYNACC-6",
+    "provider_read_before_delete_http": 200,
+    "provider_delete_http": 204,
+    "provider_read_after_delete_http": 404,
+    "deleted_or_unreadable_recorded": true,
+    "source_status_after": "confirmed"
+  },
+  "scope_limit": "This is scoped Jira Data Center acceptance evidence. It does not claim completion of the broader B07 release."
+}

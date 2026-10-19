@@ -7,15 +7,32 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Added
+
+- Jira Cloud and Data Center finding synchronization, Project vulnerability grouping,
+  proposal-only inbound status/comment observations, and bounded reconciliation.
+  Per-ticket refusals remain isolated from unrelated ticket creation.
+- Governed Confluence Cloud and Data Center PDF publication, update and permanent
+  unpublish with group-only sharing checks before content upload, periodic sharing
+  drift observations, and weekly PDF delivery to verified email destinations.
+  Delivery retains tenant permissions, legal holds, durable idempotency and an
+  explicit uncertain state when a remote acknowledgement is lost.
+
 ### Changed
 
 - **The syslog sink's RFC 5424 timestamp was out of specification (#1458).** `TIME-SECFRAC` is bounded at six digits and the sink wrote nine, because it formatted with `time.RFC3339Nano` and `time.Now` has nanosecond resolution on Linux. Every message a nanosecond clock produced was malformed. The timestamp is now capped at six fractional digits; nothing else about the frame changes, and a receiver that tolerated the nine-digit form keeps working.
+
+- A blocked or throttled Splunk sink now reads plainly in the console. The driver's own wording started with `splunk `, which the diagnostic scrubber treats as a credential marker, so "splunk rejected the credential" reached the operator as "[secret] the credential" (#1459).
 
 - **BREAKING CHANGE: default notification webhooks use a class-filtered envelope.** Receivers now get `synapse.notification.v1` with declared, scrubbed variables, lists and trusted console links instead of the raw event. Update receivers before upgrading notification workers. An administrator can explicitly enable `raw_event` on a `detail` webhook without a custom body; engagement disclosure limits still apply. Existing channels configured at `detail` also begin receiving finding titles in the `scan.completed` findings list. Review their recipients before rollout. Scan messages use immutable completion snapshots, bounded comparison keys and explicit unavailable deltas; built-in English and Vietnamese templates cover the routable events. Email includes escaped HTML alongside text. Follow the worker compatibility, capture-mode drain and rollback steps in [Notification content and capture rollout](docs/guide/notification-content.md).
 
 ### Added
 
 - **Syslog RFC 5424 over TLS verified against a real receiver (#1458).** An opt-in live contract suite (`SYNAPSE_TEST_SYSLOG_ORIGIN`, `SYNAPSE_TEST_SYSLOG_ADDR`, optionally `SYNAPSE_TEST_SYSLOG_CA`, `SYNAPSE_TEST_SYSLOG_LOG_URL` and `SYNAPSE_TEST_SYSLOG_APP`) delivers the three exported record shapes to a real syslog receiver over TLS and reads the receiver's own parsed output back, asserting the app name, the message id, the priority and the message. It also proves a receiver the sink cannot verify is blocked rather than delivered to. The offline contract tests now pin the RFC 5424 grammar field by field, the RFC 5425 octet count, the `APP-NAME` and `MSGID` rules, the sealed TLS credential shapes and the inputs refused before a connection is opened. [SIEM streaming](docs/guide/siem-stream.md) documents the frame and how to run the suite.
+
+- **Splunk HEC sink verified against a real collector (#1459).** An opt-in live contract suite (`SYNAPSE_TEST_SPLUNK_URL`, `SYNAPSE_TEST_SPLUNK_TOKEN`, optionally `SYNAPSE_TEST_SPLUNK_ACK_TOKEN`, `SYNAPSE_TEST_SPLUNK_CA`, `SYNAPSE_TEST_SPLUNK_MGMT_URL`, `SYNAPSE_TEST_SPLUNK_MGMT_AUTH` and `SYNAPSE_TEST_SPLUNK_INDEX`) delivers the three exported record shapes to a real Splunk over TLS, searches them back through the management API, and exercises the indexer-acknowledgement receipt and poll. The offline contract tests now also pin the collector wire format, the `Splunk` credential scheme, every transport, HEC-code and poll classification, and the inputs refused before a connection is opened. [SIEM streaming](docs/guide/siem-stream.md) documents the token, the `use-ack` pairing and how to run the suite.
+
+- **Elasticsearch bulk sink verified against a real cluster (#1460).** An opt-in live contract suite (`SYNAPSE_TEST_ELASTIC_URL`, `SYNAPSE_TEST_ELASTIC_API_KEY`, optional `SYNAPSE_TEST_ELASTIC_CA` and `SYNAPSE_TEST_ELASTIC_INDEX`) delivers the three exported record shapes to a real Elasticsearch over TLS, reads each document back, and asserts the stored body and the cursor fields a consumer reads to detect a gap. The offline contract tests now also pin the documented bulk wire format, the `ApiKey` credential scheme, every transport and per-item status classification, and the inputs refused before a connection is opened. [SIEM streaming](docs/guide/siem-stream.md) documents the credential form (the base64 `encoded` field of `POST /_security/api_key`, not the bare key), the index-name rules, and how to run the suite.
 
 - Ticketing foundation: tenant-scoped project/engagement mappings, manual finding links, durable idempotent write intents, and a reusable write-intent state machine with explicit uncertain reconciliation (#1423).
 

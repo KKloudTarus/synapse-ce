@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, BarChart01, Check, CheckCircle, Copy01, GitBranch01 as BranchIcon, Play, Trash01, Upload01 } from '@untitledui/icons'
+import { AlertTriangle, ArrowLeft, BarChart01, Check, CheckCircle, Copy01, File06, GitBranch01 as BranchIcon, Play, Trash01, Upload01 } from '@untitledui/icons'
 import { copyText } from '../../lib/clipboard'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
@@ -7,6 +7,7 @@ import { Toggle } from '../../components/base/toggle/toggle'
 import { api } from '../../lib/api'
 import { useFetch } from '../../hooks'
 import type { Project, QualityGate, ScanJob } from '../../lib/types'
+import { DocumentPublishingPanel } from '../EngagementDetail/components/DocumentPublishingPanel'
 
 // Roles holding PermOperate, which PUT /projects/{key}/decoration requires (router.go). This only
 // disables the control for accounts the server would refuse; the server still decides.
@@ -58,6 +59,7 @@ export function CodeQualityProject() {
   const [copied, setCopied] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [publishing, setPublishing] = useState(false)
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { data: branchList } = useFetch(() => api.projectBranches(key), { deps: [key, analysisRevision], enabled: !!key })
@@ -378,6 +380,9 @@ export function CodeQualityProject() {
             <Button loading={isRunning} disabled={isRunning} onClick={startAnalysis}>
               <Play className="size-4" aria-hidden="true" /> Run analysis
             </Button>
+            <Button variant="secondary" onClick={() => setPublishing((visible) => !visible)}>
+              <File06 className="size-4" aria-hidden="true" /> {publishing ? 'Hide publishing' : 'Publish report'}
+            </Button>
             {/* DELETE /api/v1/projects/{key} has always existed; the dashboard never called it, so a
                 project could be created and never removed. Two steps, because deleting a project
                 takes its analyses and their history with it. */}
@@ -415,10 +420,12 @@ export function CodeQualityProject() {
           </div>
         )}
       </header>
+      {publishing ? <DocumentPublishingPanel project={{ id: project.id, key: project.key }} /> : null}
       <nav className="mb-6 flex gap-4 overflow-x-auto border-b border-secondary whitespace-nowrap" aria-label="Project views">
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}`} end>Overview</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/hotspots`}>Security Hotspots</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/issues`}>Issues</ProjectNavLink>
+        <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/source-findings`}>Source findings</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/code`}>Code</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/dependencies`}>Dependencies</ProjectNavLink>
         <ProjectNavLink to={`/code-quality/projects/${encodeURIComponent(key)}/measures`}>Measures</ProjectNavLink>

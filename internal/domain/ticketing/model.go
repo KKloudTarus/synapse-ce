@@ -22,6 +22,32 @@ const (
 	Engagement Scope = "engagement"
 )
 
+// GroupingMode controls whether a mapping creates one ticket per finding or
+// groups a canonical vulnerability across a long-lived project.
+type GroupingMode string
+
+const (
+	GroupingFinding              GroupingMode = "finding"
+	GroupingVulnerabilityProject GroupingMode = "vulnerability_project"
+)
+
+func (m GroupingMode) Valid() bool { return m == GroupingFinding || m == GroupingVulnerabilityProject }
+
+// SyncState is the one-way Jira state represented by a current Synapse finding
+// or effective SLA lifecycle. A mapping opts in by configuring its transition.
+type SyncState string
+
+const (
+	SyncRemediated    SyncState = "remediated"
+	SyncAccepted      SyncState = "accepted"
+	SyncFalsePositive SyncState = "false_positive"
+	SyncReopen        SyncState = "reopen"
+)
+
+func (s SyncState) Valid() bool {
+	return s == SyncRemediated || s == SyncAccepted || s == SyncFalsePositive || s == SyncReopen
+}
+
 type Mapping struct {
 	ID            shared.ID
 	TenantID      shared.ID
@@ -44,12 +70,25 @@ type Mapping struct {
 	DataClass           notification.DataClass
 	Locale              string
 	WaiverReason        string
+	// AutoPush is deliberately opt-in per mapping. EnabledAt fences historical
+	// status events so enabling a mapping never backfills tickets unexpectedly.
+	AutoPushEnabled     bool
+	AutoPushMinSeverity shared.Severity
+	AutoPushEnabledAt   *time.Time
+	GroupingMode        GroupingMode
+	StatusTransitions   map[SyncState]string
 	Version             int
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
 
 func (m Mapping) Validate() error {
+	// The persisted default keeps direct foundation callers compatible with
+	// mappings created before grouping was introduced. Workflows normalize this
+	// before validation; stores do the same before writing the explicit column.
+	if m.GroupingMode == "" {
+		m.GroupingMode = GroupingFinding
+	}
 	if m.ID.IsZero() || m.TenantID.IsZero() || m.IntegrationID.IsZero() ||
 		m.ScopeID.IsZero() || (m.Scope != Project && m.Scope != Engagement) ||
 		!bounded(m.ProjectKey, 255) || !bounded(m.IssueType, 255) ||
@@ -80,6 +119,30 @@ func (m Mapping) Validate() error {
 		(m.Locale != "" && m.Locale != "en" && m.Locale != "vi") ||
 		len(m.WaiverReason) > 1024 || !validText(m.WaiverReason) {
 		return fmt.Errorf("%w: invalid ticket template or transition", shared.ErrValidation)
+	}
+	if m.AutoPushMinSeverity != "" && (!m.AutoPushMinSeverity.Valid() || shared.SeverityRank(m.AutoPushMinSeverity) == 0) {
+		return fmt.Errorf("%w: invalid ticket auto-push severity", shared.ErrValidation)
+	}
+	if !m.GroupingMode.Valid() || (m.GroupingMode == GroupingVulnerabilityProject && (m.Scope != Project || m.DataClass != notification.DataClassDetail)) {
+		return fmt.Errorf("%w: vulnerability/project grouping requires a project mapping with detail data class", shared.ErrValidation)
+	}
+	if m.AutoPushEnabled {
+		if m.AutoPushEnabledAt == nil || m.AutoPushEnabledAt.IsZero() {
+			return fmt.Errorf("%w: enabled ticket auto-push requires an activation time", shared.ErrValidation)
+		}
+		if shared.SeverityRank(m.AutoPushMinSeverity) == 0 {
+			return fmt.Errorf("%w: enabled ticket auto-push requires a minimum severity", shared.ErrValidation)
+		}
+	} else if m.AutoPushEnabledAt != nil {
+		return fmt.Errorf("%w: disabled ticket auto-push cannot retain an activation time", shared.ErrValidation)
+	}
+	if len(m.StatusTransitions) > 4 {
+		return fmt.Errorf("%w: too many ticket status transitions", shared.ErrValidation)
+	}
+	for state, transition := range m.StatusTransitions {
+		if !state.Valid() || !bounded(transition, 255) {
+			return fmt.Errorf("%w: invalid ticket status transition", shared.ErrValidation)
+		}
 	}
 	labels, err := json.Marshal(m.Labels)
 	if err != nil {
@@ -113,6 +176,17 @@ func (m Mapping) Clone() Mapping {
 			out[k] = v
 		}
 		m.FieldValues = out
+	}
+	if m.StatusTransitions != nil {
+		out := make(map[SyncState]string, len(m.StatusTransitions))
+		for k, v := range m.StatusTransitions {
+			out[k] = v
+		}
+		m.StatusTransitions = out
+	}
+	if m.AutoPushEnabledAt != nil {
+		at := *m.AutoPushEnabledAt
+		m.AutoPushEnabledAt = &at
 	}
 	return m
 }

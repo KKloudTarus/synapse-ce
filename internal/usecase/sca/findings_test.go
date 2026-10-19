@@ -80,6 +80,19 @@ func TestBuildFindings(t *testing.T) {
 	}
 }
 
+func TestBuildFindingsSetsCanonicalAdvisoryID(t *testing.T) {
+	got := buildFindings("eng1", &ScanResult{Vulnerabilities: []vulnerability.Vulnerability{{
+		ID: "CVE-2021-44228", Component: "log4j-core", Version: "2.14.1", Severity: shared.SeverityCritical,
+	}}}, time.Unix(0, 0).UTC(), shared.SeverityInfo, false, nil)
+
+	if len(got) != 1 {
+		t.Fatalf("findings = %d, want 1", len(got))
+	}
+	if got[0].AdvisoryID != "CVE-2021-44228" {
+		t.Fatalf("AdvisoryID = %q, want canonical vulnerability identity", got[0].AdvisoryID)
+	}
+}
+
 func TestBuildFindingsIgnoreUnfixed(t *testing.T) {
 	res := &ScanResult{
 		Vulnerabilities: []vulnerability.Vulnerability{
