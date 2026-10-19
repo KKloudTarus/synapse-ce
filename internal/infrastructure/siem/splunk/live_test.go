@@ -56,6 +56,18 @@ func liveSetup(t *testing.T) liveSplunk {
 	if origin == "" || token == "" {
 		t.Skipf("set %s and %s to run the live Splunk contract", envSplunkURL, envSplunkToken)
 	}
+	// Both origins carry a credential on every request: the collector token on the delivery
+	// path and the management user and password on the search path. safehttp constrains the
+	// address and refuses redirects; it does not require TLS, so the scheme is checked here
+	// before anything is sent.
+	if err := liveOrigin(origin); err != nil {
+		t.Fatalf("%s: %v", envSplunkURL, err)
+	}
+	if mgmt := os.Getenv(envSplunkMgmtURL); mgmt != "" {
+		if err := liveOrigin(mgmt); err != nil {
+			t.Fatalf("%s: %v", envSplunkMgmtURL, err)
+		}
+	}
 	index := os.Getenv(envSplunkIndex)
 	if index == "" {
 		index = "main"
@@ -65,6 +77,22 @@ func liveSetup(t *testing.T) liveSplunk {
 		mgmt: os.Getenv(envSplunkMgmtURL), mgmtAuth: os.Getenv(envSplunkMgmtAuth),
 		index: index, http: liveHTTP(t),
 	}
+}
+
+// liveOrigin accepts only an https origin with nothing else in it.
+func liveOrigin(origin string) error {
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return fmt.Errorf("origin is not a URL: %w", err)
+	}
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("origin must be https, got %q", parsed.Scheme)
+	}
+	if parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Path != "" && parsed.Path != "/") {
+		return fmt.Errorf("origin must be https://host[:port] with no userinfo, path, query or fragment")
+	}
+	return nil
 }
 
 // liveHTTP keeps the production safe dialer and the production TLS verification, and differs from
@@ -150,6 +178,28 @@ func (l liveSplunk) search(t *testing.T, query string) []map[string]any {
 		t.Fatalf("decode search: %v (%s)", err, payload)
 	}
 	return parsed.Results
+}
+
+// post sends one raw collector request with the token, for assertions about the collector's own
+// answer rather than the driver's interpretation of it.
+func (l liveSplunk) post(t *testing.T, path, token, body string) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, l.origin+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build %s: %v", path, err)
+	}
+	req.Header.Set("Authorization", "Splunk "+token)
+	req.Header.Set("Content-Type", "application/json")
+	response, err := l.http.Do(req)
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	payload, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return response.StatusCode, payload
 }
 
 // liveRecords builds what a real export produces, one record per stored shape, each carrying the
@@ -335,6 +385,22 @@ func TestLiveHECRejectionsAreClassified(t *testing.T) {
 	})
 
 	t.Run("an empty batch is refused with a non-zero hec code", func(t *testing.T) {
+		// The driver returns no items for an empty batch whatever the collector says, so the
+		// collector's own answer is read directly: a zero code here would mean Splunk accepted
+		// an empty request and this assertion would be vacuous.
+		status, body := live.post(t, "/services/collector/event", live.token, "")
+		var hec struct {
+			Code *int   `json:"code"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(body, &hec); err != nil {
+			t.Fatalf("collector answer is not json: %v (%s)", err, body)
+		}
+		if hec.Code == nil || *hec.Code == 0 {
+			t.Fatalf("the collector accepted an empty request: status=%d body=%s", status, body)
+		}
+		t.Logf("empty request rejected: status=%d code=%d text=%q", status, *hec.Code, hec.Text)
+
 		result, err := live.client(t, false).Deliver(context.Background(), live.delivery(live.token, siem.AckHECAcceptance, nil))
 		if err != nil {
 			t.Fatalf("deliver an empty batch: %v", err)

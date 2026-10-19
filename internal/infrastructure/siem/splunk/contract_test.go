@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -537,5 +539,58 @@ func TestNewClampsTheTimeoutAndDoesNotInferIndexerAck(t *testing.T) {
 				t.Error("indexer acknowledgement was inferred")
 			}
 		})
+	}
+}
+
+// Both live origins carry a credential: the collector token on the delivery path, the management
+// user and password on the search path. liveOrigin is the gate that keeps either off a cleartext
+// connection, and it decides before a connection is opened.
+func TestLiveOriginRefusesAnythingButHTTPS(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+	var accepted atomic.Int64
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			accepted.Add(1)
+			_ = conn.Close()
+		}
+	}()
+
+	refused := []struct {
+		name   string
+		origin string
+	}{
+		{"http", "http://" + listener.Addr().String()},
+		{"no scheme", listener.Addr().String()},
+		{"userinfo", "https://user:password@splunk.example.test:8088"},
+		{"path", "https://splunk.example.test:8088/services"},
+		{"query", "https://splunk.example.test:8088?output_mode=json"},
+		{"fragment", "https://splunk.example.test:8088#f"},
+		{"empty", ""},
+		{"not a url", "https://splunk.example.test:88 88"},
+	}
+	for _, testCase := range refused {
+		t.Run(testCase.name, func(t *testing.T) {
+			if err := liveOrigin(testCase.origin); err == nil {
+				t.Fatalf("liveOrigin(%q) was accepted", testCase.origin)
+			}
+		})
+	}
+	for _, accept := range []string{"https://splunk.example.test:8088", "https://splunk.example.test", "https://splunk.example.test:8089/"} {
+		if err := liveOrigin(accept); err != nil {
+			t.Errorf("liveOrigin(%q): %v", accept, err)
+		}
+	}
+	// The refused http origin pointed at a live listener. Nothing dialled it, which is what
+	// makes the guard useful: it runs before the credential is attached to a request.
+	if dialled := accepted.Load(); dialled != 0 {
+		t.Fatalf("validation opened %d connections", dialled)
 	}
 }
