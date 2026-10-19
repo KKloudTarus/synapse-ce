@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/msgtemplate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
@@ -387,6 +388,52 @@ func readTicketSnapshot(i domain.Intent) (snapshotFacts, json.RawMessage, error)
 	if ticketDigest(raw) != i.PayloadDigest {
 		return facts, nil, fmt.Errorf("%w: ticket snapshot digest mismatch", shared.ErrConflict)
 	}
+	if i.Action == domain.Update || i.Action == domain.Transition || i.Action == domain.Comment {
+		if facts.UpdateRemoteID == "" || facts.UpdateRemoteURL == "" {
+			return facts, nil, fmt.Errorf("%w: update ticket target missing", shared.ErrValidation)
+		}
+		if i.Action == domain.Transition {
+			if facts.StatusTransitionID == "" || facts.StatusSource == "" {
+				return facts, nil, fmt.Errorf("%w: transition ticket snapshot missing status facts", shared.ErrValidation)
+			}
+			if facts.StatusCommandVersion == 0 && facts.StatusComment == "" {
+				return facts, nil, fmt.Errorf("%w: legacy transition ticket snapshot missing status comment", shared.ErrValidation)
+			}
+			if facts.StatusCommandVersion != 0 && facts.StatusCommandVersion != 1 {
+				return facts, nil, fmt.Errorf("%w: transition ticket snapshot version invalid", shared.ErrValidation)
+			}
+			if facts.StatusCommandVersion == 1 && facts.StatusMode != "transition_only" {
+				return facts, nil, fmt.Errorf("%w: transition ticket snapshot mode invalid", shared.ErrValidation)
+			}
+			delete(base, "_synapse")
+			request, _ := json.Marshal(base)
+			return facts, request, nil
+		}
+		if i.Action == domain.Comment {
+			if facts.StatusCommandVersion != 1 || facts.StatusMode != "comment" || facts.StatusComment == "" || facts.StatusSource == "" || facts.StatusParentID.IsZero() || facts.StatusEpisode < 1 || facts.StatusAuthor == "" {
+				return facts, nil, fmt.Errorf("%w: comment ticket snapshot missing status facts", shared.ErrValidation)
+			}
+			delete(base, "_synapse")
+			request, _ := json.Marshal(base)
+			return facts, request, nil
+		}
+		// A grouped update uses the immutable preview snapshot for authority, but
+		// Jira must never receive create-only destination or assignment fields.
+		fields["labels"], _ = json.Marshal(labels)
+		for _, immutable := range []string{"project", "issuetype", "reporter", "assignee", "id", "key", "self"} {
+			delete(fields, immutable)
+		}
+		if len(fields) == 0 {
+			return facts, nil, fmt.Errorf("%w: update ticket fields missing", shared.ErrValidation)
+		}
+		base["fields"], _ = json.Marshal(fields)
+		delete(base, "_synapse")
+		request, _ := json.Marshal(base)
+		return facts, request, nil
+	}
+	if facts.UpdateRemoteID != "" || facts.UpdateRemoteURL != "" {
+		return facts, nil, fmt.Errorf("%w: create ticket snapshot has update target", shared.ErrValidation)
+	}
 	delete(obj, "_synapse")
 	request, _ := json.Marshal(obj)
 	return facts, request, nil
@@ -435,6 +482,55 @@ func (w *Workflow) executionAuthority(ctx context.Context, i domain.Intent, fact
 	}
 	if _, err = w.findings.GetByEngagementAndID(ctx, i.EngagementID, i.FindingID); err != nil {
 		return in, domain.Mapping{}, err
+	}
+	if i.Action == domain.Transition || i.Action == domain.Comment || (i.Action == domain.Update && facts.StatusSource != "") {
+		f, stateErr := w.findings.GetByEngagementAndID(ctx, i.EngagementID, i.FindingID)
+		if stateErr != nil {
+			return in, domain.Mapping{}, stateErr
+		}
+		state, source, stateErr := w.ticketSyncStateForTarget(ctx, i.TenantID, ports.TicketStatusTarget{Mapping: m, Intent: i}, f)
+		if stateErr != nil || facts.StatusSource != source || m.StatusTransitions[state] == "" || (i.Action == domain.Transition && m.StatusTransitions[state] != facts.StatusTransitionID) {
+			return in, domain.Mapping{}, shared.ErrConflict
+		}
+	}
+	if strings.HasPrefix(i.RequestKey, "auto:") {
+		f, err := w.findings.GetByEngagementAndID(ctx, i.EngagementID, i.FindingID)
+		if err != nil {
+			return in, domain.Mapping{}, err
+		}
+		if !w.autoPushSourceAvailable || !m.AutoPushEnabled || m.AutoPushMinSeverity == "" || f.Status != finding.StatusConfirmed || f.Kind == finding.KindExternal || !f.CanPromote() || shared.SeverityRank(f.Severity) < shared.SeverityRank(m.AutoPushMinSeverity) {
+			return in, domain.Mapping{}, shared.ErrForbidden
+		}
+	}
+	if facts.GroupFactsDigest != "" {
+		reader, ok := w.store.(ports.TicketGroupFactsReader)
+		if !ok {
+			return in, domain.Mapping{}, shared.ErrConflict
+		}
+		current, err := reader.GroupTicketFacts(ctx, i.TenantID, i.MappingID, m.ScopeID, facts.GroupVulnerability, ports.TicketGroupMember{EngagementID: i.EngagementID, FindingID: i.FindingID})
+		if err != nil {
+			return in, domain.Mapping{}, err
+		}
+		digest, err := ticketGroupFactsDigest(current)
+		if err != nil {
+			return in, domain.Mapping{}, err
+		}
+		if digest != facts.GroupFactsDigest {
+			return in, domain.Mapping{}, shared.ErrConflict
+		}
+		if facts.StatusSource == "" {
+			groups, ok := w.store.(ports.TicketGroupStore)
+			if !ok {
+				return in, domain.Mapping{}, shared.ErrConflict
+			}
+			group, found, err := groups.GetTicketGroup(ctx, i.TenantID, i.MappingID, m.ScopeID, facts.GroupVulnerability)
+			if err != nil {
+				return in, domain.Mapping{}, err
+			}
+			if !found || group.IntentID != i.ID || group.Revision != facts.GroupRevision+1 {
+				return in, domain.Mapping{}, shared.ErrConflict
+			}
+		}
 	}
 	policy, err := w.policy.GetEngagementNotificationSetting(ctx, i.TenantID, i.EngagementID)
 	if err != nil {

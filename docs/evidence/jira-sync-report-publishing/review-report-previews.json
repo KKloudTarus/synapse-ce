@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-18T12:33:30.750803+00:00",
+  "scope": "Current normal API report renders plus real Cloud attachment downloads. Stored source dates remain in PDFs; no new scan is implied.",
+  "artifacts": [
+    {
+      "file": "review-governed-report.pdf",
+      "sha256": "0c7fd73fff15e14007b236ff2ca3ea5ff9c4724f4b68d1f6238b4e0de1fb6f84",
+      "bytes": 47217,
+      "previews": [
+        "review-governed-report-1.png"
+      ],
+      "source": "Actual normal report.pdf response from restored Docker API; publication requests for these retained targets refused with409; no new provider release claimed",
+      "visual_review": "Every rendered page inspected; no clipping, overlap or missing Vietnamese glyph observed"
+    },
+    {
+      "file": "review-vulnerability-report.pdf",
+      "sha256": "744756b36d988c0b613c91e925afb05608a981b936c7846bd189d4ab0171ac91",
+      "bytes": 83119,
+      "previews": [
+        "review-vulnerability-report-1.png",
+        "review-vulnerability-report-2.png"
+      ],
+      "source": "Actual normal report.pdf response from restored Docker API; publication requests for these retained targets refused with409; no new provider release claimed",
+      "visual_review": "Every rendered page inspected; no clipping, overlap or missing Vietnamese glyph observed"
+    },
+    {
+      "file": "review-cloud-initial-report.pdf",
+      "sha256": "d3c4fae9e91f7bdbf1e8eaeaf2ca3bf5ba00d847602d82bb94a088bdbeb06fed",
+      "bytes": 39269,
+      "previews": [
+        "review-cloud-initial-report-1.png"
+      ],
+      "source": "Actual attachment bytes downloaded from Confluence Cloud page98630; authenticated origin request, redirected media request without Authorization",
+      "visual_review": "Every rendered page inspected; no clipping, overlap or missing Vietnamese glyph observed"
+    },
+    {
+      "file": "review-cloud-updated-report.pdf",
+      "sha256": "50e366a8da32e31d2047e36e0318c97f16afb7863063638354a851d37b94d58a",
+      "bytes": 44982,
+      "previews": [
+        "review-cloud-updated-report-1.png"
+      ],
+      "source": "Actual attachment bytes downloaded from Confluence Cloud page98630; authenticated origin request, redirected media request without Authorization",
+      "visual_review": "Every rendered page inspected; no clipping, overlap or missing Vietnamese glyph observed"
+    },
+    {
+      "file": "review-cloud-scheduled-report.pdf",
+      "sha256": "d06519ac6591cf5c4d6db596903cda62bdbc866b73f90a7aeada554fd0f9d169",
+      "bytes": 47057,
+      "previews": [
+        "review-cloud-scheduled-report-1.png"
+      ],
+      "source": "Actual attachment bytes downloaded from Confluence Cloud page98630; authenticated origin request, redirected media request without Authorization",
+      "visual_review": "Every rendered page inspected; no clipping, overlap or missing Vietnamese glyph observed"
+    }
+  ]
+}

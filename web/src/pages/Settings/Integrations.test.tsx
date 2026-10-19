@@ -90,6 +90,34 @@ describe('Integrations settings', () => {
     vi.mocked(api.listIntegrationExternalRuns).mockResolvedValue([])
   })
 
+  it('uses external integration copy so documentation links do not land on a CI/CD-only editor', async () => {
+    vi.mocked(api.listIntegrations).mockResolvedValue([])
+    render(<MemoryRouter><Integrations /></MemoryRouter>)
+    expect(await screen.findByRole('heading', { name: 'External integrations' })).toBeInTheDocument()
+    expect(screen.getByText('Connect external systems for ticketing, documentation, repository events, and Project analyses.')).toBeInTheDocument()
+  })
+
+  it.each(['member', 'readonly', 'integration_admin'])('keeps empty onboarding view-only for %s while identity loads', async (role) => {
+    let resolveIdentity!: (value: Awaited<ReturnType<typeof api.me>>) => void
+    vi.mocked(api.me).mockReturnValue(new Promise((resolve) => { resolveIdentity = resolve }))
+    vi.mocked(api.listIntegrations).mockResolvedValue([])
+    render(<MemoryRouter><Integrations /></MemoryRouter>)
+
+    expect(await screen.findByText('No integrations configured')).toBeInTheDocument()
+    expect(screen.getByText('A tenant administrator can add a provider connection.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Add integration|Create integration/ })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('API token')).not.toBeInTheDocument()
+
+    await act(async () => {
+      resolveIdentity({ id: 'u-viewer', name: 'Viewer', role } as never)
+    })
+    expect(screen.getByText('No integrations configured')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Add integration|Create integration/ })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('API token')).not.toBeInTheDocument()
+    expect(api.createIntegration).not.toHaveBeenCalled()
+    expect(api.setIntegrationCredential).not.toHaveBeenCalled()
+  })
+
   // #1358: an integration_admin operates an integration but cannot create one, edit its endpoint or
   // replace its credential; the server refuses those with 403 anyway.
   it('offers an integration_admin the operations but not the destination changes', async () => {

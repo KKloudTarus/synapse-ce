@@ -100,7 +100,9 @@ goose**. Two rules avoid the duplicate-version startup crash goose raises on col
 - Keep PRs focused; describe the change and its rationale.
 - Include tests for new behavior. Security- or execution-sensitive changes should also pass the
   hostile harness (`TestHostileHarness` in `internal/adapter/httpapi/harness_test.go`); persistence
-  changes should include real-Postgres integration tests run with `SYNAPSE_TEST_DB_DSN` set.
+  changes should include real-Postgres integration tests run with `SYNAPSE_TEST_DB_DSN` set. A
+  change to an outbound destination driver should also run that provider's opt-in live contract
+  suite against a real service, as described in the provider's guide.
 - Ensure `make build vet test typecheck` and `cd web && pnpm build` pass.
 - Use clear, conventional commit messages (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`).
 - For a user-visible change, add an entry under the `Unreleased` section of [`CHANGELOG.md`](CHANGELOG.md).

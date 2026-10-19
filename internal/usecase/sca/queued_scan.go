@@ -28,7 +28,7 @@ func (s *Service) admitQueuedScanJob(ctx context.Context, p scaJobPayload) (bool
 	}
 	stored, err := s.jobs.GetJob(ctx, p.Job.ID)
 	if err == nil {
-		if stored.EngagementID != p.EngagementID || stored.Target != p.Job.Target || stored.Kind != p.Job.Kind {
+		if stored.EngagementID != p.EngagementID || stored.Target != p.Job.Target || stored.Kind != p.Job.Kind || stored.Purpose != p.Job.Purpose {
 			return false, fmt.Errorf("%w: queued scan identity changed", shared.ErrValidation)
 		}
 		if stored.Status != ports.ScanRunning && stored.Status != ports.ScanSucceeded && stored.Status != ports.ScanFailed {
@@ -49,5 +49,5 @@ func (s *Service) admitQueuedScanJob(ctx context.Context, p scaJobPayload) (bool
 }
 
 func validQueuedScanIdentity(p scaJobPayload) bool {
-	return p.Job.ID != "" && p.Job.Status == ports.ScanRunning && p.Job.EngagementID == p.EngagementID && p.Job.Target == p.Req.Value && p.Job.Kind == kindOrLocal(p.Req.Kind)
+	return p.Job.ID != "" && p.Job.Status == ports.ScanRunning && p.Job.EngagementID == p.EngagementID && p.Job.Target == p.Req.Value && p.Job.Kind == kindOrLocal(p.Req.Kind) && ((p.Req.ProjectSource == nil && p.Job.Purpose == "") || (p.Req.ProjectSource != nil && p.Job.Purpose == ports.ScanPurposeProjectSource))
 }

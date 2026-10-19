@@ -34,6 +34,7 @@ RUN CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build -trimpath \
 FROM anchore/grype:v0.115.0 AS grype
 
 FROM gcr.io/distroless/static-debian12:nonroot
+COPY internal/infrastructure/report/assets/LiberationSans-LICENSE.txt /usr/share/licenses/synapse-ce/LiberationSans-LICENSE.txt
 COPY --from=grype /grype /usr/local/bin/grype
 COPY --from=build /out/synapse-cli /usr/local/bin/synapse-cli
 ENV SYNAPSE_GRYPE_BIN=/usr/local/bin/grype

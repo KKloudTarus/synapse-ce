@@ -1,0 +1,62 @@
+{
+  "email_subject": "Security assessment report: B07 controlled SCA acceptance",
+  "run": {
+    "content_hash": "4172b4ca075dab1fa95965f4e12ee85e78b6656628f317fc6125968d2f6531ca",
+    "delivered_count": 2,
+    "due_at": "2026-10-17T16:33:00Z",
+    "failed_count": 0,
+    "id": "schedule:fe956adb6f12e59a8b6b203bdaebace3",
+    "state": "done",
+    "uncertain_count": 0,
+    "updated_at": "2026-10-17T16:33:15.100691Z"
+  },
+  "schedule": {
+    "disable_status": 204,
+    "disabled_after_run": true,
+    "frequency": "weekly",
+    "hour": 23,
+    "id": "729601a7736a72dc4e9e02b80a8402eb",
+    "minute": 33,
+    "next_due_at": "2026-10-17T16:33:00Z",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "version": 1,
+    "weekday": 6
+  },
+  "source": {
+    "engagement_id": "f147d7221e2c2cba4109024964dfe24f",
+    "pdf_bytes": 83266,
+    "pdf_pages": 2,
+    "pdf_sha256": "4ddabd3bfcfbd96ac34e768a850b89bf13debbb1df0d749c6cb782e7adce0486",
+    "report_status": 200,
+    "source_ref": "engagement:f147d7221e2c2cba4109024964dfe24f"
+  },
+  "browser": {
+    "checked_at": "2026-10-17T16:47:14.540479+00:00",
+    "gmail_web_attachment_received": true,
+    "gmail_native_pdf_viewer_opened": true,
+    "gmail_pdf_pages": 2,
+    "outlook_web_attachment_received": true,
+    "outlook_native_preview": "provider_preview_creation_error",
+    "outlook_message_moved_to_inbox": true,
+    "outlook_safe_sender_setting_changed": false,
+    "source_pdf_sha256": "4ddabd3bfcfbd96ac34e768a850b89bf13debbb1df0d749c6cb782e7adce0486",
+    "downloads": [
+      {
+        "filename": "synapse-report-4172b4ca075dab1f (1).pdf.crdownload",
+        "bytes": 83266,
+        "sha256": "4ddabd3bfcfbd96ac34e768a850b89bf13debbb1df0d749c6cb782e7adce0486",
+        "matches_source": true,
+        "browser_download_finalized": false
+      },
+      {
+        "filename": "synapse-report-4172b4ca075dab1f.pdf.crdownload",
+        "bytes": 83266,
+        "sha256": "4ddabd3bfcfbd96ac34e768a850b89bf13debbb1df0d749c6cb782e7adce0486",
+        "matches_source": true,
+        "browser_download_finalized": false
+      }
+    ],
+    "download_note": "Browser staged files contain the complete matching PDF bytes with EOF; browser download finalization did not complete. No browser security warning was bypassed."
+  },
+  "artifact_hash_note": "The run content_hash hashes the serialized DocumentArtifact including metadata; PDF byte identity is established separately by source.pdf_sha256 and the complete staged download bytes."
+}

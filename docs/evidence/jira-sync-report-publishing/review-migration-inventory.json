@@ -1,0 +1,179 @@
+{
+  "recorded_at": "2026-10-18T12:43:33.889811+00:00",
+  "scope": "Current review-remediation migrations compared with refreshed origin/main schema 0241; source hashes identify the exact SQL, not a timing prediction",
+  "comparison_base": "caa6b1ea210174d459979ae02e37d1a88628ee19",
+  "migrations": [
+    {
+      "migration": "0242",
+      "pre_existing": [
+        "ticket_mappings",
+        "notification_events"
+      ],
+      "work": "ticket_mappings constant-default columns, CHECK validation and partial index; CREATE TRIGGER on notification_events; ticket_auto_push_receipts is new and not backfilled",
+      "file": "0242_ticket_auto_push.sql",
+      "sha256": "896422b7d2aba66d8efbd61316a108c7df444b811f949d59df55b3d072f5db15"
+    },
+    {
+      "migration": "0243",
+      "pre_existing": [
+        "ticket_mappings"
+      ],
+      "work": "mapping grouping columns/CHECK validation; new ticket_groups and ticket_group_members",
+      "file": "0243_ticket_grouping.sql",
+      "sha256": "ddb1b560e5b2b391cf16145bf77cc55c5a29c021dc91991bdf8d951dfea48471"
+    },
+    {
+      "migration": "0244",
+      "pre_existing": [
+        "ticket_mappings"
+      ],
+      "work": "mapping JSONB default and CHECK validation; new ticket_status_sync",
+      "file": "0244_ticket_status_sync.sql",
+      "sha256": "68dd825ec96c792dfdd36f73fd6cd61a03a5f657d4b7cc5ced3fa828f8e93b06"
+    },
+    {
+      "migration": "0245",
+      "pre_existing": [],
+      "work": "new-in-batch ticket_groups column/CHECK",
+      "file": "0245_ticket_group_command_revision.sql",
+      "sha256": "1448ad031c1a53895b88c86e8820ec32f62a4cda19ccb48a8031fba46ac01716"
+    },
+    {
+      "migration": "0246",
+      "pre_existing": [],
+      "work": "new-in-batch ticket_status_sync column/CHECK, UPDATE backfill, NOT NULL validation and replacement partial index",
+      "file": "0246_ticket_status_progress.sql",
+      "sha256": "23a1cda16f99b69fceb9514da5d5e217d6cd07a0f87cddeece14be7fc67d4c80"
+    },
+    {
+      "migration": "0247",
+      "pre_existing": [],
+      "work": "new-in-batch ticket_status_sync column/CHECK",
+      "file": "0247_ticket_status_episode.sql",
+      "sha256": "15d9189e42c5cb999444a3774131c8d6a6cc1bf6e37d0df46eede894fd967665"
+    },
+    {
+      "migration": "0248",
+      "pre_existing": [],
+      "work": "new ticket_external_observations, ticket_retest_proposals and ticket_external_comments; new indexes and RLS",
+      "file": "0248_ticket_inbound_observations.sql",
+      "sha256": "1ca4c67c179b62f805aced34f38565fc080d5f9313a313c76abda25d9b5700d3"
+    },
+    {
+      "migration": "0249",
+      "pre_existing": [],
+      "work": "new ticket_inbound_config and runtime provisioning/rotation functions; no existing-row migration",
+      "file": "0249_ticket_inbound_configuration.sql",
+      "sha256": "e3e6a94afd2dcedd324b9341d817a321520fb9221587525a21d9f0793ba16a7c"
+    },
+    {
+      "migration": "0250",
+      "pre_existing": [],
+      "work": "new-in-batch inbound tables column/CHECK/FK validation; referenced integrations can take brief FK DDL relation locks",
+      "file": "0250_ticket_inbound_status_author.sql",
+      "sha256": "3f8c0e27a45e05cd37b3ec81315df63122397d23c0b482a5b2bcdd3e5ba052a0"
+    },
+    {
+      "migration": "0251",
+      "pre_existing": [
+        "ticket_intents"
+      ],
+      "work": "Create progress/index and forced-RLS tenant cursor tables, then install trigger on ticket_intents. No historical INSERT SELECT, NO FORCE RLS or existing-table index build. Runtime tenant-keyset catch-up scans bounded batches; DDL can still wait for relation locks.",
+      "file": "0251_ticket_inbound_poll_progress.sql",
+      "sha256": "bb0476a5d24d9d2373aad1e8a627b45ffaae2c2dcd4eca1a9e01626e0df38bd9"
+    },
+    {
+      "migration": "0252",
+      "pre_existing": [
+        "document_links",
+        "document_intents"
+      ],
+      "work": "nullable retired_at column; replace/revalidate action and link-action CHECK constraints; new document_commands",
+      "file": "0252_document_commands.sql",
+      "sha256": "a9b2f14df8425a88bf1dc609f476bedf130b04889f62d62e3bbe9aacd3ddb817"
+    },
+    {
+      "migration": "0253",
+      "pre_existing": [],
+      "work": "new authorization function only",
+      "file": "0253_document_release_authority.sql",
+      "sha256": "598dcb11d6b4d163c80cad17062e0a8010bbd4bdde36a1ef2f43e1244516e828"
+    },
+    {
+      "migration": "0254",
+      "pre_existing": [
+        "document_intents"
+      ],
+      "work": "conditionally validate/add correlation-marker CHECK if absent; existing valid marker constraint makes this a no-op",
+      "file": "0254_document_intent_marker_guard.sql",
+      "sha256": "90395dda112fba153fb4f37f08c53904ef24e954fd5bbfa82bc057498fac6d37"
+    },
+    {
+      "migration": "0255",
+      "pre_existing": [],
+      "work": "replace authorization function only",
+      "file": "0255_document_authority_unbound.sql",
+      "sha256": "0aa26be51f97a8c59fb2a4837f7e7e53274d5483db2d6679484c59507a4fdd16"
+    },
+    {
+      "migration": "0256",
+      "pre_existing": [
+        "engagements"
+      ],
+      "work": "ordinary partial B-tree index on existing engagements; column/CHECK/index on new-in-batch document_commands",
+      "file": "0256_document_command_fair_queue.sql",
+      "sha256": "817c1c687991c1e0adde17a5e0107c7e3f226a7ed8822a2ea3ba13bd689d6101"
+    },
+    {
+      "migration": "0257",
+      "pre_existing": [],
+      "work": "new document_schedules, document_schedule_occurrences and document_schedule_deliveries with indexes, FK constraints and RLS",
+      "file": "0257_report_schedules.sql",
+      "sha256": "df94c9bc07e769934478eaf8d1ec0bd70c182ffde7862f0a4214c9220a964f50"
+    },
+    {
+      "migration": "0258",
+      "pre_existing": [
+        "ticket_intents"
+      ],
+      "work": "ordinary partial covering B-tree index on existing ticket_intents; second index on new-in-batch ticket_external_comments",
+      "file": "0258_ticket_inbound_read_indexes.sql",
+      "sha256": "3f3d7336ca3dfed4c1b51894eea6fca512c4808b3ef24874773bff8126d1d047"
+    },
+    {
+      "migration": "0259",
+      "pre_existing": [],
+      "work": "two ordinary partial indexes on new-in-batch schedule tables",
+      "file": "0259_document_schedule_ready_indexes.sql",
+      "sha256": "201f08263a47e9b5f86b6507cedf9d7f55702b8db7f10e36ea747d9c60518b67"
+    },
+    {
+      "migration": "0260",
+      "pre_existing": [
+        "scan_jobs"
+      ],
+      "work": "constant-default purpose column, CHECK validation, immutable-purpose trigger, ordinary partial B-tree index; ACCESS EXCLUSIVE retained through transaction",
+      "file": "0260_scan_job_purpose.sql",
+      "sha256": "d0360df7edc2a2e53581ea29c86429bb2b5f072bd9594ed366c4ed2a59cdf55b"
+    },
+    {
+      "migration": "0261",
+      "pre_existing": [
+        "document_links"
+      ],
+      "work": "Constant-default observation/claim columns and checks; ordinary transactional partial B-tree index on active document_links. Rehearse and drain clients for its conflicting relation lock; not an online migration guarantee.",
+      "file": "0261_document_restriction_monitor.sql",
+      "sha256": "be0e1f757794b0a16d608375169e5f8a653f1a180ef0c74977b91319381d57fb"
+    }
+  ],
+  "general_lock_note": "New tables with foreign keys also take DDL relation locks on referenced pre-existing tables; new/empty describes row volume, not an absence of locks.",
+  "not_measured": [
+    "0242-0244 mapping validation/index at production mapping cardinality",
+    "0252/0254 document-intent CHECK validation at production cardinality",
+    "incremental upgrade with populated intermediate B07 tables",
+    "lock acquisition behind long-running transactions or replica lag",
+    "Current 0261 active-link index at production cardinality",
+    "Current 0251 migration lock acquisition behind long transactions",
+    "Sustainable historical catch-up/provider-monitor freshness under production backlog"
+  ]
+}

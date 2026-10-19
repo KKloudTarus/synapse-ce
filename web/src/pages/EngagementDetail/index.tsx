@@ -7,6 +7,7 @@ import { OverviewTab } from './OverviewTab'
 import { FindingsTab } from './FindingsTab'
 import { jobForEngagement, ScanPanel } from './ScanPanel'
 import { ExportButtons } from './ExportButtons'
+import { DocumentPublishingPanel } from './components/DocumentPublishingPanel'
 import { packageLocationMap, countVulnerabilityFindings, VulnsTab } from './VulnsTab'
 import { ARCHIVED_REASON, isReadOnly } from './readOnly'
 import {
@@ -68,6 +69,7 @@ export function EngagementDetail() {
   const focusedScanRunId = hashTarget(hash, '#scan-')
   const { tab, setTab } = useEngagementTab(id, tabSlug, hash)
   const [findingsFilter, setFindingsFilter] = useState<Severity | 'all'>('all')
+  const [publishing, setPublishing] = useState(false)
 
   const {
     eng, setEng, engLoading, engError: engErr,
@@ -167,9 +169,11 @@ export function EngagementDetail() {
         {/* 3 action buttons moved up to be on the same horizontal row with breadcrumbs */}
         <div className="flex flex-wrap items-center justify-end gap-2">
           {viFindingCount > 0 && <VulnerabilityIntelligenceBadge count={viFindingCount} />}
-          <ExportButtons engagementId={eng.id} scan={scan} onChanged={refreshAll} />
+          <ExportButtons engagementId={eng.id} scan={scan} onChanged={refreshAll} publishing={publishing} onTogglePublishing={() => setPublishing((visible) => !visible)} />
         </div>
       </div>
+
+      {publishing && <DocumentPublishingPanel key={eng.id} engagementId={eng.id} />}
 
       {/* Keep the Engagement identity first; lifecycle is supporting context below the scan console. */}
       <section aria-label="Engagement summary" className="bg-hero rounded-2xl border border-secondary p-4 sm:p-5 shadow-xs space-y-3">

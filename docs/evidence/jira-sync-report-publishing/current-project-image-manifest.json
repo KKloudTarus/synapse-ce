@@ -1,0 +1,82 @@
+{
+  "scope": "Rendered provider and linked-console visual evidence for the final post-removal source/a state.",
+  "images": [
+    {
+      "path": "current-project-cloud-en.jpg",
+      "sha256": "6e495f4875e66c3a53c8302455f72d0ef547617737210b069fe11886cb5605bc",
+      "format": "jpeg",
+      "dimensions": "1383x718",
+      "subject": "B7R-8 English post-removal view with source/a, priority, labels, and the restricted security level"
+    },
+    {
+      "path": "current-project-cloud-vi-after-removal.jpg",
+      "sha256": "94412a12748fc47f796f5a25fab32fbae12330a39ac1ccb6df588c0ebc7ddc4e",
+      "format": "jpeg",
+      "dimensions": "1383x718",
+      "subject": "B7R-8 final Vietnamese post-removal view with source/a, priority, labels, and the restricted security level"
+    },
+    {
+      "path": "current-project-dc-en.jpg",
+      "sha256": "bee02e59f048ec926af0a70d16380ac5a77bf6a91858e1c58a17d0f4704a3203",
+      "format": "jpeg",
+      "dimensions": "1368x710",
+      "subject": "SYNACC-2 English post-removal issue view with priority, labels, restricted security, and description."
+    },
+    {
+      "path": "current-project-dc-vi.jpg",
+      "sha256": "de9f9baa418d165a972623be6aa2ab28a01f228c0eb8afd2a45d5258e4f14f6a",
+      "format": "jpeg",
+      "dimensions": "1368x710",
+      "subject": "SYNACC-2 final Vietnamese post-removal issue view with priority, labels, restricted security, and description."
+    },
+    {
+      "path": "current-jira-dc-policy-en.jpg",
+      "sha256": "92e504a8f0654ca699ebf5d026a011ee052ef3f4ffc8600445729f02473a6d08",
+      "format": "jpeg",
+      "dimensions": "1368x710",
+      "subject": "SYNACC-3 English policy issue view with body, priority, labels, and restricted security"
+    },
+    {
+      "path": "current-jira-dc-policy-vi.jpg",
+      "sha256": "90dfa06b73175aeac66777838298d4ab18f4232e5a058a7b269e9523a7872759",
+      "format": "jpeg",
+      "dimensions": "1368x710",
+      "subject": "SYNACC-4 Vietnamese policy issue view with body, priority, labels, and restricted security"
+    },
+    {
+      "path": "current-project-source-finding.jpg",
+      "sha256": "bd828b6d5b9e06c19bd2464e3154ac3c00cb88f7651a02a1c0921a0045c9f543",
+      "format": "jpeg",
+      "dimensions": "1383x718",
+      "subject": "Authenticated Project source-finding view showing the confirmed finding title, status, and source provenance."
+    },
+    {
+      "path": "current-project-dc-assets-en.jpg",
+      "sha256": "79b42afed48515fa92fab8e191947a0f94cd4c14ab06d44fdecb3c31f5037374",
+      "format": "jpeg",
+      "dimensions": "1368x703",
+      "subject": "SYNACC-2 English description and rendered post-removal source/a asset row for CVE-2021-44228 in org.apache.logging.log4j:log4j-core@2.14.1."
+    },
+    {
+      "path": "current-project-dc-assets-vi.jpg",
+      "sha256": "b758a4d37c8ead4d4f3c9600a33788f7f141791f2496d08f51b7f5cd742f7367",
+      "format": "jpeg",
+      "dimensions": "1368x703",
+      "subject": "SYNACC-2 Vietnamese description and rendered post-removal source/a asset row for CVE-2021-44228 in org.apache.logging.log4j:log4j-core@2.14.1."
+    },
+    {
+      "path": "current-project-console-linked-tickets.jpg",
+      "sha256": "0df100bd306deb6f7daa42f39004acf6c2c34258ecec64120094a3eadf91c097",
+      "format": "jpeg",
+      "dimensions": "1383x711",
+      "subject": "Authenticated Project finding detail with the confirmed CVE-2021-44228 finding and both rendered linked provider ticket keys, SYNACC-2 and B7R-8."
+    },
+    {
+      "path": "current-project-console-ticket-states.jpg",
+      "sha256": "8e8c8877538699fdbfdc0c1a65a8f9eaa2bddf0860b85dd88ea69c85f26a493b",
+      "format": "jpeg",
+      "dimensions": "1383x711",
+      "subject": "Authenticated Project finding ticket panel showing Jira observations and retained diagnostic ticket state for the existing linked tickets."
+    }
+  ]
+}

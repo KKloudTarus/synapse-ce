@@ -316,6 +316,7 @@ func (fakeRules) Get(context.Context, rule.Key) (rule.Rule, error)        { retu
 // handler runs, so they need no downstream service. This is deliberate – the security-critical
 // assertions are the denials.
 func TestHostileHarness(t *testing.T) {
+	t.Run("document integration egress rejects foreign tenants", runDocumentIntegrationEgressHarness)
 	t.Run("ticket manual routes isolate finding and tenant", runTicketManualHostileHarness)
 	t.Run("notification event rules reject foreign tenants", func(t *testing.T) {
 		for _, eventType := range []notification.EventType{
@@ -679,6 +680,12 @@ func TestHostileHarness(t *testing.T) {
 		// RBAC deny: readonly holds only view.
 		{"readonly may not create (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/engagements", http.StatusForbidden},
 		{"readonly may not create project (operate)", "readonly", "tenantA", true, http.MethodPost, "/api/v1/projects", http.StatusForbidden},
+		{"readonly may not start project source scan", "readonly", "tenantA", true, http.MethodPost, "/api/v1/projects/project-a/source-scans", http.StatusForbidden},
+		{"readonly may not triage project source finding", "readonly", "tenantA", true, http.MethodPatch, "/api/v1/projects/project-a/source-findings/f1", http.StatusForbidden},
+		{"machine may not read project source findings", "agent", "tenantA", true, http.MethodGet, "/api/v1/projects/project-a/source-findings", http.StatusForbidden},
+		{"cross-tenant source findings are hidden", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a/source-findings", http.StatusNotFound},
+		{"cross-tenant source finding is hidden", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a/source-findings/f1", http.StatusNotFound},
+		{"cross-tenant source job is hidden", "consultant", "tenantB", true, http.MethodGet, "/api/v1/projects/project-a/source-scans/job-1", http.StatusNotFound},
 		{"readonly may not start project analysis", "readonly", "tenantA", true, http.MethodPost, "/api/v1/projects/project-a/analyses", http.StatusForbidden},
 		{"machine may not start project analysis", "agent", "tenantA", true, http.MethodPost, "/api/v1/projects/project-a/analyses", http.StatusForbidden},
 		{"machine may not list projects", "agent", "tenantA", true, http.MethodGet, "/api/v1/projects", http.StatusForbidden},

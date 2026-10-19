@@ -136,6 +136,13 @@ func (s *InboundWebhookRepository) ProcessInboundWebhookEvent(ctx context.Contex
 		if !active {
 			return fmt.Errorf("%w: inbound webhook changed before enqueue", shared.ErrConflict)
 		}
+		if event.Provider == "jira-cloud" || event.Provider == "jira-dc" {
+			// Jira delivery IDs and signed payload receipts expire together. The
+			// unique receipt indexes serialize concurrent delivery admission.
+			if _, err := tx.Exec(ctx, `DELETE FROM inbound_webhook_events WHERE tenant_id=$1 AND public_id=$2 AND provider=$3 AND received_at<=now()-interval '2 hours'`, identity.TenantID, identity.PublicID, event.Provider); err != nil {
+				return err
+			}
+		}
 		tag, err := tx.Exec(ctx, `
 			INSERT INTO inbound_webhook_events(tenant_id,public_id,provider,event_id,received_at,payload_sha256)
 			VALUES($1,$2,$3,$4,now(),$5) ON CONFLICT DO NOTHING
@@ -238,6 +245,8 @@ func (s *InboundWebhookRepository) ProvisionInboundWebhook(ctx context.Context, 
 	case "", "github":
 	case "bitbucket":
 		function = "synapse_provision_bitbucket_inbound_webhook"
+	case "jira-cloud", "jira-dc":
+		function = "synapse_provision_jira_inbound_webhook"
 	default:
 		return false, nil
 	}
@@ -267,6 +276,8 @@ func (s *InboundWebhookRepository) RotateInboundWebhook(ctx context.Context, ide
 	case "github":
 	case "bitbucket":
 		function = "synapse_rotate_bitbucket_inbound_webhook"
+	case "jira-cloud", "jira-dc":
+		function = "synapse_rotate_jira_inbound_webhook"
 	default:
 		return false, nil
 	}

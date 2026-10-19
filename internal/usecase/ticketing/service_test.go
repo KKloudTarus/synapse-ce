@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,9 +21,17 @@ type ticketClock struct{ t time.Time }
 
 func (c ticketClock) Now() time.Time { return c.t }
 
-type ticketIDs struct{ n int }
+type ticketIDs struct {
+	mu sync.Mutex
+	n  int
+}
 
-func (g *ticketIDs) NewID() shared.ID { g.n++; return shared.ID(fmt.Sprintf("ticket-service-%d", g.n)) }
+func (g *ticketIDs) NewID() shared.ID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.n++
+	return shared.ID(fmt.Sprintf("ticket-service-%d", g.n))
+}
 
 type ticketFixture struct {
 	store       *memory.TicketStore

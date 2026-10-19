@@ -162,6 +162,9 @@ archives:
       - LICENSE
       - README.md
       - CHANGELOG.md
+      - src: internal/infrastructure/report/assets/LiberationSans-LICENSE.txt
+        dst: LICENSES
+        strip_parent: true
 
   # A slim CI archive: just synapse-cli. A scan/gate job needs only that one binary, so this avoids
   # downloading the whole suite on every pipeline run across hundreds of projects.
@@ -177,6 +180,9 @@ archives:
           - zip
     files:
       - LICENSE
+      - src: internal/infrastructure/report/assets/LiberationSans-LICENSE.txt
+        dst: LICENSES
+        strip_parent: true
 
 checksum:
   name_template: "checksums.txt"

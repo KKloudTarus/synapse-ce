@@ -561,6 +561,23 @@ func GrantRuntimePrivileges(ctx context.Context, adminDSN, runtimeDSN string, ha
 			"GRANT EXECUTE ON FUNCTION synapse_rotate_bitbucket_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
 		)
 	}
+	var jiraInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_provision_jira_inbound_webhook(text,text,text,text,integer)') IS NOT NULL").Scan(&jiraInstalled); err != nil {
+		return fmt.Errorf("inspect Jira webhook functions: %w", err)
+	}
+	if jiraInstalled {
+		statements = append(statements,
+			"GRANT EXECUTE ON FUNCTION synapse_provision_jira_inbound_webhook(TEXT,TEXT,TEXT,TEXT,INT) TO "+quotedRole,
+			"GRANT EXECUTE ON FUNCTION synapse_rotate_jira_inbound_webhook(TEXT,TEXT,TEXT,INT,TEXT,TIMESTAMPTZ) TO "+quotedRole,
+		)
+	}
+	var documentAuthorityInstalled bool
+	if err := adminDB.QueryRowContext(ctx, "SELECT to_regprocedure('public.synapse_can_release_document(text,text,text,text)') IS NOT NULL").Scan(&documentAuthorityInstalled); err != nil {
+		return fmt.Errorf("inspect document authority function: %w", err)
+	}
+	if documentAuthorityInstalled {
+		statements = append(statements, "GRANT EXECUTE ON FUNCTION synapse_can_release_document(TEXT,TEXT,TEXT,TEXT) TO "+quotedRole)
+	}
 	// The Teams link offers (#1420) are global and owner-only like the inbound registry: the runtime
 	// role offers and claims a code only through the SECURITY DEFINER functions of migration 0229.
 	var teamsLinkInstalled bool

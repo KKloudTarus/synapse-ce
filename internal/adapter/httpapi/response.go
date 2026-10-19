@@ -63,6 +63,9 @@ func writeError(w http.ResponseWriter, log *slog.Logger, err error) {
 		writeCodedError(w, CodeAccessDenied, "access denied: this identity is not approved for Synapse")
 		return
 	}
+	if scoped, ok := w.(interface{ sanitizePublicError(error) error }); ok {
+		err = scoped.sanitizePublicError(err)
+	}
 	switch {
 	case errors.Is(err, shared.ErrValidation):
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: err.Error()})

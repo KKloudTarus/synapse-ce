@@ -560,6 +560,134 @@ Only Teams/PagerDuty remain deferred. Issue ownership and the existing #1418/#14
 integration closures are unchanged. This PR keeps `Refs` where an issue's complete
 cross-provider acceptance includes those deferrals; it does not close #1420 or #1576.
 
+## Personal inbox and bell state matrix on 2026-10-18
+
+The light/dark/state matrix the section above records as missing, for the notification bell
+and the inbox page (#1417). Every capture comes from the console in Chromium against an
+API serving PostgreSQL, authenticated as the bootstrap administrator and as a separate
+read-only operator. The notices in the list are the real administrator notices the product
+raised when a webhook destination was created and then moved, so the inbox content is
+product output rather than seeded rows. The dark captures and the deep-link journey were
+taken on 2026-10-19 against the same stack, with fresh notices raised the same way.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| Inbox list, bell carrying two unread | [Light](assets/ui/ws4-console/inbox-list-light.png) | [Dark](assets/ui/ws4-console/inbox-list-dark.png) |
+| Transport failure while loading the list | [Light](assets/ui/ws4-console/inbox-error-light.png) | [Dark](assets/ui/ws4-console/inbox-error-dark.png) |
+| Unread-only filter | [Light](assets/ui/ws4-console/inbox-unread-filter-light.png) | |
+| Loading, request outstanding | [Light](assets/ui/ws4-console/inbox-loading-light.png) | [Dark](assets/ui/ws4-console/inbox-loading-dark.png) |
+| Unread list before Mark all read | | [Dark](assets/ui/ws4-console/inbox-unread-list-dark.png) |
+| The list straight after Mark all read | | [Dark](assets/ui/ws4-console/inbox-mark-all-dark.png) |
+| Unread empty after Mark all read | [Light](assets/ui/ws4-console/inbox-mark-all-empty-light.png) | [Dark](assets/ui/ws4-console/inbox-empty-dark.png) |
+| Bell with no badge after Mark all read | [Light](assets/ui/ws4-console/inbox-after-mark-all-bell-light.png) | |
+| A second operator's own empty inbox | [Light](assets/ui/ws4-console/inbox-reader-empty-light.png) | [Dark](assets/ui/ws4-console/inbox-reader-empty-dark.png) |
+| A notice about to be opened | [Light](assets/ui/ws4-console/inbox-deep-link-source-light.png) | [Dark](assets/ui/ws4-console/inbox-deep-link-source-dark.png) |
+| Where its own link lands | [Light](assets/ui/ws4-console/inbox-deep-link-destination-light.png) | [Dark](assets/ui/ws4-console/inbox-deep-link-destination-dark.png) |
+| The same destination for a reader | [Light](assets/ui/ws4-console/inbox-deep-link-denied-light.png) | [Dark](assets/ui/ws4-console/inbox-deep-link-denied-dark.png) |
+| 390-pixel viewport | [Light](assets/ui/ws4-console/inbox-mobile-light.png) | |
+
+How each state was produced, since a state that cannot be reproduced is not evidence:
+
+- The loading capture delays the real `GET /api/v1/me/inbox` by six seconds and screenshots
+  while it is outstanding. The response is the server's own.
+- The error capture aborts that request at the transport, which is what a dropped connection
+  looks like to the browser. No response body is substituted.
+- The empty capture is the state after the page's own Mark all read, with the unread filter
+  on. The bell capture that follows it is a fresh load of the same account.
+- The second operator is a real `readonly` user with their own API key, so their empty inbox
+  is the product's per-user scoping rather than a filtered view.
+- The deep-link journey clicks a notice in the list. The row names `/settings/alerting`,
+  the console navigates there, and the destination capture is that screen. The light
+  capture is taken with the notice unread; the dark one was taken after the light journey
+  had already read it, so it carries no unread badge. The notice itself was raised by
+  creating and then moving a webhook destination through `POST` and
+  `PATCH /api/v1/notifications/channels`, so the link target is the screen the event came
+  from.
+
+### Where authorization is refused in this journey
+
+`GET /api/v1/me/inbox` carries `PermView` and returns only the caller's own rows. Every
+human role in this tenant holds that permission, so no human reaches a denial on the inbox
+page: a `readonly` operator reaches their own list and finds it empty, which the capture
+above shows. A machine principal is refused, and
+`TestInboxRoutesRejectSpoofedIdentityAndMachineRoles` covers that, with no console state to
+capture because an agent has no browser session.
+
+The refusal a person can see in this journey is at the destination a notice links to. The
+`readonly` operator opening `/settings/alerting` gets the administrator-access screen:
+
+> Administrator access required. Only tenant administrators and integration administrators
+> can manage notification settings and delivery history.
+
+That screen is the client role gate: `Alerting.tsx` calls `load()` only when
+`canManageIntegrations(me.role)` is true, so this navigation issues no rules request. The
+server refuses the same read independently, which is a separate observation against the
+running API:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $READONLY_KEY" \
+    http://127.0.0.1:18080/api/v1/notifications/rules
+403
+```
+
+The captures in the row above are the client-side state, in both themes.
+
+One copy defect is visible in the error captures: the message names port 8080
+("Cannot reach the API. Is the server running on :8080?") even when the console reaches the
+API through another origin. It is recorded here rather than changed, because the string is
+shared by every page's error surface and belongs in its own change.
+
+## Rule builder picker state matrix on 2026-10-18
+
+The pickers #1421 added, captured from the console in Chromium against an API serving
+PostgreSQL. The directory behind them is real: two users, three engagements and three
+ownership teams created through the API before the run.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| People picker open, options named `label (id)` | [Light](assets/ui/ws4-console/rule-people-picker-light.png) | [Dark](assets/ui/ws4-console/rule-people-picker-dark.png) |
+| Engagement picker filtered by a typed query | [Light](assets/ui/ws4-console/rule-engagement-picker-light.png) | [Dark](assets/ui/ws4-console/rule-engagement-picker-dark.png) |
+| Team picker on a rule that watches ownership | [Light](assets/ui/ws4-console/rule-picker-team-light.png) | [Dark](assets/ui/ws4-console/rule-picker-team-dark.png) |
+| A query the directory cannot match | [Light](assets/ui/ws4-console/rule-picker-empty-light.png) | [Dark](assets/ui/ws4-console/rule-picker-empty-dark.png) |
+| The directory read still outstanding | [Light](assets/ui/ws4-console/rule-picker-loading-light.png) | [Dark](assets/ui/ws4-console/rule-picker-loading-dark.png) |
+| The directory read failed | [Light](assets/ui/ws4-console/rule-picker-error-light.png) | [Dark](assets/ui/ws4-console/rule-picker-error-dark.png) |
+| Alerting as a read-only operator | [Light](assets/ui/ws4-console/alerting-permission-denied-light.png) | [Dark](assets/ui/ws4-console/alerting-permission-denied-dark.png) |
+
+All three picker types are covered: people, engagements and teams. The team picker appears
+on a rule whose event carries a team, so the capture selects `Finding ownership changed`
+and clears "All teams in this tenant", which is what enables the field. The three teams it
+lists were created through the API before the run.
+
+Each option carries its identifier, which is the point of the change: two people with the
+same display name stay apart, and a saved rule that names someone no longer in the
+directory keeps its selection rather than silently dropping it.
+
+The loading capture holds `GET /api/v1/notifications/rules/user-options` open and screenshots
+the picker's own "Searching…" line. The failure capture answers that read with 500, and the
+picker says `user directory unavailable` instead of looking like an empty directory. The
+no-match capture is a real search for a name nobody has.
+
+### What the read-only capture proves, and what it does not
+
+The denial screen is client-side: `Alerting.tsx` calls `load()` only when `canManage` is
+true and renders "Administrator access required" when it is not, so a `readonly` operator
+never issues `GET /api/v1/notifications/rules` from this page. The capture is evidence of
+the role gate, not of server enforcement.
+
+The server refuses the same read on its own, which is a separate observation against the
+running API:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $READONLY_KEY" \
+    http://127.0.0.1:18080/api/v1/notifications/rules
+403
+```
+
+The route carries `rt.authz(userdom.PermManageIntegrations, ...)` in
+`internal/adapter/httpapi/router.go`, and the hostile tenant harness covers the refusal
+paths. The same account's bell carries no badge, because the notices in this tenant are
+addressed to administrators.
+
 ## Verified contact state matrix on 2026-10-18
 
 The My profile surface #1412 added, captured from the console in Chromium against an API

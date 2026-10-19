@@ -23,6 +23,7 @@ func TestBuilderCreatesTypedConsoleLinks(t *testing.T) {
 		href    string
 	}{
 		{"finding", func() (Link, error) { return b.Finding("eng-1", "find-1") }, KindFinding, "find-1", "https://console.example/console/engagements/eng-1/findings#finding-find-1"},
+		{"project source finding", func() (Link, error) { return b.ProjectSourceFinding("project-1", "find-1") }, KindFinding, "find-1", "https://console.example/console/code-quality/projects/project-1/source-findings#finding-find-1"},
 		{"scan", func() (Link, error) { return b.Scan("eng-1", "scan-1") }, KindScan, "scan-1", "https://console.example/console/engagements/eng-1/scanruns#scan-scan-1"},
 		{"engagement", func() (Link, error) { return b.Engagement("eng-1") }, KindEngagement, "eng-1", "https://console.example/console/engagements/eng-1"},
 		{"incident", func() (Link, error) { return b.Incident("inc-1") }, KindIncident, "inc-1", "https://console.example/console/fleet/incidents/inc-1"},
