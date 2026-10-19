@@ -54,6 +54,9 @@ export function Authentication({ enabled }: AuthenticationProps) {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const generation = useRef(0)
   const loadController = useRef<AbortController | null>(null)
+  // Counts the administrator's own changes to the sign-in requirement, including the one a
+  // save makes. A read in flight across one of these must not put its answer back.
+  const policyEdits = useRef(0)
 
   const load = useCallback(async () => {
     loadController.current?.abort()
@@ -85,11 +88,17 @@ export function Authentication({ enabled }: AuthenticationProps) {
       })
       .catch(report)
       .finally(settled)
+    // What the administrator has chosen since this read started. A policy answer that arrives
+    // after an edit carries the authoritative version, so it is taken for everything except
+    // the requirement, which stays as the administrator left it.
+    const editsAtStart = policyEdits.current
     const policyRead = identityApi
       .policy(controller.signal)
       .then((value) => {
         if (!current()) return
-        setPolicy(value)
+        setPolicy((editable) => (policyEdits.current !== editsAtStart && editable
+          ? { ...value, requirement: editable.requirement }
+          : value))
         setPolicyDeclared(true)
       })
       .catch((cause) => {
@@ -162,6 +171,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
     if (!policy) return
     const prior = policy
     const optimistic = { ...prior, version: prior.version + 1 }
+    policyEdits.current += 1
     setPolicy(optimistic)
     setSaving(true)
     setError(null)
@@ -236,8 +246,8 @@ export function Authentication({ enabled }: AuthenticationProps) {
             {policyDeclared === null ? <p className="mt-2 text-sm text-secondary">Loading the sign-in requirement…</p> : null}
             {policyDeclared === false ? <p className="mt-2 text-sm text-secondary">This organization has not been enabled for shared identity, so it has no sign-in requirement to change yet. Connections below can still be prepared and tested.</p> : null}
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'optional'} onChange={() => setPolicy((current) => current && { ...current, requirement: 'optional' })} /> Optional</label>
-              <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'required'} onChange={() => setPolicy((current) => current && { ...current, requirement: 'required' })} /> Required</label>
+              <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'optional'} onChange={() => { policyEdits.current += 1; setPolicy((current) => current && { ...current, requirement: 'optional' }) }} /> Optional</label>
+              <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'required'} onChange={() => { policyEdits.current += 1; setPolicy((current) => current && { ...current, requirement: 'required' }) }} /> Required</label>
               <button type="button" disabled={!policy || saving} className="rounded bg-brand-primary px-3 py-2 text-white disabled:opacity-50" onClick={() => void savePolicy()}>Save policy</button>
               <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={() => void run(() => identityApi.rehearse(bootstrapProof ?? undefined), 'Recovery rehearsal recorded.')}>Rehearse recovery</button>
               <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={() => void run(() => identityApi.testAlert(bootstrapProof ?? undefined), 'Recovery alert test requested.')}>Test alert</button>
