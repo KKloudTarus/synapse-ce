@@ -1,0 +1,161 @@
+{
+  "downloads": [
+    {
+      "bytes": 47057,
+      "id": "att164173",
+      "redirect_without_authorization": true,
+      "sha256": "d06519ac6591cf5c4d6db596903cda62bdbc866b73f90a7aeada554fd0f9d169"
+    },
+    {
+      "bytes": 44982,
+      "id": "att131417",
+      "redirect_without_authorization": true,
+      "sha256": "50e366a8da32e31d2047e36e0318c97f16afb7863063638354a851d37b94d58a"
+    },
+    {
+      "bytes": 39269,
+      "id": "att131411",
+      "redirect_without_authorization": true,
+      "sha256": "d3c4fae9e91f7bdbf1e8eaeaf2ca3bf5ba00d847602d82bb94a088bdbeb06fed"
+    }
+  ],
+  "frozen_pdf_sha256": "50e366a8da32e31d2047e36e0318c97f16afb7863063638354a851d37b94d58a",
+  "page_id": "98630",
+  "recorded_at": "2026-10-18T12:32:01.628312803Z",
+  "restriction": {
+    "pass": true
+  },
+  "restriction_elapsed_ms": 5232,
+  "state": "done",
+  "uploaded_receipts": 1,
+  "scope": "Real Cloud create/update/hash-skip/calendar publication, monitor, authenticated PDF readback and purge through the restored Docker API/worker stack",
+  "source_inputs_sha256": "7a79755dd200bbe1c3c33a277eeb1f587404f484de64c04c943a00e2d5b13729",
+  "create": {
+    "id": "1b7fc1b65553dc7d656a5dc8a71534d7",
+    "action": "create",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "remote_url": "https://synapse-personal-lab.atlassian.net/wiki/spaces/SIL/pages/98630",
+    "remote_id": "98630",
+    "created_at": "2026-10-18T12:25:19.732036Z",
+    "updated_at": "2026-10-18T12:25:38.294822Z"
+  },
+  "update": {
+    "id": "c01f5c6003abd1945d9843fc495c47ee",
+    "link_id": "1b7fc1b65553dc7d656a5dc8a71534d7",
+    "action": "update",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "remote_url": "https://synapse-personal-lab.atlassian.net/wiki/spaces/SIL/pages/98630",
+    "remote_id": "98630",
+    "created_at": "2026-10-18T12:26:45.443926Z",
+    "updated_at": "2026-10-18T12:27:09.919359Z"
+  },
+  "unchanged_hash_skip": true,
+  "monitor_before_purge": {
+    "id": "1b7fc1b65553dc7d656a5dc8a71534d7",
+    "integration_id": "102f216630436784557c034e9526c12e",
+    "source_kind": "engagement_report",
+    "source_ref": "engagement:290ccb99f51df3c6251f96f849505ced",
+    "scope": "engagement",
+    "scope_id": "290ccb99f51df3c6251f96f849505ced",
+    "container": "SIL",
+    "remote_url": "https://synapse-personal-lab.atlassian.net/wiki/spaces/SIL/pages/98630",
+    "remote_version": 4,
+    "content_hash": "7b64208feb40a96ad211581e5965586a24cb7ca3c88820af404d102e2f16aa78",
+    "revision": 3,
+    "restriction_status": "verified",
+    "restriction_checked_at": "2026-10-18T12:30:34.617798Z",
+    "updated_at": "2026-10-18T12:30:26.321034Z"
+  },
+  "schedule": {
+    "id": "881bb3468b6701e6667ef60dd6e72cf7",
+    "source_kind": "engagement_report",
+    "source_ref": "engagement:290ccb99f51df3c6251f96f849505ced",
+    "scope": "engagement",
+    "scope_id": "290ccb99f51df3c6251f96f849505ced",
+    "destination": "confluence",
+    "integration_id": "102f216630436784557c034e9526c12e",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "frequency": "weekly",
+    "hour": 19,
+    "minute": 30,
+    "enabled": true,
+    "version": 1,
+    "next_due_at": "2026-10-18T12:30:00Z",
+    "updated_at": "2026-10-18T12:28:54.24191Z"
+  },
+  "schedule_runs": [
+    {
+      "id": "schedule:499475a9d01cffeb0045e627785ccf12",
+      "due_at": "2026-10-18T12:30:00Z",
+      "state": "done",
+      "content_hash": "7b64208feb40a96ad211581e5965586a24cb7ca3c88820af404d102e2f16aa78",
+      "remote_page_id": "98630",
+      "remote_version": 4,
+      "delivered_count": 0,
+      "uncertain_count": 0,
+      "failed_count": 0,
+      "updated_at": "2026-10-18T12:30:26.324535Z"
+    }
+  ],
+  "schedule_disable": {
+    "recorded_at": "2026-10-18T12:30:54.576413+00:00",
+    "http_status": 204,
+    "schedule_id": "881bb3468b6701e6667ef60dd6e72cf7"
+  },
+  "purge": {
+    "id": "3951b020ebce90276b95bc077f3cefa8",
+    "link_id": "1b7fc1b65553dc7d656a5dc8a71534d7",
+    "action": "purge",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "remote_url": "https://synapse-personal-lab.atlassian.net/wiki/spaces/SIL/pages/98630",
+    "remote_id": "98630",
+    "created_at": "2026-10-18T12:33:30.642963Z",
+    "updated_at": "2026-10-18T12:33:42.460284Z"
+  },
+  "purge_readback": {
+    "readbacks": {
+      "attachment_131411": 404,
+      "attachment_131417": 404,
+      "attachment_164173": 404,
+      "current": 404,
+      "trash": 404,
+      "versions": 404
+    },
+    "recorded_at": "2026-10-18T12:34:23.508878818Z"
+  },
+  "retired_link": {
+    "id": "1b7fc1b65553dc7d656a5dc8a71534d7",
+    "integration_id": "102f216630436784557c034e9526c12e",
+    "source_kind": "engagement_report",
+    "source_ref": "engagement:290ccb99f51df3c6251f96f849505ced",
+    "scope": "engagement",
+    "scope_id": "290ccb99f51df3c6251f96f849505ced",
+    "container": "SIL",
+    "remote_url": "https://synapse-personal-lab.atlassian.net/wiki/spaces/SIL/pages/98630",
+    "remote_version": 4,
+    "content_hash": "7b64208feb40a96ad211581e5965586a24cb7ca3c88820af404d102e2f16aa78",
+    "revision": 4,
+    "restriction_status": "unchecked",
+    "retired_at": "2026-10-18T12:33:42.460284Z",
+    "updated_at": "2026-10-18T12:33:42.460284Z"
+  },
+  "manual_acl_repair": false,
+  "resume_used": false,
+  "new_grants": "Existing personal-lab credentials refreshed for one day at the same scopes; Gmail OAuth unchanged",
+  "independent_access_limitation": "Public captures do not grant reviewers provider access. DC/native callback/multi-asset producer/mail reruns are not established by this Cloud run.",
+  "prior_refused_neutral_shell": {
+    "scope": "Initial remediation parser before the final vendor-schema correction; not the successful fresh run",
+    "page_id": "65918",
+    "state": "failed",
+    "error_code": "provider_refused",
+    "progress_step": "restrictions",
+    "uploaded": 0,
+    "retained_fenced": true
+  }
+}

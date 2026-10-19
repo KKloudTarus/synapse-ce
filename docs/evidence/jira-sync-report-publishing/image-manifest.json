@@ -1,0 +1,108 @@
+{
+  "format": "native Edge JPEG",
+  "images": [
+    {
+      "bytes": 52258,
+      "path": "cloud-sandbox-created-en-dark.jpg",
+      "sha256": "877ca81cb52ef9725e2b2a0b99e7ccc9330bf75906955b5f488df14c4c24cbfe",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 45645,
+      "path": "cloud-token-prepared-en-light.jpg",
+      "sha256": "86afc6b5a81d67d8d7941d464ff728f9df0499117980916cdb01e7375d82c4e0",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 50440,
+      "path": "confluence-cloud-free-setup-en-light.jpg",
+      "sha256": "969fb438297ca499973a423e08ff5934389e59c8c6b33e1589bd1ed6c7d49d79",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 66764,
+      "path": "confluence-cloud-publication-blocked-en-light.jpg",
+      "sha256": "35db00db2266f8b2668ed11ac6ba271668f81998ee2e3bdf9d9c2fbc05fb3892",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 69715,
+      "path": "confluence-cloud-restrictions-unavailable-en-light.jpg",
+      "sha256": "73da3ca026ee27a002f4bf2bd2c423527278b54fbfc4c0567a6c0ca6224d3803",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 67556,
+      "path": "console-jira-proposal-en-light.jpg",
+      "sha256": "8e8446b95d34d24215fb4d6dd95f3aba8d8bc7554c13469ff8d9c5925e9bf9ab",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 66133,
+      "path": "console-publication-refused-en-light.jpg",
+      "sha256": "bd01461ca4200f63ad863152175f2a2acba93c10fffb30d4ca25b9239e22b6e8",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 68907,
+      "path": "console-scheduled-history-en-light.jpg",
+      "sha256": "a110ae61ecbe0e9632ef83ac84637e378cc733a1482976364f30edf25aba0969",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 73337,
+      "path": "console-scheduled-report-deep-link-en-light.jpg",
+      "sha256": "21c95c7a03009c8ffdd54362210080a00e25f4243658e4a5960f88f2cac7faa6",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 61112,
+      "path": "gmail-scheduled-pdf-attachment-en-light.jpg",
+      "sha256": "1139f7ca2c4b646e149df4c8c9559c870233634c0973ea80e8f0090cd081fb94",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 73110,
+      "path": "gmail-scheduled-pdf-preview-en-light.jpg",
+      "sha256": "ca4bae3b05da454799d1000166345892ba603b4cf8e7a35c691f5490ee9f6e1c",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 81073,
+      "path": "gmail-scheduled-report-en-light.jpg",
+      "sha256": "34c0b1193b320540034930010fd541c701e181dabf625df849ee64d9bb78f401",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 60402,
+      "path": "google-oauth-prepared-en-dark.jpg",
+      "sha256": "afc35938c40caf817f50e90fc6834dcb8cb529209533464fedcfd4e06b8cfb93",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 75370,
+      "path": "jira-cloud-auto-push-en-dark.jpg",
+      "sha256": "a7993d77bb295b3c432cf50d5baee4e1ed5c5d2deb73d7207dcb0000595082c7",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 75439,
+      "path": "jira-cloud-auto-push-vi-dark.jpg",
+      "sha256": "af942c8554fe922c690e26ff3bc72a9357a7f8a004ab8bb982ddc49eb78fc8b1",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 77511,
+      "path": "jira-cloud-manual-flow-disabled-en-dark.jpg",
+      "sha256": "b5340fbde20f2ca478e0f5457901142d065b1c29f72bb316389ec36ba60a46fd",
+      "visually_reviewed": true
+    },
+    {
+      "bytes": 132180,
+      "path": "outlook-scheduled-report-en-light.jpg",
+      "sha256": "9f0e333759ae586cfbdea3ee8e195aae38f44ed29f804b51fa9cdf136c4a7c54",
+      "visually_reviewed": true
+    }
+  ],
+  "review_scope": "all retained frames inspected by parent and frontend reviewer"
+}

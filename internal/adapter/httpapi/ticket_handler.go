@@ -63,7 +63,7 @@ func ticketIntentResponse(i ticketing.Intent) ticketIntentView {
 }
 
 func ticketMappingResponse(m ticketing.Mapping) any {
-	return map[string]any{"id": m.ID, "integration_id": m.IntegrationID, "scope": m.Scope, "scope_id": m.ScopeID, "project_key": m.ProjectKey, "issue_type": m.IssueType, "component": m.Component, "labels": m.Labels, "priority_map": m.PriorityMap, "security_level": m.SecurityLevel, "summary_template": m.SummaryTemplate, "description_template": m.DescriptionTemplate, "field_values": m.FieldValues, "transition_id": m.Transition, "version": m.Version, "data_class": m.DataClass, "locale": m.Locale, "waiver_reason": m.WaiverReason}
+	return map[string]any{"id": m.ID, "integration_id": m.IntegrationID, "scope": m.Scope, "scope_id": m.ScopeID, "project_key": m.ProjectKey, "issue_type": m.IssueType, "component": m.Component, "labels": m.Labels, "priority_map": m.PriorityMap, "security_level": m.SecurityLevel, "summary_template": m.SummaryTemplate, "description_template": m.DescriptionTemplate, "field_values": m.FieldValues, "transition_id": m.Transition, "version": m.Version, "data_class": m.DataClass, "locale": m.Locale, "waiver_reason": m.WaiverReason, "auto_push_enabled": m.AutoPushEnabled, "auto_push_min_severity": m.AutoPushMinSeverity, "grouping_mode": m.GroupingMode, "status_transitions": m.StatusTransitions}
 }
 
 func (rt *Router) listTicketMappings(w http.ResponseWriter, r *http.Request) {

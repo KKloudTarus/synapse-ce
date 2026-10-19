@@ -3,17 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../../lib/api'
 import { TicketsPanel } from './TicketsPanel'
 
-vi.mock('../../../lib/api', () => ({ api: { findingTickets: vi.fn(), me: vi.fn(), previewTicket: vi.fn(), submitTicket: vi.fn(), linkTicket: vi.fn(), unlinkTicket: vi.fn(), reconcileTicketIntent: vi.fn(), retryTicketIntent: vi.fn() } }))
+vi.mock('../../../lib/api', () => ({ api: { findingTickets: vi.fn(), projectSourceFindingTickets: vi.fn(), ticketObservations: vi.fn(), projectSourceFindingTicketObservations: vi.fn(), me: vi.fn(), previewTicket: vi.fn(), previewProjectSourceFindingTicket: vi.fn(), submitTicket: vi.fn(), submitProjectSourceFindingTicket: vi.fn(), linkTicket: vi.fn(), linkProjectSourceFindingTicket: vi.fn(), unlinkTicket: vi.fn(), unlinkProjectSourceFindingTicket: vi.fn(), reconcileTicketIntent: vi.fn(), retryTicketIntent: vi.fn() } }))
 vi.mock('../../../lib/api/client', () => ({ newIdempotencyKey: () => 'request-key' }))
 
 const ticketData = (over: Record<string, unknown> = {}) => ({
-  links: [], intents: [], mappings: [{ id: 'mapping-1', integrationId: 'jira-1', scope: 'engagement' as const, scopeId: 'eng-1', projectKey: 'SEC', issueType: 'Bug', component: '', labels: [], priorityMap: {}, securityLevel: '', waiverReason: '', dataClass: 'summary' as const, locale: 'en' as const, summaryTemplate: '', descriptionTemplate: '', fieldValues: {}, transitionId: '', version: 1 }], ...over,
+  links: [], intents: [], mappings: [{ id: 'mapping-1', integrationId: 'jira-1', scope: 'engagement' as const, scopeId: 'eng-1', projectKey: 'SEC', issueType: 'Bug', component: '', labels: [], priorityMap: {}, securityLevel: '', waiverReason: '', dataClass: 'summary' as const, locale: 'en' as const, summaryTemplate: '', descriptionTemplate: '', fieldValues: {}, transitionId: '', statusTransitions: {}, groupingMode: 'finding' as const, autoPushEnabled: false, autoPushMinSeverity: 'high' as const, version: 1 }], ...over,
 })
 
 describe('TicketsPanel', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     vi.mocked(api.findingTickets).mockResolvedValue(ticketData())
+    vi.mocked(api.ticketObservations).mockResolvedValue({ observations: [], proposals: [], comments: [] })
+    vi.mocked(api.projectSourceFindingTickets).mockResolvedValue(ticketData())
+    vi.mocked(api.projectSourceFindingTicketObservations).mockResolvedValue({ observations: [], proposals: [], comments: [] })
     vi.mocked(api.me).mockResolvedValue({ role: 'reviewer' } as never)
   })
 
@@ -108,5 +111,21 @@ describe('TicketsPanel', () => {
     expect(api.linkTicket).toHaveBeenCalledTimes(1)
     expect(screen.getAllByRole('link', { name: link.externalUrl })).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: `Remove ticket ${link.externalUrl}` })).toHaveLength(1)
+  })
+
+  it('uses Project-scoped ticket routes without an engagement identifier', async () => {
+    vi.mocked(api.previewProjectSourceFindingTicket).mockResolvedValue({ fields: {}, summary: 'SEC: Project finding', description: 'Rendered plain text', dataClass: 'summary', digest: 'project-digest', mappingVersion: 1 })
+    vi.mocked(api.submitProjectSourceFindingTicket).mockResolvedValue({ id: 'intent-project', state: 'queued', errorCode: '', version: 1, createdAt: '' })
+    render(<TicketsPanel projectKey="payments" findingId="finding-1" />)
+
+    await screen.findByRole('button', { name: 'Preview Jira ticket' })
+    expect(api.projectSourceFindingTickets).toHaveBeenCalledWith('payments', 'finding-1')
+    expect(api.projectSourceFindingTicketObservations).toHaveBeenCalledWith('payments', 'finding-1')
+    fireEvent.click(screen.getByRole('button', { name: 'Preview Jira ticket' }))
+    await waitFor(() => expect(api.previewProjectSourceFindingTicket).toHaveBeenCalledWith('payments', 'finding-1', 'mapping-1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Jira ticket' }))
+    await waitFor(() => expect(api.submitProjectSourceFindingTicket).toHaveBeenCalledWith('payments', 'finding-1', 'mapping-1', 'project-digest', 'request-key'))
+    expect(api.previewTicket).not.toHaveBeenCalled()
+    expect(api.submitTicket).not.toHaveBeenCalled()
   })
 })

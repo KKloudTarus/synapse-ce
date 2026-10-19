@@ -219,3 +219,19 @@ func testIntent(now time.Time) Intent {
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
 }
+
+func TestTicketIntentRejectsDocumentResumableEvent(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	lease := now.Add(time.Minute)
+	claimed, err := testIntent(now).Apply(IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	uncertain, err := claimed.Apply(IntentTransition{Event: writeintent.Ambiguous}, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = uncertain.Apply(IntentTransition{Event: writeintent.Event("reconcile_resumable")}, now.Add(3*time.Second)); err == nil {
+		t.Fatal("document-only recovery event changed ticket state")
+	}
+}

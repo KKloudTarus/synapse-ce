@@ -94,8 +94,10 @@ describe('IntegrationsHub', () => {
     expect(await (await group('CI/CD')).findByText('No CI/CD integrations yet')).toBeInTheDocument()
     expect(await (await group('Source control')).findByText('No source-control connectors yet')).toBeInTheDocument()
     expect(await (await group('Messaging')).findByText('No notification channels yet')).toBeInTheDocument()
-    // No capability catalog: the planned groups still have nothing to configure in this build.
+    // No capability catalog cannot establish that document routes exist, so the older API fallback
+    // stays unavailable instead of guessing from the generic integration endpoints.
     expect((await group('Ticketing')).getByText('Ticketing is not available in this build yet')).toBeInTheDocument()
+    expect((await group('Documentation')).getByText('Documentation is not available in this build yet')).toBeInTheDocument()
     const siem = await group('SIEM')
     expect(await siem.findByText('No SIEM destinations yet')).toBeInTheDocument()
     expect(siem.getByText('Available')).toBeInTheDocument()
@@ -104,6 +106,33 @@ describe('IntegrationsHub', () => {
     expect(screen.getByRole('link', { name: 'Manage channels' })).toHaveAttribute('href', '/settings/alerting')
     expect(screen.getByRole('link', { name: 'Message templates' })).toHaveAttribute('href', '/settings/templates')
     expect(screen.getByRole('link', { name: 'Manage SIEM streams' })).toHaveAttribute('href', '/settings/siem')
+  })
+
+  it('shows Confluence connections only in Documentation and keeps Jira out of CI/CD', async () => {
+    const confluenceProvider: IntegrationProviderDescriptor = {
+      provider: 'confluence-cloud', name: 'Confluence Cloud', description: '', capabilities: ['test_connection'], configFields: [], secretFields: [],
+    }
+    const jiraProvider: IntegrationProviderDescriptor = {
+      provider: 'jira-cloud', name: 'Jira Cloud', description: '', capabilities: ['test_connection'], configFields: [], secretFields: [],
+    }
+    const confluence = { ...integration, id: 'confluence-1', name: 'Reports', provider: 'confluence-cloud', endpoint: 'https://example.atlassian.net/wiki' }
+    const jira = { ...integration, id: 'jira-1', name: 'Tickets', provider: 'jira-cloud', endpoint: 'https://example.atlassian.net' }
+    vi.mocked(api.listCapabilities).mockResolvedValue([capability({ key: 'docpublish', name: 'Documentation publishing' }), capability({ key: 'ticketing', name: 'Ticketing' })])
+    vi.mocked(api.listIntegrationProviders).mockResolvedValue([provider, confluenceProvider, jiraProvider])
+    vi.mocked(api.listIntegrations).mockResolvedValue([integration, confluence, jira])
+    renderHub()
+
+    const documentation = await group('Documentation')
+    const documentationCard = await documentation.findByRole('listitem', { name: 'Reports' })
+    expect(documentationCard).toBeInTheDocument()
+    expect(within(documentationCard).getByText('Healthy')).toBeInTheDocument()
+    expect(within(documentationCard).getByRole('button', { name: 'Test Reports' })).toBeEnabled()
+    expect(documentation.getByRole('link', { name: 'Manage documentation' })).toHaveAttribute('href', '/settings/integrations/ci')
+    const ci = await group('CI/CD')
+    expect(await ci.findByRole('listitem', { name: 'Production Jenkins' })).toBeInTheDocument()
+    expect(ci.queryByRole('listitem', { name: 'Reports' })).not.toBeInTheDocument()
+    expect(ci.queryByRole('listitem', { name: 'Tickets' })).not.toBeInTheDocument()
+    expect((await group('Ticketing')).getByRole('listitem', { name: 'Tickets' })).toBeInTheDocument()
   })
 
   it('renders a CI/CD card from the integration and its operation history, and tests it', async () => {
@@ -211,11 +240,11 @@ describe('IntegrationsHub', () => {
     expect(card.queryByText('Healthy')).not.toBeInTheDocument()
   })
 
-  it('shows a disabled capability as off with its switch and planned ones as not available', async () => {
+  it('shows a disabled capability as off with its switch and durable persistence as required for documentation', async () => {
     vi.mocked(api.listCapabilities).mockResolvedValue([
       capability({ key: 'notifications', name: 'Tenant notifications', enabled: false, switch: 'SYNAPSE_NOTIFICATIONS_ENABLED' }),
       capability({ key: 'ticketing', name: 'Ticketing', enabled: false, planned: true }),
-      capability({ key: 'docpublish', name: 'Documentation publishing', enabled: false, planned: true }),
+      capability({ key: 'docpublish', name: 'Documentation publishing', enabled: false, planned: false }),
     ])
     renderHub()
     const messaging = await group('Messaging')
@@ -227,7 +256,8 @@ describe('IntegrationsHub', () => {
     const ticketing = await group('Ticketing')
     expect(ticketing.getByText('Ticketing is not available in this build yet')).toBeInTheDocument()
     expect(ticketing.getByText('Not available yet')).toBeInTheDocument()
-    expect((await group('Documentation')).getByText('Documentation is not available in this build yet')).toBeInTheDocument()
+    expect((await group('Documentation')).getByText('Documentation is off')).toBeInTheDocument()
+    expect((await group('Documentation')).getByText('This deployment needs durable PostgreSQL persistence before documentation publishing is available.')).toBeInTheDocument()
   })
 
   // #1358: everything the hub reads or tests needs manage_integrations, which integration_admin holds.

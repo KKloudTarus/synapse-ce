@@ -9,6 +9,7 @@ let linked = false
 
 const server = setupServer(
   http.get('/api/v1/me', () => HttpResponse.json({ id: 'operator-1', role: 'admin' })),
+  http.get('/api/v1/engagements/:engagementId/findings/:findingId/ticket-observations', () => HttpResponse.json({ observations: [], proposals: [], comments: [] })),
   http.get('/api/v1/engagements/:engagementId/findings/:findingId/tickets', () => HttpResponse.json({
     links: linked ? [{ id: 'link-1', external_url: 'https://team.atlassian.net/browse/SEC-1', external_id: 'SEC-1', integration_id: 'jira-1', created_at: '' }] : [],
     intents: [{ id: 'intent-uncertain', state: 'uncertain', error_code: 'zero_matches', version: 1, created_at: '' }],

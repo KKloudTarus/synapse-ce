@@ -1,0 +1,10 @@
+=== RUN   TestInboundReconcileChargesIdentityWithinReadBudget
+--- PASS: TestInboundReconcileChargesIdentityWithinReadBudget (0.01s)
+=== RUN   TestInboundReconcileTimeoutCheckpointsAttemptedTargetForNextFairTick
+--- PASS: TestInboundReconcileTimeoutCheckpointsAttemptedTargetForNextFairTick (0.06s)
+=== RUN   TestWorkflowTickReconcilesProviderStateAndMarksUnreadable
+--- PASS: TestWorkflowTickReconcilesProviderStateAndMarksUnreadable (0.00s)
+=== RUN   TestWorkflowTickRunsOutboundBeforeBoundedInboundRead
+--- PASS: TestWorkflowTickRunsOutboundBeforeBoundedInboundRead (0.10s)
+PASS
+ok  	github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing	0.179s

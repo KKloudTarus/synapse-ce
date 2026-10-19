@@ -26,6 +26,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/KKloudTarus/synapse-ce/internal/adapter/observability"
+	"github.com/KKloudTarus/synapse-ce/internal/composition"
 	"github.com/KKloudTarus/synapse-ce/internal/composition/scacompose"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/agent"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/cloudposture"
@@ -41,6 +42,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ebpf"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
 	azurepipelinesintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/azurepipelines"
+	confluenceintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/confluence"
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	jiraintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jira"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
@@ -49,6 +51,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/ownershipcapture"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	recontools "github.com/KKloudTarus/synapse-ce/internal/infrastructure/recon"
+	reportinfra "github.com/KKloudTarus/synapse-ce/internal/infrastructure/report"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/sandbox"
 	elastic "github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/elastic"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/siem/ocsf"
@@ -91,6 +94,7 @@ import (
 	dastrunneruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastrunner"
 	dastverifieruc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastverifier"
 	dastworkflowuc "github.com/KKloudTarus/synapse-ce/internal/usecase/dastworkflow"
+	docpublishuc "github.com/KKloudTarus/synapse-ce/internal/usecase/docpublish"
 	egresspolicy "github.com/KKloudTarus/synapse-ce/internal/usecase/egress"
 	evidenceuc "github.com/KKloudTarus/synapse-ce/internal/usecase/evidence"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/execution"
@@ -104,8 +108,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/orchestrator"
 	ownershipuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ownership"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+	projectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/projectuc"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/reachproof"
 	reconuc "github.com/KKloudTarus/synapse-ce/internal/usecase/recon"
+	reportuc "github.com/KKloudTarus/synapse-ce/internal/usecase/report"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/safety"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
 	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
@@ -396,6 +402,10 @@ func main() {
 		log.Error("Jira provider registry init failed", "err", err)
 		os.Exit(1)
 	}
+	if err := confluenceintegration.Register(integrationRegistry); err != nil {
+		log.Error("Confluence provider registry init failed", "err", err)
+		os.Exit(1)
+	}
 	if err := azurepipelinesintegration.Register(integrationRegistry); err != nil {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
@@ -413,6 +423,32 @@ func main() {
 	}
 	integrationService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), time.Minute))
 	var integrationMaintenanceTasks []func(context.Context)
+	documentStore, err := postgres.NewDocumentStore(pool)
+	if err != nil {
+		log.Error("document store init failed", "err", err)
+		os.Exit(1)
+	}
+	documentAuthority, err := postgres.NewDocumentAuthorityReader(pool)
+	if err != nil {
+		log.Error("document authority init failed", "err", err)
+		os.Exit(1)
+	}
+	documentSourcePolicy, err := postgres.NewDocumentSourceReleaseReader(pool)
+	if err != nil {
+		log.Error("document source policy init failed", "err", err)
+		os.Exit(1)
+	}
+	documentExecutor, err := docpublishuc.NewExecutor(documentStore, integrationStore, integrationService, documentAuthority, documentSourcePolicy, auditLog, clock)
+	if err != nil {
+		log.Error("document publication executor init failed", "err", err)
+		os.Exit(1)
+	}
+	documentRunner, err := composition.NewDocumentPublicationRunner(documentExecutor, repo, log)
+	if err != nil {
+		log.Error("document publication runner init failed", "err", err)
+		os.Exit(1)
+	}
+	integrationMaintenanceTasks = append(integrationMaintenanceTasks, documentRunner.Run)
 	if cfg.TicketingEnabled {
 		store, ticketErr := postgres.NewTicketStore(pool)
 		if ticketErr != nil {
@@ -425,6 +461,9 @@ func main() {
 			os.Exit(1)
 		}
 		workflow.SetPublicBaseURL(cfg.EffectivePublicBaseURL())
+		workflow.SetProjects(postgres.NewProjectRepository(pool))
+		workflow.SetAutoPushSourceAvailable(cfg.NotificationEnabled)
+		workflow.SetSLAStore(postgres.NewSLAStore(pool))
 		runner, ticketErr := ticketruntime.New(workflow, repo, log)
 		if ticketErr != nil {
 			log.Error("ticket polling init failed", "err", ticketErr)
@@ -454,13 +493,6 @@ func main() {
 		integrationMaintenanceTasks = append(integrationMaintenanceTasks, integrationScheduler.Run)
 		log.Info("integration scheduler ENABLED", "poll", cfg.IntegrationSchedulerInterval, "dispatch_limit", cfg.IntegrationSchedulerDispatch, "max_queue_depth", cfg.IntegrationSchedulerQueueDepth)
 	}
-	if cfg.WorkerProfile == config.WorkerProfileIntegrations {
-		runWorkerRuntime(ctx, cfg, queue, map[string]worker.Handler{
-			integrationuc.JobKind: integrationJobHandler{svc: integrationService},
-		}, integrationMaintenanceTasks, leaderStore, auditLog, clock, ids, 6*time.Minute, log)
-		return
-	}
-
 	// Evidence blob store (shared with the API when MinIO is configured).
 	var blobStore ports.BlobStore
 	var objectStore ports.ObjectStore
@@ -489,11 +521,6 @@ func main() {
 	}
 	uploadedSources := sourceupload.NewStoreWithRepository(sourceObjects, postgres.NewEngagementSourceRepository(pool), 0)
 
-	guard, err := execution.NewGuard(repo, clock, auditLog)
-	if err != nil {
-		log.Error("guard init failed", "err", err)
-		os.Exit(1)
-	}
 	evidenceService, err := evidenceuc.NewService(evidenceStore, blobStore, auditLog, clock, ids)
 	if err != nil {
 		log.Error("evidence service init failed", "err", err)
@@ -551,46 +578,132 @@ func main() {
 	if cfg.Offline {
 		prov.VulnDBSource = "" // Match API provenance when live OSV is disabled.
 	}
-	scmConnectorStore, scmErr := postgres.NewSCMConnectorRepository(pool, mustVaultCipher(cfg, log))
-	if scmErr != nil {
-		log.Error("source-control connector store init failed", "err", scmErr)
-		os.Exit(1)
+	var (
+		scaAcquirer  ports.Acquirer
+		scaSBOMGen   ports.SBOMGenerator
+		scaSources   []ports.DetectionSource
+		scaSandbox   *sandbox.Runner
+		scaExecution scacompose.Execution
+	)
+	if usesDispatchOnlySCA(cfg) {
+		scaAcquirer, scaSBOMGen, scaSources = integrationsSCAAdapters()
+		log.Info("SCA execution adapters omitted from integrations worker; stored report reads use fail-closed dispatch-only ports")
+	} else {
+		scmConnectorStore, scmErr := postgres.NewSCMConnectorRepository(pool, mustVaultCipher(cfg, log))
+		if scmErr != nil {
+			log.Error("source-control connector store init failed", "err", scmErr)
+			os.Exit(1)
+		}
+		var eerr error
+		scaExecution, eerr = scacompose.BuildExecution(cfg, log, postgres.NewAdvisoryRepository(pool), scmConnectorStore)
+		if eerr != nil {
+			log.Error(eerr.Error())
+			os.Exit(1)
+		}
+		scaAcquirer, scaSBOMGen, scaSources, scaSandbox = scaExecution.Acquirer, scaExecution.SBOMGen, scaExecution.Sources, scaExecution.Sandbox
 	}
-	scaExecution, eerr := scacompose.BuildExecution(cfg, log, postgres.NewAdvisoryRepository(pool), scmConnectorStore)
-	if eerr != nil {
-		log.Error(eerr.Error())
-		os.Exit(1)
-	}
-	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, sourceupload.NewAcquirer(scaExecution.Acquirer, uploadedSources),
-		enry.New(), scaExecution.SBOMGen, scaExecution.Sources,
+	scaService := scauc.NewService(repo, findingRepo, scanRepo, scanResultStore, scanJobStore, scanRunStore, evidenceService, ids, prov, clock, auditLog, shared.Severity(cfg.FindingMinSeverity), cfg.ScanTimeout, sourceupload.NewAcquirer(scaAcquirer, uploadedSources),
+		enry.New(), scaSBOMGen, scaSources,
 		risk.New(cfg.KEVURL, cfg.EPSSURL, nil), license.New(), licensemeta.NewChain(licensemeta.NewOSMetadata(), licensemeta.New(cfg.DepsDevURL, nil), licensemeta.NewPyPI("", nil)))
 	if cfg.AssessmentSnapshotEnabled {
 		scaService.SetScanRunProvenance(scanRunStore, assessmentTransactions)
 		scaService.SetAssessmentCycleMembership(assessmentCycleStore, assessmentSnapshotStore)
 	}
-	scaService.SetImportedSBOMStore(importedSBOMStore)
-	scaService.SetUploadedSourceStore(uploadedSources)
-	configureCleanup := scacompose.Configure(scaService, cfg, scaExecution.Sandbox, log)
-	defer configureCleanup()
-	// Queued scans need the same judgment-backed analysis as API scans.
-	if cfg.GoBinaryReachabilityEnabled && !cfg.JudgmentsEnabled {
-		if _, explicit := os.LookupEnv("SYNAPSE_REACH_GOBIN"); explicit {
-			log.Error("go-binary reachability requires SYNAPSE_JUDGMENTS_ENABLED; enable judgments or unset SYNAPSE_REACH_GOBIN")
+	scaService.SetProjectSourceProjects(postgres.NewProjectRepository(pool))
+	if cfg.FleetAssetsEnabled {
+		assets := postgres.NewAssetRepository(pool)
+		attributor, err := attackpathuc.NewRecorder(assets, postgres.NewAttackPathStore(pool), repo)
+		if err != nil {
+			log.Error("SCA attribution init failed", "err", err)
 			os.Exit(1)
 		}
-		log.Warn("go-binary reachability auto-skipped: SYNAPSE_JUDGMENTS_ENABLED is off")
+		if err := scaService.SetFindingAttribution(assets, attributor); err != nil {
+			log.Error("SCA attribution setup failed", "err", err)
+			os.Exit(1)
+		}
 	}
-	if err := configureWorkerJudgmentScanners(scaService, cfg, scaExecution.Sandbox, func() (*analysisuc.Service, error) {
-		return analysisuc.NewService(postgres.NewJudgmentRepository(pool), evidenceService, auditLog, clock, ids)
-	}, auditLog, clock, log); err != nil {
-		log.Error("worker SCA judgment scanner init failed", "err", err)
+	scaService.SetImportedSBOMStore(importedSBOMStore)
+	scaService.SetUploadedSourceStore(uploadedSources)
+	if err := configureWorkerSCASLAAssessor(cfg, scaService, postgres.NewSLAStore(pool), clock, ids); err != nil {
+		log.Error("SCA SLA governance init failed", "err", err)
 		os.Exit(1)
+	}
+	configureCleanup := func() {}
+	if !usesDispatchOnlySCA(cfg) {
+		configureCleanup = scacompose.Configure(scaService, cfg, scaSandbox, log)
+	}
+	defer configureCleanup()
+	if !usesDispatchOnlySCA(cfg) {
+		// Queued scans need the same judgment-backed analysis as API scans.
+		if cfg.GoBinaryReachabilityEnabled && !cfg.JudgmentsEnabled {
+			if _, explicit := os.LookupEnv("SYNAPSE_REACH_GOBIN"); explicit {
+				log.Error("go-binary reachability requires SYNAPSE_JUDGMENTS_ENABLED; enable judgments or unset SYNAPSE_REACH_GOBIN")
+				os.Exit(1)
+			}
+			log.Warn("go-binary reachability auto-skipped: SYNAPSE_JUDGMENTS_ENABLED is off")
+		}
+		if err := configureWorkerJudgmentScanners(scaService, cfg, scaSandbox, func() (*analysisuc.Service, error) {
+			return analysisuc.NewService(postgres.NewJudgmentRepository(pool), evidenceService, auditLog, clock, ids)
+		}, auditLog, clock, log); err != nil {
+			log.Error("worker SCA judgment scanner init failed", "err", err)
+			os.Exit(1)
+		}
 	}
 	if cfg.ComplianceEnabled {
 		scaService.SetComplianceEnabled(true) // attach the AppSec-baseline benchmark (per-control PASS/FAIL)
 		log.Info("compliance report ENABLED (Synapse AppSec Baseline; deterministic, LLM-free)")
 	}
 	scaService.SetRunLock(postgres.NewLeaseRunLock(pool, ids.NewID().String(), cfg.ScanTimeout+time.Minute))
+	// Scheduled document delivery uses the same bounded, tenant-scoped stored
+	// report sources in the all and integrations worker profiles.
+	documentReportRenderer := reportinfra.NewRenderer()
+	documentReportService := reportuc.NewService(repo, findingRepo, postgres.NewRetestRepository(pool), evidenceService, documentReportRenderer, scaService, clock, buildinfo.App())
+	documentProjectService := projectuc.NewService(postgres.NewProjectRepository(pool), repo, clock, ids, auditLog, !cfg.IsProduction())
+	documentProjectService.SetAnalysisStore(postgres.NewProjectAnalysisStore(pool))
+	documentArtifacts, documentArtifactErr := docpublishuc.NewArtifactBuilder(repo, documentReportService, assessmentCycleStore, assessmentCycleStore, assessmentClosureReportService, documentProjectService, documentReportRenderer)
+	if documentArtifactErr != nil {
+		log.Error("scheduled document artifact builder init failed", "err", documentArtifactErr)
+		os.Exit(1)
+	}
+	documentArtifacts.SetEvidenceProvider(evidenceService)
+	documentArtifacts.SetEvidenceIntegrityProvider(scaService)
+	documentPublisher, documentPublishErr := docpublishuc.NewService(documentStore, integrationStore, integrationService, documentArtifacts, documentAuthority, documentSourcePolicy, auditLog, ids, clock)
+	if documentPublishErr != nil {
+		log.Error("scheduled document publisher init failed", "err", documentPublishErr)
+		os.Exit(1)
+	}
+	var scheduleRuntime documentScheduleRuntime
+	if cfg.NotificationEnabled {
+		scheduleRuntime, err = configureDocumentScheduleRuntime(documentScheduleRuntimeDependencies{
+			ctx: ctx, stop: stop, cfg: cfg, pool: pool, vaultCipher: vaultCipher, sender: notificationSender,
+			disabledNotificationTypes: disabledNotificationTypes, audit: auditLog, clock: clock, ids: ids, log: log, tenants: repo,
+			schedule: docpublishuc.ScheduleDependencies{
+				Store: documentStore, Authority: documentAuthority, ReportPolicy: documentSourcePolicy,
+				Integrations: integrationStore, Projects: postgres.NewProjectRepository(pool),
+				Artifacts: documentArtifacts, Channels: postgres.NewNotificationRepository(pool), EmailSender: notificationSender,
+				Publisher: documentPublisher, Executor: documentExecutor,
+				Audit: auditLog, IDs: ids, Clock: clock, PublicBaseURL: cfg.EffectivePublicBaseURL(),
+			},
+		})
+		if err != nil {
+			log.Error("document schedule runtime init failed", "err", err)
+			os.Exit(1)
+		}
+		defer scheduleRuntime.close()
+		log.Info("durable notification delivery ENABLED", "profile", cfg.WorkerProfile)
+		log.Info("document schedule delivery ENABLED", "profile", cfg.WorkerProfile)
+	}
+	if integrationsProfile(cfg) {
+		maintenance := append([]func(context.Context){}, integrationMaintenanceTasks...)
+		maintenance = append(maintenance, scheduleRuntime.maintenance...)
+		runWorkerRuntime(ctx, cfg, queue, integrationsProfileHandlers(integrationJobHandler{svc: integrationService}, scheduleRuntime.handlers), maintenance, leaderStore, auditLog, clock, ids, 6*time.Minute, log)
+		return
+	}
+	guard, err := execution.NewGuard(repo, clock, auditLog)
+	if err != nil {
+		log.Error("guard init failed", "err", err)
+		os.Exit(1)
+	}
 	if cfg.AssessmentShadowEnabled {
 		shadowSnapshotService, shadowErr := snapshotuc.NewService(assessmentSnapshotStore, assessmentCycleStore, repo, scanRunStore, assessmentTransactions, ids, clock, auditLog)
 		if shadowErr != nil {
@@ -758,20 +871,11 @@ func main() {
 	}
 	var workerMetricsRegistry *prometheus.Registry
 	if cfg.NotificationEnabled {
-		notificationRuntime, notificationErr := configureNotificationWorkerRuntime(
-			ctx, stop, cfg, pool, vaultCipher, notificationSender, disabledNotificationTypes, auditLog, clock, ids, log,
-		)
-		if notificationErr != nil {
-			log.Error("notification worker init failed", "err", notificationErr)
-			os.Exit(1)
-		}
-		defer notificationRuntime.close()
-		for kind, handler := range notificationRuntime.handlers {
+		for kind, handler := range scheduleRuntime.handlers {
 			handlers[kind] = handler
 		}
-		maintenanceTasks = append(maintenanceTasks, notificationRuntime.maintenance...)
-		workerMetricsRegistry = notificationRuntime.metricsRegistry
-		log.Info("durable notification delivery ENABLED")
+		maintenanceTasks = append(maintenanceTasks, scheduleRuntime.maintenance...)
+		workerMetricsRegistry = scheduleRuntime.metricsRegistry
 	}
 	vulnerabilityRegistry := vulnerabilitymonitor.NewRegistry()
 	vulnerabilityRegistry.AllowPrivateNetworkSources(cfg.VulnerabilitySourceAllowPrivateNetwork)
@@ -1379,10 +1483,7 @@ func runWorkerRuntime(
 	log *slog.Logger,
 ) {
 	if cfg.LeaderElectionEnabled {
-		resource := cfg.LeaderResource + "-worker-maintenance"
-		if cfg.WorkerProfile == config.WorkerProfileNotifications {
-			resource = notificationMaintenanceResource(cfg)
-		}
+		resource := workerMaintenanceResource(cfg)
 		elector, err := leaderuc.NewElector(leaderStore, auditLog, clock, resource, ids.NewID().String(), cfg.LeaderTerm, cfg.LeaderRenew)
 		if err != nil {
 			log.Error("worker leader election configuration invalid", "err", err)
@@ -1440,6 +1541,25 @@ func runWorkerRuntime(
 	}
 	loops.Wait()
 	log.Info("synapse-worker stopped", "loops", cfg.WorkerConcurrency)
+}
+
+// scaSLAAssessorWiring keeps the composition boundary narrow: SCA only needs the
+// finding-facing SLA assessment port, while the concrete service remains owned by
+// the SLA use case.
+type scaSLAAssessorWiring interface {
+	SetSLAAssessor(ports.FindingSLAAssessor)
+}
+
+func configureWorkerSCASLAAssessor(cfg config.Config, target scaSLAAssessorWiring, store ports.SLAStore, clock ports.Clock, ids ports.IDGenerator) error {
+	if !cfg.SLAEnabled {
+		return nil
+	}
+	assessor, err := slauc.NewService(store, clock, ids)
+	if err != nil {
+		return err
+	}
+	target.SetSLAAssessor(assessor)
+	return nil
 }
 
 // mustVaultCipher builds the vault cipher from the master key (ephemeral in dev), exiting

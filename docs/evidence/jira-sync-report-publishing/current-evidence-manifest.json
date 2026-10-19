@@ -1,0 +1,363 @@
+{
+  "generated_at": "2026-10-18T16:04:22.560989+00:00",
+  "implementation_parent": "492349883a56a9983ce7915d750d98e1d3ce0293",
+  "final_selected_source_inputs_sha256": "120a1ce6da8013742239ccb2dce43f5f7b0d0f0a48cb227aafd7389aa1e161bc",
+  "scope": "Current continuation artifacts; per-provider proof files identify exact sources, times and runtime binary hashes. Final tests include later test-only retention; runtime implementation behavior is unchanged. Earlier review/historical artifacts retain their separate scope. This manifest excludes itself.",
+  "files": [
+    {
+      "path": "current-cloud-automation-disabled.jpg",
+      "bytes": 55824,
+      "sha256": "78855ff33feb26c35c425455af1646607225df659921a3fa784ed24335d6a4c3"
+    },
+    {
+      "path": "current-cloud-native-console.jpg",
+      "bytes": 62714,
+      "sha256": "efd6af5fccfbf12d7017082df150afbc393eb3cbbec82f2ad648d768367726a0"
+    },
+    {
+      "path": "current-cloud-native-finding.jpg",
+      "bytes": 55478,
+      "sha256": "4394b12f701e4cc6ad946c390323e7d79fab8a5ee5fe43b26afc2c67c1e9be6c"
+    },
+    {
+      "path": "current-cloud-native-provider.jpg",
+      "bytes": 84420,
+      "sha256": "ec753b0c4c8d007089630134290924d454259804f7b1e0d10fe16ccf814e19b0"
+    },
+    {
+      "path": "current-cloud-poll-console.jpg",
+      "bytes": 47808,
+      "sha256": "eb9976db434ad74637b577c604020f48c77c587d2cf986cba9edf300205b51e0"
+    },
+    {
+      "path": "current-cloud-poll-provider.jpg",
+      "bytes": 84609,
+      "sha256": "76433bc628ccdf7f5ba7c1d649b3aa7b4c6a100eebeee2c9dc8d27301760ab0b"
+    },
+    {
+      "path": "current-dc-confluence-README.md",
+      "bytes": 1236,
+      "sha256": "f4e13b1a2dff07e37e5eb78982303339415a5cb452d4dafb82e34e044c5eff2d"
+    },
+    {
+      "path": "current-dc-confluence-console-legal-hold.jpg",
+      "bytes": 65416,
+      "sha256": "5568b42dfdc5a579e9b22a7aa781d3d15cfbf540b4b7cd2c92ee547d4546f193"
+    },
+    {
+      "path": "current-dc-confluence-console-readonly.jpg",
+      "bytes": 73759,
+      "sha256": "7c8142eba4de60b219cbe14df8ba83ec111a61017ff5ca5da75c85aedd0547b7"
+    },
+    {
+      "path": "current-dc-confluence-console-unpublished.jpg",
+      "bytes": 65180,
+      "sha256": "5f309b48cca5d41daeb1fb8e0c340838e01c4aaade0f71eb13995b4baa61d642"
+    },
+    {
+      "path": "current-dc-confluence-hash-manifest.json",
+      "bytes": 5097,
+      "sha256": "80d9fc08bfd4edaf7da41d7688e93018c4ee50d572675ae29d39f50f3e159f5a"
+    },
+    {
+      "path": "current-dc-confluence-report-after-scheduled-page-1.png",
+      "bytes": 233545,
+      "sha256": "f37a2989e16f3ba121eccdead1e0c2d1bb10c5b01a86dccc965b2bdf108c6c9e"
+    },
+    {
+      "path": "current-dc-confluence-report-after-scheduled.pdf",
+      "bytes": 53551,
+      "sha256": "a84a5d1b3140121c17aaa6ae9716297595ce84315c573f5be25fe6d16dcf59c9"
+    },
+    {
+      "path": "current-dc-confluence-report-before-page-1.png",
+      "bytes": 216585,
+      "sha256": "8230d83ce60afceeea31115abdcd2d6b477fb3756e90af9ef06d0825fdc61287"
+    },
+    {
+      "path": "current-dc-confluence-report-before.pdf",
+      "bytes": 51239,
+      "sha256": "dc913f7be6725f79411b660552d0af47e528ecf6cbce1498d43b06bba4bf8939"
+    },
+    {
+      "path": "current-dc-confluence-rest-proof.json",
+      "bytes": 2418,
+      "sha256": "5c72559413befb2dbd925999e2969ffec8f3ba612db9aa042da83b5fad5d99f4"
+    },
+    {
+      "path": "current-dc-confluence-visual-body.jpg",
+      "bytes": 102658,
+      "sha256": "27a98b4ed8b3c32b6a3d1fb8fe636027fb70a4567117d0fa27c22b5b41a6d3a2"
+    },
+    {
+      "path": "current-dc-confluence-visual-final-footer.jpg",
+      "bytes": 77102,
+      "sha256": "4b6b4b65b7ea674121831c7d38ef21f58a377951c818b0f8e54cad9213044856"
+    },
+    {
+      "path": "current-dc-confluence-visual-final-pdf.jpg",
+      "bytes": 80785,
+      "sha256": "b4b8e5906450ed1b5d6b25b37f42aef5b81ce0d2788123ee0144bafacb54636d"
+    },
+    {
+      "path": "current-dc-confluence-visual-footer.jpg",
+      "bytes": 83960,
+      "sha256": "4a04456bc18cb2c396f4bf95e2d8fb6704acdc451fbd3cae798f3a1704fb526d"
+    },
+    {
+      "path": "current-dc-confluence-visual-history.jpg",
+      "bytes": 71380,
+      "sha256": "6e9d74d47a9a2f3dad13fa98fd5f4e03afbef01307ac6d4085aa434b59563b20"
+    },
+    {
+      "path": "current-dc-confluence-visual-pdf.jpg",
+      "bytes": 76224,
+      "sha256": "86ccee0e8f7100ddb1073e4e308fb42106dd9107ddd42ab2c908bb5bbc5ef6cc"
+    },
+    {
+      "path": "current-dc-confluence-visual-proof.json",
+      "bytes": 21381,
+      "sha256": "51cb07ba06e69101527d182228fcf486f90cb0809b295d96ffd2890f9e6652cd"
+    },
+    {
+      "path": "current-dc-confluence-visual-purged.jpg",
+      "bytes": 29222,
+      "sha256": "c45a590616c2f5afde5cfe2cd819b5940c14c14db51321a124ebb4bc7830a864"
+    },
+    {
+      "path": "current-dc-confluence-visual-report-0b4ae50d153ef30a-page-1.png",
+      "bytes": 159140,
+      "sha256": "0d6d90a022fddbcb90aeb48f471ec779b53bc0917e0078960327e542d441cbac"
+    },
+    {
+      "path": "current-dc-confluence-visual-report-0b4ae50d153ef30a.pdf",
+      "bytes": 46455,
+      "sha256": "2c390aa8cebbd80cc8d05c9470b2a4e7c312eb6acae6d5b277333ab2b563f1b3"
+    },
+    {
+      "path": "current-dc-confluence-visual-report-0f713e1d73df3454-page-1.png",
+      "bytes": 170437,
+      "sha256": "306c66d8182994f2856e5f348fc4303bb209318b9a229688654b014af12d2bf7"
+    },
+    {
+      "path": "current-dc-confluence-visual-report-0f713e1d73df3454.pdf",
+      "bytes": 48568,
+      "sha256": "fc11e12a3e68b5e2cf506b1ae38e5f60473ef1d7d9cb5d37539f3bb25165eb43"
+    },
+    {
+      "path": "current-dc-confluence-visual-report-3d19c2731147e60d-page-1.png",
+      "bytes": 162660,
+      "sha256": "f1243651c91f700552f93a569e503baea0e73c72a8ef1826399163dc31d94cb9"
+    },
+    {
+      "path": "current-dc-confluence-visual-report-3d19c2731147e60d.pdf",
+      "bytes": 48233,
+      "sha256": "7e230542a514f27951b7066eedc0a0e5d592a7667027963f16eafd7f6d5a1ea8"
+    },
+    {
+      "path": "current-dc-confluence-visual-report-80d8449505e5d94a-page-1.png",
+      "bytes": 159140,
+      "sha256": "0d6d90a022fddbcb90aeb48f471ec779b53bc0917e0078960327e542d441cbac"
+    },
+    {
+      "path": "current-dc-confluence-visual-report-80d8449505e5d94a.pdf",
+      "bytes": 46455,
+      "sha256": "2c390aa8cebbd80cc8d05c9470b2a4e7c312eb6acae6d5b277333ab2b563f1b3"
+    },
+    {
+      "path": "current-dc-confluence-visual-restrictions.jpg",
+      "bytes": 56664,
+      "sha256": "571e41ce82c38489a8586cd0e918ccf9b674cf2112036a3329834d8d1346dbd4"
+    },
+    {
+      "path": "current-dc-confluence-visual-scheduled-history.jpg",
+      "bytes": 75397,
+      "sha256": "b9418d832942713feaef07bd2c84176d95e15803e33086659eef5ab1a4912c9c"
+    },
+    {
+      "path": "current-email-console-deeplink.jpg",
+      "bytes": 83625,
+      "sha256": "f3bc4b1061dd5ed5d528785c008bee347c514a03e1b8eba785a35f543d12afa9"
+    },
+    {
+      "path": "current-email-gmail-receipt-attachment.jpg",
+      "bytes": 58229,
+      "sha256": "dd67e7aa9d23548fb7908eadcb6b938381ba64aa703029b34c7789937add6450"
+    },
+    {
+      "path": "current-email-outlook-eml-download-error.jpg",
+      "bytes": 16505,
+      "sha256": "223f378342e7f189bbfa8d1924c18d0860827c05bbb8673803337f025453e92f"
+    },
+    {
+      "path": "current-email-outlook-receipt-attachment.jpg",
+      "bytes": 70618,
+      "sha256": "249621f23557321c8ca69be435dac3c33fe535ec5236d478ad189e4e494af267"
+    },
+    {
+      "path": "current-email-proof.json",
+      "bytes": 4346,
+      "sha256": "b01fd2123a7028e7de4df07b5230691450437ab96d80e2ebe7fbebf1f154ecec"
+    },
+    {
+      "path": "current-email-source-report-page-1.jpg",
+      "bytes": 200328,
+      "sha256": "111f2c5da01dd57b3c3877b2e3645b9bb542fff4625f8c13550d49359333a529"
+    },
+    {
+      "path": "current-email-source-report.pdf",
+      "bytes": 47057,
+      "sha256": "d06519ac6591cf5c4d6db596903cda62bdbc866b73f90a7aeada554fd0f9d169"
+    },
+    {
+      "path": "current-jira-cloud-console-vi-linked.jpg",
+      "bytes": 50085,
+      "sha256": "631acbb38ff351bf64fe785a2d876b9ee3411c29f894df588315ab8126f9d06c"
+    },
+    {
+      "path": "current-jira-cloud-console-vi.jpg",
+      "bytes": 70234,
+      "sha256": "363697e31c83d83896701cbb1d1252c16795933ee0882097474b10d6de797c03"
+    },
+    {
+      "path": "current-jira-cloud-policy-en-security.jpg",
+      "bytes": 90982,
+      "sha256": "42ee2c4f1b2b3a3a950fe8885da3d73cea1d12dbdf9d440ae8f62b4f22f1c725"
+    },
+    {
+      "path": "current-jira-cloud-policy-en.jpg",
+      "bytes": 88172,
+      "sha256": "0d69efdc4cc120d96d00e5090634759106b711049f007ea91e8c39926c9ba5c9"
+    },
+    {
+      "path": "current-jira-cloud-policy-vi-security.jpg",
+      "bytes": 90898,
+      "sha256": "fd65f47985d47d11bea3a85c9e1328c0e0e85864bc166ee84e812328cdd6e770"
+    },
+    {
+      "path": "current-jira-cloud-policy-vi.jpg",
+      "bytes": 87993,
+      "sha256": "dcabe5839cb1514b1a46b259ea34911acb43e6189a9b01a0fa695bd515007cef"
+    },
+    {
+      "path": "current-jira-cloud-proof.json",
+      "bytes": 41518,
+      "sha256": "8305ca2a3f6632fd3a141c7df90040cd0e249e36ab870750f5b2a798087dad2d"
+    },
+    {
+      "path": "current-jira-dc-evidence-manifest.json",
+      "bytes": 2145,
+      "sha256": "2f158bcf4142b8184d2077af2bc73e73366905b3f75e9c442aff74ba2f8cf2cf"
+    },
+    {
+      "path": "current-jira-dc-policy-console-context.jpg",
+      "bytes": 77494,
+      "sha256": "91114e317bdc7c631aee00b0da9bba7a588b8262c4a6e5127cae4bfa2aadb27d"
+    },
+    {
+      "path": "current-jira-dc-policy-console.jpg",
+      "bytes": 71126,
+      "sha256": "7b001c9abe2d2daad6be663fdaa1d3cafeb490e6429eaeeaa437e79904ee04d8"
+    },
+    {
+      "path": "current-jira-dc-policy-en.jpg",
+      "bytes": 102329,
+      "sha256": "92e504a8f0654ca699ebf5d026a011ee052ef3f4ffc8600445729f02473a6d08"
+    },
+    {
+      "path": "current-jira-dc-policy-lifecycle-proof.json",
+      "bytes": 4076,
+      "sha256": "f5291255d000a716ec50b42a9d4c777f0b32fca508cb5c6cced216c570ddc94e"
+    },
+    {
+      "path": "current-jira-dc-policy-linked-ticket.jpg",
+      "bytes": 71126,
+      "sha256": "7b001c9abe2d2daad6be663fdaa1d3cafeb490e6429eaeeaa437e79904ee04d8"
+    },
+    {
+      "path": "current-jira-dc-policy-vi.jpg",
+      "bytes": 102874,
+      "sha256": "90dfa06b73175aeac66777838298d4ab18f4232e5a058a7b269e9523a7872759"
+    },
+    {
+      "path": "current-project-cloud-en.jpg",
+      "bytes": 90929,
+      "sha256": "6e495f4875e66c3a53c8302455f72d0ef547617737210b069fe11886cb5605bc"
+    },
+    {
+      "path": "current-project-cloud-provider-readback-after-removal.json",
+      "bytes": 6354,
+      "sha256": "30d34cefe75f5ef2e5107a8ca92bd7ba8a8fd318ddc0d6ec8386414173a6fa8b"
+    },
+    {
+      "path": "current-project-cloud-provider-readback.json",
+      "bytes": 7738,
+      "sha256": "8b5006423ad15f670a224385b10d872cddf4a138672c556b31c3cab6f1df9cbf"
+    },
+    {
+      "path": "current-project-cloud-vi-after-removal.jpg",
+      "bytes": 93499,
+      "sha256": "94412a12748fc47f796f5a25fab32fbae12330a39ac1ccb6df588c0ebc7ddc4e"
+    },
+    {
+      "path": "current-project-console-linked-tickets.jpg",
+      "bytes": 68450,
+      "sha256": "0df100bd306deb6f7daa42f39004acf6c2c34258ecec64120094a3eadf91c097"
+    },
+    {
+      "path": "current-project-console-proof.json",
+      "bytes": 1241,
+      "sha256": "ba6cb01588fc9244aaa856bc67b4e6751473a03f037b40dd2c7c70942ddf126d"
+    },
+    {
+      "path": "current-project-console-ticket-states.jpg",
+      "bytes": 35400,
+      "sha256": "8e8c8877538699fdbfdc0c1a65a8f9eaa2bddf0860b85dd88ea69c85f26a493b"
+    },
+    {
+      "path": "current-project-dc-assets-en.jpg",
+      "bytes": 87387,
+      "sha256": "79b42afed48515fa92fab8e191947a0f94cd4c14ab06d44fdecb3c31f5037374"
+    },
+    {
+      "path": "current-project-dc-assets-vi.jpg",
+      "bytes": 85799,
+      "sha256": "b758a4d37c8ead4d4f3c9600a33788f7f141791f2496d08f51b7f5cd742f7367"
+    },
+    {
+      "path": "current-project-dc-en.jpg",
+      "bytes": 102161,
+      "sha256": "bee02e59f048ec926af0a70d16380ac5a77bf6a91858e1c58a17d0f4704a3203"
+    },
+    {
+      "path": "current-project-dc-provider-readback.json",
+      "bytes": 2123,
+      "sha256": "5fb0a7e0cac123d4cfc1a42d183a7937e7c2b0dba0176c1f7b8abb41db4579bf"
+    },
+    {
+      "path": "current-project-dc-vi.jpg",
+      "bytes": 103766,
+      "sha256": "de9f9baa418d165a972623be6aa2ab28a01f228c0eb8afd2a45d5258e4f14f6a"
+    },
+    {
+      "path": "current-project-image-manifest.json",
+      "bytes": 3857,
+      "sha256": "5e429077e419f980ff03e5581f83b0cfa52f021d2419cfb690e75be1abd89342"
+    },
+    {
+      "path": "current-project-provider-proof.json",
+      "bytes": 3824,
+      "sha256": "7a83a5055ab565023920379e1e7c4a69f3c5a27118afa2c0164f629de898742b"
+    },
+    {
+      "path": "current-project-source-finding.jpg",
+      "bytes": 70997,
+      "sha256": "bd828b6d5b9e06c19bd2464e3154ac3c00cb88f7651a02a1c0921a0045c9f543"
+    },
+    {
+      "path": "current-verification-checks.json",
+      "bytes": 3667,
+      "sha256": "e361462d26cc69dbbab9fc85d9d198276bb09e3349783ed6ac5e3bb995687f97"
+    }
+  ]
+}

@@ -46,7 +46,7 @@ func (c *Client) Deliver(ctx context.Context, req siem.Delivery) (siem.DeliveryR
 		return blocked(len(req.Records), "indexer acknowledgement was requested but this client is not configured for it"), nil
 	}
 	if req.AckMode != siem.AckHECAcceptance && req.AckMode != siem.AckIndexer {
-		return blocked(len(req.Records), "splunk acknowledgement mode is not supported"), nil
+		return blocked(len(req.Records), "the event collector acknowledgement mode is not supported"), nil
 	}
 	endpoint, host, err := endpoint(req.Origin, req.Target, req.Channel, req.AckMode == siem.AckIndexer)
 	if err != nil {
@@ -79,13 +79,13 @@ func (c *Client) Deliver(ctx context.Context, req siem.Delivery) (siem.DeliveryR
 		return blocked(len(req.Records), "redirects are not followed"), nil
 	}
 	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500 {
-		return retryAll(len(req.Records), retryAfter(response.Header), "splunk returned "+strconv.Itoa(response.StatusCode)), nil
+		return retryAll(len(req.Records), retryAfter(response.Header), "the event collector returned "+strconv.Itoa(response.StatusCode)), nil
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		return blocked(len(req.Records), "splunk rejected the credential"), nil
+		return blocked(len(req.Records), "the event collector rejected the credential"), nil
 	}
 	if response.StatusCode != http.StatusOK {
-		return blocked(len(req.Records), "splunk rejected the batch"), nil
+		return blocked(len(req.Records), "the event collector rejected the batch"), nil
 	}
 	var hec struct {
 		Code  *int   `json:"code"`

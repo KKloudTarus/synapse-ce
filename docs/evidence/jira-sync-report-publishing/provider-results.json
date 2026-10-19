@@ -1,0 +1,145 @@
+{
+  "captured_at": "2026-10-17",
+  "cleanup": {
+    "atlassian_token_expiry": "2026-10-18",
+    "automatic_merge": false,
+    "oauth_grant_and_temporary_client": "retained until PR merge by explicit user instruction"
+  },
+  "confluence": {
+    "attachment_count": 0,
+    "classification": "neutral_shell_only; restriction_refused; no sensitive report or PDF uploaded",
+    "data_center_acceptance": false,
+    "intent": {
+      "action": "create",
+      "attempts": 5,
+      "created_at": "2026-10-17T10:15:09.123709Z",
+      "error_code": "provider_refused",
+      "id": "c3823c49c00f02a0669569e472a2c59a",
+      "state": "failed",
+      "updated_at": "2026-10-17T10:15:30.096136Z",
+      "version": 15
+    },
+    "page_id": "131218",
+    "restriction_status": 403,
+    "successful_restricted_publish_update_purge_acceptance": false,
+    "version": 1
+  },
+  "environment": "personal isolated Docker full stack and personal Atlassian Free lab",
+  "jira": {
+    "automatic_create": [
+      {
+        "attempts": 1,
+        "remote_id": "KAN-4",
+        "state": "done"
+      }
+    ],
+    "cloud_webhook_comment_acceptance": false,
+    "data_center_acceptance": false,
+    "deletion_observation": {
+      "comments": [],
+      "observations": [
+        {
+          "checked_at": "2026-10-17T10:16:50.396546Z",
+          "deleted_or_unreadable": true,
+          "provider_updated_at": "2026-10-17T10:10:55.232Z",
+          "remote_id": "KAN-5",
+          "status_category": "new"
+        }
+      ],
+      "proposals": []
+    },
+    "distinct_status_actor": {
+      "actor_name": "Automation for Jira",
+      "actor_type": "app",
+      "distinct_from_integration_principal": true,
+      "latest_status_change_at": "2026-10-17T17:21:00.851+0700",
+      "status_category": "done"
+    },
+    "external_done_proposal": {
+      "comments": [],
+      "observations": [
+        {
+          "checked_at": "2026-10-17T10:21:40.638293Z",
+          "deleted_or_unreadable": false,
+          "provider_updated_at": "2026-10-17T10:21:00.851Z",
+          "remote_id": "KAN-4",
+          "status_category": "done"
+        }
+      ],
+      "proposals": [
+        {
+          "id": "inbound-proposal-a3dba992db5c72b2687850cdf9b45438",
+          "observed_at": "2026-10-17T10:21:05.6774Z",
+          "remote_id": "KAN-4",
+          "resolution_context": "Done",
+          "state": "pending"
+        }
+      ]
+    },
+    "finding_after_external_done": {
+      "http_status": 200,
+      "status": "open",
+      "version": 6
+    },
+    "multi_asset_project_acceptance": false,
+    "own_write_suppression": {
+      "comments": [],
+      "observations": [
+        {
+          "checked_at": "2026-10-17T10:16:25.893549Z",
+          "deleted_or_unreadable": false,
+          "provider_updated_at": "2026-10-17T10:11:40.243Z",
+          "remote_id": "KAN-4",
+          "status_category": "done"
+        }
+      ],
+      "proposals": []
+    },
+    "status_history": [
+      {
+        "at": "2026-10-17T17:09:41.356+0700",
+        "from": "Done",
+        "to": "To Do"
+      },
+      {
+        "at": "2026-10-17T17:09:06.163+0700",
+        "from": "To Do",
+        "to": "Done"
+      }
+    ]
+  },
+  "scheduled_pdf": {
+    "gmail_preview_file": "synapse-report-a524134800446a1f.pdf",
+    "gmail_web_receipt": true,
+    "outlook_capture_occurrence": "2026-10-17T10:51:00Z",
+    "outlook_web_receipt": "previous occurrence received in Junk; attachment visible but opening blocked by Outlook protection",
+    "pdf_vietnamese_rendering": "actual final Gmail PDF preview shows intact Vietnamese title and finding text after embedded-font fix",
+    "previous_occurrence_content_hash": "cca19ccc7fcb7f436afaf5f68a4c3e201e109855cd5acabe11e4a47e362086ce",
+    "result": "smtp_accepted_for_two_verified_owner_recipients",
+    "runtime": {
+      "binary_digest_match": true,
+      "docker_security_opt": "null",
+      "privileged": false,
+      "worker_profile": "integrations"
+    },
+    "schedule": {
+      "content_hash_present": true,
+      "create_status": 201,
+      "delivered_count": 2,
+      "disabled_after_first_delivery": true,
+      "expected_owner_recipient_count": 2,
+      "failed_count": 0,
+      "frequency": "weekly",
+      "next_due_at_present": true,
+      "run_state": "done",
+      "uncertain_count": 0
+    },
+    "scheduled_confluence_version_acceptance": false,
+    "scope": "B07 live weekly scheduled PDF acceptance",
+    "source": {
+      "pdf_magic": true,
+      "pdf_sha256": "43908428d8745637cb783d2059814a7c03f7c1f2b771a6eed38f9394a0471107",
+      "report_endpoint_status": 200
+    }
+  }
+}

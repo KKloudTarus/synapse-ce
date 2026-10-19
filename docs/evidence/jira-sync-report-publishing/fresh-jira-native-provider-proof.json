@@ -1,0 +1,107 @@
+{
+  "cleanup": {
+    "jira_application_kept_running": false,
+    "native_registration_deleted": true,
+    "private_proxy_stopped": true,
+    "remaining_native_registrations": 0,
+    "temporary_cross_stack_network_disconnected": true
+  },
+  "inbound": {
+    "comment_remote_id_count": 1,
+    "comment_snapshot_count": 2,
+    "finding_status": "confirmed",
+    "observation_count": 1,
+    "proposal_count": 1,
+    "proposal_states": [
+      "pending"
+    ],
+    "status_categories": [
+      "done"
+    ],
+    "distinct_create_and_edit_bodies_verified": true
+  },
+  "integration": {
+    "enabled": true,
+    "id": "6fe2de6da3aa88cb43bdb411ffc2ee8b",
+    "test_state": "succeeded"
+  },
+  "jira_dc_version": "11.3.12",
+  "license": {
+    "active": true,
+    "expired": false,
+    "expiry_utc": "2026-10-17T20:54:31.181000+00:00",
+    "type": "Commercial",
+    "valid": true,
+    "checked_at": "2026-10-17T18:43:29.306749+00:00",
+    "source": "Official Atlassian published three-hour test license; vendor API labels its type Commercial. No paid license was purchased.",
+    "data_center": true,
+    "maximum_users": 10
+  },
+  "native_webhook": {
+    "diagnostics": {
+      "forwarded": 7,
+      "records": 15,
+      "upstream_statuses": [
+        202
+      ],
+      "valid_signatures": 7
+    },
+    "private_loopback_hmac": true,
+    "registration_id": 1,
+    "signing_secret_field": "SECRET",
+    "single_issue_filter": true,
+    "first_forward_at": "2026-10-17T18:39:28.700081+00:00",
+    "last_forward_at": "2026-10-17T18:40:36.923844+00:00",
+    "all_forwards_before_license_expiry": true,
+    "transport_scope": "Native Jira callback over private container loopback HTTP, HMAC-SHA256 verified, forwarded only to the same exact Synapse webhook route. No public tunnel."
+  },
+  "restricted_ticket": {
+    "final_status_category": "done",
+    "issue_key": "SYNACC-1",
+    "project_key": "SYNACC",
+    "security_level_id": "10000"
+  },
+  "reviewer": {
+    "comment_create_and_edit": true,
+    "independent_transition_done": true,
+    "repeat_todo_done": true
+  },
+  "verification_scope": "Independent verification re-read provider license, normal Synapse observations and finding state, exact create/edit bodies and native proxy receipt times after completion.",
+  "runtime": {
+    "at": "2026-10-17T18:02:24.427155+00:00",
+    "CGO_ENABLED": "0",
+    "exit_code": 0,
+    "sha256": {
+      "synapse-api": "b43e60f0b000422e8e119ff4889ab6726705715fd3ec60b2d3a71061895cf846",
+      "synapse-worker": "378a4d6c81266ce4cb9b2d48c754c6af4a8cdd0dff5b0a35c93818f8bc61d1c1"
+    }
+  },
+  "source": {
+    "engagement_id": "5e55e25e4773c66bac5fe639a4070ea9",
+    "finding_id": "062c5617471a95c19c4fab34cc08c259",
+    "mapping_id": "af8509edfd5456406e535d2933a05206",
+    "ticket_id": "680538488b85c789086211ad4c7fa5e9"
+  },
+  "scope": "Fresh isolated official Jira Data Center 11.3.12, normal first-run wizard and restricted project; normal Synapse preview/submit/worker plus genuine native callbacks. This supersedes the earlier expired-lab callback record.",
+  "post_capture_shutdown": {
+    "containers": {
+      "jira_stopped": true,
+      "postgres_preserved_running": true,
+      "runtime_tls_stopped": true,
+      "tls_stopped": true
+    },
+    "integration": {
+      "disabled_with_version": 5,
+      "enabled_after_disable": false,
+      "id": "6fe2de6da3aa88cb43bdb411ffc2ee8b",
+      "version_after_disable": 6
+    },
+    "native_webhook": {
+      "proxy_127_0_0_1_18092_closed": true,
+      "remaining_registrations": 0
+    },
+    "network": {
+      "runtime_api_attached_to_fresh_network": false
+    }
+  }
+}
