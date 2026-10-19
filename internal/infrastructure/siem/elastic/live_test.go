@@ -6,8 +6,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -48,11 +50,37 @@ func liveSetup(t *testing.T) liveTarget {
 	if origin == "" || apiKey == "" {
 		t.Skipf("set %s and %s to run the live Elasticsearch contract", envLiveURL, envLiveAPIKey)
 	}
-	index := os.Getenv(envLiveIndex)
-	if index == "" {
-		index = "synapse-siem-live"
+	// The credential is attached to every call below, so the origin is validated before the
+	// first one leaves: safehttp constrains addresses and redirects, not the scheme.
+	if err := liveOrigin(origin); err != nil {
+		t.Fatalf("%s: %v", envLiveURL, err)
 	}
+	// The index belongs to this run. A configured prefix is a namespace, never a target: a run
+	// must not delete an index somebody else owns, and two runs must not share one.
+	prefix := os.Getenv(envLiveIndex)
+	if prefix == "" {
+		prefix = "synapse-siem-live"
+	}
+	index := fmt.Sprintf("%s-%d-%d", prefix, time.Now().UnixNano(), os.Getpid())
 	return liveTarget{origin: origin, apiKey: apiKey, index: index, admin: liveHTTP(t)}
+}
+
+// liveOrigin accepts only an https origin with nothing else in it. safehttp constrains the
+// address and refuses redirects; it does not require TLS, so a plain http URL would otherwise
+// put the API key on the wire in clear text before the driver itself rejected the scheme.
+func liveOrigin(origin string) error {
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return fmt.Errorf("origin is not a URL: %w", err)
+	}
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("origin must be https, got %q", parsed.Scheme)
+	}
+	if parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Path != "" && parsed.Path != "/") {
+		return fmt.Errorf("origin must be https://host[:port] with no userinfo, path, query or fragment")
+	}
+	return nil
 }
 
 // liveHTTP keeps the production safe dialer and the production TLS verification, and differs from
@@ -115,6 +143,21 @@ func (l liveTarget) call(t *testing.T, method, path, body string) (int, []byte) 
 		t.Fatalf("read %s %s: %v", method, path, err)
 	}
 	return response.StatusCode, payload
+}
+
+// create makes the index this run owns and registers its removal only once it exists, so a
+// failure before creation never deletes anything.
+func (l liveTarget) create(t *testing.T, index, mappings string) {
+	t.Helper()
+	body := ""
+	if mappings != "" {
+		body = mappings
+	}
+	code, response := l.call(t, http.MethodPut, "/"+index, body)
+	if code != http.StatusOK {
+		t.Fatalf("create index %s: code=%d body=%s", index, code, response)
+	}
+	t.Cleanup(func() { l.drop(t, index) })
 }
 
 func (l liveTarget) drop(t *testing.T, index string) {
@@ -213,8 +256,7 @@ func at(doc map[string]any, path []string) any {
 // stream and notice a hole.
 func TestLiveBulkStoresTheRecordAndItsCursorFields(t *testing.T) {
 	live := liveSetup(t)
-	t.Cleanup(func() { live.drop(t, live.index) })
-	live.drop(t, live.index)
+	live.create(t, live.index, "")
 
 	shapes := liveShapes("tenant-live")
 	records := make([]siem.DeliveryRecord, len(shapes))
@@ -362,11 +404,7 @@ func TestLiveBulkRejectionsAreClassified(t *testing.T) {
 
 	t.Run("a record the cluster cannot map is not acknowledged", func(t *testing.T) {
 		index := live.index + "-mapping"
-		t.Cleanup(func() { live.drop(t, index) })
-		live.drop(t, index)
-		if code, body := live.call(t, http.MethodPut, "/"+index, `{"mappings":{"properties":{"time":{"type":"date"}}}}`); code != http.StatusOK {
-			t.Fatalf("create the mapped index: code=%d body=%s", code, body)
-		}
+		live.create(t, index, `{"mappings":{"properties":{"time":{"type":"date"}}}}`)
 		broken := []siem.DeliveryRecord{
 			records[0],
 			{ID: "live-unmappable", Body: []byte(`{"schema":"synapse.siem.audit.v1","time":"not-a-date","source":{"kind":"audit","id":1}}`)},

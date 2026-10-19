@@ -241,19 +241,36 @@ func TestMisalignedResponseIsAnError(t *testing.T) {
 }
 
 // TestOversizedResponseIsRefused stops a destination from making the client hold an unbounded
-// body in memory.
+// body in memory. The body is otherwise valid and carries exactly the three expected items, so
+// the only reason to refuse it is the byte cap: with the cap removed this response parses and
+// the delivery succeeds, which is what makes the assertion specific.
 func TestOversizedResponseIsRefused(t *testing.T) {
+	var sent int
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"items":[`)
-		filler := strings.Repeat(`{"index":{"_id":"rec-1","status":201}},`, 1024)
-		for written := 0; written <= siem.MaxResponseBytes; written += len(filler) {
-			_, _ = io.WriteString(w, filler)
+		// One ignored field carries the weight. Elasticsearch itself returns unknown fields
+		// the client skips, so an oversized answer is a real shape rather than a malformed one.
+		filler := strings.Repeat("x", siem.MaxResponseBytes+1024)
+		body := `{"took":3,"errors":false,"note":"` + filler + `","items":[` +
+			`{"index":{"_id":"rec-1","status":201}},` +
+			`{"index":{"_id":"rec-2","status":201}},` +
+			`{"index":{"_id":"rec-3","status":201}}]}`
+		sent = len(body)
+		if !json.Valid([]byte(body)) {
+			t.Errorf("the oversized fixture is not valid json")
 		}
-		_, _ = io.WriteString(w, `]}`)
+		_, _ = io.WriteString(w, body)
 	}))
 	defer server.Close()
-	if _, err := testClient(server).Deliver(context.Background(), sample(server.URL)); err == nil {
+
+	_, err := testClient(server).Deliver(context.Background(), sample(server.URL))
+	if err == nil {
 		t.Fatal("an oversized response was accepted")
+	}
+	if !strings.Contains(err.Error(), "byte cap") {
+		t.Fatalf("error = %v, want the response byte cap", err)
+	}
+	if sent <= siem.MaxResponseBytes {
+		t.Fatalf("the fixture was %d bytes, which does not exceed the %d byte cap", sent, siem.MaxResponseBytes)
 	}
 }
 
@@ -368,6 +385,32 @@ func TestNewClampsTheTimeout(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := New(tc.in).HTTP.Timeout; got != tc.want {
 				t.Errorf("New(%v) timeout = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLiveOriginRefusesAnythingButHTTPS guards the live suite's own credential handling: the API
+// key is attached to every administrative call it makes, so an origin that is not plain https
+// has to be refused before the first request rather than by the driver afterwards.
+func TestLiveOriginRefusesAnythingButHTTPS(t *testing.T) {
+	for _, tc := range []struct {
+		name, origin string
+		valid        bool
+	}{
+		{name: "https host and port", origin: "https://127.0.0.1:19243", valid: true},
+		{name: "https with a trailing slash", origin: "https://cluster.example/", valid: true},
+		{name: "plain http", origin: "http://127.0.0.1:19243"},
+		{name: "no scheme", origin: "127.0.0.1:19243"},
+		{name: "userinfo", origin: "https://elastic:secret@cluster.example"},
+		{name: "a path", origin: "https://cluster.example/es"},
+		{name: "a query", origin: "https://cluster.example?pretty=true"},
+		{name: "a fragment", origin: "https://cluster.example#frag"},
+		{name: "empty", origin: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := liveOrigin(tc.origin); (err == nil) != tc.valid {
+				t.Fatalf("liveOrigin(%q) = %v, want valid=%v", tc.origin, err, tc.valid)
 			}
 		})
 	}
