@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -29,10 +30,12 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/rule"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/scanrun"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/siem"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/threatmodel"
 	userdom "github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeupdraft"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	analysisuc "github.com/KKloudTarus/synapse-ce/internal/usecase/analysis"
 	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
 	snapshotuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentsnapshot"
@@ -53,6 +56,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/rules"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/sarifingest"
 	scauc "github.com/KKloudTarus/synapse-ce/internal/usecase/sca"
+	siemuc "github.com/KKloudTarus/synapse-ce/internal/usecase/siem"
 	usersuc "github.com/KKloudTarus/synapse-ce/internal/usecase/users"
 )
 
@@ -297,6 +301,56 @@ type fakeRules struct{}
 
 func (fakeRules) List(context.Context, rules.Filter) ([]rule.Rule, error) { return nil, nil }
 func (fakeRules) Get(context.Context, rule.Key) (rule.Rule, error)        { return rule.Rule{}, nil }
+
+// harnessSIEMSealer seals a sink secret with the real vault cipher, AAD and all, so the fixture
+// stores what production stores. The connection-test route has to be able to open a stored secret
+// to reach its driver, which is why this sealer round-trips rather than refusing like the one in
+// siem_handler_test.go.
+type harnessSIEMSealer struct{ cipher *vault.Cipher }
+
+func (s harnessSIEMSealer) Seal(_ context.Context, plaintext, aad []byte) (string, error) {
+	return s.cipher.Seal(plaintext, aad)
+}
+
+func (s harnessSIEMSealer) Open(_ context.Context, ciphertext string, aad []byte) ([]byte, error) {
+	return s.cipher.Open(ciphertext, aad)
+}
+
+func harnessSIEMCipher(t *testing.T) *vault.Cipher {
+	t.Helper()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+	cipher, err := vault.NewCipher(key)
+	if err != nil {
+		t.Fatalf("harness siem cipher: %v", err)
+	}
+	return cipher
+}
+
+// harnessSIEMIDs hands out a distinct id per sink. One sink per tenant is the whole point of the
+// cross-tenant probes, so a constant id would make them vacuous.
+type harnessSIEMIDs struct{ n int }
+
+func (h *harnessSIEMIDs) NewID() shared.ID {
+	h.n++
+	return shared.ID(fmt.Sprintf("siem-sink-%d", h.n))
+}
+
+// harnessSIEMDriver accepts one record. The connection-test route needs a wired driver to return
+// 200, which is what makes "manage_integrations may test" an allow assertion rather than a 400.
+type harnessSIEMDriver struct{}
+
+func (harnessSIEMDriver) Deliver(context.Context, siem.Delivery) (siem.DeliveryResult, error) {
+	return siem.DeliveryResult{Items: []siem.DeliveryItem{{Disposition: siem.ItemAcked}}}, nil
+}
+
+var (
+	_ ports.SIEMSealer  = harnessSIEMSealer{}
+	_ ports.IDGenerator = (*harnessSIEMIDs)(nil)
+	_ ports.SIEMDriver  = harnessSIEMDriver{}
+)
 
 // TestHostileHarness drives the REAL route table (rt.routes()) through the production
 // authz → withEngTenant → handler chain with a context-injected principal, asserting the program's
@@ -549,6 +603,18 @@ func TestHostileHarness(t *testing.T) {
 	rt.EnableAgent(nil, memory.NewAgentSessionStore(), nil, memory.NewApprovalStore(), nil, 1, 8)
 	rt.SetAgentPlanStore(memory.NewPlanStore())
 	rt.SetAgentDecisionStore(memory.NewDecisionStore())
+	// #1457 SIEM sinks: the real use case over the in-memory store, not a stand-in. Sinks are tenant
+	// rows, and the ten routes are split across two permissions (manage_integrations reads, pauses,
+	// resumes and tests; administer creates, edits, rotates the secret and moves the host), so both
+	// the split and the tenant scope need hostile coverage.
+	siemStore := siemuc.NewMemory()
+	siemSvc, siemErr := siemuc.NewService(siemStore, siemStore, siemStore, harnessSIEMSealer{harnessSIEMCipher(t)},
+		map[siem.Provider]ports.SIEMDriver{siem.ProviderSplunk: harnessSIEMDriver{}}, nil,
+		siemClock{now: time.Unix(1_700_000_000, 0).UTC()}, &harnessSIEMIDs{}, testSIEMSchema(t))
+	if siemErr != nil {
+		t.Fatalf("siem service: %v", siemErr)
+	}
+	rt.SetSIEM(siemSvc)
 	mux := rt.routes()
 
 	send := func(role, tenant, method, path string, authed bool) (int, string) {
@@ -652,6 +718,44 @@ func TestHostileHarness(t *testing.T) {
 	}
 	if len(tenantBEvents) != 0 {
 		t.Fatalf("tenantB observed %d tenantA promotion events", len(tenantBEvents))
+	}
+
+	// #1457 SIEM sinks: seed one sink per tenant through the real create route, as that tenant's own
+	// admin. Everything below addresses a sink that actually exists, so a cross-tenant 404 proves an
+	// absence rather than an empty fixture.
+	seedSIEMSink := func(tenant, name, origin string) (string, int64) {
+		t.Helper()
+		body := fmt.Sprintf(`{"name":%q,"provider":"splunk_hec","origin":%q,"secret":"splunk-token-value"}`, name, origin)
+		code, response := sendLifecycleWrite("admin", tenant, http.MethodPost, "/api/v1/siem/sinks", body, nil)
+		if code != http.StatusCreated {
+			t.Fatalf("seed %s siem sink: code=%d body=%s", tenant, code, response)
+		}
+		if strings.Contains(response, "splunk-token-value") {
+			t.Fatalf("siem create echoed the write-only secret: %s", response)
+		}
+		var decoded struct {
+			ID      string `json:"id"`
+			Version int64  `json:"version"`
+		}
+		if err := json.Unmarshal([]byte(response), &decoded); err != nil {
+			t.Fatalf("decode seeded %s siem sink: %v (%s)", tenant, err, response)
+		}
+		if decoded.ID == "" || decoded.Version == 0 {
+			t.Fatalf("seeded %s siem sink has no id or version: %s", tenant, response)
+		}
+		return decoded.ID, decoded.Version
+	}
+	siemSinkA, siemVersionA := seedSIEMSink("tenantA", "tenantA-siem-marker", "https://splunk-a.example:8088")
+	siemSinkB, _ := seedSIEMSink("tenantB", "tenantB-siem-sink", "https://splunk-b.example:8088")
+	if siemSinkA == siemSinkB {
+		t.Fatalf("both tenants seeded the same sink id %q; the cross-tenant probes would be vacuous", siemSinkA)
+	}
+	siemSinkPath := func(id, suffix string) string { return "/api/v1/siem/sinks/" + id + suffix }
+	// The sealed credential, read straight out of the store. No SIEM response may carry the
+	// plaintext or the sealed form, which is the credential half of the issue's definition of done.
+	_, siemSealedA, siemSealErr := siemStore.LatestSecret(shared.WithTenant(context.Background(), "tenantA"), shared.ID(siemSinkA))
+	if siemSealErr != nil || siemSealedA == "" {
+		t.Fatalf("read the sealed tenantA sink secret: %v", siemSealErr)
 	}
 
 	cases := []struct {
@@ -902,6 +1006,140 @@ func TestHostileHarness(t *testing.T) {
 		} else if strings.Contains(body, "asset-A") || strings.Contains(body, "ag1") {
 			t.Errorf("cross-tenant %s leaked tenantA data: %s", path, body)
 		}
+	}
+
+	// #1457 SIEM sinks. Ten routes, split across two permissions, every one of them addressing a
+	// tenant row that carries a destination and a sealed credential. The sweep below walks all ten
+	// against every role that must be refused, then proves the split lets the right role through,
+	// then proves a tenantB admin cannot read, edit, move, pause or test tenantA's sink.
+	//
+	// A write needs a body to reach the handler at all, which is why these routes are not rows in
+	// the table above: a 400 from the decoder would otherwise pass as a denial.
+	sendSIEM := func(role, tenant, method, path, body string) (int, string) {
+		return sendLifecycleWrite(role, tenant, method, path, body, nil)
+	}
+	siemRoutes := []struct {
+		name, method, path, perm, body string
+	}{
+		{"list sinks", http.MethodGet, "/api/v1/siem/sinks", "manage_integrations", ""},
+		{"create sink", http.MethodPost, "/api/v1/siem/sinks", "administer", `{"name":"Another","provider":"splunk_hec","origin":"https://splunk-c.example:8088","secret":"splunk-token-value"}`},
+		{"read sink", http.MethodGet, siemSinkPath(siemSinkA, ""), "manage_integrations", ""},
+		{"update sink", http.MethodPatch, siemSinkPath(siemSinkA, ""), "administer", fmt.Sprintf(`{"name":"Renamed","version":%d}`, siemVersionA)},
+		{"rotate secret", http.MethodPost, siemSinkPath(siemSinkA, "/secret"), "administer", fmt.Sprintf(`{"secret":"splunk-token-rotated","version":%d}`, siemVersionA)},
+		{"change origin", http.MethodPost, siemSinkPath(siemSinkA, "/origin"), "administer", fmt.Sprintf(`{"origin":"https://splunk-moved.example:8088","secret":"splunk-token-moved","replay":"cursor","version":%d}`, siemVersionA)},
+		{"pause sink", http.MethodPost, siemSinkPath(siemSinkA, "/pause"), "manage_integrations", fmt.Sprintf(`{"version":%d}`, siemVersionA)},
+		{"resume sink", http.MethodPost, siemSinkPath(siemSinkA, "/resume"), "manage_integrations", fmt.Sprintf(`{"version":%d}`, siemVersionA)},
+		{"test sink", http.MethodPost, siemSinkPath(siemSinkA, "/test"), "manage_integrations", ""},
+		{"sink status", http.MethodGet, siemSinkPath(siemSinkA, "/status"), "manage_integrations", ""},
+	}
+	// A SIEM route registered tomorrow has to be listed here, or this count fails and the sweep
+	// cannot silently skip it.
+	var registeredSIEM []string
+	for _, route := range registeredRoutes(t) {
+		if strings.Contains(route.Pattern, "/api/v1/siem/") {
+			registeredSIEM = append(registeredSIEM, route.Pattern)
+		}
+	}
+	if len(registeredSIEM) != len(siemRoutes) {
+		t.Fatalf("the route table registers %d siem routes (%v); this sweep covers %d", len(registeredSIEM), registeredSIEM, len(siemRoutes))
+	}
+	for _, route := range siemRoutes {
+		// Fail closed, and deny every role that holds neither permission. Machine roles hold
+		// nothing at all (separation of duties), and view, operate, triage and review are all
+		// insufficient on their own.
+		if code, body := send("", "", route.method, route.path, false); code != http.StatusUnauthorized {
+			t.Errorf("principal-less siem %s = %d, body=%s, want 401", route.name, code, body)
+		}
+		for _, role := range []string{"agent", "mcp", "service", "readonly", "consultant", "reviewer"} {
+			if code, body := sendSIEM(role, "tenantA", route.method, route.path, route.body); code != http.StatusForbidden {
+				t.Errorf("%s siem %s = %d, body=%s, want 403", role, route.name, code, body)
+			}
+		}
+		// The split itself: integration_admin holds manage_integrations and not administer, so it
+		// is refused on exactly the four administer routes and let through on the other six.
+		if route.perm == "administer" {
+			if code, body := sendSIEM("integration_admin", "tenantA", route.method, route.path, route.body); code != http.StatusForbidden {
+				t.Errorf("integration_admin siem %s = %d, body=%s, want 403 (administer, not manage_integrations)", route.name, code, body)
+			}
+		}
+		// Tenant scope. A tenantB admin holds both permissions in its own tenant, so a 404 on
+		// tenantA's sink is the tenant boundary and nothing else, and it must carry none of
+		// tenantA's configuration. The two collection routes are asserted on their bodies below.
+		if route.path != "/api/v1/siem/sinks" {
+			code, body := sendSIEM("admin", "tenantB", route.method, route.path, route.body)
+			if code != http.StatusNotFound {
+				t.Errorf("tenantB admin siem %s on tenantA's sink = %d, body=%s, want 404", route.name, code, body)
+			}
+			if strings.Contains(body, "tenantA") || strings.Contains(body, "splunk-a.example") {
+				t.Errorf("tenantB admin siem %s leaked tenantA sink data: %s", route.name, body)
+			}
+		}
+	}
+	// The allow side of the manage_integrations half, for the role that holds exactly that
+	// permission and nothing more.
+	for _, route := range []struct{ name, path, method, body string }{
+		{"list sinks", "/api/v1/siem/sinks", http.MethodGet, ""},
+		{"read sink", siemSinkPath(siemSinkA, ""), http.MethodGet, ""},
+		{"sink status", siemSinkPath(siemSinkA, "/status"), http.MethodGet, ""},
+		{"test sink", siemSinkPath(siemSinkA, "/test"), http.MethodPost, ""},
+	} {
+		code, body := sendSIEM("integration_admin", "tenantA", route.method, route.path, route.body)
+		if code != http.StatusOK {
+			t.Errorf("integration_admin siem %s = %d, body=%s, want 200 (manage_integrations)", route.name, code, body)
+		}
+		if strings.Contains(body, "splunk-token-value") || strings.Contains(body, siemSealedA) {
+			t.Errorf("siem %s echoed the sink credential: %s", route.name, body)
+		}
+	}
+	// tenantA sees its own sink; tenantB's list carries nothing of tenantA's, and the probes above
+	// left tenantA's row exactly as it was seeded.
+	if code, body := sendSIEM("integration_admin", "tenantA", http.MethodGet, "/api/v1/siem/sinks", ""); code != http.StatusOK || !strings.Contains(body, "tenantA-siem-marker") {
+		t.Fatalf("tenantA must see its own siem sink (code=%d body=%s)", code, body)
+	}
+	if code, body := sendSIEM("integration_admin", "tenantB", http.MethodGet, "/api/v1/siem/sinks", ""); code != http.StatusOK {
+		t.Errorf("tenantB siem list should be an own-tenant 200, got %d (%s)", code, body)
+	} else if strings.Contains(body, "tenantA-siem-marker") || strings.Contains(body, siemSinkA) || strings.Contains(body, "splunk-a.example") {
+		t.Errorf("tenantB siem list leaked tenantA's sink: %s", body)
+	}
+	if code, body := sendSIEM("admin", "tenantA", http.MethodGet, siemSinkPath(siemSinkA, ""), ""); code != http.StatusOK {
+		t.Fatalf("read tenantA sink after the hostile probes: code=%d body=%s", code, body)
+	} else if !strings.Contains(body, "tenantA-siem-marker") || !strings.Contains(body, "splunk-a.example") ||
+		!strings.Contains(body, fmt.Sprintf(`"version":%d`, siemVersionA)) || strings.Contains(body, `"paused":true`) {
+		t.Errorf("a refused siem probe still changed tenantA's sink: %s", body)
+	}
+	// The administer half, granted. Each write moves the version, so the sequence reads the new one
+	// back rather than assuming it, and no response may echo a credential.
+	siemVersion := siemVersionA
+	for _, step := range []struct{ name, role, method, path, body string }{
+		{"integration_admin pauses", "integration_admin", http.MethodPost, siemSinkPath(siemSinkA, "/pause"), `{"version":%d}`},
+		{"integration_admin resumes", "integration_admin", http.MethodPost, siemSinkPath(siemSinkA, "/resume"), `{"version":%d}`},
+		{"admin edits the sink", "admin", http.MethodPatch, siemSinkPath(siemSinkA, ""), `{"name":"tenantA-siem-marker","data_class":"summary","version":%d}`},
+		{"admin rotates the secret", "admin", http.MethodPost, siemSinkPath(siemSinkA, "/secret"), `{"secret":"splunk-token-rotated","version":%d}`},
+		{"admin moves the host", "admin", http.MethodPost, siemSinkPath(siemSinkA, "/origin"), `{"origin":"https://splunk-moved.example:8088","secret":"splunk-token-moved","replay":"cursor","version":%d}`},
+	} {
+		code, body := sendSIEM(step.role, "tenantA", step.method, step.path, fmt.Sprintf(step.body, siemVersion))
+		if code != http.StatusOK {
+			t.Fatalf("%s: code=%d body=%s, want 200", step.name, code, body)
+		}
+		if strings.Contains(body, "splunk-token-rotated") || strings.Contains(body, "splunk-token-moved") ||
+			strings.Contains(body, "splunk-token-value") || strings.Contains(body, siemSealedA) {
+			t.Errorf("%s echoed a write-only credential: %s", step.name, body)
+		}
+		var decoded struct {
+			Version int64 `json:"version"`
+		}
+		if err := json.Unmarshal([]byte(body), &decoded); err != nil {
+			t.Fatalf("%s: decode response: %v (%s)", step.name, err, body)
+		}
+		if decoded.Version <= siemVersion {
+			t.Fatalf("%s returned version %d, want it moved past %d", step.name, decoded.Version, siemVersion)
+		}
+		siemVersion = decoded.Version
+	}
+	// tenantB's own sink is untouched by all of the above, so the isolation runs both ways.
+	if code, body := sendSIEM("admin", "tenantB", http.MethodGet, siemSinkPath(siemSinkB, ""), ""); code != http.StatusOK ||
+		!strings.Contains(body, "tenantB-siem-sink") || strings.Contains(body, "splunk-moved.example") {
+		t.Errorf("tenantB's own sink changed under tenantA's writes: code=%d body=%s", code, body)
 	}
 
 	// Generated cross-tenant sweep. The hand-written cases above prove specific leaks are closed;
