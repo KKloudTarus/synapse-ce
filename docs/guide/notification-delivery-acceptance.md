@@ -568,9 +568,20 @@ PostgreSQL. Both findings and both assignments are real rows written through
 
 | Surface | Light | Dark |
 | --- | --- | --- |
-| Finding ownership and the assignee picker | [Light](assets/ui/ws4-console/finding-assignee-light.png) | [Dark](assets/ui/ws4-console/finding-assignee-dark.png) |
+| A finding whose assignee bound to a user | [Light](assets/ui/ws4-console/finding-assignee-bound-light.png) | [Dark](assets/ui/ws4-console/finding-assignee-bound-dark.png) |
+| A finding whose label bound to nobody | [Light](assets/ui/ws4-console/finding-assignee-unbound-light.png) | [Dark](assets/ui/ws4-console/finding-assignee-unbound-dark.png) |
+| Finding ownership panel above the picker | [Light](assets/ui/ws4-console/finding-assignee-light.png) | [Dark](assets/ui/ws4-console/finding-assignee-dark.png) |
 | Assignee review with a label that bound to nobody | [Light](assets/ui/ws4-console/assignee-review-light.png) | [Dark](assets/ui/ws4-console/assignee-review-dark.png) |
-| Assignee review as a read-only operator | [Light](assets/ui/ws4-console/assignee-review-denied-light.png) | |
+| Assignee review still loading | [Light](assets/ui/ws4-console/assignee-review-loading-light.png) | [Dark](assets/ui/ws4-console/assignee-review-loading-dark.png) |
+| Assignee review with nothing to review | [Light](assets/ui/ws4-console/assignee-review-empty-light.png) | [Dark](assets/ui/ws4-console/assignee-review-empty-dark.png) |
+| Assignee review when the read fails | [Light](assets/ui/ws4-console/assignee-review-error-light.png) | [Dark](assets/ui/ws4-console/assignee-review-error-dark.png) |
+| Assignee review as a read-only operator | [Light](assets/ui/ws4-console/assignee-review-denied-light.png) | [Dark](assets/ui/ws4-console/assignee-review-denied-dark.png) |
+| Ownership Inbox, where routed findings are taken on | [Light](assets/ui/ws4-console/ownership-inbox-light.png) | [Dark](assets/ui/ws4-console/ownership-inbox-dark.png) |
+
+The two finding captures are scrolled to the assignment control, so the picker, the stored
+label and the warning are all in frame. The loading capture holds
+`GET /api/v1/findings/assignee-review` open; the empty capture answers it with no items; the
+failing capture answers 503 and the page reports it.
 
 The run exercises both outcomes of the identity bridge, which is the point of the change:
 
@@ -594,7 +605,32 @@ The console says the same thing in its own words next to the picker: "Legacy ass
 has no user binding. Choose a user above to enable personal routing." Personal routing skips
 the row until someone picks a person who can own it.
 
+The two captures show different people, and the difference is the point. On the unbound
+finding the ownership panel prints the stored label
+`manual assign · Assignee: 70db0073427a1ec832d97b106a2295c1`, which is the `readonly` user,
+while `Operator (bootstrap admin) (operator)` below it is an eligible replacement the
+picker offers, not the current assignee: the control's selection is empty because
+`assignee_user_id` is null. On the bound finding the same control reads
+`Selected: operator` with a Clear action and `Stored assignee label: operator`, which is
+what a successful binding looks like.
+
 One observation recorded rather than changed: the ownership panel prints the assignee as the
-raw identifier (`manual assign · Assignee: 70db0073427a1ec832d97b106a2295c1`) while the picker
-below shows the same person as `Operator (bootstrap admin) (operator)`. The stored reference
-is right; the panel's rendering of it is less readable than the picker's.
+raw identifier while the picker renders a person as `name (id)`. The stored reference is
+right; the panel's rendering of it is less readable than the picker's.
+
+### Where authorization is refused
+
+The read-only capture is the client role gate: `AssigneeReview.tsx` calls `load()` only when
+`canAdmin` is true and otherwise renders "Administrator access required", so that account
+issues no read from this page. The server refuses it independently, which is a separate
+observation against the running API:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $READONLY_KEY" \
+    http://127.0.0.1:18080/api/v1/findings/assignee-review
+403
+```
+
+The route carries `rt.authz(userdom.PermAdminister, ...)` in
+`internal/adapter/httpapi/router.go`, and the page also renders the same screen from a 403
+it receives, through its own `denied` state.
