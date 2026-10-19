@@ -153,8 +153,12 @@ func liveRecords(tenant, marker string) []siem.DeliveryRecord {
 // offers, so the read-back is what turns that write into evidence.
 func TestLiveReceiverParsesTheFrame(t *testing.T) {
 	live := liveSetup(t)
-	marker := fmt.Sprintf("synapse-live-%d", time.Now().UnixNano())
-	records := liveRecords("tenant-live", marker)
+	// Both the tenant and the marker carry the run, so the record ids, and with them the
+	// message ids the receiver reports, never repeat across runs. A receiver log is
+	// append-only: a fixed identity would let a previous run's line answer this one.
+	run := time.Now().UnixNano()
+	marker := fmt.Sprintf("synapse-live-%d", run)
+	records := liveRecords(fmt.Sprintf("tenant-live-%d", run), marker)
 
 	result, err := live.client().Deliver(context.Background(), siem.Delivery{
 		Origin: live.origin, Secret: live.secret(t), Target: live.app,
@@ -177,13 +181,13 @@ func TestLiveReceiverParsesTheFrame(t *testing.T) {
 	var parsed string
 	for attempt := 0; attempt < 10; attempt++ {
 		parsed = live.received(t)
-		if allPresent(parsed, records) {
+		if allPresent(parsed, records, marker) {
 			break
 		}
 		time.Sleep(time.Second)
 	}
 	for _, record := range records {
-		line := lineFor(parsed, messageID(record.ID))
+		line := lineFor(parsed, messageID(record.ID), marker)
 		if line == "" {
 			t.Fatalf("the receiver has no line for %s (msgid %s)", record.ID, messageID(record.ID))
 		}
@@ -214,7 +218,8 @@ func TestLiveVerificationIsMandatory(t *testing.T) {
 	if live.caPEM == "" {
 		t.Skipf("set %s to a private CA so the system trust store cannot verify the receiver", envSyslogCA)
 	}
-	records := liveRecords("tenant-live-verify", "synapse-live-verify")
+	run := time.Now().UnixNano()
+	records := liveRecords(fmt.Sprintf("tenant-live-verify-%d", run), fmt.Sprintf("synapse-live-verify-%d", run))
 
 	result, err := live.client().Deliver(context.Background(), siem.Delivery{
 		Origin: live.origin, Secret: `{}`, Target: live.app,
@@ -236,18 +241,20 @@ func TestLiveVerificationIsMandatory(t *testing.T) {
 	}
 }
 
-func allPresent(parsed string, records []siem.DeliveryRecord) bool {
+func allPresent(parsed string, records []siem.DeliveryRecord, marker string) bool {
 	for _, record := range records {
-		if lineFor(parsed, messageID(record.ID)) == "" {
+		if lineFor(parsed, messageID(record.ID), marker) == "" {
 			return false
 		}
 	}
 	return true
 }
 
-func lineFor(parsed, msgID string) string {
+// lineFor selects the receiver line for one record of the current run. The receiver log is
+// append-only, so a line has to carry the run marker as well as the message id to answer.
+func lineFor(parsed, msgID, marker string) string {
 	for _, line := range strings.Split(parsed, "\n") {
-		if strings.Contains(line, msgID) {
+		if strings.Contains(line, msgID) && strings.Contains(line, marker) {
 			return line
 		}
 	}

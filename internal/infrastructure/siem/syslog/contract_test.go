@@ -364,3 +364,49 @@ func readFull(reader *bufio.Reader, payload []byte) (int, error) {
 	}
 	return read, nil
 }
+
+// A receiver log is append-only, so a second run reads lines its predecessor wrote. The selection
+// has to answer with the current run's line, and with nothing at all when the current run's line
+// has not arrived yet.
+func TestTheReceiverLineIsSelectedByRunAndNotByMessageIDAlone(t *testing.T) {
+	const msgID = "syn-0123456789abcdef0123456789ab"
+	previous := `app=synapse msgid=` + msgID + ` pri=134 msg={"target":"synapse-live-1000","action":"user.login"}`
+	current := `app=synapse msgid=` + msgID + ` pri=134 msg={"target":"synapse-live-2000","action":"user.login"}`
+
+	cases := []struct {
+		name   string
+		parsed string
+		marker string
+		want   string
+	}{
+		{"the current run wins over an earlier line with the same message id", previous + "\n" + current, "synapse-live-2000", current},
+		{"an earlier line alone does not answer for this run", previous, "synapse-live-2000", ""},
+		{"the earlier run still selects its own line", previous + "\n" + current, "synapse-live-1000", previous},
+		{"a message id that is absent answers with nothing", previous + "\n" + current, "synapse-live-3000", ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := lineFor(testCase.parsed, msgID, testCase.marker); got != testCase.want {
+				t.Errorf("lineFor() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// The identities a run delivers must not repeat, or the message ids the receiver reports collide
+// with an earlier run's.
+func TestLiveRecordIdentitiesAreUniquePerRun(t *testing.T) {
+	first := liveRecords("tenant-live-1", "synapse-live-1")
+	second := liveRecords("tenant-live-2", "synapse-live-2")
+	if len(first) != len(second) || len(first) == 0 {
+		t.Fatalf("record counts = %d and %d", len(first), len(second))
+	}
+	seen := map[string]string{}
+	for _, record := range append(append([]siem.DeliveryRecord{}, first...), second...) {
+		id := messageID(record.ID)
+		if other, repeated := seen[id]; repeated {
+			t.Errorf("message id %s is shared by %s and %s", id, other, record.ID)
+		}
+		seen[id] = record.ID
+	}
+}
