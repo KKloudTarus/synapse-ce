@@ -2,18 +2,22 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/aup"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/idgen"
+	notificationuc "github.com/KKloudTarus/synapse-ce/internal/usecase/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/usercontacts"
 )
@@ -250,9 +254,52 @@ func TestContactWriteRoutesStayOnTheCallersOwnIdentity(t *testing.T) {
 	})
 
 	t.Run("the personal channel view is scoped and machine roles are refused", func(t *testing.T) {
-		if response := send(http.MethodGet, "/api/v1/me/personal-channels", "alice", ""); response.Code != http.StatusOK {
-			t.Errorf("alice personal channels = %d %s", response.Code, response.Body.String())
+		// Each tenant gets one Slack bot workspace, so a leak reads as the other tenant's
+		// workspace name in the body rather than as a status code. This route takes no
+		// contact id, so the identity it can get wrong is the tenant on the context.
+		rt.SetNotifications(slackWorkspaceService(t))
+
+		workspaces := func(t *testing.T, token, query string) []string {
+			t.Helper()
+			response := send(http.MethodGet, "/api/v1/me/personal-channels"+query, token, "")
+			if response.Code != http.StatusOK {
+				t.Fatalf("%s personal channels%s = %d %s", token, query, response.Code, response.Body.String())
+			}
+			var view struct {
+				Slack struct {
+					Available  bool `json:"available"`
+					Workspaces []struct {
+						TeamID   string `json:"team_id"`
+						TeamName string `json:"team_name"`
+					} `json:"workspaces"`
+				} `json:"slack"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &view); err != nil {
+				t.Fatalf("decode personal channels: %v (%s)", err, response.Body.String())
+			}
+			var names []string
+			for _, workspace := range view.Slack.Workspaces {
+				names = append(names, workspace.TeamName+"/"+workspace.TeamID)
+			}
+			return names
 		}
+
+		for _, probe := range []struct {
+			name, token, query string
+			want               []string
+		}{
+			{"alice sees her own tenant", "alice", "", []string{"Alpha/T-ALPHA"}},
+			{"carol sees her own tenant", "carol", "", []string{"Beta/T-BETA"}},
+			{"a tenant in the query changes nothing for alice", "alice", "?tenant_id=tenant-b", []string{"Alpha/T-ALPHA"}},
+			{"a tenant and user in the query change nothing for carol", "carol", "?tenant_id=tenant-a&user_id=alice", []string{"Beta/T-BETA"}},
+		} {
+			t.Run(probe.name, func(t *testing.T) {
+				if got := workspaces(t, probe.token, probe.query); !slices.Equal(got, probe.want) {
+					t.Errorf("workspaces = %v, want %v", got, probe.want)
+				}
+			})
+		}
+
 		if response := send(http.MethodGet, "/api/v1/me/personal-channels", "machine", ""); response.Code != http.StatusForbidden {
 			t.Errorf("machine personal channels = %d, want 403", response.Code)
 		}
@@ -260,4 +307,49 @@ func TestContactWriteRoutesStayOnTheCallersOwnIdentity(t *testing.T) {
 			t.Errorf("anonymous personal channels = %d, want 401", response.Code)
 		}
 	})
+}
+
+// plainSecrets stands in for the vault so a test can store a channel config the service will
+// open. It changes nothing about which tenant the service reads.
+type plainSecrets struct{}
+
+func (plainSecrets) Seal(plaintext, _ []byte) (string, error) { return string(plaintext), nil }
+func (plainSecrets) Open(ciphertext string, _ []byte) ([]byte, error) {
+	return []byte(ciphertext), nil
+}
+
+var _ ports.NotificationSecretProtector = plainSecrets{}
+
+// slackWorkspaceService builds a notification service holding one Slack bot workspace per tenant,
+// so the personal-channel view has something tenant-specific to return.
+func slackWorkspaceService(t *testing.T) *notificationuc.Service {
+	t.Helper()
+	repo := memory.NewNotificationRepository(nil, func() time.Time { return time.Now().UTC() })
+	svc, err := notificationuc.NewService(repo, plainSecrets{}, nil, &fakeAudit{}, idgen.SystemClock{}, idgen.RandomID{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, workspace := range []struct {
+		tenant, id, team, name string
+	}{
+		{"tenant-a", "chan-alpha", "T-ALPHA", "Alpha"},
+		{"tenant-b", "chan-beta", "T-BETA", "Beta"},
+	} {
+		sealed, err := json.Marshal(ports.SlackBotChannelConfig{
+			BotToken: "xoxb-" + workspace.team, ChannelID: "C" + workspace.team,
+			TeamID: workspace.team, TeamName: workspace.name,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		channel := notification.Channel{
+			TenantID: shared.ID(workspace.tenant), ID: shared.ID(workspace.id), Name: workspace.name,
+			Type: notification.ChannelSlackBot, Enabled: true, Destination: "#alerts",
+			Revision: 1, SecretVersion: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		}
+		if _, err := repo.CreateChannel(context.Background(), channel, string(sealed)); err != nil {
+			t.Fatalf("seed %s: %v", workspace.tenant, err)
+		}
+	}
+	return svc
 }
