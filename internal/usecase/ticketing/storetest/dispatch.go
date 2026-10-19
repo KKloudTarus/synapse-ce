@@ -179,3 +179,59 @@ func Dispatch(t *testing.T, store dispatchStore, f Fixture) {
 		t.Fatalf("invalid-audit retry mutated intent: before=%+v after=%+v err=%v", before, after, err)
 	}
 }
+
+// StatusRefusalDoesNotGateTuple proves a bad per-ticket status command cannot
+// stop unrelated work for the shared Jira destination. Creates keep their
+// tuple-wide credential and mapping refusal fence; status commands have their
+// own durable request-key fence instead.
+func StatusRefusalDoesNotGateTuple(t *testing.T, store dispatchStore, f Fixture) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Date(2026, 2, 2, 10, 0, 0, 0, time.UTC)
+	makeIntent := func(id string, action ticketing.Action) ticketing.Intent {
+		return ticketing.Intent{ID: shared.ID(id), TenantID: f.Tenant, IntegrationID: f.Integration, MappingID: "ticket-map-a", FindingID: f.Finding, EngagementID: f.Engagement, Action: action, RequestKey: "status-refusal-" + id, PayloadDigest: strings.Repeat("b", 64), Marker: "synapse-intent-" + id, State: writeintent.Pending, Version: 1, MappingVersion: 1, ConnectionRevision: 1, CredentialRevision: 1, Snapshot: []byte(`{"fields":{"project":{"key":"SEC"},"issuetype":{"id":"Bug"}}}`), CreatedAt: now, UpdatedAt: now}
+	}
+	for _, refusal := range []struct {
+		name   string
+		action ticketing.Action
+		code   string
+	}{
+		{name: "transition-400", action: ticketing.Transition, code: "http_400"},
+		{name: "comment-404", action: ticketing.Comment, code: "http_404"},
+		{name: "update-400", action: ticketing.Update, code: "http_400"},
+	} {
+		t.Run(refusal.name, func(t *testing.T) {
+			bad := makeIntent("ticket-status-"+refusal.name, refusal.action)
+			good := makeIntent("ticket-create-after-"+refusal.name, ticketing.Create)
+			otherStatus := makeIntent("ticket-status-after-"+refusal.name, ticketing.Update)
+			for _, intent := range []ticketing.Intent{bad, good, otherStatus} {
+				if _, created, err := store.CreateOrGetIntent(ctx, f.Tenant, intent); err != nil || !created {
+					t.Fatalf("create %s: created=%t err=%v", intent.ID, created, err)
+				}
+			}
+			claimed, ok, err := store.AcquireDispatch(ctx, f.Tenant, bad.ID, bad.Version, now, now.Add(time.Minute))
+			if err != nil || !ok {
+				t.Fatalf("claim refused status command: ok=%t err=%v", ok, err)
+			}
+			failed, err := store.FinishDispatch(ctx, f.Tenant, claimed.ID, claimed.Version, ticketing.IntentTransition{Event: writeintent.Reject, ErrorCode: refusal.code}, now.Add(time.Second), nil, refusal.code)
+			if err != nil || failed.State != writeintent.Failed {
+				t.Fatalf("finish refused status command: %+v err=%v", failed, err)
+			}
+			goodClaim, ok, err := store.AcquireDispatch(ctx, f.Tenant, good.ID, good.Version, now.Add(2*time.Second), now.Add(2*time.Minute))
+			if err != nil || !ok {
+				t.Fatalf("status refusal blocked unrelated create: ok=%t err=%v", ok, err)
+			}
+			remote := ticketing.RemoteTicket{ID: "SEC-" + refusal.name, URL: "https://jira.example/browse/SEC-" + refusal.name}
+			if _, err = store.FinishDispatch(ctx, f.Tenant, goodClaim.ID, goodClaim.Version, ticketing.IntentTransition{Event: writeintent.Acknowledge, Remote: &remote}, now.Add(3*time.Second), nil, ""); err != nil {
+				t.Fatalf("finish unrelated create: %v", err)
+			}
+			otherClaim, ok, err := store.AcquireDispatch(ctx, f.Tenant, otherStatus.ID, otherStatus.Version, now.Add(4*time.Second), now.Add(5*time.Minute))
+			if err != nil || !ok {
+				t.Fatalf("status refusal blocked unrelated status command: ok=%t err=%v", ok, err)
+			}
+			if _, err = store.FinishDispatch(ctx, f.Tenant, otherClaim.ID, otherClaim.Version, ticketing.IntentTransition{Event: writeintent.Reject, ErrorCode: "invalid_action"}, now.Add(5*time.Second), nil, "invalid_action"); err != nil {
+				t.Fatalf("finish unrelated status command: %v", err)
+			}
+		})
+	}
+}

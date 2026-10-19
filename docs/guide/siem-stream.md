@@ -184,6 +184,46 @@ system trust store, optionally add `ca_pem` for a private CA, and provide both
 key is rejected. Private self-hosted collectors stay blocked until the shared
 egress allowlist lands. Do not turn on private-network dialing to bypass that.
 
+A syslog message is one RFC 5424 frame, octet counted as RFC 5425 requires:
+
+```
+147 <134>1 2026-10-18T13:28:56.123456Z - synapse - syn-ac63669f1be0… - ﻿{"schema":"synapse.siem.audit.v1",…}
+```
+
+Priority 134 is facility `local0` with severity `informational`. Hostname,
+process id and structured data are the nil value. The app name is the sink
+target, one to 48 printable US-ASCII characters. The message id is a digest of
+the record id, 32 characters, so a receiver can deduplicate a replay without
+reading the body. The message is the exported record after a byte order mark,
+which is how RFC 5424 marks a UTF-8 payload. The timestamp carries at most six
+fractional digits, because RFC 5424 bounds the fraction at
+`TIME-SECFRAC = "." 1*6DIGIT`.
+
+The Splunk credential is one HTTP Event Collector token, sent as
+`Authorization: Splunk <token>`. The target is the collector path, normally
+`/services/collector/event`. HTTP 200 is not success on its own: the HEC code
+in the body must be zero, and a non-zero code blocks the batch instead of
+retrying it, because the same token would answer the same way.
+
+Indexer acknowledgement needs both sides set. Create the token with
+`use-ack 1` and select `indexer_ack` on the sink. The sink then sends its
+channel as the `X-Splunk-Request-Channel` header and as the `channel` query
+parameter, keeps the numeric receipt the collector returns, and polls
+`/services/collector/ack` until the indexer confirms it. A receipt is not an
+acknowledgement: nothing advances until the poll comes back true. With a token
+that has acknowledgement off, select `hec_acceptance` instead.
+
+The Elasticsearch credential is one API key, sent as
+`Authorization: ApiKey <credential>`. Store the `encoded` field that
+`POST /_security/api_key` returns, which is the base64 of `id:api_key`. Pasting
+the bare `api_key` or the `id` gives a 401 on every send, recorded as a blocked
+batch. Give the key index privileges on the destination index only.
+
+The Elasticsearch target is the index name. The sink rejects a name that holds
+a path separator, starts with `_`, or carries a line break, and the cluster
+rejects the rest of what it disallows, including uppercase, so a refused name
+fails the whole batch rather than part of it.
+
 ## Operations
 
 Pause stops new sends and leaves cursors where they are. Resume clears a
@@ -225,17 +265,108 @@ Reading sinks and their status, and pausing, resuming or testing a sink, need th
 sink, editing it (data class, allowed hosts), rotating its secret and changing its host
 need `administer`, which only `admin` holds. Machine roles hold neither.
 
+## Verifying a destination against a real service
+
+Each destination has an opt-in live contract suite next to its driver. It is
+skipped unless the service is configured, the way the Postgres suite is skipped
+without `SYNAPSE_TEST_DB_DSN`. Syslog over TLS:
+
+```bash
+export SYNAPSE_TEST_SYSLOG_ORIGIN=tls://syslog.example:6514   # must match the receiver certificate
+export SYNAPSE_TEST_SYSLOG_ADDR=127.0.0.1:16514               # where to dial
+export SYNAPSE_TEST_SYSLOG_CA=/path/to/ca.pem                 # optional, for a private CA
+export SYNAPSE_TEST_SYSLOG_LOG_URL=http://127.0.0.1:16515/parsed.log   # optional read-back
+export SYNAPSE_TEST_SYSLOG_APP=synapse-live                    # optional
+go test ./internal/infrastructure/siem/syslog -run TestLive -count=1 -v
+```
+
+The suite delivers the three record shapes a real export produces, then reads
+the receiver's own parsed output back and asserts each frame arrived with its
+app name, its message id, priority 134 as `local0`/`informational`, and the
+exported record as the message. A completed TLS write is the only
+acknowledgement syslog gives a sender, so the read-back is what turns that
+write into evidence that the receiver's RFC 5424 parser accepted the frame.
+
+It also proves verification is mandatory: against a receiver signed by a
+private CA, a credential of `{}` is blocked with
+`syslog TLS certificate verification failed` rather than delivered or retried.
+
+The origin and the dial address are separate because a sink origin can never
+name a loopback address: `siem.ForbiddenHost` refuses it in the domain layer,
+before any dial policy runs. The suite therefore resolves the origin itself and
+leaves address policy to the shared dialer's own tests. Hostname verification
+is real: the origin host has to match the receiver certificate.
+
+
+Splunk:
+
+```bash
+export SYNAPSE_TEST_SPLUNK_URL=https://127.0.0.1:18088
+export SYNAPSE_TEST_SPLUNK_TOKEN=<token with acknowledgement off>
+export SYNAPSE_TEST_SPLUNK_ACK_TOKEN=<token created with use-ack 1>   # optional
+export SYNAPSE_TEST_SPLUNK_CA=/path/to/ca.pem                         # optional
+export SYNAPSE_TEST_SPLUNK_MGMT_URL=https://127.0.0.1:18089           # to search
+export SYNAPSE_TEST_SPLUNK_MGMT_AUTH=admin:password                   # to search
+go test ./internal/infrastructure/siem/splunk -run TestLive -count=1 -v
+```
+
+The suite delivers the three record shapes a real export produces (the audit
+envelope, an OCSF detection finding and an OCSF incident finding), then searches
+them back through the management API and asserts each one is indexed under the
+`synapse:siem` sourcetype, findable by its indexed `record_id`, with the body
+unchanged and the cursor fields intact: `source.id` with `source.source_hash`
+for the envelope, and `unmapped.synapse_source_position` for a finding. Those
+are the fields a consumer reads to place an event in the stream and notice a
+hole. `record_id` is an indexed field, so a search has to select it explicitly.
+
+With an acknowledgement token it also exercises the receipt: the delivery
+returns a receipt and acknowledges nothing, the poll confirms it once the
+indexer has the data, and a receipt the collector never issued stays
+unconfirmed. Then it drives the rejection paths: a wrong token, an empty batch,
+and indexer acknowledgement asked of a token that does not have it.
+
+The management credential is separate because a collector token cannot search.
+A sink in production needs only the collector token.
+
+Elasticsearch:
+
+```bash
+export SYNAPSE_TEST_ELASTIC_URL=https://127.0.0.1:19243
+export SYNAPSE_TEST_ELASTIC_API_KEY="$(…the encoded field of POST /_security/api_key…)"
+export SYNAPSE_TEST_ELASTIC_CA=/path/to/ca.pem   # optional, for a private CA
+export SYNAPSE_TEST_ELASTIC_INDEX=synapse-siem-live   # optional
+go test ./internal/infrastructure/siem/elastic -run TestLive -count=1 -v
+```
+
+The suite delivers the three record shapes a real export produces (the audit
+envelope, an OCSF detection finding and an OCSF incident finding), then reads
+each document back and asserts the stored body is what was sent and that the
+cursor fields survived: `source.id` with `source.hash_version` and
+`source.source_hash` for the envelope, `unmapped.synapse_source_position` with
+`unmapped.synapse_source_hash` for a detection finding, and
+`unmapped.synapse_source_position.stream_seq` with the event identity for an
+incident finding. Those are the fields a consumer reads to place an event in
+the stream and notice a hole. It also replays the batch to show a replay
+acknowledges without duplicating a document, and drives the rejection paths: a
+wrong credential, an index the cluster refuses, and a record the index mapping
+cannot accept.
+
+The API key needs index management on the test index, because the suite creates
+and drops it. A sink in production needs only write access.
+
+The live client dials under `safehttp.OperatorPolicy`, which admits a loopback
+address. A tenant-configured destination never gets that policy: private,
+loopback and metadata addresses stay blocked for sinks. TLS verification is on
+in the suite as it is in production; only the trust anchor changes when
+`SYNAPSE_TEST_SPLUNK_CA` or `SYNAPSE_TEST_ELASTIC_CA` is set.
+
 ## What this release does not prove
 
-No Splunk, Elasticsearch, syslog, or Microsoft Sentinel service was available
-while this was built, so there are no screenshots of received English or
-Vietnamese events. Provider behavior is covered by contract tests against
-local test servers. Browser screenshots of the settings page in light and dark
-themes were not captured in a running console. The page uses the existing
-settings components.
-behavior is covered by contract tests against a local TLS server. Browser
-screenshots of the settings page in light and dark themes were not captured in
-a running console. The page uses the existing settings components.
+No Microsoft Sentinel service was available while these contracts were built,
+so there are no screenshots of received English or Vietnamese events for that
+destination. Its behavior is covered by contract tests against local test servers. Browser screenshots of the settings page in light and dark themes were
+not captured in a running console. The page uses the existing settings
+components.
 
 These shared pieces were still open, so this stream does not replace them:
 

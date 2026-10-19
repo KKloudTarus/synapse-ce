@@ -1,8 +1,11 @@
 # Documentation publishing foundation
 
-Documentation publishing provides storage and domain contracts for pages that Synapse writes
-to an external system. Providers, routes, release control, scheduling and UI are future
-consumers of this foundation (EPIC #1327, WS6).
+Documentation publishing provides the storage and domain contracts for pages that Synapse
+writes to an external system. The current provider, release-control, scheduling, and UI
+flows build on this foundation.
+
+For the current governed Confluence publication and scheduled-PDF operation, see
+[Governed document publishing](document-publishing.md).
 
 It sits beside the [ticketing foundation](ticketing-foundation.md) and shares its pure
 `internal/domain/writeintent` state machine, but it is a separate bounded context with its

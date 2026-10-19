@@ -17,11 +17,16 @@ import (
 // DocumentStore is an in-memory conformance adapter. PostgreSQL is the durable production store.
 // Every map is tenant partitioned and every returned composite value is cloned.
 type DocumentStore struct {
-	mu          sync.RWMutex
-	engagements *EngagementRepository
-	projects    *ProjectRepository
-	links       map[shared.ID]map[shared.ID]docpublish.Link
-	intents     map[shared.ID]map[shared.ID]docpublish.Intent
+	mu            sync.RWMutex
+	engagements   *EngagementRepository
+	projects      *ProjectRepository
+	links         map[shared.ID]map[shared.ID]docpublish.Link
+	intents       map[shared.ID]map[shared.ID]docpublish.Intent
+	commands      map[shared.ID]map[shared.ID]ports.DocumentCommand
+	commandChecks map[shared.ID]map[shared.ID]memoryDocumentCommandCheck
+	schedules     map[shared.ID]map[shared.ID]docpublish.Schedule
+	occurrences   map[shared.ID]map[shared.ID]ports.DocumentScheduleOccurrence
+	deliveries    map[shared.ID]map[shared.ID]ports.DocumentScheduleDelivery
 }
 
 var _ ports.DocumentStore = (*DocumentStore)(nil)
@@ -31,10 +36,15 @@ func NewDocumentStore(engagements *EngagementRepository, projects *ProjectReposi
 		return nil, fmt.Errorf("%w: document store requires engagement and project repositories", shared.ErrValidation)
 	}
 	return &DocumentStore{
-		engagements: engagements,
-		projects:    projects,
-		links:       make(map[shared.ID]map[shared.ID]docpublish.Link),
-		intents:     make(map[shared.ID]map[shared.ID]docpublish.Intent),
+		engagements:   engagements,
+		projects:      projects,
+		links:         make(map[shared.ID]map[shared.ID]docpublish.Link),
+		intents:       make(map[shared.ID]map[shared.ID]docpublish.Intent),
+		commands:      make(map[shared.ID]map[shared.ID]ports.DocumentCommand),
+		commandChecks: make(map[shared.ID]map[shared.ID]memoryDocumentCommandCheck),
+		schedules:     make(map[shared.ID]map[shared.ID]docpublish.Schedule),
+		occurrences:   make(map[shared.ID]map[shared.ID]ports.DocumentScheduleOccurrence),
+		deliveries:    make(map[shared.ID]map[shared.ID]ports.DocumentScheduleDelivery),
 	}, nil
 }
 
@@ -48,7 +58,7 @@ func (s *DocumentStore) GetLink(ctx context.Context, tenant, id shared.ID) (docp
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if link, ok := s.links[tenant][id]; ok {
-		return link, nil
+		return link.Clone(), nil
 	}
 	return docpublish.Link{}, shared.ErrNotFound
 }
@@ -66,7 +76,7 @@ func (s *DocumentStore) FindLink(ctx context.Context, tenant shared.ID, target d
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if link, ok := s.linkForTarget(tenant, target); ok {
-		return link, nil
+		return link.Clone(), nil
 	}
 	return docpublish.Link{}, shared.ErrNotFound
 }
@@ -93,7 +103,7 @@ func (s *DocumentStore) ListLinks(ctx context.Context, tenant shared.ID, scope d
 	out := make([]docpublish.Link, 0)
 	for _, link := range s.links[tenant] {
 		if link.Scope == scope && link.ScopeID == scopeID {
-			out = append(out, link)
+			out = append(out, link.Clone())
 		}
 	}
 	// Stable order matches PostgreSQL's (created_at DESC, id DESC).
@@ -171,6 +181,17 @@ func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID,
 		if link.Target != intent.Target {
 			return docpublish.Intent{}, false, shared.ErrValidation
 		}
+		if link.RetiredAt != nil {
+			return docpublish.Intent{}, false, shared.ErrConflict
+		}
+	case docpublish.Purge:
+		link, ok := s.links[tenant][intent.LinkID]
+		if !ok {
+			return docpublish.Intent{}, false, shared.ErrNotFound
+		}
+		if link.Target != intent.Target || link.RetiredAt != nil {
+			return docpublish.Intent{}, false, shared.ErrConflict
+		}
 	}
 	if s.intents[tenant] == nil {
 		s.intents[tenant] = make(map[shared.ID]docpublish.Intent)
@@ -229,11 +250,19 @@ func (s *DocumentStore) TransitionIntent(ctx context.Context, tenant, id shared.
 		}
 	}
 	if written != nil {
+		written.RestrictionStatus = "unchecked"
+		written.RestrictionCheckedAt = nil
+		written.RestrictionNextAt = time.Time{}
+		written.RestrictionCheckVersion++
 		if s.links[tenant] == nil {
 			s.links[tenant] = make(map[shared.ID]docpublish.Link)
 		}
 		s.links[tenant][written.ID] = *written
 	}
 	s.intents[tenant][id] = next.Clone()
+	if command, ok := s.commands[tenant][id]; ok {
+		command.Intent = next.Clone()
+		s.commands[tenant][id] = cloneDocumentCommand(command)
+	}
 	return next.Clone(), nil
 }

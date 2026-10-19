@@ -78,6 +78,16 @@ func TestCreateChannelRefusesADisabledType(t *testing.T) {
 	}
 }
 
+func TestEmailChannelConfigRefusesOperatorDisabledProvider(t *testing.T) {
+	svc := killSwitchService(t, &killSwitchRepo{}, nil, domain.ChannelEmail)
+	config, code := svc.EmailChannelConfig(context.Background(), ports.NotificationWork{
+		Channel: domain.Channel{Type: domain.ChannelEmail},
+	}, ports.EmailChannelConfig{Recipients: []string{"reviewer@example.test"}})
+	if config != nil || code != "provider_disabled" {
+		t.Fatalf("config=%v code=%s", config, code)
+	}
+}
+
 func TestUpdateChannelOfADisabledType(t *testing.T) {
 	ctx := shared.WithTenant(context.Background(), "tenant")
 	for _, tc := range []struct {

@@ -1,7 +1,9 @@
 package acquire
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net/http/cgi"
 	"net/http/httptest"
 	"os"
@@ -9,7 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -52,6 +56,181 @@ func TestAcquireLocalRejectsSymlinkRoot(t *testing.T) {
 		t.Fatal("want error: symlinked target root must be refused")
 	}
 }
+
+func TestAcquireProjectSourceSnapshotsOnlySelectedSubtree(t *testing.T) {
+	root := t.TempDir()
+	selected := filepath.Join(root, "services", "api")
+	if err := os.MkdirAll(selected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(selected, "package.json"), []byte(`{"name":"selected"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"root"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "sibling.lock"), []byte("not selected"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := ports.AcquireRequest{Kind: ports.TargetLocal, Value: selected, ProjectSource: &ports.ProjectSourceSelection{ProjectID: "project", Root: root, Subdirectory: "services/api"}}
+	ws, err := New().Acquire(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer ws.Close()
+	if ws.Dir == selected {
+		t.Fatal("project source must scan a private snapshot")
+	}
+	body, err := os.ReadFile(filepath.Join(ws.Dir, "package.json"))
+	if err != nil || string(body) != `{"name":"selected"}` {
+		t.Fatalf("snapshot selected manifest = %q, %v", body, err)
+	}
+	if _, err := os.Stat(filepath.Join(ws.Dir, "sibling.lock")); err == nil {
+		t.Fatal("snapshot must not include sibling files")
+	}
+	if err := os.WriteFile(filepath.Join(selected, "package.json"), []byte(`{"name":"mutated"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body, err = os.ReadFile(filepath.Join(ws.Dir, "package.json"))
+	if err != nil || string(body) != `{"name":"selected"}` {
+		t.Fatalf("snapshot changed after source mutation: %q, %v", body, err)
+	}
+}
+
+func TestAcquireProjectSourceRejectsSymlinksAndMalformedSelections(t *testing.T) {
+	root := t.TempDir()
+	selected := filepath.Join(root, "selected")
+	if err := os.Mkdir(selected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "outside"), filepath.Join(selected, "escape")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	valid := ports.AcquireRequest{Kind: ports.TargetLocal, Value: selected, ProjectSource: &ports.ProjectSourceSelection{ProjectID: "project", Root: root, Subdirectory: "selected"}}
+	if _, err := New().Acquire(context.Background(), valid); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("symlink selection error = %v, want validation", err)
+	}
+	for _, child := range []string{"", "../selected", "/selected", `selected\\child`, "selected/../selected"} {
+		req := valid
+		req.ProjectSource = &ports.ProjectSourceSelection{ProjectID: "project", Root: root, Subdirectory: child}
+		if _, err := New().Acquire(context.Background(), req); !errors.Is(err, shared.ErrValidation) {
+			t.Errorf("subdirectory %q error = %v, want validation", child, err)
+		}
+	}
+}
+
+func TestAcquireProjectSourceRejectsFIFOWithoutBlocking(t *testing.T) {
+	if _, err := exec.LookPath("mkfifo"); err != nil {
+		t.Skip("mkfifo is not available")
+	}
+	root := t.TempDir()
+	selected := filepath.Join(root, "selected")
+	if err := os.Mkdir(selected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(selected, "blocked")
+	if out, err := exec.Command("mkfifo", fifo).CombinedOutput(); err != nil {
+		t.Fatalf("mkfifo: %v: %s", err, out)
+	}
+	req := ports.AcquireRequest{Kind: ports.TargetLocal, Value: selected, ProjectSource: &ports.ProjectSourceSelection{ProjectID: "project", Root: root, Subdirectory: "selected"}}
+	result := make(chan error, 1)
+	go func() {
+		workspace, err := New().Acquire(context.Background(), req)
+		if workspace != nil {
+			_ = workspace.Close()
+		}
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, shared.ErrValidation) {
+			t.Fatalf("FIFO acquisition error = %v, want validation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("FIFO acquisition blocked instead of rejecting the special file")
+	}
+}
+
+func TestCopyProjectSourceFileRejectsFIFOSwapWithoutBlocking(t *testing.T) {
+	if _, err := exec.LookPath("mkfifo"); err != nil {
+		t.Skip("mkfifo is not available")
+	}
+	directory := t.TempDir()
+	name := "swapped"
+	path := filepath.Join(directory, name)
+	if err := os.WriteFile(path, []byte("regular"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	expected, err := root.Lstat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("mkfifo", path).CombinedOutput(); err != nil {
+		t.Fatalf("mkfifo: %v: %s", err, out)
+	}
+	destination := filepath.Join(t.TempDir(), "snapshot")
+	result := make(chan error, 1)
+	go func() {
+		_, err := copyProjectSourceFile(context.Background(), root, name, expected, destination)
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, shared.ErrValidation) {
+			t.Fatalf("FIFO swap error = %v, want validation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("FIFO swap blocked instead of rejecting the changed entry")
+	}
+}
+
+func TestAcquireProjectSourceHonorsCancellationAndByteCap(t *testing.T) {
+	root := t.TempDir()
+	selected := filepath.Join(root, "selected")
+	if err := os.Mkdir(selected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(selected, "payload"), make([]byte, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := ports.AcquireRequest{Kind: ports.TargetLocal, Value: selected, ProjectSource: &ports.ProjectSourceSelection{ProjectID: "project", Root: root, Subdirectory: "selected"}}
+	if _, err := New().WithMaxWorkspaceBytes(16).Acquire(context.Background(), req); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("over-cap error = %v, want validation", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := New().Acquire(ctx, req); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled acquisition error = %v", err)
+	}
+}
+
+func TestCopyProjectSourceFileContentsStopsAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader := readerFunc(func(buffer []byte) (int, error) {
+		cancel()
+		return copy(buffer, "data"), nil
+	})
+	var destination bytes.Buffer
+	if _, err := copyProjectSourceFileContents(ctx, &destination, reader); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled copy error = %v, want context canceled", err)
+	}
+	if destination.Len() != 0 {
+		t.Fatalf("copy wrote %d bytes after cancellation", destination.Len())
+	}
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(buffer []byte) (int, error) { return f(buffer) }
 
 func TestAcquireUnknownAndUnimplementedKinds(t *testing.T) {
 	for _, kind := range []string{"archive", "image", "bogus"} {

@@ -1,0 +1,324 @@
+{
+  "started_at": "2026-10-17T16:54:17.565800+00:00",
+  "scope": "Focused local synthetic migration measurements; not a production capacity or complete migration replay benchmark",
+  "schema_fixture_limitations": [
+    "Relevant column/index definitions preserved where measured; engagement/scan rows use a 256-byte synthetic payload, not complete historical schemas.",
+    "ticket_intents uses its complete foundation column/check/index definition and minimal FK parent fixtures; no application triggers, other than migration 0251 trigger.",
+    "All million ticket intents are done/create/nonempty remote ID: maximum qualifying backfill/index population for N.",
+    "RLS enable procedure is a fixture using ENABLE/FORCE ROW LEVEL SECURITY and a simple tenant policy; execution is migration-owner superuser, not runtime role.",
+    "Docker local storage, one sample per migration; warm local cache; no production I/O, replicas, concurrent live traffic or table bloat.",
+    "One synthetic tenant and integration, 1000 mapping/engagement grouping keys; synthetic text IDs are shorter than production opaque IDs and can reduce index bytes. Engagement assessment_project_id repeats across 1000 values, allowing B-tree deduplication; production cardinality and width can differ."
+  ],
+  "measurements": [
+    {
+      "label": "0251_ticket_intent_backfill",
+      "table": "ticket_intents",
+      "sql_sha256": "f6070f9635bb3e19a894b399c61679cee1b6d71ba72ac5965191001ca7031d56",
+      "transaction_seconds": 64.69331,
+      "reader_statement_seconds": 64.677175,
+      "writer_statement_seconds": 64.681878,
+      "lock_modes_observed": [
+        "AccessExclusiveLock",
+        "AccessShareLock",
+        "RowShareLock",
+        "ShareRowExclusiveLock"
+      ],
+      "first_to_last_observed_lock_seconds": 64.680513,
+      "errors": [],
+      "rows_after": 1000000,
+      "indexes": [
+        {
+          "name": "ticket_intents_due_idx",
+          "bytes": 8192
+        },
+        {
+          "name": "ticket_intents_finding_idx",
+          "bytes": 86720512
+        },
+        {
+          "name": "ticket_intents_pkey",
+          "bytes": 54132736
+        },
+        {
+          "name": "ticket_intents_tenant_id_id_key",
+          "bytes": 70787072
+        },
+        {
+          "name": "ticket_intents_tenant_id_integration_id_correlation_marker_key",
+          "bytes": 115916800
+        },
+        {
+          "name": "ticket_intents_tenant_id_integration_id_request_key_key",
+          "bytes": 103751680
+        }
+      ],
+      "target_poll_interval_seconds": 0.005,
+      "granted_lock_rows_sampled": 44847,
+      "measurement_note": "Transaction includes BEGIN, all selected migration SQL and COMMIT. Lock-span sampling is a lower bound, and the target polling interval is not a maximum scheduling delay. Reader/writer duration is a concurrent single statement issued after first observed relation lock."
+    },
+    {
+      "label": "0258_ticket_intent_index",
+      "table": "ticket_intents",
+      "sql_sha256": "f6e2f18829d7adf9314400c55fe7763e460e5a7994d8fec111a256fa9730f403",
+      "reader_statement_seconds": 0.001397,
+      "transaction_seconds": 2.177938,
+      "writer_statement_seconds": 2.174304,
+      "lock_modes_observed": [
+        "ShareLock"
+      ],
+      "first_to_last_observed_lock_seconds": 2.174722,
+      "errors": [],
+      "rows_after": 1000000,
+      "indexes": [
+        {
+          "name": "ticket_intents_due_idx",
+          "bytes": 8192
+        },
+        {
+          "name": "ticket_intents_finding_idx",
+          "bytes": 86720512
+        },
+        {
+          "name": "ticket_intents_inbound_remote_done_create_idx",
+          "bytes": 86032384
+        },
+        {
+          "name": "ticket_intents_pkey",
+          "bytes": 54132736
+        },
+        {
+          "name": "ticket_intents_tenant_id_id_key",
+          "bytes": 70787072
+        },
+        {
+          "name": "ticket_intents_tenant_id_integration_id_correlation_marker_key",
+          "bytes": 115916800
+        },
+        {
+          "name": "ticket_intents_tenant_id_integration_id_request_key_key",
+          "bytes": 103751680
+        }
+      ],
+      "target_poll_interval_seconds": 0.005,
+      "granted_lock_rows_sampled": 403,
+      "measurement_note": "Transaction includes BEGIN, all selected migration SQL and COMMIT. Lock-span sampling is a lower bound, and the target polling interval is not a maximum scheduling delay. Reader/writer duration is a concurrent single statement issued after first observed relation lock."
+    },
+    {
+      "label": "0256_engagement_index",
+      "table": "engagements",
+      "sql_sha256": "0756ef6670fac23fb1bcfa6246ebe23fc84ea6993a3506305211bfc35ca06c5b",
+      "reader_statement_seconds": 0.002906,
+      "transaction_seconds": 1.89713,
+      "writer_statement_seconds": 1.885318,
+      "lock_modes_observed": [
+        "ShareLock"
+      ],
+      "first_to_last_observed_lock_seconds": 1.889281,
+      "errors": [],
+      "rows_after": 1000000,
+      "indexes": [
+        {
+          "name": "engagements_assessment_project_idx",
+          "bytes": 7356416
+        },
+        {
+          "name": "engagements_pkey",
+          "bytes": 85532672
+        }
+      ],
+      "target_poll_interval_seconds": 0.005,
+      "granted_lock_rows_sampled": 295,
+      "measurement_note": "Transaction includes BEGIN, all selected migration SQL and COMMIT. Lock-span sampling is a lower bound, and the target polling interval is not a maximum scheduling delay. Reader/writer duration is a concurrent single statement issued after first observed relation lock."
+    },
+    {
+      "label": "0260_scan_job_purpose",
+      "table": "scan_jobs",
+      "sql_sha256": "1dc6312ede8f142534579fd16af342cb76c8ca24545e4f24bfb98d2e450d925e",
+      "transaction_seconds": 2.828431,
+      "reader_statement_seconds": 2.821493,
+      "writer_statement_seconds": 2.825459,
+      "lock_modes_observed": [
+        "AccessExclusiveLock",
+        "ShareLock",
+        "ShareRowExclusiveLock"
+      ],
+      "first_to_last_observed_lock_seconds": 2.720207,
+      "errors": [],
+      "rows_after": 1000000,
+      "indexes": [
+        {
+          "name": "idx_scan_jobs_engagement",
+          "bytes": 67436544
+        },
+        {
+          "name": "idx_scan_jobs_project_analysis_latest",
+          "bytes": 58908672
+        },
+        {
+          "name": "scan_jobs_pkey",
+          "bytes": 54157312
+        }
+      ],
+      "target_poll_interval_seconds": 0.005,
+      "granted_lock_rows_sampled": 1400,
+      "measurement_note": "Transaction includes BEGIN, all selected migration SQL and COMMIT. Lock-span sampling is a lower bound, and the target polling interval is not a maximum scheduling delay. Reader/writer duration is a concurrent single statement issued after first observed relation lock."
+    }
+  ],
+  "server_version": "PostgreSQL 17.11 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "image_id": "sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+  "settings": {
+    "fsync": "on",
+    "maintenance_work_mem": "65536",
+    "max_parallel_maintenance_workers": "1",
+    "max_wal_size": "1024",
+    "shared_buffers": "16384",
+    "synchronous_commit": "on",
+    "wal_level": "replica",
+    "work_mem": "4096"
+  },
+  "container_limits": {
+    "memory_bytes": 1073741824,
+    "cpu_count": 2
+  },
+  "table_sizes_before": [
+    {
+      "table": "engagements",
+      "heap_bytes": 338747392,
+      "total_bytes": 424394752,
+      "estimated_live_rows_from_pg_stat_user_tables": 1000001
+    },
+    {
+      "table": "findings",
+      "heap_bytes": 68272128,
+      "total_bytes": 165085184,
+      "estimated_live_rows_from_pg_stat_user_tables": 1000000
+    },
+    {
+      "table": "scan_jobs",
+      "heap_bytes": 390103040,
+      "total_bytes": 511819776,
+      "estimated_live_rows_from_pg_stat_user_tables": 1000020
+    },
+    {
+      "table": "ticket_intents",
+      "heap_bytes": 326303744,
+      "total_bytes": 757735424,
+      "estimated_live_rows_from_pg_stat_user_tables": 999980
+    }
+  ],
+  "backfilled_progress_rows": 1000000,
+  "finished_at": "2026-10-17T16:57:06.710390+00:00",
+  "success": true,
+  "commands": [
+    {
+      "argv": [
+        "docker",
+        "volume",
+        "create",
+        "synapse-b07-migration-measurement-data"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.013
+    },
+    {
+      "argv": [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        "synapse-b07-migration-measurement",
+        "--label",
+        "synapse.task=migration-measurement",
+        "--memory",
+        "1g",
+        "--cpus",
+        "2",
+        "--env-file",
+        "/tmp/synapse-b07-private/continuation/migration-measurement/postgres.env",
+        "-p",
+        "127.0.0.1::5432",
+        "-v",
+        "synapse-b07-migration-measurement-data:/var/lib/postgresql/data",
+        "postgres:17-alpine",
+        "-c",
+        "shared_buffers=128MB",
+        "-c",
+        "maintenance_work_mem=64MB",
+        "-c",
+        "max_parallel_maintenance_workers=1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.709
+    },
+    {
+      "argv": [
+        "docker",
+        "port",
+        "synapse-b07-migration-measurement",
+        "5432/tcp"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.009
+    },
+    {
+      "argv": [
+        "docker",
+        "image",
+        "inspect",
+        "postgres:17-alpine",
+        "--format",
+        "{{.Id}}"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.029
+    },
+    {
+      "argv": [
+        "docker",
+        "rm",
+        "-f",
+        "synapse-b07-migration-measurement"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.679
+    },
+    {
+      "argv": [
+        "docker",
+        "volume",
+        "rm",
+        "synapse-b07-migration-measurement-data"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 1.854
+    }
+  ],
+  "cleanup_complete": true,
+  "exact_rows_verified_after": {
+    "ticket_intents": 1000000,
+    "engagements": 1000000,
+    "scan_jobs": 1000000
+  },
+  "method": "Native libpq connections through isolated loopback-only Docker port; explicit transaction matching transactional Goose Up; separate monitor plus concurrent one-row read and no-op update, started after relation lock first observed. One sample for each selected migration.",
+  "configured_memory": {
+    "shared_buffers": "128MB",
+    "maintenance_work_mem": "64MB",
+    "work_mem": "4MB"
+  },
+  "runner_argv": [
+    "python3",
+    "/tmp/synapse-b07-private/continuation/migration-measurement/run-measurement.py"
+  ],
+  "runner_sha256": "67b7222ec1a8c812b93a8a92d01d1553caf16587b7e9a66e871601e593792c38",
+  "run_log_sha256": "28df93007793858170729994808acd183999d574555c5ee4edcb68f4175d5c9c",
+  "inventory_sha256": "2b4bb3d7d263461b0a8ccb5c4f2a386c4ded829e9c1cf312ef1f1e769e39894a",
+  "sample_limits": {
+    "repetitions": 1,
+    "rows_per_existing_table": 1000000,
+    "ticket_intent_backfill_qualifying_fraction": 1.0,
+    "shared_host": true,
+    "production_prediction": false,
+    "lock_acquisition_contention": "No preexisting long-running holder; contender queries start only after migration acquired its relation lock."
+  },
+  "recommendation": "Treat B07 upgrade as a maintenance-window migration: drain API/MCP and all database-writing workers, inspect/resolve long-running transactions, take the existing prescribed backup, migrate with an owner identity and bounded lock acquisition, verify migration completion and FORCE RLS before enabling matching consumers. Rehearse on a representative restored database and size the window from that measurement. Do not describe these transactional ordinary indexes/backfill as zero-downtime. Keep schema on rollback when durable B07 rows exist; use forward fixes."
+}

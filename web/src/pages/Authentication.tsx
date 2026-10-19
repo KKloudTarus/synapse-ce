@@ -36,9 +36,12 @@ function formatTime(value: string | null): string {
 
 export function Authentication({ enabled }: AuthenticationProps) {
   const auth = useOptionalAuth()
-  const [connections, setConnections] = useState<EnterpriseConnection[]>([])
+  // null means the read has not landed yet, which each section says for itself. One section
+  // still waiting must not hide the sections that have arrived.
+  const [connections, setConnections] = useState<EnterpriseConnection[] | null>(null)
   const [policy, setPolicy] = useState<IdentityPolicy | null>(null)
-  const [alerts, setAlerts] = useState<RecoveryAlert[]>([])
+  const [policyDeclared, setPolicyDeclared] = useState<boolean | null>(null)
+  const [alerts, setAlerts] = useState<RecoveryAlert[] | null>(null)
   const [draft, setDraft] = useState<ConnectionDraft>(emptyDraft)
   const [membershipId, setMembershipId] = useState('')
   const [personId, setPersonId] = useState('')
@@ -51,6 +54,9 @@ export function Authentication({ enabled }: AuthenticationProps) {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const generation = useRef(0)
   const loadController = useRef<AbortController | null>(null)
+  // Counts the administrator's own changes to the sign-in requirement, including the one a
+  // save makes. A read in flight across one of these must not put its answer back.
+  const policyEdits = useRef(0)
 
   const load = useCallback(async () => {
     loadController.current?.abort()
@@ -59,22 +65,64 @@ export function Authentication({ enabled }: AuthenticationProps) {
     loadController.current = controller
     setLoading(true)
     setError(null)
-    try {
-      const [nextConnections, nextPolicy, nextAlerts] = await Promise.all([
-        identityApi.connections(controller.signal),
-        identityApi.policy(controller.signal),
-        identityApi.alerts(controller.signal),
-      ])
-      if (generation.current !== requestGeneration) return
-      setConnections(nextConnections)
-      setPolicy(nextPolicy)
-      setAlerts(nextAlerts)
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return
-      if (generation.current === requestGeneration) setError(messageFor(cause, 'Could not load authentication settings.'))
-    } finally {
-      if (generation.current === requestGeneration) setLoading(false)
+    const current = () => generation.current === requestGeneration
+    // Each read lands on its own. One unavailable part must not blank the page: an
+    // organization that has not been declared for shared identity has no policy row yet,
+    // and its connections still have to be visible and administrable. A read that fails
+    // is reported the moment it fails, so its Retry is reachable while another read is
+    // still outstanding and the client has no deadline of its own.
+    // The page stops being blank as soon as the first read lands. Each section renders its
+    // own state after that, so a read that never answers cannot hide the rest of the page.
+    const settled = () => {
+      if (current()) setLoading(false)
     }
+    const report = (cause: unknown) => {
+      if (!current() || (cause instanceof DOMException && cause.name === 'AbortError')) return
+      setError(messageFor(cause, 'Could not load authentication settings.'))
+      setLoading(false)
+    }
+    const connectionRead = identityApi
+      .connections(controller.signal)
+      .then((value) => {
+        if (current()) setConnections(value)
+      })
+      .catch(report)
+      .finally(settled)
+    // What the administrator has chosen since this read started. A policy answer that arrives
+    // after an edit carries the authoritative version, so it is taken for everything except
+    // the requirement, which stays as the administrator left it.
+    const editsAtStart = policyEdits.current
+    const policyRead = identityApi
+      .policy(controller.signal)
+      .then((value) => {
+        if (!current()) return
+        setPolicy((editable) => (policyEdits.current !== editsAtStart && editable
+          ? { ...value, requirement: editable.requirement }
+          : value))
+        setPolicyDeclared(true)
+      })
+      .catch((cause) => {
+        if (current() && cause instanceof ApiError && cause.status === 404) {
+          // Not an error: this organization has not been declared for shared identity.
+          setPolicy(null)
+          setPolicyDeclared(false)
+          return
+        }
+        report(cause)
+      })
+      .finally(settled)
+    const alertRead = identityApi
+      .alerts(controller.signal)
+      .then((value) => {
+        if (current()) setAlerts(value)
+      })
+      .catch(report)
+      .finally(settled)
+    // Nothing awaits all three. A refresh after a save must not leave its controls disabled
+    // because one read never answers, so each read updates its own section as it lands.
+    void connectionRead
+    void policyRead
+    void alertRead
   }, [])
 
   useEffect(() => {
@@ -97,7 +145,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
     try {
       await action()
       setNotice(success)
-      if (refresh) await load()
+      if (refresh) void load()
     } catch (cause) {
       setError(messageFor(cause, 'Authentication settings update failed. Reload and try again.'))
       if (cause instanceof ApiError && cause.status === 409) void load()
@@ -123,6 +171,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
     if (!policy) return
     const prior = policy
     const optimistic = { ...prior, version: prior.version + 1 }
+    policyEdits.current += 1
     setPolicy(optimistic)
     setSaving(true)
     setError(null)
@@ -130,7 +179,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
     try {
       await identityApi.savePolicy(prior, bootstrapProof ?? undefined)
       setNotice('Sign-in requirement saved.')
-      await load()
+      void load()
     } catch (cause) {
       setPolicy(prior)
       setError(messageFor(cause, 'Could not save the sign-in requirement.'))
@@ -194,9 +243,11 @@ export function Authentication({ enabled }: AuthenticationProps) {
           <section aria-labelledby="policy-heading" className="rounded-lg border border-secondary p-5">
             <h2 id="policy-heading" className="text-lg font-semibold text-primary">Sign-in requirement</h2>
             <p className="mt-1 text-sm text-secondary">Required mode admits browser sessions only after approved organization SSO.</p>
+            {policyDeclared === null ? <p className="mt-2 text-sm text-secondary">Loading the sign-in requirement…</p> : null}
+            {policyDeclared === false ? <p className="mt-2 text-sm text-secondary">This organization has not been enabled for shared identity, so it has no sign-in requirement to change yet. Connections below can still be prepared and tested.</p> : null}
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'optional'} onChange={() => setPolicy((current) => current && { ...current, requirement: 'optional' })} /> Optional</label>
-              <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'required'} onChange={() => setPolicy((current) => current && { ...current, requirement: 'required' })} /> Required</label>
+              <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'optional'} onChange={() => { policyEdits.current += 1; setPolicy((current) => current && { ...current, requirement: 'optional' }) }} /> Optional</label>
+              <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'required'} onChange={() => { policyEdits.current += 1; setPolicy((current) => current && { ...current, requirement: 'required' }) }} /> Required</label>
               <button type="button" disabled={!policy || saving} className="rounded bg-brand-primary px-3 py-2 text-white disabled:opacity-50" onClick={() => void savePolicy()}>Save policy</button>
               <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={() => void run(() => identityApi.rehearse(bootstrapProof ?? undefined), 'Recovery rehearsal recorded.')}>Rehearse recovery</button>
               <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={() => void run(() => identityApi.testAlert(bootstrapProof ?? undefined), 'Recovery alert test requested.')}>Test alert</button>
@@ -210,9 +261,9 @@ export function Authentication({ enabled }: AuthenticationProps) {
 
           <section aria-labelledby="connections-heading" className="rounded-lg border border-secondary p-5">
             <h2 id="connections-heading" className="text-lg font-semibold text-primary">Approved connections</h2>
-            {connections.length === 0 ? <p className="mt-2 text-secondary">No approved connections yet.</p> : (
+            {connections === null ? <p className="mt-2 text-secondary">Loading connections…</p> : connections.length === 0 ? <p className="mt-2 text-secondary">No approved connections yet.</p> : (
               <ul className="mt-3 space-y-3">
-                {connections.map((connection) => (
+                {(connections ?? []).map((connection) => (
                   <li key={connection.id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-secondary p-3">
                     <span>
                       <strong>{connection.displayName}</strong>
@@ -259,9 +310,9 @@ export function Authentication({ enabled }: AuthenticationProps) {
 
           <section aria-labelledby="alerts-heading" className="rounded-lg border border-secondary p-5">
             <h2 id="alerts-heading" className="text-lg font-semibold text-primary">Recovery alerts</h2>
-            {alerts.length === 0 ? <p className="mt-2 text-secondary">No recovery alerts have been recorded.</p> : (
+            {alerts === null ? <p className="mt-2 text-secondary">Loading recovery alerts…</p> : alerts.length === 0 ? <p className="mt-2 text-secondary">No recovery alerts have been recorded.</p> : (
               <ul className="mt-3 space-y-2">
-                {alerts.map((alert) => <li key={alert.id} className="rounded border border-secondary p-3 text-sm text-secondary"><strong className="text-primary">{alert.state || 'pending'}</strong> · attempts {alert.attempts}/{alert.maxAttempts} · created {formatTime(alert.createdAt || null)}</li>)}
+                {(alerts ?? []).map((alert) => <li key={alert.id} className="rounded border border-secondary p-3 text-sm text-secondary"><strong className="text-primary">{alert.state || 'pending'}</strong> · attempts {alert.attempts}/{alert.maxAttempts} · created {formatTime(alert.createdAt || null)}</li>)}
               </ul>
             )}
           </section>

@@ -80,7 +80,7 @@ func TestEnabledFlagsResolve(t *testing.T) {
 		FleetTelemetryIngest: true, FleetDetectionIngest: true, CSPM: true, Agent: true,
 		FPTriage: true, SLA: true, Judgments: true, Sandbox: true, WriteupDrafts: true,
 		Taint: true, JSReachability: true, SingleTenant: true, OIDC: true,
-		Ownership: true, InboundWebhooks: true, Notifications: true, Ticketing:true, LegacyAlertWebhook: true,
+		Ownership: true, InboundWebhooks: true, Notifications: true, Ticketing: true, DocumentPublishing: true, LegacyAlertWebhook: true,
 	})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -206,18 +206,24 @@ func TestNotificationChannelTypesFollowTheRegistryAndTheKillSwitch(t *testing.T)
 	}
 }
 
-// TestPlannedSubsystemsNameNoSwitch covers ticketing and documentation publishing, which this build
-// does not ship: they stay disabled whatever the flags, and name no switch an operator could set.
-func TestPlannedSubsystemsNameNoSwitch(t *testing.T) {
-	svc, err := NewService(Flags{Notifications: true, Fleet: true, FleetAssets: true})
+// TestDocumentationPublishingFollowsDurablePersistence keeps the catalog aligned with the route
+// wiring: the document routes exist only when the composition root has a PostgreSQL pool. It is
+// not a planned feature and no boolean environment switch can enable it without that persistence.
+func TestDocumentationPublishingFollowsDurablePersistence(t *testing.T) {
+	svc, err := NewService(Flags{})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	for _, key := range []string{"docpublish"} {
-		got := find(t, svc.List(), key)
-		if !got.Planned || got.Enabled || got.Switch != "" {
-			t.Errorf("%s = %+v, want planned, disabled and without a switch", key, got)
-		}
+	if got := find(t, svc.List(), "docpublish"); got.Planned || got.Enabled || got.Switch != "" {
+		t.Errorf("docpublish without durable persistence = %+v, want disabled, not planned and without a switch", got)
+	}
+
+	svc, err = NewService(Flags{DocumentPublishing: true})
+	if err != nil {
+		t.Fatalf("new service with durable persistence: %v", err)
+	}
+	if got := find(t, svc.List(), "docpublish"); got.Planned || !got.Enabled || got.Switch != "" {
+		t.Errorf("docpublish with durable persistence = %+v, want enabled, not planned and without a switch", got)
 	}
 }
 
@@ -265,6 +271,12 @@ func TestNewServiceRejectsAnInvalidCatalog(t *testing.T) {
 	}
 	if err := validate([]Capability{{Key: "a", Name: "A", Planned: true, Switch: "S"}}); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("planned capability with a switch: want ErrValidation, got %v", err)
+	}
+	if err := validate([]Capability{{Key: "a", Name: "A", Derived: true, Switch: "S"}}); !errors.Is(err, shared.ErrValidation) {
+		t.Errorf("derived capability with a switch: want ErrValidation, got %v", err)
+	}
+	if err := validate([]Capability{{Key: "a", Name: "A", Derived: true, Planned: true}}); !errors.Is(err, shared.ErrValidation) {
+		t.Errorf("planned derived capability: want ErrValidation, got %v", err)
 	}
 	if err := validate([]Capability{{Key: "a", Name: "A", Switch: "S", Requires: []string{"ghost"}}}); !errors.Is(err, shared.ErrValidation) {
 		t.Errorf("unknown dependency: want ErrValidation, got %v", err)

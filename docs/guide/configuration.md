@@ -39,8 +39,15 @@ Some entries carry more than a switch:
   `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED`. The console offers only these types when creating a
   channel. When the operator disables every type, `values` is omitted and no channel can be created.
 - `ticketing` follows `SYNAPSE_TICKETING_ENABLED` (default `true`), exposing manual ticket
-  links and governed Jira creation. See [Jira ticketing](jira-ticketing.md).
-- `docpublish` reports `planned: true`; it remains disabled and its `switch` is empty.
+  links and governed Jira creation. Automatic creation remains an administrator opt-in
+  per mapping, with a minimum confirmed-finding severity; enabling the deployment
+  capability alone never enables auto-push. Automatic policies also require PostgreSQL
+  and `SYNAPSE_NOTIFICATIONS_ENABLED=true` for their durable finding event source. See [Jira ticketing](jira-ticketing.md).
+- `docpublish` remains a planned capability entry for compatibility, even though a
+  PostgreSQL API process can mount the governed document routes. It has no switch;
+  clients should discover the routes through their normal API compatibility policy.
+  Scheduled PDF delivery additionally requires notifications and a full
+  `synapse-worker`; see [Governed document publishing](document-publishing.md).
 
 ```json
 {"key": "notifications.channel_types", "name": "Notification channel types", "enabled": true,
@@ -55,7 +62,7 @@ Some entries carry more than a switch:
 | --- | --- | --- |
 | `SYNAPSE_API_TOKEN` | (none) | Bootstrap-admin bearer token. The API exits if empty. Operational routes require it; liveness `GET /healthz` and readiness `GET /readyz` are intentionally public. Generate with `openssl rand -hex 32`. |
 | `SYNAPSE_OIDC_ENABLED` | `false` | Enable the browser OIDC BFF. Requires the fixed HTTPS issuer, client credentials, callback URL, fixed frontend URL, and fixed tenant below. A subject signs in only through an approved exact `(issuer, subject)` link to an existing user; see the note after this table. |
-| `SYNAPSE_OIDC_ISSUER` | (none) | Absolute HTTPS issuer used for pinned discovery and ID-token validation. It must have no query or fragment; an invalid value fails configuration validation at startup. Approved `(issuer, subject)` links must match it exactly. |
+| `SYNAPSE_OIDC_ISSUER` | (none) | Absolute HTTPS issuer used for pinned discovery and ID-token validation. It must have no query or fragment; an invalid value fails configuration validation at startup. Approved `(issuer, subject)` links must match it exactly. **Every address the issuer host resolves to must be globally reachable.** Discovery refuses a loopback, private, unique-local or cloud-metadata address with `OIDC destination address <ip> is not public`, and refuses the host outright if any one of its answers is such an address. There is no switch that relaxes this, so a provider published only on an internal network cannot be used. |
 | `SYNAPSE_OIDC_CLIENT_ID`, `SYNAPSE_OIDC_CLIENT_SECRET`, `SYNAPSE_OIDC_REDIRECT_URL` | (none) | OAuth client settings. The callback must be the exact registered `https://<api-host>/api/auth/oidc/callback` URL. Never log the secret. |
 | `SYNAPSE_OIDC_FRONTEND_URL` | (none) | Fixed absolute HTTPS dashboard URL for a successful callback redirect. Query strings, fragments, and credentials are rejected; request parameters never control this destination. |
 | `SYNAPSE_PUBLIC_BASE_URL` | `SYNAPSE_OIDC_FRONTEND_URL` if set; otherwise unset | Trusted HTTPS console URL (optionally including the deployment path prefix) for outgoing deep links. Works without OIDC. HTTP, relative URLs, credentials, query strings, fragments, invalid ports, control and Unicode format characters (including percent-encoded characters in hostnames), and double-encoded path segments are rejected at API and worker startup. Never put tokens or secrets in this value. Set explicitly if no OIDC frontend URL exists. |
@@ -110,6 +117,15 @@ Set `SYNAPSE_INBOUND_WEBHOOKS_ENABLED=true` to mount the **separate** `POST /api
 Provision each endpoint through a tenant-authorized integration lifecycle after its provider receiver is installed. The global `inbound_webhook_endpoints` routing table uses a 32–64-character cryptographically random base64url public ID, a required nonempty tenant ID, an owner integration ID, and a secret sealed with AES-256-GCM using AAD bound to tenant, public ID, integration and version. The exact-ID SECURITY DEFINER lookup exposes **only a tenant ID**; sealed keys and endpoint status are read separately under that tenant's FORCE-RLS transaction. An unscoped runtime SELECT sees no rows; direct runtime DML is revoked. Row-locked admission rechecks endpoint identity, owner status, version and previous-key expiry. The integration must remain enabled and unarchived. No public management API or automatic endpoint activation is supplied by this transport-plane PR.
 
 Send at most 1 MiB of **raw** bytes. Provider-neutral endpoints use HMAC-SHA256 over those exact bytes in one `X-Synapse-Hook-Signature: sha256=<64 hex>` header. Never put a token, secret, tenant identifier or signature in the URL or query string. The current secret and the immediately previous version overlap for up to 24 hours; a revoked endpoint is rejected. The limit is 60 authenticated requests/minute by default per endpoint, bounded between 1 and 600, enforced transactionally across API replicas. Unknown endpoint, bad signature, expired/revoked key and disabled integration all return the same generic 401 response. A missing provider receiver returns 503 rather than falsely acknowledging a dropped event.
+
+Jira uses this plane when ticketing and durable inbound webhooks are enabled. A
+tenant administrator configures its signed endpoint in Settings → Jira or
+`POST /api/v1/integrations/{integrationID}/jira/inbound-webhook`. Jira sends
+`X-Hub-Signature` and `X-Atlassian-Webhook-Identifier`; its receipt retention and
+previous-key overlap are two hours. Configuration verifies the integration
+principal and current connection/credential revisions. Cloud and supported Data
+Center 11.3+ are accepted; older or unknown DC versions fail closed. See
+[Jira ticketing](jira-ticketing.md) for proposal-only behavior and attribution limits.
 
 ### GitLab push and merge-request hooks (#1452)
 
@@ -393,7 +409,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | Variable | Default | Description |
 | --- | --- | --- |
 | `SYNAPSE_FLEET_ENABLED` | `false` | Fleet transport + agent-admin routes. |
-| `SYNAPSE_FLEET_ASSETS_ENABLED` | `false` | Fleet asset model + attack paths. |
+| `SYNAPSE_FLEET_ASSETS_ENABLED` | `false` | Fleet asset model, attack paths and canonical SCA target attribution. Enable on both API and SCA workers when Project Jira grouping needs observed asset rows. |
 | `SYNAPSE_FLEET_HOST_INGEST_ENABLED` | `false` | Accept host-inventory from `synapse-agent`. |
 | `SYNAPSE_FLEET_CLUSTER_INGEST_ENABLED` | `false` | Accept Kubernetes inventory from `synapse-cluster-agent`. |
 | `SYNAPSE_FLEET_TELEMETRY_INGEST_ENABLED` | `false` | Accept signed agent telemetry batches (A3, `POST /api/v1/fleet/telemetry`); verified + idempotently sequenced server-side. |
@@ -422,6 +438,15 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_NOTIFICATION_SMTP_USERNAME` / `SYNAPSE_NOTIFICATION_SMTP_PASSWORD` | (unset) | Optional SMTP authentication. The password is secret and must not be logged. |
 | `SYNAPSE_NOTIFICATION_SMTP_REQUIRE_TLS` | `true` | Require STARTTLS with certificate verification. Keep enabled in production. |
 | `SYNAPSE_NOTIFICATION_SMTP_ALLOWED_HOSTS` | (unset) | Comma-separated exact DNS names permitted for tenant-managed SMTP relays. Empty permits no tenant relay. Wildcards, URLs, ports, paths, and IP addresses stop startup. |
+
+Document publication has no separate feature flag. It requires PostgreSQL and the
+current release authority, source policy, legal-hold, evidence, and redaction
+services. Schedules additionally require `SYNAPSE_NOTIFICATIONS_ENABLED=true`, a
+shared `SYNAPSE_VAULT_MASTER_KEY`, and an `all` or `integrations` worker profile.
+The `integrations` profile builds artifacts from verified stored evidence through
+dispatch-only tool adapters. Worker profiles use separate maintenance leases so
+split deployments cannot suppress another profile's maintenance. See
+[Governed document publishing](document-publishing.md).
 | `SYNAPSE_NOTIFICATION_CHAT_ALLOWED_HOSTS` | (unset) | Comma-separated exact DNS names permitted for tenant-managed Mattermost and Rocket.Chat webhooks. Empty permits neither. Wildcards, URLs, ports, paths, and IP addresses stop startup. |
 | `SYNAPSE_NOTIFICATION_UNSUBSCRIBE_URL` | (unset) | Optional absolute HTTPS URL for the operator's recipient-removal workflow. When set, every tenant Email channel message includes it in `List-Unsubscribe`; the receiver must perform recipient removal using its own state. Synapse never interpolates recipient or tenant data and does not advertise one-click unsubscribe. |
 | `SYNAPSE_NOTIFICATION_PROVIDERS_DISABLED` | (unset) | Operator kill switch: comma-separated channel and provider types no tenant may use, for example `slack,email`. Entries are trimmed, lowercased and deduplicated; empty entries are ignored. Every entry must be a type in this build's notification driver registry (`webhook`, `slack`, `email`, `teams`, `telegram`, `google_chat`, `discord`, `slack_bot`, `mattermost`, `rocket_chat`, `pagerduty`, `jsm`), so a typo stops API and worker startup. A disabled type is left out of the `notifications.channel_types` capability, creating or testing a channel of that type answers `400`, an existing channel of that type cannot be switched on or given a new destination (it can still be renamed, switched off or deleted), and the worker cancels its queued deliveries with `provider_disabled`. Set the same value on the API and the worker. Removing a type from the list restores its channels. It does not affect personal inbox mail or contact verification email. |
@@ -447,7 +472,7 @@ All off by default. The fleet needs PostgreSQL + `synapse-worker`; agents run on
 | `SYNAPSE_LEADER_TERM` | `15s` | Lease term. |
 | `SYNAPSE_LEADER_RENEW` | `5s` | Renew interval. |
 | `SYNAPSE_WORKER_CONCURRENCY` | `1` | Durable queue claim loops per `synapse-worker` process; must be from 1 through 64. Jobs remain active on every worker, while maintenance sweepers are leader-gated when election is enabled. |
-| `SYNAPSE_WORKER_PROFILE` | `all` | `all` initializes hardened scanner handlers, captures ownership source evidence and requires the production sandbox. `integrations` claims only external-integration jobs. `lifecycle` claims Assessment comparison and closure-report jobs and, when ownership is enabled, also dispatches and consumes data-only ownership routing jobs. `notifications` claims only notification delivery, contact verification, and personal email/Slack/Teams jobs. It requires `SYNAPSE_NOTIFICATIONS_ENABLED=true` and the stable `SYNAPSE_VAULT_MASTER_KEY` shared with the API before it claims work. The three data-only profiles do not construct executable-tool handlers or require sandbox support. Notification maintenance uses its own leader lease; delivery and source idempotency remain in the shared tenant-scoped stores. |
+| `SYNAPSE_WORKER_PROFILE` | `all` | `all` initializes hardened scanner handlers, captures ownership source evidence and requires the production sandbox. `all` and `integrations` both build and deliver scheduled document reports when notifications are enabled. `integrations` claims external-integration and enabled notification jobs, reads verified stored report data through fail-closed dispatch-only scan ports, and does not claim scan, recon, or assessment-lifecycle work. `lifecycle` claims Assessment comparison and closure-report jobs and, when ownership is enabled, also dispatches and consumes data-only ownership routing jobs. `notifications` claims only notification delivery, contact verification, and personal email/Slack/Teams jobs. It requires `SYNAPSE_NOTIFICATIONS_ENABLED=true` and the stable `SYNAPSE_VAULT_MASTER_KEY` shared with the API before it claims work. The three data-only profiles do not construct executable-tool handlers or require sandbox support. Notification maintenance uses its own leader lease; delivery and source idempotency remain in the shared tenant-scoped stores. |
 | `SYNAPSE_INTEGRATION_SCHEDULER_ENABLED` | `false` | Dispatch due external-integration polls. Requires PostgreSQL and `SYNAPSE_LEADER_ENABLED=true`; startup fails closed otherwise. |
 | `SYNAPSE_INTEGRATION_SCHEDULER_POLL` | `1m` | Interval for checking enabled integrations whose provider poll is due. |
 | `SYNAPSE_INTEGRATION_SCHEDULER_DISPATCH_LIMIT` | `10` | Maximum integration poll operations created per scheduler tick. |

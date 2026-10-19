@@ -31,7 +31,8 @@ func TestBulkPartialDoesNotTreatConflictAsSuccess(t *testing.T) {
 	if result.Items[0].Disposition != siem.ItemAcked || result.Items[1].Disposition == siem.ItemAcked || !result.Items[1].Blocked || result.Items[2].Disposition != siem.ItemAcked {
 		t.Fatalf("items %+v", result.Items)
 	}
-	if strings.Count(body, "\n") != 6 && strings.Count(body, "\n") != 4 {
+	// Two lines per record, the last one newline terminated: six for three records.
+	if strings.Count(body, "\n") != 6 {
 		t.Fatalf("unexpected bulk framing: %q", body)
 	}
 	if !strings.Contains(body, `"_id":"rec-2"`) || strings.Contains(body, "api-key-secret") {

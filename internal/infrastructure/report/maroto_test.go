@@ -3,6 +3,12 @@ package report
 import (
 	"bytes"
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,6 +102,90 @@ func TestRenderPDFWithEngineCoverage(t *testing.T) {
 	if len(rows) != 2 || rows[0].Engine != "sast" || rows[0].Reason != scanrun.ReasonDeadlineExceeded {
 		t.Fatalf("PDF engine outcome rows = %+v", rows)
 	}
+}
+
+func TestRenderLongCompletenessWarningKeepsEngineTableBelowWarning(t *testing.T) {
+	pdftotext, err := exec.LookPath("pdftotext")
+	if err != nil {
+		t.Skip("pdftotext is not installed")
+	}
+
+	// This is deliberately longer than a single report line. It mirrors an
+	// unresolved Maven dependency warning, which must grow before the engine
+	// table is placed below it.
+	note := "Unresolved build system(s) present: maven. Their dependencies are NOT fully captured (the transitive tree wasn't resolved from source), so this result is INCOMPLETE – a low finding count does NOT mean clean. For a COMPLETE scan: Maven has no lockfile – scan a BUILT artifact (`mvn package`, then scan the produced JAR or `target/`), or resolve the tree first (`mvn dependency:copy-dependencies -DoutputDirectory=target/deps`) and scan that directory."
+	insight := ports.ReportInsight{
+		HasScan:          true,
+		CompletenessNote: note,
+		EngineCoverage:   scanrun.EngineCoverage{Status: scanrun.CoveragePartial, Required: 2, Completed: 1},
+		EngineOutcomes: []scanrun.EngineOutcome{
+			{Engine: "dependency_resolution", Execution: scanrun.EngineCompleted, Coverage: scanrun.CoveragePartial, Reason: scanrun.ReasonDependencyUnresolved, Required: true},
+		},
+	}
+	pdf, err := NewRenderer().Render(context.Background(), sampleEngagement(), nil, insight, time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC), "v1")
+	if err != nil {
+		t.Fatalf("render report: %v", err)
+	}
+
+	words := pdfWordPositions(t, pdftotext, pdf)
+	lastWarning, ok := wordPosition(words, "directory.")
+	if !ok {
+		t.Fatalf("long completeness warning was not rendered: %v", words)
+	}
+	engineHeader, ok := wordPosition(words, "ENGINE")
+	if !ok {
+		t.Fatalf("engine table header was not rendered: %v", words)
+	}
+	if engineHeader.page < lastWarning.page || (engineHeader.page == lastWarning.page && engineHeader.y <= lastWarning.y) {
+		t.Fatalf("engine table begins at page %d y=%.2f before warning ends at page %d y=%.2f", engineHeader.page, engineHeader.y, lastWarning.page, lastWarning.y)
+	}
+}
+
+type pdfWord struct {
+	text string
+	page int
+	y    float64
+}
+
+var wordRE = regexp.MustCompile(`<word xMin="[^"]+" yMin="([^"]+)" xMax="[^"]+" yMax="[^"]+">([^<]+)</word>`)
+
+func pdfWordPositions(t *testing.T, pdftotext string, pdf []byte) []pdfWord {
+	t.Helper()
+	directory := t.TempDir()
+	input := filepath.Join(directory, "report.pdf")
+	output := filepath.Join(directory, "report.xhtml")
+	if err := os.WriteFile(input, pdf, 0o600); err != nil {
+		t.Fatalf("write PDF for layout extraction: %v", err)
+	}
+	if out, err := exec.Command(pdftotext, "-bbox", input, output).CombinedOutput(); err != nil {
+		t.Fatalf("extract PDF layout: %v: %s", err, out)
+	}
+	markup, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("read PDF layout: %v", err)
+	}
+	pages := strings.Split(string(markup), "<page ")
+	words := make([]pdfWord, 0)
+	for page, markup := range pages[1:] {
+		matches := wordRE.FindAllSubmatch([]byte(markup), -1)
+		for _, match := range matches {
+			y, err := strconv.ParseFloat(string(match[1]), 64)
+			if err != nil {
+				t.Fatalf("parse word y coordinate %q: %v", match[1], err)
+			}
+			words = append(words, pdfWord{text: string(match[2]), page: page + 1, y: y})
+		}
+	}
+	return words
+}
+
+func wordPosition(words []pdfWord, word string) (pdfWord, bool) {
+	for _, candidate := range words {
+		if strings.EqualFold(candidate.text, word) {
+			return candidate, true
+		}
+	}
+	return pdfWord{}, false
 }
 
 func TestPDFPostureQualifiesMixedCurrentAndRetainedResults(t *testing.T) {

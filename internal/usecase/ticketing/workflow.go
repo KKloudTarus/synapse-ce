@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -39,6 +41,12 @@ type Workflow struct {
 	intentAudit  ports.TicketIntentAuditStore
 	dispatch     ports.TicketDispatchStore
 	publicBase   string
+	// autoPushSourceAvailable is set only by a runtime with the durable
+	// notification_events projection. Development memory mode has no safe
+	// unbounded event feed, so enabling this policy fails closed there.
+	autoPushSourceAvailable bool
+	sla                     ports.SLAStore
+	inboundDeduper          ports.InboundWebhookEventDeduper
 	// Metadata is bounded to 32 entries/256 KiB each, TTL 30s. The mutex protects
 	// cache values and active discovery admission; singleflight coalesces same-key
 	// HTTP without holding it. At most four distinct discoveries run at once.
@@ -50,6 +58,15 @@ type Workflow struct {
 
 func (w *Workflow) SetPublicBaseURL(base string) {
 	w.publicBase = strings.TrimRight(strings.TrimSpace(base), "/")
+}
+func (w *Workflow) SetAutoPushSourceAvailable(available bool) { w.autoPushSourceAvailable = available }
+
+// SetSLAStore enables effective accepted-risk evaluation for status sync. A nil
+// reader leaves automatic status synchronization unavailable rather than
+// guessing lifecycle state from an audit stream.
+func (w *Workflow) SetSLAStore(store ports.SLAStore) { w.sla = store }
+func (w *Workflow) SetInboundWebhookDeduper(store ports.InboundWebhookEventDeduper) {
+	w.inboundDeduper = store
 }
 func NewWorkflow(store ports.TicketStore, integrations ports.IntegrationStore, providers TicketProviderRegistry, findings ports.FindingRepository, engagements ports.EngagementRepository, policy ports.TicketPolicyReader, audit ports.AuditLogger, ids ports.IDGenerator, clock ports.Clock) (*Workflow, error) {
 	base, err := NewService(store, findings, engagements, ids, clock)
@@ -106,26 +123,33 @@ type SubmitRequest struct {
 	Actor         string    `json:"-"`
 }
 type MappingInput struct {
-	IntegrationID       shared.ID              `json:"integration_id"`
-	Scope               domain.Scope           `json:"scope"`
-	ScopeID             shared.ID              `json:"scope_id"`
-	ProjectKey          string                 `json:"project_key"`
-	IssueType           string                 `json:"issue_type"`
-	Component           string                 `json:"component"`
-	Labels              []string               `json:"labels"`
-	PriorityMap         map[string]string      `json:"priority_map"`
-	SecurityLevel       string                 `json:"security_level"`
-	SummaryTemplate     string                 `json:"summary_template"`
-	DescriptionTemplate string                 `json:"description_template"`
-	FieldValues         map[string]string      `json:"field_values"`
-	Transition          string                 `json:"transition_id"`
-	DataClass           notification.DataClass `json:"data_class"`
-	Locale              string                 `json:"locale"`
-	Version             int                    `json:"version"`
-	WaiverReason        string                 `json:"waiver_reason"`
-	Actor               string                 `json:"-"`
-	AllowAdmin          bool                   `json:"-"`
+	IntegrationID       shared.ID                   `json:"integration_id"`
+	Scope               domain.Scope                `json:"scope"`
+	ScopeID             shared.ID                   `json:"scope_id"`
+	ProjectKey          string                      `json:"project_key"`
+	IssueType           string                      `json:"issue_type"`
+	Component           string                      `json:"component"`
+	Labels              []string                    `json:"labels"`
+	PriorityMap         map[string]string           `json:"priority_map"`
+	SecurityLevel       string                      `json:"security_level"`
+	SummaryTemplate     string                      `json:"summary_template"`
+	DescriptionTemplate string                      `json:"description_template"`
+	FieldValues         map[string]string           `json:"field_values"`
+	Transition          string                      `json:"transition_id"`
+	DataClass           notification.DataClass      `json:"data_class"`
+	Locale              string                      `json:"locale"`
+	Version             int                         `json:"version"`
+	WaiverReason        string                      `json:"waiver_reason"`
+	AutoPushEnabled     bool                        `json:"auto_push_enabled"`
+	AutoPushMinSeverity shared.Severity             `json:"auto_push_min_severity"`
+	GroupingMode        domain.GroupingMode         `json:"grouping_mode"`
+	StatusTransitions   map[domain.SyncState]string `json:"status_transitions"`
+	Actor               string                      `json:"-"`
+	AllowAdmin          bool                        `json:"-"`
 }
+
+var jiraTransitionIDPattern = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
+
 type FindingTickets struct {
 	Links    []domain.Link    `json:"links"`
 	Intents  []domain.Intent  `json:"intents"`
@@ -138,6 +162,9 @@ func (w *Workflow) SaveMapping(ctx context.Context, tenant, id shared.ID, in Map
 	}
 	if in.DataClass == "" {
 		in.DataClass = notification.DataClassSummary
+	}
+	if in.GroupingMode == "" {
+		in.GroupingMode = domain.GroupingFinding
 	}
 	// Persist only redacted administrator literals: settings reads must not expose
 	// a secret accidentally pasted into a template or custom field.
@@ -154,6 +181,20 @@ func (w *Workflow) SaveMapping(ctx context.Context, tenant, id shared.ID, in Map
 	if !in.DataClass.Valid() || (in.Locale != "en" && in.Locale != "vi") {
 		return domain.Mapping{}, shared.ErrValidation
 	}
+	for state, transition := range in.StatusTransitions {
+		if !state.Valid() || !jiraTransitionIDPattern.MatchString(transition) {
+			return domain.Mapping{}, shared.ErrValidation
+		}
+	}
+	if in.AutoPushEnabled && !in.AllowAdmin {
+		return domain.Mapping{}, shared.ErrForbidden
+	}
+	if in.AutoPushEnabled && !w.autoPushSourceAvailable {
+		return domain.Mapping{}, fmt.Errorf("%w: ticket auto-push requires durable notification events", shared.ErrConflict)
+	}
+	if in.AutoPushEnabled && in.AutoPushMinSeverity == "" {
+		in.AutoPushMinSeverity = shared.SeverityHigh
+	}
 	if in.SecurityLevel == "" && (!in.AllowAdmin || strings.TrimSpace(in.WaiverReason) == "") {
 		return domain.Mapping{}, fmt.Errorf("%w: select an issue security level or record an administrator waiver", shared.ErrValidation)
 	}
@@ -162,7 +203,7 @@ func (w *Workflow) SaveMapping(ctx context.Context, tenant, id shared.ID, in Map
 	}
 	in.WaiverReason = ticketAuditText(in.WaiverReason)
 	now := w.clock.Now().UTC()
-	m := domain.Mapping{ID: id, TenantID: tenant, IntegrationID: in.IntegrationID, Scope: in.Scope, ScopeID: in.ScopeID, ProjectKey: in.ProjectKey, IssueType: in.IssueType, Component: in.Component, Labels: in.Labels, PriorityMap: in.PriorityMap, SecurityLevel: in.SecurityLevel, SummaryTemplate: in.SummaryTemplate, DescriptionTemplate: in.DescriptionTemplate, FieldValues: in.FieldValues, Transition: in.Transition, DataClass: in.DataClass, Locale: in.Locale, WaiverReason: in.WaiverReason, Version: 1, CreatedAt: now, UpdatedAt: now}
+	m := domain.Mapping{ID: id, TenantID: tenant, IntegrationID: in.IntegrationID, Scope: in.Scope, ScopeID: in.ScopeID, ProjectKey: in.ProjectKey, IssueType: in.IssueType, Component: in.Component, Labels: in.Labels, PriorityMap: in.PriorityMap, SecurityLevel: in.SecurityLevel, SummaryTemplate: in.SummaryTemplate, DescriptionTemplate: in.DescriptionTemplate, FieldValues: in.FieldValues, Transition: in.Transition, DataClass: in.DataClass, Locale: in.Locale, WaiverReason: in.WaiverReason, AutoPushEnabled: in.AutoPushEnabled, AutoPushMinSeverity: in.AutoPushMinSeverity, GroupingMode: in.GroupingMode, StatusTransitions: in.StatusTransitions, Version: 1, CreatedAt: now, UpdatedAt: now}
 	action := "ticket.mapping.created"
 	if id.IsZero() {
 		m.ID = w.ids.NewID()
@@ -182,13 +223,33 @@ func (w *Workflow) SaveMapping(ctx context.Context, tenant, id shared.ID, in Map
 		}
 		m.Version = old.Version + 1
 		m.CreatedAt = old.CreatedAt
+		if m.AutoPushEnabled && old.AutoPushEnabled {
+			m.AutoPushEnabledAt = old.AutoPushEnabledAt
+		} else if m.AutoPushEnabled {
+			m.AutoPushEnabledAt = &now
+		}
 		action = "ticket.mapping.updated"
+	}
+	if id.IsZero() && m.AutoPushEnabled {
+		m.AutoPushEnabledAt = &now
 	}
 	if m.DataClass == notification.DataClassDetail && !in.AllowAdmin {
 		return domain.Mapping{}, shared.ErrForbidden
 	}
 	if err := m.Validate(); err != nil {
 		return domain.Mapping{}, err
+	}
+	if id != "" {
+		if groups, ok := w.store.(ports.TicketGroupStore); ok {
+			integrationItem, integrationErr := w.integration(ctx, tenant, m.IntegrationID)
+			if integrationErr != nil {
+				return domain.Mapping{}, integrationErr
+			}
+			candidate := ports.TicketGroup{TenantID: tenant, MappingID: m.ID, IntegrationID: integrationItem.ID, Endpoint: integrationItem.Endpoint, ProjectKey: m.ProjectKey, IssueType: m.IssueType, SecurityLevel: m.SecurityLevel}
+			if destinationErr := groups.ValidateTicketGroupDestination(ctx, tenant, candidate); destinationErr != nil {
+				return domain.Mapping{}, destinationErr
+			}
+		}
 	}
 	if err := w.validateScope(ctx, m); err != nil {
 		return domain.Mapping{}, err
@@ -334,10 +395,28 @@ type snapshotFacts struct {
 	ConnectionRevision int                    `json:"connection_revision"`
 	CredentialRevision int                    `json:"credential_revision"`
 	WaiverReason       string                 `json:"waiver_reason"`
+	UpdateRemoteID     string                 `json:"update_remote_id,omitempty"`
+	UpdateRemoteURL    string                 `json:"update_remote_url,omitempty"`
+	StatusTransitionID string                 `json:"status_transition_id,omitempty"`
+	StatusComment      string                 `json:"status_comment,omitempty"`
+	StatusSource       string                 `json:"status_source,omitempty"`
+	// StatusCommandVersion is zero for legacy bundled transition commands. A
+	// versioned transition has no bundled comment; its following Comment intent
+	// freezes this parent, episode and authenticated Jira principal.
+	StatusCommandVersion int       `json:"status_command_version,omitempty"`
+	StatusMode           string    `json:"status_mode,omitempty"`
+	StatusParentID       shared.ID `json:"status_parent_id,omitempty"`
+	StatusEpisode        int       `json:"status_episode,omitempty"`
+	StatusAuthor         string    `json:"status_author,omitempty"`
+	GroupRevision        int       `json:"group_revision,omitempty"`
+	GroupVulnerability   string    `json:"group_vulnerability,omitempty"`
+	GroupFactsDigest     string    `json:"group_facts_digest,omitempty"`
+	RequestPreviewDigest string    `json:"request_preview_digest,omitempty"`
 }
 
 // Preview never writes to Jira. Destination/security/policy facts participate in
 // the digest; the correlation marker is the only declared provider-field addition.
+// Submit also records internal request identity for lost-response recovery.
 func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, error) {
 	if req.TenantID.IsZero() || req.MappingID.IsZero() || req.FindingID.IsZero() || req.EngagementID.IsZero() {
 		return Preview{}, shared.ErrValidation
@@ -366,6 +445,11 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 	if err != nil {
 		return Preview{}, err
 	}
+	// Grouped descriptions include vulnerability and attributed-asset detail.
+	// Never silently downgrade that table under an engagement override.
+	if m.GroupingMode == domain.GroupingVulnerabilityProject && class != notification.DataClassDetail {
+		return Preview{}, fmt.Errorf("%w: vulnerability/project grouping requires detail data class", shared.ErrForbidden)
+	}
 	meta, err := w.Metadata(tenantCtx, req.TenantID, m.IntegrationID, m.ProjectKey, m.IssueType, "")
 	if err != nil {
 		return Preview{}, err
@@ -373,7 +457,7 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 	if err = w.validateSelections(m, meta); err != nil {
 		return Preview{}, err
 	}
-	summary, body, links, err := RenderTicket(m, f, class, m.Locale, w.publicBase)
+	summary, body, links, err := w.renderTicket(tenantCtx, m, f, class)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -382,7 +466,34 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 		return Preview{}, safeTicketError(err)
 	}
 	defer closeTicketProvider(provider)
-	description, err := provider.FormatTicketDescription(body, links)
+	var description json.RawMessage
+	groupRevision, groupFactsDigest, groupVulnerability := 0, "", ""
+	if m.GroupingMode == domain.GroupingVulnerabilityProject && strings.TrimSpace(f.AdvisoryID) != "" {
+		factsReader, ok := w.store.(ports.TicketGroupFactsReader)
+		if !ok {
+			return Preview{}, fmt.Errorf("%w: durable ticket group facts required", shared.ErrConflict)
+		}
+		facts, factsErr := factsReader.GroupTicketFacts(tenantCtx, req.TenantID, m.ID, m.ScopeID, strings.TrimSpace(f.AdvisoryID), ports.TicketGroupMember{EngagementID: req.EngagementID, FindingID: req.FindingID})
+		if factsErr != nil {
+			return Preview{}, factsErr
+		}
+		groupFactsDigest, factsErr = ticketGroupFactsDigest(facts)
+		if factsErr != nil {
+			return Preview{}, factsErr
+		}
+		groupRevision, groupVulnerability = facts[0].GroupRevision, strings.TrimSpace(f.AdvisoryID)
+		headers, rows, rowsErr := w.groupTicketRows(facts, m.Locale)
+		if rowsErr != nil {
+			return Preview{}, rowsErr
+		}
+		formatter, ok := provider.(ports.TicketGroupFormatter)
+		if !ok {
+			return Preview{}, fmt.Errorf("%w: ticket provider does not support grouped descriptions", shared.ErrValidation)
+		}
+		description, err = formatter.FormatTicketGroupDescription(body, links, headers, rows)
+	} else {
+		description, err = provider.FormatTicketDescription(body, links)
+	}
 	if err != nil {
 		return Preview{}, err
 	}
@@ -415,7 +526,7 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 		}
 		fields[field.ID] = converted
 	}
-	payload := map[string]any{"fields": fields, "_synapse": snapshotFacts{Provider: in.Provider, Endpoint: in.Endpoint, DataClass: class, PolicyRevision: policy.Revision, MappingVersion: m.Version, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, WaiverReason: m.WaiverReason}}
+	payload := map[string]any{"fields": fields, "_synapse": snapshotFacts{Provider: in.Provider, Endpoint: in.Endpoint, DataClass: class, PolicyRevision: policy.Revision, MappingVersion: m.Version, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, WaiverReason: m.WaiverReason, GroupRevision: groupRevision, GroupVulnerability: groupVulnerability, GroupFactsDigest: groupFactsDigest}}
 	if m.Transition != "" {
 		payload["transition"] = map[string]string{"id": m.Transition}
 	}
@@ -428,9 +539,47 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 	}
 	return Preview{Payload: raw, Digest: ticketDigest(raw), Summary: summary, Description: body, MappingVersion: m.Version, MarkerRequired: true, MarkerFormat: "synapse-intent-{intent_id}", DataClass: class, Links: links, SecurityWaived: m.SecurityLevel == ""}, nil
 }
+
+func (w *Workflow) groupTicketRows(facts []ports.TicketGroupFact, locale string) ([]string, [][]string, error) {
+	if len(facts) == 0 || len(facts) > 100 {
+		return nil, nil, shared.ErrValidation
+	}
+	headers := []string{"Asset", "Finding", "Severity", "Status"}
+	unassigned := "Unassigned"
+	if normalizedLocale(locale) == "vi" {
+		headers, unassigned = []string{"Tài sản", "Phát hiện", "Mức độ", "Trạng thái"}, "Chưa gán"
+	}
+	rows := make([][]string, 0, len(facts))
+	for _, fact := range facts {
+		if fact.EngagementID.IsZero() || fact.FindingID.IsZero() {
+			return nil, nil, shared.ErrValidation
+		}
+		asset := ticketText(fact.AssetName)
+		if asset == "" {
+			asset = unassigned
+		}
+		rows = append(rows, []string{asset, ticketText(fact.Title), localSeverity(fact.Severity, normalizedLocale(locale)), localStatus(fact.Status, normalizedLocale(locale))})
+	}
+	return headers, rows, nil
+}
 func (w *Workflow) Submit(ctx context.Context, req SubmitRequest) (domain.Intent, bool, error) {
 	if strings.TrimSpace(req.RequestKey) == "" || len(req.RequestKey) > 128 || strings.TrimSpace(req.Actor) == "" {
 		return domain.Intent{}, false, shared.ErrValidation
+	}
+	if requests, ok := w.store.(ports.TicketRequestReader); ok {
+		previous, found, err := requests.FindTicketRequest(shared.WithTenant(ctx, req.TenantID), req.TenantID, req.MappingID, req.EngagementID, req.FindingID, req.RequestKey)
+		if err != nil {
+			return domain.Intent{}, false, err
+		}
+		if found {
+			var envelope struct {
+				Facts snapshotFacts `json:"_synapse"`
+			}
+			if json.Unmarshal(previous.Snapshot, &envelope) != nil || envelope.Facts.RequestPreviewDigest == "" || envelope.Facts.RequestPreviewDigest != req.PreviewDigest {
+				return domain.Intent{}, false, shared.ErrConflict
+			}
+			return previous, false, nil
+		}
 	}
 	p, err := w.Preview(ctx, PreviewRequest{TenantID: req.TenantID, MappingID: req.MappingID, FindingID: req.FindingID, EngagementID: req.EngagementID})
 	if err != nil {
@@ -469,6 +618,37 @@ func (w *Workflow) Submit(ctx context.Context, req SubmitRequest) (domain.Intent
 	_ = json.Unmarshal(payload["fields"], &fields)
 	var labels []string
 	_ = json.Unmarshal(fields["labels"], &labels)
+	grouped := false
+	var group ports.TicketGroup
+	action := domain.Create
+	facts.RequestPreviewDigest = p.Digest
+	if m.GroupingMode == domain.GroupingVulnerabilityProject {
+		f, getErr := w.findings.GetByEngagementAndID(shared.WithTenant(ctx, req.TenantID), req.EngagementID, req.FindingID)
+		if getErr != nil {
+			return domain.Intent{}, false, getErr
+		}
+		if vulnerability := strings.TrimSpace(f.AdvisoryID); vulnerability != "" {
+			groups, ok := w.store.(ports.TicketGroupStore)
+			if !ok {
+				return domain.Intent{}, false, fmt.Errorf("%w: durable ticket grouping store required", shared.ErrConflict)
+			}
+			existing, found, groupErr := groups.GetTicketGroup(ctx, req.TenantID, m.ID, m.ScopeID, vulnerability)
+			if groupErr != nil {
+				return domain.Intent{}, false, groupErr
+			}
+			group = ports.TicketGroup{ID: w.ids.NewID(), TenantID: req.TenantID, MappingID: m.ID, ProjectID: m.ScopeID, Vulnerability: vulnerability, IntegrationID: in.ID, Endpoint: in.Endpoint, ProjectKey: m.ProjectKey, IssueType: m.IssueType, SecurityLevel: m.SecurityLevel, Revision: facts.GroupRevision}
+			if found {
+				group.ID, group.CreatedAt = existing.ID, existing.CreatedAt
+				if existing.Remote.ID != "" && existing.Remote.URL != "" {
+					action, facts.UpdateRemoteID, facts.UpdateRemoteURL = domain.Update, existing.Remote.ID, existing.Remote.URL
+				}
+			}
+			grouped = true
+		}
+	}
+	payload["_synapse"], _ = json.Marshal(facts)
+	unsigned, _ := json.Marshal(payload)
+	digest := ticketDigest(unsigned)
 	id := w.ids.NewID()
 	marker := "synapse-intent-" + id.String()
 	labels = append(labels, marker)
@@ -476,24 +656,120 @@ func (w *Workflow) Submit(ctx context.Context, req SubmitRequest) (domain.Intent
 	payload["fields"], _ = json.Marshal(fields)
 	raw, _ := json.Marshal(payload)
 	now := w.clock.Now().UTC()
-	i := domain.Intent{ID: id, TenantID: req.TenantID, IntegrationID: m.IntegrationID, MappingID: m.ID, FindingID: req.FindingID, EngagementID: req.EngagementID, Action: domain.Create, RequestKey: req.RequestKey, PayloadDigest: p.Digest, Marker: marker, State: writeintent.Pending, Version: 1, Snapshot: raw, MappingVersion: facts.MappingVersion, ConnectionRevision: facts.ConnectionRevision, CredentialRevision: facts.CredentialRevision, SecurityLevel: m.SecurityLevel, CreatedAt: now, UpdatedAt: now}
+	if grouped {
+		if group.CreatedAt.IsZero() {
+			group.CreatedAt = now
+		}
+		group.UpdatedAt = now
+	}
+	i := domain.Intent{ID: id, TenantID: req.TenantID, IntegrationID: m.IntegrationID, MappingID: m.ID, FindingID: req.FindingID, EngagementID: req.EngagementID, Action: action, RequestKey: req.RequestKey, PayloadDigest: digest, Marker: marker, State: writeintent.Pending, Version: 1, Snapshot: raw, MappingVersion: facts.MappingVersion, ConnectionRevision: facts.ConnectionRevision, CredentialRevision: facts.CredentialRevision, SecurityLevel: m.SecurityLevel, CreatedAt: now, UpdatedAt: now}
 	entry := ports.AuditEntry{Actor: req.Actor, Action: "ticket.intent.created", Target: id.String(), At: now, Metadata: map[string]string{"mapping_id": m.ID.String(), "preview_digest": p.Digest}}
+	if grouped {
+		groups := w.store.(ports.TicketGroupStore)
+		return groups.CreateOrGetGroupedIntent(ctx, req.TenantID, group, ports.TicketGroupMember{EngagementID: req.EngagementID, FindingID: req.FindingID}, i, entry)
+	}
 	return w.intentAudit.CreateOrGetIntentAudited(ctx, req.TenantID, i, entry)
 }
 
+const (
+	ticketTickStageUnit     = 5 * time.Second
+	ticketTickStageUnits    = 7
+	ticketOutboundStageUnit = 4
+)
+
+// ticketStageContext reserves time for every workflow stage. A deadline shorter
+// than the normal 35-second allocation is divided by the same weights, so a
+// hung maintenance read cannot consume the caller's entire worker lease.
+func ticketStageContext(ctx context.Context, units int) (context.Context, context.CancelFunc) {
+	budget := time.Duration(units) * ticketTickStageUnit
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > 0 && remaining < time.Duration(ticketTickStageUnits)*ticketTickStageUnit {
+			budget = (remaining / ticketTickStageUnits) * time.Duration(units)
+			if budget <= 0 {
+				budget = time.Nanosecond
+			}
+		}
+	}
+	return context.WithTimeout(ctx, budget)
+}
+
+// Tick makes independently bounded progress across automatic planning, outbound
+// writes, status planning, and inbound observation. The outbound queue runs
+// before inbound polling because it is the only stage that dispatches durable
+// user-approved intents. A timed-out child stage is retried on the next tick;
+// parent cancellation is still returned immediately.
 func (w *Workflow) Tick(ctx context.Context, tenant shared.ID, limit int) (int, error) {
 	if tenant.IsZero() || limit < 1 || limit > 100 {
 		return 0, shared.ErrValidation
 	}
 	tenantCtx := shared.WithTenant(ctx, tenant)
+	var stageErrors []error
+	run := func(units int, work func(context.Context) error) bool {
+		if err := ctx.Err(); err != nil {
+			stageErrors = append(stageErrors, err)
+			return false
+		}
+		stageCtx, cancel := ticketStageContext(tenantCtx, units)
+		err := work(stageCtx)
+		stageTimedOut := errors.Is(stageCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		cancel()
+		if ctx.Err() != nil {
+			stageErrors = append(stageErrors, ctx.Err())
+			return false
+		}
+		if err != nil && !(stageTimedOut && errors.Is(err, context.DeadlineExceeded)) {
+			stageErrors = append(stageErrors, err)
+		}
+		return true
+	}
+
+	if auto, ok := w.store.(ports.TicketAutoPushStore); ok && w.autoPushSourceAvailable {
+		if !run(1, func(stageCtx context.Context) error {
+			_, err := w.tickAutoPush(stageCtx, tenant, auto, min(limit, 100))
+			return err
+		}) {
+			return 0, errors.Join(stageErrors...)
+		}
+	}
+
+	if statuses, ok := w.store.(ports.TicketStatusStore); ok && w.sla != nil {
+		if !run(1, func(stageCtx context.Context) error {
+			_, err := w.tickTicketStatuses(stageCtx, tenant, statuses, min(limit, 100))
+			return err
+		}) {
+			return 0, errors.Join(stageErrors...)
+		}
+	}
+
+	completed := 0
+	if !run(ticketOutboundStageUnit, func(stageCtx context.Context) error {
+		var err error
+		completed, err = w.tickOutboundIntents(stageCtx, tenant, limit)
+		return err
+	}) {
+		return completed, errors.Join(stageErrors...)
+	}
+
+	if inbound, ok := w.store.(ports.TicketInboundStore); ok {
+		if !run(1, func(stageCtx context.Context) error {
+			return w.tickInboundTicketObservationsWithProgress(stageCtx, tenantCtx, tenant, inbound, min(limit, 250))
+		}) {
+			return completed, errors.Join(stageErrors...)
+		}
+	}
+	return completed, errors.Join(stageErrors...)
+}
+
+func (w *Workflow) tickOutboundIntents(tenantCtx context.Context, tenant shared.ID, limit int) (int, error) {
 	due, err := w.store.ListDueIntents(tenantCtx, tenant, w.clock.Now().UTC(), limit)
 	if err != nil {
 		return 0, err
 	}
 	completed := 0
 	for _, i := range due {
-		if ctx.Err() != nil {
-			return completed, ctx.Err()
+		if tenantCtx.Err() != nil {
+			return completed, tenantCtx.Err()
 		}
 		now := w.clock.Now().UTC()
 		if i.State == writeintent.InFlight {
@@ -533,6 +809,14 @@ func (w *Workflow) Tick(ctx context.Context, tenant shared.ID, limit int) (int, 
 			}
 			continue
 		}
+		if claimed.Action == domain.Comment {
+			if preflightErr = w.statusCommentPreflight(tenantCtx, tenant, claimed, facts); preflightErr != nil {
+				if _, e = w.dispatch.FinishDispatch(tenantCtx, tenant, claimed.ID, claimed.Version, domain.IntentTransition{Event: writeintent.Reject, ErrorCode: "preflight_refused"}, w.clock.Now().UTC(), nil, ""); e != nil && !errors.Is(e, shared.ErrConflict) {
+					return completed, e
+				}
+				continue
+			}
+		}
 		provider, e := w.providers.TicketProvider(tenantCtx, in)
 		if e != nil {
 			_, e = w.dispatch.FinishDispatch(tenantCtx, tenant, claimed.ID, claimed.Version, domain.IntentTransition{Event: writeintent.Reject, ErrorCode: "provider_unavailable"}, w.clock.Now().UTC(), nil, "")
@@ -542,7 +826,37 @@ func (w *Workflow) Tick(ctx context.Context, tenant shared.ID, limit int) (int, 
 			continue
 		}
 		callCtx, cancel := context.WithTimeout(tenantCtx, 20*time.Second)
-		remote, sendErr := provider.CreateTicket(callCtx, request)
+		var remote domain.RemoteTicket
+		var sendErr error
+		if claimed.Action == domain.Transition {
+			writer, ok := provider.(ports.TicketStatusWriter)
+			if !ok || facts.UpdateRemoteID == "" || facts.StatusTransitionID == "" || facts.StatusSource == "" || (facts.StatusCommandVersion == 0 && facts.StatusComment == "") {
+				sendErr = &ports.TicketProviderError{Code: "transition_unsupported"}
+			} else {
+				remote = domain.RemoteTicket{ID: facts.UpdateRemoteID, URL: facts.UpdateRemoteURL}
+				sendErr = writer.TransitionTicket(callCtx, facts.UpdateRemoteID, facts.StatusTransitionID, facts.StatusComment)
+			}
+		} else if claimed.Action == domain.Comment {
+			writer, ok := provider.(ports.TicketCommentWriter)
+			if !ok || facts.UpdateRemoteID == "" || facts.UpdateRemoteURL == "" || facts.StatusComment == "" || facts.StatusAuthor == "" {
+				sendErr = &ports.TicketProviderError{Code: "comment_unsupported"}
+			} else {
+				remote = domain.RemoteTicket{ID: facts.UpdateRemoteID, URL: facts.UpdateRemoteURL}
+				_, sendErr = writer.CommentTicket(callCtx, facts.UpdateRemoteID, facts.StatusComment, facts.StatusAuthor)
+			}
+		} else if claimed.Action == domain.Update {
+			updater, ok := provider.(ports.TicketUpdater)
+			if !ok || facts.UpdateRemoteID == "" || facts.UpdateRemoteURL == "" {
+				sendErr = &ports.TicketProviderError{Code: "update_unsupported"}
+			} else {
+				remote = domain.RemoteTicket{ID: facts.UpdateRemoteID, URL: facts.UpdateRemoteURL}
+				sendErr = updater.UpdateTicket(callCtx, facts.UpdateRemoteID, request)
+			}
+		} else if claimed.Action == domain.Create {
+			remote, sendErr = provider.CreateTicket(callCtx, request)
+		} else {
+			sendErr = &ports.TicketProviderError{Code: "unsupported_action"}
+		}
 		cancel()
 		closeTicketProvider(provider)
 		change := domain.IntentTransition{Event: writeintent.Ambiguous}
@@ -557,6 +871,10 @@ func (w *Workflow) Tick(ctx context.Context, tenant shared.ID, limit int) (int, 
 		} else {
 			var refusal *ports.TicketProviderError
 			if errors.As(sendErr, &refusal) && !refusal.Ambiguous {
+				if refusal.Status == 0 && (refusal.Code == "unsupported_action" || refusal.Code == "update_unsupported" || refusal.Code == "transition_unsupported" || refusal.Code == "comment_unsupported") {
+					code = "invalid_action"
+					change = domain.IntentTransition{Event: writeintent.Reject, ErrorCode: code}
+				}
 				switch refusal.Status {
 				case 400, 401, 403, 404:
 					code = fmt.Sprintf("http_%d", refusal.Status)
@@ -585,10 +903,141 @@ func (w *Workflow) Tick(ctx context.Context, tenant shared.ID, limit int) (int, 
 			continue
 		}
 		if saved.State == writeintent.Done {
+			if saved.Action == domain.Create {
+				if groups, ok := w.store.(ports.TicketGroupStore); ok {
+					if groupErr := groups.CompleteGroupedIntent(tenantCtx, tenant, saved.ID, domain.RemoteTicket{ID: saved.RemoteID, URL: saved.RemoteURL}, w.clock.Now().UTC()); groupErr != nil && !errors.Is(groupErr, shared.ErrNotFound) {
+						return completed, groupErr
+					}
+				}
+			}
 			completed++
 		}
 	}
 	return completed, nil
+}
+
+// tickAutoPush consumes the durable finding.status_changed stream rather than a
+// recent-events view. Automatic creation has one finding/mapping request key;
+// later confirmation events retain the existing ticket or its recovery fence.
+// Malformed or no-longer-eligible events advance so they
+// cannot block later healthy changes.
+func (w *Workflow) tickAutoPush(ctx context.Context, tenant shared.ID, store ports.TicketAutoPushStore, limit int) (int, error) {
+	now := w.clock.Now().UTC()
+	events, err := store.ListAutoPushEvents(ctx, tenant, now, limit)
+	if err != nil {
+		return 0, err
+	}
+	created := 0
+	for _, event := range events {
+		if ctx.Err() != nil {
+			return created, ctx.Err()
+		}
+		if event.FindingID.IsZero() || event.EngagementID.IsZero() || event.ToStatus != string(finding.StatusConfirmed) {
+			if err := store.CompleteAutoPushEvent(ctx, tenant, event, w.clock.Now().UTC()); err != nil {
+				return created, err
+			}
+			continue
+		}
+		mappings, err := w.store.ListFindingMappings(ctx, tenant, event.EngagementID, 200)
+		if err != nil {
+			if deferErr := store.DeferAutoPushEvent(ctx, tenant, event, now.Add(time.Minute)); deferErr != nil {
+				return created, deferErr
+			}
+			continue
+		}
+		retry := false
+		for _, mapping := range mappings {
+			if !mapping.AutoPushEnabled || mapping.AutoPushEnabledAt == nil || event.OccurredAt.Before(mapping.AutoPushEnabledAt.UTC()) || shared.SeverityRank(mapping.AutoPushMinSeverity) == 0 {
+				continue
+			}
+			f, err := w.findings.GetByEngagementAndID(ctx, event.EngagementID, event.FindingID)
+			if err != nil {
+				if errors.Is(err, shared.ErrNotFound) {
+					break
+				}
+				retry = true
+				break
+			}
+			if f.Status != finding.StatusConfirmed || f.Kind == finding.KindExternal || !f.CanPromote() || shared.SeverityRank(f.Severity) < shared.SeverityRank(mapping.AutoPushMinSeverity) {
+				continue
+			}
+			exists, err := w.automaticTicketExists(ctx, tenant, mapping, f.ID)
+			if err != nil {
+				retry = true
+				break
+			}
+			if exists {
+				continue
+			}
+			preview, err := w.Preview(ctx, PreviewRequest{TenantID: tenant, MappingID: mapping.ID, FindingID: f.ID, EngagementID: event.EngagementID})
+			if err != nil {
+				if autoPushPermanent(err) {
+					continue
+				}
+				retry = true
+				break
+			}
+			sum := sha256.Sum256([]byte("finding\x00" + f.ID.String() + "\x00" + mapping.ID.String()))
+			key := "auto:" + hex.EncodeToString(sum[:])
+			_, wasCreated, err := w.Submit(ctx, SubmitRequest{TenantID: tenant, MappingID: mapping.ID, FindingID: f.ID, EngagementID: event.EngagementID, RequestKey: key, PreviewDigest: preview.Digest, Actor: "system:auto_push"})
+			if err != nil {
+				if autoPushPermanent(err) {
+					continue
+				}
+				retry = true
+				break
+			}
+			if wasCreated {
+				created++
+			}
+		}
+		if retry {
+			if err := store.DeferAutoPushEvent(ctx, tenant, event, now.Add(time.Minute)); err != nil {
+				return created, err
+			}
+			continue
+		}
+		if err := store.CompleteAutoPushEvent(ctx, tenant, event, w.clock.Now().UTC()); err != nil {
+			return created, err
+		}
+	}
+	return created, nil
+}
+
+func (w *Workflow) automaticTicketExists(ctx context.Context, tenant shared.ID, mapping domain.Mapping, findingID shared.ID) (bool, error) {
+	links, err := w.store.ListLinks(ctx, tenant, findingID)
+	if err != nil {
+		return false, err
+	}
+	for _, link := range links {
+		if link.IntegrationID == mapping.IntegrationID {
+			return true, nil
+		}
+	}
+	// Retain pending, uncertain and failed initial commands, including commands
+	// admitted with the earlier per-event key. Reconfirmation is not operator
+	// authorization to bypass their recovery fence.
+	const historyLimit = 200
+	intents, err := w.store.ListFindingIntents(ctx, tenant, findingID, historyLimit)
+	if err != nil {
+		return false, err
+	}
+	for _, intent := range intents {
+		if intent.MappingID == mapping.ID && intent.Action == domain.Create {
+			return true, nil
+		}
+	}
+	if len(intents) == historyLimit {
+		return false, shared.ErrConflict
+	}
+	return false, nil
+}
+
+func autoPushPermanent(err error) bool {
+	if errors.Is(err, domain.ErrGroupBusy) {
+		return false
+	}
+	return errors.Is(err, shared.ErrValidation) || errors.Is(err, shared.ErrNotFound) || errors.Is(err, shared.ErrForbidden)
 }
 func (w *Workflow) Reconcile(ctx context.Context, tenant, id shared.ID, version int) (domain.Intent, error) {
 	i, err := w.store.GetIntent(ctx, tenant, id)
@@ -614,6 +1063,17 @@ func (w *Workflow) Reconcile(ctx context.Context, tenant, id shared.ID, version 
 		return domain.Intent{}, safeTicketError(err)
 	}
 	defer closeTicketProvider(p)
+	if i.Action == domain.Comment {
+		reader, ok := p.(ports.TicketCommentReader)
+		if !ok {
+			return i, nil
+		}
+		found, readErr := reader.FindTicketComment(ctx, facts.UpdateRemoteID, facts.StatusComment, i.Marker, facts.StatusAuthor)
+		if readErr != nil || !found {
+			return i, readErr
+		}
+		return w.store.TransitionIntent(ctx, tenant, id, i.Version, domain.IntentTransition{Event: writeintent.ReconcileFound, Remote: &domain.RemoteTicket{ID: facts.UpdateRemoteID, URL: facts.UpdateRemoteURL}}, w.clock.Now().UTC())
+	}
 	target, err := i.DispatchTarget()
 	if err != nil {
 		return domain.Intent{}, err
@@ -633,6 +1093,33 @@ func (w *Workflow) Reconcile(ctx context.Context, tenant, id shared.ID, version 
 		change = domain.IntentTransition{Event: writeintent.ReconcileFound, Remote: &hits[0]}
 	}
 	return w.store.TransitionIntent(ctx, tenant, id, i.Version, change, w.clock.Now().UTC())
+}
+
+// statusCommentPreflight binds a versioned comment to the exact completed
+// transition episode. It is deliberately after the common double-read authority
+// preflight, immediately before the provider write; a later close/reopen cannot
+// use an old comment command as proof for the new episode.
+func (w *Workflow) statusCommentPreflight(ctx context.Context, tenant shared.ID, i domain.Intent, facts snapshotFacts) error {
+	progresses, ok := w.store.(ports.TicketStatusProgressStore)
+	if !ok {
+		return shared.ErrConflict
+	}
+	progress, err := progresses.GetTicketStatusProgress(ctx, tenant, i.MappingID, i.EngagementID, i.FindingID)
+	if err != nil {
+		return err
+	}
+	if progress.TransitionIntentID != facts.StatusParentID || progress.Episode != facts.StatusEpisode || progress.SourceRevision != facts.StatusSource || progress.IntegrationAuthor != facts.StatusAuthor {
+		return shared.ErrConflict
+	}
+	parent, err := w.store.GetIntent(ctx, tenant, facts.StatusParentID)
+	if err != nil || parent.State != writeintent.Done || parent.Action != domain.Transition || parent.TenantID != tenant || parent.MappingID != i.MappingID || parent.EngagementID != i.EngagementID || parent.FindingID != i.FindingID || parent.IntegrationID != i.IntegrationID {
+		return shared.ErrConflict
+	}
+	parentFacts, _, err := readTicketSnapshot(parent)
+	if err != nil || parentFacts.StatusCommandVersion != 1 || parentFacts.StatusMode != "transition_only" || parentFacts.StatusSource != facts.StatusSource || parent.RemoteID != facts.UpdateRemoteID || parent.RemoteURL != facts.UpdateRemoteURL {
+		return shared.ErrConflict
+	}
+	return nil
 }
 func (w *Workflow) ListFindingIntents(ctx context.Context, tenant, finding shared.ID, limit int) ([]domain.Intent, error) {
 	return w.store.ListFindingIntents(ctx, tenant, finding, limit)

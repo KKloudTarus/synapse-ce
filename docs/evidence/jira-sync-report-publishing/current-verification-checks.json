@@ -1,0 +1,52 @@
+{
+  "checks": [
+    {
+      "name": "current-baseline",
+      "command": "make lint build vet test typecheck",
+      "started_at": "2026-10-18T15:28:13.616075+00:00",
+      "finished_at": "2026-10-18T15:29:08.346475+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "120a1ce6da8013742239ccb2dce43f5f7b0d0f0a48cb227aafd7389aa1e161bc",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": null
+    },
+    {
+      "name": "current-ticket-race",
+      "command": "go test -race ./internal/usecase/ticketing ./internal/infrastructure/persistence/memory ./internal/adapter/httpapi -count=1",
+      "started_at": "2026-10-18T15:29:08.347064+00:00",
+      "finished_at": "2026-10-18T15:29:19.987196+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "120a1ce6da8013742239ccb2dce43f5f7b0d0f0a48cb227aafd7389aa1e161bc",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": null
+    },
+    {
+      "name": "current-hostile-harness",
+      "command": "make harness",
+      "started_at": "2026-10-18T15:29:19.987405+00:00",
+      "finished_at": "2026-10-18T15:29:20.602574+00:00",
+      "exit_code": 0,
+      "source_inputs_sha256": "120a1ce6da8013742239ccb2dce43f5f7b0d0f0a48cb227aafd7389aa1e161bc",
+      "source_input_count": 5067,
+      "source_unchanged": true,
+      "postgres_database": null
+    },
+    {
+      "name": "current-acquire-race",
+      "command": "go test -race ./internal/infrastructure/acquire -count=1",
+      "exit_code": 0,
+      "source_inputs_sha256": "b218a596f1709c90f82a06c8c09045c4473bcb09f300ba6200128586d46d105f",
+      "scope": "POSIX private Git clone regression; log SHA256 a51d8d83b27eef573a2221d321956b5edc5716bffa56b3e048cfb4b15425da35; acquire implementation/tests unchanged after this check; later ticket test-only edits do not invalidate it"
+    },
+    {
+      "name": "automatic-admission-stress-regressions",
+      "command": "/home/vihn/.local/share/mise/installs/go/1.27.0/bin/go test -race ./internal/usecase/ticketing -run TestAutoPush -count=10",
+      "exit_code": 0,
+      "evidence": "Implementation agent retained independent QA probes: pending/refused/uncertain command fence, 20 concurrent ticks, 200 unrelated valid intents and retry interval; package passed 2.280s. Final baseline and race run above use exact resulting source inputs."
+    }
+  ],
+  "reconcile_output": "=== RUN   TestInboundReconcileChargesIdentityWithinReadBudget\n--- PASS: TestInboundReconcileChargesIdentityWithinReadBudget (0.01s)\n=== RUN   TestInboundReconcileTimeoutCheckpointsAttemptedTargetForNextFairTick\n--- PASS: TestInboundReconcileTimeoutCheckpointsAttemptedTargetForNextFairTick (0.06s)\n=== RUN   TestWorkflowTickReconcilesProviderStateAndMarksUnreadable\n--- PASS: TestWorkflowTickReconcilesProviderStateAndMarksUnreadable (0.00s)\n=== RUN   TestWorkflowTickFreshUnreadableTicketDefersUntilReadableStatus\n--- PASS: TestWorkflowTickFreshUnreadableTicketDefersUntilReadableStatus (0.00s)\nPASS\nok  \tgithub.com/KKloudTarus/synapse-ce/internal/usecase/ticketing\t0.079s\n",
+  "scope": "Current source delta is automatic Jira admission and POSIX Git askpass. Final baseline, race and hostile harness use the current input hash after retaining QA regressions. Existing frontend208files/1408tests+build and full PostgreSQL repeated suite from review-verification-checks.json retain unchanged frontend/store/migration input scope. Real provider execution uses binaries with the same behavior source; later edits only retain tests. Initial failed clone baseline and diagnostic provider episodes remain private and are not acceptance passes."
+}

@@ -21,6 +21,32 @@ results, and how to back out.
 - Authentication errors carry a stable `code`, `request_id` and `retryable`. Only `authentication_invalid`
   means the credential is bad; `authentication_unavailable` (503) is a dependency outage.
 
+## Where the provider has to be reachable from
+
+The API's OIDC client admits globally reachable destinations only. It resolves the issuer host and
+checks every answer before dialling, so a provider on a loopback, private, unique-local or
+cloud-metadata address is refused:
+
+```
+build authorization URL: OIDC discovery is cooling down: discover OIDC issuer:
+Get "https://127.0.0.1:18543/realms/master/.well-known/openid-configuration":
+OIDC destination address 127.0.0.1 is not public
+```
+
+The client is deliberately not configurable: it ignores ambient proxy settings, follows no provider
+redirect, and there is no flag that admits a private address. One private answer among several is
+enough to refuse the host, so split-horizon DNS that returns an internal address to the API does not
+work either.
+
+What this means in practice:
+
+- A hosted provider (Entra ID, Okta, Auth0, Google) works as it is.
+- A self-hosted provider has to be published on a public name with a certificate the API trusts.
+  Keycloak, Authentik or Zitadel on an internal network cannot be reached from the API, and the
+  failure appears at the connection test rather than at startup.
+- A connection draft is accepted before any discovery runs, so a draft that stores cleanly says
+  nothing about reachability. The test is what proves it.
+
 ## Order of operations
 
 1. Run `synapse-migrate` with the migration credential. The migration only adds tables, functions and
