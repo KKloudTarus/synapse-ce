@@ -577,11 +577,38 @@ PostgreSQL. Both findings and both assignments are real rows written through
 | Assignee review when the read fails | [Light](assets/ui/ws4-console/assignee-review-error-light.png) | [Dark](assets/ui/ws4-console/assignee-review-error-dark.png) |
 | Assignee review as a read-only operator | [Light](assets/ui/ws4-console/assignee-review-denied-light.png) | [Dark](assets/ui/ws4-console/assignee-review-denied-dark.png) |
 | Ownership Inbox, where routed findings are taken on | [Light](assets/ui/ws4-console/ownership-inbox-light.png) | [Dark](assets/ui/ws4-console/ownership-inbox-dark.png) |
+| Inbox bulk assignment, with the assignee picker open | [Light](assets/ui/ws4-console/ownership-bulk-assign-light.png) | [Dark](assets/ui/ws4-console/ownership-bulk-assign-dark.png) |
+| The assignee search still outstanding | [Light](assets/ui/ws4-console/ownership-user-picker-loading-light.png) | [Dark](assets/ui/ws4-console/ownership-user-picker-loading-dark.png) |
+| The assignee search matching nobody | [Light](assets/ui/ws4-console/ownership-user-picker-empty-light.png) | [Dark](assets/ui/ws4-console/ownership-user-picker-empty-dark.png) |
+| The assignee search failing | [Light](assets/ui/ws4-console/ownership-user-picker-error-light.png) | [Dark](assets/ui/ws4-console/ownership-user-picker-error-dark.png) |
+| The inbox for an operator who cannot triage | [Light](assets/ui/ws4-console/ownership-inbox-readonly-light.png) | [Dark](assets/ui/ws4-console/ownership-inbox-readonly-dark.png) |
 
 The two finding captures are scrolled to the assignment control, so the picker, the stored
 label and the warning are all in frame. The loading capture holds
-`GET /api/v1/findings/assignee-review` open; the empty capture answers it with no items; the
-failing capture answers 503 and the page reports it.
+`GET /api/v1/findings/assignee-review` open after the Settings route has mounted, so the
+heading and `Loading unresolved assignees…` are both on screen; the empty capture answers
+that read with no items; the failing capture answers 503 and the page reports it.
+
+### The assignee controls themselves
+
+The second assignment surface is the Ownership Inbox: select findings, choose
+`Assign team / person`, pick the destination team, and the same `UserPicker` the finding
+detail uses appears. Its states are captured on that surface, because it is the one where a
+search is driven by hand:
+
+- Results. `GET /api/v1/users/picker?team_id=…` returns the team's eligible members, and the
+  list shows `name (id)`. `Cloud operations` has two memberships; only `Operator (bootstrap
+  admin)` is offered, because the `readonly` member cannot act on a finding. That is the
+  same rule the bridge applies in migration `0182`.
+- Searching. The picker holds its own `Searching users…` line while the read is outstanding.
+- No match. A search for a name nobody has settles on `No eligible users found.`
+- Failure. A 503 on that read raises `user directory unavailable` beside the field.
+- Permission. An operator without triage permission gets no selection column and no bulk
+  card at all, which is the capture in the row above; the control cannot be reached to show
+  a disabled state, so no such capture exists.
+
+The finding-detail copy of the picker is the control in the bound and unbound captures
+above. Its search states are the same component and are not captured twice.
 
 The run exercises both outcomes of the identity bridge, which is the point of the change:
 
