@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -130,7 +130,14 @@ describe('rule form pickers over the real client', () => {
     await screen.findByText('Rita Reader (70db0073427a1ec832d97b106a2295c1)')
     fireEvent.change(people, { target: { value: 'nobody-by-that-name' } })
     await waitFor(() => expect(asked.users.some((query) => query === 'nobody-by-that-name')).toBe(true))
-    await waitFor(() => expect(screen.queryByText('Rita Reader (70db0073427a1ec832d97b106a2295c1)')).not.toBeInTheDocument())
+    // The picker empties its list as soon as the query changes, so an empty list proves
+    // nothing on its own. The assertion is the settled state of this picker: the no-match
+    // line, with neither the searching line nor an error beside it.
+    const picker = within(people.closest('div') as HTMLElement)
+    expect(await picker.findByText('No matches.')).toBeInTheDocument()
+    expect(picker.queryByText('Searching…')).not.toBeInTheDocument()
+    expect(picker.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Rita Reader (70db0073427a1ec832d97b106a2295c1)')).not.toBeInTheDocument()
   })
 
   it('carries a chosen person into the rule the form submits', async () => {
