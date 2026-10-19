@@ -687,3 +687,42 @@ The route carries `rt.authz(userdom.PermManageIntegrations, ...)` in
 `internal/adapter/httpapi/router.go`, and the hostile tenant harness covers the refusal
 paths. The same account's bell carries no badge, because the notices in this tenant are
 addressed to administrators.
+
+## Verified contact state matrix on 2026-10-18
+
+The My profile surface #1412 added, captured from the console in Chromium against an API
+serving PostgreSQL.
+
+| Surface | Light | Dark |
+| --- | --- | --- |
+| Contacts still loading | [Light](assets/ui/ws4-console/profile-contacts-loading-light.png) | [Dark](assets/ui/ws4-console/profile-contacts-loading-dark.png) |
+| No contacts yet | [Light](assets/ui/ws4-console/profile-contacts-empty-light.png) | [Dark](assets/ui/ws4-console/profile-contacts-empty-dark.png) |
+| Added, pending verification, with the code form | [Light](assets/ui/ws4-console/profile-contact-added-light.png) | [Dark](assets/ui/ws4-console/profile-contact-added-dark.png) |
+| An address the API rejects | [Light](assets/ui/ws4-console/profile-contact-api-rejected-light.png) | [Dark](assets/ui/ws4-console/profile-contact-api-rejected-dark.png) |
+| An address the browser refuses to submit | [Light](assets/ui/ws4-console/profile-contact-browser-validation-light.png) | [Dark](assets/ui/ws4-console/profile-contact-browser-validation-dark.png) |
+| Verification asked for with no relay configured | [Light](assets/ui/ws4-console/profile-contact-verify-unavailable-light.png) | [Dark](assets/ui/ws4-console/profile-contact-verify-unavailable-dark.png) |
+
+Two of these are the browser and the server disagreeing about the same field, and the
+difference matters:
+
+- The browser capture is Chromium's own warning on `not-an-address`. The field is
+  `type="email"` and `required`, so nothing is sent and no handler runs.
+- The API capture is the server's answer. The address is a 260-character local part, which
+  Chromium accepts and `POST /api/v1/me/contacts` refuses with HTTP 400. The page shows what
+  the server said: `validation error: invalid contact email`.
+
+The loading capture holds `GET /api/v1/me/contacts` open and screenshots the page's own
+`Loading contacts…` state. The added contact is a real row created through
+`POST /api/v1/me/contacts`, and the unavailable state is what an operator sees when the
+deployment has no SMTP relay: `RequestVerification` reports `email verification is
+unavailable` rather than queueing a code nobody can receive.
+
+The emailed code itself is not captured here. The operator relay is dialled through the
+same SSRF guard as every other destination, so it refuses a loopback or private address,
+and no public relay was available for this run. The code path is covered by
+`TestContactVerificationUsesExistingSMTPTransport` and by the PostgreSQL verification
+tests, which assert the single-use, per-user scoping of each challenge.
+
+There is no permission-denied state for this surface: every signed-in person manages
+their own contacts, and the routes derive the identity from the principal rather than
+from anything the caller sends.
