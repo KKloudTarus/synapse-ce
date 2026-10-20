@@ -607,10 +607,34 @@ func (s *TicketStore) UpdateMapping(ctx context.Context, tenant shared.ID, m tic
 	if m.Locale == "" {
 		m.Locale = "en"
 	}
-	labels, _ := json.Marshal(m.Labels)
-	priorities, _ := json.Marshal(m.PriorityMap)
-	fields, _ := json.Marshal(m.FieldValues)
-	statusTransitions, _ := json.Marshal(m.StatusTransitions)
+	if m.Labels == nil {
+		m.Labels = []string{}
+	}
+	if m.PriorityMap == nil {
+		m.PriorityMap = map[string]string{}
+	}
+	if m.FieldValues == nil {
+		m.FieldValues = map[string]string{}
+	}
+	if m.StatusTransitions == nil {
+		m.StatusTransitions = map[ticketing.SyncState]string{}
+	}
+	labels, err := json.Marshal(m.Labels)
+	if err != nil {
+		return out, shared.ErrValidation
+	}
+	priorities, err := json.Marshal(m.PriorityMap)
+	if err != nil {
+		return out, shared.ErrValidation
+	}
+	fields, err := json.Marshal(m.FieldValues)
+	if err != nil {
+		return out, shared.ErrValidation
+	}
+	statusTransitions, err := json.Marshal(m.StatusTransitions)
+	if err != nil {
+		return out, shared.ErrValidation
+	}
 	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `UPDATE ticket_mappings SET project_key=$3,issue_type=$4,component=$5,labels=$6::jsonb,priority_map=$7::jsonb,security_level=$8,summary_template=$9,description_template=$10,field_values=$11::jsonb,transition_name=$12,data_class=$13,locale=$14,waiver_reason=$15,auto_push_enabled=$16,auto_push_min_severity=$17,auto_push_enabled_at=$18,grouping_mode=$19,status_transitions=$20::jsonb,version=version+1,updated_at=$21 WHERE tenant_id=$1 AND id=$2 AND version=$22 RETURNING `+mappingCols, tenant.String(), m.ID.String(), m.ProjectKey, m.IssueType, m.Component, string(labels), string(priorities), m.SecurityLevel, m.SummaryTemplate, m.DescriptionTemplate, string(fields), m.Transition, string(m.DataClass), m.Locale, m.WaiverReason, m.AutoPushEnabled, string(m.AutoPushMinSeverity), m.AutoPushEnabledAt, string(m.GroupingMode), string(statusTransitions), m.UpdatedAt.UTC(), expected)
 		var e error

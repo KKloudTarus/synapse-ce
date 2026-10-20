@@ -471,7 +471,7 @@ func TestForgeWriteRejectsCredentialRotatedAfterLiteralBinding(t *testing.T) {
 	}
 }
 
-func TestGitLabCreateAndSearchUseCanonicalProjectIssueURLs(t *testing.T) {
+func TestGitLabCreateAndSearchAcceptModernWorkItemURLs(t *testing.T) {
 	const marker = "synapse-intent-gitlab-marker"
 	var preflights, created, searched int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -487,14 +487,14 @@ func TestGitLabCreateAndSearchUseCanonicalProjectIssueURLs(t *testing.T) {
 			_, _ = w.Write([]byte(`{"permissions":{"project_access":{"access_level":40}}}`))
 		case r.Method == http.MethodPost && r.URL.EscapedPath() == "/projects/namespace%2Fproject/issues":
 			created++
-			_, _ = w.Write([]byte(`{"iid":42,"web_url":"https://gitlab.example/namespace/project/-/issues/42","confidential":true}`))
+			_, _ = w.Write([]byte(`{"iid":42,"web_url":"https://gitlab.example/namespace/project/-/work_items/42","confidential":true}`))
 		case r.Method == http.MethodGet && r.URL.EscapedPath() == "/projects/namespace%2Fproject/issues":
 			searched++
 			query := r.URL.Query()
 			if query.Get("labels") != marker || query.Get("scope") != "all" || query.Get("per_page") != "3" || len(query) != 3 {
 				t.Errorf("GitLab marker query = %q", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`[{"iid":42,"web_url":"https://gitlab.example/namespace/project/-/issues/42","confidential":true,"labels":["synapse-intent-gitlab-marker"]}]`))
+			_, _ = w.Write([]byte(`[{"iid":42,"web_url":"https://gitlab.example/namespace/project/-/work_items/42","confidential":true,"labels":["synapse-intent-gitlab-marker"]}]`))
 		default:
 			t.Errorf("unexpected GitLab request %s %s", r.Method, r.URL.String())
 			w.WriteHeader(http.StatusNotFound)
@@ -513,7 +513,7 @@ func TestGitLabCreateAndSearchUseCanonicalProjectIssueURLs(t *testing.T) {
 	}
 
 	createdTicket, err := a.CreateTicket(context.Background(), json.RawMessage(`{"title":"finding","confidential":true}`))
-	if err != nil || createdTicket.ID != "42" || createdTicket.URL != "https://gitlab.example/namespace/project/-/issues/42" {
+	if err != nil || createdTicket.ID != "42" || createdTicket.URL != "https://gitlab.example/namespace/project/-/work_items/42" {
 		t.Fatalf("GitLab create = %#v, %v", createdTicket, err)
 	}
 	hits, err := a.SearchTicketMarker(context.Background(), "namespace/project", "issue", marker)
@@ -525,12 +525,36 @@ func TestGitLabCreateAndSearchUseCanonicalProjectIssueURLs(t *testing.T) {
 	}
 }
 
-func TestGitLabIssueURLsRejectWrongPathCredentialsAndQuery(t *testing.T) {
+func TestGitLabTicketURLsAcceptCanonicalIssueAndWorkItemPaths(t *testing.T) {
 	a := &Adapter{provider: GitLabProvider, browserBase: &url.URL{Scheme: "https", Host: "gitlab.example"}, project: "namespace/project"}
 	for name, ticketURL := range map[string]string{
-		"wrong path":  "https://gitlab.example/namespace/project/issues/42",
-		"credentials": "https://token@gitlab.example/namespace/project/-/issues/42",
-		"query":       "https://gitlab.example/namespace/project/-/issues/42?private_token=forbidden",
+		"legacy issue":     "https://gitlab.example/namespace/project/-/issues/42",
+		"modern work item": "https://gitlab.example/namespace/project/-/work_items/42",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !a.ticketURLValid(ticketURL) {
+				t.Fatalf("ticket URL rejected: %q", ticketURL)
+			}
+		})
+	}
+}
+
+func TestGitLabTicketURLsRejectUnsafePathsAndOrigins(t *testing.T) {
+	a := &Adapter{provider: GitLabProvider, browserBase: &url.URL{Scheme: "https", Host: "gitlab.example"}, project: "namespace/project"}
+	for name, ticketURL := range map[string]string{
+		"wrong path":           "https://gitlab.example/namespace/project/issues/42",
+		"wrong project":        "https://gitlab.example/namespace/other/-/work_items/42",
+		"wrong host":           "https://attacker.example/namespace/project/-/work_items/42",
+		"credentials":          "https://token@gitlab.example/namespace/project/-/work_items/42",
+		"query":                "https://gitlab.example/namespace/project/-/work_items/42?private_token=forbidden",
+		"fragment":             "https://gitlab.example/namespace/project/-/work_items/42#forbidden",
+		"dot path":             "https://gitlab.example/namespace/project/./-/work_items/42",
+		"unexpected suffix":    "https://gitlab.example/namespace/project/-/work_items/42/notes",
+		"leading zero":         "https://gitlab.example/namespace/project/-/work_items/042",
+		"zero":                 "https://gitlab.example/namespace/project/-/work_items/0",
+		"escaped work item":    "https://gitlab.example/namespace/project/-/%77ork_items/42",
+		"non HTTPS":            "http://gitlab.example/namespace/project/-/work_items/42",
+		"cross project prefix": "https://gitlab.example/namespace/project-other/-/work_items/42",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := a.createGitLabWith(context.Background(), json.RawMessage(`{"title":"finding"}`), func(_ context.Context, _ string, _ string, _ url.Values, _ []byte, out any) error {
@@ -544,12 +568,19 @@ func TestGitLabIssueURLsRejectWrongPathCredentialsAndQuery(t *testing.T) {
 	}
 }
 
-func TestGitLabMarkerSearchRejectsWrongPathCredentialsAndQuery(t *testing.T) {
+func TestGitLabMarkerSearchRejectsUnsafePathsAndOrigins(t *testing.T) {
 	const marker = "synapse-intent-gitlab-marker"
 	for name, ticketURL := range map[string]string{
-		"wrong path":  "https://gitlab.example/namespace/project/issues/42",
-		"credentials": "https://token@gitlab.example/namespace/project/-/issues/42",
-		"query":       "https://gitlab.example/namespace/project/-/issues/42?private_token=forbidden",
+		"wrong path":        "https://gitlab.example/namespace/project/issues/42",
+		"wrong project":     "https://gitlab.example/namespace/other/-/work_items/42",
+		"wrong host":        "https://attacker.example/namespace/project/-/work_items/42",
+		"credentials":       "https://token@gitlab.example/namespace/project/-/work_items/42",
+		"query":             "https://gitlab.example/namespace/project/-/work_items/42?private_token=forbidden",
+		"fragment":          "https://gitlab.example/namespace/project/-/work_items/42#forbidden",
+		"dot path":          "https://gitlab.example/namespace/project/./-/work_items/42",
+		"unexpected suffix": "https://gitlab.example/namespace/project/-/work_items/42/notes",
+		"leading zero":      "https://gitlab.example/namespace/project/-/work_items/042",
+		"zero":              "https://gitlab.example/namespace/project/-/work_items/0",
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

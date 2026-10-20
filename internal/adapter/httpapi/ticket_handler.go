@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
@@ -192,8 +193,23 @@ func (rt *Router) previewTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rt.log, err)
 		return
 	}
-	var payload map[string]json.RawMessage
+	var payload struct {
+		Fields json.RawMessage `json:"fields"`
+		Wire   json.RawMessage `json:"wire"`
+		Facts  struct {
+			Provider string `json:"provider"`
+			Endpoint string `json:"endpoint"`
+		} `json:"_synapse"`
+	}
 	if err = json.Unmarshal(p.Payload, &payload); err != nil {
+		writeError(w, rt.log, shared.ErrValidation)
+		return
+	}
+	// Provider and endpoint come from the exact immutable payload used to derive
+	// p.Digest. Do not resolve the current integration here: a connection change
+	// after preview must not make the operator see a different destination.
+	provider, endpoint := strings.TrimSpace(payload.Facts.Provider), strings.TrimSpace(payload.Facts.Endpoint)
+	if provider == "" || endpoint == "" {
 		writeError(w, rt.log, shared.ErrValidation)
 		return
 	}
@@ -201,7 +217,7 @@ func (rt *Router) previewTicket(w http.ResponseWriter, r *http.Request) {
 	for _, link := range p.Links {
 		links = append(links, map[string]string{"label": link.Label, "url": link.URL})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"fields": payload["fields"], "wire": payload["wire"], "summary": p.Summary, "description": p.Description, "links": links, "security_waived": p.SecurityWaived, "data_class": p.DataClass, "digest": p.Digest, "mapping_version": p.MappingVersion, "marker_required": p.MarkerRequired, "marker_format": p.MarkerFormat})
+	writeJSON(w, http.StatusOK, map[string]any{"fields": payload.Fields, "wire": payload.Wire, "summary": p.Summary, "description": p.Description, "links": links, "security_waived": p.SecurityWaived, "data_class": p.DataClass, "digest": p.Digest, "mapping_version": p.MappingVersion, "marker_required": p.MarkerRequired, "marker_format": p.MarkerFormat, "provider": provider, "endpoint": endpoint})
 }
 func (rt *Router) submitTicket(w http.ResponseWriter, r *http.Request) {
 	var input struct {

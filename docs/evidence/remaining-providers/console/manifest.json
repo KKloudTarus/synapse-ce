@@ -7,7 +7,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "fa16dc3e6bc7dfc43513f6fff56c1dddf5e22ee34f2e5cb3fa1885ff60594e82"
+      "sha256": "2cbe38acb5cbdc60ea1929e37ed06be905122ccfbe858b2d9a74ce48cfa297e8"
     },
     {
       "file": "github-issues-light-mobile.png",
@@ -24,7 +24,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "90c5baa38de401b9a1a0a54510607fd7616aed1c0b296b73f8cd6019af3872fa"
+      "sha256": "14cd3b3120b674a447b91f0028be4e96ea051665b1ca81cb4c69e59e14eca422"
     },
     {
       "file": "azure-boards-light.png",
@@ -32,7 +32,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "3914f2b695ef4d49d9e3120db8db3159348dc5762fc80517cae5794aa3fee189"
+      "sha256": "42839c8f97d56edc61055001f995c6e99f6df370bff54d7e5be3f412861c23a4"
     },
     {
       "file": "servicenow-light.png",
@@ -40,7 +40,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "9b31ccc2f1d79b116110dfac8ab689d9ac696dd11ddf503631bc203e46eb01d3"
+      "sha256": "7a6741a7da7e7184ae03be23bbcf2005222a8811e47c30ad8bfa5fdcac4d408c"
     },
     {
       "file": "linear-light.png",
@@ -48,7 +48,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "7f0fe6f6326a6c2c9ddea07e2ae5740501fa01af8d8700c71aa33249d4709e97"
+      "sha256": "b3f88239281d5a061a4cca72c2135f5213c5ecc3f035ebdc3f19f2098b9dd5ba"
     },
     {
       "file": "loading-light.png",
@@ -56,7 +56,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "387c3f286142992d718c8127fe6daf06ad52c34a5bb7997153977fcd9f0d6698"
+      "sha256": "171430769df3692229969654f26e9dc0c69b6ff9077b8bb2b416ecf754a86091"
     },
     {
       "file": "empty-light.png",
@@ -64,7 +64,15 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "08960abb13d2778f6b6227fd2b9fe1e5ea4c8164ea55cb3911ed3ffda4523183"
+      "sha256": "2b931824892e839d94436181ec59448b573782a76cda586f3f8d6d9cc39ddb88"
+    },
+    {
+      "file": "orphan-light.png",
+      "state": "orphan",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "d24b90050e44bf436bdcfe58188453c2f40f6ed9faf3f57a3110fe86b76213f4"
     },
     {
       "file": "error-light.png",
@@ -72,7 +80,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "d2245cfe9eb790044742c912ea51290e029db30876b8df53d7e703e59a473637"
+      "sha256": "ba4d7b7ceb71b5f129896c82c0ac24f337ff6e212d3e72be85dc5173d56ac72e"
     },
     {
       "file": "permission-light.png",
@@ -80,7 +88,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "8bea15fbacb7ee7d285a72521af79f579f23cbea58ed739bee204ad561bd5b96"
+      "sha256": "ee72715914309d01170a56f125fed504ed6df082600039bcdfd0df324e5e81d1"
     },
     {
       "file": "permission-light-mobile.png",
@@ -97,7 +105,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "8a1d13e6918d1001490b433edd5d3fab9407db1b77184ff95a4a1f6d02e76759"
+      "sha256": "539e661aa66a5205f554102539acf24a9d3135f1f1c6ee641a087c40b53ae1ab"
     },
     {
       "file": "github-issues-dark-mobile.png",
@@ -114,7 +122,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "a3a187133c904725d17c0a255ec75da666e2fd72a5c66fb54d62cdaf2cce1cc3"
+      "sha256": "78cdda10c82679485bf35ae8526aab791f356917e1e78080517c15032455ae3c"
     },
     {
       "file": "azure-boards-dark.png",
@@ -122,7 +130,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "d21180c319bd2821faf033189f66dbfd6a00fb8b2aa4176127445e0959d79f7d"
+      "sha256": "a2f743d4d8adc4e58d0f8edab2144acff9193abe07a5b3df300a9546f90560f0"
     },
     {
       "file": "servicenow-dark.png",
@@ -130,7 +138,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "d54f71fa25650547d7a9ac510c1d6a40e6bc9bf7ab588b7751be0bd69d086e9f"
+      "sha256": "1f32ed5fe79dbd81a0ccb4be6a4de470391b3a20e488ee02f787e032e7912301"
     },
     {
       "file": "linear-dark.png",
@@ -138,7 +146,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "dd9d5a5a503a1e124078c2aa777fc598721e2dcc35f6b2e1732bf384de716609"
+      "sha256": "0a25ed275325585d275e5701e7220211551e258f62ece82ecf158aa02823ba26"
     },
     {
       "file": "loading-dark.png",
@@ -146,7 +154,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "56714d961df03b76895ce60c265131d250467a6b02ba04578142ebf456bc2b46"
+      "sha256": "915a62a848892c046129297ff90d8125a754247ad90a29c27bcc4a65d0d0de3b"
     },
     {
       "file": "empty-dark.png",
@@ -154,7 +162,15 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "aadb38deefbe3afd587819b1d54f9cd72d43007a2fc3a923dc243c44be8c093d"
+      "sha256": "cd9afae0453d85e07dfd1b0de870b9fa1d906c82f9736bbe49235cbe0ce5fb03"
+    },
+    {
+      "file": "orphan-dark.png",
+      "state": "orphan",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "1ff006699f84817c1a5315a61cb30090161522778399b560e0b8403dc157feef"
     },
     {
       "file": "error-dark.png",
@@ -162,7 +178,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "7d9f55af58ecb2e3ee023967756ed496eb7b7246e310637345b30ba46b429ac4"
+      "sha256": "19383a6151b33edad2dd9ec27fe78a4cd503ec6b70f88ba16ddb9fbd0a03f5f4"
     },
     {
       "file": "permission-dark.png",
@@ -170,7 +186,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "4d21d102578de0609b94b29e442062cca08baa7c5bc84295d90c3ce7c58a1781"
+      "sha256": "075639d0294187d1db8caaa199359a3d2dd094e25baffc455e2a6885004d7e12"
     },
     {
       "file": "permission-dark-mobile.png",

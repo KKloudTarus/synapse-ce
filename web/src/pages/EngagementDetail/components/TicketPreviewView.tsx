@@ -145,8 +145,10 @@ function renderedDescription(preview: TicketPreview) {
 /** Renders the immutable provider-ready ticket payload before an operator submits it. */
 export function TicketPreviewView({ preview, findingId }: { preview: TicketPreview; findingId?: string }) {
   const description = renderedDescription(preview)
+  const destinationReady = Boolean(preview.provider && preview.endpoint)
   return <div className="space-y-2 rounded-lg border border-secondary bg-secondary/40 p-3">
     <p className="text-xs font-semibold text-primary">{findingId ? `Preview · ${findingId} · ` : 'Preview · '}{preview.dataClass}</p>
+    {destinationReady ? <dl aria-label="Authoritative ticket destination" className="grid gap-1 rounded border border-secondary bg-primary/60 p-2 text-xs text-secondary"><div className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">Provider</dt><dd>{preview.provider}</dd></div><div className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">Endpoint</dt><dd className="break-all">{preview.endpoint}</dd></div><div className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">Project / type</dt><dd className="break-all">{value(preview.fields.project)} · {value(preview.fields.issuetype)}</dd></div></dl> : <p role="alert" className="text-xs text-error-primary">This preview does not disclose a destination bound to its digest. It cannot be submitted.</p>}
     <p className="text-sm font-medium text-primary">{preview.summary}</p>
     {preview.securityWaived && <p className="text-xs text-warning-primary">No Jira security level is set; this preview uses the recorded administrator waiver.</p>}
     {entries(preview.fields).length > 0 && <dl className="grid gap-1 text-xs text-secondary">{entries(preview.fields).map(([key, field]) => <div key={key} className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">{key}</dt><dd className="break-all">{value(field)}</dd></div>)}</dl>}

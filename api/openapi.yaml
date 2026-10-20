@@ -8223,6 +8223,13 @@ components:
     TicketPreview:
       type: object
       properties:
+        provider:
+          type: string
+          description: Provider identifier from the immutable payload bound to this preview digest.
+        endpoint:
+          type: string
+          format: uri
+          description: Destination endpoint from the immutable payload bound to this preview digest.
         summary: {type: string}
         description: {type: string}
         links:

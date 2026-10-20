@@ -1354,7 +1354,16 @@ func (a *Adapter) ticketURLValid(raw string) bool {
 	}
 	projectPath := "/" + a.project + "/issues/"
 	if a.provider == GitLabProvider {
-		projectPath = "/" + a.project + "/-/issues/"
+		projectPath = "/" + a.project + "/-/"
+		path := u.EscapedPath()
+		switch {
+		case strings.HasPrefix(path, projectPath+"issues/"):
+			projectPath += "issues/"
+		case strings.HasPrefix(path, projectPath+"work_items/"):
+			projectPath += "work_items/"
+		default:
+			return false
+		}
 	}
 	if !strings.HasPrefix(u.EscapedPath(), projectPath) {
 		return false

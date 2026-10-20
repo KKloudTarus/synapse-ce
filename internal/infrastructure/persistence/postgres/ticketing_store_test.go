@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeintent"
@@ -115,6 +116,7 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	assertTicketInboundTargetCatchup(t, ctx, pool, store, fixture)
 	assertTicketRetryAuditRollback(t, ctx, pool, store, fixture)
 	assertTicketStoreAuthoritativeProjectReferences(t, ctx, pool, store, fixture)
+	assertTicketMappingUpdateNormalizesOmittedCollections(t, ctx, store, fixture)
 	for _, table := range []string{"ticket_mappings", "ticket_links", "ticket_intents", "ticket_dispatch_breakers", "ticket_auto_push_receipts", "ticket_external_observations", "ticket_retest_proposals", "ticket_external_comments", "ticket_inbound_poll_progress", "ticket_inbound_poll_backfill_cursors"} {
 		var enabled, forced bool
 		err = pool.QueryRow(ctx, `SELECT relrowsecurity,relforcerowsecurity
@@ -239,6 +241,33 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	_, err = store.GetMapping(ctx, "ticket-b", "ticket-map-a")
 	if !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("other tenant mapping visible: %v", err)
+	}
+}
+
+func assertTicketMappingUpdateNormalizesOmittedCollections(t *testing.T, ctx context.Context, store *TicketStore, f storetest.Fixture) {
+	t.Helper()
+	mapping, err := store.GetMapping(ctx, f.Tenant, "ticket-map-a")
+	if err != nil {
+		t.Fatalf("load mapping before native policy update: %v", err)
+	}
+	mapping.Labels = nil
+	mapping.PriorityMap = nil
+	mapping.FieldValues = nil
+	mapping.StatusTransitions = nil
+	mapping.SecurityLevel = "private_repository"
+	mapping.DataClass = notification.DataClassSummary
+	mapping.Locale = "vi"
+	mapping.UpdatedAt = mapping.UpdatedAt.Add(time.Second)
+
+	updated, err := store.UpdateMapping(ctx, f.Tenant, mapping, mapping.Version)
+	if err != nil {
+		t.Fatalf("update native mapping with omitted collections: %v", err)
+	}
+	if updated.Version != mapping.Version+1 || updated.Locale != "vi" || updated.SecurityLevel != "private_repository" || updated.DataClass != notification.DataClassSummary {
+		t.Fatalf("updated native mapping = %+v", updated)
+	}
+	if updated.Labels == nil || updated.PriorityMap == nil || updated.FieldValues == nil || updated.StatusTransitions == nil || len(updated.Labels) != 0 || len(updated.PriorityMap) != 0 || len(updated.FieldValues) != 0 || len(updated.StatusTransitions) != 0 {
+		t.Fatalf("omitted collections were not persisted as empty values: %+v", updated)
 	}
 }
 

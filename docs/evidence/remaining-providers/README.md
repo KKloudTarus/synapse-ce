@@ -12,19 +12,19 @@ The implementation order is #1437 → #1438 → #1439 → #1440 → #1441 → #1
 Current draft scope, agreed with the maintainer on 20 October 2026: the working
 ticket and Microsoft/Drive document profiles below are implementation-ready.
 Notion (#1446) is excluded entirely, including connection-only registration and
-configuration; its claim and assignment are released on the issue. Live E2E and
-destination screenshots remain deferred. This is not acceptance or closure of the
-full B08 batch.
+configuration; its claim and assignment are released on the issue. Live E2E has since started on authorized personal sandboxes; see the
+[current live ledger](live/README.md) for actual outcomes and remaining gaps.
+This is not acceptance or closure of the full B08 batch.
 
 | Issue | Existing main | Candidate implementation / provider limit | Required current checks / remaining acceptance |
 | --- | --- | --- | --- |
-| #1437 GitHub Issues | Credentialless inbound adapter; tenant/host SCM credential store; durable ticket workflow | Private-only issue provider, SCM resolver injection, metadata, exact preview/marker recovery, registry/API/UI | Contract/privacy recheck, host/tenant/credential/redaction, failure/recovery and workflow tests; private EN/VI issues and console states remain live acceptance |
-| #1438 GitLab Issues | Inbound adapter and SCM connector | Confidential issue provider using same ticket path, SaaS/self-managed policy | Confidentiality, credential/egress/rate/error/uncertainty tests; native confidential EN/VI issues and console states remain live acceptance |
+| #1437 GitHub Issues | Credentialless inbound adapter; tenant/host SCM credential store; durable ticket workflow | Private-only issue provider, SCM resolver injection, metadata, exact preview/marker recovery, registry/API/UI | Contract/privacy/tenant/recovery tests pass; real private EN/VI issues, replay and acknowledgement-commit recovery recorded. Lost provider HTTP-response recovery remains open |
+| #1438 GitLab Issues | Inbound adapter and SCM connector | Confidential issue provider using same ticket path, SaaS/self-managed policy | Contract/privacy/tenant/recovery tests pass; real confidential EN/VI issues and one-attempt adoption of an uncertain create recorded. Broader native failure coverage remains open |
 | #1439 Azure Boards | Shared registry and ticket reconciliation | Native work-item provider and polling | Contract, exact-marker recovery, permissions/tenant/sealed secret, polling proposal tests; native work items remain live acceptance |
 | #1440 ServiceNow | Shared registry and ticket reconciliation | Incident/vulnerability record provider and polling | Contract, exact correlation recovery, permissions/tenant/sealed secret, polling proposal tests; native records remain live acceptance |
-| #1441 Linear | Shared registry and ticket reconciliation | Native GraphQL issue provider | GraphQL errors, metadata, exact-marker recovery, credential/egress/polling tests; native issues remain live acceptance |
+| #1441 Linear | Shared registry and ticket reconciliation | Native GraphQL issue provider | Contract and polling tests pass; real EN/VI issues, idempotent replay and observations recorded. Native terminal-author/proposal and failure acceptance remains open |
 | #1447 SharePoint / OneDrive | Shared document intent/restriction/release controls | Graph provider, opaque revision fencing, restricted-sharing proof, purge | Contract/ACL/pagination/inheritance/CAS/recovery/legal-hold/purge tests; native document and sharing views remain live acceptance |
-| #1448 Google Drive | Shared document intent/restriction/release controls | Drive provider, opaque revision fencing, restricted-sharing proof, purge | Contract/ACL/pagination/inheritance/CAS/recovery/legal-hold/purge tests; native document and sharing views remain live acceptance |
+| #1448 Google Drive | Shared document intent/restriction/release controls | Drive provider, opaque revision fencing, restricted-sharing proof, purge | Contract/ACL/pagination/CAS/recovery/legal-hold/purge tests pass; real restricted publish, same-ID republish, Reader PDF access and governed purge recorded. Interrupted upload/purge and sharing-drift native acceptance remain open |
 
 No new #1449 implementation: its conditional claim remains with nghiadaulau.
 No duplicate #1457 implementation or PR: #1587 merged on 19 October 2026.
@@ -57,22 +57,24 @@ that capability unavailable. An operator assertion is not provider permission ev
 
 ## Execution and evidence limits
 
-The maintainer directed implementation first and deferred E2E on 20 October 2026.
-No B08 live acceptance or Docker full-stack E2E is claimed by this preflight.
-Future GitHub acceptance must include a fresh unique correlation label with the
-configured PAT and recovery after a lost create response. A disposable local PostgreSQL container is used for persistence checks; no B08
-provider sandbox credentials were established. Missing live
-resources: dedicated private GitHub repository; GitLab project; Azure DevOps organization
-and project; ServiceNow instance; Linear workspace;
-Microsoft Graph test tenant, drive and restricted reader group;
-Google Drive test account/container and restricted reader identity. Live permissions,
-retention and sharing settings must be checked before future acceptance operations.
+The initial implementation-only gate was followed by authorized personal-sandbox
+E2E through the Docker API and integrations worker. The [live ledger](live/README.md)
+records native English/Vietnamese GitHub, GitLab and Linear issues, idempotent replay,
+GitHub acknowledgement-commit recovery, and restricted Drive publication, same-ID
+republish, Reader PDF access and governed purge. Earlier captures retain their
+candidate provenance; they are not represented as reruns on a later binary.
 
-B04/B07 screenshots and provider receipts retain their original source/environment/time
-provenance. They are historical foundation evidence, not current B08 execution. Revoked
-B06/B07 OAuth must not be reused. No billing or school resources may be changed.
-Contract doubles prove local behavior only. Current commands, review findings, UI previews
-and the final gate will be recorded here as they are produced; missing checks are not pass.
+Outstanding native acceptance includes an actual lost provider HTTP response,
+interrupted attachment upload/purge, live sharing drift/legal hold, and terminal
+actor/proposal cases. The ServiceNow PDI is signed in, but the dedicated machine
+identity and scoped OAuth client still require authorization; no ServiceNow record
+pass is claimed. Microsoft Azure Boards and SharePoint/OneDrive acceptance remains
+explicitly deferred on #1439/#1447. It needs an Azure DevOps organization/project
+and a business test tenant, drive, reader group and scoped credentials.
+
+B04/B07 evidence remains historical foundation evidence. Revoked B06/B07 OAuth was
+not reused, and billing and school resources were not changed. Contract doubles
+prove local behavior; they do not replace the remaining native acceptance.
 
 ## Review corrections
 
@@ -81,7 +83,7 @@ changes. Their findings are not approvals of the current candidate:
 
 | Finding | Correction / verification status |
 | --- | --- |
-| Native browser URLs rejected after successful ticket creation | GitLab uses its `/-/issues/` path; Linear uses its explicit browser origin; ServiceNow uses the documented Next Experience path with an encoded target and no outer query. Adapter and shared workflow acknowledgment/reconciliation regressions pass. The stored URL constraints remain unchanged. |
+| Native browser URLs rejected after successful ticket creation | GitLab accepts its exact `/-/issues/` and `/-/work_items/` paths; Linear uses its explicit browser origin; ServiceNow uses the documented Next Experience path with an encoded target and no outer query. Adapter and shared workflow acknowledgment/reconciliation regressions pass. The stored URL constraints remain unchanged. |
 | Unsupported Linear `Issue.updatedBy` query field | Removed; schema-shaped request tests assert that polling uses supported fields. |
 | Linear recovery accepted marker substrings | Require the exact terminal delimited marker exactly once; prefix, embedded, duplicate and foreign-team candidates are refused. |
 | Graph republish rejected newly staged attachments | A canonical, conditional-write ownership manifest binds staged filenames to exact Graph item IDs across adapter reconstruction. Manual files remain refused. Republish and purge regressions pass; reconstructed-adapter recovery tests cover interrupted neutral-shell initialization. |
@@ -94,6 +96,19 @@ changes. Their findings are not approvals of the current candidate:
 | Partial purge/upload was classified as a clean refusal after remote effects | Both purgers validate all children before deleting; any error after delete dispatch remains ambiguous. Graph post-create ACL/manifest/readback failures retain the fence. Executor post-restriction verification/readback failures also remain uncertain. Actual adapter regressions and the core quarantine/readback recovery regressions pass in Docker. |
 | Repeated document proofs consumed the worker budget | Reuse actor/metadata within one fresh Drive proof, fetch each ACL once, and avoid a duplicate monitor read. Maximum attachment proof regression passes. A document-local clean-checkpoint yield resumes acknowledged work without waiting for lease expiry. Graph snapshot reuse and four concurrent read-only child checks remove redundant proof work without caching across writes. At eleven attachments, the previously failing 300ms/request attachment completes in 18.972s under 45s; the 210ms/request monitor completes in 4.219s under 10s. These are synthetic measurements, not live guarantees. The full persistence gate is recorded separately. |
 
+Live testing exposed and corrected additional boundary defects:
+
+- Omitted mapping collections are normalized to JSON arrays/objects before the
+  PostgreSQL update; the real locale update now succeeds without weakening CAS/RLS.
+- Drive omits `pageToken` on first-page permission/child requests. Non-empty
+  continuation tokens, repeat detection and bounded pagination remain intact.
+- Drive metadata and media ETags differ in real responses. Revision-pinned bytes,
+  checksum verification and a final conditional metadata proof now protect reads
+  and duplicate-attachment recovery; write CAS and purge identity remain separate.
+- Mapping selectors disclose provider, connection and endpoint. Preview disclosure
+  comes from the digest-bound snapshot. Known Jira mappings retain their own route;
+  missing native connections lock saving while preserving orphan inspection/deletion.
+
 Notion is excluded from this PR at the maintainer's direction. The separate
 [#1446 issue](https://github.com/KKloudTarus/synapse-ce/issues/1446) retains its
 original product goal and acceptance, the released ownership, and feasibility
@@ -102,66 +117,49 @@ configuration form or connection-only capability ships in this change.
 
 ## Local verification
 
-Final checks run in Docker at the maintainer's request. The runtime is built from
-[docker-runtime.Dockerfile](docker-runtime.Dockerfile): Go 1.27.0, Node 22.23.3 and
-pnpm 9.15.9. Its verified image ID is
+Final checks ran in Docker using Go 1.27.0, Node 22.23.3, pnpm 9.15.9,
+golangci-lint 2.13.2, Helm 3.19.0 and PostgreSQL 17. The runtime defined by
+[docker-runtime.Dockerfile](docker-runtime.Dockerfile) is
 `sha256:a43aacdbc518ab3918c7f21563ce77ea85e927348b488b1f5d36f985709a3fde`.
-The backend runner mounts golangci-lint 2.13.2 and Helm 3.19.0 read-only, uses
-`GOCACHE=/cache/go` and `XDG_CACHE_HOME=/cache`, and shares the local Go module
-cache. The XDG cache setting also gives the SCA candidate's intentionally isolated
-build environment a writable default cache without changing its source or policy.
-The database gate uses disposable PostgreSQL 17 and streams Go test JSON.
+The runner uses `GOCACHE=/cache/go`, `XDG_CACHE_HOME=/cache` and a persistent cache
+on the host filesystem. Live API, worker and web binaries were rebuilt after the
+fixes; [candidate hashes](live/candidate-provenance.json) identify their inputs.
 
-Current results:
-
-| Check | Result |
+| Check | Current result |
 | --- | --- |
-| Full PostgreSQL persistence/RLS suite, `go test -json -timeout 90m -count=1 ./internal/infrastructure/persistence/postgres` | Docker exit 0; 1,149 test cases passed, four skipped, no failures, 1,712.893s. Persistence source inputs remained unchanged throughout. |
-| Full web suite, typecheck, production build and lint | Docker exit 0; 212 files and 1,438 tests passed. Lint: zero errors, twenty warnings. |
-| Document provider and shared executor recovery race regressions | Docker passed: documentproviders 5.680s and docpublish 14.651s. Includes permanent first/second DELETE 404 and post-create corrupt neutral-body readback regressions. |
-| Exact outbound SCM credential rotation and ticket workflow race regressions | Docker passed: ticketproviders 1.130s and ticketing 4.736s. Independent security focus passed in 1.041s. |
-| SCA candidate package after fixing the Docker cache | Docker passed, 103.800s. |
-| Final backend lint, build, vet, full tests, typecheck, hostile harness and focused race gate | Docker exit 0 on the final Notion-exclusion candidate. Lint: zero issues; no test failures. Current race: document adapters 4.955s, shared document executor 12.520s and integration service 1.038s. Prior domain/store/ticket race evidence applies to unchanged production code. |
+| `golangci-lint run --timeout=15m && make build vet test typecheck && make harness` | Docker exit 0; lint zero issues; no failing checks |
+| Focused race gate: ticket/document adapters, ticket/document use cases and integration service | Docker exit 0; independent QA also reran both adapter packages with `-race -count=1` |
+| Full PostgreSQL persistence/RLS suite, `go test -json -timeout 90m -count=1 ./internal/infrastructure/persistence/postgres` | 1,149 passed, four skipped, no failures, 1,375.446s. Persistence inputs remained unchanged afterward |
+| Full web Vitest suite, typecheck, production build and lint | 212 files / 1,450 tests passed; zero lint errors, twenty warnings. Final scope-fixture correction also passed all eleven Settings tests |
+| `go test -count=1 ./docs ./api` | Docker exit 0; 1.456s and 0.439s |
+| Independent implementation QA, QA/security/performance/reliability/frontend/architecture reviews | Passed after the Settings routing, permission and orphan-visibility corrections |
+| Browser evidence | Production-component fixture captures include missing/failed destination discovery, snapshot disclosure and 390px reflow. Actual Edge keyboard selection/preview/request expansion reached Submit without submitting a duplicate |
 
-After removing Notion, the full Docker web suite again passed all 212 files and
-1,438 tests, followed by typecheck, production build and lint (zero errors, twenty
-warnings). The final docs/API drift recheck passed in 2.087s and 0.859s. The opt-in
-rendering test regenerated the three authoritative provider descriptors; six
-retained configuration captures are unchanged. Independent QA, security and
-frontend reviews passed the removal delta. PostgreSQL/migration inputs are
-unchanged, so the completed full database run remains applicable.
+The first broad web run found a missing API test stub and two unrelated fifteen-second
+Template test timeouts. The stub was corrected; the final run used two workers and
+passed without increasing timeouts. Earlier Docker failures caused by a full `/tmp`
+cache, missing tooling or native toolchain termination are not pass evidence.
 
-Earlier native PostgreSQL runs terminated with `signal: killed`; an initial cold
-Docker lint run exceeded its default timeout. The first broad Docker runner then
-failed because Helm was absent and the SCA isolated build cache was not writable.
-Those runs are not pass evidence. The final backend runner mounts Helm, sets the
-XDG cache, and allows fifteen minutes for the same linter checks.
+The new Drive readback adds one conditional metadata GET per body or duplicate
+attachment proof; it does not change the restriction monitor path. Independent
+Docker checks passed bounded revision/cancellation/oversize cases and the existing
+maximum-attachment proof. The Graph eleven-attachment check measured 59 requests /
+3.213s at synthetic 100ms transport delay; Drive retained its eighteen-request proof
+bound. These are contract measurements, not native SLO or throughput claims.
 
-Final recovery QA, security, shared-core reliability, frontend and architecture
-reviews passed for their inspected working profiles after corrections. The bounded
-SCM rotation security recheck also passed. The real schedule/Service/Executor
-regression verifies one frozen artifact, yielded intent progress and the same
-occurrence converging after lease expiry without duplicate remote effects.
+Partial attachment/purge ambiguity remains durably quarantined. The earlier failed
+Drive update is retained behind its release fence; a separate synthetic source
+verified the corrected lifecycle. No automatic recovery or erasure is inferred
+from a missing remote object. Deploy the preview backend before the new frontend;
+older preview APIs fail closed in the new UI. Roll back the UI before the backend.
 
-The final performance review ran Docker contract measurements in 27.259s: Graph
-attachment eleven made 108 requests in 18.972s at synthetic 300ms latency, within
-the 45s worker-pass budget; monitoring made 38 requests in 4.219s at 210ms latency,
-within its 10s budget. Eleven attachment slices made 913 Graph requests and 286
-Drive requests. Concurrent read proofs peaked at four, with none active after
-return; failed proof caused zero writes. These measurements do not establish live
-latency or throughput.
-
-Partial attachment/purge quarantine preserves safety and durable fences; it does
-not claim automatic convergence. Live E2E and destination screenshots remain deferred.
-The worktree-bound Taurus report covers the supported profiles in this PR. Notion
-is outside its scope. Technical checks pass for the implementation delivered here. The Draft PR remains unmerged and
-must not be read as full B08 or native live acceptance.
-[Verification summary](verification-summary.json) records the Docker commands,
-exit codes and log digests. Full raw logs remain local outside source control.
+The [verification summary](verification-summary.json) records commands, outcomes and
+log hashes. The worktree-bound Taurus report is local under `.git/taurus/`. Raw logs,
+credentials and private runtime configuration remain outside source control.
 
 ## Local visual previews
 
-All captures below use synthetic fixtures. They show production components or the
+The 96 captures below use synthetic fixtures. They show production components or the
 actual HTML bytes produced by the document adapters; they are not screenshots from
 live provider sandboxes and do not satisfy native live acceptance.
 
@@ -170,13 +168,17 @@ live provider sandboxes and do not satisfy native live acceptance.
   [mobile](console/github-issues-light-mobile.png).
 - [Loading](console/loading-light.png), [empty](console/empty-light.png),
   [provider error](console/error-light.png),
-  [permission denied](console/permission-light.png).
+  [permission denied](console/permission-light.png),
+  [orphan mapping recovery](console/orphan-light.png).
 - [SharePoint configuration, light](configuration/sharepoint-light.png),
   [dark](configuration/sharepoint-dark.png),
   [Drive configuration](configuration/google-drive-light.png).
 - [Finding ticket preview](ticket-entry/ticket-preview-light.png),
   [bulk preview](ticket-entry/bulk-preview-dark.png),
-  [finding selection](ticket-entry/findings-bulk-selection-light.png).
+  [finding selection](ticket-entry/findings-bulk-selection-light.png),
+  [unresolved destination](ticket-entry/ticket-unresolved-light.png),
+  [missing preview destination](ticket-entry/ticket-preview-missing-destination-dark.png),
+  [390px preview](ticket-entry/ticket-preview-light-mobile.png).
 - [Publication and schedules](publication-console/document-light.png),
   [sharing drift](publication-console/restriction-lost-dark.png),
   [native request preview](publication-console/azure-preview-dark.png).
@@ -192,4 +194,6 @@ run `web/scripts/remaining-providers-evidence.mjs` and
 `web/scripts/document-provider-previews.mjs` and
 `web/scripts/document-configuration-previews.mjs` and
 `web/scripts/ticket-entry-previews.mjs` from `web/`. These scripts intercept
-API calls locally and do not contact provider services.
+API calls locally and do not contact provider services. Run these capture scripts
+sequentially against one Vite server; temporary-entry creation/removal triggers
+reloads in other simultaneously running captures.

@@ -28,7 +28,7 @@ import (
 
 const Drive integration.Provider = "google-drive"
 const folderMIME = "application/vnd.google-apps.folder"
-const driveFields = "id,title,mimeType,etag,description,parents(id),owners(permissionId),teamDriveId,labels(trashed),properties(key,value,visibility),md5Checksum"
+const driveFields = "id,title,mimeType,etag,description,parents(id),owners(permissionId),teamDriveId,labels(trashed),properties(key,value,visibility),headRevisionId,md5Checksum"
 
 var driveDescriptor = integration.ProviderDescriptor{
 	Provider: Drive, Name: "Google Drive", Description: "Governed HTML report folders in a dedicated service-owned My Drive folder. Exact reader permission and owner are verified before every upload; shared drives are refused.",
@@ -152,7 +152,8 @@ type driveFile struct {
 		Value      string `json:"value"`
 		Visibility string `json:"visibility"`
 	} `json:"properties"`
-	MD5 string `json:"md5Checksum"`
+	HeadRevision string `json:"headRevisionId"`
+	MD5          string `json:"md5Checksum"`
 }
 
 func (f driveFile) property(key string) string {
@@ -168,18 +169,70 @@ func (f driveFile) property(key string) string {
 	return value
 }
 func (a *driveAdapter) file(ctx context.Context, id string) (driveFile, error) {
+	return a.fileWithHeaders(ctx, id, nil)
+}
+
+func (a *driveAdapter) fileWithETag(ctx context.Context, id, etag string) (driveFile, error) {
+	if !validDriveETag(etag, a.token) {
+		return driveFile{}, shared.ErrValidation
+	}
+	return a.fileWithHeaders(ctx, id, http.Header{"If-Match": {etag}})
+}
+
+func (a *driveAdapter) fileWithHeaders(ctx context.Context, id string, headers http.Header) (driveFile, error) {
 	var f driveFile
 	if !safeID(id) {
 		return f, shared.ErrValidation
 	}
-	err := a.json(ctx, "GET", "/drive/v2/files/"+id, url.Values{"fields": {driveFields}}, nil, &f, 200)
+	raw, _, err := a.request(ctx, "GET", "/drive/v2/files/"+id, url.Values{"fields": {driveFields}}, nil, headers, 200)
 	if err != nil {
 		return f, err
 	}
-	if f.ID != id || f.Labels.Trashed || f.TeamDriveID != "" || f.ETag == "" || len(f.ETag) > 512 || strings.ContainsAny(f.ETag, "\r\n") || containsCredential(f.ETag, a.token) {
+	if json.Unmarshal(raw, &f) != nil {
+		return f, docError(200, "invalid_response", false)
+	}
+	if f.ID != id || f.Labels.Trashed || f.TeamDriveID != "" || !validDriveETag(f.ETag, a.token) {
 		return f, docError(200, "invalid_remote_identity", false)
 	}
 	return f, nil
+}
+
+func validDriveETag(etag, token string) bool {
+	return etag != "" && len(etag) <= 512 && !strings.ContainsAny(etag, "\r\n") && !containsCredential(etag, token)
+}
+
+func validDriveMD5(value string) bool {
+	if len(value) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+// readFileBytes binds a body read to the immutable Drive revision, then confirms
+// that the metadata used to select it has not changed. Drive media and metadata
+// responses may expose different ETags, so only the final metadata request uses
+// the metadata ETag as a conditional fence.
+func (a *driveAdapter) readFileBytes(ctx context.Context, f driveFile) ([]byte, error) {
+	if !safeID(f.ID) || !safeID(f.HeadRevision) || !validDriveMD5(f.MD5) || !validDriveETag(f.ETag, a.token) {
+		return nil, docError(200, "invalid_blob_identity", false)
+	}
+	raw, _, err := a.request(ctx, "GET", "/drive/v2/files/"+f.ID, url.Values{"alt": {"media"}, "revisionId": {f.HeadRevision}}, nil, nil, 200)
+	if err != nil {
+		return nil, err
+	}
+	sum := md5.Sum(raw) //nolint:gosec // Compare the vendor content checksum; this does not authenticate or authorize content.
+	if hex.EncodeToString(sum[:]) != f.MD5 {
+		return nil, docError(200, "content_checksum_mismatch", false)
+	}
+	confirmed, err := a.fileWithETag(ctx, f.ID, f.ETag)
+	if err != nil {
+		return nil, err
+	}
+	if confirmed.ETag != f.ETag || confirmed.HeadRevision != f.HeadRevision || confirmed.MD5 != f.MD5 {
+		return nil, docError(200, "blob_metadata_changed", false)
+	}
+	return raw, nil
 }
 func (a *driveAdapter) checkACL(ctx context.Context, id, group string) error {
 	owner, err := a.identity(ctx)
@@ -214,7 +267,11 @@ func (a *driveAdapter) checkKnownFileACL(ctx context.Context, f driveFile, owner
 			} `json:"items"`
 			Next string `json:"nextPageToken"`
 		}
-		if err := a.json(ctx, "GET", "/drive/v2/files/"+id+"/permissions", url.Values{"maxResults": {"100"}, "pageToken": {token}, "fields": {"items(id,type,role,deleted,additionalRoles),nextPageToken"}}, nil, &out, 200); err != nil {
+		query := url.Values{"maxResults": {"100"}, "fields": {"items(id,type,role,deleted,additionalRoles),nextPageToken"}}
+		if token != "" {
+			query.Set("pageToken", token)
+		}
+		if err := a.json(ctx, "GET", "/drive/v2/files/"+id+"/permissions", query, nil, &out, 200); err != nil {
 			return err
 		}
 		for _, p := range out.Items {
@@ -365,7 +422,11 @@ func (a *driveAdapter) allChildren(ctx context.Context, parent string, includeTr
 			Items []driveFile `json:"items"`
 			Next  string      `json:"nextPageToken"`
 		}
-		if err := a.json(ctx, "GET", "/drive/v2/files", url.Values{"q": {query}, "maxResults": {"100"}, "pageToken": {token}, "fields": {"items(" + driveFields + "),nextPageToken"}}, nil, &out, 200); err != nil {
+		pageQuery := url.Values{"q": {query}, "maxResults": {"100"}, "fields": {"items(" + driveFields + "),nextPageToken"}}
+		if token != "" {
+			pageQuery.Set("pageToken", token)
+		}
+		if err := a.json(ctx, "GET", "/drive/v2/files", pageQuery, nil, &out, 200); err != nil {
 			return nil, err
 		}
 		for _, f := range out.Items {
@@ -411,7 +472,7 @@ func (a *driveAdapter) GetDocument(ctx context.Context, page string) (ports.Docu
 			return out, docError(200, "invalid_body", false)
 		}
 		found = true
-		raw, _, err := a.request(ctx, "GET", "/drive/v2/files/"+body, url.Values{"alt": {"media"}}, nil, http.Header{"If-Match": {child.ETag}}, 200)
+		raw, err := a.readFileBytes(ctx, child)
 		if err != nil {
 			return out, err
 		}
@@ -519,7 +580,7 @@ func (a *driveAdapter) UploadDocumentAttachment(ctx context.Context, page string
 			if err = a.VerifyDocumentRestriction(ctx, page, a.container, a.group); err != nil {
 				return err
 			}
-			existing, _, readErr := a.request(ctx, "GET", "/drive/v2/files/"+f.ID, url.Values{"alt": {"media"}}, nil, http.Header{"If-Match": {f.ETag}}, 200)
+			existing, readErr := a.readFileBytes(ctx, f)
 			if readErr != nil {
 				return readErr
 			}

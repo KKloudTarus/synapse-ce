@@ -4,6 +4,12 @@ import { ticketingApi } from './ticketing'
 afterEach(() => vi.unstubAllGlobals())
 
 describe('ticketing API contract', () => {
+  it('keeps the preview destination supplied by the digest-bound response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ digest: 'preview', data_class: 'summary', provider: 'gitlab-issues', endpoint: 'https://bound.gitlab.example' }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const preview = await ticketingApi.previewTicket('eng', 'finding', 'mapping')
+    expect(preview).toMatchObject({ digest: 'preview', provider: 'gitlab-issues', endpoint: 'https://bound.gitlab.example' })
+  })
+
   it('reads proposal context and external comments without interpreting content', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ observations: [{ remote_id: 'SEC-1', status_category: 'done', deleted_or_unreadable: false }], proposals: [{ id: 'proposal', remote_id: 'SEC-1', state: 'pending', resolution_context: 'Fixed' }], comments: [{ id: 'comment', remote_id: 'SEC-1', origin: 'external', body: '@admin <b>Đã kiểm tra</b>' }] }), { status: 200, headers: { 'content-type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)

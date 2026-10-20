@@ -1,5 +1,8 @@
 {
   "base_commit": "a55a314aab8eb6e5979f7d886c82a0729776949f",
+  "compiled_from_head": "5193a130c15b4e4b5dd16b6d9d25dfe3e0034bfd",
+  "compiled_with_uncommitted_inputs": true,
+  "recorded_at_utc": "2026-10-20T05:22:40.154719+00:00",
   "runtime": {
     "image_id": "sha256:a43aacdbc518ab3918c7f21563ce77ea85e927348b488b1f5d36f985709a3fde",
     "go": "1.27.0",
@@ -13,6 +16,60 @@
     }
   },
   "checks": {
+    "backend": {
+      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race ./internal/infrastructure/integration/ticketproviders ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
+      "exit_code": 0,
+      "local_log_sha256": "685385d7f736afc27022f2c610c82359aa969cd8e883eb8cd932f9b691cb6065",
+      "log_modified_at_utc": "2026-10-20T05:08:51.454054+00:00",
+      "lint_issues": 0,
+      "test_failures": 0
+    },
+    "web": {
+      "command": "cd web && pnpm exec vitest run --maxWorkers=2 && pnpm exec tsc --noEmit && pnpm build && pnpm lint",
+      "exit_code": 0,
+      "local_log_sha256": "c887902a9c5cd467b5d1e4fd3c4ba11d9cc4ab1010ab5b4fc84fcc8ef16cfb08",
+      "log_modified_at_utc": "2026-10-20T05:18:52.402611+00:00",
+      "test_files_passed": 212,
+      "tests_passed": 1450,
+      "lint_errors": 0,
+      "lint_warnings": 20
+    },
+    "postgres": {
+      "command": "go test -json -timeout 90m -count=1 ./internal/infrastructure/persistence/postgres",
+      "exit_code": 0,
+      "local_log_sha256": "6ebb37e52ef13295ee8f47248848a860f257f5b5296a44ad3012dd2851a47d7f",
+      "log_modified_at_utc": "2026-10-20T04:37:56.642573+00:00",
+      "test_cases_passed": 1149,
+      "test_cases_skipped": 4,
+      "test_failures": 0,
+      "elapsed_seconds": 1375.446,
+      "changed_persistence_inputs_after_run": false
+    },
+    "docs_api": {
+      "command": "go test -count=1 ./docs ./api",
+      "exit_code": 0,
+      "local_log_sha256": "0dfd66c2cfa4ebd465fd4f0015209cea46e8d640a3d9169029a70a15f833d291",
+      "log_modified_at_utc": "2026-10-20T05:23:19.940969+00:00",
+      "package_seconds": {
+        "docs": 1.456,
+        "api": 0.439
+      }
+    },
+    "final_scope_fixture": {
+      "command": "cd web && pnpm exec vitest run src/pages/Settings/TicketProviderSettings.test.tsx",
+      "exit_code": 0,
+      "local_log_sha256": "d6752a35d343dd1bf6a30bef913df6cfdd703677dff307eb087affaf9d0f74bf",
+      "log_modified_at_utc": "2026-10-20T05:15:44.620062+00:00",
+      "tests_passed": 11
+    },
+    "preview_scripts_lint": {
+      "command": "cd web && pnpm exec eslint scripts/ticket-entry-previews.mjs scripts/document-provider-previews.mjs scripts/remaining-providers-evidence.mjs",
+      "exit_code": 0,
+      "local_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log_modified_at_utc": "2026-10-20T05:21:56.617168+00:00"
+    }
+  },
+  "historical_implementation_gate": {
     "backend": {
       "container": "synapse-provider-exclusion-backend",
       "started_at": "2026-10-20T03:12:54.107670256Z",
@@ -59,14 +116,52 @@
     }
   },
   "overall_scope_gate": "implementation_ready_draft",
-  "live_e2e": "Deferred by maintainer; no live acceptance claimed.",
-  "partial_effect_recovery": "Durable quarantine for uncertain attachment/purge; exact neutral shell recovery can converge after fresh proof. No automatic purge completion inferred from404.",
-  "scope_disposition_issue": "https://github.com/KKloudTarus/synapse-ce/issues/1446",
   "excluded_scope": "Notion issue #1446 is excluded entirely from the current PR, including connection-only support. Ownership is released; future native publication and policy decisions remain on the open issue.",
-  "reviews": "Independent QA, security and frontend removal-delta reviews passed. Prior architecture, reliability and performance reviews remain applicable to unchanged release/store/provider core.",
+  "scope_disposition_issue": "https://github.com/KKloudTarus/synapse-ce/issues/1446",
+  "partial_effect_recovery": "Durable quarantine for uncertain attachment/purge; exact neutral shell recovery can converge after fresh proof. No automatic purge completion inferred from404.",
+  "reviews": {
+    "implementation-qa": "pass",
+    "qa-verifier": "pass",
+    "security-auditor": "pass",
+    "performance-auditor": "pass",
+    "reliability-auditor": "pass",
+    "frontend-quality-auditor": "pass",
+    "architecture-critic": "pass",
+    "resolved_findings": [
+      "Known Jira mappings excluded from native settings; unresolved mappings cannot save.",
+      "Save/Create action restores permission, busy and loading guards.",
+      "Orphan mappings remain inspectable/deletable across scopes with no remaining connection."
+    ]
+  },
+  "live_e2e": {
+    "observed": "Private/confidential English and Vietnamese GitHub/GitLab issues; Linear issues; idempotent replay; GitHub acknowledgement-commit recovery; Drive create/update same remote ID/purge and separate Reader PDF access.",
+    "remaining": [
+      "Actual lost provider HTTP-response recovery",
+      "Interrupted upload/purge native acceptance",
+      "Native sharing drift/legal hold and terminal actor/proposal cases",
+      "ServiceNow dedicated machine identity/scoped OAuth authorization and native records"
+    ],
+    "explicitly_deferred": [
+      "Azure Boards Microsoft sandbox acceptance (#1439)",
+      "SharePoint/OneDrive Business acceptance (#1447)"
+    ],
+    "ledger": "live/README.md"
+  },
   "visual_evidence": {
-    "console_captures": 70,
-    "adapter_html_previews": 4,
-    "excluded_notion_captures_removed": 2
-  }
+    "console": 24,
+    "publication-console": 16,
+    "configuration": 6,
+    "ticket-entry": 46,
+    "adapter_html_previews": 4
+  },
+  "browser_checks": {
+    "manual_edge": "Keyboard Down/Tab selected GitLab among equal project/type/locale destinations; Enter opened snapshot preview, Enter expanded exact confidential request; Tab reached Submit without activation.",
+    "reflow": "Docker Chromium asserts no horizontal overflow at 390x900 for single/bulk ready/preview states, both themes.",
+    "limits": "No screen-reader, Firefox/WebKit/touch or field Core Web Vitals evidence."
+  },
+  "failed_attempts_not_pass_evidence": [
+    "Initial full web run: missing list API stub plus two unrelated fifteen-second Template timeouts; final maxWorkers=2 runs passed without changing timeouts.",
+    "Old /tmp Go cache exhausted tmpfs during a build/lint run; persistent host cache used for successful final checks.",
+    "Preview harness first used ambiguous text locators and parallel Vite capture jobs; final sequential regenerated captures passed."
+  ]
 }

@@ -19,7 +19,7 @@ const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', hea
 const captures = []
 try {
  for (const theme of ['light', 'dark']) {
-  for (const state of ['github-issues', 'gitlab-issues', 'azure-boards', 'servicenow', 'linear', 'loading', 'empty', 'error', 'permission']) {
+  for (const state of ['github-issues', 'gitlab-issues', 'azure-boards', 'servicenow', 'linear', 'loading', 'empty', 'orphan', 'error', 'permission']) {
    const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } })
    const page = await context.newPage()
    const errors = []
@@ -33,10 +33,10 @@ try {
     if (path === '/api/v1/aup') return respond({ accepted: true, version: 'preview', text: '' })
     if (path === '/api/v1/me') return respond({ id: 'preview-admin', name: 'Preview administrator', role: state === 'permission' ? 'readonly' : 'admin', tenant_id: 'preview-tenant' })
     if (path === '/api/v1/integration-providers') { if (state === 'loading') await new Promise(() => {}); return respond(providers) }
-    if (path === '/api/v1/integrations') return respond(state === 'empty' ? [] : connections)
+    if (path === '/api/v1/integrations') return respond(state === 'empty' || state === 'orphan' ? [] : connections)
     if (path === '/api/v1/engagements') return respond([{ id: 'preview-engagement', name: 'Dedicated test assessment', client: 'Synthetic fixture', state: 'active' }])
     if (path === '/api/v1/projects') return respond([])
-    if (path === '/api/v1/ticket-mappings') return respond([])
+    if (path === '/api/v1/ticket-mappings') return respond(state === 'orphan' ? [{ id: 'orphan-mapping', integration_id: 'removed-connection', scope: 'engagement', scope_id: 'preview-engagement', project_key: 'security/private', issue_type: 'issue', locale: 'en', data_class: 'summary', version: 1 }] : [])
     if (path.endsWith('/ticket-metadata')) {
      if (state === 'error') return respond({ code: 'provider_unavailable', error: 'SCM connector unavailable (synthetic fixture).' }, 503)
      const provider = providers.find(provider => path.includes(`/${provider.provider}/`)) ?? providers[0]
@@ -47,8 +47,13 @@ try {
    await page.goto(`${base}/settings/integrations/tickets`)
    if (state === 'loading') await page.getByText('Loading ticket providers…').waitFor()
    else if (state === 'permission') await page.getByText('Ticket settings require integration access').waitFor()
-   else if (state === 'empty') await page.getByText('No ticket provider connections').waitFor()
-   else {
+   else if (state === 'empty') { await page.getByText('No ticket provider connections').waitFor(); await page.getByText('No mappings for this scope.').waitFor() }
+   else if (state === 'orphan') {
+    await page.getByRole('button', { name: 'Unresolved ticket destination', exact: true }).click()
+    await page.getByText('This saved mapping no longer resolves to a provider connection. Select a supported mapping or create a new one.', { exact: true }).waitFor()
+    await expect(page.getByRole('button', { name: 'Save ticket mapping', exact: true })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Delete mapping', exact: true })).toBeEnabled()
+   } else {
     await page.getByLabel('Ticket connection', { exact: true }).waitFor().catch(async error => { console.log(await page.locator('body').innerText()); console.log(errors); await page.screenshot({path:'/tmp/synapse-provider-preview-failure.png'}); throw error })
     if (providers.some(provider => provider.provider === state) && await page.getByLabel('Ticket connection', { exact: true }).inputValue() !== state) await page.getByLabel('Ticket connection', { exact: true }).selectOption(state)
     if (state === 'error') await page.getByText('SCM connector unavailable (synthetic fixture).').waitFor()

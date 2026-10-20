@@ -8,6 +8,8 @@ const mapping = { id: 'mapping-1', integration_id: 'jira-1', scope: 'engagement'
 let linked = false
 
 const server = setupServer(
+  http.get('/api/v1/integrations', () => HttpResponse.json([{ id: 'jira-1', provider: 'jira-cloud', name: 'Security Jira', endpoint: 'https://team.atlassian.net' }])),
+  http.get('/api/v1/integration-providers', () => HttpResponse.json([{ provider: 'jira-cloud', name: 'Jira Cloud' }])),
   http.get('/api/v1/me', () => HttpResponse.json({ id: 'operator-1', role: 'admin' })),
   http.get('/api/v1/engagements/:engagementId/findings/:findingId/ticket-observations', () => HttpResponse.json({ observations: [], proposals: [], comments: [] })),
   http.get('/api/v1/engagements/:engagementId/findings/:findingId/tickets', () => HttpResponse.json({
@@ -15,7 +17,7 @@ const server = setupServer(
     intents: [{ id: 'intent-uncertain', state: 'uncertain', error_code: 'zero_matches', version: 1, created_at: '' }],
     mappings: [mapping],
   })),
-  http.post('/api/v1/engagements/:engagementId/findings/:findingId/ticket-preview', () => HttpResponse.json({ fields: { project: { key: 'SEC' }, issuetype: { id: '10001' }, security: { id: 'security-1' }, labels: ['security'] }, summary: 'SEC: SQL injection', description: 'Rendered preview', links: [{ label: 'Open finding', url: 'https://console.example/findings/finding-1' }], security_waived: true, marker_required: true, marker_format: 'synapse-intent-{intent_id}', data_class: 'summary', digest: 'digest-1', mapping_version: 1 })),
+  http.post('/api/v1/engagements/:engagementId/findings/:findingId/ticket-preview', () => HttpResponse.json({ provider: 'jira-cloud', endpoint: 'https://team.atlassian.net', fields: { project: { key: 'SEC' }, issuetype: { id: '10001' }, security: { id: 'security-1' }, labels: ['security'] }, summary: 'SEC: SQL injection', description: 'Rendered preview', links: [{ label: 'Open finding', url: 'https://console.example/findings/finding-1' }], security_waived: true, marker_required: true, marker_format: 'synapse-intent-{intent_id}', data_class: 'summary', digest: 'digest-1', mapping_version: 1 })),
   http.post('/api/v1/engagements/:engagementId/findings/:findingId/ticket-submit', () => { linked = true; return HttpResponse.json({ id: 'intent-new', state: 'queued', error_code: '', version: 1, created_at: '' }, { status: 202 }) }),
   http.post('/api/v1/ticket-intents/:intentId/reconcile', () => { linked = true; return HttpResponse.json({ id: 'intent-uncertain', state: 'done', error_code: '', version: 2, created_at: '' }) }),
 )

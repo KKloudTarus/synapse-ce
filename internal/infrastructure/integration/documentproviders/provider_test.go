@@ -68,16 +68,33 @@ func TestDocumentOriginsAndErrorsDoNotExposeCredentials(t *testing.T) {
 }
 
 type driveFixture struct {
-	files            map[string]map[string]any
-	content          map[string][]byte
-	extra            bool
-	incomplete       bool
-	writes, deletes  int
-	deleteAttempts   int
-	deleteFailAfter  int
-	deleteFailStatus int
-	next             int
-	revision         int
+	files                      map[string]map[string]any
+	content                    map[string][]byte
+	extra                      bool
+	incomplete                 bool
+	permissionPages            map[string]map[string]any
+	permissionPageTokens       []string
+	permissionPageTokenPresent []bool
+	childPages                 map[string]map[string]any
+	childPageTokens            []string
+	childPageTokenPresent      []bool
+	mediaRevisionIDs           []string
+	mediaIfMatches             []string
+	metadataIfMatches          []string
+	rejectMediaIfMatch         bool
+	mediaETag                  string
+	mediaStatus                int
+	metadataStatus             int
+	afterMediaETag             string
+	afterMediaHeadRevision     string
+	afterMediaMD5              string
+	corruptMedia               bool
+	writes, deletes            int
+	deleteAttempts             int
+	deleteFailAfter            int
+	deleteFailStatus           int
+	next                       int
+	revision                   int
 }
 
 func newDriveFixture(t *testing.T) (*driveAdapter, *driveFixture) {
@@ -104,6 +121,17 @@ func (f *driveFixture) serve(r *http.Request) (*http.Response, error) {
 		return response(200, map[string]any{"ids": []string{"folder", "body"}}), nil
 	}
 	if strings.HasSuffix(p, "/permissions") {
+		_, present := r.URL.Query()["pageToken"]
+		token := r.URL.Query().Get("pageToken")
+		f.permissionPageTokenPresent = append(f.permissionPageTokenPresent, present)
+		f.permissionPageTokens = append(f.permissionPageTokens, token)
+		if f.permissionPages != nil {
+			out, ok := f.permissionPages[token]
+			if !ok {
+				return response(400, map[string]string{"error": "unexpected page token"}), nil
+			}
+			return response(200, out), nil
+		}
 		permissions := []map[string]any{{"id": "owner", "type": "user", "role": "owner"}, {"id": "group", "type": "group", "role": "reader"}}
 		if f.extra {
 			permissions = append(permissions, map[string]any{"id": "everyone", "type": "anyone", "role": "reader"})
@@ -153,6 +181,7 @@ func (f *driveFixture) serve(r *http.Request) (*http.Response, error) {
 		file["id"] = id
 		f.revision++
 		file["etag"] = fmt.Sprintf("body-v%d", f.revision+1)
+		file["headRevisionId"] = fmt.Sprintf("head-%d", f.revision+1)
 		file["owners"] = []map[string]string{{"permissionId": "owner"}}
 		sum := md5.Sum(data)
 		file["md5Checksum"] = hex.EncodeToString(sum[:])
@@ -161,6 +190,17 @@ func (f *driveFixture) serve(r *http.Request) (*http.Response, error) {
 		return response(200, file), nil
 	}
 	if p == "/drive/v2/files" {
+		_, present := r.URL.Query()["pageToken"]
+		token := r.URL.Query().Get("pageToken")
+		f.childPageTokenPresent = append(f.childPageTokenPresent, present)
+		f.childPageTokens = append(f.childPageTokens, token)
+		if f.childPages != nil {
+			out, ok := f.childPages[token]
+			if !ok {
+				return response(400, map[string]string{"error": "unexpected page token"}), nil
+			}
+			return response(200, out), nil
+		}
 		q := r.URL.Query().Get("q")
 		items := []map[string]any{}
 		for _, file := range f.files {
@@ -192,12 +232,85 @@ func (f *driveFixture) serve(r *http.Request) (*http.Response, error) {
 		return response(204, []byte{}), nil
 	}
 	if r.URL.Query().Get("alt") == "media" {
-		if expected := r.Header.Get("If-Match"); expected != "" && expected != file["etag"] {
+		f.mediaRevisionIDs = append(f.mediaRevisionIDs, r.URL.Query().Get("revisionId"))
+		f.mediaIfMatches = append(f.mediaIfMatches, r.Header.Get("If-Match"))
+		if f.mediaStatus != 0 {
+			return response(f.mediaStatus, nil), nil
+		}
+		if f.rejectMediaIfMatch && r.Header.Get("If-Match") != "" {
+			return response(http.StatusPreconditionFailed, nil), nil
+		}
+		if revision, _ := file["headRevisionId"].(string); r.URL.Query().Get("revisionId") != revision {
 			return response(412, nil), nil
 		}
-		return response(200, f.content[id]), nil
+		if f.afterMediaETag != "" {
+			file["etag"] = f.afterMediaETag
+		}
+		if f.afterMediaHeadRevision != "" {
+			file["headRevisionId"] = f.afterMediaHeadRevision
+		}
+		if f.afterMediaMD5 != "" {
+			file["md5Checksum"] = f.afterMediaMD5
+		}
+		if f.corruptMedia {
+			return response(200, []byte("corrupted media")), nil
+		}
+		out := response(200, f.content[id])
+		if f.mediaETag != "" {
+			out.Header.Set("ETag", f.mediaETag)
+		}
+		return out, nil
+	}
+	if expected := r.Header.Get("If-Match"); expected != "" {
+		f.metadataIfMatches = append(f.metadataIfMatches, expected)
+		if f.metadataStatus != 0 {
+			return response(f.metadataStatus, nil), nil
+		}
+		if expected != file["etag"] {
+			return response(http.StatusPreconditionFailed, nil), nil
+		}
 	}
 	return response(200, file), nil
+}
+
+func TestDriveACLPaginationOmitsEmptyPageTokenAndPropagatesContinuation(t *testing.T) {
+	a, f := newDriveFixture(t)
+	f.permissionPages = map[string]map[string]any{
+		"":                 {"items": []map[string]any{{"id": "owner", "type": "user", "role": "owner"}}, "nextPageToken": "permissions-next"},
+		"permissions-next": {"items": []map[string]any{{"id": "group", "type": "group", "role": "reader"}}},
+	}
+	if err := a.CheckDocumentRelease(context.Background(), "parent", "group"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.permissionPageTokens) != 2 || f.permissionPageTokenPresent[0] || f.permissionPageTokens[0] != "" || !f.permissionPageTokenPresent[1] || f.permissionPageTokens[1] != "permissions-next" {
+		t.Fatalf("permission page tokens = present:%v values:%q", f.permissionPageTokenPresent, f.permissionPageTokens)
+	}
+}
+
+func TestDriveChildrenPaginationOmitsEmptyPageTokenAndPropagatesContinuation(t *testing.T) {
+	a, f := newDriveFixture(t)
+	f.childPages = map[string]map[string]any{
+		"":              {"items": []map[string]any{{"id": "child-one", "title": "one", "mimeType": "text/html", "etag": "one-v1", "parents": []map[string]string{{"id": "parent"}}, "owners": []map[string]string{{"permissionId": "owner"}}, "labels": map[string]bool{"trashed": false}}}, "nextPageToken": "children-next"},
+		"children-next": {"items": []map[string]any{{"id": "child-two", "title": "two", "mimeType": "text/html", "etag": "two-v1", "parents": []map[string]string{{"id": "parent"}}, "owners": []map[string]string{{"permissionId": "owner"}}, "labels": map[string]bool{"trashed": false}}}},
+	}
+	children, err := a.children(context.Background(), "parent")
+	if err != nil || len(children) != 2 {
+		t.Fatalf("children = %+v, err = %v", children, err)
+	}
+	if len(f.childPageTokens) != 2 || f.childPageTokenPresent[0] || f.childPageTokens[0] != "" || !f.childPageTokenPresent[1] || f.childPageTokens[1] != "children-next" {
+		t.Fatalf("child page tokens = present:%v values:%q", f.childPageTokenPresent, f.childPageTokens)
+	}
+}
+
+func TestDriveChildrenRejectsRepeatedPageToken(t *testing.T) {
+	a, f := newDriveFixture(t)
+	f.childPages = map[string]map[string]any{
+		"":       {"items": []map[string]any{}, "nextPageToken": "repeat"},
+		"repeat": {"items": []map[string]any{}, "nextPageToken": "repeat"},
+	}
+	if _, err := a.children(context.Background(), "parent"); err == nil {
+		t.Fatal("repeated child page token accepted")
+	}
 }
 func TestDriveRefusesPublicOrIncompleteACLBeforeCreatingShell(t *testing.T) {
 	for _, mode := range []string{"public", "incomplete"} {
@@ -357,7 +470,7 @@ func TestDriveHTMLAllowsOnlyInertSourceAndLiteralReportText(t *testing.T) {
 	}
 }
 
-func TestDriveContentReadIsFencedByMetadataETag(t *testing.T) {
+func TestDriveReadbackUsesHeadRevisionThenFencesOriginalMetadata(t *testing.T) {
 	a, f := newDriveFixture(t)
 	ctx := context.Background()
 	shell, err := a.CreateDocumentShell(ctx, "parent", "synapse-intent-fixture")
@@ -368,18 +481,173 @@ func TestDriveContentReadIsFencedByMetadataETag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Query().Get("alt") == "media" {
-			if r.Header.Get("If-Match") != "body-v2" {
-				t.Fatal("body read not fenced by metadata revision")
-			}
-			f.files["body"]["etag"] = "concurrent-revision"
-		}
-		return f.serve(r)
-	})
-	if _, err = a.GetDocument(ctx, shell.ID); err == nil {
-		t.Fatal("paired content with a different revision")
+	f.rejectMediaIfMatch = true
+	f.mediaETag = "media-body-v2"
+	remote, err := a.GetDocument(ctx, shell.ID)
+	if err != nil || remote.Revision != "body-v2" {
+		t.Fatalf("readback = %+v, err = %v", remote, err)
 	}
+	if len(f.mediaRevisionIDs) == 0 || f.mediaRevisionIDs[len(f.mediaRevisionIDs)-1] != "head-2" || f.mediaIfMatches[len(f.mediaIfMatches)-1] != "" || f.metadataIfMatches[len(f.metadataIfMatches)-1] != "body-v2" {
+		t.Fatalf("media revisions=%q media conditions=%q metadata conditions=%q", f.mediaRevisionIDs, f.mediaIfMatches, f.metadataIfMatches)
+	}
+}
+
+func TestDriveReadbackRejectsChangedMetadataAfterPinnedMedia(t *testing.T) {
+	for name, mutate := range map[string]func(*driveFixture){
+		"etag":          func(f *driveFixture) { f.afterMediaETag = "body-v3" },
+		"head revision": func(f *driveFixture) { f.afterMediaHeadRevision = "head-3" },
+		"checksum":      func(f *driveFixture) { f.afterMediaMD5 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+		"bytes":         func(f *driveFixture) { f.corruptMedia = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, f := newDriveFixture(t)
+			shell, err := a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = a.WriteDocumentRevision(context.Background(), shell, "Report", "<p>Approved</p>", "synapse-intent-fixture"); err != nil {
+				t.Fatal(err)
+			}
+			mutate(f)
+			if _, err = a.GetDocument(context.Background(), shell.ID); err == nil {
+				t.Fatal("changed blob proof accepted")
+			}
+			if name == "head revision" || name == "checksum" {
+				if len(f.metadataIfMatches) == 0 || f.metadataIfMatches[len(f.metadataIfMatches)-1] != "body-v2" {
+					t.Fatalf("changed metadata was not conditionally reread: %q", f.metadataIfMatches)
+				}
+			}
+		})
+	}
+}
+
+func TestDriveAttachmentProofUsesHeadRevisionAndDoesNotDuplicateOnFailure(t *testing.T) {
+	a, f := newDriveFixture(t)
+	ctx := context.Background()
+	shell, err := a.CreateDocumentShell(ctx, "parent", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachment := ports.DocumentImage{Name: "evidence.pdf", MediaType: "application/pdf", Data: []byte("%PDF-1.7 existing")}
+	if err = a.UploadDocumentAttachment(ctx, shell.ID, attachment); err != nil {
+		t.Fatal(err)
+	}
+	f.rejectMediaIfMatch = true
+	f.mediaETag = "media-attachment-v1"
+	before := f.writes
+	if err = a.UploadDocumentAttachment(ctx, shell.ID, attachment); err != nil {
+		t.Fatal(err)
+	}
+	if f.writes != before || len(f.mediaRevisionIDs) == 0 || f.mediaRevisionIDs[len(f.mediaRevisionIDs)-1] == "" || f.mediaIfMatches[len(f.mediaIfMatches)-1] != "" {
+		t.Fatalf("attachment proof duplicated or was not revision-pinned: writes=%d before=%d revisions=%q conditions=%q", f.writes, before, f.mediaRevisionIDs, f.mediaIfMatches)
+	}
+	conflicting := attachment
+	conflicting.Data = []byte("%PDF-1.7 different")
+	if err = a.UploadDocumentAttachment(ctx, shell.ID, conflicting); err == nil || f.writes != before {
+		t.Fatalf("attachment byte conflict accepted or uploaded duplicate: writes=%d before=%d err=%v", f.writes, before, err)
+	}
+	f.afterMediaETag = "attachment-drift"
+	if err = a.UploadDocumentAttachment(ctx, shell.ID, attachment); err == nil || f.writes != before {
+		t.Fatalf("drifted attachment proof accepted or uploaded duplicate: writes=%d before=%d err=%v", f.writes, before, err)
+	}
+}
+
+func TestDrivePurgeDoesNotRequireBlobReadMetadata(t *testing.T) {
+	a, f := newDriveFixture(t)
+	ctx := context.Background()
+	shell, err := a.CreateDocumentShell(ctx, "parent", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.WriteDocumentRevision(ctx, shell, "Report", "<p>Approved</p>", "synapse-intent-fixture"); err != nil {
+		t.Fatal(err)
+	}
+	delete(f.files["body"], "headRevisionId")
+	delete(f.files["body"], "md5Checksum")
+	if err = a.PurgeDocument(ctx, shell.ID, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if f.deletes != 2 {
+		t.Fatalf("purge did not remove the report and shell: deletes=%d", f.deletes)
+	}
+}
+
+func TestDriveBlobReadRejectsInvalidProofMetadataBeforeMediaRead(t *testing.T) {
+	data := []byte("managed blob")
+	sum := md5.Sum(data)
+	for name, file := range map[string]driveFile{
+		"missing head revision":   {ID: "body", ETag: "metadata-v1", MD5: hex.EncodeToString(sum[:])},
+		"malformed head revision": {ID: "body", ETag: "metadata-v1", HeadRevision: "head/revision", MD5: hex.EncodeToString(sum[:])},
+		"missing checksum":        {ID: "body", ETag: "metadata-v1", HeadRevision: "head-1"},
+		"malformed checksum":      {ID: "body", ETag: "metadata-v1", HeadRevision: "head-1", MD5: "not-a-checksum"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, f := newDriveFixture(t)
+			if _, err := a.readFileBytes(context.Background(), file); err == nil {
+				t.Fatal("invalid blob proof metadata accepted")
+			}
+			if len(f.mediaRevisionIDs) != 0 {
+				t.Fatalf("media read issued for invalid metadata: %q", f.mediaRevisionIDs)
+			}
+		})
+	}
+}
+
+func TestDriveReadbackFailsClosedWhenProviderRejectsMediaOrMetadata(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		phase  string
+		status int
+	}{
+		{name: "media forbidden", phase: "media", status: http.StatusForbidden},
+		{name: "media missing", phase: "media", status: http.StatusNotFound},
+		{name: "media changed", phase: "media", status: http.StatusPreconditionFailed},
+		{name: "metadata forbidden", phase: "metadata", status: http.StatusForbidden},
+		{name: "metadata missing", phase: "metadata", status: http.StatusNotFound},
+		{name: "metadata changed", phase: "metadata", status: http.StatusPreconditionFailed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a, f := newDriveFixture(t)
+			shell, err := a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = a.WriteDocumentRevision(context.Background(), shell, "Report", "<p>Approved</p>", "synapse-intent-fixture"); err != nil {
+				t.Fatal(err)
+			}
+			if test.phase == "media" {
+				f.mediaStatus = test.status
+			} else {
+				f.metadataStatus = test.status
+			}
+			if _, err = a.GetDocument(context.Background(), shell.ID); err == nil {
+				t.Fatal("rejected provider read accepted")
+			}
+		})
+	}
+}
+
+func TestDriveBlobReadFailsClosedOnCancellationAndOversizedMedia(t *testing.T) {
+	t.Run("cancellation", func(t *testing.T) {
+		a, _ := newDriveFixture(t)
+		a.client = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, r.Context().Err()
+		})}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := a.readFileBytes(ctx, driveFile{ID: "body", ETag: "metadata-v1", HeadRevision: "head-1", MD5: "00000000000000000000000000000000"}); err == nil {
+			t.Fatal("cancelled media read accepted")
+		}
+	})
+	t.Run("oversized media", func(t *testing.T) {
+		a, _ := newDriveFixture(t)
+		a.client = &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+			return response(http.StatusOK, bytes.Repeat([]byte{'x'}, 24<<20+1)), nil
+		})}
+		if _, err := a.readFileBytes(context.Background(), driveFile{ID: "body", ETag: "metadata-v1", HeadRevision: "head-1", MD5: "00000000000000000000000000000000"}); err == nil {
+			t.Fatal("oversized media accepted")
+		}
+	})
 }
 
 // This opt-in capture renders the same safe HTML bytes sent by the adapters.

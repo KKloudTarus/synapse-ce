@@ -7,7 +7,7 @@
       "theme": "light",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "a0234d6d539dec36545d8eeb2eece7a9939170d81f36ddfd4ba2ee64cfa6f63c"
+      "sha256": "a3257ecec94072c49adcf94b87968daf72ec8439c57de8421abdb2b46206e582"
     },
     {
       "file": "empty-light.png",
@@ -15,7 +15,7 @@
       "theme": "light",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "8eb136232a44198b02df5208b0f56351624e7abad18a31e3c19903949f290d6e"
+      "sha256": "7137924a75b8b571db992b9bd7ce8f24c7e5a63863af8b6d53c566a5ef79018b"
     },
     {
       "file": "loading-light.png",
@@ -23,7 +23,7 @@
       "theme": "light",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "a2cd4a1dc6d7a84fd87c288ac08f115c7ca83592b9e05b9a9cadc0944d1fbef8"
+      "sha256": "7de8a8bd43a8fde55623715ae771fe24181b2ae9c95768f581fd0505bf6a0a42"
     },
     {
       "file": "error-light.png",
@@ -31,7 +31,7 @@
       "theme": "light",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "a456802a753609aa99e60a1d0bdbc07796e57708743e6aaec10cbbeadddaaba8"
+      "sha256": "bd1d490c3e4dc8bfeb3322073c1024c389ff5226b886d66f5415fce468e83c1c"
     },
     {
       "file": "permission-light.png",
@@ -39,7 +39,7 @@
       "theme": "light",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "aa289f53809506368bb9602509e4f4dda0d34d9a169d785758d1f06003c02346"
+      "sha256": "322f52c05ed26945c1922625080c8bb41f9258aa78ce0e6b5b12fe4ffef6e807"
     },
     {
       "file": "restriction-lost-light.png",
@@ -47,7 +47,7 @@
       "theme": "light",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "18963a612aeec53557037800936753e6a45902e34b22f0928c705a7c6c30c8a3"
+      "sha256": "1be9d83184b83ced914d0102407da993c91d409795a3065023b5462df6b9217e"
     },
     {
       "file": "native-preview-light.png",
@@ -55,7 +55,7 @@
       "theme": "light",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "69ded44781227c6224e9dba28413f3c52d1b09ecd33e380f2bd135f7ac2755ba"
+      "sha256": "013fedf839772c7c1e10b2324aa68328dd447eac8b6ab07780e04173f5e6431a"
     },
     {
       "file": "azure-preview-light.png",
@@ -63,7 +63,7 @@
       "theme": "light",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "88073895ca68c137d428e3a53882ffec51cde990f68440630a6885a600596b98"
+      "sha256": "3ac372b585c9883b04fb8e30b5f40085751797cfd25a4197ff6193ec71a74dfa"
     },
     {
       "file": "document-dark.png",
@@ -71,7 +71,7 @@
       "theme": "dark",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "887f23127aa53fa5f8ce4d14324dc11930bb039f038d3faccd5c6b2715eba5a5"
+      "sha256": "60252a123a8de30fbaba9ab84357800b1135509760a790fdaf4a77fd46bb8228"
     },
     {
       "file": "empty-dark.png",
@@ -79,7 +79,7 @@
       "theme": "dark",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "c4694ab3e1ef4a96f9ffe4f73915fab8dc3619737ab9bc4d1338f129d553389f"
+      "sha256": "7f18b7e6d21317a106c8a32ffebe01daecb89c4f851903d9a2eeb4a2a318b7d8"
     },
     {
       "file": "loading-dark.png",
@@ -87,7 +87,7 @@
       "theme": "dark",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "a50db51da4a9a71afd085427d854e4ec3ecae501f46b6d1267b7b6a73cea9c98"
+      "sha256": "50b63b5e2490b0e2387fc3062e4bc157b8c7b5343cad6fcf3184d69946fc20e4"
     },
     {
       "file": "error-dark.png",
@@ -95,7 +95,7 @@
       "theme": "dark",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "153c8424c0a1671ca50be703c8210ed7fa5fa7fced14e391da44aec29d982c54"
+      "sha256": "ddc4647344c020dc8defddc6d8010ede18ca9f08c179319946d9e4513681a877"
     },
     {
       "file": "permission-dark.png",
@@ -103,7 +103,7 @@
       "theme": "dark",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "84406a2d16c72c8a2f4a8c2387c3971a43bfa400b003b1bcc73f67cef81d86cf"
+      "sha256": "887eba63679b67776fd79bb6db5a18596eaaffd9d6d095f1c98bd9967920df44"
     },
     {
       "file": "restriction-lost-dark.png",
@@ -111,7 +111,7 @@
       "theme": "dark",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "7e7526a73f308d3ee3626ae06ded5165f4d740e731cc419308de330dadc5dca3"
+      "sha256": "cfacb96ccf9ee94c459ebfc2b3b84ee7054ab5606100b20266805380ad6b7f1f"
     },
     {
       "file": "native-preview-dark.png",
@@ -119,7 +119,7 @@
       "theme": "dark",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "735022688674f3c73ab92277ff456a25f8b09231c03c9f1b40fb926c007debd7"
+      "sha256": "63dbead289fec133775a442ae14f526b12a6ce223a45374f4e8f42a376047715"
     },
     {
       "file": "azure-preview-dark.png",
@@ -127,7 +127,7 @@
       "theme": "dark",
       "source": "Production components, synthetic API fixtures",
       "errors": [],
-      "sha256": "3dcc4ab90ab659b62793b4495b1dbed04b20ec449af4c58bf5acdf96ed328a7d"
+      "sha256": "f0bd9aa7208b431fe9be1eb516e04d92944d2acde327cd304a134b78fa67884c"
     }
   ]
 }

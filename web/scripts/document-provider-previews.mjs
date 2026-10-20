@@ -17,7 +17,7 @@ import {DocumentPublishingPanel} from '../src/pages/EngagementDetail/components/
 import {TicketPreviewView} from '../src/pages/EngagementDetail/components/TicketPreviewView';
 import '../src/index.css'; import '../src/styles/globals.css';
 const state=new URLSearchParams(location.search).get('state')||'document';
-const preview={summary:'SQL injection — Tiếng Việt',description:'**Approved stored finding**\\n\\nLiteral <script> stays inert.\\n\\nBằng chứng đã được phê duyệt.',fields:{project:'security/private'},dataClass:'summary',digest:'synthetic-preview',mappingVersion:1,markerRequired:true,markerFormat:'synapse-intent-…',wire:state==='azure-preview'?[{op:'add',path:'/fields/System.Title',value:'SQL injection — Tiếng Việt'},{op:'add',path:'/fields/System.Description',value:'Approved stored finding'}]:{title:'SQL injection — Tiếng Việt',body:'Approved stored finding',labels:[]}};
+const preview={provider:state==='azure-preview'?'azure-boards':'github-issues',endpoint:state==='azure-preview'?'https://dev.azure.com/sandbox':'https://github.example.test',summary:'SQL injection — Tiếng Việt',description:'**Approved stored finding**\\n\\nLiteral <script> stays inert.\\n\\nBằng chứng đã được phê duyệt.',fields:{project:state==='azure-preview'?'org/security':'security/private',issuetype:state==='azure-preview'?'Bug':'issue'},dataClass:'summary',digest:'synthetic-preview',mappingVersion:1,markerRequired:true,markerFormat:'synapse-intent-…',wire:state==='azure-preview'?[{op:'add',path:'/fields/System.Title',value:'SQL injection — Tiếng Việt'},{op:'add',path:'/fields/System.Description',value:'Approved stored finding'}]:{title:'SQL injection — Tiếng Việt',body:'Approved stored finding',labels:[]}};
 const theme=new URLSearchParams(location.search).get('theme')||'light';document.documentElement.dataset.theme=theme;if(theme==='dark')document.documentElement.classList.add('dark-mode');
 createRoot(document.getElementById('root')!).render(<main className="min-h-screen bg-primary p-8"><p className="mb-4 text-sm text-tertiary">Local visual preview · synthetic fixtures · no live provider acceptance</p>{state.endsWith('preview')?<TicketPreviewView preview={preview as any}/>:<DocumentPublishingPanel engagementId="preview-engagement"/>}</main>);
 `)
@@ -52,7 +52,7 @@ try {
    if (state.endsWith('preview')) { await page.getByText('Exact provider request').click(); await page.getByText('Submitting adds the correlation marker', { exact: false }).waitFor() }
    else if (state === 'loading') await page.getByText('Loading document publications…').waitFor()
    else if (state === 'error') await page.getByText('Document links unavailable (synthetic fixture).').waitFor()
-   else if (state === 'permission') await page.getByText('reviewer or administrator', { exact: false }).waitFor()
+   else if (state === 'permission') await page.getByText('A reviewer or administrator can request publication and unpublish a report.', { exact: true }).waitFor()
    else if (state === 'restriction-lost') await page.getByText('Restricted sharing lost').waitFor()
    else if (state === 'empty') await page.getByText('No enabled document connection with credentials is available.', { exact: false }).waitFor()
    else await page.getByLabel('Document connection').waitFor()

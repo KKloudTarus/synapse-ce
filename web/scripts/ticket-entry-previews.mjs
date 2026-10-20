@@ -48,7 +48,8 @@ const mapping = {
   transition_id: '', status_transitions: {}, grouping_mode: 'finding', auto_push_enabled: false, auto_push_min_severity: 'high', version: 3,
 }
 const preview = {
-  summary: 'SQL injection in account search', description: 'Approved synthetic finding for a private repository.', fields: {},
+  provider: 'github-issues', endpoint: 'https://github.example.test',
+  summary: 'SQL injection in account search', description: 'Approved synthetic finding for a private repository.', fields: { project: 'security/private', issuetype: 'issue' },
   data_class: 'summary', digest: 'synthetic-preview-digest', mapping_version: 3, marker_required: true,
   marker_format: 'synapse-intent:v1', wire: { title: 'SQL injection in account search', body: 'Approved synthetic finding for a private repository.', labels: ['security'] },
 }
@@ -59,9 +60,13 @@ const tickets = {
 }
 const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] })
 const captures = []
+let activePage
+let activeState
 const states = [
   'ticket-ready', 'ticket-preview', 'ticket-empty', 'ticket-loading', 'ticket-error', 'ticket-readonly',
   'bulk-ready', 'bulk-preview', 'bulk-empty', 'bulk-loading', 'bulk-error', 'bulk-readonly',
+  'ticket-unresolved', 'ticket-destination-error', 'ticket-preview-missing-destination',
+  'bulk-unresolved', 'bulk-destination-error', 'bulk-preview-missing-destination',
   'findings-bulk-selection',
 ]
 const respond = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
@@ -72,23 +77,36 @@ try {
       const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
       await context.addInitScript((value) => localStorage.setItem('synapse-theme', value), theme)
       const page = await context.newPage()
+      activePage = page
+      activeState = `${state}-${theme}`
       const errors = []
       page.on('pageerror', (error) => errors.push(error.message))
       await page.route('**/api/**', async (route) => {
         const pathname = new URL(route.request().url()).pathname
         if (!pathname.startsWith('/api/')) return route.continue()
         if (pathname === '/api/v1/me') return respond(route, { id: 'preview-user', name: 'Preview user', tenant_id: 'preview-tenant', role: state.endsWith('readonly') ? 'readonly' : 'reviewer' })
+        if (pathname === '/api/v1/integrations' && state.endsWith('destination-error')) return respond(route, { error: 'Destination discovery unavailable (synthetic fixture).' }, 503)
+        if (pathname === '/api/v1/integrations' && state.endsWith('unresolved')) return respond(route, [])
+        if (pathname === '/api/v1/integrations') return respond(route, [{ id: 'github-issues', provider: 'github-issues', name: 'Private security repository', endpoint: 'https://github.example.test' }])
+        if (pathname === '/api/v1/integration-providers') return respond(route, [{ provider: 'github-issues', name: 'GitHub Issues' }])
         if (pathname.endsWith('/ticket-observations')) return respond(route, { observations: [{ remote_id: '23', status_category: 'open', deleted_or_unreadable: false, checked_at: '2026-10-20T00:00:00Z' }], proposals: [], comments: [] })
         if (pathname.endsWith('/tickets') && route.request().method() === 'GET') {
           if (state.endsWith('loading')) return new Promise(() => {})
-          if (state.endsWith('error')) return respond(route, { error: 'Ticket delivery service unavailable (synthetic fixture).' }, 503)
+          if (state === 'ticket-error' || state === 'bulk-error') return respond(route, { error: 'Ticket delivery service unavailable (synthetic fixture).' }, 503)
           return respond(route, state.endsWith('empty') ? { links: [], intents: [], mappings: [] } : tickets)
         }
-        if (pathname.endsWith('/ticket-preview')) return respond(route, { ...preview, summary: pathname.includes('finding-two') ? 'Missing authorization check' : preview.summary })
+        if (pathname.endsWith('/ticket-preview')) return respond(route, { ...preview, ...(state.endsWith('missing-destination') ? { provider: undefined, endpoint: undefined } : {}), summary: pathname.includes('finding-two') ? 'Missing authorization check' : preview.summary })
         return respond(route, [])
       })
       await page.goto(`${base}/${directory}/index.html?state=${state}&theme=${theme}`)
-      if (state === 'ticket-ready') await page.getByRole('button', { name: 'Preview ticket' }).waitFor()
+      if (state.endsWith('unresolved') || state.endsWith('destination-error')) {
+        await page.getByRole('alert').filter({ hasText: state.endsWith('unresolved') ? 'selected mapping no longer resolves' : 'Ticket destination details are unavailable' }).waitFor()
+        await expect(page.getByRole('button', { name: state.startsWith('ticket-') ? 'Preview ticket' : 'Prepare previews' })).toBeDisabled()
+      } else if (state.endsWith('missing-destination')) {
+        await page.getByRole('button', { name: state.startsWith('ticket-') ? 'Preview ticket' : 'Prepare previews' }).click()
+        await page.getByText('This preview does not disclose a destination bound to its digest. It cannot be submitted.', { exact: true }).first().waitFor()
+        await expect(page.getByRole('button', { name: state.startsWith('ticket-') ? 'Submit ticket' : /^Submit 2 tickets$/ })).toBeDisabled()
+      } else if (state === 'ticket-ready') await page.getByRole('button', { name: 'Preview ticket' }).waitFor()
       else if (state === 'ticket-preview') { await page.getByRole('button', { name: 'Preview ticket' }).click(); await page.getByRole('button', { name: 'Submit ticket' }).waitFor(); await page.getByText('Exact provider request').click() }
       else if (state === 'ticket-empty') await page.getByText('No ticket mapping for this scope').waitFor()
       else if (state === 'ticket-loading') await page.getByText('Loading ticket links…').waitFor()
@@ -99,15 +117,30 @@ try {
       else if (state === 'bulk-empty') await page.getByText('No ticket mapping is configured for this engagement.').waitFor()
       else if (state === 'bulk-loading') await page.getByText('Loading Ticket mappings…').waitFor()
       else if (state === 'bulk-error') await page.getByText('Ticket delivery service unavailable (synthetic fixture).').waitFor()
-      else if (state === 'bulk-readonly') { await page.getByText('must prepare and submit tickets.').waitFor(); await expect(page.getByRole('button', { name: 'Prepare previews' })).toBeDisabled() }
+      else if (state === 'bulk-readonly') { await page.getByText('A consultant, reviewer, or administrator must prepare and submit tickets.', { exact: true }).waitFor(); await expect(page.getByRole('button', { name: 'Prepare previews' })).toBeDisabled() }
       else { await page.getByLabel('Select SQL injection in account search for ticket').check(); await page.getByRole('button', { name: 'Create tickets (1)' }).waitFor() }
       const file = `${state}-${theme}.png`
       const path = resolve(output, file)
       await page.screenshot({ path, fullPage: true })
       captures.push({ file, state, theme, source: 'Production components, synthetic local API fixtures', errors, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') })
+      if (['ticket-ready', 'ticket-preview', 'bulk-ready', 'bulk-preview'].includes(state)) {
+        await page.setViewportSize({ width: 390, height: 900 })
+        if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)) throw new Error(`Horizontal overflow: ${state} ${theme}`)
+        const mobileFile = `${state}-${theme}-mobile.png`
+        const mobilePath = resolve(output, mobileFile)
+        await page.screenshot({ path: mobilePath, fullPage: true })
+        captures.push({ file: mobileFile, state, theme, viewport: 'mobile', source: 'Production components, synthetic local API fixtures', errors, sha256: createHash('sha256').update(readFileSync(mobilePath)).digest('hex') })
+      }
       await context.close()
     }
   }
+} catch (error) {
+  console.error('Ticket entry capture failed:', activeState)
+  if (activePage && !activePage.isClosed()) {
+    console.error(await activePage.locator('body').innerText())
+    await activePage.screenshot({ path: '/tmp/synapse-ticket-entry-preview-failure.png', fullPage: true })
+  }
+  throw error
 } finally {
   await browser.close()
   rmSync(temporary, { recursive: true, force: true })

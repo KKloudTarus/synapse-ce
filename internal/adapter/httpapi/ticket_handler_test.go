@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -20,6 +21,40 @@ type ticketHTTPFake struct {
 	tenant       shared.ID
 	mappingInput ticketuc.MappingInput
 	resetInput   [4]string
+}
+
+type ticketPreviewFake struct {
+	ticketHTTPFake
+	preview ticketuc.Preview
+}
+
+func (f *ticketPreviewFake) Preview(context.Context, ticketuc.PreviewRequest) (ticketuc.Preview, error) {
+	return f.preview, nil
+}
+
+func TestTicketPreviewDisclosesOnlyDestinationFrozenInDigestPayload(t *testing.T) {
+	fake := &ticketPreviewFake{preview: ticketuc.Preview{
+		Payload: []byte(`{"fields":{"project":{"key":"owner/repo"},"issuetype":{"id":"issue"}},"_synapse":{"provider":"gitlab-issues","endpoint":"https://gitlab.example","credential_revision":9,"waiver_reason":"must not leak"}}`),
+		Digest:  "digest-bound-to-payload",
+	}}
+	rt := &Router{log: discardLog()}
+	rt.SetTicketing(fake)
+	request := httptest.NewRequest("POST", "/api/v1/engagements/eng/findings/finding/ticket-preview", strings.NewReader(`{"mapping_id":"mapping"}`))
+	response := httptest.NewRecorder()
+	rt.previewTicket(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["provider"] != "gitlab-issues" || body["endpoint"] != "https://gitlab.example" || body["digest"] != "digest-bound-to-payload" {
+		t.Fatalf("destination=%v", body)
+	}
+	if strings.Contains(response.Body.String(), "credential_revision") || strings.Contains(response.Body.String(), "waiver_reason") || strings.Contains(response.Body.String(), "_synapse") {
+		t.Fatalf("internal snapshot leaked: %s", response.Body.String())
+	}
 }
 
 func (f *ticketHTTPFake) ResetBreaker(_ context.Context, tenant, id shared.ID, project, issueType, actor string) error {
