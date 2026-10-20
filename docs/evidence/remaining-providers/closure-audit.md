@@ -15,7 +15,7 @@ together. Issues must not be manually closed to skip that prerequisite.
 | #1440 ServiceNow | Incident profile satisfies the issue's “incidents or vulnerability records” outcome. Identity/polling contracts, restricted-token matrix and fresh readable EN/VI records pass. Plain-text formatter regression and independent visual recheck resolve the Markdown-escape defect. | Eligible for a closing keyword with the refreshed evidence; closes on merge. |
 | #1441 Linear | Native GraphQL contracts, exact-marker recovery, real EN/VI issues and polling observations. QA inspected native content and console states. | Eligible for a closing keyword; closes on merge. |
 | #1447 SharePoint/OneDrive | Restricted provider/release/recovery contracts exist. Native documents and sharing-settings evidence are absent. The available Microsoft account is rejected as a consumer account without business presence. | Eligible for a closing keyword after the same explicit transfer to #1576. The original native/safety acceptance is preserved there; closes on merge. |
-| #1448 Google Drive | Contract/restriction/lifecycle tests, actual HTML/PDF, separate Reader access, same-ID republish and governed purge are recorded. Native sharing-settings screenshot is still missing: the owner and Reader sharing dialogs return “you cannot share at this time”; the owner details pane also fails to load. | Keep open until the required product sharing-settings evidence can be inspected. Existing API permission proof and Reader access do not replace that screenshot. |
+| #1448 Google Drive | Contract/restriction/lifecycle tests, actual HTML/PDF, separate Reader access, same-ID republish and governed purge are recorded. Native folder and PDF sharing dialogs now show exactly Owner plus group Viewer, with General access Restricted. QA inspected both new captures and earlier English report/Vietnamese stored content. | Eligible for a closing keyword after the reviewed native sharing evidence is published; closes on merge. Earlier dialog failures and the separate purged lifecycle remain distinct historical observations. |
 
 ## Shared definition of done
 
@@ -54,3 +54,16 @@ ticket leaves' specific native screenshot criteria or reported as passed.
 Notion #1446 remains excluded and released. #1449 remains outside this assignment;
 #1457/#1587 and closed #1458–#1460 are reused. Teams/PagerDuty acceptance stays under
 #1576. This audit does not close the full B08 batch or authorize a merge.
+
+## Drive evidence gap resolved
+
+The later native folder and PDF sharing dialogs supply the previously missing
+product sharing-settings evidence. [Read-only receipt](live/drive-sharing-result.json),
+[folder capture](live/drive-publication-sharing.png) and [PDF capture](live/drive-pdf-sharing.png)
+record Restricted access, the Owner and the authorized group as Viewer. A fresh
+local API readback binds the folder to its original completed one-attempt create.
+Independent QA checked the exact issue contract, native report locales, role/access
+views, UI-state manifests and image hashes and found no remaining acceptance defect.
+The report demonstrates English text and Vietnamese stored content; it does not
+claim a fully translated report template. All seven assigned implementation leaves
+are now eligible for closing keywords; actual closure still requires landing.

@@ -240,3 +240,21 @@ only; it is not a rerun of all provider scenarios on a newly built candidate.
 Microsoft native acceptance for #1439/#1447 was explicitly transferred by the
 maintainer to #1576 on 20 October 2026, alongside the Teams/PagerDuty follow-ups.
 Those source implementation leaves may close with #1599; #1576 remains open.
+
+## Drive native sharing settings
+
+The native Owner sharing dialogs later loaded successfully for the original
+worker-created publication folder and its PDF. Both show exactly the Owner and
+`synapse-cee@googlegroups.com` with Viewer access; General access is Restricted.
+The [folder screenshot](drive-publication-sharing.png), [PDF screenshot](drive-pdf-sharing.png)
+and [read-only inspection receipt](drive-sharing-result.json) bind those views to
+a fresh local command readback: completed create, one attempt, matching remote IDs.
+No security, cookie or sharing permission was changed. The earlier dialog failures
+remain historical observations; their cause is unproven, and the details pane
+still failed. The separate republish/purge lifecycle used another source/folder;
+these screenshots do not show a restored or reused purged publication.
+
+This supplies the previously missing native sharing-settings views alongside the
+existing native report, Reader access and governed lifecycle captures. Broader
+interrupted-operation/sharing-drift/legal-hold native scenarios remain unexecuted;
+this read-only inspection does not relabel them as passed.

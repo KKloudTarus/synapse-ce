@@ -7776,7 +7776,7 @@ paths:
     post:
       tags: [document-publishing]
       operationId: publishDocument
-      summary: Admit a governed Confluence document command
+      summary: Admit a governed external document command
       description: >-
         Requires review permission. The server derives the source scope from source_kind,
         validates current authority and source policy, and returns a durable command or an
@@ -7829,7 +7829,7 @@ paths:
     delete:
       tags: [document-publishing]
       operationId: unpublishDocument
-      summary: Admit a governed page and attachment purge
+      summary: Admit a governed document and attachment purge
       description: >-
         Requires review permission and a unique request key. An ambiguous purge remains
         uncertain for reconciliation and is never blindly repeated.
@@ -10445,7 +10445,7 @@ components:
         planned:
           type: boolean
           description: >
-            True for a subsystem this build does not ship yet, such as `docpublish`.
+            True for a declared subsystem this build does not ship yet.
             It is always disabled and names no switch. Omitted when false.
 
     TenantLocale:

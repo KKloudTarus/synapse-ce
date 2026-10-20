@@ -195,6 +195,20 @@
       "captured_at_utc": "2026-10-20T13:42:41.916738+00:00",
       "kind": "live_browser_screenshot",
       "environment": "personal GitHub sandbox; local Docker full stack, HTTPS origin after user certificate handling"
+    },
+    {
+      "file": "drive-publication-sharing.png",
+      "sha256": "cc4a83bcdd1f74c21bc3443592af2972a56f66af8bf1cef492af34b107bfe93f",
+      "captured_at_utc": "2026-10-20T13:50:29.496022+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal Drive Owner account; existing governed publication; read-only native sharing settings"
+    },
+    {
+      "file": "drive-pdf-sharing.png",
+      "sha256": "bcebf44b166c7b07e964e6e588bf787fa256bb5e83398309c046675cbf62b832",
+      "captured_at_utc": "2026-10-20T13:51:40.380785+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal Drive Owner account; existing governed publication; read-only native sharing settings"
     }
   ]
 }

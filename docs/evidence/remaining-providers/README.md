@@ -246,3 +246,14 @@ and may close when it lands. The required Microsoft sandbox, native EN/VI views,
 sharing/Reader proof and remaining failure scenarios remain unchecked in #1576.
 No missing live cell is called a pass; runtime safety requirements are unchanged.
 #1576 is excluded from this PR's closing keywords.
+
+## Drive native sharing acceptance
+
+Native folder and PDF sharing dialogs now show Restricted access and exactly the
+Owner plus the authorized group as Viewer. The [live receipt and captures](live/README.md#drive-native-sharing-settings)
+resolve the earlier screenshot gap. Independent QA inspected the exact issue
+contract and both new captures together with the existing native report, Reader
+and lifecycle evidence. #1448 is eligible for a closing keyword when these reviewed
+artifacts land; prior failures and unexecuted broader fault cases remain labeled.
+All seven assigned implementation leaves are eligible for closure with this PR;
+#1576 and parent acceptance remain open, and no merge is authorized by this ledger.

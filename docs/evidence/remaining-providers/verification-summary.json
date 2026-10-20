@@ -441,5 +441,41 @@
       "1448": "Required native sharing-settings screenshot still unavailable; Microsoft transfer does not move or waive Drive acceptance."
     },
     "landing": "PR remains Ready for review and unmerged; no manual source closure or merge performed."
+  },
+  "drive_sharing_acceptance": {
+    "recorded_at_utc": "2026-10-20T13:55:18.250565+00:00",
+    "implementation_source_unchanged_from": "d3c4698c0d9944d4791746b099343a021bb3aa7d",
+    "delta": "Native evidence and documentation only, including generic provider wording for document operations/planned capability in OpenAPI. No server behavior change.",
+    "receipt": "live/drive-sharing-result.json",
+    "review": {
+      "qa-verifier": "pass/high; exact1448contract, actual folder/PDF role and Restricted dialogs, source identity, prior English report/Vietnamese content and all inspected image hashes verified; no remaining leaf acceptance defect."
+    },
+    "docs_api_check": {
+      "command": "Docker: go test -count=1 ./docs ./api",
+      "exit_code": 0,
+      "local_log_sha256": "93bde5627095aa0ff00b4bfcdcbfc124663998bdd1186ffe7dc4f5111e3683e7",
+      "package_seconds": {
+        "docs": 1.995,
+        "api": 0.748
+      }
+    },
+    "publication_scan": {
+      "files_scanned": 8049,
+      "secret_sources_checked": 16,
+      "secret_match_files": [],
+      "screenshots_verified": 30
+    },
+    "eligible_closing_keywords": [
+      1437,
+      1438,
+      1439,
+      1440,
+      1441,
+      1447,
+      1448
+    ],
+    "remaining_source_leaf_acceptance_gap": null,
+    "landing": "PR remains Ready for review and unmerged; no manual closure or merge performed.",
+    "limits": "Microsoft native acceptance belongs to1576. Other broader native fault cases retain their unexecuted labels. No fully translated report-template or provider-wide final-binary replay claim."
   }
 }
