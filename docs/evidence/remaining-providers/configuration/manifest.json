@@ -2,22 +2,6 @@
   "provider_acceptance": false,
   "captures": [
     {
-      "file": "notion-light.png",
-      "provider": "notion",
-      "theme": "light",
-      "errors": [],
-      "source": "Production configuration form, actual registered descriptors, synthetic API",
-      "sha256": "2160e7d717fbeb4e7163f383c33fa16bf3915bc4f39e2f6d6896289ffd84a1dc"
-    },
-    {
-      "file": "notion-dark.png",
-      "provider": "notion",
-      "theme": "dark",
-      "errors": [],
-      "source": "Production configuration form, actual registered descriptors, synthetic API",
-      "sha256": "e5ea55b996cc828bbff51a508b57f4a3ba1d7346ac2d467a838b9b22e50a97da"
-    },
-    {
       "file": "sharepoint-light.png",
       "provider": "sharepoint",
       "theme": "light",

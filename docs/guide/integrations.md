@@ -50,9 +50,6 @@ unpublish APIs.
   custodian principal with the required SharePoint role proof.
 - `confluence-cloud` and `confluence-dc` retain their existing restricted-space
   profiles.
-- `notion` is connection-test only. Its public API cannot prove the required ACL
-  or permanent history deletion, so it does not advertise document publishing and
-  rejects a release before a shell is created.
 
 Document releases are durable, idempotent commands. The worker rechecks current
 tenant authority, destination configuration, release policy, legal hold, sharing

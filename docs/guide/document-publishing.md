@@ -21,8 +21,7 @@ In the console, open **Settings → Integrations → Documentation**, then choos
 **Manage documentation**. The configuration editor is headed **External
 integrations** and lists the registered providers and their supported capabilities. The
 Documentation group is available when the API has the same durable PostgreSQL store
-that wires document publishing; it is not a separate feature switch. Notion is
-listed for connection checks only and does not advertise document publication.
+that wires document publishing; it is not a separate feature switch.
 
 ## Configure Confluence
 
@@ -132,16 +131,6 @@ attachments while refusing manual files or a changed ownership manifest. Interru
 neutral-shell creation is recovered by its exact marker; missing neutral files are
 completed only after fresh restriction proof.
 
-## Notion availability
-
-The `notion` descriptor supports a scoped connection test only. Notion's public
-API cannot prove the required page read ACL and cannot prove permanent removal of
-page history. It therefore has no Documents capability and its release preflight
-returns `notion_release_contract_unavailable`. This is an implementation gap for
-governed Notion publication, not a successful restricted-publication profile.
-Native publication remains a provider-blocked follow-up; the current delivery
-includes only the connection check and explicit release refusal.
-
 ## Release and unpublish
 
 Use `POST /api/v1/document-publications` with an existing integration, source
@@ -235,8 +224,8 @@ builds and freezes an artifact. The persisted `confluence` schedule destination 
 the legacy API value for every enabled document-publishing profile, including
 Google Drive, SharePoint, and OneDrive Business; the console labels it **Document
 publishing**. That validation resolves the current tenant integration, config,
-provider capability, and release preflight, so an unavailable profile such as
-Notion is refused before artifact generation. A document schedule uses the frozen
+provider capability, and release preflight, so an unsupported destination is
+refused before artifact generation. A document schedule uses the frozen
 artifact for its command. An email schedule uses the same PDF as an attachment.
 The occurrence, content hash, remote page state, and per-recipient delivery
 counters are available from

@@ -274,7 +274,7 @@ func TestScheduleSaveValidatesDocumentDestinationBeforeArtifactBuild(t *testing.
 			publisher := &scheduleValidationPublisher{}
 			switch scenario {
 			case "unsupported_release_contract":
-				publisher.err = &ports.DocumentProviderError{Code: "notion_release_contract_unavailable"}
+				publisher.err = &ports.DocumentProviderError{Code: "unsupported_release_contract"}
 			case "invalid_destination":
 				publisher.err = shared.ErrForbidden
 			}
@@ -296,20 +296,20 @@ func TestScheduleSaveValidatesDocumentDestinationBeforeArtifactBuild(t *testing.
 	}
 }
 
-func TestScheduledNotionDestinationRefusesBeforeArtifactBuild(t *testing.T) {
+func TestScheduledUnsupportedDocumentDestinationRefusesBeforeArtifactBuild(t *testing.T) {
 	svc, store, schedule, source := newDeliveryContractFixture(t)
 	schedule.Destination = domain.ScheduleConfluence // persisted value denotes document publishing.
-	schedule.IntegrationID = "notion"
+	schedule.IntegrationID = "unsupported-documents"
 	schedule.EmailChannelID = ""
-	svc.deps.Publisher = &scheduleValidationPublisher{err: &ports.DocumentProviderError{Code: "notion_release_contract_unavailable"}}
+	svc.deps.Publisher = &scheduleValidationPublisher{err: &ports.DocumentProviderError{Code: "unsupported_release_contract"}}
 	if _, err := store.SaveDocumentSchedule(context.Background(), "tenant", schedule, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Tick(context.Background(), "tenant", 20); err == nil {
-		t.Fatal("scheduled Notion publication was admitted")
+		t.Fatal("scheduled unsupported publication was admitted")
 	}
 	if source.calls != 0 {
-		t.Fatalf("artifact built after Notion refusal: %d", source.calls)
+		t.Fatalf("artifact built after provider refusal: %d", source.calls)
 	}
 	runs, err := store.ListDocumentScheduleRuns(context.Background(), "tenant", schedule.ID, 20)
 	if err != nil || len(runs) != 1 || runs[0].State != domain.OccurrenceFailed {

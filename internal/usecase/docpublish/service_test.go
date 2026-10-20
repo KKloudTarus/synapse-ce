@@ -1083,7 +1083,7 @@ func TestDocumentReleaseUsesRegisteredNativeProviderWithoutConfluenceGuard(t *te
 }
 
 func TestUnsupportedNativeReleaseRefusesBeforeArtifactBuild(t *testing.T) {
-	for _, provider := range []integration.Provider{"notion", "sharepoint", "onedrive"} {
+	for _, provider := range []integration.Provider{"sharepoint", "onedrive"} {
 		t.Run(string(provider), func(t *testing.T) {
 			f := newReleaseFixture(t)
 			f.integration.item.Provider = provider

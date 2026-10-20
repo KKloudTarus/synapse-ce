@@ -51,13 +51,13 @@ describe('DocumentSchedulePanel', () => {
     vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([
       { id: 'drive-1', name: 'Restricted Drive', provider: 'google-drive', enabled: true, archived: false, credentialConfigured: true },
       { id: 'sharepoint-1', name: 'Restricted SharePoint', provider: 'sharepoint', enabled: true, archived: false, credentialConfigured: true },
-      { id: 'notion-1', name: 'Notion', provider: 'notion', enabled: true, archived: false, credentialConfigured: true },
+      { id: 'unsupported-documents-1', name: 'Unsupported documents', provider: 'unsupported-documents', enabled: true, archived: false, credentialConfigured: true },
     ] as never)
     vi.mocked(documentSchedulesApi.save).mockResolvedValue({} as never)
     render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} canManage />)
     expect(await screen.findByRole('option', { name: 'Restricted Drive' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Restricted SharePoint' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: 'Notion' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Unsupported documents' })).not.toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Document publishing' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Schedule delivery' }))
     await waitFor(() => expect(documentSchedulesApi.save).toHaveBeenCalledWith(expect.objectContaining({ destination: 'confluence', integrationId: 'drive-1' })))

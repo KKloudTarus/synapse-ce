@@ -21,7 +21,7 @@ const TERMINAL_STATES = new Set(['succeeded', 'partial', 'failed', 'cancelled'])
 const endpointExamples: Record<string, string> = {
   'github-issues': 'https://github.com', 'gitlab-issues': 'https://gitlab.com',
   'azure-boards': 'https://dev.azure.com/organization/project', servicenow: 'https://instance.service-now.com',
-  linear: 'https://api.linear.app/graphql', notion: 'https://api.notion.com',
+  linear: 'https://api.linear.app/graphql',
   sharepoint: 'https://tenant.sharepoint.com/sites/security', onedrive: 'https://tenant-my.sharepoint.com/personal/service_account',
   'google-drive': 'https://www.googleapis.com', bitbucket: 'https://bitbucket.org',
 }

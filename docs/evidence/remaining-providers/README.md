@@ -5,17 +5,16 @@
 Preflight: 20 October 2026, `origin/main` at `545bb50e`. B04 (#1582), document
 foundation (#1577), and B07 (#1586, merge `17d2e496`) are merged. Existing
 intents, links, reconciliation, release controls, and retained evidence are reused.
-The implementation order is #1437 → #1438 → #1439 → #1440 → #1441 → #1446 →
-#1447 → #1448. The maintainer authorized the recorded #1437 takeover.
+The implementation order is #1437 → #1438 → #1439 → #1440 → #1441 → #1447 →
+#1448. The maintainer authorized the recorded #1437 takeover.
 
 
 Current draft scope, agreed with the maintainer on 20 October 2026: the working
-ticket and document profiles below, together with Notion connection checks and
-explicit release refusal, are implementation-ready. Native Notion publication
-remains open under [#1446](https://github.com/KKloudTarus/synapse-ce/issues/1446)
-with its provider dependency and original acceptance preserved. It does not block
-this draft gate. Live E2E and destination screenshots remain deferred for every
-provider. This is not acceptance or closure of the full B08 batch.
+ticket and Microsoft/Drive document profiles below are implementation-ready.
+Notion (#1446) is excluded entirely, including connection-only registration and
+configuration; its claim and assignment are released on the issue. Live E2E and
+destination screenshots remain deferred. This is not acceptance or closure of the
+full B08 batch.
 
 | Issue | Existing main | Candidate implementation / provider limit | Required current checks / remaining acceptance |
 | --- | --- | --- | --- |
@@ -24,7 +23,6 @@ provider. This is not acceptance or closure of the full B08 batch.
 | #1439 Azure Boards | Shared registry and ticket reconciliation | Native work-item provider and polling | Contract, exact-marker recovery, permissions/tenant/sealed secret, polling proposal tests; native work items remain live acceptance |
 | #1440 ServiceNow | Shared registry and ticket reconciliation | Incident/vulnerability record provider and polling | Contract, exact correlation recovery, permissions/tenant/sealed secret, polling proposal tests; native records remain live acceptance |
 | #1441 Linear | Shared registry and ticket reconciliation | Native GraphQL issue provider | GraphQL errors, metadata, exact-marker recovery, credential/egress/polling tests; native issues remain live acceptance |
-| #1446 Notion | Shared document release executor | Connection check and early release refusal implemented; native publication is a provider-blocked follow-up outside this draft gate | Contract and schedule rejection checks pass; document capability stays unavailable. Original native publication and object/sharing acceptance remain open in the issue |
 | #1447 SharePoint / OneDrive | Shared document intent/restriction/release controls | Graph provider, opaque revision fencing, restricted-sharing proof, purge | Contract/ACL/pagination/inheritance/CAS/recovery/legal-hold/purge tests; native document and sharing views remain live acceptance |
 | #1448 Google Drive | Shared document intent/restriction/release controls | Drive provider, opaque revision fencing, restricted-sharing proof, purge | Contract/ACL/pagination/inheritance/CAS/recovery/legal-hold/purge tests; native document and sharing views remain live acceptance |
 
@@ -65,8 +63,8 @@ Future GitHub acceptance must include a fresh unique correlation label with the
 configured PAT and recovery after a lost create response. A disposable local PostgreSQL container is used for persistence checks; no B08
 provider sandbox credentials were established. Missing live
 resources: dedicated private GitHub repository; GitLab project; Azure DevOps organization
-and project; ServiceNow instance; Linear workspace; Notion workspace with a supported
-permission/purge contract; Microsoft Graph test tenant, drive and restricted reader group;
+and project; ServiceNow instance; Linear workspace;
+Microsoft Graph test tenant, drive and restricted reader group;
 Google Drive test account/container and restricted reader identity. Live permissions,
 retention and sharing settings must be checked before future acceptance operations.
 
@@ -96,17 +94,11 @@ changes. Their findings are not approvals of the current candidate:
 | Partial purge/upload was classified as a clean refusal after remote effects | Both purgers validate all children before deleting; any error after delete dispatch remains ambiguous. Graph post-create ACL/manifest/readback failures retain the fence. Executor post-restriction verification/readback failures also remain uncertain. Actual adapter regressions and the core quarantine/readback recovery regressions pass in Docker. |
 | Repeated document proofs consumed the worker budget | Reuse actor/metadata within one fresh Drive proof, fetch each ACL once, and avoid a duplicate monitor read. Maximum attachment proof regression passes. A document-local clean-checkpoint yield resumes acknowledged work without waiting for lease expiry. Graph snapshot reuse and four concurrent read-only child checks remove redundant proof work without caching across writes. At eleven attachments, the previously failing 300ms/request attachment completes in 18.972s under 45s; the 210ms/request monitor completes in 4.219s under 10s. These are synthetic measurements, not live guarantees. The full persistence gate is recorded separately. |
 
-Notion publication is an implementation gap, separate from deferred E2E. The
-[Notion page lifecycle reference](https://developers.notion.com/reference/trash-page)
-explicitly states that the API cannot permanently delete pages. A connection check
-cannot establish page sharing or permanent erasure. The provider therefore has no
-Documents capability and refuses before artifact/shell creation. The maintainer adapted the current draft scope to the available connection and
-release-refusal controls while retaining native publication as an open follow-up.
-No sharing or purge requirement is waived. A refreshed
-[contract feasibility audit](notion-release-contract.md) covers the official REST,
-Admin, MCP, Workers and published internal specifications.
-It also checks why the internal permission-mutation endpoint cannot provide a
-complete effective ACL readback.
+Notion is excluded from this PR at the maintainer's direction. The separate
+[#1446 issue](https://github.com/KKloudTarus/synapse-ce/issues/1446) retains its
+original product goal and acceptance, the released ownership, and feasibility
+notes for a future manual snapshot publication profile. No Notion provider,
+configuration form or connection-only capability ships in this change.
 
 ## Local verification
 
@@ -129,7 +121,15 @@ Current results:
 | Document provider and shared executor recovery race regressions | Docker passed: documentproviders 5.680s and docpublish 14.651s. Includes permanent first/second DELETE 404 and post-create corrupt neutral-body readback regressions. |
 | Exact outbound SCM credential rotation and ticket workflow race regressions | Docker passed: ticketproviders 1.130s and ticketing 4.736s. Independent security focus passed in 1.041s. |
 | SCA candidate package after fixing the Docker cache | Docker passed, 103.800s. |
-| Final backend lint, build, vet, full tests, typecheck, hostile harness and focused race gate | Docker exit 0 on 20 October 2026 at 02:29:49 UTC. Lint: zero issues; no test failures. All 4,684 recorded backend inputs remained unchanged during the run. Final race: domain 1.054s, memory store 1.527s, shared document executor 10.369s, ticket workflow 3.872s, document adapters 4.803s and ticket adapters 1.104s. |
+| Final backend lint, build, vet, full tests, typecheck, hostile harness and focused race gate | Docker exit 0 on the final Notion-exclusion candidate. Lint: zero issues; no test failures. Current race: document adapters 4.955s, shared document executor 12.520s and integration service 1.038s. Prior domain/store/ticket race evidence applies to unchanged production code. |
+
+After removing Notion, the full Docker web suite again passed all 212 files and
+1,438 tests, followed by typecheck, production build and lint (zero errors, twenty
+warnings). The final docs/API drift recheck passed in 2.087s and 0.859s. The opt-in
+rendering test regenerated the three authoritative provider descriptors; six
+retained configuration captures are unchanged. Independent QA, security and
+frontend reviews passed the removal delta. PostgreSQL/migration inputs are
+unchanged, so the completed full database run remains applicable.
 
 Earlier native PostgreSQL runs terminated with `signal: killed`; an initial cold
 Docker lint run exceeded its default timeout. The first broad Docker runner then
@@ -151,12 +151,10 @@ Drive requests. Concurrent read proofs peaked at four, with none active after
 return; failed proof caused zero writes. These measurements do not establish live
 latency or throughput.
 
-These bounded reviews do not resolve the Notion implementation gap. Partial
-attachment/purge quarantine preserves safety and durable fences; it does not
-claim automatic convergence. Live E2E and destination screenshots remain deferred.
-The worktree-bound Taurus report records Notion native publication as a deferred
-provider dependency under the maintainer-approved draft scope. Technical checks
-pass for the implementation delivered here. The Draft PR remains unmerged and
+Partial attachment/purge quarantine preserves safety and durable fences; it does
+not claim automatic convergence. Live E2E and destination screenshots remain deferred.
+The worktree-bound Taurus report covers the supported profiles in this PR. Notion
+is outside its scope. Technical checks pass for the implementation delivered here. The Draft PR remains unmerged and
 must not be read as full B08 or native live acceptance.
 [Verification summary](verification-summary.json) records the Docker commands,
 exit codes and log digests. Full raw logs remain local outside source control.
@@ -175,8 +173,7 @@ live provider sandboxes and do not satisfy native live acceptance.
   [permission denied](console/permission-light.png).
 - [SharePoint configuration, light](configuration/sharepoint-light.png),
   [dark](configuration/sharepoint-dark.png),
-  [Drive configuration](configuration/google-drive-light.png),
-  [Notion connection-only configuration](configuration/notion-light.png).
+  [Drive configuration](configuration/google-drive-light.png).
 - [Finding ticket preview](ticket-entry/ticket-preview-light.png),
   [bulk preview](ticket-entry/bulk-preview-dark.png),
   [finding selection](ticket-entry/findings-bulk-selection-light.png).

@@ -14,34 +14,29 @@
   },
   "checks": {
     "backend": {
-      "container": "synapse-provider-backend-candidate",
-      "started_at": "2026-10-20T02:24:23.082922332Z",
-      "finished_at": "2026-10-20T02:29:49.229038117Z",
+      "container": "synapse-provider-exclusion-backend",
+      "started_at": "2026-10-20T03:12:54.107670256Z",
+      "finished_at": "2026-10-20T03:14:17.212127817Z",
       "exit_code": 0,
       "oom_killed": false,
-      "local_log_sha256": "924fea41ac5014f8d2d88c6d4126e45b4550643f587b49c22b1f819ead37272f",
-      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race ./internal/domain/docpublish ./internal/infrastructure/persistence/memory ./internal/usecase/docpublish ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/infrastructure/integration/ticketproviders",
-      "recorded_backend_inputs": 4684,
-      "changed_inputs_during_run": 0,
+      "local_log_sha256": "bdebdb8c9cfe55555d7b1bf6b6300e6f2036065a69edb9ca0659d7082bc6238c",
+      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
       "lint_issues": 0,
       "test_failures": 0,
       "race_package_seconds": {
-        "domain/docpublish": 1.054,
-        "persistence/memory": 1.527,
-        "usecase/docpublish": 10.369,
-        "usecase/ticketing": 3.872,
-        "integration/documentproviders": 4.803,
-        "integration/ticketproviders": 1.104
+        "integration/documentproviders": 4.955,
+        "usecase/docpublish": 12.52,
+        "usecase/integrations": 1.038
       }
     },
     "web": {
-      "container": "synapse-provider-web-gate",
-      "started_at": "2026-10-20T01:56:19.824570489Z",
-      "finished_at": "2026-10-20T02:05:12.425282885Z",
+      "container": "synapse-provider-exclusion-web",
+      "started_at": "2026-10-20T03:13:18.878566877Z",
+      "finished_at": "2026-10-20T03:17:33.394340288Z",
       "exit_code": 0,
       "oom_killed": false,
-      "local_log_sha256": "a315ea8007495154b317d21df9ff79df3a67f1610976a998316d01ed3f3df394",
-      "command": "cd web && pnpm exec vitest run --maxWorkers=2 && pnpm run typecheck && pnpm build && pnpm lint",
+      "local_log_sha256": "fc1a31a14dcc3a6fb86f2b83a1c6ae7f1bbee9ed0e39edaaa1902d997926e25f",
+      "command": "cd web && pnpm exec vitest run --maxWorkers=4 && pnpm run typecheck && pnpm build && pnpm lint",
       "test_files_passed": 212,
       "tests_passed": 1438,
       "lint_errors": 0,
@@ -64,8 +59,14 @@
     }
   },
   "overall_scope_gate": "implementation_ready_draft",
-  "open_implementation_gap": "Native Notion publication remains a provider-blocked follow-up under #1446, outside the current maintainer-approved draft gate. Connection check and early release refusal are implemented; document capability stays unavailable.",
   "live_e2e": "Deferred by maintainer; no live acceptance claimed.",
   "partial_effect_recovery": "Durable quarantine for uncertain attachment/purge; exact neutral shell recovery can converge after fresh proof. No automatic purge completion inferred from404.",
-  "scope_disposition_issue": "https://github.com/KKloudTarus/synapse-ce/issues/1446"
+  "scope_disposition_issue": "https://github.com/KKloudTarus/synapse-ce/issues/1446",
+  "excluded_scope": "Notion issue #1446 is excluded entirely from the current PR, including connection-only support. Ownership is released; future native publication and policy decisions remain on the open issue.",
+  "reviews": "Independent QA, security and frontend removal-delta reviews passed. Prior architecture, reliability and performance reviews remain applicable to unchanged release/store/provider core.",
+  "visual_evidence": {
+    "console_captures": 70,
+    "adapter_html_previews": 4,
+    "excluded_notion_captures_removed": 2
+  }
 }

@@ -35,27 +35,10 @@ func response(code int, value any) *http.Response {
 	}
 	return &http.Response{StatusCode: code, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(data))}
 }
-func TestNotionUnavailableContractDoesNotAdvertiseRelease(t *testing.T) {
+func TestRestrictedDocumentProfilesAdvertiseRelease(t *testing.T) {
 	registry := integration.NewRegistry()
 	if err := Register(registry); err != nil {
 		t.Fatal(err)
-	}
-	d, err := registry.Descriptor(Notion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Supports(integration.CapabilityDocuments) {
-		t.Fatal("unsupported Notion release advertised")
-	}
-	adapter, err := newNotion(integration.Integration{Provider: Notion, Endpoint: "https://api.notion.com"}, integration.CredentialBundle{"access_token": "private-fixture-token"}, selfhosted.Rules{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := adapter.(ports.DocumentProvider); ok {
-		t.Fatal("unsupported provider can create document shells")
-	}
-	if err = adapter.(ports.DocumentReleasePreflighter).CheckDocumentRelease(context.Background(), "parent", "group"); err == nil {
-		t.Fatal("release not refused")
 	}
 	for _, provider := range []integration.Provider{SharePoint, OneDrive, Drive} {
 		descriptor, err := registry.Descriptor(provider)
@@ -414,7 +397,7 @@ func TestDocumentRenderingEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	descriptors := []integration.ProviderDescriptor{}
-	for _, provider := range []integration.Provider{Notion, SharePoint, OneDrive, Drive} {
+	for _, provider := range []integration.Provider{SharePoint, OneDrive, Drive} {
 		descriptor, err := registry.Descriptor(provider)
 		if err != nil {
 			t.Fatal(err)

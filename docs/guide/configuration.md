@@ -59,8 +59,7 @@ SharePoint/OneDrive Business uses the trusted SharePoint site URL as its integra
 endpoint and requires separate Graph and SharePoint audience tokens. Changing that
 endpoint invalidates the old credential bundle. Provider hosts and document sharing
 profiles are constrained by their adapters; a successful connection test cannot waive
-publication access proof. Notion supports connection checks only: its public API cannot
-satisfy the required ACL and permanent-purge contract. See
+publication access proof. See
 [Native ticket destinations](ticketing-foundation.md#native-ticket-destinations) and
 [document destination profiles](document-publishing.md).
 

@@ -1,41 +1,5 @@
 [
   {
-    "provider": "notion",
-    "name": "Notion (publication unavailable)",
-    "description": "Connection checks only. Notion's public API cannot prove the required page read ACL or permanently purge page history; governed publication is unavailable.",
-    "capabilities": [
-      "test_connection"
-    ],
-    "config_fields": [
-      {
-        "name": "space",
-        "label": "Parent page ID",
-        "kind": "text",
-        "required": true
-      },
-      {
-        "name": "read_group",
-        "label": "Required reader group",
-        "kind": "text",
-        "required": true
-      },
-      {
-        "name": "data_class",
-        "label": "Data classification",
-        "kind": "text",
-        "required": true
-      }
-    ],
-    "secret_fields": [
-      {
-        "name": "access_token",
-        "label": "Integration access token",
-        "kind": "password",
-        "required": true
-      }
-    ]
-  },
-  {
     "provider": "sharepoint",
     "name": "SharePoint",
     "description": "Governed SharePoint or OneDrive Business publication with complete SharePoint role-assignment proof.",
