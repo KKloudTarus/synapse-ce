@@ -172,7 +172,8 @@ unchanged between those last two builds.
 The full stack includes API, the integrations worker, web, PostgreSQL 17, MinIO and
 a loopback TLS proxy. The application database identity has no superuser or
 BYPASSRLS privilege; the halt writer is separate. A fresh local certificate is
-verified by the API runner. The browser uses the loopback HTTP web endpoint.
+verified by the API runner. Earlier browser captures use the loopback HTTP web endpoint; the later native
+GitHub link-navigation capture uses the HTTPS proxy after user certificate handling.
 The ServiceNow incident-create runtime source hashes match commit `80c46dbc`; its binaries were
 built from uncommitted inputs on `a1769c67`, and the running binary hashes were
 verified before the incident runs. Polling was then verified on rebuilt binaries
@@ -225,3 +226,17 @@ verified 390px reflow; no screen-reader or cross-engine acceptance is claimed.
 | Final destination preview | Exact confidential request / keyboard focus |
 | --- | --- |
 | ![Final Docker console preview](local-final-ticket-preview.png) | ![Final exact provider request](local-final-ticket-request.png) |
+
+## GitHub finding-link navigation
+
+After the user handled the local certificate warning, a fresh native GitHub issue
+click reached the configured HTTPS console. Local authentication retained the
+exact engagement/finding URL; the expected finding opened expanded with Open
+status. No triage or linked-ticket mutation was performed. The [receipt](github-finding-link-result.json)
+records the running image provenance, and the [arrival screenshot](github-finding-link-arrival.png)
+shows the selected finding. This resolves the earlier browser trust/navigation gap
+only; it is not a rerun of all provider scenarios on a newly built candidate.
+
+Microsoft native acceptance for #1439/#1447 was explicitly transferred by the
+maintainer to #1576 on 20 October 2026, alongside the Teams/PagerDuty follow-ups.
+Those source implementation leaves may close with #1599; #1576 remains open.

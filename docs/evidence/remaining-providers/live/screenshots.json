@@ -188,6 +188,13 @@
       "captured_at_utc": "2026-10-20T10:48:34.906437+00:00",
       "kind": "live_browser_screenshot",
       "environment": "personal ServiceNow PDI; refreshed plain-description EN/VI acceptance on corrected Docker runtime"
+    },
+    {
+      "file": "github-finding-link-arrival.png",
+      "sha256": "3ef1c712c5897e93556c75ec39b17503acc5b75c417411adbdd3a8f84d495e34",
+      "captured_at_utc": "2026-10-20T13:42:41.916738+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal GitHub sandbox; local Docker full stack, HTTPS origin after user certificate handling"
     }
   ]
 }

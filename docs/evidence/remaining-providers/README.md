@@ -73,7 +73,7 @@ readback and replay with one attempt each, using a role-free machine and explici
 endpoint denials. The first partial-content incident remains quarantined; the
 vulnerability profile and terminal actor/proposal cases are not passed.
 Microsoft Azure Boards and SharePoint/OneDrive acceptance remains
-explicitly deferred on #1439/#1447. It needs an Azure DevOps organization/project
+explicitly transferred from #1439/#1447 to #1576 by the maintainer. It needs an Azure DevOps organization/project
 and a business test tenant, drive, reader group and scoped credentials.
 
 B04/B07 evidence remains historical foundation evidence. Revoked B06/B07 OAuth was
@@ -236,3 +236,13 @@ Regenerate with `SYNAPSE_TICKET_PREVIEW_DIR` pointing at `ticket-rendering/` and
 '^TestAzureDescriptionRendersSafeHTMLAtPayloadBoundary$' -count=1`, then run
 `node scripts/ticket-description-previews.mjs` from `web/` with Chromium available
 at `/usr/bin/chromium`. The browser aborts all network requests during capture.
+
+## Microsoft acceptance transfer
+
+On 20 October 2026 the maintainer moved remaining Azure Boards (#1439) and
+SharePoint/OneDrive Business (#1447) native E2E acceptance into #1576, alongside
+Teams/PagerDuty. The source leaves now track implementation delivered by #1599
+and may close when it lands. The required Microsoft sandbox, native EN/VI views,
+sharing/Reader proof and remaining failure scenarios remain unchecked in #1576.
+No missing live cell is called a pass; runtime safety requirements are unchanged.
+#1576 is excluded from this PR's closing keywords.
