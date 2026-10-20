@@ -153,7 +153,7 @@
     "configuration": 6,
     "ticket-entry": 46,
     "adapter_html_previews": 4,
-    "live_browser_captures": 25,
+    "live_browser_captures": 27,
     "servicenow_setup_only_captures": 2
   },
   "browser_checks": {
@@ -282,6 +282,71 @@
       "secret_sources_checked": 16,
       "secret_match_files": [],
       "screenshots_verified": 25
+    }
+  },
+  "closure_corrections": {
+    "base_commit": "fa2a30fcd87b30cb5b30a6d1addcd9193e125467",
+    "recorded_at_utc": "2026-10-20T10:55:27.411018+00:00",
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "b5620f75996400ad4cabe8259219b88d71f72ccb21ee5068e4bbaf98c7ca5938",
+      "internal/infrastructure/integration/ticketproviders/preflight_test.go": "7541ac6d05bb30bb8127c197eaf85ef7d697680adccbad73a093006d6eb50fee",
+      "internal/infrastructure/integration/ticketproviders/description_test.go": "1f46b279c71eb46a41663720def16d1416329d69afb97a39aea4b74236f00515",
+      "internal/infrastructure/messageformat/plain.go": "561452fde76c2914ee3c0538390e39747fdd610f036fd711e3b2ddb97038d1fe"
+    },
+    "fixed_findings": [
+      "GitHub private-only preflight lacked direct negative tests; eight refusal cases and private-to-public drift now assert zero POSTs.",
+      "ServiceNow plain descriptions exposed intermediate Markdown backslashes; canonical subset rendering and new native EN/VI captures resolve it."
+    ],
+    "checks": {
+      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race -count=1 ./internal/infrastructure/integration/ticketproviders ./internal/infrastructure/messageformat ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
+      "environment": "Docker synapse-provider-check-runtime:local",
+      "exit_code": 0,
+      "local_log_sha256": "77c96bf9a6cd17f1acc20a8cafa43caf0cf725a86b69f0c93297b78570e27d61"
+    },
+    "expected_failure_evidence": {
+      "description_regression": "RED on literal escaped punctuation before conversion; the initial GitHub drift fixture also needed its login response corrected.",
+      "privacy_guard_overlay": {
+        "command": "go test -overlay=<temporary privacy guard mutation> -count=1 ./internal/infrastructure/integration/ticketproviders -run <negative privacy and drift tests>",
+        "exit_code": 1,
+        "meaning": "All eight refusal subcases and drift test reject bypassing the privacy guard; source working tree not mutated.",
+        "local_log_sha256": "76dc4a29283536ffa0a1bfed1c7782e10e248edc3688d2a6c7758c5ae15f718b"
+      }
+    },
+    "reviews": {
+      "qa-verifier": "pass; focused Docker race rerun1.079s and refreshed native visuals inspected",
+      "security-auditor": "pass; fresh native content compared independently",
+      "performance-auditor": "pass; bounded existing parser, no network changes; no linear-time parser claim",
+      "architecture-critic": "sound; existing formatter module and canonical parser reused"
+    },
+    "native_evidence": "live/servicenow-formatted-results.json",
+    "closure_audit": "closure-audit.md",
+    "eligible_closing_keywords_after_push": [
+      1437,
+      1438,
+      1440,
+      1441
+    ],
+    "required_remaining": {
+      "1439": "Azure Boards native EN/VI work-item evidence; authorized sandbox missing",
+      "1447": "Business Microsoft native document/sharing evidence; consumer account rejected",
+      "1448": "Native sharing-settings screenshot; both owner/Reader dialogs unavailable"
+    },
+    "landing": "PR remains unmerged; no actual closure claimed",
+    "browser_deep_link": "Actual click reached configured localhost TLS origin; browser certificate privacy warning requires user handoff, arrival at finding unproven",
+    "docs_api_check": {
+      "command": "Docker: go test -count=1 ./docs ./api",
+      "exit_code": 0,
+      "local_log_sha256": "4d9213204526910231a7ed1d46f4fd6d7dc1864dc301b4903c343a4aef297478",
+      "package_seconds": {
+        "docs": 1.769,
+        "api": 0.72
+      }
+    },
+    "secret_and_manifest_check": {
+      "files_scanned": 8039,
+      "secret_sources_checked": 16,
+      "secret_match_files": [],
+      "screenshots_verified": 27
     }
   }
 }

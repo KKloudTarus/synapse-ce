@@ -23,6 +23,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/selfhostedhttp"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/redact"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -302,6 +303,9 @@ func htmlEscape(s string) string {
 func (a *Adapter) FormatTicketDescription(body string, links []ports.RenderedLink) (json.RawMessage, error) {
 	if len(body) > maxPayload {
 		return nil, ticketErr(0, "description_too_large", false)
+	}
+	if a.provider == ServiceNowProvider {
+		body = messageformat.PlainText(body)
 	}
 	for _, l := range links {
 		u, e := url.Parse(l.URL)

@@ -9,12 +9,14 @@ The implementation order is #1437 → #1438 → #1439 → #1440 → #1441 → #1
 #1448. The maintainer authorized the recorded #1437 takeover.
 
 
-Current draft scope, agreed with the maintainer on 20 October 2026: the working
+Current approved scope, agreed with the maintainer on 20 October 2026: the working
 ticket and Microsoft/Drive document profiles below are implementation-ready.
 Notion (#1446) is excluded entirely, including connection-only registration and
 configuration; its claim and assignment are released on the issue. Live E2E has since started on authorized personal sandboxes; see the
 [current live ledger](live/README.md) for actual outcomes and remaining gaps.
-This is not acceptance or closure of the full B08 batch.
+This is not acceptance or closure of the full B08 batch. The
+[leaf closure audit](closure-audit.md) separates explicit issue requirements from
+additional native fault scenarios and records the unresolved landing/evidence gates.
 
 | Issue | Existing main | Candidate implementation / provider limit | Required current checks / remaining acceptance |
 | --- | --- | --- | --- |

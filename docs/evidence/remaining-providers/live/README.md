@@ -92,9 +92,23 @@ HTTP response.
 | --- | --- |
 | ![Machine user bound to exact policies and tables](servicenow-machine-boundary.png) | ![Active insert-only description grant](servicenow-description-acl-active.png) |
 
-| ServiceNow English | ServiceNow Vietnamese |
+The closure audit found that INC0010002/3 matched their frozen wire but still
+showed intermediate Markdown backslashes. They are historical wire/polling proof,
+not final visual acceptance. ServiceNow now renders the canonical message subset
+to plain text before appending trusted links. Hostile literal markup, punctuation,
+Windows backslashes and list/paragraph structure have regression coverage; other
+Markdown ticket providers remain unchanged.
+
+Fresh **INC0010004 (EN)** and **INC0010005 (VI)** on the corrected Docker runtime
+completed with one attempt each and identical-key replay. Native API readback
+matched the full approved summary/description/marker/ID. Both produced `new`
+observations with no proposals, and both findings stayed open. Independent QA
+inspected the refreshed screenshots and confirmed readable punctuation and
+Vietnamese diacritics. See [formatted-content results and build inputs](servicenow-formatted-results.json).
+
+| ServiceNow English, corrected plain description | ServiceNow Vietnamese, corrected plain description |
 | --- | --- |
-| ![Complete native English incident](servicenow-incident-en.png) | ![Complete native Vietnamese incident](servicenow-incident-vi.png) |
+| ![Readable native English incident](servicenow-plain-incident-en.png) | ![Readable native Vietnamese incident](servicenow-plain-incident-vi.png) |
 
 Temporary security_admin was removed from the admin session after setup. An
 accidental user re-enable was corrected and the final session header was verified

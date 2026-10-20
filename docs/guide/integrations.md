@@ -119,7 +119,9 @@ needed a parallel `incident.description` write Allow-If ACL with
 `current.isNewRecord()`. It has no required roles and preserves the existing
 same-target ACL's Admin overrides value; existing native ACLs remain unchanged.
 Verify full description, summary and correlation readback after creating a
-synthetic record. Keep existing-record update/delete methods denied; do not grant
+synthetic record. Descriptions render the message subset as plain text: punctuation
+and literal hostile markup are preserved without Markdown backslashes, while
+server-built links remain separate. Keep existing-record update/delete methods denied; do not grant
 `itil`, `sn_incident_write` or admin merely to satisfy field access. This sandbox
 configuration proves the incident profile only; a vulnerability table needs its
 own policy, field-permission and native acceptance checks.

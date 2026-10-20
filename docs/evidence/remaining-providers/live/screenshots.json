@@ -174,6 +174,20 @@
       "captured_at_utc": "2026-10-20T08:57:43.564683+00:00",
       "kind": "live_browser_screenshot",
       "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-plain-incident-en.png",
+      "sha256": "f9a7612f2c5e4138269e127623cb06111bb07f51fc825ba46435c0f2e6a19589",
+      "captured_at_utc": "2026-10-20T10:47:44.761577+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; refreshed plain-description EN/VI acceptance on corrected Docker runtime"
+    },
+    {
+      "file": "servicenow-plain-incident-vi.png",
+      "sha256": "5d0a2a351cad03797fee7d8fe4afab9cb9a003ce7cd9903eab1ca96518f60c98",
+      "captured_at_utc": "2026-10-20T10:48:34.906437+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; refreshed plain-description EN/VI acceptance on corrected Docker runtime"
     }
   ]
 }

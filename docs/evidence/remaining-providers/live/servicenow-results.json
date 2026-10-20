@@ -252,5 +252,6 @@
     "lost provider HTTP response",
     "interrupted upload/purge acceptance"
   ],
-  "polling_regression": "Native closed_by empty string broke unused reference decoding. Four closure-shape regression cases passed after removing unused fields. Both existing native incidents then produced new observations on the rebuilt runtime; no actor attribution inferred."
+  "polling_regression": "Native closed_by empty string broke unused reference decoding. Four closure-shape regression cases passed after removing unused fields. Both existing native incidents then produced new observations on the rebuilt runtime; no actor attribution inferred.",
+  "visual_acceptance": "Historical wire equality passed, but closure audit found visible Markdown escapes; superseded by servicenow-formatted-results.json and plain-incident captures."
 }
