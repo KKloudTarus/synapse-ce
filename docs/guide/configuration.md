@@ -55,6 +55,10 @@ Configure destinations through tenant integrations; no provider-wide token envir
 variables are added. GitHub/GitLab reuse the tenant/host SCM connector credential.
 The other ticket tokens, and the Drive and Microsoft document tokens, use the existing
 sealed integration credential store. API and worker must share the stable vault key.
+ServiceNow preflight needs its own user ID through the standard `sys_user` Table API,
+in addition to create/read access on the configured ticket table. Scope the credential
+to its own user row with server-side ACLs; a filtered request alone does not restrict
+directory access. See [ServiceNow credential provisioning](integrations.md#ticket-provider-connections).
 SharePoint/OneDrive Business uses the trusted SharePoint site URL as its integration
 endpoint and requires separate Graph and SharePoint audience tokens. Changing that
 endpoint invalidates the old credential bundle. Provider hosts and document sharing

@@ -135,6 +135,52 @@ func TestCreateLinearTreatsGraphQLErrorsAsFailure(t *testing.T) {
 	}
 }
 
+func TestServiceNowIdentityRequiresExactlyOneCurrentUserID(t *testing.T) {
+	const userID = "0123456789abcdef0123456789abcdef"
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"current user", `{"result":[{"sys_id":"` + userID + `"}]}`, userID},
+		{"no visible user", `{"result":[]}`, ""},
+		{"missing result", `{}`, ""},
+		{"multiple users", `{"result":[{"sys_id":"` + userID + `"},{"sys_id":"fedcba9876543210fedcba9876543210"}]}`, ""},
+		{"username only", `{"result":[{"user_name":"machine"}]}`, ""},
+		{"malformed identifier", `{"result":[{"sys_id":"machine"}]}`, ""},
+		{"nonhex identifier", `{"result":[{"sys_id":"0123456789abcdef0123456789abcdeg"}]}`, ""},
+		{"uppercase identifier", `{"result":[{"sys_id":"0123456789ABCDEF0123456789ABCDEF"}]}`, ""},
+		{"whitespace identifier", `{"result":[{"sys_id":" ` + userID + `"}]}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/api/now/table/sys_user" ||
+					r.URL.Query().Get("sysparm_query") != "sys_id=javascript:gs.getUserID()" ||
+					r.URL.Query().Get("sysparm_fields") != "sys_id" || r.URL.Query().Get("sysparm_limit") != "2" {
+					t.Errorf("unexpected identity request: %s %s", r.Method, r.URL.RequestURI())
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			base, _ := url.Parse(server.URL)
+			a := &Adapter{provider: ServiceNowProvider, base: base, client: server.Client(), token: []byte("synthetic-token"), project: "incident"}
+			got, err := a.TicketIdentity(context.Background())
+			if tc.want != "" {
+				if err != nil || got != tc.want {
+					t.Fatalf("identity = %q, error = %v", got, err)
+				}
+				return
+			}
+			var classified *ports.TicketProviderError
+			if got != "" || !errors.As(err, &classified) || classified.Code != "invalid_identity" {
+				t.Fatalf("unproven identity accepted: %q, error = %v", got, err)
+			}
+		})
+	}
+}
+
 func TestSearchRejectsTruncatedAzureResults(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"workItems":[{"id":1},{"id":2},{"id":3}]}`))

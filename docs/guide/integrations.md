@@ -86,6 +86,25 @@ Add the outbound providers from **Manage connections and credentials**:
   `sn_vul_vulnerable_item` table, and a sealed API token.
 - `linear` requires `https://api.linear.app/graphql`, a team ID, and a sealed API token.
 
+ServiceNow identifies its authenticated principal through the standard Table API:
+`GET /api/now/table/sys_user` with the fixed query
+`sys_id=javascript:gs.getUserID()`, fields `sys_id`, and limit `2`. Exactly one
+32-character user ID is required. An empty, ambiguous, or malformed result fails
+closed; a username or display name is never substituted.
+
+Provision ServiceNow credentials for GET collection/record and POST collection on
+the selected ticket table, plus GET collection on `sys_user` for the authenticated
+user's own identity. The query is not an authorization boundary: enforce own-row
+read access independently with a Deny-Unless ACL for the dedicated machine user,
+preserving other callers' existing access. Do not grant user-directory access or
+user writes. For OAuth, enable **Enforce Token Restrictions** on this client and
+link its entity-specific authentication profile to table- and method-specific API
+access policies. Keep other tables, methods, and resources disabled, and preserve
+the endpoint's existing authentication profiles when adding a policy. Verify the
+actual token can read its own ID and cannot read another user's record before
+using it in Synapse. ServiceNow's Client Credentials grant also requires its
+documented instance property; it is not a Synapse environment variable.
+
 GitHub's inbound `github` provider remains separate: it receives webhooks for source
 scanning and is not an outbound Issues connection. GitLab's inbound identity is also
 not reused as an outbound ticket provider. SCM credentials are tenant/host scoped and

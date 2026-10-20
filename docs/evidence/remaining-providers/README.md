@@ -66,9 +66,10 @@ candidate provenance; they are not represented as reruns on a later binary.
 
 Outstanding native acceptance includes an actual lost provider HTTP response,
 interrupted attachment upload/purge, live sharing drift/legal hold, and terminal
-actor/proposal cases. The ServiceNow PDI is signed in, but the dedicated machine
-identity and scoped OAuth client still require authorization; no ServiceNow record
-pass is claimed. Microsoft Azure Boards and SharePoint/OneDrive acceptance remains
+actor/proposal cases. The ServiceNow PDI now has a role-free Machine user, an OAuth
+client, an own-row ACL and three endpoint policies. Effective token authorization
+and own-row isolation remain unproven; no ServiceNow record pass is claimed.
+Microsoft Azure Boards and SharePoint/OneDrive acceptance remains
 explicitly deferred on #1439/#1447. It needs an Azure DevOps organization/project
 and a business test tenant, drive, reader group and scoped credentials.
 
@@ -134,6 +135,14 @@ fixes; [candidate hashes](live/candidate-provenance.json) identify their inputs.
 | `go test -count=1 ./docs ./api` | Docker exit 0; 1.456s and 0.439s |
 | Independent implementation QA, QA/security/performance/reliability/frontend/architecture reviews | Passed after the Settings routing, permission and orphan-visibility corrections |
 | Browser evidence | Production-component fixture captures include missing/failed destination discovery, snapshot disclosure and 390px reflow. Actual Edge keyboard selection/preview/request expansion reached Submit without submitting a duplicate |
+
+The subsequent ServiceNow identity correction replaces a nonexistent endpoint with
+a bounded authenticated-user Table API query. The full Docker backend gate and
+focused adapter race/API/use-case checks passed; nine identity contract cases
+cover successful and fail-closed responses. QA, security, performance and
+architecture reviews found no blocking source issue. The [live ledger](live/README.md#servicenow-identity-correction)
+separates these source checks and native setup captures from pending authorization
+and incident acceptance.
 
 The first broad web run found a missing API test stub and two unrelated fifteen-second
 Template test timeouts. The stub was corrected; the final run used two workers and

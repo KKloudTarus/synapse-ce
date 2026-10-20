@@ -760,18 +760,22 @@ func (a *Adapter) TicketIdentity(ctx context.Context) (string, error) {
 		return identity(out.AuthenticatedUser.ID)
 	case ServiceNowProvider:
 		var out struct {
-			Result struct {
-				UserName string `json:"user_name"`
-				SysID    string `json:"sys_id"`
+			Result []struct {
+				SysID string `json:"sys_id"`
 			} `json:"result"`
 		}
-		if err := a.request(ctx, http.MethodGet, "/api/now/ui/user_session", nil, nil, &out); err != nil {
+		query := url.Values{
+			"sysparm_query":  {"sys_id=javascript:gs.getUserID()"},
+			"sysparm_fields": {"sys_id"},
+			"sysparm_limit":  {"2"},
+		}
+		if err := a.request(ctx, http.MethodGet, "/api/now/table/sys_user", query, nil, &out); err != nil {
 			return "", err
 		}
-		if out.Result.SysID != "" {
-			return identity(out.Result.SysID)
+		if len(out.Result) != 1 || len(out.Result[0].SysID) != 32 || strings.Trim(out.Result[0].SysID, "0123456789abcdef") != "" {
+			return "", ticketErr(http.StatusOK, "invalid_identity", false)
 		}
-		return identity(out.Result.UserName)
+		return identity(out.Result[0].SysID)
 	default:
 		payload, _ := json.Marshal(map[string]string{"query": "query Viewer { viewer { id } }"})
 		var out struct {

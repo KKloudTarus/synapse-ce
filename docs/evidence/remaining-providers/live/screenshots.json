@@ -104,6 +104,20 @@
       "captured_at_utc": "2026-10-20T04:54:49.279225+00:00",
       "kind": "live_browser_screenshot",
       "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "servicenow-machine-user-created.png",
+      "sha256": "63db6252a32eae62e06376ff1eb68bab87fd33b152968248f85e5a237287b862",
+      "captured_at_utc": "2026-10-20T06:19:08.810382+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI setup; native authorization and Synapse incident acceptance pending"
+    },
+    {
+      "file": "servicenow-own-row-acl-active.png",
+      "sha256": "b13bd91e1aedb1aa42f76bda7d4464227808cc718c95d1c5944031d02994fed2",
+      "captured_at_utc": "2026-10-20T07:25:52.305109+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI setup; native authorization and Synapse incident acceptance pending"
     }
   ]
 }

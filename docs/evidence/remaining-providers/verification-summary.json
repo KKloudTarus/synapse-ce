@@ -139,7 +139,7 @@
       "Actual lost provider HTTP-response recovery",
       "Interrupted upload/purge native acceptance",
       "Native sharing drift/legal hold and terminal actor/proposal cases",
-      "ServiceNow dedicated machine identity/scoped OAuth authorization and native records"
+      "ServiceNow effective OAuth policy/own-row ACL validation, native incident records and polling"
     ],
     "explicitly_deferred": [
       "Azure Boards Microsoft sandbox acceptance (#1439)",
@@ -152,7 +152,9 @@
     "publication-console": 16,
     "configuration": 6,
     "ticket-entry": 46,
-    "adapter_html_previews": 4
+    "adapter_html_previews": 4,
+    "live_browser_captures": 17,
+    "servicenow_setup_only_captures": 2
   },
   "browser_checks": {
     "manual_edge": "Keyboard Down/Tab selected GitLab among equal project/type/locale destinations; Enter opened snapshot preview, Enter expanded exact confidential request; Tab reached Submit without activation.",
@@ -162,6 +164,79 @@
   "failed_attempts_not_pass_evidence": [
     "Initial full web run: missing list API stub plus two unrelated fifteen-second Template timeouts; final maxWorkers=2 runs passed without changing timeouts.",
     "Old /tmp Go cache exhausted tmpfs during a build/lint run; persistent host cache used for successful final checks.",
-    "Preview harness first used ambiguous text locators and parallel Vite capture jobs; final sequential regenerated captures passed."
-  ]
+    "Preview harness first used ambiguous text locators and parallel Vite capture jobs; final sequential regenerated captures passed.",
+    "Initial ServiceNow focused command referenced nonexistent internal/adapter/http; corrected httpapi run passed. Native preflight returned 403 even for own identity, so its negative reads are not ACL acceptance."
+  ],
+  "servicenow_identity_delta": {
+    "base_commit": "a1769c67959f29ca47820233683e3fb32a40a681",
+    "recorded_at_utc": "2026-10-20T07:50:50.325338+00:00",
+    "compiled_with_uncommitted_inputs": true,
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "e39dc28d7d26d43095c21af0d8a02469ee95f5923cf05848e06c63c7812a95bd",
+      "internal/infrastructure/integration/ticketproviders/provider_test.go": "7ff945e54932a3cd3376bc9736a79e39dd0b4cfece585ae7014e9ef1cab5d958",
+      "docs/guide/integrations.md": "2295a8325ad479b72ab671dab3c1da029b5b83ba7171870946daefa23017f475",
+      "docs/guide/configuration.md": "b1f9004deca39abfd8f3db58d90ab9857cda81351280010ca8f257c6602daae0"
+    },
+    "checks": [
+      {
+        "command": "make lint build vet test typecheck",
+        "environment": "Docker synapse-provider-check-runtime:local",
+        "exit_code": 0,
+        "local_log_sha256": "ba2c24ffd07ae4ab53c8e4123c0be253680bcfd5928c29521f9de819158c3ee1",
+        "log_modified_at_utc": "2026-10-20T07:09:48.699918+00:00"
+      },
+      {
+        "command": "go test -race -count=1 ./internal/infrastructure/integration/ticketproviders; go test -count=1 ./internal/adapter/httpapi/... ./internal/usecase/ticketing/... ./internal/usecase/integrations/... ./internal/infrastructure/integration/...",
+        "environment": "Docker synapse-provider-check-runtime:local",
+        "exit_code": 0,
+        "local_log_sha256": "30ab022be70f5a673d21b8ed53e353972e0106c20b8a885c09d56d8b4f9da604",
+        "log_modified_at_utc": "2026-10-20T07:14:11.002283+00:00"
+      },
+      {
+        "command": "go test -count=1 ./docs ./api",
+        "environment": "Docker synapse-provider-check-runtime:local",
+        "exit_code": 0,
+        "local_log_sha256": "097d16e1d598cbbaeb95ce279266be13d6d72661cd5942140ba338e7d7980122",
+        "log_modified_at_utc": "2026-10-20T07:51:15.491904+00:00"
+      }
+    ],
+    "identity_contract_cases": 9,
+    "reviews": {
+      "qa-verifier": "pass",
+      "security-auditor": "pass",
+      "performance-auditor": "pass",
+      "architecture-critic": "pass"
+    },
+    "native_status": "incomplete; corrected identity query succeeded during reverted trial; final policy isolation and governed incident acceptance pending",
+    "earlier_evidence_scope": "Web, PostgreSQL/RLS and hostile harness evidence above predates this adapter-local identity correction; their implementation inputs are unchanged. Full backend preceded two test-only alphabet fixtures, both covered by the final focused run.",
+    "secret_and_manifest_check": {
+      "files_scanned": 8022,
+      "secret_sources_checked": 16,
+      "secret_match_files": [],
+      "screenshots_verified": 17
+    },
+    "native_trial": {
+      "status": "incomplete; trial rolled back",
+      "own_identity": {
+        "status": 200,
+        "exactly_own_id": true
+      },
+      "foreign_user_query": {
+        "status": 200,
+        "result_count": 0
+      },
+      "unlinked_problem_and_task": {
+        "status": 200,
+        "result_count": 0,
+        "interpretation": "does not prove endpoint-policy denial"
+      },
+      "rollback": {
+        "revoke_status": 200,
+        "revoked_token_probe_status": 401,
+        "verified_revoked": true
+      },
+      "client_restored_to": "Securely scoped",
+      "governed_incidents_created": 0
+    }
+  }
 }

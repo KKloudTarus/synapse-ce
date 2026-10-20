@@ -19,12 +19,46 @@ excluded from this PR.
 | GitLab Issues | English and Vietnamese confidential issues in a private project; the first uncertain create was reconciled to its existing issue after the modern URL correction. | The existing issue was adopted with one create attempt; no repeat create was dispatched. |
 | Linear | English and Vietnamese issues in the dedicated team with a Read/Create-only API key. | Polling observations are available; no terminal-state author attribution or automatic finding change is claimed. |
 | Google Drive | Restricted app-created My Drive folder; a real worker publication produced HTML and PDF. The separate Reader account joined the group and opened the PDF. | A fresh source completed create → update on the same remote ID → governed purge, each with one attempt. Reader opened the updated PDF and could no longer open it after purge. Interrupted-operation native acceptance remains open. |
-| ServiceNow | Personal developer instance is provisioned and signed in. | A dedicated machine identity and scoped OAuth client await authorization; no native record acceptance is claimed. |
+| ServiceNow | Personal developer instance, role-free machine identity, OAuth client and three endpoint-specific API policies are provisioned. | OAuth authorization and own-row ACL acceptance remain unproven. No native incident has been created through Synapse. |
 
 The Drive publication used a separately provisioned local reviewer and an active
 synthetic engagement. The bootstrap operator is deliberately excluded from durable
 release authority. Source and permission checks were satisfied through supported
 APIs; the release guard was not relaxed.
+
+## ServiceNow identity correction
+
+Native setup exposed a nonexistent identity endpoint in the adapter. Identity now
+uses a bounded Table API query for the authenticated user's `sys_id` and requires
+exactly one lowercase 32-character hexadecimal identifier. Empty, malformed,
+multiple-user and username-only responses fail closed. The query is not an access
+control boundary: the instance must independently prevent this machine identity
+from reading other directory rows or writing the directory.
+
+The correction passed the full Docker backend gate (`make lint build vet test
+typecheck`) and focused Docker adapter race, HTTP API, ticketing and integration
+checks. Nine identity response cases cover the wire request and failure paths.
+Independent QA, security and performance reviews found no blocking source issue.
+The first focused command included a nonexistent `http` package path; the corrected
+`httpapi` run passed. These source checks do not establish native ACL acceptance.
+
+The initial native probe returned `Access to unscoped api is not allowed`, including
+for the required own-identity read. Those denied reads do not prove the intended
+permission boundary. An approved client-specific OAuth trial then returned exactly
+the Machine user's ID through the corrected query; foreign-directory queries
+returned no rows. However, unlinked `problem` and `task` reads also returned 200 with
+no rows, which does not establish endpoint-policy denial. The client was restored
+to Securely scoped and the trial token revoked; its subsequent request returned
+401. Final token authorization and the complete positive/negative permission
+matrix remain pending. Neither connection-test nor incident acceptance is passed.
+
+These setup captures show the Machine user without assigned roles and the active
+own-row Deny-Unless ACL. They do not demonstrate effective token authorization,
+successful own-identity read, or governed incident creation.
+
+| Machine user setup | Own-row ACL activated |
+| --- | --- |
+| ![Dedicated Machine user with no assigned roles](servicenow-machine-user-created.png) | ![Active sys_user read Deny-Unless ACL](servicenow-own-row-acl-active.png) |
 
 ## Recovery experiment
 
