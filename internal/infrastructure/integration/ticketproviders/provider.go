@@ -283,7 +283,11 @@ func (a *Adapter) BuildTicketPayload(_ context.Context, in ports.TicketPayloadIn
 	case GitLabProvider:
 		return marshalPayload(map[string]any{"title": in.Summary, "description": desc, "confidential": true, "labels": ""}, ports.TicketMarkerDescriptor{Version: 1, Strategy: ports.TicketMarkerTag, Path: []string{"labels"}})
 	case AzureProvider:
-		return marshalPayload([]map[string]any{{"op": "add", "path": "/fields/System.Title", "value": in.Summary}, {"op": "add", "path": "/fields/System.Description", "value": htmlEscape(desc)}}, ports.TicketMarkerDescriptor{Version: 1, Strategy: ports.TicketMarkerJSONPatchAdd, Path: []string{"fields", "System.Tags"}})
+		fragment, err := messageformat.HTMLFragment(desc, in.Links)
+		if err != nil {
+			return ports.TicketPayload{}, ticketErr(0, "invalid_link", false)
+		}
+		return marshalPayload([]map[string]any{{"op": "add", "path": "/fields/System.Title", "value": in.Summary}, {"op": "add", "path": "/fields/System.Description", "value": fragment}}, ports.TicketMarkerDescriptor{Version: 1, Strategy: ports.TicketMarkerJSONPatchAdd, Path: []string{"fields", "System.Tags"}})
 	case ServiceNowProvider:
 		return marshalPayload(map[string]any{"short_description": in.Summary, "description": desc, "correlation_id": ""}, ports.TicketMarkerDescriptor{Version: 1, Strategy: ports.TicketMarkerScalar, Path: []string{"correlation_id"}})
 	default:
@@ -297,12 +301,17 @@ func marshalPayload(v any, m ports.TicketMarkerDescriptor) (ports.TicketPayload,
 	}
 	return ports.TicketPayload{Wire: b, Marker: m}, nil
 }
-func htmlEscape(s string) string {
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&#39;").Replace(s)
-}
 func (a *Adapter) FormatTicketDescription(body string, links []ports.RenderedLink) (json.RawMessage, error) {
 	if len(body) > maxPayload {
 		return nil, ticketErr(0, "description_too_large", false)
+	}
+	if a.provider == AzureProvider {
+		// Validate at both formatter and serializer boundaries; keep typed links
+		// separate so only the native builder can create HTML anchors.
+		if _, err := messageformat.HTMLFragment("", links); err != nil {
+			return nil, ticketErr(0, "invalid_link", false)
+		}
+		return json.Marshal(body)
 	}
 	if a.provider == ServiceNowProvider {
 		body = messageformat.PlainText(body)

@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/writeintent"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/ticketproviders"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	usecase "github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing"
 )
@@ -240,3 +244,60 @@ func TestJiraMetadataRetainsLegacyCapabilityDefaults(t *testing.T) {
 
 var _ ports.TicketPayloadBuilder = (*nativeWorkflowProvider)(nil)
 var _ integration.Provider = "github-issues"
+
+// Keep the real native serializer inside the workflow while replacing only I/O.
+type azureWorkflowProvider struct {
+	*workflowProvider
+	native *ticketproviders.Adapter
+	built  int
+}
+
+func (p *azureWorkflowProvider) FormatTicketDescription(body string, links []ports.RenderedLink) (json.RawMessage, error) {
+	return p.native.FormatTicketDescription(body, links)
+}
+func (p *azureWorkflowProvider) BuildTicketPayload(ctx context.Context, in ports.TicketPayloadInput) (ports.TicketPayload, error) {
+	p.built++
+	return p.native.BuildTicketPayload(ctx, in)
+}
+func TestAzureWorkflowFreezesRenderedHTMLBeforeDispatch(t *testing.T) {
+	f, _ := newNativeWorkflowForProvider(t, "azure-boards", "https://dev.azure.com/org/project")
+	native, err := ticketproviders.New(f.integrations.item, integration.CredentialBundle{"pat": "synthetic-pat"}, selfhosted.Rules{}, nil, "azure-boards")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer native.Close()
+	provider := &azureWorkflowProvider{workflowProvider: f.provider, native: native}
+	provider.metadata = ports.TicketMetadata{Projects: []ports.TicketChoice{{ID: "SEC", Name: "SEC"}}, IssueTypes: []ports.TicketChoice{{ID: "issue", Name: "issue"}}, SecurityPolicy: "provider_access"}
+	provider.created = domain.RemoteTicket{ID: "42", URL: "https://dev.azure.com/org/project/_workitems/edit/42"}
+	w, err := usecase.NewWorkflow(f.store, f.integrations, workflowProviders{provider}, f.findings, f.engagements, f.policy, f.audit, &ticketIDs{}, f.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SetPublicBaseURL("https://console.example")
+	f.workflow = w
+	intent := submitNativeURLTicket(t, f, "azure-html-once")
+	var envelope struct {
+		Wire json.RawMessage `json:"wire"`
+	}
+	if err = json.Unmarshal(intent.Snapshot, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(envelope.Wire), `fields/System.Description`) || !strings.Contains(string(envelope.Wire), `noopener noreferrer`) {
+		t.Fatalf("HTML/typed link missing: %s", envelope.Wire)
+	}
+	// Dispatch must reuse queued wire without invoking the serializer.
+	before := provider.built
+	if _, err = f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if provider.built != before {
+		t.Fatal("dispatch rerendered the description")
+	}
+	var want, got any
+	if json.Unmarshal(envelope.Wire, &want) != nil || json.Unmarshal(provider.createdPayload, &got) != nil {
+		t.Fatal("invalid frozen wire")
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("dispatch changed frozen HTML: %s", provider.createdPayload)
+	}
+}

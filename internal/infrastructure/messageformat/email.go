@@ -140,62 +140,14 @@ func EmailHTML(message ports.RenderedMessage) (string, error) {
 }
 
 func emailHTMLFragment(message ports.RenderedMessage) (string, error) {
-	links, err := checkLinks(message.Links)
+	fragment, err := HTMLFragment(message.Fields["body"], message.Links)
 	if err != nil {
 		return "", err
 	}
-	var b strings.Builder
 	if label := emailSeverity(message.Severity); label != "" {
-		b.WriteString("<p>" + html.EscapeString(label) + "</p>\n")
+		return "<p>" + html.EscapeString(label) + "</p>\n" + fragment, nil
 	}
-	for _, block := range msgmarkdown.Parse(message.Fields["body"]).Blocks {
-		switch v := block.(type) {
-		case msgmarkdown.Paragraph:
-			b.WriteString("<p>")
-			htmlInlines(&b, v.Inlines)
-			b.WriteString("</p>\n")
-		case msgmarkdown.List:
-			b.WriteString("<ul>\n")
-			for _, item := range v.Items {
-				b.WriteString("<li>")
-				htmlInlines(&b, item)
-				b.WriteString("</li>\n")
-			}
-			b.WriteString("</ul>\n")
-		}
-	}
-	if len(links) > 0 {
-		b.WriteString("<p>")
-		for i, l := range links {
-			if i > 0 {
-				b.WriteString(" &middot; ")
-			}
-			b.WriteString(`<a href="` + html.EscapeString(l.url) + `" rel="noopener noreferrer">` + html.EscapeString(l.label) + "</a>")
-		}
-		b.WriteString("</p>\n")
-	}
-	return b.String(), nil
-}
-
-func htmlInlines(b *strings.Builder, inlines []msgmarkdown.Inline) {
-	for _, n := range inlines {
-		switch v := n.(type) {
-		case msgmarkdown.Text:
-			b.WriteString(html.EscapeString(defangEmailURLs(v.Value)))
-		case msgmarkdown.Strong:
-			b.WriteString("<strong>")
-			htmlInlines(b, v.Children)
-			b.WriteString("</strong>")
-		case msgmarkdown.Emphasis:
-			b.WriteString("<em>")
-			htmlInlines(b, v.Children)
-			b.WriteString("</em>")
-		case msgmarkdown.Code:
-			b.WriteString("<code>" + html.EscapeString(defangEmailURLs(v.Value)) + "</code>")
-		case msgmarkdown.LineBreak:
-			b.WriteString("<br>\n")
-		}
-	}
+	return fragment, nil
 }
 
 // Email uses the same typed urgency palette as chat, independent of template text.

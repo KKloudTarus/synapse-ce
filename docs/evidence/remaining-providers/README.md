@@ -209,3 +209,30 @@ run `web/scripts/remaining-providers-evidence.mjs` and
 API calls locally and do not contact provider services. Run these capture scripts
 sequentially against one Vite server; temporary-entry creation/removal triggers
 reloads in other simultaneously running captures.
+
+## Azure description correction
+
+Azure Boards serializes canonical message Markdown into safe HTML at the native
+payload builder. The formatter retains the source body and keeps typed links
+separate. The builder escapes hostile text and defangs body URLs; only checked
+HTTPS links create anchors. The shared renderer is extracted from the existing
+email formatter without changing email output, layout or severity. This avoids
+trusting arbitrary HTML passed to a direct payload-builder call.
+
+Regression tests cover Vietnamese punctuation, lists, line breaks, emphasis/code,
+HTML injection, body-originated URLs, unsafe typed links and exact anchor count.
+A workflow test uses the real Azure formatter/builder and proves that dispatch
+sends the frozen HTML without calling the builder again. Tests failed before the
+fix and pass afterward in Docker.
+
+[Serializer preview](ticket-rendering/azure-description.png) shows the actual
+fixture bytes in [azure-description.html](ticket-rendering/azure-description.html).
+Its [manifest](ticket-rendering/manifest.json) records local hashes. This capture is
+additional to the 96 component/report previews; it is synthetic local evidence,
+not Azure product acceptance. The Microsoft sandbox deferral remains unchanged.
+
+Regenerate with `SYNAPSE_TICKET_PREVIEW_DIR` pointing at `ticket-rendering/` and
+`go test ./internal/infrastructure/integration/ticketproviders -run
+'^TestAzureDescriptionRendersSafeHTMLAtPayloadBoundary$' -count=1`, then run
+`node scripts/ticket-description-previews.mjs` from `web/` with Chromium available
+at `/usr/bin/chromium`. The browser aborts all network requests during capture.

@@ -348,5 +348,56 @@
       "secret_match_files": [],
       "screenshots_verified": 27
     }
+  },
+  "azure_description_correction": {
+    "base_commit": "a281229dbd46862557fbd310c3614c877b548c9c",
+    "recorded_at_utc": "2026-10-20T11:07:12.127783+00:00",
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "41e394c8901cb94e6a6468c786e99ce0bc5fb79bb4445d8d45d300021ae53f44",
+      "internal/infrastructure/integration/ticketproviders/description_test.go": "6f2bcbdc8a6599cfe4206f907dc724e6486cd70e8504788a5d24a60027b72e12",
+      "internal/infrastructure/messageformat/email.go": "f221a7cb90c47e5bf3d4208b103e2989a7ddb8a822aca922fa3983f9cadf91b2",
+      "internal/infrastructure/messageformat/html.go": "1f4dd112232da5584e12e9bc02c9cb5032fd5aa0604d9f69f15e13a81c4f67f6",
+      "internal/usecase/ticketing/native_payload_workflow_test.go": "4623301505c46bc78c37adf440f1657378d74e49e43ea4f9046b0e49351163ea",
+      "web/scripts/ticket-description-previews.mjs": "fcc3712bf203721ae5e35b08ad1d041142e6451697f36b4be4bb7c03b5b85c16"
+    },
+    "design": "Render canonical Markdown at the native payload builder; keep typed links separate and reuse the existing safe email fragment renderer. Direct builder calls never trust supplied HTML. Dispatch consumes frozen wire.",
+    "expected_failure": {
+      "exit_code": 1,
+      "local_log_sha256": "ba883343d8f32daa8e23f645b63194cb92083b9e6548efbf5a8ae13e8f981e72",
+      "meaning": "Initial tests fail on lost formatting, escaped punctuation and unsafe typed-link acceptance before fix."
+    },
+    "checks": {
+      "backend": {
+        "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race -count=1 ./internal/infrastructure/integration/ticketproviders ./internal/infrastructure/messageformat ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
+        "exit_code": 0,
+        "local_log_sha256": "386132285bb5763dd439e0d2897c5fc8641b6d84146d278235efb630acbfc195"
+      },
+      "docs_api": {
+        "command": "go test -count=1 ./docs ./api",
+        "environment": "Docker",
+        "exit_code": 0,
+        "local_log_sha256": "936b3164d045231125ae06aefef159f7ed4ee62fb5e0d934694ca304f6681044"
+      },
+      "workflow_after_import_comment_cleanup": {
+        "command": "go test -count=1 ./internal/usecase/ticketing -run TestAzureWorkflowFreezesRenderedHTMLBeforeDispatch",
+        "exit_code": 0,
+        "local_log_sha256": "808486b180baacf0e141f59279688de2812a8d56eef68513cc954fa036f162b5"
+      },
+      "preview_script_lint": {
+        "command": "pnpm exec eslint scripts/ticket-description-previews.mjs",
+        "environment": "Docker",
+        "exit_code": 0,
+        "local_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "reviews": {
+      "qa-verifier": "pass/high; independent focused Docker race and HTML/PNG/hash inspection",
+      "security-auditor": "pass/high; direct boundary and frozen-wire credential/size controls verified",
+      "performance-auditor": "pass/high; one body parse, no network/dispatch work; synthetic near-limit samples up to5.55ms and4.16MB per render, not a production SLO or linear-time claim",
+      "architecture-critic": "sound/high; existing infrastructure helper and inward dependencies preserved"
+    },
+    "visual": "ticket-rendering/manifest.json",
+    "live_acceptance": "Not run; authorized Azure sandbox unavailable. Local serializer preview does not establish Azure native display or close #1439.",
+    "unchanged_evidence": "Web source, persistence and shared intent/recovery executors unchanged; existing web/PostgreSQL/RLS and broader reviewers retained for those inputs."
   }
 }

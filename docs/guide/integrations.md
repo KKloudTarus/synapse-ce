@@ -87,6 +87,14 @@ Add the outbound providers from **Manage connections and credentials**:
   `sn_vul_vulnerable_item` table, and a sealed API token.
 - `linear` requires `https://api.linear.app/graphql`, a team ID, and a sealed API token.
 
+Azure Boards renders the canonical message subset as safe HTML while building the
+preview's native JSON Patch. Paragraphs, line breaks, lists, emphasis and code are
+preserved; body-supplied HTML and links remain literal, with explicit URL forms
+defanged. Only separately supplied, validated HTTPS links become anchors. The
+rendered wire is frozen with the preview and is not rendered again during dispatch.
+This uses the existing email fragment renderer; email's layout and severity stay
+unchanged. Native Azure rendering acceptance still requires an authorized sandbox.
+
 ServiceNow identifies its authenticated principal through the standard Table API:
 `GET /api/now/table/sys_user` with the fixed query
 `sys_id=javascript:gs.getUserID()`, fields `sys_id`, and limit `2`. Exactly one
