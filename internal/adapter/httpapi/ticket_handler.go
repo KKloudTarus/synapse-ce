@@ -201,7 +201,7 @@ func (rt *Router) previewTicket(w http.ResponseWriter, r *http.Request) {
 	for _, link := range p.Links {
 		links = append(links, map[string]string{"label": link.Label, "url": link.URL})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"fields": payload["fields"], "summary": p.Summary, "description": p.Description, "links": links, "security_waived": p.SecurityWaived, "data_class": p.DataClass, "digest": p.Digest, "mapping_version": p.MappingVersion, "marker_required": p.MarkerRequired, "marker_format": p.MarkerFormat})
+	writeJSON(w, http.StatusOK, map[string]any{"fields": payload["fields"], "wire": payload["wire"], "summary": p.Summary, "description": p.Description, "links": links, "security_waived": p.SecurityWaived, "data_class": p.DataClass, "digest": p.Digest, "mapping_version": p.MappingVersion, "marker_required": p.MarkerRequired, "marker_format": p.MarkerFormat})
 }
 func (rt *Router) submitTicket(w http.ResponseWriter, r *http.Request) {
 	var input struct {

@@ -54,6 +54,7 @@ const Inbox = lazy(() => import('./pages/Inbox/InboxPage').then(m => ({ default:
 const SettingsConfig = lazy(() => import('./pages/Settings/SettingsConfig').then(m => ({ default: m.SettingsConfig })))
 const Integrations = lazy(() => import('./pages/Settings/Integrations').then(m => ({ default: m.Integrations })))
 const IntegrationsHub = lazy(() => import('./pages/Settings/IntegrationsHub').then(m => ({ default: m.IntegrationsHub })))
+const TicketProviderSettings = lazy(() => import('./pages/Settings/TicketProviderSettings').then(m => ({ default: m.TicketProviderSettings })))
 const JiraSettings = lazy(() => import('./pages/Settings/JiraSettings').then(m => ({ default: m.JiraSettings })))
 const Connectors = lazy(() => import('./pages/Settings/Connectors').then(m => ({ default: m.Connectors })))
 const TelemetryPrivacy = lazy(() => import('./pages/Settings/TelemetryPrivacy').then(m => ({ default: m.TelemetryPrivacy })))
@@ -157,6 +158,7 @@ function Gate() {
           <Route path="integrations" element={<IntegrationsHub />} />
           <Route path="integrations/ci" element={<Integrations />} />
           <Route path="integrations/jira" element={<JiraSettings />} />
+          <Route path="integrations/tickets" element={<TicketProviderSettings />} />
           <Route path="connectors" element={<Connectors />} />
           <Route path="privacy" element={<TelemetryPrivacy />} />
 

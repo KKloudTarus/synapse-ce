@@ -1,0 +1,21 @@
+package documentproviders
+
+import (
+	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+)
+
+func Register(registry *integration.Registry) error {
+	if registry == nil {
+		return shared.ErrValidation
+	}
+	for _, item := range []struct {
+		descriptor integration.ProviderDescriptor
+		factory    integration.Factory
+	}{{notionDescriptor, newNotion}, {graphDescriptor(SharePoint), newGraph}, {graphDescriptor(OneDrive), newGraph}, {driveDescriptor, newDrive}} {
+		if err := registry.Register(item.descriptor, item.factory); err != nil {
+			return err
+		}
+	}
+	return nil
+}

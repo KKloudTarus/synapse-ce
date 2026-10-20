@@ -1,0 +1,185 @@
+{
+  "provider_acceptance": false,
+  "captures": [
+    {
+      "file": "github-issues-light.png",
+      "state": "github-issues",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "fa16dc3e6bc7dfc43513f6fff56c1dddf5e22ee34f2e5cb3fa1885ff60594e82"
+    },
+    {
+      "file": "github-issues-light-mobile.png",
+      "state": "github-issues",
+      "theme": "light",
+      "viewport": "mobile",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "554edfb648c7a58e4f2dc6b37ea68b4ad02daa971f879147bd210f6992dabeec"
+    },
+    {
+      "file": "gitlab-issues-light.png",
+      "state": "gitlab-issues",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "90c5baa38de401b9a1a0a54510607fd7616aed1c0b296b73f8cd6019af3872fa"
+    },
+    {
+      "file": "azure-boards-light.png",
+      "state": "azure-boards",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "3914f2b695ef4d49d9e3120db8db3159348dc5762fc80517cae5794aa3fee189"
+    },
+    {
+      "file": "servicenow-light.png",
+      "state": "servicenow",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "9b31ccc2f1d79b116110dfac8ab689d9ac696dd11ddf503631bc203e46eb01d3"
+    },
+    {
+      "file": "linear-light.png",
+      "state": "linear",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "7f0fe6f6326a6c2c9ddea07e2ae5740501fa01af8d8700c71aa33249d4709e97"
+    },
+    {
+      "file": "loading-light.png",
+      "state": "loading",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "387c3f286142992d718c8127fe6daf06ad52c34a5bb7997153977fcd9f0d6698"
+    },
+    {
+      "file": "empty-light.png",
+      "state": "empty",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "08960abb13d2778f6b6227fd2b9fe1e5ea4c8164ea55cb3911ed3ffda4523183"
+    },
+    {
+      "file": "error-light.png",
+      "state": "error",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "d2245cfe9eb790044742c912ea51290e029db30876b8df53d7e703e59a473637"
+    },
+    {
+      "file": "permission-light.png",
+      "state": "permission",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "8bea15fbacb7ee7d285a72521af79f579f23cbea58ed739bee204ad561bd5b96"
+    },
+    {
+      "file": "permission-light-mobile.png",
+      "state": "permission",
+      "theme": "light",
+      "viewport": "mobile",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "bf3a79215ddfb8223219f46e3dc5d7a83b068f577d7288a75521744f84a57465"
+    },
+    {
+      "file": "github-issues-dark.png",
+      "state": "github-issues",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "8a1d13e6918d1001490b433edd5d3fab9407db1b77184ff95a4a1f6d02e76759"
+    },
+    {
+      "file": "github-issues-dark-mobile.png",
+      "state": "github-issues",
+      "theme": "dark",
+      "viewport": "mobile",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "1725fb731916d2ac71c937e62fb4464529a1e7812a67a6da17d490add82f033c"
+    },
+    {
+      "file": "gitlab-issues-dark.png",
+      "state": "gitlab-issues",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "a3a187133c904725d17c0a255ec75da666e2fd72a5c66fb54d62cdaf2cce1cc3"
+    },
+    {
+      "file": "azure-boards-dark.png",
+      "state": "azure-boards",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "d21180c319bd2821faf033189f66dbfd6a00fb8b2aa4176127445e0959d79f7d"
+    },
+    {
+      "file": "servicenow-dark.png",
+      "state": "servicenow",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "d54f71fa25650547d7a9ac510c1d6a40e6bc9bf7ab588b7751be0bd69d086e9f"
+    },
+    {
+      "file": "linear-dark.png",
+      "state": "linear",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "dd9d5a5a503a1e124078c2aa777fc598721e2dcc35f6b2e1732bf384de716609"
+    },
+    {
+      "file": "loading-dark.png",
+      "state": "loading",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "56714d961df03b76895ce60c265131d250467a6b02ba04578142ebf456bc2b46"
+    },
+    {
+      "file": "empty-dark.png",
+      "state": "empty",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "aadb38deefbe3afd587819b1d54f9cd72d43007a2fc3a923dc243c44be8c093d"
+    },
+    {
+      "file": "error-dark.png",
+      "state": "error",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "7d9f55af58ecb2e3ee023967756ed496eb7b7246e310637345b30ba46b429ac4"
+    },
+    {
+      "file": "permission-dark.png",
+      "state": "permission",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "4d21d102578de0609b94b29e442062cca08baa7c5bc84295d90c3ce7c58a1781"
+    },
+    {
+      "file": "permission-dark-mobile.png",
+      "state": "permission",
+      "theme": "dark",
+      "viewport": "mobile",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "7112448a2a0340da73075cc4b0a9a9d7827abbdf47c2d060ebbfcaebbc8a81d5"
+    }
+  ]
+}

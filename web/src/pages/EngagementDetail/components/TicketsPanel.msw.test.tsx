@@ -27,12 +27,12 @@ afterAll(() => server.close())
 describe('TicketsPanel with the real ticketing client', () => {
   it('previews, submits, reloads a linked ticket, and reconciles an uncertain request', async () => {
     render(<TicketsPanel engagementId="eng-1" findingId="finding-1" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview Jira ticket' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview ticket' }))
     expect(await screen.findByText('SEC: SQL injection')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open finding' })).toHaveAttribute('href', 'https://console.example/findings/finding-1')
     expect(screen.getByText(/recorded administrator waiver/)).toBeInTheDocument()
     expect(screen.getByText('security')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Submit Jira ticket' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Submit ticket' }))
     expect(await screen.findByText(/Ticket request recorded/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh tickets' }))
@@ -46,8 +46,8 @@ describe('TicketsPanel with the real ticketing client', () => {
   it('surfaces a provider preview rejection without issuing a ticket request', async () => {
     server.use(http.post('/api/v1/engagements/:engagementId/findings/:findingId/ticket-preview', () => HttpResponse.json({ error: 'Jira metadata is unavailable' }, { status: 422 })))
     render(<TicketsPanel engagementId="eng-1" findingId="finding-1" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Preview Jira ticket' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview ticket' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Jira metadata is unavailable')
-    expect(screen.queryByRole('button', { name: 'Submit Jira ticket' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Submit ticket' })).not.toBeInTheDocument()
   })
 })

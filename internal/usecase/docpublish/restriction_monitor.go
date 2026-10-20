@@ -86,13 +86,8 @@ func (s *Service) observeRestriction(ctx context.Context, tenant shared.ID, link
 		return "unverifiable"
 	}
 	defer closeProvider(provider)
-	remote, err := provider.GetDocument(ctx, link.RemotePageID)
-	if err != nil {
-		return "unverifiable"
-	}
-	if remote.ID != link.RemotePageID || remote.Container != link.Container {
-		return "restriction_lost"
-	}
+	// The provider verifies both remote identity/container and complete current
+	// sharing. Fetching the document separately duplicates that bounded proof.
 	err = provider.VerifyDocumentRestriction(ctx, link.RemotePageID, link.Container, group)
 	// Re-read configuration after the remote observation, so a rotated credential
 	// or changed destination cannot make an old proof look current.

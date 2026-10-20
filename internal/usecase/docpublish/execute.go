@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/docpublish"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -13,6 +14,9 @@ import (
 
 func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Intent, error) {
 	ctx = shared.WithTenant(ctx, tenant)
+	if err := ctx.Err(); err != nil {
+		return domain.Intent{}, err
+	}
 	c, err := s.store.GetDocumentCommand(ctx, tenant, id)
 	if err != nil {
 		return domain.Intent{}, err
@@ -24,11 +28,22 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 	if err != nil {
 		return c.Intent, err
 	}
+	if err := ctx.Err(); err != nil {
+		return c.Intent, err
+	}
 	p, err := s.providers.DocumentProvider(ctx, in)
 	if err != nil {
 		return c.Intent, err
 	}
 	defer closeProvider(p)
+	if c.Progress.Step == "shell" {
+		if err := ctx.Err(); err != nil {
+			return c.Intent, err
+		}
+		if err := s.preflightDocumentRelease(ctx, in, c.Intent.Container, c.ReadGroup); err != nil {
+			return c.Intent, err
+		}
+	}
 	if c.Intent.State == writeintent.InFlight {
 		if c.Intent.LeaseUntil != nil && !s.clock.Now().Before(*c.Intent.LeaseUntil) {
 			c.Intent, err = s.store.TransitionIntent(ctx, tenant, id, c.Intent.Version, domain.IntentTransition{Event: writeintent.LeaseExpired}, s.clock.Now().UTC())
@@ -40,6 +55,9 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 		}
 	}
 	if c.Intent.State == writeintent.Uncertain {
+		if err := ctx.Err(); err != nil {
+			return c.Intent, err
+		}
 		return s.reconcile(ctx, c, p)
 	}
 	if c.Intent.State == writeintent.Failed {
@@ -73,6 +91,12 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 		}
 	}
 	for step := 0; step < 16; step++ {
+		// A canceled caller may not begin another provider operation. A remote
+		// acknowledgement is durably checkpointed below with a short detached
+		// context before this check can run again.
+		if err = ctx.Err(); err != nil {
+			return c.Intent, err
+		}
 		if _, err = s.guard(ctx, c); err != nil {
 			return s.refuse(ctx, c, "release_authority_changed")
 		}
@@ -96,9 +120,7 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 			}
 			c.Progress.Remote = remote
 			c.Progress.Step = "restrictions"
-			if c, err = s.checkpoint(ctx, c); err != nil {
-				return c.Intent, err
-			}
+			return s.checkpointAndYield(ctx, c)
 		case "restrictions":
 			if err = s.verifyRemote(ctx, c, p); err != nil {
 				return s.refuse(ctx, c, "remote_identity_changed")
@@ -112,13 +134,36 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 			if err = p.RestrictDocument(ctx, c.Progress.Remote.ID, c.ReadGroup); err != nil {
 				return s.writeFailure(ctx, c, err)
 			}
+			// If cancellation raced the acknowledgement, persist it without another
+			// provider read. A later slice repeats the idempotent restriction and
+			// proves the completed neutral shell before content can leave.
+			if ctx.Err() != nil {
+				return s.checkpointAndYield(ctx, c)
+			}
 			if err = p.VerifyDocumentRestriction(ctx, c.Progress.Remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
-				return s.writeFailure(ctx, c, err)
+				return s.uncertain(ctx, c)
 			}
+			// Some providers complete a neutral shell while applying its ACL. Read
+			// the exact bound shell back so its final opaque revision fences every
+			// attachment and body write. A changed identity, marker, or non-neutral
+			// representation can never be adopted as the pending publication.
+			refreshed, readErr := p.GetDocument(ctx, c.Progress.Remote.ID)
+			if readErr != nil {
+				return s.uncertain(ctx, c)
+			}
+			if refreshed.ID != c.Progress.Remote.ID || refreshed.Container != c.Intent.Container {
+				return s.uncertain(ctx, c)
+			}
+			if c.Intent.Action == domain.Create {
+				if !refreshed.Neutral || refreshed.Marker != c.Intent.Marker {
+					return s.uncertain(ctx, c)
+				}
+			} else if !sameRemoteRevision(refreshed.RemotePage, c.Progress.Remote) {
+				return s.uncertain(ctx, c)
+			}
+			c.Progress.Remote = refreshed.RemotePage
 			c.Progress.Step = "attachments"
-			if c, err = s.checkpoint(ctx, c); err != nil {
-				return c.Intent, err
-			}
+			return s.checkpointAndYield(ctx, c)
 		case "attachments":
 			files := attachments(c)
 			if len(c.Progress.UploadedReceipts) > len(files) {
@@ -148,9 +193,7 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 			}
 			c.Progress.UploadedReceipts = append(c.Progress.UploadedReceipts, ports.DocumentUploadReceipt{Key: key, Digest: digest(file.Data)})
 			c.Progress.Uploaded = len(c.Progress.UploadedReceipts)
-			if c, err = s.checkpoint(ctx, c); err != nil {
-				return c.Intent, err
-			}
+			return s.checkpointAndYield(ctx, c)
 		case "body":
 			if err = s.sensitiveGuard(ctx, c, p); err != nil {
 				return s.refuse(ctx, c, "restricted_sharing_unverified")
@@ -162,15 +205,23 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 			if _, err = s.guard(ctx, c); err != nil {
 				return s.refuse(ctx, c, "release_authority_changed")
 			}
-			remote, writeErr := p.WriteDocument(ctx, c.Progress.Remote.ID, c.Progress.Remote.Version, c.Artifact.Title, body, c.Intent.Marker)
+			var remote domain.RemotePage
+			var writeErr error
+			if c.Progress.Remote.Revision != "" {
+				writer, ok := p.(ports.DocumentRevisionWriter)
+				if !ok {
+					return s.refuse(ctx, c, "unsupported_release_contract")
+				}
+				remote, writeErr = writer.WriteDocumentRevision(ctx, c.Progress.Remote, c.Artifact.Title, body, c.Intent.Marker)
+			} else {
+				remote, writeErr = p.WriteDocument(ctx, c.Progress.Remote.ID, c.Progress.Remote.Version, c.Artifact.Title, body, c.Intent.Marker)
+			}
 			if writeErr != nil {
 				return s.writeFailure(ctx, c, writeErr)
 			}
 			c.Progress.Remote = remote
 			c.Progress.Step = "complete"
-			if c, err = s.checkpoint(ctx, c); err != nil {
-				return c.Intent, err
-			}
+			return s.checkpointAndYield(ctx, c)
 		case "complete":
 			if err = s.record(ctx, c, "document.published", c.Progress.Remote.ID); err != nil {
 				return c.Intent, err
@@ -190,9 +241,7 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 				return s.writeFailure(ctx, c, err)
 			}
 			c.Progress.Step = "purged"
-			if c, err = s.checkpoint(ctx, c); err != nil {
-				return c.Intent, err
-			}
+			return s.checkpointAndYield(ctx, c)
 		case "purged":
 			if err = s.record(ctx, c, "document.unpublished", c.Progress.Remote.ID); err != nil {
 				return c.Intent, err
@@ -203,6 +252,31 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 		}
 	}
 	return c.Intent, fmt.Errorf("%w: document checkpoint bound exceeded", shared.ErrConflict)
+}
+
+// checkpointAndYield stores an acknowledged provider effect before handing the
+// command back to the queue. The detached, bounded context is deliberately
+// limited to local persistence: a caller cancellation must not cause a second
+// provider request after the first has been acknowledged.
+func (s *Service) checkpointAndYield(ctx context.Context, c ports.DocumentCommand) (domain.Intent, error) {
+	localCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	checkpointed, err := s.checkpoint(localCtx, c)
+	if err != nil {
+		return c.Intent, err
+	}
+	yielded, err := s.store.YieldDocumentCommand(
+		localCtx,
+		checkpointed.Intent.TenantID,
+		checkpointed.Intent.ID,
+		checkpointed.Intent.Version,
+		checkpointed.Progress.Version,
+		s.clock.Now().UTC(),
+	)
+	if err != nil {
+		return checkpointed.Intent, err
+	}
+	return yielded.Intent, nil
 }
 
 func (s *Service) sensitiveGuard(ctx context.Context, c ports.DocumentCommand, p ports.DocumentProvider) error {
@@ -219,7 +293,17 @@ func (s *Service) verifyRemote(ctx context.Context, c ports.DocumentCommand, p p
 	if err != nil {
 		return err
 	}
-	if remote.ID != c.Progress.Remote.ID || remote.Container != c.Intent.Container || remote.Version != c.Progress.Remote.Version {
+	if remote.ID != c.Progress.Remote.ID || remote.Container != c.Intent.Container {
+		return shared.ErrConflict
+	}
+	// A provider may expose a durable folder reservation before the neutral body
+	// exists. It is usable only for the still-neutral restriction checkpoint and
+	// only when the intent marker binds it to this command. After restriction we
+	// refresh and freeze the actual body revision above.
+	if remote.Neutral && remote.Marker == c.Intent.Marker && c.Progress.Step == "restrictions" {
+		return nil
+	}
+	if !sameRemoteRevision(remote.RemotePage, c.Progress.Remote) {
 		return shared.ErrConflict
 	}
 	return nil
@@ -229,6 +313,7 @@ func (s *Service) outstanding(ctx context.Context, c ports.DocumentCommand, oper
 	c.Progress.OutstandingKey = key
 	c.Progress.OutstandingDigest = hash
 	c.Progress.ExpectedRemoteVersion = c.Progress.Remote.Version
+	c.Progress.ExpectedRemoteRevision = c.Progress.Remote.Revision
 	return s.saveProgress(ctx, c)
 }
 func (s *Service) checkpoint(ctx context.Context, c ports.DocumentCommand) (ports.DocumentCommand, error) {
@@ -236,6 +321,7 @@ func (s *Service) checkpoint(ctx context.Context, c ports.DocumentCommand) (port
 	c.Progress.OutstandingKey = ""
 	c.Progress.OutstandingDigest = ""
 	c.Progress.ExpectedRemoteVersion = 0
+	c.Progress.ExpectedRemoteRevision = ""
 	return s.saveProgress(ctx, c)
 }
 func (s *Service) saveProgress(ctx context.Context, c ports.DocumentCommand) (ports.DocumentCommand, error) {
@@ -259,5 +345,11 @@ func (s *Service) writeFailure(ctx context.Context, c ports.DocumentCommand, cau
 	if errors.As(cause, &classified) && !classified.Ambiguous {
 		return s.refuse(ctx, c, "provider_refused")
 	}
+	return s.uncertain(ctx, c)
+}
+
+// uncertain keeps the stored operation fence when an acknowledged mutation can
+// no longer be verified. A later read refusal cannot undo its remote effect.
+func (s *Service) uncertain(ctx context.Context, c ports.DocumentCommand) (domain.Intent, error) {
 	return s.store.TransitionIntent(ctx, c.Intent.TenantID, c.Intent.ID, c.Intent.Version, domain.IntentTransition{Event: writeintent.Ambiguous}, s.clock.Now().UTC())
 }

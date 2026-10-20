@@ -37,8 +37,8 @@ const (
 )
 
 var (
-	cloudDescriptor  = integration.ProviderDescriptor{Provider: CloudProvider, Name: "Jira Cloud", Description: "Jira Cloud ticket creation and metadata.", Capabilities: []integration.Capability{integration.CapabilityTestConnection}, SecretFields: []integration.FieldDescriptor{{Name: "email", Label: "Atlassian account email", Kind: integration.FieldText, Required: true}, {Name: "api_token", Label: "API token", Kind: integration.FieldPassword, Required: true}}}
-	dcDescriptor     = integration.ProviderDescriptor{Provider: DCProvider, Name: "Jira Data Center", Description: "Jira Data Center ticket creation and metadata.", SelfHosted: true, Capabilities: []integration.Capability{integration.CapabilityTestConnection}, SecretFields: []integration.FieldDescriptor{{Name: "pat", Label: "Personal access token", Kind: integration.FieldPassword, Required: true}}}
+	cloudDescriptor  = integration.ProviderDescriptor{Provider: CloudProvider, Name: "Jira Cloud", Description: "Jira Cloud ticket creation and metadata.", Capabilities: []integration.Capability{integration.CapabilityTestConnection, integration.CapabilityTickets}, SecretFields: []integration.FieldDescriptor{{Name: "email", Label: "Atlassian account email", Kind: integration.FieldText, Required: true}, {Name: "api_token", Label: "API token", Kind: integration.FieldPassword, Required: true}}}
+	dcDescriptor     = integration.ProviderDescriptor{Provider: DCProvider, Name: "Jira Data Center", Description: "Jira Data Center ticket creation and metadata.", SelfHosted: true, Capabilities: []integration.Capability{integration.CapabilityTestConnection, integration.CapabilityTickets}, SecretFields: []integration.FieldDescriptor{{Name: "pat", Label: "Personal access token", Kind: integration.FieldPassword, Required: true}}}
 	projectPattern   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
 	issueTypePattern = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
 	markerPattern    = regexp.MustCompile(`^synapse-intent-[a-z0-9][a-z0-9-]{0,127}$`)

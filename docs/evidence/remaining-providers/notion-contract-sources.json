@@ -1,0 +1,22 @@
+{
+  "checked_on": "2026-10-20",
+  "purpose": "Read-only contract feasibility audit; no provider credentials or live workspace calls.",
+  "specifications": [
+    {
+      "url": "https://developers.notion.com/openapi.json",
+      "sha256": "cdb48b858846c78bf87a2145da1f5055f508b4c6702d2b7b1a03a93002f90e87",
+      "path_count": 48
+    },
+    {
+      "url": "https://developers.notion.com/openapi-adminApi.json",
+      "sha256": "04852565ed9438ece2fde6b489f459a1605b9863bb451caa796e0d01fb1ec1dd",
+      "path_count": 34
+    },
+    {
+      "url": "https://developers.notion.com/openapi-undocumented.json",
+      "sha256": "053ba17f54d88ffceee9e1392970bdaff33dbf8f2e65dd7f6146a59b8c649f52",
+      "path_count": 47
+    }
+  ],
+  "scope_decision": "Maintainer-approved current draft scope includes connection checks and early release refusal. Native Notion publication remains provider-blocked under open issue #1446 with original acceptance and security requirements preserved."
+}

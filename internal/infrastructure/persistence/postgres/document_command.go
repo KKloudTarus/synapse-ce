@@ -187,7 +187,7 @@ func (s *DocumentStore) CreateDocumentCommand(ctx context.Context, tenant shared
 			if link.ID != command.Intent.LinkID || link.RetiredAt != nil {
 				return shared.ErrConflict
 			}
-			progress.Remote = docpublish.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, URL: link.RemoteURL}
+			progress.Remote = docpublish.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}
 			if command.Intent.Action == docpublish.Update {
 				progress.Step = "restrictions"
 			} else {
@@ -203,7 +203,7 @@ func (s *DocumentStore) CreateDocumentCommand(ctx context.Context, tenant shared
 		if !command.Intent.LinkID.IsZero() {
 			linkID = command.Intent.LinkID.String()
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO document_intents(id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,link_id,action,request_key,payload_digest,content_hash,correlation_marker,state,version,attempts,remote_id,remote_url,remote_version,error_code,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending',1,0,'','',0,'',$15,$16)`, command.Intent.ID.String(), tenant.String(), command.Intent.IntegrationID.String(), string(command.Intent.SourceKind), command.Intent.SourceRef, engagement, project, command.Intent.Container, linkID, string(command.Intent.Action), command.Intent.RequestKey, command.Intent.PayloadDigest, command.Intent.ContentHash, command.Intent.Marker, command.Intent.CreatedAt.UTC(), command.Intent.UpdatedAt.UTC())
+		_, e = tx.Exec(ctx, `INSERT INTO document_intents(id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,link_id,action,request_key,payload_digest,content_hash,correlation_marker,state,version,attempts,remote_id,remote_url,remote_version,remote_revision,error_code,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending',1,0,'','',0,'','',$15,$16)`, command.Intent.ID.String(), tenant.String(), command.Intent.IntegrationID.String(), string(command.Intent.SourceKind), command.Intent.SourceRef, engagement, project, command.Intent.Container, linkID, string(command.Intent.Action), command.Intent.RequestKey, command.Intent.PayloadDigest, command.Intent.ContentHash, command.Intent.Marker, command.Intent.CreatedAt.UTC(), command.Intent.UpdatedAt.UTC())
 		if e != nil {
 			return e
 		}
@@ -283,6 +283,72 @@ func (s *DocumentStore) SaveDocumentProgress(ctx context.Context, tenant, intent
 	return out, documentWriteError(err)
 }
 
+func cleanDocumentYieldCheckpoint(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
+	if progress.Step != "restrictions" && progress.Step != "attachments" && progress.Step != "body" && progress.Step != "complete" && progress.Step != "purged" {
+		return false
+	}
+	if strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "" {
+		return false
+	}
+	return intent.State == writeintent.InFlight && intent.LeaseUntil != nil && at.Before(*intent.LeaseUntil) &&
+		progress.IntentVersion == intent.Version && progress.LeaseUntil != nil && progress.LeaseUntil.Equal(*intent.LeaseUntil) &&
+		progress.OutstandingOperation == "" && progress.OutstandingKey == "" && progress.OutstandingDigest == "" &&
+		progress.ExpectedRemoteVersion == 0 && progress.ExpectedRemoteRevision == ""
+}
+
+func (s *DocumentStore) YieldDocumentCommand(ctx context.Context, tenant, intentID shared.ID, expectedIntent, expectedProgress int, at time.Time) (ports.DocumentCommand, error) {
+	if tenant.IsZero() || intentID.IsZero() || expectedIntent < 1 || expectedProgress < 1 || at.IsZero() {
+		return ports.DocumentCommand{}, shared.ErrValidation
+	}
+	var out ports.DocumentCommand
+	err := s.withDocumentTx(ctx, tenant, func(tx pgx.Tx) error {
+		intent, e := scanDocumentIntent(tx.QueryRow(ctx, `SELECT `+documentIntentCols+` FROM document_intents WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenant.String(), intentID.String()))
+		if e != nil {
+			return e
+		}
+		command, e := scanDocumentCommand(ctx, tx, tenant, intentID)
+		if e != nil {
+			return e
+		}
+		if intent.Version != expectedIntent || command.Progress.Version != expectedProgress || !cleanDocumentYieldCheckpoint(command.Progress, intent, at) {
+			return shared.ErrConflict
+		}
+		next, e := intent.Apply(docpublish.IntentTransition{Event: docpublish.CheckpointYield}, at)
+		if e != nil {
+			return e
+		}
+		progress := command.Progress
+		progress.Version = expectedProgress + 1
+		progress.IntentVersion = next.Version
+		progress.LeaseUntil = nil
+		progress.UpdatedAt = at.UTC()
+		data, e := commandProgressJSON(progress)
+		if e != nil {
+			return e
+		}
+		tag, e := tx.Exec(ctx, `UPDATE document_commands SET progress=$3,progress_version=progress_version+1,updated_at=$4 WHERE tenant_id=$1 AND intent_id=$2 AND progress_version=$5`, tenant.String(), intentID.String(), data, at.UTC(), expectedProgress)
+		if e != nil {
+			return e
+		}
+		if tag.RowsAffected() != 1 {
+			return shared.ErrConflict
+		}
+		tag, e = tx.Exec(ctx, `UPDATE document_intents SET state=$3,version=$4,attempts=$5,lease_until=NULL,remote_id='',remote_url='',remote_version=0,remote_revision='',error_code='',updated_at=$6 WHERE tenant_id=$1 AND id=$2 AND version=$7`, tenant.String(), intentID.String(), string(next.State), next.Version, next.Attempts, next.UpdatedAt, expectedIntent)
+		if e != nil {
+			return e
+		}
+		if tag.RowsAffected() != 1 {
+			return shared.ErrConflict
+		}
+		out, e = scanDocumentCommand(ctx, tx, tenant, intentID)
+		return e
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ports.DocumentCommand{}, shared.ErrNotFound
+	}
+	return out, documentWriteError(err)
+}
+
 func (s *DocumentStore) ResumeDocumentCommand(ctx context.Context, tenant, intentID shared.ID, expectedIntent, expectedProgress int, progress ports.DocumentProgress, at time.Time) (ports.DocumentCommand, error) {
 	if tenant.IsZero() || intentID.IsZero() || expectedIntent < 1 || expectedProgress < 1 || at.IsZero() {
 		return ports.DocumentCommand{}, shared.ErrValidation
@@ -314,7 +380,7 @@ func (s *DocumentStore) ResumeDocumentCommand(ctx context.Context, tenant, inten
 		if tag.RowsAffected() != 1 {
 			return shared.ErrConflict
 		}
-		_, e = tx.Exec(ctx, `UPDATE document_intents SET state=$3,version=$4,attempts=$5,lease_until=NULL,remote_id='',remote_url='',remote_version=0,error_code='',updated_at=$6 WHERE tenant_id=$1 AND id=$2 AND version=$7`, tenant.String(), intentID.String(), string(next.State), next.Version, next.Attempts, next.UpdatedAt, expectedIntent)
+		_, e = tx.Exec(ctx, `UPDATE document_intents SET state=$3,version=$4,attempts=$5,lease_until=NULL,remote_id='',remote_url='',remote_version=0,remote_revision='',error_code='',updated_at=$6 WHERE tenant_id=$1 AND id=$2 AND version=$7`, tenant.String(), intentID.String(), string(next.State), next.Version, next.Attempts, next.UpdatedAt, expectedIntent)
 		if e != nil {
 			return e
 		}

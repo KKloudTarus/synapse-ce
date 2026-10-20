@@ -1,0 +1,213 @@
+{
+  "provider_acceptance": false,
+  "captures": [
+    {
+      "file": "ticket-ready-light.png",
+      "state": "ticket-ready",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "61dc040f0d78a5478761e48bc73a0296d159be33e73e085791129b0c2c0474ba"
+    },
+    {
+      "file": "ticket-preview-light.png",
+      "state": "ticket-preview",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "0bc1252e650c9688ebfa93c29e8bed66888152557cc7166df54857eec0df220f"
+    },
+    {
+      "file": "ticket-empty-light.png",
+      "state": "ticket-empty",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "d3bfe4e167c003403ba46125967bf2deb7f8dbff8f9c1296bf0b5b37e5139882"
+    },
+    {
+      "file": "ticket-loading-light.png",
+      "state": "ticket-loading",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "9ed7d6981afab8e7f20263b88dd82ded235491b65d95d1015bcd88400b7b234f"
+    },
+    {
+      "file": "ticket-error-light.png",
+      "state": "ticket-error",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "a9a1f8bdb4f61f920ffa8f2fb32284057ba696b6994edbc8fe3bd20c3c5273ca"
+    },
+    {
+      "file": "ticket-readonly-light.png",
+      "state": "ticket-readonly",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "b6d72cda991361c3b79ae5d721cd6af43976a9ea70ec7adebe2ad9af7afd574c"
+    },
+    {
+      "file": "bulk-ready-light.png",
+      "state": "bulk-ready",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "30fb8f796cbf97da26efb29c6468484557b03e3090bfaf7e9218a507f2704e8f"
+    },
+    {
+      "file": "bulk-preview-light.png",
+      "state": "bulk-preview",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "789a611a34c3e126797c0172e5dcb96440a5f1db153fc22a6105717ed8afcc78"
+    },
+    {
+      "file": "bulk-empty-light.png",
+      "state": "bulk-empty",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "614f3c97b6395c4e46ae7b272f0c01de08a615b1ce8ef24ce2c90df9eff0f625"
+    },
+    {
+      "file": "bulk-loading-light.png",
+      "state": "bulk-loading",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "e813184f12ac80df8f6ffe6757b0c4186a7ca30be032197e7bba27634f4bcd1c"
+    },
+    {
+      "file": "bulk-error-light.png",
+      "state": "bulk-error",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "83c9e4e7a2d8aef4be9a9410a6f167ee8552705f04ffb969f109687922a50de3"
+    },
+    {
+      "file": "bulk-readonly-light.png",
+      "state": "bulk-readonly",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "cbede1e20124caf071c99195ce41aeefd99bc6f84eec4e596643557efcf735e4"
+    },
+    {
+      "file": "findings-bulk-selection-light.png",
+      "state": "findings-bulk-selection",
+      "theme": "light",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "d7fbe7b95d69e06843b34f0dc00d39116ea2cc23385a7b929a48758157d00b1a"
+    },
+    {
+      "file": "ticket-ready-dark.png",
+      "state": "ticket-ready",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "c52099161f393dd9c3894082281a1c67f64d81b67cdf29ee676002ee1844ec0b"
+    },
+    {
+      "file": "ticket-preview-dark.png",
+      "state": "ticket-preview",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "bff5d23034d10eccdb76a15506d26cf1a1420eae6b77ecd21c5ea4577eebc714"
+    },
+    {
+      "file": "ticket-empty-dark.png",
+      "state": "ticket-empty",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "5be750ca23b477c1c5777aca9ee57b9d424b00b13d71c5335a5c98459d13112d"
+    },
+    {
+      "file": "ticket-loading-dark.png",
+      "state": "ticket-loading",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "b41da0ca9cc41c35946e96096aa22ee929a05faaae394c2fafa0fe553253caac"
+    },
+    {
+      "file": "ticket-error-dark.png",
+      "state": "ticket-error",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "b61dbd60d2c6f4bf1a79b970ec97f681e8032a6a01ff81d15e2f977273519778"
+    },
+    {
+      "file": "ticket-readonly-dark.png",
+      "state": "ticket-readonly",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "e920f2c96f048b5926119deab3a81f9155115dd17084833b544892ea47c45184"
+    },
+    {
+      "file": "bulk-ready-dark.png",
+      "state": "bulk-ready",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "6f41aea06e3858c9473246cb70fc03fb5f5c7c399a6eeb0547c021cf39605a5b"
+    },
+    {
+      "file": "bulk-preview-dark.png",
+      "state": "bulk-preview",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "62986ec601d3edb6a465bf3a2d8aabf68c00b0c029d3b3416ea42090dab9b2b5"
+    },
+    {
+      "file": "bulk-empty-dark.png",
+      "state": "bulk-empty",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "af8056b4f72c7fb0607a12d5c6c977b2026b07266b6679d844d525871699e80f"
+    },
+    {
+      "file": "bulk-loading-dark.png",
+      "state": "bulk-loading",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "7ec468b6834892c06e1c913808bb0d06bbf894902e29c8da64054219f1cd2766"
+    },
+    {
+      "file": "bulk-error-dark.png",
+      "state": "bulk-error",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "c18646cc32f596f6040d0956cfdc0c2ed8d80fd398d498c7cf75a3945fad429a"
+    },
+    {
+      "file": "bulk-readonly-dark.png",
+      "state": "bulk-readonly",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "513c0908895202de66575172e0c626ea501f9a9b576a40e0cf22efe7ce9027a9"
+    },
+    {
+      "file": "findings-bulk-selection-dark.png",
+      "state": "findings-bulk-selection",
+      "theme": "dark",
+      "source": "Production components, synthetic local API fixtures",
+      "errors": [],
+      "sha256": "ce5866a33c46a8830a86b29846fd16f15b7ea178fb0934a095d6897522266a08"
+    }
+  ]
+}

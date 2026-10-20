@@ -35,17 +35,18 @@ type DocumentProgress struct {
 	Version int
 	// IntentVersion and LeaseUntil fence a worker which lost its claim from
 	// checkpointing a newer attempt.
-	IntentVersion         int
-	LeaseUntil            *time.Time
-	Remote                docpublish.RemotePage
-	Step                  string
-	Uploaded              int
-	OutstandingOperation  string
-	OutstandingKey        string
-	OutstandingDigest     string
-	ExpectedRemoteVersion int
-	UploadedReceipts      []DocumentUploadReceipt
-	UpdatedAt             time.Time
+	IntentVersion          int
+	LeaseUntil             *time.Time
+	Remote                 docpublish.RemotePage
+	Step                   string
+	Uploaded               int
+	OutstandingOperation   string
+	OutstandingKey         string
+	OutstandingDigest      string
+	ExpectedRemoteVersion  int
+	ExpectedRemoteRevision string
+	UploadedReceipts       []DocumentUploadReceipt
+	UpdatedAt              time.Time
 }
 
 // DocumentUploadReceipt is an immutable record of an upload proven complete.
@@ -69,6 +70,10 @@ type DocumentCommandStore interface {
 	GetDocumentCommand(context.Context, shared.ID, shared.ID) (DocumentCommand, error)
 	FindDocumentCommand(context.Context, shared.ID, shared.ID, string) (DocumentCommand, error)
 	SaveDocumentProgress(context.Context, shared.ID, shared.ID, int, DocumentProgress) (DocumentCommand, error)
+	// YieldDocumentCommand atomically releases one clean in-flight checkpoint
+	// after an acknowledged remote effect. It preserves progress and artifacts,
+	// but removes the voluntary slice from the failure-attempt budget.
+	YieldDocumentCommand(context.Context, shared.ID, shared.ID, int, int, time.Time) (DocumentCommand, error)
 	// ResumeDocumentCommand atomically stores a reconciliation-proven checkpoint
 	// and moves one uncertain command back to pending.  Ordinary checkpoint saves
 	// are limited to the current in-flight lease.

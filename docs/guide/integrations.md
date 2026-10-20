@@ -32,6 +32,81 @@ Synapse verifies `X-Hub-Signature-256` over the exact raw body and durably dedup
 
 Fork pull requests are treated as untrusted source. Synapse does not resolve or present a source-control connector credential for their clone/fetch path and disables Maven, Gradle, npm, manifest-resolver, and Go dependency-graph command execution. Static source analysis and SBOM inspection continue without executing repository-controlled build/dependency commands.
 
+## Document publishing connections
+
+The Documentation group in **Settings → Integrations** lists only providers that
+advertise the `documents` capability. It uses the same tenant-scoped integration
+records, sealed write-only credentials, endpoint validation, permissions, audit
+trail, and PostgreSQL row-level security as the other integration groups. See
+[Governed document publishing](document-publishing.md) for release and
+unpublish APIs.
+
+- `google-drive` accepts only `https://www.googleapis.com` and a dedicated
+  service-owned My Drive parent folder. The configured group permission and owner
+  are proved before sensitive writes; shared drives are refused.
+- `sharepoint` and `onedrive` use the configured HTTPS SharePoint site origin as
+  the authority for a restricted Business folder. They require separate sealed
+  Microsoft Graph and SharePoint REST tokens, an exact reader group, and a service
+  custodian principal with the required SharePoint role proof.
+- `confluence-cloud` and `confluence-dc` retain their existing restricted-space
+  profiles.
+- `notion` is connection-test only. Its public API cannot prove the required ACL
+  or permanent history deletion, so it does not advertise document publishing and
+  rejects a release before a shell is created.
+
+Document releases are durable, idempotent commands. The worker rechecks current
+tenant authority, destination configuration, release policy, legal hold, sharing
+proof, and credential/destination revisions before each outward write. Provider
+opaque revision tokens are compared exactly for Drive and SharePoint/OneDrive;
+reconciliation does not infer a changed body from a numeric version or a 404.
+Command leases and intent/progress revisions fence stale workers and concurrent
+republish or unpublish operations.
+Contract tests cover the profile boundaries, but live sandbox E2E acceptance is
+deferred and is not represented as completed integration evidence.
+
+## Ticket provider connections
+
+The Ticketing group in **Settings → Integrations** opens **Manage tickets** at
+`/settings/integrations/tickets`. It lists only connections with the `tickets`
+capability and provides loading, empty, provider-error, and permission-denied states.
+Tenant administrators and integration administrators can inspect ticket connections;
+tenant administrators create or change destination mappings. The mapping form discovers
+metadata through `GET /api/v1/integrations/{integrationID}/ticket-metadata` and only
+offers the provider's returned destinations, issue type, and visibility policy.
+
+Add the outbound providers from **Manage connections and credentials**:
+
+- `github-issues` requires an HTTPS forge host and an `owner/repository` value. It
+  reuses the tenant's SCM connector for that exact forge host; do not enter a second
+  token. Only private repositories with Issues enabled and sufficient repository access
+  can receive a finding ticket.
+- `gitlab-issues` requires an HTTPS forge host and a project path, including nested
+  namespaces. It also reuses the host's tenant SCM connector and creates confidential
+  issues only.
+- `azure-boards` requires a `https://dev.azure.com/{organization}/{project}` endpoint,
+  a work-item type, and a sealed PAT.
+- `servicenow` requires a SaaS instance endpoint, an `incident` or
+  `sn_vul_vulnerable_item` table, and a sealed API token.
+- `linear` requires `https://api.linear.app/graphql`, a team ID, and a sealed API token.
+
+GitHub's inbound `github` provider remains separate: it receives webhooks for source
+scanning and is not an outbound Issues connection. GitLab's inbound identity is also
+not reused as an outbound ticket provider. SCM credentials are tenant/host scoped and
+remain the only credential source for GitHub Issues and GitLab Issues. Azure Boards,
+ServiceNow, and Linear keep their supplied credential sealed and write-only.
+
+Every ticket is built from a required preview. For native providers, the exact vendor
+wire request is frozen with the preview digest, then Submit adds the durable correlation
+marker. An uncertain create is reconciled before a retry. Native mappings intentionally
+do not expose grouping, transitions, labels, priority maps, components, or custom Jira
+fields because those controls are unsupported by these serializers. Their native privacy
+policy has no waiver path.
+
+Ticket status polling and recovery create reviewable proposals only; they do not mutate
+finding triage or status automatically. Connection credentials, URLs with query data,
+and provider response bodies are not retained in ticket audit records. Live sandbox E2E
+acceptance is deferred and is not represented as a completed integration test.
+
 ## Architecture
 
 ```text

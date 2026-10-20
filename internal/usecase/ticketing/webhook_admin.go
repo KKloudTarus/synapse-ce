@@ -49,6 +49,9 @@ func (s *WebhookAdmin) ConfigureInboundWebhook(ctx context.Context, tenant, inte
 	if err != nil {
 		return out, err
 	}
+	if !isJiraTicketProvider(item.Provider) {
+		return out, fmt.Errorf("%w: signed inbound webhooks are available only for Jira", shared.ErrValidation)
+	}
 	if !item.Enabled {
 		return out, shared.ErrConflict
 	}

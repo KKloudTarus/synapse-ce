@@ -82,6 +82,7 @@ func TestDocumentCommandStorePostgresAdmissionProgressAndRLS(t *testing.T) {
 	}
 	progress := first.Progress
 	progress.IntentVersion, progress.LeaseUntil, progress.UpdatedAt = claimed.Version, &lease, now.Add(time.Second)
+	progress.Step = "restrictions"
 	checkpoint, err := store.SaveDocumentProgress(ctx, "doc-a", first.Intent.ID, first.Progress.Version, progress)
 	if err != nil || checkpoint.Progress.Version != 2 {
 		t.Fatalf("save checkpoint=%+v err=%v", checkpoint.Progress, err)
@@ -91,6 +92,57 @@ func TestDocumentCommandStorePostgresAdmissionProgressAndRLS(t *testing.T) {
 	}
 	if _, err := store.GetDocumentCommand(ctx, "doc-b", first.Intent.ID); !errors.Is(err, shared.ErrNotFound) {
 		t.Fatalf("cross tenant command err=%v", err)
+	}
+}
+
+func TestDocumentCommandStorePostgresYieldRequiresCleanCheckpoint(t *testing.T) {
+	dsn := testDSN(t)
+	ctx := context.Background()
+	if err := MigrateLocked(ctx, dsn); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	seedDocumentTenants(t, ctx, pool)
+	store, err := NewDocumentStore(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	command := postgresDocumentCommand("doc-yield", "yield", now)
+	saved, _, err := store.CreateDocumentCommand(ctx, "doc-a", command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := now.Add(time.Minute)
+	claimed, err := store.TransitionIntent(ctx, "doc-a", saved.Intent.ID, saved.Intent.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress := saved.Progress
+	progress.IntentVersion, progress.LeaseUntil, progress.UpdatedAt = claimed.Version, &lease, now.Add(time.Second)
+	progress.Step = "restrictions"
+	progress.Remote = docpublish.RemotePage{ID: "page", Version: 1, Revision: "opaque", URL: "https://wiki.example/pages/page"}
+	progress.UploadedReceipts = []ports.DocumentUploadReceipt{{Key: "attachment:0", Digest: strings.Repeat("c", 64)}}
+	checkpoint, err := store.SaveDocumentProgress(ctx, "doc-a", saved.Intent.ID, saved.Progress.Version, progress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TransitionIntent(ctx, "doc-a", saved.Intent.ID, claimed.Version, docpublish.IntentTransition{Event: docpublish.CheckpointYield}, now.Add(2*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("generic yield err=%v, want conflict", err)
+	}
+	if _, err := store.YieldDocumentCommand(ctx, "doc-b", saved.Intent.ID, claimed.Version, checkpoint.Progress.Version, now.Add(2*time.Second)); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("cross tenant yield err=%v, want not found", err)
+	}
+	yielded, err := store.YieldDocumentCommand(ctx, "doc-a", saved.Intent.ID, claimed.Version, checkpoint.Progress.Version, now.Add(2*time.Second))
+	if err != nil || yielded.Intent.State != writeintent.Pending || yielded.Intent.Attempts != 0 || yielded.Progress.LeaseUntil != nil || yielded.Progress.Remote.Revision != "opaque" || len(yielded.Progress.UploadedReceipts) != 1 {
+		t.Fatalf("yielded=%+v err=%v", yielded, err)
+	}
+	if _, err := store.YieldDocumentCommand(ctx, "doc-a", saved.Intent.ID, claimed.Version, checkpoint.Progress.Version, now.Add(3*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale yield err=%v, want conflict", err)
 	}
 }
 

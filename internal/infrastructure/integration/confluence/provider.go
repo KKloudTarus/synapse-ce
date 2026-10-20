@@ -48,7 +48,7 @@ const (
 var (
 	cloudDescriptor = integration.ProviderDescriptor{
 		Provider: CloudProvider, Name: "Confluence Cloud", Description: "Confluence Cloud governed document publishing.",
-		Capabilities: []integration.Capability{integration.CapabilityTestConnection},
+		Capabilities: []integration.Capability{integration.CapabilityTestConnection, integration.CapabilityDocuments},
 		ConfigFields: []integration.FieldDescriptor{
 			{Name: "space", Label: "Confluence space key", Kind: integration.FieldText, Required: true},
 			{Name: "read_group", Label: "Exact read group", Kind: integration.FieldText, Required: true},
@@ -65,7 +65,7 @@ var (
 	}
 	dcDescriptor = integration.ProviderDescriptor{
 		Provider: DCProvider, Name: "Confluence Data Center", Description: "Confluence Data Center governed document publishing.", SelfHosted: true,
-		Capabilities: []integration.Capability{integration.CapabilityTestConnection},
+		Capabilities: []integration.Capability{integration.CapabilityTestConnection, integration.CapabilityDocuments},
 		ConfigFields: []integration.FieldDescriptor{{Name: "space", Label: "Confluence space key", Kind: integration.FieldText, Required: true}, {Name: "read_group", Label: "Exact read group", Kind: integration.FieldText, Required: true}, {Name: "data_class", Label: "Data classification", Kind: integration.FieldText, Required: true}, {Name: "legacy_xmlrpc_restrictions", Label: "Confluence 10.2 XML-RPC restriction compatibility", Kind: integration.FieldBoolean, Description: "Use only for Confluence Data Center 10.2 when its REST API rejects a safe group-only restriction."}},
 		SecretFields: []integration.FieldDescriptor{{Name: "pat", Label: "Personal access token", Kind: integration.FieldPassword, Required: true}},
 	}

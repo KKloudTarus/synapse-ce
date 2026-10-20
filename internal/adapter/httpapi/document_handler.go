@@ -64,6 +64,7 @@ type documentLinkView struct {
 	Container            string                `json:"container"`
 	RemoteURL            string                `json:"remote_url"`
 	RemoteVersion        int                   `json:"remote_version"`
+	RemoteRevisionKind   string                `json:"remote_revision_kind"`
 	ContentHash          string                `json:"content_hash"`
 	Revision             int                   `json:"revision"`
 	RestrictionStatus    string                `json:"restriction_status"`
@@ -85,7 +86,7 @@ func documentIntentResponse(value docpublish.Intent) documentIntentView {
 }
 
 func documentLinkResponse(value docpublish.Link) documentLinkView {
-	return documentLinkView{ID: value.ID, IntegrationID: value.IntegrationID, SourceKind: value.SourceKind, SourceRef: value.SourceRef, Scope: value.Scope, ScopeID: value.ScopeID, Container: value.Container, RemoteURL: value.RemoteURL, RemoteVersion: value.RemoteVersion, ContentHash: value.ContentHash, Revision: value.Revision, RestrictionStatus: value.RestrictionStatus, RestrictionCheckedAt: value.RestrictionCheckedAt, RetiredAt: value.RetiredAt, UpdatedAt: value.UpdatedAt}
+	return documentLinkView{ID: value.ID, IntegrationID: value.IntegrationID, SourceKind: value.SourceKind, SourceRef: value.SourceRef, Scope: value.Scope, ScopeID: value.ScopeID, Container: value.Container, RemoteURL: value.RemoteURL, RemoteVersion: value.RemoteVersion, RemoteRevisionKind: documentRevisionKind(value.RemoteRevision), ContentHash: value.ContentHash, Revision: value.Revision, RestrictionStatus: value.RestrictionStatus, RestrictionCheckedAt: value.RestrictionCheckedAt, RetiredAt: value.RetiredAt, UpdatedAt: value.UpdatedAt}
 }
 
 func documentReleaseResponse(value documentuc.ReleaseResult) any {
@@ -201,4 +202,11 @@ func (rt *Router) unpublishDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusAccepted, documentReleaseResponse(result))
+}
+
+func documentRevisionKind(token string) string {
+	if token != "" {
+		return "opaque"
+	}
+	return "numeric"
 }

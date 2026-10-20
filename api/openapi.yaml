@@ -232,6 +232,42 @@ paths:
           description: Tenant-owned resource not found
         '409':
           description: Stale preview, version or uncertain state
+  /api/v1/integrations/{integrationID}/ticket-metadata:
+    parameters:
+      - name: integrationID
+        in: path
+        required: true
+        schema: {type: string}
+      - name: project_key
+        in: query
+        required: false
+        schema: {type: string}
+      - name: issue_type
+        in: query
+        required: false
+        schema: {type: string}
+      - name: issue_key
+        in: query
+        required: false
+        schema: {type: string}
+    get:
+      tags: [ticketing]
+      summary: Discover ticket provider metadata
+      description: Integration administrator permission. Bounded synchronous discovery; cache keys include tenant and connection revisions.
+      responses:
+        '200':
+          description: Successful tenant-scoped ticket operation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TicketMetadata"}
+        '400':
+          description: Invalid selection, security policy or request
+        '403':
+          description: Human permission denied
+        '404':
+          description: Tenant-owned resource not found
+        '409':
+          description: Stale preview, version or uncertain state
   /api/v1/integrations/{integrationID}/jira-breaker/reset:
     parameters:
       - name: integrationID
@@ -8200,11 +8236,17 @@ components:
         data_class: {type: string, enum: [signal, summary, detail]}
         digest: {type: string}
         marker_format: {type: string}
+        wire:
+          description: Exact native provider request before adding the server-issued correlation marker. Absent for legacy Jira previews.
+          oneOf:
+            - {type: object}
+            - {type: array, items: {type: object}}
+            - {type: 'null'}
         fields: {type: object}
         mapping_version: {type: integer}
         marker_required: {type: boolean}
     TicketChoice: {"type":"object","required":["id","name"],"properties":{"id":{"type":"string"},"name":{"type":"string"}}}
-    TicketMetadata: {"type":"object","properties":{"resolved_reporter":{"type":"string","maxLength":255,"description":"Authenticated Data Center user supplied in the immutable preview when Reporter is required and has no default."},"projects":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"issue_types":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"priorities":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"security_levels":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"components":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"transitions":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"fields":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"required":{"type":"boolean"},"type":{"type":"string"},"item_type":{"type":"string"},"has_default":{"type":"boolean"},"values":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}}}}}}}
+    TicketMetadata: {"type":"object","properties":{"resolved_reporter":{"type":"string","maxLength":255,"description":"Authenticated Data Center user supplied in the immutable preview when Reporter is required and has no default."},"projects":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"issue_types":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"priorities":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"security_levels":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"components":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"transitions":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}},"fields":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"required":{"type":"boolean"},"type":{"type":"string"},"item_type":{"type":"string"},"has_default":{"type":"boolean"},"values":{"type":"array","items":{"$ref":"#/components/schemas/TicketChoice"}}}}},"security_policy":{"type":"string","enum":["private_repository","confidential_issue","provider_access"]},"supports_grouping":{"type":"boolean"},"supports_status_sync":{"type":"boolean"},"supports_status_transitions":{"type":"boolean"}}}
     TicketIntentVersion: {"type":"object","additionalProperties":false,"required":["version"],"properties":{"version":{"type":"integer","minimum":1}}}
     TicketRetryInput: {"type":"object","additionalProperties":false,"required":["version","acknowledge_duplicate_risk","reason"],"properties":{"version":{"type":"integer","minimum":1},"acknowledge_duplicate_risk":{"type":"boolean","const":true},"reason":{"type":"string","minLength":1,"maxLength":1024}}}
     TicketBreakerResetInput: {"type":"object","additionalProperties":false,"required":["project_key","issue_type"],"properties":{"project_key":{"type":"string","minLength":1,"maxLength":255},"issue_type":{"type":"string","minLength":1,"maxLength":255}}}
@@ -9221,7 +9263,7 @@ components:
         provider: {type: string, pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$'}
         name: {type: string}
         description: {type: string}
-        capabilities: {type: array, uniqueItems: true, items: {type: string, enum: [test_connection, discover_pipelines, read_runs]}}
+        capabilities: {type: array, uniqueItems: true, items: {type: string, enum: [test_connection, discover_pipelines, read_runs, tickets, documents]}}
         config_fields: {type: array, items: {$ref: '#/components/schemas/IntegrationFieldDescriptor'}}
         secret_fields: {type: array, items: {$ref: '#/components/schemas/IntegrationFieldDescriptor'}}
 
@@ -15129,6 +15171,7 @@ components:
         scope_id: {type: string}
         container: {type: string, maxLength: 255, description: Confluence space key}
         remote_url: {type: string, format: uri}
+        remote_revision_kind: {type: string, enum: [numeric, opaque], description: "Opaque provider revisions stay server-side; revision counts successful local publications."}
         remote_version: {type: integer, minimum: 1}
         content_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
         revision: {type: integer, minimum: 1}
@@ -15145,6 +15188,7 @@ components:
         link: {$ref: '#/components/schemas/DocumentLink'}
     DocumentScheduleDestination:
       type: string
+      description: "`confluence` is the persisted legacy value for any enabled document-publishing profile; `email` selects a verified detail email channel."
       enum: [confluence, email]
     DocumentScheduleFrequency:
       type: string

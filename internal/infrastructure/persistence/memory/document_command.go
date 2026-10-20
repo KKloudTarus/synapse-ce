@@ -176,7 +176,7 @@ func (s *DocumentStore) CreateDocumentCommand(ctx context.Context, tenant shared
 		if link.RetiredAt != nil {
 			return ports.DocumentCommand{}, false, shared.ErrConflict
 		}
-		initial.Remote = docpublish.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, URL: link.RemoteURL}
+		initial.Remote = docpublish.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}
 		if command.Intent.Action == docpublish.Update {
 			initial.Step = "restrictions"
 		} else {
@@ -249,6 +249,50 @@ func (s *DocumentStore) SaveDocumentProgress(ctx context.Context, tenant, intent
 	command.Progress = cloneDocumentProgress(progress)
 	command.Intent = current.Clone()
 	s.commands[tenant][intentID] = cloneDocumentCommand(command)
+	return cloneDocumentCommand(command), nil
+}
+
+func cleanDocumentYieldCheckpoint(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
+	if progress.Step != "restrictions" && progress.Step != "attachments" && progress.Step != "body" && progress.Step != "complete" && progress.Step != "purged" {
+		return false
+	}
+	if strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "" {
+		return false
+	}
+	return intent.State == writeintent.InFlight && intent.LeaseUntil != nil && at.Before(*intent.LeaseUntil) &&
+		progress.IntentVersion == intent.Version && progress.LeaseUntil != nil && progress.LeaseUntil.Equal(*intent.LeaseUntil) &&
+		progress.OutstandingOperation == "" && progress.OutstandingKey == "" && progress.OutstandingDigest == "" &&
+		progress.ExpectedRemoteVersion == 0 && progress.ExpectedRemoteRevision == ""
+}
+
+func (s *DocumentStore) YieldDocumentCommand(ctx context.Context, tenant, intentID shared.ID, expectedIntent, expectedProgress int, at time.Time) (ports.DocumentCommand, error) {
+	if err := ctx.Err(); err != nil {
+		return ports.DocumentCommand{}, err
+	}
+	if tenant.IsZero() || intentID.IsZero() || expectedIntent < 1 || expectedProgress < 1 || at.IsZero() {
+		return ports.DocumentCommand{}, shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	command, ok := s.commands[tenant][intentID]
+	if !ok {
+		return ports.DocumentCommand{}, shared.ErrNotFound
+	}
+	current := s.intents[tenant][intentID]
+	if current.Version != expectedIntent || command.Progress.Version != expectedProgress || !cleanDocumentYieldCheckpoint(command.Progress, current, at) {
+		return ports.DocumentCommand{}, shared.ErrConflict
+	}
+	next, err := current.Apply(docpublish.IntentTransition{Event: docpublish.CheckpointYield}, at)
+	if err != nil {
+		return ports.DocumentCommand{}, err
+	}
+	progress := cloneDocumentProgress(command.Progress)
+	progress.Version = expectedProgress + 1
+	progress.IntentVersion = next.Version
+	progress.LeaseUntil = nil
+	progress.UpdatedAt = at.UTC()
+	command.Intent, command.Progress = next, progress
+	s.intents[tenant][intentID], s.commands[tenant][intentID] = next, cloneDocumentCommand(command)
 	return cloneDocumentCommand(command), nil
 }
 

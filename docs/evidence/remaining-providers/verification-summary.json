@@ -1,0 +1,71 @@
+{
+  "base_commit": "a55a314aab8eb6e5979f7d886c82a0729776949f",
+  "runtime": {
+    "image_id": "sha256:a43aacdbc518ab3918c7f21563ce77ea85e927348b488b1f5d36f985709a3fde",
+    "go": "1.27.0",
+    "node": "22.23.3",
+    "pnpm": "9.15.9",
+    "mounted_golangci_lint": "2.13.2",
+    "mounted_helm": "3.19.0",
+    "cache_environment": {
+      "GOCACHE": "/cache/go",
+      "XDG_CACHE_HOME": "/cache"
+    }
+  },
+  "checks": {
+    "backend": {
+      "container": "synapse-provider-backend-candidate",
+      "started_at": "2026-10-20T02:24:23.082922332Z",
+      "finished_at": "2026-10-20T02:29:49.229038117Z",
+      "exit_code": 0,
+      "oom_killed": false,
+      "local_log_sha256": "924fea41ac5014f8d2d88c6d4126e45b4550643f587b49c22b1f819ead37272f",
+      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race ./internal/domain/docpublish ./internal/infrastructure/persistence/memory ./internal/usecase/docpublish ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/infrastructure/integration/ticketproviders",
+      "recorded_backend_inputs": 4684,
+      "changed_inputs_during_run": 0,
+      "lint_issues": 0,
+      "test_failures": 0,
+      "race_package_seconds": {
+        "domain/docpublish": 1.054,
+        "persistence/memory": 1.527,
+        "usecase/docpublish": 10.369,
+        "usecase/ticketing": 3.872,
+        "integration/documentproviders": 4.803,
+        "integration/ticketproviders": 1.104
+      }
+    },
+    "web": {
+      "container": "synapse-provider-web-gate",
+      "started_at": "2026-10-20T01:56:19.824570489Z",
+      "finished_at": "2026-10-20T02:05:12.425282885Z",
+      "exit_code": 0,
+      "oom_killed": false,
+      "local_log_sha256": "a315ea8007495154b317d21df9ff79df3a67f1610976a998316d01ed3f3df394",
+      "command": "cd web && pnpm exec vitest run --maxWorkers=2 && pnpm run typecheck && pnpm build && pnpm lint",
+      "test_files_passed": 212,
+      "tests_passed": 1438,
+      "lint_errors": 0,
+      "lint_warnings": 20
+    },
+    "postgres": {
+      "container": "synapse-provider-postgres-gate",
+      "started_at": "2026-10-20T01:54:03.888163116Z",
+      "finished_at": "2026-10-20T02:24:25.173774701Z",
+      "exit_code": 0,
+      "oom_killed": false,
+      "local_log_sha256": "783f6c4c5bf72166018c36e4742997a4281e7f4c39612cbc6b0abf7bf731368b",
+      "command": "go test -json -timeout 90m -count=1 ./internal/infrastructure/persistence/postgres",
+      "postgres_major": 17,
+      "test_cases_passed": 1149,
+      "test_cases_skipped": 4,
+      "test_failures": 0,
+      "elapsed_seconds": 1712.893,
+      "changed_persistence_inputs_during_run": 0
+    }
+  },
+  "overall_scope_gate": "implementation_ready_draft",
+  "open_implementation_gap": "Native Notion publication remains a provider-blocked follow-up under #1446, outside the current maintainer-approved draft gate. Connection check and early release refusal are implemented; document capability stays unavailable.",
+  "live_e2e": "Deferred by maintainer; no live acceptance claimed.",
+  "partial_effect_recovery": "Durable quarantine for uncertain attachment/purge; exact neutral shell recovery can converge after fresh proof. No automatic purge completion inferred from404.",
+  "scope_disposition_issue": "https://github.com/KKloudTarus/synapse-ce/issues/1446"
+}

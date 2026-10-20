@@ -46,6 +46,23 @@ describe('DocumentSchedulePanel', () => {
     expect(screen.queryByLabelText(/recipient/i)).not.toBeInTheDocument()
   })
 
+  it('offers each enabled document publishing profile while retaining the legacy schedule value', async () => {
+    ready()
+    vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([
+      { id: 'drive-1', name: 'Restricted Drive', provider: 'google-drive', enabled: true, archived: false, credentialConfigured: true },
+      { id: 'sharepoint-1', name: 'Restricted SharePoint', provider: 'sharepoint', enabled: true, archived: false, credentialConfigured: true },
+      { id: 'notion-1', name: 'Notion', provider: 'notion', enabled: true, archived: false, credentialConfigured: true },
+    ] as never)
+    vi.mocked(documentSchedulesApi.save).mockResolvedValue({} as never)
+    render(<DocumentSchedulePanel scope="engagement" scopeID="eng-1" sources={sources} canManage />)
+    expect(await screen.findByRole('option', { name: 'Restricted Drive' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Restricted SharePoint' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Notion' })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Document publishing' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule delivery' }))
+    await waitFor(() => expect(documentSchedulesApi.save).toHaveBeenCalledWith(expect.objectContaining({ destination: 'confluence', integrationId: 'drive-1' })))
+  })
+
   it('does not let a stale scope response replace a newer scope', async () => {
     let resolveFirst: (value: any) => void = () => {}
     vi.mocked(documentSchedulesApi.list).mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve }) as never).mockResolvedValueOnce([])
@@ -64,6 +81,7 @@ describe('DocumentSchedulePanel', () => {
 		expect((await screen.findAllByText(/uncertain/)).length).toBeGreaterThan(0)
 		expect(screen.getByText(/delivered 1, uncertain 1, failed 0/)).toBeInTheDocument()
 		expect(screen.getByText(/page page-1 v4/)).toBeInTheDocument()
+		expect(screen.getByText(/Document publishing/)).toBeInTheDocument()
 		expect(screen.queryByText(/hidden@example|error_code|recipient/i)).not.toBeInTheDocument()
 	})
 })

@@ -10,6 +10,7 @@ import (
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/docpublish"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/writeintent"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
@@ -48,8 +49,8 @@ func TestDocumentTickDetectsRestrictionLossWithoutWritingRemoteContent(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.service.Execute(ctx, "tenant", release.Intent.ID); err != nil {
-		t.Fatal(err)
+	if result := f.executeUntilNotPending(t, release.Intent.ID); result.State != writeintent.Done {
+		t.Fatalf("publication=%+v", result)
 	}
 	f.provider.restricted = false
 	f.clock.at = f.clock.at.Add(16 * time.Minute)
@@ -101,8 +102,8 @@ func TestDocumentRestrictionClaimsFenceStaleWorkersAndRetiredTargets(t *testing.
 	f := newReleaseFixture(t)
 	ctx := context.Background()
 	intent := f.publish(t)
-	if _, err := f.service.Execute(ctx, "tenant", intent.ID); err != nil {
-		t.Fatal(err)
+	if result := f.executeUntilNotPending(t, intent.ID); result.State != writeintent.Done {
+		t.Fatalf("publication=%+v", result)
 	}
 	at := f.clock.at.Add(time.Minute)
 	claims, err := f.store.ClaimDocumentRestrictionChecks(ctx, "tenant", 1, at)
@@ -130,8 +131,8 @@ func TestDocumentRestrictionClaimsFenceStaleWorkersAndRetiredTargets(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.service.Execute(ctx, "tenant", purge.Intent.ID); err != nil {
-		t.Fatal(err)
+	if result := f.executeUntilNotPending(t, purge.Intent.ID); result.State != writeintent.Done {
+		t.Fatalf("purge=%+v", result)
 	}
 	if err = f.store.SaveDocumentRestrictionCheck(ctx, "tenant", newer[0], "verified", f.clock.at, f.clock.at.Add(time.Hour)); !errors.Is(err, shared.ErrConflict) {
 		t.Fatalf("purged page accepted stale observation: %v", err)
@@ -144,8 +145,8 @@ func TestDocumentRestrictionClaimsFenceStaleWorkersAndRetiredTargets(t *testing.
 func TestDocumentRestrictionMonitorDetectsConfigurationChange(t *testing.T) {
 	f := newReleaseFixture(t)
 	intent := f.publish(t)
-	if _, err := f.service.Execute(context.Background(), "tenant", intent.ID); err != nil {
-		t.Fatal(err)
+	if result := f.executeUntilNotPending(t, intent.ID); result.State != writeintent.Done {
+		t.Fatalf("publication=%+v", result)
 	}
 	f.provider.afterVerify = func() { f.integration.item.CredentialRevision++ }
 	if err := f.service.Tick(context.Background(), "tenant", 1); err != nil {
@@ -160,8 +161,8 @@ func TestDocumentRestrictionMonitorDetectsConfigurationChange(t *testing.T) {
 func TestDocumentRestrictionMonitorPersistsVerifiedProofBeyondFormerPerLinkBudget(t *testing.T) {
 	f := newReleaseFixture(t)
 	intent := f.publish(t)
-	if _, err := f.service.Execute(context.Background(), "tenant", intent.ID); err != nil {
-		t.Fatal(err)
+	if result := f.executeUntilNotPending(t, intent.ID); result.State != writeintent.Done {
+		t.Fatalf("publication=%+v", result)
 	}
 	provider := &deadlineAwareRestrictionProvider{releaseProvider: f.provider, minimumBudget: 2 * time.Second}
 	f.service.providers = restrictionMonitorProviders{provider: provider}
@@ -181,8 +182,8 @@ func TestDocumentRestrictionMonitorPersistsVerifiedProofBeyondFormerPerLinkBudge
 func TestDocumentRestrictionMonitorLeavesSecondDueLinkUnclaimed(t *testing.T) {
 	f := newReleaseFixture(t)
 	first := f.publish(t)
-	if _, err := f.service.Execute(context.Background(), "tenant", first.ID); err != nil {
-		t.Fatal(err)
+	if result := f.executeUntilNotPending(t, first.ID); result.State != writeintent.Done {
+		t.Fatalf("first publication=%+v", result)
 	}
 	secondInput := f.input
 	secondInput.SourceRef = "assessment-second"
@@ -191,8 +192,8 @@ func TestDocumentRestrictionMonitorLeavesSecondDueLinkUnclaimed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.service.Execute(context.Background(), "tenant", second.Intent.ID); err != nil {
-		t.Fatal(err)
+	if result := f.executeUntilNotPending(t, second.Intent.ID); result.State != writeintent.Done {
+		t.Fatalf("second publication=%+v", result)
 	}
 
 	if err = f.service.Tick(context.Background(), "tenant", 5); err != nil {
@@ -224,8 +225,8 @@ func TestDocumentRestrictionMonitorLeavesSecondDueLinkUnclaimed(t *testing.T) {
 func TestDocumentRestrictionMonitorReservesPassHeadroomForCheckpoint(t *testing.T) {
 	f := newReleaseFixture(t)
 	intent := f.publish(t)
-	if _, err := f.service.Execute(context.Background(), "tenant", intent.ID); err != nil {
-		t.Fatal(err)
+	if result := f.executeUntilNotPending(t, intent.ID); result.State != writeintent.Done {
+		t.Fatalf("publication=%+v", result)
 	}
 	f.service.providers = restrictionMonitorProviders{provider: &deadlineExhaustingRestrictionProvider{releaseProvider: f.provider}}
 

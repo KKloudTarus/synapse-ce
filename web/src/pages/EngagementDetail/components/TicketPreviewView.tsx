@@ -135,6 +135,7 @@ function wikiDescription(value: string, links: TicketPreview['links']) {
 }
 
 function renderedDescription(preview: TicketPreview) {
+  if (preview.wire !== undefined && preview.wire !== null) return { providerReady: false, body: <Markdown className="text-xs text-secondary">{preview.description}</Markdown> }
   const description = preview.fields.description
   if (isRecord(description) && description.type === 'doc' && Array.isArray(description.content)) return { providerReady: true, body: <div className="space-y-1.5 leading-relaxed text-foreground text-xs text-secondary">{adfBlocks(description.content, preview.links, 'adf')}</div> }
   if (typeof description === 'string') return { providerReady: true, body: wikiDescription(description, preview.links) }
@@ -150,10 +151,11 @@ export function TicketPreviewView({ preview, findingId }: { preview: TicketPrevi
     {preview.securityWaived && <p className="text-xs text-warning-primary">No Jira security level is set; this preview uses the recorded administrator waiver.</p>}
     {entries(preview.fields).length > 0 && <dl className="grid gap-1 text-xs text-secondary">{entries(preview.fields).map(([key, field]) => <div key={key} className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">{key}</dt><dd className="break-all">{value(field)}</dd></div>)}</dl>}
     {description.body}
+    {preview.wire !== undefined && preview.wire !== null && <details><summary className="cursor-pointer text-xs font-medium text-secondary">Exact provider request</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded border border-secondary p-2 text-xs text-secondary">{JSON.stringify(preview.wire, null, 2)}</pre></details>}
     {!description.providerReady && preview.links?.length ? <ul className="space-y-1 text-xs">{preview.links.map((link) => {
       const href = trustedURL(link.url, preview.links)
       return href ? <li key={href}><a className="text-brand-secondary hover:underline" href={href} target="_blank" rel="noreferrer">{link.label}</a></li> : null
     })}</ul> : null}
-    {preview.markerRequired && <p className="text-xs text-tertiary">Submitting adds the correlation label {preview.markerFormat || 'required by Jira recovery'}.</p>}
+    {preview.markerRequired && <p className="text-xs text-tertiary">Submitting adds the correlation marker {preview.markerFormat || 'required by provider recovery'}.</p>}
   </div>
 }

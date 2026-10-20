@@ -303,3 +303,16 @@ describe('DocumentPublishingPanel', () => {
     expect(screen.queryByRole('button', { name: 'Publish report' })).not.toBeInTheDocument()
   })
 })
+
+it('admits restricted document profiles while excluding unavailable Notion', async () => {
+ ready()
+ vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([
+  { id: 'drive', name: 'Restricted Drive', provider: 'google-drive', enabled: true, archived: false, credentialConfigured: true },
+  { id: 'notion', name: 'Unavailable Notion', provider: 'notion', enabled: true, archived: false, credentialConfigured: true },
+  { id: 'graph', name: 'Restricted SharePoint', provider: 'sharepoint', enabled: true, archived: false, credentialConfigured: true },
+ ] as never)
+ render(<DocumentPublishingPanel engagementId="eng-1" />)
+ expect(await screen.findByRole('option', { name: 'Restricted Drive' })).toBeInTheDocument()
+ expect(screen.queryByRole('option', { name: 'Unavailable Notion' })).not.toBeInTheDocument()
+ expect(screen.getByRole('option', { name: 'Restricted SharePoint' })).toBeInTheDocument()
+})

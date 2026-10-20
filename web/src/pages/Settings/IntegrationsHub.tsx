@@ -332,8 +332,8 @@ interface ProviderItem {
 
 type ProviderCategory = 'ci' | 'documentation'
 
-const JIRA_PROVIDERS = new Set(['jira-cloud', 'jira-dc'])
-const DOCUMENTATION_PROVIDERS = new Set(['confluence-cloud', 'confluence-dc'])
+const JIRA_PROVIDERS = new Set(['jira-cloud', 'jira-dc', 'github-issues', 'gitlab-issues', 'azure-boards', 'servicenow', 'linear'])
+const DOCUMENTATION_PROVIDERS = new Set(['confluence-cloud', 'confluence-dc', 'notion', 'sharepoint', 'onedrive', 'google-drive'])
 
 function belongsToProviderCategory(provider: string, category: ProviderCategory) {
   if (category === 'documentation') return DOCUMENTATION_PROVIDERS.has(provider)
@@ -541,13 +541,13 @@ function TicketingGroup({ canAdmin, capability }: { canAdmin: boolean; capabilit
     let live = true
     Promise.all([api.listIntegrationProviders(), api.listIntegrations()]).then(([providers, values]) => {
       if (!live) return
-      const jira = new Set(providers.filter((provider) => provider.provider === 'jira-cloud' || provider.provider === 'jira-dc').map((provider) => provider.provider))
+      const jira = new Set(providers.filter((provider) => provider.capabilities.includes('tickets') || provider.provider === 'jira-cloud' || provider.provider === 'jira-dc').map((provider) => provider.provider))
       setIntegrations(values.filter((integration) => jira.has(integration.provider) && !integration.archived))
     }, (cause) => { if (live) { setError(message(cause)); setIntegrations([]) } })
     return () => { live = false }
   }, [available, canAdmin])
-  return <Group title="Ticketing" icon={CheckDone01} info="Push confirmed findings to Jira with a required preview, durable intent, and a recoverable uncertain-create state." status={!available ? (capability?.planned || capability === null ? 'planned' : 'off') : !canAdmin ? 'restricted' : 'on'} manage={available && canAdmin ? { to: '/settings/integrations/jira', label: 'Manage Jira' } : undefined}>
-    {!available ? <EmptyState icon={CheckDone01} title={capability?.switch ? 'Ticketing is off' : 'Ticketing is not available in this build yet'} hint={capability?.switch ? `Set ${capability.switch}=true, then refresh.` : 'Ticketing is not available in this build yet.'} /> : !canAdmin ? <EmptyState icon={Lock01} title="Administrator access required" hint="Only tenant administrators and integration administrators can view Jira connections." /> : integrations === undefined ? <Spinner label="Loading Jira connections…" /> : error ? <ErrorState message={error} /> : integrations.length === 0 ? <EmptyState icon={CheckDone01} title="No Jira connections yet" hint="Connect Jira Cloud or Jira Data Center to create finding tickets." /> : <CardGrid>{integrations.map((integration) => <IntegrationCard key={integration.id} name={integration.name} kind={integration.provider === 'jira-cloud' ? 'Jira Cloud' : 'Jira Data Center'} detail={integration.endpoint} health={integration.enabled ? { label: 'Configured', tone: 'good' } : { label: 'Disabled', tone: 'neutral' }} lastSuccess="unavailable" lastError="unavailable" test={<p className="text-xs text-tertiary">Preview a finding before creating a ticket.</p>} />)}</CardGrid>}
+  return <Group title="Ticketing" icon={CheckDone01} info="Create provider tickets with a required preview, durable intent, and a recoverable uncertain-create state." status={!available ? (capability?.planned || capability === null ? 'planned' : 'off') : !canAdmin ? 'restricted' : 'on'} manage={available && canAdmin ? { to: '/settings/integrations/tickets', label: 'Manage tickets' } : undefined}>
+    {!available ? <EmptyState icon={CheckDone01} title={capability?.switch ? 'Ticketing is off' : 'Ticketing is not available in this build yet'} hint={capability?.switch ? `Set ${capability.switch}=true, then refresh.` : 'Ticketing is not available in this build yet.'} /> : !canAdmin ? <EmptyState icon={Lock01} title="Administrator access required" hint="Only tenant administrators and integration administrators can view ticket connections." /> : integrations === undefined ? <Spinner label="Loading ticket connections…" /> : error ? <ErrorState message={error} /> : integrations.length === 0 ? <EmptyState icon={CheckDone01} title="No ticket connections yet" hint="Connect a supported ticket provider to create finding tickets." /> : <CardGrid>{integrations.map((integration) => <IntegrationCard key={integration.id} name={integration.name} kind={integration.provider} detail={integration.endpoint} health={integration.enabled ? { label: 'Configured', tone: 'good' } : { label: 'Disabled', tone: 'neutral' }} lastSuccess="unavailable" lastError="unavailable" test={<p className="text-xs text-tertiary">Preview a finding before creating a ticket.</p>} />)}</CardGrid>}
   </Group>
 }
 

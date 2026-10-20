@@ -181,8 +181,12 @@ func (w *Workflow) SaveMapping(ctx context.Context, tenant, id shared.ID, in Map
 	if !in.DataClass.Valid() || (in.Locale != "en" && in.Locale != "vi") {
 		return domain.Mapping{}, shared.ErrValidation
 	}
+	integrationItem, err := w.integration(ctx, tenant, in.IntegrationID)
+	if err != nil {
+		return domain.Mapping{}, err
+	}
 	for state, transition := range in.StatusTransitions {
-		if !state.Valid() || !jiraTransitionIDPattern.MatchString(transition) {
+		if !state.Valid() || (isJiraTicketProvider(integrationItem.Provider) && !jiraTransitionIDPattern.MatchString(transition)) || (!isJiraTicketProvider(integrationItem.Provider) && strings.TrimSpace(transition) == "") {
 			return domain.Mapping{}, shared.ErrValidation
 		}
 	}
@@ -195,8 +199,12 @@ func (w *Workflow) SaveMapping(ctx context.Context, tenant, id shared.ID, in Map
 	if in.AutoPushEnabled && in.AutoPushMinSeverity == "" {
 		in.AutoPushMinSeverity = shared.SeverityHigh
 	}
-	if in.SecurityLevel == "" && (!in.AllowAdmin || strings.TrimSpace(in.WaiverReason) == "") {
-		return domain.Mapping{}, fmt.Errorf("%w: select an issue security level or record an administrator waiver", shared.ErrValidation)
+	if isJiraTicketProvider(integrationItem.Provider) {
+		if in.SecurityLevel == "" && (!in.AllowAdmin || strings.TrimSpace(in.WaiverReason) == "") {
+			return domain.Mapping{}, fmt.Errorf("%w: select an issue security level or record an administrator waiver", shared.ErrValidation)
+		}
+	} else if strings.TrimSpace(in.WaiverReason) != "" || (in.SecurityLevel != "" && !nativeTicketSecurityPolicyValid(in.SecurityLevel)) {
+		return domain.Mapping{}, fmt.Errorf("%w: select an explicit provider visibility policy without a waiver", shared.ErrValidation)
 	}
 	if len(in.WaiverReason) > 1024 {
 		return domain.Mapping{}, shared.ErrValidation
@@ -261,7 +269,13 @@ func (w *Workflow) SaveMapping(ctx context.Context, tenant, id shared.ID, in Map
 	if err != nil {
 		return domain.Mapping{}, err
 	}
-	if err = w.validateSelections(m, meta); err != nil {
+	// Native providers publish one trusted visibility policy with destination
+	// metadata. A UI does not type a Jira security-level surrogate; persist the
+	// discovered policy so previews and execution fencing retain the choice.
+	if !isJiraTicketProvider(integrationItem.Provider) && m.SecurityLevel == "" {
+		m.SecurityLevel = meta.SecurityPolicy
+	}
+	if err = w.validateSelections(m, meta, integrationItem.Provider); err != nil {
 		return domain.Mapping{}, err
 	}
 	literals, err := json.Marshal(m)
@@ -395,11 +409,14 @@ type snapshotFacts struct {
 	ConnectionRevision int                    `json:"connection_revision"`
 	CredentialRevision int                    `json:"credential_revision"`
 	WaiverReason       string                 `json:"waiver_reason"`
-	UpdateRemoteID     string                 `json:"update_remote_id,omitempty"`
-	UpdateRemoteURL    string                 `json:"update_remote_url,omitempty"`
-	StatusTransitionID string                 `json:"status_transition_id,omitempty"`
-	StatusComment      string                 `json:"status_comment,omitempty"`
-	StatusSource       string                 `json:"status_source,omitempty"`
+	// Marker is present only for native wire payloads. Legacy Jira snapshots
+	// retain their historical labels marker representation byte-for-byte.
+	Marker             *ports.TicketMarkerDescriptor `json:"marker,omitempty"`
+	UpdateRemoteID     string                        `json:"update_remote_id,omitempty"`
+	UpdateRemoteURL    string                        `json:"update_remote_url,omitempty"`
+	StatusTransitionID string                        `json:"status_transition_id,omitempty"`
+	StatusComment      string                        `json:"status_comment,omitempty"`
+	StatusSource       string                        `json:"status_source,omitempty"`
 	// StatusCommandVersion is zero for legacy bundled transition commands. A
 	// versioned transition has no bundled comment; its following Comment intent
 	// freezes this parent, episode and authenticated Jira principal.
@@ -454,7 +471,7 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 	if err != nil {
 		return Preview{}, err
 	}
-	if err = w.validateSelections(m, meta); err != nil {
+	if err = w.validateSelections(m, meta, in.Provider); err != nil {
 		return Preview{}, err
 	}
 	summary, body, links, err := w.renderTicket(tenantCtx, m, f, class)
@@ -504,7 +521,7 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 	if priority := m.PriorityMap[string(f.Severity)]; priority != "" {
 		fields["priority"] = map[string]string{"id": priority}
 	}
-	if m.SecurityLevel != "" {
+	if isJiraTicketProvider(in.Provider) && m.SecurityLevel != "" {
 		fields["security"] = map[string]string{"id": m.SecurityLevel}
 	}
 	if reporter, ok := requiredResolvedReporter(meta); ok {
@@ -526,16 +543,39 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 		}
 		fields[field.ID] = converted
 	}
-	payload := map[string]any{"fields": fields, "_synapse": snapshotFacts{Provider: in.Provider, Endpoint: in.Endpoint, DataClass: class, PolicyRevision: policy.Revision, MappingVersion: m.Version, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, WaiverReason: m.WaiverReason, GroupRevision: groupRevision, GroupVulnerability: groupVulnerability, GroupFactsDigest: groupFactsDigest}}
+	facts := snapshotFacts{Provider: in.Provider, Endpoint: in.Endpoint, DataClass: class, PolicyRevision: policy.Revision, MappingVersion: m.Version, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, WaiverReason: m.WaiverReason, GroupRevision: groupRevision, GroupVulnerability: groupVulnerability, GroupFactsDigest: groupFactsDigest}
+	payload := map[string]any{"fields": fields, "_synapse": facts}
 	if m.Transition != "" {
 		payload["transition"] = map[string]string{"id": m.Transition}
+	}
+	if builder, ok := provider.(ports.TicketPayloadBuilder); ok {
+		inputFields, inputErr := ticketPayloadInputFields(fields)
+		if inputErr != nil {
+			return Preview{}, inputErr
+		}
+		native, buildErr := builder.BuildTicketPayload(tenantCtx, ports.TicketPayloadInput{ProjectKey: m.ProjectKey, IssueType: m.IssueType, Summary: summary, Description: description, Links: links, Fields: inputFields, SecurityPolicy: m.SecurityLevel})
+		if buildErr != nil || !json.Valid(native.Wire) || len(native.Wire) == 0 || ticketMarkerDescriptorValid(native.Marker) != nil {
+			if buildErr != nil {
+				return Preview{}, safeTicketError(buildErr)
+			}
+			return Preview{}, fmt.Errorf("%w: provider returned an invalid ticket payload", shared.ErrValidation)
+		}
+		if err = provider.ValidateTicketPayload(native.Wire); err != nil {
+			return Preview{}, safeTicketError(err)
+		}
+		marker := native.Marker
+		facts.Marker = &marker
+		payload["_synapse"] = facts
+		payload["wire"] = native.Wire
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil || len(raw) > 60<<10 {
 		return Preview{}, fmt.Errorf("%w: ticket payload too large", shared.ErrValidation)
 	}
-	if err = provider.ValidateTicketPayload(raw); err != nil {
-		return Preview{}, safeTicketError(err)
+	if _, native := payload["wire"]; !native {
+		if err = provider.ValidateTicketPayload(raw); err != nil {
+			return Preview{}, safeTicketError(err)
+		}
 	}
 	return Preview{Payload: raw, Digest: ticketDigest(raw), Summary: summary, Description: body, MappingVersion: m.Version, MarkerRequired: true, MarkerFormat: "synapse-intent-{intent_id}", DataClass: class, Links: links, SecurityWaived: m.SecurityLevel == ""}, nil
 }
@@ -604,7 +644,7 @@ func (w *Workflow) Submit(ctx context.Context, req SubmitRequest) (domain.Intent
 		return domain.Intent{}, false, err
 	}
 	if !in.Enabled {
-		return domain.Intent{}, false, fmt.Errorf("%w: test and enable Jira before submit", shared.ErrConflict)
+		return domain.Intent{}, false, fmt.Errorf("%w: test and enable ticket integration before submit", shared.ErrConflict)
 	}
 	var payload map[string]json.RawMessage
 	if err = json.Unmarshal(p.Payload, &payload); err != nil {
@@ -614,10 +654,16 @@ func (w *Workflow) Submit(ctx context.Context, req SubmitRequest) (domain.Intent
 	if json.Unmarshal(payload["_synapse"], &facts) != nil || facts.MappingVersion != m.Version || facts.ConnectionRevision != in.ConnectionRevision || facts.CredentialRevision != in.CredentialRevision || facts.Endpoint != in.Endpoint {
 		return domain.Intent{}, false, shared.ErrConflict
 	}
+	_, nativeWire := payload["wire"]
 	var fields map[string]json.RawMessage
-	_ = json.Unmarshal(payload["fields"], &fields)
 	var labels []string
-	_ = json.Unmarshal(fields["labels"], &labels)
+	if !nativeWire {
+		if json.Unmarshal(payload["fields"], &fields) != nil || json.Unmarshal(fields["labels"], &labels) != nil {
+			return domain.Intent{}, false, shared.ErrValidation
+		}
+	} else if facts.Marker == nil || ticketMarkerDescriptorValid(*facts.Marker) != nil {
+		return domain.Intent{}, false, shared.ErrValidation
+	}
 	grouped := false
 	var group ports.TicketGroup
 	action := domain.Create
@@ -651,9 +697,17 @@ func (w *Workflow) Submit(ctx context.Context, req SubmitRequest) (domain.Intent
 	digest := ticketDigest(unsigned)
 	id := w.ids.NewID()
 	marker := "synapse-intent-" + id.String()
-	labels = append(labels, marker)
-	fields["labels"], _ = json.Marshal(labels)
-	payload["fields"], _ = json.Marshal(fields)
+	if nativeWire {
+		marked, markerErr := addTicketMarker(payload["wire"], *facts.Marker, marker)
+		if markerErr != nil {
+			return domain.Intent{}, false, markerErr
+		}
+		payload["wire"] = marked
+	} else {
+		labels = append(labels, marker)
+		fields["labels"], _ = json.Marshal(labels)
+		payload["fields"], _ = json.Marshal(fields)
+	}
 	raw, _ := json.Marshal(payload)
 	now := w.clock.Now().UTC()
 	if grouped {
@@ -863,7 +917,7 @@ func (w *Workflow) tickOutboundIntents(tenantCtx context.Context, tenant shared.
 		var until *time.Time
 		code := ""
 		if sendErr == nil {
-			if !sameRemoteOrigin(in.Endpoint, remote.URL) {
+			if !sameTicketRemoteOrigin(in.Provider, in.Endpoint, remote.URL) {
 				change = domain.IntentTransition{Event: writeintent.Ambiguous}
 			} else {
 				change = domain.IntentTransition{Event: writeintent.Acknowledge, Remote: &remote}
@@ -1087,7 +1141,7 @@ func (w *Workflow) Reconcile(ctx context.Context, tenant, id shared.ID, version 
 	}
 	change := domain.IntentTransition{Event: writeintent.ReconcileMultiple}
 	if len(hits) == 1 {
-		if !sameRemoteOrigin(facts.Endpoint, hits[0].URL) {
+		if !sameTicketRemoteOrigin(facts.Provider, facts.Endpoint, hits[0].URL) {
 			return domain.Intent{}, shared.ErrValidation
 		}
 		change = domain.IntentTransition{Event: writeintent.ReconcileFound, Remote: &hits[0]}
@@ -1137,7 +1191,7 @@ func closeTicketProvider(provider ports.TicketProvider) {
 		closer.Close()
 	}
 }
-func sameRemoteOrigin(endpoint, remote string) bool {
+func sameTicketRemoteOrigin(provider integration.Provider, endpoint, remote string) bool {
 	a, e := url.Parse(endpoint)
 	if e != nil {
 		return false
@@ -1146,8 +1200,35 @@ func sameRemoteOrigin(endpoint, remote string) bool {
 	if e != nil {
 		return false
 	}
-	return a.Scheme == "https" && b.Scheme == "https" && strings.EqualFold(a.Host, b.Host) && b.User == nil && b.RawQuery == "" && b.Fragment == "" && strings.HasPrefix(b.Path, strings.TrimRight(a.Path, "/")+"/browse/")
+	if a.Scheme != "https" || a.User != nil || b.Scheme != "https" || b.User != nil || b.Fragment != "" {
+		return false
+	}
+	if provider == "linear" {
+		if a.Host != "api.linear.app" || a.Path != "/graphql" || b.Host != "linear.app" || b.RawQuery != "" || b.ForceQuery {
+			return false
+		}
+		parts := strings.Split(strings.Trim(b.EscapedPath(), "/"), "/")
+		return len(parts) >= 3 && parts[1] == "issue" && nativeBrowserPart.MatchString(parts[0]) && nativeBrowserPart.MatchString(parts[2])
+	}
+	if !strings.EqualFold(a.Host, b.Host) {
+		return false
+	}
+	if provider == "servicenow" {
+		return b.RawQuery == "" && !b.ForceQuery && serviceNowBrowserPath.MatchString(b.Path)
+	}
+
+	if b.RawQuery != "" || b.ForceQuery {
+		return false
+	}
+	if isJiraTicketProvider(provider) {
+		return strings.HasPrefix(b.Path, strings.TrimRight(a.Path, "/")+"/browse/")
+	}
+	return true
 }
+
+var nativeBrowserPart = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+var serviceNowBrowserPath = regexp.MustCompile(`^/now/nav/ui/classic/params/target/(incident|sn_vul_vulnerable_item)\.do\?sys_id=[a-f0-9]{32}$`)
+
 func safeTicketError(err error) error {
 	if err == nil {
 		return nil

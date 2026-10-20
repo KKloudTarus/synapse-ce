@@ -267,28 +267,53 @@ func TestScheduledPDFUsesActualSenderAndRetainsLostAcknowledgement(t *testing.T)
 	}
 }
 
-func TestScheduleSaveRequiresConfluenceDetailDestination(t *testing.T) {
-	for _, scenario := range []string{"jira", "summary", "missing_group", "detail"} {
+func TestScheduleSaveValidatesDocumentDestinationBeforeArtifactBuild(t *testing.T) {
+	for _, scenario := range []string{"unsupported_release_contract", "invalid_destination", "working_profile"} {
 		t.Run(scenario, func(t *testing.T) {
-			svc, _, schedule, _ := newDeliveryContractFixture(t)
-			item := integration.Integration{TenantID: "tenant", Enabled: true, Provider: "confluence-cloud", Config: []byte(`{"space":"LAB","read_group":"readers","data_class":"detail"}`)}
+			svc, _, schedule, source := newDeliveryContractFixture(t)
+			publisher := &scheduleValidationPublisher{}
 			switch scenario {
-			case "jira":
-				item.Provider = "jira-cloud"
-			case "summary":
-				item.Config = []byte(`{"space":"LAB","read_group":"readers","data_class":"summary"}`)
-			case "missing_group":
-				item.Config = []byte(`{"space":"LAB","data_class":"detail"}`)
+			case "unsupported_release_contract":
+				publisher.err = &ports.DocumentProviderError{Code: "notion_release_contract_unavailable"}
+			case "invalid_destination":
+				publisher.err = shared.ErrForbidden
 			}
-			svc.deps.Integrations = &releaseIntegration{item: item}
-			_, err := svc.SaveSchedule(context.Background(), "tenant", ports.DocumentActor{UserID: "reviewer"}, ScheduleInput{ID: "scheduled-confluence", Source: schedule.Source, Destination: domain.ScheduleConfluence, IntegrationID: "confluence", Timezone: "UTC", Frequency: domain.ScheduleWeekly, Weekday: 6, Hour: 13, Enabled: true})
-			if scenario == "detail" && err != nil {
+			svc.deps.Publisher = publisher
+			_, err := svc.SaveSchedule(context.Background(), "tenant", ports.DocumentActor{UserID: "reviewer"}, ScheduleInput{ID: "scheduled-document", Source: schedule.Source, Destination: domain.ScheduleConfluence, IntegrationID: "google-drive", Timezone: "UTC", Frequency: domain.ScheduleWeekly, Weekday: 6, Hour: 13, Enabled: true})
+			if publisher.calls != 1 {
+				t.Fatalf("destination validation calls=%d", publisher.calls)
+			}
+			if scenario == "working_profile" && err != nil {
 				t.Fatal(err)
 			}
-			if scenario != "detail" && !errors.Is(err, shared.ErrForbidden) {
-				t.Fatalf("admitted unsafe destination: %v", err)
+			if scenario != "working_profile" && err == nil {
+				t.Fatal("admitted unavailable document destination")
+			}
+			if source.calls != 0 {
+				t.Fatalf("artifact built during schedule admission: %d", source.calls)
 			}
 		})
+	}
+}
+
+func TestScheduledNotionDestinationRefusesBeforeArtifactBuild(t *testing.T) {
+	svc, store, schedule, source := newDeliveryContractFixture(t)
+	schedule.Destination = domain.ScheduleConfluence // persisted value denotes document publishing.
+	schedule.IntegrationID = "notion"
+	schedule.EmailChannelID = ""
+	svc.deps.Publisher = &scheduleValidationPublisher{err: &ports.DocumentProviderError{Code: "notion_release_contract_unavailable"}}
+	if _, err := store.SaveDocumentSchedule(context.Background(), "tenant", schedule, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Tick(context.Background(), "tenant", 20); err == nil {
+		t.Fatal("scheduled Notion publication was admitted")
+	}
+	if source.calls != 0 {
+		t.Fatalf("artifact built after Notion refusal: %d", source.calls)
+	}
+	runs, err := store.ListDocumentScheduleRuns(context.Background(), "tenant", schedule.ID, 20)
+	if err != nil || len(runs) != 1 || runs[0].State != domain.OccurrenceFailed {
+		t.Fatalf("runs=%+v err=%v", runs, err)
 	}
 }
 
