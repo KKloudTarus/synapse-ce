@@ -578,10 +578,6 @@ func (a *Adapter) GetTicket(ctx context.Context, id string) (ports.TicketObserva
 				SysID        string `json:"sys_id"`
 				SysUpdatedOn string `json:"sys_updated_on"`
 				State        string `json:"state"`
-				ClosedBy     *struct {
-					Value string `json:"value"`
-				} `json:"closed_by"`
-				ClosedAt string `json:"closed_at"`
 			} `json:"result"`
 		}
 		if err := a.request(ctx, http.MethodGet, "/api/now/table/"+a.project+"/"+url.PathEscape(id), nil, nil, &out); err != nil {

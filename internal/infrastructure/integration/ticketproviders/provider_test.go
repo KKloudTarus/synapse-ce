@@ -230,6 +230,31 @@ func TestGetTicketReadsNativeAzureAndServiceNowShapes(t *testing.T) {
 	}
 }
 
+func TestServiceNowPollingIgnoresOptionalClosureReferenceShapes(t *testing.T) {
+	for name, fields := range map[string]string{
+		"empty reference":    `,"closed_by":"","closed_at":""`,
+		"expanded reference": `,"closed_by":{"value":"native-user","link":"https://instance.service-now.com/api/now/table/sys_user/native-user"},"closed_at":"2026-10-20 01:02:03"`,
+		"null reference":     `,"closed_by":null,"closed_at":null`,
+		"omitted reference":  ``,
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/api/now/table/incident/native-ticket" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				_, _ = w.Write([]byte(`{"result":{"sys_id":"native-ticket","state":"1","sys_updated_on":"2026-10-20 01:02:03"` + fields + `}}`))
+			}))
+			defer server.Close()
+			base, _ := url.Parse(server.URL)
+			a := &Adapter{provider: ServiceNowProvider, base: base, client: server.Client(), project: "incident", token: []byte("synthetic-token")}
+			got, err := a.GetTicket(context.Background(), "native-ticket")
+			if err != nil || got.ExternalID != "native-ticket" || got.StatusCategory != "new" || !got.UpdatedAt.Equal(time.Date(2026, 10, 20, 1, 2, 3, 0, time.UTC)) || got.AuthorID != "" || !got.StatusChangedAt.IsZero() {
+				t.Fatalf("observation=%#v err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestGetTicketDoesNotTreatAzureLastEditorAsStateActor(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/updates") {

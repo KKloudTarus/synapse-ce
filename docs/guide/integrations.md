@@ -58,8 +58,9 @@ opaque revision tokens are compared exactly for Drive and SharePoint/OneDrive;
 reconciliation does not infer a changed body from a numeric version or a 404.
 Command leases and intent/progress revisions fence stale workers and concurrent
 republish or unpublish operations.
-Contract tests cover the profile boundaries, but live sandbox E2E acceptance is
-deferred and is not represented as completed integration evidence.
+Contract tests cover the profile boundaries. Selected personal Drive lifecycle cases
+have native evidence; Microsoft and broader failure acceptance remain open in the
+[acceptance ledger](../evidence/remaining-providers/live/README.md).
 
 ## Ticket provider connections
 
@@ -96,14 +97,32 @@ Provision ServiceNow credentials for GET collection/record and POST collection o
 the selected ticket table, plus GET collection on `sys_user` for the authenticated
 user's own identity. The query is not an authorization boundary: enforce own-row
 read access independently with a Deny-Unless ACL for the dedicated machine user,
-preserving other callers' existing access. Do not grant user-directory access or
-user writes. For OAuth, enable **Enforce Token Restrictions** on this client and
-link its entity-specific authentication profile to table- and method-specific API
-access policies. Keep other tables, methods, and resources disabled, and preserve
-the endpoint's existing authentication profiles when adding a policy. Verify the
-actual token can read its own ID and cannot read another user's record before
-using it in Synapse. ServiceNow's Client Credentials grant also requires its
-documented instance property; it is not a Synapse environment variable.
+preserving other callers' existing access. Do not grant user-directory writes.
+
+For OAuth, enable **Enforce Token Restrictions**, use a client-specific
+authentication profile and table- and method-specific API access policies, and
+preserve the endpoint's existing authentication profiles. A policy profile alone
+does not deny unlinked endpoints. On instances with Machine Identity Access
+Control, link the web-service-only machine user to exactly those policies and
+tables; leave child tables and SOAP disabled. Verify explicit authorization denials
+for other tables, resources and write methods with the actual token. An empty
+200 response is not proof of endpoint isolation. Do not change shared scope mappings
+or other clients to make this connection work. The tested personal instance uses
+client-specific Broadly scoped OAuth together with this machine boundary; never
+use Broadly scoped alone as proof of restricted access. Client Credentials also
+requires ServiceNow's documented instance property, not a Synapse environment variable.
+
+Field ACLs must permit every approved payload field during insert. ServiceNow can
+silently omit fields that lack write permission. The personal incident sandbox
+needed a parallel `incident.description` write Allow-If ACL with
+`UserIsAuthenticated` and a script requiring the exact machine user ID and
+`current.isNewRecord()`. It has no required roles and preserves the existing
+same-target ACL's Admin overrides value; existing native ACLs remain unchanged.
+Verify full description, summary and correlation readback after creating a
+synthetic record. Keep existing-record update/delete methods denied; do not grant
+`itil`, `sn_incident_write` or admin merely to satisfy field access. This sandbox
+configuration proves the incident profile only; a vulnerability table needs its
+own policy, field-permission and native acceptance checks.
 
 GitHub's inbound `github` provider remains separate: it receives webhooks for source
 scanning and is not an outbound Issues connection. GitLab's inbound identity is also
@@ -120,8 +139,9 @@ policy has no waiver path.
 
 Ticket status polling and recovery create reviewable proposals only; they do not mutate
 finding triage or status automatically. Connection credentials, URLs with query data,
-and provider response bodies are not retained in ticket audit records. Live sandbox E2E
-acceptance is deferred and is not represented as a completed integration test.
+and provider response bodies are not retained in ticket audit records. Selected
+personal ticket sandbox cases have [native evidence](../evidence/remaining-providers/live/README.md);
+remaining acceptance is listed separately and is not represented as passed.
 
 ## Architecture
 

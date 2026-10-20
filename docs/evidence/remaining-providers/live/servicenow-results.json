@@ -1,0 +1,256 @@
+{
+  "recorded_at_utc": "2026-10-20T08:55:24.523202+00:00",
+  "environment": "personal ServiceNow PDI; Docker full stack; synthetic findings",
+  "permission_matrix": {
+    "at": "2026-10-20T08:45:52.861533+00:00",
+    "probes_are_noncreating": true,
+    "matched_token_outward_proof_checked": true,
+    "results": [
+      {
+        "name": "own_identity",
+        "method": "GET",
+        "status": 200,
+        "result_count": 1,
+        "error": null,
+        "exactly_own_id": true
+      },
+      {
+        "name": "foreign_user_query",
+        "method": "GET",
+        "status": 200,
+        "result_count": 0,
+        "error": null
+      },
+      {
+        "name": "incident_collection",
+        "method": "GET",
+        "status": 200,
+        "result_count": 0,
+        "error": null
+      },
+      {
+        "name": "unlinked_problem",
+        "method": "GET",
+        "status": 403,
+        "result_count": null,
+        "error": {
+          "message": "User Not Authorized",
+          "detail": "Failed Machine Identity access validation"
+        }
+      },
+      {
+        "name": "unlinked_task",
+        "method": "GET",
+        "status": 403,
+        "result_count": null,
+        "error": {
+          "message": "User Not Authorized",
+          "detail": "Failed Machine Identity access validation"
+        }
+      },
+      {
+        "name": "unlinked_attachment",
+        "method": "GET",
+        "status": 403,
+        "result_count": null,
+        "error": {
+          "message": "User Not Authorized",
+          "detail": "Failed API level ACL Validation"
+        }
+      },
+      {
+        "name": "unlinked_ui_identity",
+        "method": "GET",
+        "status": 401,
+        "result_count": null,
+        "error": {
+          "message": "User is not authenticated",
+          "detail": "Required to provide Auth information"
+        }
+      },
+      {
+        "name": "foreign_user_record_route",
+        "method": "GET",
+        "status": 403,
+        "result_count": null,
+        "error": {
+          "message": "User Not Authorized",
+          "detail": "Failed Machine Identity access validation"
+        }
+      },
+      {
+        "name": "directory_create",
+        "method": "POST",
+        "status": 403,
+        "result_count": null,
+        "error": {
+          "message": "User Not Authorized",
+          "detail": "Failed Machine Identity access validation"
+        }
+      },
+      {
+        "name": "incident_update",
+        "method": "PUT",
+        "status": 403,
+        "result_count": null,
+        "error": {
+          "message": "User Not Authorized",
+          "detail": "Failed Machine Identity access validation"
+        }
+      },
+      {
+        "name": "incident_patch",
+        "method": "PATCH",
+        "status": 403,
+        "result_count": null,
+        "error": {
+          "message": "User Not Authorized",
+          "detail": "Failed Machine Identity access validation"
+        }
+      },
+      {
+        "name": "incident_delete",
+        "method": "DELETE",
+        "status": 403,
+        "result_count": null,
+        "error": {
+          "message": "User Not Authorized",
+          "detail": "Failed Machine Identity access validation"
+        }
+      },
+      {
+        "name": "method_override_delete",
+        "method": "GET",
+        "status": 403,
+        "result_count": null,
+        "error": {
+          "message": "User Not Authorized",
+          "detail": "Failed Machine Identity access validation"
+        }
+      }
+    ],
+    "probe_label_correction": "foreign_user_record_route targets own ID via a forbidden record route; no foreign-record proof claimed"
+  },
+  "native_configuration": {
+    "machine_roles": 0,
+    "web_service_only": true,
+    "token_seconds": 1800,
+    "rest_only": true,
+    "enforce_token_restrictions": true,
+    "scope_restriction": "Broadly scoped; machine-specific endpoint boundary required",
+    "machine_boundary": {
+      "active": true,
+      "rest_policy_count": 3,
+      "tables": [
+        "incident",
+        "sys_user"
+      ],
+      "child_tables": false,
+      "soap": false,
+      "user_count": 1
+    },
+    "description_acl": {
+      "id": "8bc2ad692f40d310ef154c707fa4e31a",
+      "active": true,
+      "operation": "write",
+      "name": "incident.description",
+      "decision": "allow",
+      "required_roles": [],
+      "security_attribute": "UserIsAuthenticated",
+      "script": "answer = String(gs.getUserID()) === '9fa0742d2fc89310ef154c707fa4e3a0' && current.isNewRecord();",
+      "admin_overrides": true,
+      "mod_count": 1,
+      "native_xml_updated_at": "2026-10-20 08:45:07",
+      "baseline_acl_modified": false
+    },
+    "temporary_security_admin": "removed; header verified after correcting an accidental user re-enable; no role dialog left open"
+  },
+  "cases": {
+    "en": {
+      "intent": {
+        "id": "874d636d17d7497b8093c7456279877d",
+        "state": "done",
+        "attempts": 1,
+        "remote_id": "1b67e5e12f80d310ef154c707fa4e31f",
+        "remote_url": "https://dev426571.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3D1b67e5e12f80d310ef154c707fa4e31f",
+        "created_at": "2026-10-20T08:46:07.426066Z"
+      },
+      "native_number": "INC0010002",
+      "checks": {
+        "summary_exact": true,
+        "description_exact": true,
+        "correlation_exact": true,
+        "remote_id_exact": true,
+        "identical_key_same_intent": true,
+        "one_attempt": true
+      },
+      "native_description_sha256": "7ff70be77bc1a5a057099999e2ed17d85d16f98199f2d026d11a2b82da3f3a09",
+      "reconciliation_used": false,
+      "polling": {
+        "comments": [],
+        "observations": [
+          {
+            "checked_at": "2026-10-20T08:57:21.427321Z",
+            "deleted_or_unreadable": false,
+            "provider_updated_at": "2026-10-20T08:46:13Z",
+            "remote_id": "1b67e5e12f80d310ef154c707fa4e31f",
+            "status_category": "new"
+          }
+        ],
+        "proposals": []
+      },
+      "finding_status_after_poll": "open"
+    },
+    "vi": {
+      "intent": {
+        "id": "bc9c0f4ddd04cbc9df299e27f8ce5a4c",
+        "state": "done",
+        "attempts": 1,
+        "remote_id": "0e7729e12f80d310ef154c707fa4e38f",
+        "remote_url": "https://dev426571.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3D0e7729e12f80d310ef154c707fa4e38f",
+        "created_at": "2026-10-20T08:46:19.521828Z"
+      },
+      "native_number": "INC0010003",
+      "checks": {
+        "summary_exact": true,
+        "description_exact": true,
+        "correlation_exact": true,
+        "remote_id_exact": true,
+        "identical_key_same_intent": true,
+        "one_attempt": true
+      },
+      "native_description_sha256": "60f97396c998f311ccb06cdb5d24cd631700b9bc110c86857eacd737997ff04f",
+      "reconciliation_used": false,
+      "polling": {
+        "comments": [],
+        "observations": [
+          {
+            "checked_at": "2026-10-20T08:57:12.253203Z",
+            "deleted_or_unreadable": false,
+            "provider_updated_at": "2026-10-20T08:46:24Z",
+            "remote_id": "0e7729e12f80d310ef154c707fa4e38f",
+            "status_category": "new"
+          }
+        ],
+        "proposals": []
+      },
+      "finding_status_after_poll": "open"
+    }
+  },
+  "earlier_partial_create": {
+    "intent_id": "dc14b137da1985e765e9b983cb2253ed",
+    "state": "uncertain",
+    "attempts": 1,
+    "number": "INC0010001",
+    "sys_id": "789069a52f40d310ef154c707fa4e3b5",
+    "description_empty": true,
+    "disposition": "preserved; no adoption or blind retry; no lost-HTTP-response proof"
+  },
+  "remaining": [
+    "vulnerability profile native acceptance",
+    "terminal actor/proposal cases",
+    "lost provider HTTP response",
+    "interrupted upload/purge acceptance"
+  ],
+  "polling_regression": "Native closed_by empty string broke unused reference decoding. Four closure-shape regression cases passed after removing unused fields. Both existing native incidents then produced new observations on the rebuilt runtime; no actor attribution inferred."
+}

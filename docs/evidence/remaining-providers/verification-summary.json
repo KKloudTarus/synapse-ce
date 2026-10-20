@@ -134,12 +134,12 @@
     ]
   },
   "live_e2e": {
-    "observed": "Private/confidential English and Vietnamese GitHub/GitLab issues; Linear issues; idempotent replay; GitHub acknowledgement-commit recovery; Drive create/update same remote ID/purge and separate Reader PDF access.",
+    "observed": "Private/confidential English and Vietnamese GitHub/GitLab issues; Linear issues; idempotent replay; GitHub acknowledgement-commit recovery; Drive create/update same remote ID/purge and separate Reader PDF access. ServiceNow restricted-token matrix, EN/VI incident exact-content readback/replay and native new-state polling.",
     "remaining": [
       "Actual lost provider HTTP-response recovery",
       "Interrupted upload/purge native acceptance",
       "Native sharing drift/legal hold and terminal actor/proposal cases",
-      "ServiceNow effective OAuth policy/own-row ACL validation, native incident records and polling"
+      "ServiceNow vulnerability profile and terminal actor/proposal cases"
     ],
     "explicitly_deferred": [
       "Azure Boards Microsoft sandbox acceptance (#1439)",
@@ -153,7 +153,7 @@
     "configuration": 6,
     "ticket-entry": 46,
     "adapter_html_previews": 4,
-    "live_browser_captures": 17,
+    "live_browser_captures": 25,
     "servicenow_setup_only_captures": 2
   },
   "browser_checks": {
@@ -165,7 +165,8 @@
     "Initial full web run: missing list API stub plus two unrelated fifteen-second Template timeouts; final maxWorkers=2 runs passed without changing timeouts.",
     "Old /tmp Go cache exhausted tmpfs during a build/lint run; persistent host cache used for successful final checks.",
     "Preview harness first used ambiguous text locators and parallel Vite capture jobs; final sequential regenerated captures passed.",
-    "Initial ServiceNow focused command referenced nonexistent internal/adapter/http; corrected httpapi run passed. Native preflight returned 403 even for own identity, so its negative reads are not ACL acceptance."
+    "Initial ServiceNow focused command referenced nonexistent internal/adapter/http; corrected httpapi run passed. Native preflight returned 403 even for own identity, so its negative reads are not ACL acceptance.",
+    "Initial polling gate container omitted pinned lint binary mount; corrected runtime mounts passed. Initial polling runtime build lacked Git safe.directory and failed VCS stamping; rebuilt with safe.directory, no stamping bypass."
   ],
   "servicenow_identity_delta": {
     "base_commit": "a1769c67959f29ca47820233683e3fb32a40a681",
@@ -207,7 +208,7 @@
       "performance-auditor": "pass",
       "architecture-critic": "pass"
     },
-    "native_status": "incomplete; corrected identity query succeeded during reverted trial; final policy isolation and governed incident acceptance pending",
+    "native_status": "Selected incident acceptance passed: restricted-token denial matrix, EN/VI exact-content readback and replay; fresh runtime polling produces new observations. Earlier trial rollback and partial incident preserved.",
     "earlier_evidence_scope": "Web, PostgreSQL/RLS and hostile harness evidence above predates this adapter-local identity correction; their implementation inputs are unchanged. Full backend preceded two test-only alphabet fixtures, both covered by the final focused run.",
     "secret_and_manifest_check": {
       "files_scanned": 8022,
@@ -237,6 +238,50 @@
       },
       "client_restored_to": "Securely scoped",
       "governed_incidents_created": 0
+    }
+  },
+  "servicenow_polling_delta": {
+    "base_commit": "80c46dbc385ff8de807e6a0646c357def23731d6",
+    "recorded_at_utc": "2026-10-20T08:58:10.181833+00:00",
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "8c03ec373c020f623ee8991aba44ecdc186ee0ea94cff8196f84c9b0269df49f",
+      "internal/infrastructure/integration/ticketproviders/provider_test.go": "36dae2a0f6da361cf89159fb5c7f45734e2de9a8d798c39b699d56046fe7adee"
+    },
+    "regression_cases": 4,
+    "red_evidence": "Empty-string closure reference failed invalid_response before removal of unused decoding fields.",
+    "checks": {
+      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race -count=1 ./internal/infrastructure/integration/ticketproviders ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
+      "environment": "Docker synapse-provider-check-runtime:local",
+      "exit_code": 0,
+      "local_log_sha256": "90c30d098b0e06b26cdd508fdffef0795f743e30085ec4ec8279e02d7b8b8950"
+    },
+    "reviews": {
+      "qa-verifier": "pass",
+      "security-auditor": "pass",
+      "performance-auditor": "pass; incremental architecture inspected"
+    },
+    "native_results": "live/servicenow-results.json",
+    "runtime_provenance": "live/servicenow-provenance.json",
+    "prior_inputs_unchanged": [
+      "web production and tests",
+      "PostgreSQL/RLS persistence",
+      "shared ticket/release controls"
+    ],
+    "docs_api_check": {
+      "command": "go test -count=1 ./docs ./api",
+      "environment": "Docker",
+      "exit_code": 0,
+      "local_log_sha256": "40c778a7f76e156bfc1cb4042e45f4a2a1e952ffbdb50a7a6424de80efdca91d",
+      "package_seconds": {
+        "docs": 1.317,
+        "api": 0.468
+      }
+    },
+    "secret_and_manifest_check": {
+      "files_scanned": 8032,
+      "secret_sources_checked": 16,
+      "secret_match_files": [],
+      "screenshots_verified": 25
     }
   }
 }

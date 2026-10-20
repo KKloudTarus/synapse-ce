@@ -21,7 +21,7 @@ This is not acceptance or closure of the full B08 batch.
 | #1437 GitHub Issues | Credentialless inbound adapter; tenant/host SCM credential store; durable ticket workflow | Private-only issue provider, SCM resolver injection, metadata, exact preview/marker recovery, registry/API/UI | Contract/privacy/tenant/recovery tests pass; real private EN/VI issues, replay and acknowledgement-commit recovery recorded. Lost provider HTTP-response recovery remains open |
 | #1438 GitLab Issues | Inbound adapter and SCM connector | Confidential issue provider using same ticket path, SaaS/self-managed policy | Contract/privacy/tenant/recovery tests pass; real confidential EN/VI issues and one-attempt adoption of an uncertain create recorded. Broader native failure coverage remains open |
 | #1439 Azure Boards | Shared registry and ticket reconciliation | Native work-item provider and polling | Contract, exact-marker recovery, permissions/tenant/sealed secret, polling proposal tests; native work items remain live acceptance |
-| #1440 ServiceNow | Shared registry and ticket reconciliation | Incident/vulnerability record provider and polling | Contract, exact correlation recovery, permissions/tenant/sealed secret, polling proposal tests; native records remain live acceptance |
+| #1440 ServiceNow | Shared registry and ticket reconciliation | Incident/vulnerability record provider and polling | Contract, correlation recovery, permissions/tenant/sealed secret, polling proposal tests; native incident EN/VI and restricted-token checks passed |
 | #1441 Linear | Shared registry and ticket reconciliation | Native GraphQL issue provider | Contract and polling tests pass; real EN/VI issues, idempotent replay and observations recorded. Native terminal-author/proposal and failure acceptance remains open |
 | #1447 SharePoint / OneDrive | Shared document intent/restriction/release controls | Graph provider, opaque revision fencing, restricted-sharing proof, purge | Contract/ACL/pagination/inheritance/CAS/recovery/legal-hold/purge tests; native document and sharing views remain live acceptance |
 | #1448 Google Drive | Shared document intent/restriction/release controls | Drive provider, opaque revision fencing, restricted-sharing proof, purge | Contract/ACL/pagination/CAS/recovery/legal-hold/purge tests pass; real restricted publish, same-ID republish, Reader PDF access and governed purge recorded. Interrupted upload/purge and sharing-drift native acceptance remain open |
@@ -66,9 +66,10 @@ candidate provenance; they are not represented as reruns on a later binary.
 
 Outstanding native acceptance includes an actual lost provider HTTP response,
 interrupted attachment upload/purge, live sharing drift/legal hold, and terminal
-actor/proposal cases. The ServiceNow PDI now has a role-free Machine user, an OAuth
-client, an own-row ACL and three endpoint policies. Effective token authorization
-and own-row isolation remain unproven; no ServiceNow record pass is claimed.
+actor/proposal cases. ServiceNow native EN/VI incidents now pass exact full-content
+readback and replay with one attempt each, using a role-free machine and explicit
+endpoint denials. The first partial-content incident remains quarantined; the
+vulnerability profile and terminal actor/proposal cases are not passed.
 Microsoft Azure Boards and SharePoint/OneDrive acceptance remains
 explicitly deferred on #1439/#1447. It needs an Azure DevOps organization/project
 and a business test tenant, drive, reader group and scoped credentials.
@@ -141,8 +142,8 @@ a bounded authenticated-user Table API query. The full Docker backend gate and
 focused adapter race/API/use-case checks passed; nine identity contract cases
 cover successful and fail-closed responses. QA, security, performance and
 architecture reviews found no blocking source issue. The [live ledger](live/README.md#servicenow-identity-correction)
-separates these source checks and native setup captures from pending authorization
-and incident acceptance.
+records the native restricted-token matrix, successful incident runs, and the
+preserved partial-content failure separately from source checks.
 
 The first broad web run found a missing API test stub and two unrelated fifteen-second
 Template test timeouts. The stub was corrected; the final run used two workers and

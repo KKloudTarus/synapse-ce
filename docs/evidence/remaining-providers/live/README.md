@@ -19,7 +19,7 @@ excluded from this PR.
 | GitLab Issues | English and Vietnamese confidential issues in a private project; the first uncertain create was reconciled to its existing issue after the modern URL correction. | The existing issue was adopted with one create attempt; no repeat create was dispatched. |
 | Linear | English and Vietnamese issues in the dedicated team with a Read/Create-only API key. | Polling observations are available; no terminal-state author attribution or automatic finding change is claimed. |
 | Google Drive | Restricted app-created My Drive folder; a real worker publication produced HTML and PDF. The separate Reader account joined the group and opened the PDF. | A fresh source completed create → update on the same remote ID → governed purge, each with one attempt. Reader opened the updated PDF and could no longer open it after purge. Interrupted-operation native acceptance remains open. |
-| ServiceNow | Personal developer instance, role-free machine identity, OAuth client and three endpoint-specific API policies are provisioned. | OAuth authorization and own-row ACL acceptance remain unproven. No native incident has been created through Synapse. |
+| ServiceNow | Role-free machine identity; own-row ACL and machine-specific endpoint boundary; governed EN/VI incident creation, exact full-content readback and identical-key replay, one attempt each. | The first partial-content incident remains quarantined; vulnerability profile, terminal actor/proposal and interrupted HTTP-response acceptance remain open. |
 
 The Drive publication used a separately provisioned local reviewer and an active
 synthetic engagement. The bootstrap operator is deliberately excluded from durable
@@ -49,16 +49,62 @@ the Machine user's ID through the corrected query; foreign-directory queries
 returned no rows. However, unlinked `problem` and `task` reads also returned 200 with
 no rows, which does not establish endpoint-policy denial. The client was restored
 to Securely scoped and the trial token revoked; its subsequent request returned
-401. Final token authorization and the complete positive/negative permission
-matrix remain pending. Neither connection-test nor incident acceptance is passed.
+401. This trial predates the machine-specific boundary below and is retained as failed
+setup evidence, not the final authorization result.
 
-These setup captures show the Machine user without assigned roles and the active
-own-row Deny-Unless ACL. They do not demonstrate effective token authorization,
-successful own-identity read, or governed incident creation.
+The final setup retains client-specific Broadly scoped OAuth, REST-only and Enforce
+Token Restrictions with a 30-minute token. An active Machine Identity Access
+Control links only the web-service-only, zero-role machine user, the three exact
+GET/POST policies and `incident`/`sys_user` tables; child tables and SOAP are disabled.
+No shared OAuth scope mapping or other client was changed.
 
-| Machine user setup | Own-row ACL activated |
+Fresh-token probes returned exactly the own ID and no foreign-directory rows.
+Unlinked `problem`/`task`, the `sys_user` record route, directory POST, incident
+PUT/PATCH/DELETE and DELETE method override returned explicit Machine Identity
+validation denials (403). Attachment access returned API-level ACL denial (403).
+The UI identity resource returned 401; no specific MIAC denial is inferred there.
+The historical probe label `foreign_user_record_route` actually targets the own ID
+through a forbidden record route, and is not foreign-record proof.
+
+The first governed create produced INC0010001 with an empty description: native
+field ACLs silently dropped it. Its intent remains uncertain with one attempt;
+no blind retry, adoption or content pass is claimed. A separate insert-only
+`incident.description` Allow-If ACL now requires the exact machine ID and
+`current.isNewRecord()`, with UserIsAuthenticated and no roles. Admin overrides
+matches the existing same-target rule, preserving its admin semantics. The native
+ACL was not modified. The custom rule was verified active through native XML.
+
+Fresh findings then produced **INC0010002 (EN)** and **INC0010003 (VI)** through the
+sealed credential, durable connection test, preview, submit and Docker worker.
+Both intents completed normally with one attempt, identical-key replay returned
+the same intent, and native API readback matched the entire frozen summary,
+description, correlation marker and remote ID. Neither successful run required
+reconciliation. Polling initially failed because an unused closure-reference field
+expected an object while native open incidents return an empty string. Four
+regression cases cover empty, expanded, null and omitted closure references. The
+adapter now decodes only the fields used for status. On the rebuilt runtime both
+existing incidents produced `new` observations, no comments and no proposals;
+actor attribution remains absent. Both findings remain open. No additional incident
+was created for this check. The earlier partial create does not establish a lost
+HTTP response.
+
+| Machine endpoint boundary | Insert-only description ACL |
 | --- | --- |
-| ![Dedicated Machine user with no assigned roles](servicenow-machine-user-created.png) | ![Active sys_user read Deny-Unless ACL](servicenow-own-row-acl-active.png) |
+| ![Machine user bound to exact policies and tables](servicenow-machine-boundary.png) | ![Active insert-only description grant](servicenow-description-acl-active.png) |
+
+| ServiceNow English | ServiceNow Vietnamese |
+| --- | --- |
+| ![Complete native English incident](servicenow-incident-en.png) | ![Complete native Vietnamese incident](servicenow-incident-vi.png) |
+
+Temporary security_admin was removed from the admin session after setup. An
+accidental user re-enable was corrected and the final session header was verified
+without the elevated role; no role dialog was left open.
+
+![Final Docker console ticket and polling observation](local-servicenow-ticket.png)
+
+The existing Machine-user and own-row ACL captures remain setup evidence. The
+[permission and content result export](servicenow-results.json) records the tested
+boundary and exact comparison results without credentials or raw transcripts.
 
 ## Recovery experiment
 
@@ -113,6 +159,11 @@ The full stack includes API, the integrations worker, web, PostgreSQL 17, MinIO 
 a loopback TLS proxy. The application database identity has no superuser or
 BYPASSRLS privilege; the halt writer is separate. A fresh local certificate is
 verified by the API runner. The browser uses the loopback HTTP web endpoint.
+The ServiceNow incident-create runtime source hashes match commit `80c46dbc`; its binaries were
+built from uncommitted inputs on `a1769c67`, and the running binary hashes were
+verified before the incident runs. Polling was then verified on rebuilt binaries
+with the optional-field correction; both build records remain in
+[ServiceNow provenance](servicenow-provenance.json).
 Current credentials and local runtime configuration are retained outside source
 and evidence.
 

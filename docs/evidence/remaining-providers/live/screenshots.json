@@ -118,6 +118,62 @@
       "captured_at_utc": "2026-10-20T07:25:52.305109+00:00",
       "kind": "live_browser_screenshot",
       "environment": "personal ServiceNow PDI setup; native authorization and Synapse incident acceptance pending"
+    },
+    {
+      "file": "servicenow-machine-boundary.png",
+      "sha256": "92dcd968fcbb654daf3993e2836dbb34a387a394c36ffd20de8faf15db22aa7a",
+      "captured_at_utc": "2026-10-20T08:13:16.656560+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-description-acl-active.png",
+      "sha256": "5d446ec16d034c4ced760a9cab5fd62d11533201002197164fd6203d53a8418e",
+      "captured_at_utc": "2026-10-20T08:46:49.040855+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-description-acl-xml.png",
+      "sha256": "8dc4b4f75c8d8e6c0d437affcdb1bf97bed9ceb4dd001b7c97d9dfa68b73b63e",
+      "captured_at_utc": "2026-10-20T08:51:39.600351+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-incident-en.png",
+      "sha256": "6abbf4748198762bc5ee1efd66b4b43589ccbaef574108e590fb7dcf4223e846",
+      "captured_at_utc": "2026-10-20T08:47:35.468777+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-incident-vi.png",
+      "sha256": "7de06cad1330627b38d378bdc4dd43c31a69325afdc5e281be4971f78085d7a6",
+      "captured_at_utc": "2026-10-20T08:48:04.936727+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-final-restricted-oauth.png",
+      "sha256": "01f57e614ab2163ae2b0d0e3e8725ce7e4ca6d2e595af5e2e5f296ce03af3b4f",
+      "captured_at_utc": "2026-10-20T08:19:26.786596+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-admin-elevation-removed.png",
+      "sha256": "545deca5d5bdca0190915ec381b23366f543cf35b3b862c3e5d219761387e105",
+      "captured_at_utc": "2026-10-20T08:54:22.173056+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "local-servicenow-ticket.png",
+      "sha256": "7e3cbbed7699eea70cf58f3962c30cd40104e44a02307de42b82fc7a04b29d09",
+      "captured_at_utc": "2026-10-20T08:57:43.564683+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
     }
   ]
 }
