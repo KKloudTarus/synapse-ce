@@ -1,0 +1,47 @@
+{
+  "recorded_at_utc": "2026-10-20T13:53:02.728657+00:00",
+  "repository_head_at_capture": "26c1d01dcf7bdd719f82efd5615f37a9792b43b2",
+  "native_publication_folder": "15KewV0lYL3jN_waEcseaCvFpoR-Ju6kf",
+  "native_pdf_id": "1ql9wNEaJMtJbCsoAySe1Q-aG_7IYP5Ve",
+  "native_pdf_name": "report-78e5c434152b4c11.pdf",
+  "observed_on_folder_and_pdf": {
+    "general_access": "Restricted (Hạn chế)",
+    "access_entries": 2,
+    "owner": "thanhvinhlqt2016@gmail.com",
+    "reader_group": "synapse-cee@googlegroups.com",
+    "group_role": "Viewer (Người xem)"
+  },
+  "read_only": true,
+  "settings_or_permissions_changed": false,
+  "source_api_readback": {
+    "intent": {
+      "id": "16684bb8e85b16b5c014a52df940748f",
+      "action": "create",
+      "state": "done",
+      "version": 11,
+      "attempts": 1,
+      "remote_id": "15KewV0lYL3jN_waEcseaCvFpoR-Ju6kf~1j1hnU-BPEGLzjsIyDz8jqx4MvPls8yMM",
+      "remote_url": "https://drive.google.com/drive/folders/15KewV0lYL3jN_waEcseaCvFpoR-Ju6kf",
+      "created_at": "2026-10-20T04:42:30.28171Z",
+      "updated_at": "2026-10-20T04:43:17.969527Z"
+    },
+    "known_native_children": [
+      {
+        "id": "1j1hnU-BPEGLzjsIyDz8jqx4MvPls8yMM",
+        "name": "report.html",
+        "mimeType": "text/html"
+      },
+      {
+        "id": "1ql9wNEaJMtJbCsoAySe1Q-aG_7IYP5Ve",
+        "name": "report-78e5c434152b4c11.pdf",
+        "mimeType": "application/pdf"
+      }
+    ]
+  },
+  "images": [
+    "drive-publication-sharing.png",
+    "drive-pdf-sharing.png"
+  ],
+  "history": "Earlier Owner/Reader dialogs failed. The native folder and PDF sharing dialogs later loaded successfully without cookie, security or permission changes; the details pane still failed. No root cause is established. Automated Edge Settings access was policy-blocked and no workaround was attempted.",
+  "provenance": "The inspected initial publication remains present and its fresh local API readback is done with one create attempt. Its folder/HTML remote IDs match these native captures. The separate republish/purge lifecycle in selected-results.json used a different source/folder and remains separate historical evidence. This is a current read-only sharing inspection, not a new publish, full live-fault replay or rebuild of the running provider stack."
+}

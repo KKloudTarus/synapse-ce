@@ -1,0 +1,214 @@
+{
+  "images": [
+    {
+      "file": "drive-purge-reader-denied.png",
+      "sha256": "0f2fb512cd31f8bc488790657d46d5faca7de32a449f3897e77f3d33f48d840e",
+      "captured_at_utc": "2026-10-20T05:07:14.122288+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "drive-reader-files.png",
+      "sha256": "0386312a9dd896b8ee446820fcbe9fe6fc7dd8dd53c6ceb2c67348a1cfd06b7b",
+      "captured_at_utc": "2026-10-20T04:54:49.279358+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "drive-reader-pdf.png",
+      "sha256": "ca48a92e757a73728882e4d661d8f00bb8ba6dcb92b2453da057c10a3927ae9c",
+      "captured_at_utc": "2026-10-20T04:54:49.279478+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "drive-republish-reader-files.png",
+      "sha256": "fa1805312bedcb7cc9d77a64b3a1aad40c85fc0310ab39c38cceb135107c25ff",
+      "captured_at_utc": "2026-10-20T05:05:42.630508+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "drive-republish-reader-pdf.png",
+      "sha256": "be9a09b09f32a14c9a5e4df31b672dc19987e2070c79fc65772dfaf145e97f41",
+      "captured_at_utc": "2026-10-20T05:06:17.687424+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "github-issue-en.png",
+      "sha256": "8825061d2f88a2cc3b4e72aac38624c0b536b0ca10c739c7c30917cdf6c9c834",
+      "captured_at_utc": "2026-10-20T04:54:49.277733+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "github-issue-vi.png",
+      "sha256": "19af34ecd08e29f7aebec6fc2b159e2b173b94b3dc24789d98e1811edf268cd8",
+      "captured_at_utc": "2026-10-20T04:54:49.278043+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "github-recovery.png",
+      "sha256": "4bfd2b77db10079ac513d5e3d9886d33d88672a5ca34dfeae38ffeb4aad2c02b",
+      "captured_at_utc": "2026-10-20T04:54:49.279074+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "gitlab-issue-en.png",
+      "sha256": "a1cb44bcafaa6e179f4c6421cba1b29c2c4491d07c08a7aaa7fcb7c90304ead7",
+      "captured_at_utc": "2026-10-20T04:54:49.278227+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "gitlab-issue-vi.png",
+      "sha256": "168b632d88efaa1438384c666d824c2d519a493794367c2a4a8744fbf500dc09",
+      "captured_at_utc": "2026-10-20T04:54:49.278472+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "linear-issue-en.png",
+      "sha256": "16c426c47cdad9746423f09b4205de2c3e88be025d7ba14a6585915ca16575db",
+      "captured_at_utc": "2026-10-20T04:54:49.278713+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "linear-issue-vi.png",
+      "sha256": "935dc7a7bb58f7a2798523134541fda5bde0718ff452e1e98a8b82e3f787e630",
+      "captured_at_utc": "2026-10-20T04:54:49.278904+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "local-final-ticket-preview.png",
+      "sha256": "039fe987e7a2a8b6bd2a3db7998510b0bd8924c1aebf0efd072afcc349d09da3",
+      "captured_at_utc": "2026-10-20T05:20:13.577416+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "local-final-ticket-request.png",
+      "sha256": "5f49e02fe03cd6ace5e089638b93a0b3e4c95e24d3e9a5f242d0c3fd3fd68b75",
+      "captured_at_utc": "2026-10-20T05:20:41.502349+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "local-recovered-ticket.png",
+      "sha256": "a5a9a4a0fc61a225ce697ee9f034676ed8a6ea37fbee78bf1049f522b25baca6",
+      "captured_at_utc": "2026-10-20T04:54:49.279225+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal-provider-sandbox; local Docker full stack"
+    },
+    {
+      "file": "servicenow-machine-user-created.png",
+      "sha256": "63db6252a32eae62e06376ff1eb68bab87fd33b152968248f85e5a237287b862",
+      "captured_at_utc": "2026-10-20T06:19:08.810382+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI setup; native authorization and Synapse incident acceptance pending"
+    },
+    {
+      "file": "servicenow-own-row-acl-active.png",
+      "sha256": "b13bd91e1aedb1aa42f76bda7d4464227808cc718c95d1c5944031d02994fed2",
+      "captured_at_utc": "2026-10-20T07:25:52.305109+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI setup; native authorization and Synapse incident acceptance pending"
+    },
+    {
+      "file": "servicenow-machine-boundary.png",
+      "sha256": "92dcd968fcbb654daf3993e2836dbb34a387a394c36ffd20de8faf15db22aa7a",
+      "captured_at_utc": "2026-10-20T08:13:16.656560+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-description-acl-active.png",
+      "sha256": "5d446ec16d034c4ced760a9cab5fd62d11533201002197164fd6203d53a8418e",
+      "captured_at_utc": "2026-10-20T08:46:49.040855+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-description-acl-xml.png",
+      "sha256": "8dc4b4f75c8d8e6c0d437affcdb1bf97bed9ceb4dd001b7c97d9dfa68b73b63e",
+      "captured_at_utc": "2026-10-20T08:51:39.600351+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-incident-en.png",
+      "sha256": "6abbf4748198762bc5ee1efd66b4b43589ccbaef574108e590fb7dcf4223e846",
+      "captured_at_utc": "2026-10-20T08:47:35.468777+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-incident-vi.png",
+      "sha256": "7de06cad1330627b38d378bdc4dd43c31a69325afdc5e281be4971f78085d7a6",
+      "captured_at_utc": "2026-10-20T08:48:04.936727+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-final-restricted-oauth.png",
+      "sha256": "01f57e614ab2163ae2b0d0e3e8725ce7e4ca6d2e595af5e2e5f296ce03af3b4f",
+      "captured_at_utc": "2026-10-20T08:19:26.786596+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-admin-elevation-removed.png",
+      "sha256": "545deca5d5bdca0190915ec381b23366f543cf35b3b862c3e5d219761387e105",
+      "captured_at_utc": "2026-10-20T08:54:22.173056+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "local-servicenow-ticket.png",
+      "sha256": "7e3cbbed7699eea70cf58f3962c30cd40104e44a02307de42b82fc7a04b29d09",
+      "captured_at_utc": "2026-10-20T08:57:43.564683+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; local Docker full stack; selected incident acceptance only"
+    },
+    {
+      "file": "servicenow-plain-incident-en.png",
+      "sha256": "f9a7612f2c5e4138269e127623cb06111bb07f51fc825ba46435c0f2e6a19589",
+      "captured_at_utc": "2026-10-20T10:47:44.761577+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; refreshed plain-description EN/VI acceptance on corrected Docker runtime"
+    },
+    {
+      "file": "servicenow-plain-incident-vi.png",
+      "sha256": "5d0a2a351cad03797fee7d8fe4afab9cb9a003ce7cd9903eab1ca96518f60c98",
+      "captured_at_utc": "2026-10-20T10:48:34.906437+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal ServiceNow PDI; refreshed plain-description EN/VI acceptance on corrected Docker runtime"
+    },
+    {
+      "file": "github-finding-link-arrival.png",
+      "sha256": "3ef1c712c5897e93556c75ec39b17503acc5b75c417411adbdd3a8f84d495e34",
+      "captured_at_utc": "2026-10-20T13:42:41.916738+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal GitHub sandbox; local Docker full stack, HTTPS origin after user certificate handling"
+    },
+    {
+      "file": "drive-publication-sharing.png",
+      "sha256": "cc4a83bcdd1f74c21bc3443592af2972a56f66af8bf1cef492af34b107bfe93f",
+      "captured_at_utc": "2026-10-20T13:50:29.496022+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal Drive Owner account; existing governed publication; read-only native sharing settings"
+    },
+    {
+      "file": "drive-pdf-sharing.png",
+      "sha256": "bcebf44b166c7b07e964e6e588bf787fa256bb5e83398309c046675cbf62b832",
+      "captured_at_utc": "2026-10-20T13:51:40.380785+00:00",
+      "kind": "live_browser_screenshot",
+      "environment": "personal Drive Owner account; existing governed publication; read-only native sharing settings"
+    }
+  ]
+}

@@ -32,6 +32,9 @@ type stageFairnessProviders struct{ provider ports.TicketProvider }
 func (r stageFairnessProviders) TicketProvider(context.Context, integration.Integration) (ports.TicketProvider, error) {
 	return r.provider, nil
 }
+func (r stageFairnessProviders) TicketProviderDescriptor(provider integration.Provider) (integration.ProviderDescriptor, error) {
+	return integration.ProviderDescriptor{Provider: provider, Capabilities: []integration.Capability{integration.CapabilityTickets}}, nil
+}
 
 func TestWorkflowTickRunsOutboundBeforeBoundedInboundRead(t *testing.T) {
 	f := newWorkflowFixture(t)

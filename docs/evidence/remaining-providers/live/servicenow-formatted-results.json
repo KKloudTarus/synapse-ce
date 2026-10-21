@@ -1,0 +1,85 @@
+{
+  "recorded_at_utc": "2026-10-20T10:53:02.378766+00:00",
+  "scope": "ServiceNow plain-description correction; fresh native incidents on recorded dirty build; no adoption of older records",
+  "cases": {
+    "en": {
+      "intent": {
+        "id": "3a771933f366a89de28976b86c8e9b95",
+        "state": "done",
+        "attempts": 1,
+        "remote_id": "86e24ea52f44d310ef154c707fa4e34d",
+        "remote_url": "https://dev426571.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3D86e24ea52f44d310ef154c707fa4e34d",
+        "created_at": "2026-10-20T10:46:09.845605Z"
+      },
+      "native_number": "INC0010004",
+      "summary_exact": true,
+      "description_exact": true,
+      "marker_exact": true,
+      "same_key_same_intent": true,
+      "description_sha256": "82040723aa62639f47c2cae4321107fcf6b151da51e802620b0fe652d2106730",
+      "markdown_escapes_absent": true,
+      "polling": {
+        "comments": [],
+        "observations": [
+          {
+            "checked_at": "2026-10-20T10:52:55.462211Z",
+            "deleted_or_unreadable": false,
+            "provider_updated_at": "2026-10-20T10:46:16Z",
+            "remote_id": "86e24ea52f44d310ef154c707fa4e34d",
+            "status_category": "new"
+          }
+        ],
+        "proposals": []
+      },
+      "finding_status": "open"
+    },
+    "vi": {
+      "intent": {
+        "id": "1aec9e57fa7a1f439941c0434ab1f5ff",
+        "state": "done",
+        "attempts": 1,
+        "remote_id": "e4f246e52f44d310ef154c707fa4e32f",
+        "remote_url": "https://dev426571.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3De4f246e52f44d310ef154c707fa4e32f",
+        "created_at": "2026-10-20T10:46:21.959639Z"
+      },
+      "native_number": "INC0010005",
+      "summary_exact": true,
+      "description_exact": true,
+      "marker_exact": true,
+      "same_key_same_intent": true,
+      "description_sha256": "0ddc337876daa252fd20f5445b326a3bf2f84ece5073cf4195a5d1bcd0e8a906",
+      "markdown_escapes_absent": true,
+      "polling": {
+        "comments": [],
+        "observations": [
+          {
+            "checked_at": "2026-10-20T10:52:50.393222Z",
+            "deleted_or_unreadable": false,
+            "provider_updated_at": "2026-10-20T10:46:26Z",
+            "remote_id": "e4f246e52f44d310ef154c707fa4e32f",
+            "status_category": "new"
+          }
+        ],
+        "proposals": []
+      },
+      "finding_status": "open"
+    }
+  },
+  "runtime": {
+    "at": "2026-10-20T10:44:54.883230+00:00",
+    "head": "fa2a30fcd87b30cb5b30a6d1addcd9193e125467",
+    "dirty": true,
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "b5620f75996400ad4cabe8259219b88d71f72ccb21ee5068e4bbaf98c7ca5938",
+      "internal/infrastructure/integration/ticketproviders/preflight_test.go": "7541ac6d05bb30bb8127c197eaf85ef7d697680adccbad73a093006d6eb50fee",
+      "internal/infrastructure/integration/ticketproviders/description_test.go": "1f46b279c71eb46a41663720def16d1416329d69afb97a39aea4b74236f00515",
+      "internal/infrastructure/messageformat/plain.go": "561452fde76c2914ee3c0538390e39747fdd610f036fd711e3b2ddb97038d1fe"
+    },
+    "binaries": {
+      "synapse-api": "e704619f6c72e0377b55f63321460bbbadc66a380b828f6e32bda56c54e6bb96",
+      "synapse-worker": "b23d23f073536c9eb86dee815f54b638119b7ac42e688dfb5c43f8506c54030e"
+    },
+    "running_binary_hashes_verified": true
+  },
+  "permission_probe_at": "2026-10-20T10:45:29.776016+00:00"
+}

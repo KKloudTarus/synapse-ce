@@ -1,0 +1,16 @@
+{
+  "kind": "local_serializer_preview",
+  "native_acceptance": false,
+  "source": "TestAzureDescriptionRendersSafeHTMLAtPayloadBoundary output",
+  "browser_errors": [],
+  "files": [
+    {
+      "file": "azure-description.html",
+      "sha256": "882365088e7cbba2179909ba65cbf1e45e010d60d5cd120c05162c11d8e54eea"
+    },
+    {
+      "file": "azure-description.png",
+      "sha256": "f3eb18e44ffc3566c9dea46719b78a8bfed58c14141bae5073e6bc5caed94295"
+    }
+  ]
+}

@@ -1,0 +1,217 @@
+{
+  "provider_acceptance": false,
+  "captures": [
+    {
+      "file": "github-issues-light.png",
+      "state": "github-issues",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "8dc91ccc02475441b8a00ac26812a343d2d711e64d7246ea789f433d9005e5b9"
+    },
+    {
+      "file": "github-issues-light-mobile.png",
+      "state": "github-issues",
+      "theme": "light",
+      "viewport": "mobile",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "639a045c05c0675d00b216ac39f7e0fb2d9abdb20840bebef427f4bd2acf5fd7"
+    },
+    {
+      "file": "gitlab-issues-light.png",
+      "state": "gitlab-issues",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "8078e784384562c198230404dbb9b0ebe877b6ada25d274bd03397fa842d8913"
+    },
+    {
+      "file": "azure-boards-light.png",
+      "state": "azure-boards",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "2cb84c8578d6cc00cda348b83f6715d72f5d12687cdbab3fc0968430190d52bf"
+    },
+    {
+      "file": "servicenow-light.png",
+      "state": "servicenow",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "ee0fa52496f5988db75cddbd87800b898bfa816ebfbdd103a3f037075de856e3"
+    },
+    {
+      "file": "linear-light.png",
+      "state": "linear",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "af2125b4d7c462a243c866596da72a3d2914130045eb2f6bc120536d7ee9db40"
+    },
+    {
+      "file": "loading-light.png",
+      "state": "loading",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "171430769df3692229969654f26e9dc0c69b6ff9077b8bb2b416ecf754a86091"
+    },
+    {
+      "file": "empty-light.png",
+      "state": "empty",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "04b013c4de46cd6590031ca3a3e62672ca7ef6807e6cba4036f30bb80e8b4826"
+    },
+    {
+      "file": "orphan-light.png",
+      "state": "orphan",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "7440f990f899737424cf86f839d01404e7cd2df94303312f79500a8f298fe4c3"
+    },
+    {
+      "file": "orphan-actions-light.png",
+      "state": "orphan-actions",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "edcbea8a001fef186b6da36bac41ff8257709175aafba3e8c962e52c690f91a2"
+    },
+    {
+      "file": "error-light.png",
+      "state": "error",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "eab59468b37bcf8d74eca86e29c9920303894fe51300b29eba84e494e04cc6e5"
+    },
+    {
+      "file": "permission-light.png",
+      "state": "permission",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "9917a5d080a65a94221bcaba9ca85857f1c20fc838fc6610af703bcd4ca80aae"
+    },
+    {
+      "file": "permission-light-mobile.png",
+      "state": "permission",
+      "theme": "light",
+      "viewport": "mobile",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "4933d9ad0da6a22861512e3a05833fae027638af2e194a0360caea12562df1fa"
+    },
+    {
+      "file": "github-issues-dark.png",
+      "state": "github-issues",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "27304c706d7f8c18da4af1cecaa0698540a32e554137c9b5fe262c0f9f53761c"
+    },
+    {
+      "file": "github-issues-dark-mobile.png",
+      "state": "github-issues",
+      "theme": "dark",
+      "viewport": "mobile",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "351a4c0d76965773bd8376908f8c0f8863ea96f7b63d4bcf91d9c0aa9db07d8e"
+    },
+    {
+      "file": "gitlab-issues-dark.png",
+      "state": "gitlab-issues",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "7451f4938e06899bf78e976286e65b6eef3eeb3d09e8bec6e85a5a3379f99151"
+    },
+    {
+      "file": "azure-boards-dark.png",
+      "state": "azure-boards",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "ebf3f212c6a0daaaff14f67669a1c3b06c11a62fde44d892eddaa070705c2fa2"
+    },
+    {
+      "file": "servicenow-dark.png",
+      "state": "servicenow",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "c72165951d1808f4c8dfad8f7af53e7e014a17e83df86aa379b121575f06e412"
+    },
+    {
+      "file": "linear-dark.png",
+      "state": "linear",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "243c1e10b1bd89ad888d4b8244f20fd33cf0c150445268aa695e9b24585e449a"
+    },
+    {
+      "file": "loading-dark.png",
+      "state": "loading",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "b201fc4c2a86cec473bf8b0b69981af6950c99c23a5158c3dcc7597ae155d44b"
+    },
+    {
+      "file": "empty-dark.png",
+      "state": "empty",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "f7fd35508da2ebc45757c9be60a4d66af05cfdcfbaa6b93fb8bdcf56e158fa79"
+    },
+    {
+      "file": "orphan-dark.png",
+      "state": "orphan",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "72f9b8b837817fab12d1b4fe0a0d3119fc325b376ce36fb5dee8ebf6be4a2f04"
+    },
+    {
+      "file": "orphan-actions-dark.png",
+      "state": "orphan-actions",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "6e8d99c008fa746d225f85d5e3497eec10cbec79d89a7c21c4a4be4ae00cedb2"
+    },
+    {
+      "file": "error-dark.png",
+      "state": "error",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "9d8ebbecb2717e0140106f2ddc420a7121b8348cf0829b8848c14518ae542a52"
+    },
+    {
+      "file": "permission-dark.png",
+      "state": "permission",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "1e838e7a4539caccfdbeaf9473d2607fe4d70697f03b18de513afcc1ee4d29bb"
+    },
+    {
+      "file": "permission-dark-mobile.png",
+      "state": "permission",
+      "theme": "dark",
+      "viewport": "mobile",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "13d91a438dc496ecd461b3bee9508063e0e78b94a3edbd48aaac365db3a6411f"
+    }
+  ]
+}

@@ -58,6 +58,8 @@ const (
 	CapabilityTestConnection Capability = "test_connection"
 	CapabilityDiscover       Capability = "discover_pipelines"
 	CapabilityReadRuns       Capability = "read_runs"
+	CapabilityTickets        Capability = "tickets"
+	CapabilityDocuments      Capability = "documents"
 )
 
 type FieldKind string
@@ -96,7 +98,7 @@ func (descriptor ProviderDescriptor) Validate() error {
 	seenCapabilities := map[Capability]struct{}{}
 	for _, capability := range descriptor.Capabilities {
 		switch capability {
-		case CapabilityTestConnection, CapabilityDiscover, CapabilityReadRuns:
+		case CapabilityTestConnection, CapabilityDiscover, CapabilityReadRuns, CapabilityTickets, CapabilityDocuments:
 		default:
 			return fmt.Errorf("%w: provider capability %q is invalid", shared.ErrValidation, capability)
 		}

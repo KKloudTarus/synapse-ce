@@ -3,12 +3,13 @@
 [Documentation home](README.md) · [Configuration](configuration.md) · [Notification channels](notification-channels.md)
 
 Synapse can publish a bounded, deterministic stored-source report to an existing
-Confluence Cloud or Data Center integration. It supports `engagement_report`,
-`assessment_closure_report`, and `project_quality_summary`. The API admits a
-durable command; a worker performs the remote write. The release actor, tenant,
-scope, current authority, source release policy, legal hold, destination revisions,
-evidence-chain integrity, and secret redaction are checked again before each
-sensitive remote step.
+Confluence Cloud or Data Center integration, a restricted Google Drive folder, or
+a restricted SharePoint or OneDrive Business folder. It supports
+`engagement_report`, `assessment_closure_report`, and `project_quality_summary`.
+The API admits a durable command; a worker performs the remote write. The release
+actor, tenant, scope, current authority, source release policy, legal hold,
+destination revisions, evidence-chain integrity, and secret redaction are checked
+again before each sensitive remote step.
 
 This requires PostgreSQL. The API enables publication only with the PostgreSQL
 document store. A `synapse-worker` with either the `all` or `integrations` profile
@@ -18,9 +19,9 @@ report data; it does not claim scan, recon, or assessment-lifecycle jobs.
 
 In the console, open **Settings → Integrations → Documentation**, then choose
 **Manage documentation**. The configuration editor is headed **External
-integrations** and lists the available Confluence Cloud and Data Center providers.
-The Documentation group is available when the API has the same durable PostgreSQL
-store that wires document publishing; it is not a separate feature switch.
+integrations** and lists the registered providers and their supported capabilities. The
+Documentation group is available when the API has the same durable PostgreSQL store
+that wires document publishing; it is not a separate feature switch.
 
 ## Configure Confluence
 
@@ -76,6 +77,80 @@ read ACL and verifies it, including the Cloud public-link proof, before it uploa
 a PDF or image attachment or writes the actual title and body. An ACL alone does
 not satisfy the Cloud public-link check.
 
+## Configure Google Drive
+
+Create an enabled `google-drive` integration with endpoint
+`https://www.googleapis.com`. Set `space` to the ID of a dedicated restricted
+parent folder in the integration actor's **My Drive**, `read_group` to the exact
+Google Drive group permission ID, and `data_class` to `detail`. Store the scoped
+Drive OAuth access token only in the write-only `access_token` credential field.
+This profile accepts an access token, not a refresh token, service-account key or
+OAuth client secret. Synapse does not refresh it. Its lifetime is set by Google
+and the grant; record the expiry in your credential operations and replace the
+sealed value before it expires. Scheduled releases and restriction checks use the
+current credential and fail closed when it expires. A successful connection test
+does not establish that the token will still work at a later schedule.
+
+The destination must remain a service-owned My Drive folder. Before a neutral
+shell, each attachment upload, and the body write, Synapse proves the configured
+folder has exactly its authenticated owner and the configured group as reader. It
+also proves the same restricted ownership and reader permission for the generated
+publication folder and every managed child. Shared Drives, extra principals,
+public links, incomplete permission listings, changed ownership, and unverifiable
+permissions block the release. `space` is the immutable destination container;
+do not repoint it to a different folder after a link has been published.
+
+## Configure SharePoint or OneDrive Business
+
+Create an enabled `sharepoint` or `onedrive` integration. Its endpoint is the
+authoritative HTTPS SharePoint site origin, including the configured site path
+when applicable, for example `https://tenant.sharepoint.com/sites/security`.
+It must not contain credentials, a query, or a fragment. Configure the following
+fields:
+
+| Field | Required value |
+| --- | --- |
+| `drive_id` | The Microsoft Graph drive ID for the destination. |
+| `space` | The restricted folder item ID in that drive. |
+| `folder_path` | The matching server-relative restricted folder path, such as `/sites/security/restricted`. |
+| `read_group` | The exact Microsoft group principal ID. |
+| `custodian_principal_id` | The service custodian's SharePoint principal ID. |
+| `data_class` | `detail`. |
+
+Supply a scoped Microsoft Graph access token in `access_token` and a separate
+scoped SharePoint REST access token in `sharepoint_token`. Both credentials are
+sealed and write-only. The `sharepoint` profile accepts a `documentLibrary` drive;
+the `onedrive` profile accepts a Business drive. Personal OneDrive is outside this
+profile.
+
+Both Microsoft fields accept access tokens for their respective audiences, not
+refresh tokens or client secrets. Synapse does not refresh either token. Track
+both provider-issued expiry times and rotate the sealed fields before expiry;
+a live Graph token cannot replace an expired SharePoint REST token. Scheduled
+publishing and restriction checks fail closed if either proof becomes unavailable.
+Plan credential renewal with the identity owner before enabling schedules.
+
+For both Drive and Microsoft, rotation advances the connection's credential
+revision. An already approved command is pinned to its original revision and
+refuses to write after rotation; do not edit its stored checkpoint to resume it.
+Review any pending or uncertain command through the governed recovery workflow
+before approving a release with the new credential. Restriction monitoring reads
+the current credential independently of the original publication approval.
+
+Before release, Synapse binds the Graph drive and configured folder to the
+authoritative SharePoint site and folder path. It requires unique SharePoint role
+assignments containing exactly the configured group with the reader role and the
+configured custodian with full control. Public Graph links, inherited container
+permissions, additional principals, custom roles, incomplete role listings, or a
+mismatch between Graph and SharePoint identities fail closed. The neutral shell,
+its body, and managed attachments are checked again before sensitive writes.
+
+The publication folder retains a conditional-write ownership manifest binding each
+managed attachment name to its exact Graph item ID. This permits staged republish
+attachments while refusing manual files or a changed ownership manifest. Interrupted
+neutral-shell creation is recovered by its exact marker; missing neutral files are
+completed only after fresh restriction proof.
+
 ## Release and unpublish
 
 Use `POST /api/v1/document-publications` with an existing integration, source
@@ -93,12 +168,36 @@ project instead of assuming that `202 Accepted` means the remote write completed
 `DELETE /api/v1/document-links/{id}` accepts a separate request key and creates a
 governed purge command. Confluence deletes every attachment, including its trash
 or permanent-purge phase, before deleting the page with the same whole-object
-procedure. A retired link cannot be recreated for that target.
+procedure. Google Drive deletes only the proven service-owned publication folder
+and its managed artifacts; its trash history is not treated as proof of deletion.
+SharePoint and OneDrive Business permanently delete only the proven managed body,
+attachments, and publication folder. A retired link cannot be recreated for that
+target.
+
+Each worker invocation checkpoints at most one acknowledged remote write and returns
+the command to the pending queue. The next invocation continues from the stored
+receipts and remote revision. A successful slice does not consume the failure retry
+budget. Checkpoint and yield require the same unexpired lease and intent/progress
+revisions; caller cancellation permits only a bounded local checkpoint, with no
+further provider request.
 
 A timeout, crash, expired lease, partial purge, or ambiguous provider response is
 `uncertain`. Synapse does not retry an uncertain operation blindly. It reconciles
 the durable marker and requires a unique verified remote result before it can
-finish. Keep the intent and audit history while resolving an uncertain state.
+finish. Drive and SharePoint/OneDrive store the provider's opaque body revision
+token alongside the compatible numeric version sentinel; the token is compared
+exactly and never converted to, parsed as, or advanced like an integer. A body
+write is recovered only when its marker, title, and stored content match and the
+opaque token changed from the checkpoint. A 404 never proves a purge. Before deleting, native providers validate the entire
+listed ownership set; no delete is issued when any child is unmanaged. Once a
+delete is dispatched, later errors retain uncertainty, including a definite 4xx
+from a subsequent request. A created attachment whose ACL or ownership-manifest
+write cannot be confirmed is also quarantined. A successful restriction mutation
+followed by a refused readback keeps its outstanding fence and releases no content.
+Keep the
+intent and audit history while resolving an uncertain state. Command leases and
+intent/progress revisions fence stale workers and concurrent republish or
+unpublish operations.
 
 ## Sharing after publication
 
@@ -109,25 +208,59 @@ for audit/checkpoint persistence. The 45-second worker pass defers the next tena
 without advancing its rotation when less than twelve seconds remain. A claimed link becomes eligible again
 after five minutes if the worker crashes. Verified links are checked again after
 15 minutes; lost or unverifiable sharing is checked again after five minutes.
+A provider `Retry-After` longer than that interval postpones the next observation
+until its minimum delay has elapsed.
 These are queue intervals, not a guaranteed freshness bound under provider outages
 or a backlog. Inspect the last-check timestamp in the console.
 
-The sweep reads the page identity, exact group restrictions and Cloud public-link
-policy using current destination credentials. It never uploads content or silently
-changes a remote ACL. A lost restriction records `document.restriction_lost` and
-shows **Restricted sharing lost**; unavailable credentials, disabled connections or
-unreadable providers show **Sharing could not be verified** and record
-`document.restriction_unverifiable`. After a successful checkpoint, repeated failures do not repeat the event
-unless the observed state changes. A crash between the append-only audit write and
-the checkpoint can leave another observation event on the next attempt. Audit records include the observed link revision;
-concurrent republish, purge and worker claims fence stale checkpoints.
+Each tenant pass claims at most one restriction check. For one worker serving one
+otherwise idle tenant, a five-second runner cadence permits at most 180 checks per
+15-minute interval even with negligible provider latency. This is a scheduling
+ceiling, not supported production capacity: publication work, multiple tenants,
+provider quotas and slow proofs reduce it. If a proof takes ten seconds, the
+single-tenant ceiling falls to 90 checks per 15 minutes before other work. A larger
+backlog cannot promise a 15-minute sweep. Track last-check age and due-link backlog;
+measure your native provider latency and quota before choosing a deployment size.
+
+In the synthetic Graph contract fixture, a combined restricted read costs
+`16 + 2N` requests for `N` inherited attachments, with at most four concurrent
+child proofs. A fresh identity-only read followed by a second complete proof costs
+`26 + 3N`; sensitive-write guards now use the combined read. With eleven
+attachments the direct restriction-only observation made 38 requests in 2.041s
+at a synthetic 100ms/request RTT. The old duplicate-read harness made 59 requests
+in 3.262s. These fixtures do not establish native latency or a production SLO.
+The no-attachment Drive combined-read fixture makes nine sequential requests.
+A Graph attachment operation separately makes 32 requests in its fixture; cost
+rises with the existing children. Every actual upload/write retains its own fresh
+restriction check immediately before dispatch. No proof is cached across writes.
+
+Each executor claim persists a version/lease-bound progress checkpoint before
+provider work, including read-only pre-write checks. The PostgreSQL checkpoint
+save currently rereads the immutable artifact once; the encoded artifact limit
+is 32MiB. Yield and throttle-deferral returns reuse their already locked command
+instead of reading it a second time. List and direct execution still perform
+fresh reads. These choices preserve fencing and cost memory/JSON decoding for
+large reports; [queue measurements](../evidence/remaining-providers/queue-cost.json)
+record that bound and the remaining artifact-validation cost.
+
+The sweep reads the page identity and exact restricted-sharing proof using current
+destination credentials. For Confluence Cloud it also reads the public-link policy.
+It never uploads content or silently changes a remote ACL. A lost restriction
+records `document.restriction_lost` and shows **Restricted sharing lost**;
+unavailable credentials, disabled connections or unreadable providers show
+**Sharing could not be verified** and record `document.restriction_unverifiable`.
+After a successful checkpoint, repeated failures do not repeat the event unless the
+observed state changes. A crash between the append-only audit write and the
+checkpoint can leave another observation event on the next attempt. Audit records
+include the observed link revision; concurrent republish, purge and worker claims
+fence stale checkpoints.
 
 A remote administrator can still change access between checks. Investigate a
-warning in Confluence immediately, restore the approved exact group restrictions,
-and verify the next check, or request governed unpublish. Every subsequent publish
-still rechecks sharing immediately before each sensitive upload. Unknown policy
-keys, conditions, duplicate JSON keys and unsupported effects fail closed; they
-cannot prove an unconditional public-link block.
+warning immediately, restore the approved restricted destination, and verify the
+next check, or request governed unpublish. Every subsequent publish still rechecks
+sharing immediately before each sensitive upload. Unknown policy keys, conditions,
+duplicate JSON keys and unsupported effects fail closed; they cannot prove an
+unconditional public-link block.
 
 ## Scheduled delivery
 
@@ -138,10 +271,16 @@ uses `1` through `31` and clamps to the last day of shorter months. A nonexisten
 DST wall minute advances to the first real minute; an ambiguous wall minute uses
 the first occurrence. The selected UTC due instant is stored durably.
 
-Each due occurrence builds and freezes one stored artifact before delivery. A
-Confluence schedule uses that frozen artifact for its command. An email schedule
-uses the same PDF as an attachment. The occurrence, content hash, remote page
-state, and per-recipient delivery counters are available from
+Each due occurrence first revalidates the current document destination before it
+builds and freezes an artifact. The persisted `confluence` schedule destination is
+the legacy API value for every enabled document-publishing profile, including
+Google Drive, SharePoint, and OneDrive Business; the console labels it **Document
+publishing**. That validation resolves the current tenant integration, config,
+provider capability, and release preflight, so an unsupported destination is
+refused before artifact generation. A document schedule uses the frozen
+artifact for its command. An email schedule uses the same PDF as an attachment.
+The occurrence, content hash, remote page state, and per-recipient delivery
+counters are available from
 `GET /api/v1/document-schedules/{id}/runs`.
 
 Email schedules select an existing enabled `detail` email notification channel
@@ -159,6 +298,23 @@ overwriting a schedule.
 
 ## Operational evidence
 
+Provider 429 responses persist a separate next-attempt deadline. Read-only
+preflight or reconciliation throttles postpone observation without exhausting
+write attempts. A clean pre-write checkpoint releases its lease while preserving
+acknowledged progress. Partial upload/purge or confirmation failures retain the
+uncertain state, outstanding operation and receipts; the deadline delays recovery,
+not permission to repeat a write. The retry floor is one minute and a longer
+provider `Retry-After` is preserved. Direct execution honors the same deadline as
+worker selection. Definite no-effect write refusals keep the existing bounded
+failure-attempt policy.
+
+The provider retry-scheduling migration must precede updated binaries. Upgrade all
+workers before relying on persisted throttling: old workers ignore the new due
+columns. Rollback refuses to remove a future document delay or ticket poll claim.
+Disable affected integrations, stop workers and let those deadlines expire before
+rollback, or apply a forward repair. Never clear an uncertain operation to bypass
+the guard.
+
 Apply the new migrations with the migration-owner credential before starting
 updated APIs and workers. Upgrade all writers before enabling automatic ticket
 submission, grouped updates, or report schedules. Before rolling binaries back,
@@ -174,6 +330,16 @@ Run a narrow canary in an isolated restricted space and group first. Retain the
 intent, audit record, stored content hash, and provider response classification.
 For Cloud, retain proof that the exact group ID, site ARI, and public-link policy
 were verified immediately before sensitive content was written. For Data Center,
-retain the matching exact group name and space proof. Never record API tokens,
-organization keys, SMTP credentials, recipient addresses, report body, or PDF
-bytes in operational evidence.
+retain the matching exact group name and space proof. For Drive, retain the exact
+folder, service-owner, and group-reader proof. For SharePoint or OneDrive Business,
+retain the matching Graph/SharePoint folder binding and exact group/custodian role
+proof. Never record API tokens, organization keys, SMTP credentials, recipient
+addresses, report body, or PDF bytes in operational evidence.
+
+## Acceptance status
+
+The supported provider profiles have contract tests for their restricted release,
+revision, reconciliation, and purge behavior. They are not live acceptance
+evidence. End-to-end execution against permitted provider sandboxes is explicitly
+deferred for this delivery; no live destination, ACL, or permanent-delete result is
+claimed until those resources and a recorded sandbox run are available.

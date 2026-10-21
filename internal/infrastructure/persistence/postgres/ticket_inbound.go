@@ -16,6 +16,7 @@ import (
 )
 
 var _ ports.TicketInboundStore = (*TicketStore)(nil)
+var _ ports.TicketInboundClaimStore = (*TicketStore)(nil)
 
 type ticketTargetRef struct{ intentID, mappingID shared.ID }
 
@@ -143,6 +144,86 @@ func (s *TicketStore) RecordInboundTicketPoll(ctx context.Context, tenant shared
 		}
 		if tag.RowsAffected() != 1 {
 			return shared.ErrNotFound
+		}
+		return nil
+	}))
+}
+
+func (s *TicketStore) ClaimInboundTicketTargets(ctx context.Context, tenant shared.ID, limit int, at time.Time, lease time.Duration) (out []ports.TicketInboundPollClaim, err error) {
+	if tenant.IsZero() || limit < 1 || limit > 250 || at.IsZero() || lease <= 0 {
+		return nil, shared.ErrValidation
+	}
+	err = requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		if e := catchUpInboundTicketTargets(ctx, tx, tenant, limit); e != nil {
+			return e
+		}
+		rows, e := tx.Query(ctx, `WITH selected AS (
+			SELECT p.intent_id,p.mapping_id FROM ticket_inbound_poll_progress p
+			JOIN ticket_intents i ON i.tenant_id=p.tenant_id AND i.id=p.intent_id
+			WHERE p.tenant_id=$1 AND p.next_poll_at<=$2
+			  AND i.state='done' AND i.action='create' AND i.remote_id=p.remote_id
+			ORDER BY p.next_poll_at,p.checked_at,p.version,p.intent_id
+			FOR UPDATE OF p SKIP LOCKED LIMIT $3
+		) UPDATE ticket_inbound_poll_progress p
+		  SET next_poll_at=$4,version=p.version+1
+		  FROM selected s
+		  WHERE p.tenant_id=$1 AND p.intent_id=s.intent_id
+		  RETURNING p.intent_id,p.mapping_id,p.version,p.next_poll_at`, tenant.String(), at.UTC(), limit, at.UTC().Add(lease))
+		if e != nil {
+			return e
+		}
+		type ref struct {
+			intentID, mappingID shared.ID
+			version             int
+			next                time.Time
+		}
+		refs := make([]ref, 0, limit)
+		for rows.Next() {
+			var item ref
+			if e := rows.Scan(&item.intentID, &item.mappingID, &item.version, &item.next); e != nil {
+				rows.Close()
+				return e
+			}
+			refs = append(refs, item)
+		}
+		if e := rows.Err(); e != nil {
+			rows.Close()
+			return e
+		}
+		rows.Close()
+		for _, ref := range refs {
+			target, e := loadTicketStatusTarget(ctx, tx, tenant, ref.intentID, ref.mappingID)
+			if e != nil {
+				return e
+			}
+			out = append(out, ports.TicketInboundPollClaim{Target: target, Version: ref.version, NextPollAt: ref.next.UTC()})
+		}
+		return nil
+	})
+	return out, ticketWriteError(err)
+}
+
+func (s *TicketStore) CompleteInboundTicketPoll(ctx context.Context, tenant shared.ID, claim ports.TicketInboundPollClaim, checkedAt, nextPollAt time.Time) error {
+	target := claim.Target
+	if tenant.IsZero() || claim.Version < 1 || target.Mapping.ID.IsZero() || target.Intent.ID.IsZero() || target.Intent.EngagementID.IsZero() || target.Intent.FindingID.IsZero() || strings.TrimSpace(target.Intent.RemoteID) == "" || nextPollAt.IsZero() {
+		return shared.ErrValidation
+	}
+	var observed any
+	if !checkedAt.IsZero() {
+		observed = checkedAt.UTC()
+	}
+	return ticketWriteError(requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE ticket_inbound_poll_progress p
+			SET checked_at=COALESCE($7,p.checked_at),next_poll_at=GREATEST(p.next_poll_at,$8),version=p.version+1
+			FROM ticket_intents i
+			WHERE p.tenant_id=$1 AND p.intent_id=$2 AND p.mapping_id=$3 AND p.engagement_id=$4 AND p.finding_id=$5 AND p.remote_id=$6
+			  AND p.version=$9 AND i.tenant_id=p.tenant_id AND i.id=p.intent_id AND i.state='done' AND i.action='create' AND i.remote_id=p.remote_id`,
+			tenant.String(), target.Intent.ID.String(), target.Mapping.ID.String(), target.Intent.EngagementID.String(), target.Intent.FindingID.String(), target.Intent.RemoteID, observed, nextPollAt.UTC(), claim.Version)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return shared.ErrConflict
 		}
 		return nil
 	}))

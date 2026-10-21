@@ -23,6 +23,73 @@ type inboundStore interface {
 	ports.TicketInboundStore
 }
 
+// InboundPollingClaims proves that a provider poll is durably reserved before
+// I/O, an abandoned reservation expires, and a stale worker cannot replace a
+// newer provider delay.
+func InboundPollingClaims(t *testing.T, store interface {
+	ports.TicketStore
+	ports.TicketInboundClaimStore
+}, f Fixture) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Date(2026, 2, 5, 10, 0, 0, 0, time.UTC)
+	lease := time.Minute
+	intent := ticketing.Intent{ID: "ticket-poll-intent", TenantID: f.Tenant, IntegrationID: f.Integration, MappingID: "ticket-map-a",
+		FindingID: f.Finding, EngagementID: f.Engagement, Action: ticketing.Create, RequestKey: "poll-reservation", PayloadDigest: strings.Repeat("d", 64),
+		Marker: "synapse-intent-ticket-poll-intent", State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}
+	if _, created, err := store.CreateOrGetIntent(ctx, f.Tenant, intent); err != nil || !created {
+		t.Fatalf("create isolated inbound poll intent: created=%t err=%v", created, err)
+	}
+	writeLease := now.Add(time.Minute)
+	claimed, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, intent.Version, ticketing.IntentTransition{Event: writeintent.Claim, LeaseUntil: &writeLease}, now)
+	if err != nil {
+		t.Fatalf("claim isolated inbound poll intent: %v", err)
+	}
+	if _, err := store.TransitionIntent(ctx, f.Tenant, intent.ID, claimed.Version, ticketing.IntentTransition{Event: writeintent.Acknowledge, Remote: &ticketing.RemoteTicket{ID: "POLL-1", URL: "https://tickets.example/POLL-1"}}, now.Add(time.Second)); err != nil {
+		t.Fatalf("complete isolated inbound poll intent: %v", err)
+	}
+	find := func(claims []ports.TicketInboundPollClaim) (ports.TicketInboundPollClaim, bool) {
+		for _, claim := range claims {
+			if claim.Target.Intent.ID == intent.ID {
+				return claim, true
+			}
+		}
+		return ports.TicketInboundPollClaim{}, false
+	}
+	firstClaims, err := store.ClaimInboundTicketTargets(ctx, f.Tenant, 250, now, lease)
+	if err != nil {
+		t.Fatalf("claim inbound targets: %v", err)
+	}
+	first, ok := find(firstClaims)
+	if !ok || !first.NextPollAt.Equal(now.Add(lease)) {
+		t.Fatalf("initial claim=%+v all=%+v", first, firstClaims)
+	}
+	// A worker that dies before completion leaves only a finite reservation.
+	reclaimedAt := now.Add(lease).Add(time.Nanosecond)
+	reclaimed, err := store.ClaimInboundTicketTargets(ctx, f.Tenant, 250, reclaimedAt, lease)
+	if err != nil {
+		t.Fatalf("reclaim expired inbound reservation: %v", err)
+	}
+	second, ok := find(reclaimed)
+	if !ok || second.Version <= first.Version {
+		t.Fatalf("expired reservation did not requeue target: first=%+v second=%+v", first, second)
+	}
+	if err = store.CompleteInboundTicketPoll(ctx, f.Tenant, first, now, now.Add(time.Hour)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale completion shortened newer poll claim: %v", err)
+	}
+	deferredUntil := now.Add(time.Hour)
+	if err = store.CompleteInboundTicketPoll(ctx, f.Tenant, second, reclaimedAt, deferredUntil); err != nil {
+		t.Fatalf("complete renewed claim with provider deferral: %v (first=%+v second=%+v)", err, first, second)
+	}
+	early, err := store.ClaimInboundTicketTargets(ctx, f.Tenant, 250, now.Add(30*time.Minute), lease)
+	if err != nil {
+		t.Fatalf("claim before provider deferral expires: %v", err)
+	}
+	if _, ok := find(early); ok {
+		t.Fatalf("provider deferral was selected before %s", deferredUntil)
+	}
+}
+
 // InboundTombstone proves an equal provider timestamp cannot make an observed
 // deletion or unreadable ticket appear live again. Only a strictly newer
 // readable provider observation may clear the tombstone.

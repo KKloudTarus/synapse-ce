@@ -239,7 +239,7 @@ export function FindingsTable({
                   )}
                 >
                   <td className="pl-3 py-3 align-top">
-                    {onToggleTicket && <input type="checkbox" aria-label={`Select ${f.title} for Jira ticket`} checked={ticketSelected?.has(f.id) ?? false} onClick={(event) => event.stopPropagation()} onChange={() => onToggleTicket(f.id)} className="mr-1.5 rounded border-secondary" />}
+                    {onToggleTicket && <input type="checkbox" aria-label={`Select ${f.title} for ticket`} checked={ticketSelected?.has(f.id) ?? false} onClick={(event) => event.stopPropagation()} onChange={() => onToggleTicket(f.id)} className="mr-1.5 rounded border-secondary" />}
                     <button
                       type="button"
                       aria-expanded={isOpen}

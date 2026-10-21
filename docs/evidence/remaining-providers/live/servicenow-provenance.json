@@ -1,0 +1,46 @@
+{
+  "at": "2026-10-20T08:08:27.713482+00:00",
+  "current_head": "80c46dbc385ff8de807e6a0646c357def23731d6",
+  "build_record": "servicenow-runtime-inputs.json",
+  "build_head": "a1769c67959f29ca47820233683e3fb32a40a681",
+  "build_was_dirty": true,
+  "current_scoped_source_hashes_match_build": true,
+  "running_binary_sha256": {
+    "synapse-api": "7eb2ff15a3cdbce48679b4fd45d26d6a7d30ce5b7f71530f74840c2f46fdb7df",
+    "synapse-worker": "0abab2d81f93f204562d0bf8be305be4b330940a0b03a3f93b9c032eb179b011"
+  },
+  "containers": [
+    {
+      "container": "synapse-provider-live-synapse-api-1",
+      "id": "ff6a263cf6d1f59d2e46a2088e279dfd6a8744d75a9a42d59c3512af75cc0ec3",
+      "image": "sha256:171feeab913697af3fde363285319e3d48ef3ca0de2daeb30ab8b7d5719f4e78",
+      "status": "running"
+    },
+    {
+      "container": "synapse-provider-live-worker-1",
+      "id": "52fcf9409728723d211252d582bbb972c96e12710278733535e12f19b5b091e7",
+      "image": "sha256:171feeab913697af3fde363285319e3d48ef3ca0de2daeb30ab8b7d5719f4e78",
+      "status": "running"
+    }
+  ],
+  "evidence_scope": "EN/VI create and full readback before optional closure-field polling correction; not a rerun on later binaries",
+  "polling_runtime": {
+    "at": "2026-10-20T08:55:46.702446+00:00",
+    "head": "80c46dbc385ff8de807e6a0646c357def23731d6",
+    "dirty": true,
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "8c03ec373c020f623ee8991aba44ecdc186ee0ea94cff8196f84c9b0269df49f",
+      "internal/infrastructure/integration/ticketproviders/provider_test.go": "36dae2a0f6da361cf89159fb5c7f45734e2de9a8d798c39b699d56046fe7adee"
+    },
+    "binaries": {
+      "synapse-api": "47efb8ed22579547fc546f8f186bfe680027653eeb158f66ccb58202ea95b7d8",
+      "synapse-worker": "d33ec28cfadfd42e8733d057fbee7b53b88514361b02989f02ac0b581670963f"
+    },
+    "running_binary_sha256": {
+      "synapse-api": "47efb8ed22579547fc546f8f186bfe680027653eeb158f66ccb58202ea95b7d8",
+      "synapse-worker": "d33ec28cfadfd42e8733d057fbee7b53b88514361b02989f02ac0b581670963f"
+    },
+    "scope": "Polling correction runtime; existing EN/VI records created on earlier documented binary. No duplicate creates.",
+    "verified_at_utc": "2026-10-20T08:57:20.977169+00:00"
+  }
+}

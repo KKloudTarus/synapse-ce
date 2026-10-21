@@ -18,6 +18,14 @@ import type {
 } from '../../lib/types'
 
 const TERMINAL_STATES = new Set(['succeeded', 'partial', 'failed', 'cancelled'])
+const endpointExamples: Record<string, string> = {
+  'github-issues': 'https://github.com', 'gitlab-issues': 'https://gitlab.com',
+  'azure-boards': 'https://dev.azure.com/organization/project', servicenow: 'https://instance.service-now.com',
+  linear: 'https://api.linear.app/graphql',
+  sharepoint: 'https://tenant.sharepoint.com/sites/security', onedrive: 'https://tenant-my.sharepoint.com/personal/service_account',
+  'google-drive': 'https://www.googleapis.com', bitbucket: 'https://bitbucket.org',
+}
+
 
 export function Integrations() {
   const [providers, setProviders] = useState<IntegrationProviderDescriptor[]>([])
@@ -407,7 +415,7 @@ function IntegrationForm({ providers, integration, loading, onCancel, onSubmit }
             <Select id="integration-provider" value={descriptor?.provider ?? ''} disabled={!!integration} onValueChange={setProviderSlug} options={providers.map((item) => ({ value: item.provider, label: item.name }))} />
           </Field>
           <Field label="Display name" htmlFor="integration-name"><Input id="integration-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></Field>
-          <Field label="HTTPS endpoint" hint={descriptor?.provider === 'bitbucket' ? 'Bitbucket Cloud origin: https://bitbucket.org' : 'Example: https://jenkins.example.com'} htmlFor="integration-endpoint"><Input id="integration-endpoint" type="url" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder={descriptor?.provider === 'bitbucket' ? 'https://bitbucket.org' : 'https://jenkins.example.com'} required /></Field>
+          <Field label="HTTPS endpoint" hint={`Example: ${endpointExamples[descriptor?.provider ?? ''] ?? 'https://jenkins.example.com'}`} htmlFor="integration-endpoint"><Input id="integration-endpoint" type="url" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder={endpointExamples[descriptor?.provider ?? ''] ?? 'https://jenkins.example.com'} required /></Field>
           {supportsPoll && <Field label="Poll interval (seconds)" htmlFor="integration-poll"><Input id="integration-poll" type="number" min={30} max={86400} value={pollInterval} onChange={(event) => setPollInterval(event.target.value)} required /></Field>}
           {descriptor?.configFields.map((field) => <DynamicField key={field.name} field={field} value={config[field.name]} onChange={(value) => setConfig((current) => ({ ...current, [field.name]: value }))} />)}
         </div>

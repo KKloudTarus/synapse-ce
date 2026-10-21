@@ -29,23 +29,48 @@ type DocumentCommand struct {
 	ReadGroup          string
 	Artifact           DocumentArtifact
 	Progress           DocumentProgress
+	// NextAttemptAt is a durable provider-directed delay. A zero value is due
+	// immediately. QueueVersion fences a delayed worker from shortening a newer
+	// delay after another worker has claimed the queue turn.
+	NextAttemptAt time.Time
+	QueueVersion  int
 }
+
+// DocumentRetryOutcome describes a persisted, fenced response to a provider
+// throttle. It is intentionally narrower than a general state transition so a
+// caller cannot clear an uncertain write by scheduling it.
+type DocumentRetryOutcome string
+
+const (
+	// DocumentRetryKeep defers a read-only preflight or reconciliation without
+	// changing its current pending or uncertain write state.
+	DocumentRetryKeep DocumentRetryOutcome = "keep"
+	// DocumentRetryRelease releases a clean in-flight pre-write checkpoint. It
+	// never applies when an operation receipt or outstanding write remains.
+	DocumentRetryRelease DocumentRetryOutcome = "release"
+	// DocumentRetryReject records a provider's definite no-effect refusal.
+	DocumentRetryReject DocumentRetryOutcome = "reject"
+	// DocumentRetryUncertain preserves the outstanding operation after a
+	// throttle interrupted its confirmation read.
+	DocumentRetryUncertain DocumentRetryOutcome = "uncertain"
+)
 
 type DocumentProgress struct {
 	Version int
 	// IntentVersion and LeaseUntil fence a worker which lost its claim from
 	// checkpointing a newer attempt.
-	IntentVersion         int
-	LeaseUntil            *time.Time
-	Remote                docpublish.RemotePage
-	Step                  string
-	Uploaded              int
-	OutstandingOperation  string
-	OutstandingKey        string
-	OutstandingDigest     string
-	ExpectedRemoteVersion int
-	UploadedReceipts      []DocumentUploadReceipt
-	UpdatedAt             time.Time
+	IntentVersion          int
+	LeaseUntil             *time.Time
+	Remote                 docpublish.RemotePage
+	Step                   string
+	Uploaded               int
+	OutstandingOperation   string
+	OutstandingKey         string
+	OutstandingDigest      string
+	ExpectedRemoteVersion  int
+	ExpectedRemoteRevision string
+	UploadedReceipts       []DocumentUploadReceipt
+	UpdatedAt              time.Time
 }
 
 // DocumentUploadReceipt is an immutable record of an upload proven complete.
@@ -69,6 +94,14 @@ type DocumentCommandStore interface {
 	GetDocumentCommand(context.Context, shared.ID, shared.ID) (DocumentCommand, error)
 	FindDocumentCommand(context.Context, shared.ID, shared.ID, string) (DocumentCommand, error)
 	SaveDocumentProgress(context.Context, shared.ID, shared.ID, int, DocumentProgress) (DocumentCommand, error)
+	// DeferDocumentCommand atomically persists a provider delay with the
+	// relevant intent/progress/queue fences. It never permits a stale worker to
+	// shorten a newer provider-directed delay.
+	DeferDocumentCommand(context.Context, shared.ID, shared.ID, int, int, int, time.Time, time.Time, DocumentRetryOutcome, string) (DocumentCommand, error)
+	// YieldDocumentCommand atomically releases one clean in-flight checkpoint
+	// after an acknowledged remote effect. It preserves progress and artifacts,
+	// but removes the voluntary slice from the failure-attempt budget.
+	YieldDocumentCommand(context.Context, shared.ID, shared.ID, int, int, time.Time) (DocumentCommand, error)
 	// ResumeDocumentCommand atomically stores a reconciliation-proven checkpoint
 	// and moves one uncertain command back to pending.  Ordinary checkpoint saves
 	// are limited to the current in-flight lease.

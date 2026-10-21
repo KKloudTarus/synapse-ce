@@ -2,15 +2,50 @@ package ticketing_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/finding"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	usecase "github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing"
 )
+
+type inboundThrottleProvider struct {
+	*workflowProvider
+	reads, identities int
+	readErr           error
+	identityErr       error
+}
+
+func (p *inboundThrottleProvider) GetTicket(_ context.Context, remoteID string) (ports.TicketObservation, error) {
+	p.reads++
+	if p.readErr != nil {
+		return ports.TicketObservation{}, p.readErr
+	}
+	return ports.TicketObservation{ExternalID: remoteID, StatusCategory: "done", UpdatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), StatusChangedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), AuthorID: "external-human"}, nil
+}
+
+func (p *inboundThrottleProvider) TicketIdentity(context.Context) (string, error) {
+	p.identities++
+	if p.identityErr != nil {
+		return "", p.identityErr
+	}
+	return "jira-integration", nil
+}
+
+func newInboundThrottleWorkflow(t *testing.T, f workflowFixture, provider ports.TicketProvider) *usecase.Workflow {
+	t.Helper()
+	w, err := usecase.NewWorkflow(f.store, f.integrations, workflowProviders{provider}, f.findings, f.engagements, f.policy, f.audit, &ticketIDs{}, f.clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SetPublicBaseURL("https://console.example")
+	return w
+}
 
 type inboundDeduper struct {
 	mu   sync.Mutex
@@ -51,6 +86,9 @@ func setupInboundTicket(t *testing.T) workflowFixture {
 	if _, err = configs.SaveTicketInboundConfiguration(context.Background(), "tenant-a", ports.TicketInboundConfiguration{TenantID: "tenant-a", IntegrationID: "jira", Enabled: true, IntegrationAuthor: "jira-integration", ConnectionRevision: 1, CredentialRevision: 1, UpdatedAt: f.clock.Now()}, 0); err != nil {
 		t.Fatal(err)
 	}
+	// Submit's completion tick reserves the first durable poll slot. Advance to
+	// its due boundary before an inbound-specific assertion begins.
+	f.clock.Advance(time.Minute)
 	f.workflow.SetInboundWebhookDeduper(&inboundDeduper{})
 	return f
 }
@@ -286,6 +324,7 @@ func TestWorkflowTickReconcilesProviderStateAndMarksUnreadable(t *testing.T) {
 		t.Fatalf("reconciled view=%+v err=%v", view, err)
 	}
 	f.provider.observation = ports.TicketObservation{ExternalID: "SEC-1", Deleted: true}
+	f.clock.Advance(time.Minute)
 	if _, err = f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
 		t.Fatal(err)
 	}
@@ -306,11 +345,115 @@ func TestWorkflowTickFreshUnreadableTicketDefersUntilReadableStatus(t *testing.T
 		t.Fatalf("fresh unreadable view=%+v err=%v", view, err)
 	}
 	f.provider.observation = ports.TicketObservation{ExternalID: "SEC-1", StatusCategory: "done", UpdatedAt: f.clock.Now().Add(time.Minute), StatusChangedAt: f.clock.Now().Add(time.Minute), AuthorID: "human"}
+	f.clock.Advance(time.Minute)
 	if _, err = f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
 		t.Fatal(err)
 	}
 	view, err = f.workflow.ListTicketObservations(context.Background(), "tenant-a", "eng-a", "finding-a")
 	if err != nil || len(view.Proposals) != 1 || view.Observations[0].DeletedOrUnreadable || view.Observations[0].StatusCategory != "done" {
 		t.Fatalf("repaired view=%+v err=%v", view, err)
+	}
+}
+
+func TestWorkflowTickPersistsInboundReadThrottleAcrossRestart(t *testing.T) {
+	for _, status := range []int{429, 403} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			f := setupInboundTicket(t)
+			provider := &inboundThrottleProvider{
+				workflowProvider: f.provider,
+				readErr:          &ports.TicketProviderError{Code: "rate_limited", Status: status, RetryAfter: 9 * time.Minute},
+			}
+			first := newInboundThrottleWorkflow(t, f, provider)
+			if _, err := first.Tick(context.Background(), "tenant-a", 10); err != nil {
+				t.Fatal(err)
+			}
+			if provider.reads != 1 {
+				t.Fatalf("throttled read calls=%d, want 1", provider.reads)
+			}
+
+			// A new worker must obtain its target from the persisted due queue; it must
+			// not retry the provider read before the provider's longer Retry-After.
+			f.clock.Advance(8 * time.Minute)
+			restarted := newInboundThrottleWorkflow(t, f, provider)
+			if _, err := restarted.Tick(context.Background(), "tenant-a", 10); err != nil {
+				t.Fatal(err)
+			}
+			if provider.reads != 1 {
+				t.Fatalf("restarted worker retried before durable retry-after: reads=%d", provider.reads)
+			}
+
+			provider.readErr = nil
+			f.clock.Advance(time.Minute)
+			if _, err := restarted.Tick(context.Background(), "tenant-a", 10); err != nil {
+				t.Fatal(err)
+			}
+			if provider.reads != 2 {
+				t.Fatalf("worker did not resume at durable retry-after boundary: reads=%d", provider.reads)
+			}
+
+		})
+	}
+}
+
+func TestWorkflowTickIdentityThrottleStopsRemainingIntegrationTargetsWithoutProposal(t *testing.T) {
+	for _, status := range []int{429, 403} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			f := setupInboundTicket(t)
+			mappings, err := f.store.ListMappings(context.Background(), "tenant-a", 10, "")
+			if err != nil || len(mappings) != 1 {
+				t.Fatalf("mappings=%+v err=%v", mappings, err)
+			}
+			second, err := finding.NewManual("finding-inbound-throttle", "eng-a", finding.ManualInput{Title: "Second inbound target", Severity: shared.SeverityHigh}, f.clock.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = f.findings.Upsert(shared.WithTenant(context.Background(), "tenant-a"), []finding.Finding{second}); err != nil {
+				t.Fatal(err)
+			}
+			preview, err := f.workflow.Preview(context.Background(), usecase.PreviewRequest{TenantID: "tenant-a", MappingID: mappings[0].ID, EngagementID: "eng-a", FindingID: second.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, created, err := f.workflow.Submit(context.Background(), usecase.SubmitRequest{TenantID: "tenant-a", MappingID: mappings[0].ID, EngagementID: "eng-a", FindingID: second.ID, RequestKey: "inbound-throttle-second", PreviewDigest: preview.Digest, Actor: "admin"}); err != nil || !created {
+				t.Fatalf("second submission created=%t err=%v", created, err)
+			}
+			if _, err = f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
+				t.Fatal(err)
+			}
+			f.clock.Advance(time.Minute)
+			targets, err := f.store.ListInboundTicketTargets(context.Background(), "tenant-a", 10)
+			if err != nil || len(targets) != 2 {
+				t.Fatalf("inbound targets=%+v err=%v", targets, err)
+			}
+			configs := any(f.store).(ports.TicketInboundConfigurationStore)
+			config, err := configs.GetTicketInboundConfiguration(context.Background(), "tenant-a", "jira")
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.Enabled = false // Exercise the authenticated fallback identity read.
+			config.UpdatedAt = f.clock.Now()
+			if _, err = configs.SaveTicketInboundConfiguration(context.Background(), "tenant-a", config, config.Version); err != nil {
+				t.Fatal(err)
+			}
+
+			provider := &inboundThrottleProvider{
+				workflowProvider: f.provider,
+				identityErr:      &ports.TicketProviderError{Code: "rate_limited", Status: status, RetryAfter: 9 * time.Minute},
+			}
+			w := newInboundThrottleWorkflow(t, f, provider)
+			if _, err = w.Tick(context.Background(), "tenant-a", 10); err != nil {
+				t.Fatal(err)
+			}
+			if provider.reads != 1 || provider.identities != 1 {
+				t.Fatalf("identity throttle did not stop later same-integration target: reads=%d identities=%d", provider.reads, provider.identities)
+			}
+			for _, findingID := range []shared.ID{"finding-a", second.ID} {
+				view, viewErr := w.ListTicketObservations(context.Background(), "tenant-a", "eng-a", findingID)
+				if viewErr != nil || len(view.Proposals) != 0 {
+					t.Fatalf("identity-unproven target %s proposed a retest: view=%+v err=%v", findingID, view, viewErr)
+				}
+			}
+
+		})
 	}
 }

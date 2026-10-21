@@ -36,6 +36,7 @@ type ScheduleDependencies struct {
 	EmailConfig ports.DocumentScheduleEmailConfig
 	EmailSender ports.DocumentPDFSender
 	Publisher   interface {
+		ValidateDocumentDestination(context.Context, shared.ID, shared.ID) error
 		PublishArtifact(context.Context, shared.ID, ports.DocumentActor, PublishInput, ports.DocumentArtifact) (ReleaseResult, error)
 	}
 	Executor interface {
@@ -239,14 +240,7 @@ func (s *ScheduleService) scheduleAdmission(ctx context.Context, tenant shared.I
 		return err
 	}
 	if schedule.Destination == domain.ScheduleConfluence {
-		item, err := s.deps.Integrations.GetIntegration(ctx, schedule.IntegrationID)
-		if err != nil {
-			return err
-		}
-		if item.TenantID != tenant || !item.Enabled || item.Archived || (item.Provider != "confluence-cloud" && item.Provider != "confluence-dc") {
-			return shared.ErrForbidden
-		}
-		if _, _, err := destination(item); err != nil {
+		if err := s.deps.Publisher.ValidateDocumentDestination(ctx, tenant, schedule.IntegrationID); err != nil {
 			return err
 		}
 	} else {
@@ -321,12 +315,12 @@ func (s *ScheduleService) executeOccurrence(ctx context.Context, tenant shared.I
 		occurrence = saved
 	}
 	if current.Destination == domain.ScheduleConfluence {
-		return s.executeConfluenceOccurrence(ctx, tenant, current, actor, occurrence, now)
+		return s.executeDocumentOccurrence(ctx, tenant, current, actor, occurrence, now)
 	}
 	return s.executeEmailOccurrence(ctx, tenant, current, actor, occurrence, now)
 }
 
-func (s *ScheduleService) executeConfluenceOccurrence(ctx context.Context, tenant shared.ID, schedule domain.Schedule, actor ports.DocumentActor, occurrence ports.DocumentScheduleOccurrence, now time.Time) error {
+func (s *ScheduleService) executeDocumentOccurrence(ctx context.Context, tenant shared.ID, schedule domain.Schedule, actor ports.DocumentActor, occurrence ports.DocumentScheduleOccurrence, now time.Time) error {
 	key := scheduleKey(schedule.ID, occurrence.Occurrence.DueAt)
 	result, err := s.deps.Publisher.PublishArtifact(ctx, tenant, actor, PublishInput{IntegrationID: schedule.IntegrationID, SourceKind: schedule.Source.SourceKind, ScopeID: schedule.Source.ScopeID, SourceRef: schedule.Source.SourceRef, RequestKey: key}, occurrence.Artifact)
 	if err != nil {

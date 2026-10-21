@@ -46,12 +46,12 @@ func documentWriteError(err error) error {
 }
 
 const documentLinkCols = `id,tenant_id,integration_id,source_kind,source_ref,COALESCE(engagement_id,''),COALESCE(project_id,''),
-    container,remote_page_id,remote_version,remote_url,content_hash,revision,retired_at,created_at,updated_at,
+    container,remote_page_id,remote_version,remote_revision,remote_url,content_hash,revision,retired_at,created_at,updated_at,
     restriction_status,restriction_checked_at,restriction_next_at,restriction_check_version`
 
 const documentIntentCols = `id,tenant_id,integration_id,source_kind,source_ref,COALESCE(engagement_id,''),COALESCE(project_id,''),
     container,COALESCE(link_id,''),action,request_key,payload_digest,content_hash,correlation_marker,state,version,attempts,
-    lease_until,remote_id,remote_url,remote_version,error_code,created_at,updated_at`
+    lease_until,remote_id,remote_url,remote_version,remote_revision,error_code,created_at,updated_at`
 
 // documentScopeArgs maps a target's scope to the two nullable scope columns.
 func documentScopeArgs(t docpublish.Target) (engagement, project any) {
@@ -72,7 +72,7 @@ func scanDocumentLink(row rowScanner) (docpublish.Link, error) {
 	var l docpublish.Link
 	var engagement, project string
 	err := row.Scan(&l.ID, &l.TenantID, &l.IntegrationID, &l.SourceKind, &l.SourceRef, &engagement, &project,
-		&l.Container, &l.RemotePageID, &l.RemoteVersion, &l.RemoteURL, &l.ContentHash, &l.Revision,
+		&l.Container, &l.RemotePageID, &l.RemoteVersion, &l.RemoteRevision, &l.RemoteURL, &l.ContentHash, &l.Revision,
 		&l.RetiredAt, &l.CreatedAt, &l.UpdatedAt, &l.RestrictionStatus, &l.RestrictionCheckedAt, &l.RestrictionNextAt, &l.RestrictionCheckVersion)
 	if err != nil {
 		return docpublish.Link{}, err
@@ -91,7 +91,7 @@ func scanDocumentIntent(row rowScanner) (docpublish.Intent, error) {
 	var engagement, project, link string
 	err := row.Scan(&i.ID, &i.TenantID, &i.IntegrationID, &i.SourceKind, &i.SourceRef, &engagement, &project,
 		&i.Container, &link, &i.Action, &i.RequestKey, &i.PayloadDigest, &i.ContentHash, &i.Marker, &i.State,
-		&i.Version, &i.Attempts, &i.LeaseUntil, &i.RemoteID, &i.RemoteURL, &i.RemoteVersion, &i.ErrorCode,
+		&i.Version, &i.Attempts, &i.LeaseUntil, &i.RemoteID, &i.RemoteURL, &i.RemoteVersion, &i.RemoteRevision, &i.ErrorCode,
 		&i.CreatedAt, &i.UpdatedAt)
 	if err != nil {
 		return docpublish.Intent{}, err
@@ -296,13 +296,13 @@ func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID,
 		tag, e := tx.Exec(ctx, `INSERT INTO document_intents
             (id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,link_id,action,
              request_key,payload_digest,content_hash,correlation_marker,state,version,attempts,lease_until,
-             remote_id,remote_url,remote_version,error_code,created_at,updated_at)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+             remote_id,remote_url,remote_version,remote_revision,error_code,created_at,updated_at)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
             ON CONFLICT (tenant_id,integration_id,request_key) DO NOTHING`,
 			i.ID.String(), tenant.String(), i.IntegrationID.String(), string(i.SourceKind), i.SourceRef,
 			engagement, project, i.Container, link, string(i.Action), i.RequestKey, i.PayloadDigest,
 			i.ContentHash, i.Marker, string(i.State), i.Version, i.Attempts, nil, i.RemoteID, i.RemoteURL,
-			i.RemoteVersion, i.ErrorCode, i.CreatedAt.UTC(), i.UpdatedAt.UTC())
+			i.RemoteVersion, i.RemoteRevision, i.ErrorCode, i.CreatedAt.UTC(), i.UpdatedAt.UTC())
 		if e != nil {
 			return e
 		}
@@ -352,6 +352,12 @@ func (s *DocumentStore) TransitionIntent(ctx context.Context, tenant, id shared.
 	if tenant.IsZero() || id.IsZero() || expected < 1 || at.IsZero() {
 		return docpublish.Intent{}, shared.ErrValidation
 	}
+	// Yield is only safe with the command's clean progress checkpoint. Keep it
+	// behind YieldDocumentCommand so a generic intent transition cannot clear a
+	// lease while an acknowledged provider operation remains outstanding.
+	if change.Event == docpublish.CheckpointYield || change.Event == docpublish.RetryDeferred {
+		return docpublish.Intent{}, shared.ErrConflict
+	}
 	var result docpublish.Intent
 	err := requireTenant(ctx, s.pool, tenant, func(tx pgx.Tx) error {
 		current, e := scanDocumentIntent(tx.QueryRow(ctx, `SELECT `+documentIntentCols+` FROM document_intents
@@ -365,6 +371,16 @@ func (s *DocumentStore) TransitionIntent(ctx context.Context, tenant, id shared.
 		if current.Version != expected {
 			return shared.ErrConflict
 		}
+		if change.Event == writeintent.Claim {
+			var nextAttempt *time.Time
+			e = tx.QueryRow(ctx, `SELECT next_attempt_at FROM document_commands WHERE tenant_id=$1 AND intent_id=$2 FOR UPDATE`, tenant.String(), id.String()).Scan(&nextAttempt)
+			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+				return e
+			}
+			if nextAttempt != nil && at.Before(*nextAttempt) {
+				return shared.ErrConflict
+			}
+		}
 		next, e := current.Apply(change, at)
 		if e != nil {
 			return e
@@ -375,11 +391,11 @@ func (s *DocumentStore) TransitionIntent(ctx context.Context, tenant, id shared.
 			}
 		}
 		result, e = scanDocumentIntent(tx.QueryRow(ctx, `UPDATE document_intents
-            SET state=$3,version=$4,attempts=$5,lease_until=$6,remote_id=$7,remote_url=$8,remote_version=$9,
-                error_code=$10,updated_at=$11
-            WHERE tenant_id=$1 AND id=$2 AND version=$12 RETURNING `+documentIntentCols,
+			SET state=$3,version=$4,attempts=$5,lease_until=$6,remote_id=$7,remote_url=$8,remote_version=$9,remote_revision=$10,
+				error_code=$11,updated_at=$12
+			WHERE tenant_id=$1 AND id=$2 AND version=$13 RETURNING `+documentIntentCols,
 			tenant.String(), id.String(), string(next.State), next.Version, next.Attempts, next.LeaseUntil,
-			next.RemoteID, next.RemoteURL, next.RemoteVersion, next.ErrorCode, next.UpdatedAt, expected))
+			next.RemoteID, next.RemoteURL, next.RemoteVersion, next.RemoteRevision, next.ErrorCode, next.UpdatedAt, expected))
 		if errors.Is(e, pgx.ErrNoRows) {
 			return shared.ErrConflict
 		}
@@ -416,11 +432,11 @@ func completeDocumentLink(ctx context.Context, tx pgx.Tx, tenant shared.ID, done
 	engagement, project := documentScopeArgs(link.Target)
 	tag, e := tx.Exec(ctx, `INSERT INTO document_links
         (id,tenant_id,integration_id,source_kind,source_ref,engagement_id,project_id,container,
-		 remote_page_id,remote_version,remote_url,content_hash,revision,retired_at,created_at,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		 remote_page_id,remote_version,remote_revision,remote_url,content_hash,revision,retired_at,created_at,updated_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
         ON CONFLICT ON CONSTRAINT document_links_target_unique DO NOTHING`,
 		link.ID.String(), tenant.String(), link.IntegrationID.String(), string(link.SourceKind), link.SourceRef,
-		engagement, project, link.Container, link.RemotePageID, link.RemoteVersion, link.RemoteURL,
+		engagement, project, link.Container, link.RemotePageID, link.RemoteVersion, link.RemoteRevision, link.RemoteURL,
 		link.ContentHash, link.Revision, link.RetiredAt, link.CreatedAt.UTC(), link.UpdatedAt.UTC())
 	if e != nil {
 		return e
@@ -448,11 +464,11 @@ func completeDocumentLink(ctx context.Context, tx pgx.Tx, tenant shared.ID, done
 
 func updateDocumentLink(ctx context.Context, tx pgx.Tx, tenant shared.ID, link docpublish.Link, expectedRevision int) error {
 	tag, err := tx.Exec(ctx, `UPDATE document_links
-		SET remote_version=$3,remote_url=$4,content_hash=$5,revision=$6,retired_at=$7,updated_at=$8,
+		SET remote_version=$3,remote_revision=$4,remote_url=$5,content_hash=$6,revision=$7,retired_at=$8,updated_at=$9,
         restriction_status='unchecked',restriction_checked_at=NULL,restriction_next_at='epoch'::timestamptz,
         restriction_check_version=restriction_check_version+1
-        WHERE tenant_id=$1 AND id=$2 AND revision=$9`,
-		tenant.String(), link.ID.String(), link.RemoteVersion, link.RemoteURL, link.ContentHash,
+		WHERE tenant_id=$1 AND id=$2 AND revision=$10`,
+		tenant.String(), link.ID.String(), link.RemoteVersion, link.RemoteRevision, link.RemoteURL, link.ContentHash,
 		link.Revision, link.RetiredAt, link.UpdatedAt.UTC(), expectedRevision)
 	if err != nil {
 		return err

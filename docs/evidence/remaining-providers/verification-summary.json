@@ -1,0 +1,644 @@
+{
+  "base_commit": "a55a314aab8eb6e5979f7d886c82a0729776949f",
+  "compiled_from_head": "5193a130c15b4e4b5dd16b6d9d25dfe3e0034bfd",
+  "compiled_with_uncommitted_inputs": true,
+  "recorded_at_utc": "2026-10-20T05:22:40.154719+00:00",
+  "runtime": {
+    "image_id": "sha256:a43aacdbc518ab3918c7f21563ce77ea85e927348b488b1f5d36f985709a3fde",
+    "go": "1.27.0",
+    "node": "22.23.3",
+    "pnpm": "9.15.9",
+    "mounted_golangci_lint": "2.13.2",
+    "mounted_helm": "3.19.0",
+    "cache_environment": {
+      "GOCACHE": "/cache/go",
+      "XDG_CACHE_HOME": "/cache"
+    }
+  },
+  "checks": {
+    "backend": {
+      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race ./internal/infrastructure/integration/ticketproviders ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
+      "exit_code": 0,
+      "local_log_sha256": "685385d7f736afc27022f2c610c82359aa969cd8e883eb8cd932f9b691cb6065",
+      "log_modified_at_utc": "2026-10-20T05:08:51.454054+00:00",
+      "lint_issues": 0,
+      "test_failures": 0
+    },
+    "web": {
+      "command": "cd web && pnpm exec vitest run --maxWorkers=2 && pnpm exec tsc --noEmit && pnpm build && pnpm lint",
+      "exit_code": 0,
+      "local_log_sha256": "c887902a9c5cd467b5d1e4fd3c4ba11d9cc4ab1010ab5b4fc84fcc8ef16cfb08",
+      "log_modified_at_utc": "2026-10-20T05:18:52.402611+00:00",
+      "test_files_passed": 212,
+      "tests_passed": 1450,
+      "lint_errors": 0,
+      "lint_warnings": 20
+    },
+    "postgres": {
+      "command": "go test -json -timeout 90m -count=1 ./internal/infrastructure/persistence/postgres",
+      "exit_code": 0,
+      "local_log_sha256": "6ebb37e52ef13295ee8f47248848a860f257f5b5296a44ad3012dd2851a47d7f",
+      "log_modified_at_utc": "2026-10-20T04:37:56.642573+00:00",
+      "test_cases_passed": 1149,
+      "test_cases_skipped": 4,
+      "test_failures": 0,
+      "elapsed_seconds": 1375.446,
+      "changed_persistence_inputs_after_run": false
+    },
+    "docs_api": {
+      "command": "go test -count=1 ./docs ./api",
+      "exit_code": 0,
+      "local_log_sha256": "0dfd66c2cfa4ebd465fd4f0015209cea46e8d640a3d9169029a70a15f833d291",
+      "log_modified_at_utc": "2026-10-20T05:23:19.940969+00:00",
+      "package_seconds": {
+        "docs": 1.456,
+        "api": 0.439
+      }
+    },
+    "final_scope_fixture": {
+      "command": "cd web && pnpm exec vitest run src/pages/Settings/TicketProviderSettings.test.tsx",
+      "exit_code": 0,
+      "local_log_sha256": "d6752a35d343dd1bf6a30bef913df6cfdd703677dff307eb087affaf9d0f74bf",
+      "log_modified_at_utc": "2026-10-20T05:15:44.620062+00:00",
+      "tests_passed": 11
+    },
+    "preview_scripts_lint": {
+      "command": "cd web && pnpm exec eslint scripts/ticket-entry-previews.mjs scripts/document-provider-previews.mjs scripts/remaining-providers-evidence.mjs",
+      "exit_code": 0,
+      "local_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "log_modified_at_utc": "2026-10-20T05:21:56.617168+00:00"
+    }
+  },
+  "historical_implementation_gate": {
+    "backend": {
+      "container": "synapse-provider-exclusion-backend",
+      "started_at": "2026-10-20T03:12:54.107670256Z",
+      "finished_at": "2026-10-20T03:14:17.212127817Z",
+      "exit_code": 0,
+      "oom_killed": false,
+      "local_log_sha256": "bdebdb8c9cfe55555d7b1bf6b6300e6f2036065a69edb9ca0659d7082bc6238c",
+      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
+      "lint_issues": 0,
+      "test_failures": 0,
+      "race_package_seconds": {
+        "integration/documentproviders": 4.955,
+        "usecase/docpublish": 12.52,
+        "usecase/integrations": 1.038
+      }
+    },
+    "web": {
+      "container": "synapse-provider-exclusion-web",
+      "started_at": "2026-10-20T03:13:18.878566877Z",
+      "finished_at": "2026-10-20T03:17:33.394340288Z",
+      "exit_code": 0,
+      "oom_killed": false,
+      "local_log_sha256": "fc1a31a14dcc3a6fb86f2b83a1c6ae7f1bbee9ed0e39edaaa1902d997926e25f",
+      "command": "cd web && pnpm exec vitest run --maxWorkers=4 && pnpm run typecheck && pnpm build && pnpm lint",
+      "test_files_passed": 212,
+      "tests_passed": 1438,
+      "lint_errors": 0,
+      "lint_warnings": 20
+    },
+    "postgres": {
+      "container": "synapse-provider-postgres-gate",
+      "started_at": "2026-10-20T01:54:03.888163116Z",
+      "finished_at": "2026-10-20T02:24:25.173774701Z",
+      "exit_code": 0,
+      "oom_killed": false,
+      "local_log_sha256": "783f6c4c5bf72166018c36e4742997a4281e7f4c39612cbc6b0abf7bf731368b",
+      "command": "go test -json -timeout 90m -count=1 ./internal/infrastructure/persistence/postgres",
+      "postgres_major": 17,
+      "test_cases_passed": 1149,
+      "test_cases_skipped": 4,
+      "test_failures": 0,
+      "elapsed_seconds": 1712.893,
+      "changed_persistence_inputs_during_run": 0
+    }
+  },
+  "overall_scope_gate": "implementation_ready_for_re_review",
+  "excluded_scope": "Notion issue #1446 is excluded entirely from the current PR, including connection-only support. Ownership is released; future native publication and policy decisions remain on the open issue.",
+  "scope_disposition_issue": "https://github.com/KKloudTarus/synapse-ce/issues/1446",
+  "partial_effect_recovery": "Durable quarantine for uncertain attachment/purge; exact neutral shell recovery can converge after fresh proof. No automatic purge completion inferred from404.",
+  "reviews": {
+    "implementation-qa": "pass",
+    "qa-verifier": "pass",
+    "security-auditor": "pass",
+    "performance-auditor": "pass",
+    "reliability-auditor": "pass",
+    "frontend-quality-auditor": "pass",
+    "architecture-critic": "pass",
+    "resolved_findings": [
+      "Known Jira mappings excluded from native settings; unresolved mappings cannot save.",
+      "Save/Create action restores permission, busy and loading guards.",
+      "Orphan mappings remain inspectable/deletable across scopes with no remaining connection."
+    ]
+  },
+  "live_e2e": {
+    "observed": "Private/confidential English and Vietnamese GitHub/GitLab issues; Linear issues; idempotent replay; GitHub acknowledgement-commit recovery; Drive create/update same remote ID/purge and separate Reader PDF access. ServiceNow restricted-token matrix, EN/VI incident exact-content readback/replay and native new-state polling.",
+    "remaining": [
+      "Actual lost provider HTTP-response recovery",
+      "Interrupted upload/purge native acceptance",
+      "Native sharing drift/legal hold and terminal actor/proposal cases",
+      "ServiceNow vulnerability profile and terminal actor/proposal cases"
+    ],
+    "explicitly_deferred": [
+      "Azure Boards Microsoft sandbox acceptance (#1439)",
+      "SharePoint/OneDrive Business acceptance (#1447)"
+    ],
+    "ledger": "live/README.md"
+  },
+  "visual_evidence": {
+    "console": 26,
+    "publication-console": 16,
+    "configuration": 6,
+    "ticket-entry": 46,
+    "adapter_html_previews": 4,
+    "live_browser_captures": 27,
+    "servicenow_setup_only_captures": 2
+  },
+  "browser_checks": {
+    "manual_edge": "Keyboard Down/Tab selected GitLab among equal project/type/locale destinations; Enter opened snapshot preview, Enter expanded exact confidential request; Tab reached Submit without activation.",
+    "reflow": "Docker Chromium asserts no horizontal overflow at 390x900 for single/bulk ready/preview states, both themes.",
+    "limits": "No screen-reader, Firefox/WebKit/touch or field Core Web Vitals evidence."
+  },
+  "failed_attempts_not_pass_evidence": [
+    "Initial full web run: missing list API stub plus two unrelated fifteen-second Template timeouts; final maxWorkers=2 runs passed without changing timeouts.",
+    "Old /tmp Go cache exhausted tmpfs during a build/lint run; persistent host cache used for successful final checks.",
+    "Preview harness first used ambiguous text locators and parallel Vite capture jobs; final sequential regenerated captures passed.",
+    "Initial ServiceNow focused command referenced nonexistent internal/adapter/http; corrected httpapi run passed. Native preflight returned 403 even for own identity, so its negative reads are not ACL acceptance.",
+    "Initial polling gate container omitted pinned lint binary mount; corrected runtime mounts passed. Initial polling runtime build lacked Git safe.directory and failed VCS stamping; rebuilt with safe.directory, no stamping bypass."
+  ],
+  "servicenow_identity_delta": {
+    "base_commit": "a1769c67959f29ca47820233683e3fb32a40a681",
+    "recorded_at_utc": "2026-10-20T07:50:50.325338+00:00",
+    "compiled_with_uncommitted_inputs": true,
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "e39dc28d7d26d43095c21af0d8a02469ee95f5923cf05848e06c63c7812a95bd",
+      "internal/infrastructure/integration/ticketproviders/provider_test.go": "7ff945e54932a3cd3376bc9736a79e39dd0b4cfece585ae7014e9ef1cab5d958",
+      "docs/guide/integrations.md": "2295a8325ad479b72ab671dab3c1da029b5b83ba7171870946daefa23017f475",
+      "docs/guide/configuration.md": "b1f9004deca39abfd8f3db58d90ab9857cda81351280010ca8f257c6602daae0"
+    },
+    "checks": [
+      {
+        "command": "make lint build vet test typecheck",
+        "environment": "Docker synapse-provider-check-runtime:local",
+        "exit_code": 0,
+        "local_log_sha256": "ba2c24ffd07ae4ab53c8e4123c0be253680bcfd5928c29521f9de819158c3ee1",
+        "log_modified_at_utc": "2026-10-20T07:09:48.699918+00:00"
+      },
+      {
+        "command": "go test -race -count=1 ./internal/infrastructure/integration/ticketproviders; go test -count=1 ./internal/adapter/httpapi/... ./internal/usecase/ticketing/... ./internal/usecase/integrations/... ./internal/infrastructure/integration/...",
+        "environment": "Docker synapse-provider-check-runtime:local",
+        "exit_code": 0,
+        "local_log_sha256": "30ab022be70f5a673d21b8ed53e353972e0106c20b8a885c09d56d8b4f9da604",
+        "log_modified_at_utc": "2026-10-20T07:14:11.002283+00:00"
+      },
+      {
+        "command": "go test -count=1 ./docs ./api",
+        "environment": "Docker synapse-provider-check-runtime:local",
+        "exit_code": 0,
+        "local_log_sha256": "097d16e1d598cbbaeb95ce279266be13d6d72661cd5942140ba338e7d7980122",
+        "log_modified_at_utc": "2026-10-20T07:51:15.491904+00:00"
+      }
+    ],
+    "identity_contract_cases": 9,
+    "reviews": {
+      "qa-verifier": "pass",
+      "security-auditor": "pass",
+      "performance-auditor": "pass",
+      "architecture-critic": "pass"
+    },
+    "native_status": "Selected incident acceptance passed: restricted-token denial matrix, EN/VI exact-content readback and replay; fresh runtime polling produces new observations. Earlier trial rollback and partial incident preserved.",
+    "earlier_evidence_scope": "Web, PostgreSQL/RLS and hostile harness evidence above predates this adapter-local identity correction; their implementation inputs are unchanged. Full backend preceded two test-only alphabet fixtures, both covered by the final focused run.",
+    "secret_and_manifest_check": {
+      "files_scanned": 8022,
+      "secret_sources_checked": 16,
+      "secret_match_files": [],
+      "screenshots_verified": 17
+    },
+    "native_trial": {
+      "status": "incomplete; trial rolled back",
+      "own_identity": {
+        "status": 200,
+        "exactly_own_id": true
+      },
+      "foreign_user_query": {
+        "status": 200,
+        "result_count": 0
+      },
+      "unlinked_problem_and_task": {
+        "status": 200,
+        "result_count": 0,
+        "interpretation": "does not prove endpoint-policy denial"
+      },
+      "rollback": {
+        "revoke_status": 200,
+        "revoked_token_probe_status": 401,
+        "verified_revoked": true
+      },
+      "client_restored_to": "Securely scoped",
+      "governed_incidents_created": 0
+    }
+  },
+  "servicenow_polling_delta": {
+    "base_commit": "80c46dbc385ff8de807e6a0646c357def23731d6",
+    "recorded_at_utc": "2026-10-20T08:58:10.181833+00:00",
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "8c03ec373c020f623ee8991aba44ecdc186ee0ea94cff8196f84c9b0269df49f",
+      "internal/infrastructure/integration/ticketproviders/provider_test.go": "36dae2a0f6da361cf89159fb5c7f45734e2de9a8d798c39b699d56046fe7adee"
+    },
+    "regression_cases": 4,
+    "red_evidence": "Empty-string closure reference failed invalid_response before removal of unused decoding fields.",
+    "checks": {
+      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race -count=1 ./internal/infrastructure/integration/ticketproviders ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
+      "environment": "Docker synapse-provider-check-runtime:local",
+      "exit_code": 0,
+      "local_log_sha256": "90c30d098b0e06b26cdd508fdffef0795f743e30085ec4ec8279e02d7b8b8950"
+    },
+    "reviews": {
+      "qa-verifier": "pass",
+      "security-auditor": "pass",
+      "performance-auditor": "pass; incremental architecture inspected"
+    },
+    "native_results": "live/servicenow-results.json",
+    "runtime_provenance": "live/servicenow-provenance.json",
+    "prior_inputs_unchanged": [
+      "web production and tests",
+      "PostgreSQL/RLS persistence",
+      "shared ticket/release controls"
+    ],
+    "docs_api_check": {
+      "command": "go test -count=1 ./docs ./api",
+      "environment": "Docker",
+      "exit_code": 0,
+      "local_log_sha256": "40c778a7f76e156bfc1cb4042e45f4a2a1e952ffbdb50a7a6424de80efdca91d",
+      "package_seconds": {
+        "docs": 1.317,
+        "api": 0.468
+      }
+    },
+    "secret_and_manifest_check": {
+      "files_scanned": 8032,
+      "secret_sources_checked": 16,
+      "secret_match_files": [],
+      "screenshots_verified": 25
+    }
+  },
+  "closure_corrections": {
+    "base_commit": "fa2a30fcd87b30cb5b30a6d1addcd9193e125467",
+    "recorded_at_utc": "2026-10-20T10:55:27.411018+00:00",
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "b5620f75996400ad4cabe8259219b88d71f72ccb21ee5068e4bbaf98c7ca5938",
+      "internal/infrastructure/integration/ticketproviders/preflight_test.go": "7541ac6d05bb30bb8127c197eaf85ef7d697680adccbad73a093006d6eb50fee",
+      "internal/infrastructure/integration/ticketproviders/description_test.go": "1f46b279c71eb46a41663720def16d1416329d69afb97a39aea4b74236f00515",
+      "internal/infrastructure/messageformat/plain.go": "561452fde76c2914ee3c0538390e39747fdd610f036fd711e3b2ddb97038d1fe"
+    },
+    "fixed_findings": [
+      "GitHub private-only preflight lacked direct negative tests; eight refusal cases and private-to-public drift now assert zero POSTs.",
+      "ServiceNow plain descriptions exposed intermediate Markdown backslashes; canonical subset rendering and new native EN/VI captures resolve it."
+    ],
+    "checks": {
+      "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race -count=1 ./internal/infrastructure/integration/ticketproviders ./internal/infrastructure/messageformat ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
+      "environment": "Docker synapse-provider-check-runtime:local",
+      "exit_code": 0,
+      "local_log_sha256": "77c96bf9a6cd17f1acc20a8cafa43caf0cf725a86b69f0c93297b78570e27d61"
+    },
+    "expected_failure_evidence": {
+      "description_regression": "RED on literal escaped punctuation before conversion; the initial GitHub drift fixture also needed its login response corrected.",
+      "privacy_guard_overlay": {
+        "command": "go test -overlay=<temporary privacy guard mutation> -count=1 ./internal/infrastructure/integration/ticketproviders -run <negative privacy and drift tests>",
+        "exit_code": 1,
+        "meaning": "All eight refusal subcases and drift test reject bypassing the privacy guard; source working tree not mutated.",
+        "local_log_sha256": "76dc4a29283536ffa0a1bfed1c7782e10e248edc3688d2a6c7758c5ae15f718b"
+      }
+    },
+    "reviews": {
+      "qa-verifier": "pass; focused Docker race rerun1.079s and refreshed native visuals inspected",
+      "security-auditor": "pass; fresh native content compared independently",
+      "performance-auditor": "pass; bounded existing parser, no network changes; no linear-time parser claim",
+      "architecture-critic": "sound; existing formatter module and canonical parser reused"
+    },
+    "native_evidence": "live/servicenow-formatted-results.json",
+    "closure_audit": "closure-audit.md",
+    "eligible_closing_keywords_after_push": [
+      1437,
+      1438,
+      1440,
+      1441
+    ],
+    "required_remaining": {
+      "1439": "Azure Boards native EN/VI work-item evidence; authorized sandbox missing",
+      "1447": "Business Microsoft native document/sharing evidence; consumer account rejected",
+      "1448": "Native sharing-settings screenshot; both owner/Reader dialogs unavailable"
+    },
+    "landing": "PR remains unmerged; no actual closure claimed",
+    "browser_deep_link": "Actual click reached configured localhost TLS origin; browser certificate privacy warning requires user handoff, arrival at finding unproven",
+    "docs_api_check": {
+      "command": "Docker: go test -count=1 ./docs ./api",
+      "exit_code": 0,
+      "local_log_sha256": "4d9213204526910231a7ed1d46f4fd6d7dc1864dc301b4903c343a4aef297478",
+      "package_seconds": {
+        "docs": 1.769,
+        "api": 0.72
+      }
+    },
+    "secret_and_manifest_check": {
+      "files_scanned": 8039,
+      "secret_sources_checked": 16,
+      "secret_match_files": [],
+      "screenshots_verified": 27
+    }
+  },
+  "azure_description_correction": {
+    "base_commit": "a281229dbd46862557fbd310c3614c877b548c9c",
+    "recorded_at_utc": "2026-10-20T11:07:12.127783+00:00",
+    "files": {
+      "internal/infrastructure/integration/ticketproviders/provider.go": "41e394c8901cb94e6a6468c786e99ce0bc5fb79bb4445d8d45d300021ae53f44",
+      "internal/infrastructure/integration/ticketproviders/description_test.go": "6f2bcbdc8a6599cfe4206f907dc724e6486cd70e8504788a5d24a60027b72e12",
+      "internal/infrastructure/messageformat/email.go": "f221a7cb90c47e5bf3d4208b103e2989a7ddb8a822aca922fa3983f9cadf91b2",
+      "internal/infrastructure/messageformat/html.go": "1f4dd112232da5584e12e9bc02c9cb5032fd5aa0604d9f69f15e13a81c4f67f6",
+      "internal/usecase/ticketing/native_payload_workflow_test.go": "4623301505c46bc78c37adf440f1657378d74e49e43ea4f9046b0e49351163ea",
+      "web/scripts/ticket-description-previews.mjs": "fcc3712bf203721ae5e35b08ad1d041142e6451697f36b4be4bb7c03b5b85c16"
+    },
+    "design": "Render canonical Markdown at the native payload builder; keep typed links separate and reuse the existing safe email fragment renderer. Direct builder calls never trust supplied HTML. Dispatch consumes frozen wire.",
+    "expected_failure": {
+      "exit_code": 1,
+      "local_log_sha256": "ba883343d8f32daa8e23f645b63194cb92083b9e6548efbf5a8ae13e8f981e72",
+      "meaning": "Initial tests fail on lost formatting, escaped punctuation and unsafe typed-link acceptance before fix."
+    },
+    "checks": {
+      "backend": {
+        "command": "golangci-lint run --timeout=15m && make build vet test typecheck && make harness && go test -race -count=1 ./internal/infrastructure/integration/ticketproviders ./internal/infrastructure/messageformat ./internal/usecase/ticketing ./internal/infrastructure/integration/documentproviders ./internal/usecase/docpublish ./internal/usecase/integrations",
+        "exit_code": 0,
+        "local_log_sha256": "386132285bb5763dd439e0d2897c5fc8641b6d84146d278235efb630acbfc195"
+      },
+      "docs_api": {
+        "command": "go test -count=1 ./docs ./api",
+        "environment": "Docker",
+        "exit_code": 0,
+        "local_log_sha256": "936b3164d045231125ae06aefef159f7ed4ee62fb5e0d934694ca304f6681044"
+      },
+      "workflow_after_import_comment_cleanup": {
+        "command": "go test -count=1 ./internal/usecase/ticketing -run TestAzureWorkflowFreezesRenderedHTMLBeforeDispatch",
+        "exit_code": 0,
+        "local_log_sha256": "808486b180baacf0e141f59279688de2812a8d56eef68513cc954fa036f162b5"
+      },
+      "preview_script_lint": {
+        "command": "pnpm exec eslint scripts/ticket-description-previews.mjs",
+        "environment": "Docker",
+        "exit_code": 0,
+        "local_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "reviews": {
+      "qa-verifier": "pass/high; independent focused Docker race and HTML/PNG/hash inspection",
+      "security-auditor": "pass/high; direct boundary and frozen-wire credential/size controls verified",
+      "performance-auditor": "pass/high; one body parse, no network/dispatch work; synthetic near-limit samples up to5.55ms and4.16MB per render, not a production SLO or linear-time claim",
+      "architecture-critic": "sound/high; existing infrastructure helper and inward dependencies preserved"
+    },
+    "visual": "ticket-rendering/manifest.json",
+    "live_acceptance": "Not run; authorized Azure sandbox unavailable. Local serializer preview does not establish Azure native display or close #1439.",
+    "unchanged_evidence": "Web source, persistence and shared intent/recovery executors unchanged; existing web/PostgreSQL/RLS and broader reviewers retained for those inputs."
+  },
+  "acceptance_transfer_and_link_navigation": {
+    "recorded_at_utc": "2026-10-20T13:45:19.014331+00:00",
+    "source_unchanged_from": "d3c4698c0d9944d4791746b099343a021bb3aa7d",
+    "microsoft_transfer": {
+      "tracker": 1576,
+      "source_leaves": [
+        1439,
+        1447
+      ],
+      "authorization": "Maintainer explicitly moved the remaining Microsoft native acceptance into the existing Teams/PagerDuty tracker on20October2026.",
+      "disposition": "Both source issue bodies now permit closure with PR1599; live scenarios remain unchecked in1576 and no native pass is claimed.",
+      "tracker_remains_open": true
+    },
+    "github_link_navigation": "live/github-finding-link-result.json",
+    "docs_api_check": {
+      "command": "Docker: go test -count=1 ./docs ./api",
+      "exit_code": 0,
+      "local_log_sha256": "ba63477145a9186cd5fa0d52afce0cca6897505605da0a57bcb81cdce7adcb3e",
+      "package_seconds": {
+        "docs": 1.211,
+        "api": 0.438
+      }
+    },
+    "publication_scan": {
+      "files_scanned": 8046,
+      "secret_sources_checked": 16,
+      "secret_match_files": [],
+      "screenshots_verified": 28
+    },
+    "eligible_closing_keywords": [
+      1437,
+      1438,
+      1439,
+      1440,
+      1441,
+      1447
+    ],
+    "remaining_source_leaf": {
+      "1448": "Required native sharing-settings screenshot still unavailable; Microsoft transfer does not move or waive Drive acceptance."
+    },
+    "landing": "PR remains Ready for review and unmerged; no manual source closure or merge performed."
+  },
+  "drive_sharing_acceptance": {
+    "recorded_at_utc": "2026-10-20T13:55:18.250565+00:00",
+    "implementation_source_unchanged_from": "d3c4698c0d9944d4791746b099343a021bb3aa7d",
+    "delta": "Native evidence and documentation only, including generic provider wording for document operations/planned capability in OpenAPI. No server behavior change.",
+    "receipt": "live/drive-sharing-result.json",
+    "review": {
+      "qa-verifier": "pass/high; exact1448contract, actual folder/PDF role and Restricted dialogs, source identity, prior English report/Vietnamese content and all inspected image hashes verified; no remaining leaf acceptance defect."
+    },
+    "docs_api_check": {
+      "command": "Docker: go test -count=1 ./docs ./api",
+      "exit_code": 0,
+      "local_log_sha256": "93bde5627095aa0ff00b4bfcdcbfc124663998bdd1186ffe7dc4f5111e3683e7",
+      "package_seconds": {
+        "docs": 1.995,
+        "api": 0.748
+      }
+    },
+    "publication_scan": {
+      "files_scanned": 8049,
+      "secret_sources_checked": 16,
+      "secret_match_files": [],
+      "screenshots_verified": 30
+    },
+    "eligible_closing_keywords": [
+      1437,
+      1438,
+      1439,
+      1440,
+      1441,
+      1447,
+      1448
+    ],
+    "remaining_source_leaf_acceptance_gap": null,
+    "landing": "PR remains Ready for review and unmerged; no manual closure or merge performed.",
+    "limits": "Microsoft native acceptance belongs to1576. Other broader native fault cases retain their unexecuted labels. No fully translated report-template or provider-wide final-binary replay claim."
+  },
+  "latest_gate_section": "review_correction_gate",
+  "review_correction_gate": {
+    "status": "pass",
+    "reviewed_from_head": "0ac6445879ec4a1baed9661c19e112a928588bbc",
+    "source_inputs_sha256": "10b22b6f6d8d808a237e4ce8972a3a433090ab78324e57c24d600712f48328f6",
+    "source_files": 5436,
+    "source_inputs_changed_after_snapshot": 0,
+    "checks": {
+      "backend": {
+        "status": "pass",
+        "command": "make build vet test typecheck && make harness && go test -count=1 -race ./internal/infrastructure/integration/ticketproviders ./internal/infrastructure/integration/documentproviders ./internal/infrastructure/integration/confluence ./internal/usecase/ticketing ./internal/usecase/docpublish ./internal/usecase/integrations ./internal/infrastructure/persistence/memory",
+        "environment": "Docker",
+        "local_log_sha256": "4479488e990fc487316ed6dbefe54ea74562814834c6838727b0e92456e5c237",
+        "exit_code": 0,
+        "oom_killed": false,
+        "started_at": "2026-10-21T00:03:08.996317369Z",
+        "finished_at": "2026-10-21T00:04:26.289823444Z",
+        "image_id": "sha256:a43aacdbc518ab3918c7f21563ce77ea85e927348b488b1f5d36f985709a3fde",
+        "race_package_seconds": {
+          "integration/ticketproviders": 1.143,
+          "integration/documentproviders": 7.458,
+          "integration/confluence": 1.116,
+          "usecase/ticketing": 3.949,
+          "usecase/docpublish": 9.981,
+          "usecase/integrations": 1.023,
+          "persistence/memory": 1.508
+        }
+      },
+      "lint": {
+        "status": "pass",
+        "command": "golangci-lint run --timeout=15m",
+        "environment": "Docker",
+        "local_log_sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+        "issues": 0,
+        "exit_code": 0,
+        "oom_killed": false,
+        "started_at": "2026-10-21T00:03:09.172325599Z",
+        "finished_at": "2026-10-21T00:03:27.955805753Z",
+        "image_id": "sha256:a43aacdbc518ab3918c7f21563ce77ea85e927348b488b1f5d36f985709a3fde"
+      },
+      "postgres": {
+        "status": "pass",
+        "command": "go test -json -timeout90m -count=1 ./internal/infrastructure/persistence/postgres",
+        "environment": "Docker",
+        "local_log_sha256": "953bff9860c038d62a31c6dce072628cea380b7f653e674c116471e28c53bcd7",
+        "test_cases_passed": 1153,
+        "test_cases_skipped": 4,
+        "test_failures": 0,
+        "elapsed_seconds": 2188.447,
+        "postgres_major": 17,
+        "exit_code": 0,
+        "skips": {
+          "TestPostgresAssessmentComparisonScale100K": "opt-in100kassessmentvalidation",
+          "TestAssessmentUIWorker": "explicitlocalbrowserQAhelper",
+          "TestOwnershipRepresentativeScale": "opt-in10kownershipfixture",
+          "TestResponseHaltWriterRoleIsolation": "requiresseparateruntimeandhaltwriterDSNs; unrelatedhaltwriterpathunchanged"
+        }
+      },
+      "web": {
+        "status": "pass",
+        "command": "cd web && pnpm exec tsc --noEmit && pnpm test --run && pnpm build && pnpm lint",
+        "environment": "Docker",
+        "local_log_sha256": "a7df171f3856e8dc625371aaac3609b50ce0eb5942c7888d3fc1550b4bdf9ef9",
+        "test_files_passed": 212,
+        "tests_passed": 1450,
+        "lint_errors": 0,
+        "lint_warnings": 20,
+        "exit_code": 0
+      },
+      "previews": {
+        "status": "pass",
+        "command": "cd web && pnpm exec eslint scripts/remaining-providers-evidence.mjs && node scripts/remaining-providers-evidence.mjs",
+        "environment": "Docker",
+        "local_log_sha256": "d80c520995625abde18129a170006f78a619cab51a2adac0ef7ec8222b9e528e",
+        "captures": 26,
+        "kind": "synthetic production-component fixtures, not native E2E",
+        "exit_code": 0
+      },
+      "docs_api": {
+        "status": "pass",
+        "command": "go test -count=1 ./docs ./api",
+        "environment": "Docker",
+        "exit_code": 0,
+        "package_seconds": {
+          "docs": 1.364,
+          "api": 0.489
+        },
+        "local_log_sha256": "4489221d0e9a1ba20a8b7d8fcf7f1fd98a91016dcfec5b618883776a68185527"
+      },
+      "publication": {
+        "status": "pass",
+        "command": "Private publication scanner plus screenshot/JSON validation",
+        "files_scanned": 8061,
+        "secret_sources_checked": 16,
+        "secret_match_files": 0,
+        "historical_live_capture_hashes_verified": 30
+      }
+    },
+    "provenance_note": "Historical sections retain their original candidates and results. This corrective gate supersedes them for changed inputs. No new native E2E run is claimed. All persistence package, store-conformance, port, domain and migration dependency inputs remained unchanged during and after the full PostgreSQL run. Subsequent provider/use-case fixes are covered by the final backend and race gate.",
+    "reviews": {
+      "implementation-qa": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0,
+        "scope": "Combined writer acceptance and targeted recheck before the final Taurus panel"
+      },
+      "qa-verifier": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      },
+      "security-auditor": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      },
+      "performance-auditor": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0,
+        "retained_limits": [
+          "O(A) selection across active and future-deferred intents; 100000-future fixture selected three due rows in164.441ms",
+          "Existing large-artifact CHECK and fresh List/Execute reads; separate immutable artifact data if measured capacity requires it"
+        ]
+      },
+      "reliability-auditor": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      },
+      "frontend-quality-auditor": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      },
+      "architecture-critic": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      }
+    },
+    "source_fingerprint_algorithm": "SHA256 of UTF-8 JSON path-to-SHA256 map with sorted keys and compact separators",
+    "source_selection": [
+      "internal/",
+      "cmd/",
+      "migrations/",
+      "web/src/",
+      "Makefile",
+      "go.mod",
+      "go.sum",
+      "web/package.json",
+      "web/pnpm-lock.yaml"
+    ],
+    "recorded_at_utc": "2026-10-21T00:04:55.139241+00:00",
+    "resolved_panel_findings": [
+      "Expired initial-shell lease must settle before preflight429",
+      "RetryFailed requires current authority before reactivation, then precedes preflight429",
+      "Canonical Azure project names with spaces/Unicode must acknowledge and reconcile",
+      "Graph ambiguous/readback errors must retain typed Retry-After",
+      "Complete additional SharePoint role bindings prove restriction loss",
+      "Typed GitHub rate-limit403 must retain durable polling delay"
+    ],
+    "remaining_native_acceptance": "Unchanged historical live_e2e.remaining; Microsoft acceptance explicitly deferred to1576 and Notion excluded. No new native run.",
+    "failed_attempts_not_pass_evidence": [
+      "Backend run stopped after final review found a retry-ordering defect; rerun on the settled candidate is recorded separately",
+      "Initial new Graph child-read throttle fixture used the wrong path; corrected fixture reached the real readback and passed",
+      "Earlier helper sanitized its Go environment and missed its default module cache; successful full gate mounts both ordinary and sanitized cache paths"
+    ],
+    "open_material_findings": 0
+  }
+}

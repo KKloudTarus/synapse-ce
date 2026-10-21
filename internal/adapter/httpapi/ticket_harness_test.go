@@ -27,6 +27,10 @@ func (manualTicketProviders) TicketProvider(context.Context, integration.Integra
 	return nil, shared.ErrForbidden
 }
 
+func (manualTicketProviders) TicketProviderDescriptor(integration.Provider) (integration.ProviderDescriptor, error) {
+	return integration.ProviderDescriptor{}, shared.ErrForbidden
+}
+
 type manualTicketPolicy struct{}
 
 func (manualTicketPolicy) GetEngagementNotificationSetting(context.Context, shared.ID, shared.ID) (notification.EngagementNotificationSetting, error) {

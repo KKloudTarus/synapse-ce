@@ -1,0 +1,133 @@
+{
+  "provider_acceptance": false,
+  "captures": [
+    {
+      "file": "document-light.png",
+      "state": "document",
+      "theme": "light",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "a3257ecec94072c49adcf94b87968daf72ec8439c57de8421abdb2b46206e582"
+    },
+    {
+      "file": "empty-light.png",
+      "state": "empty",
+      "theme": "light",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "7137924a75b8b571db992b9bd7ce8f24c7e5a63863af8b6d53c566a5ef79018b"
+    },
+    {
+      "file": "loading-light.png",
+      "state": "loading",
+      "theme": "light",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "7de8a8bd43a8fde55623715ae771fe24181b2ae9c95768f581fd0505bf6a0a42"
+    },
+    {
+      "file": "error-light.png",
+      "state": "error",
+      "theme": "light",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "bd1d490c3e4dc8bfeb3322073c1024c389ff5226b886d66f5415fce468e83c1c"
+    },
+    {
+      "file": "permission-light.png",
+      "state": "permission",
+      "theme": "light",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "322f52c05ed26945c1922625080c8bb41f9258aa78ce0e6b5b12fe4ffef6e807"
+    },
+    {
+      "file": "restriction-lost-light.png",
+      "state": "restriction-lost",
+      "theme": "light",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "1be9d83184b83ced914d0102407da993c91d409795a3065023b5462df6b9217e"
+    },
+    {
+      "file": "native-preview-light.png",
+      "state": "native-preview",
+      "theme": "light",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "013fedf839772c7c1e10b2324aa68328dd447eac8b6ab07780e04173f5e6431a"
+    },
+    {
+      "file": "azure-preview-light.png",
+      "state": "azure-preview",
+      "theme": "light",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "3ac372b585c9883b04fb8e30b5f40085751797cfd25a4197ff6193ec71a74dfa"
+    },
+    {
+      "file": "document-dark.png",
+      "state": "document",
+      "theme": "dark",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "60252a123a8de30fbaba9ab84357800b1135509760a790fdaf4a77fd46bb8228"
+    },
+    {
+      "file": "empty-dark.png",
+      "state": "empty",
+      "theme": "dark",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "7f18b7e6d21317a106c8a32ffebe01daecb89c4f851903d9a2eeb4a2a318b7d8"
+    },
+    {
+      "file": "loading-dark.png",
+      "state": "loading",
+      "theme": "dark",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "50b63b5e2490b0e2387fc3062e4bc157b8c7b5343cad6fcf3184d69946fc20e4"
+    },
+    {
+      "file": "error-dark.png",
+      "state": "error",
+      "theme": "dark",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "ddc4647344c020dc8defddc6d8010ede18ca9f08c179319946d9e4513681a877"
+    },
+    {
+      "file": "permission-dark.png",
+      "state": "permission",
+      "theme": "dark",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "887eba63679b67776fd79bb6db5a18596eaaffd9d6d095f1c98bd9967920df44"
+    },
+    {
+      "file": "restriction-lost-dark.png",
+      "state": "restriction-lost",
+      "theme": "dark",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "cfacb96ccf9ee94c459ebfc2b3b84ee7054ab5606100b20266805380ad6b7f1f"
+    },
+    {
+      "file": "native-preview-dark.png",
+      "state": "native-preview",
+      "theme": "dark",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "63dbead289fec133775a442ae14f526b12a6ce223a45374f4e8f42a376047715"
+    },
+    {
+      "file": "azure-preview-dark.png",
+      "state": "azure-preview",
+      "theme": "dark",
+      "source": "Production components, synthetic API fixtures",
+      "errors": [],
+      "sha256": "f0bd9aa7208b431fe9be1eb516e04d92944d2acde327cd304a134b78fa67884c"
+    }
+  ]
+}

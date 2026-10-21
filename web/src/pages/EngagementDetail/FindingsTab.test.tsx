@@ -9,6 +9,11 @@ vi.mock('../../lib/api', () => ({
     status = 500
   },
   api: {
+    listIntegrations: vi.fn().mockResolvedValue([]),
+    listIntegrationProviders: vi.fn().mockResolvedValue([]),
+    findingTickets: vi.fn().mockResolvedValue({ links: [], intents: [], mappings: [] }),
+    me: vi.fn().mockResolvedValue({ role: 'reviewer' }),
+    ticketObservations: vi.fn().mockResolvedValue({ observations: [], proposals: [], comments: [] }),
     addFindingComment: vi.fn().mockResolvedValue(undefined),
     createFinding: vi.fn().mockResolvedValue(undefined),
     findingComments: vi.fn().mockResolvedValue([]),

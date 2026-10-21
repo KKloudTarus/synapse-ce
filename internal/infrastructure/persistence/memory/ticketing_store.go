@@ -49,8 +49,9 @@ type memoryAutoPushReceipt struct {
 	completed   bool
 }
 type memoryInboundPollProgress struct {
-	checkedAt time.Time
-	version   int
+	checkedAt  time.Time
+	nextPollAt time.Time
+	version    int
 }
 
 var _ ports.TicketStore = (*TicketStore)(nil)

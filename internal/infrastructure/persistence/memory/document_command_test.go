@@ -42,6 +42,7 @@ func TestDocumentCommandStoreMemoryAdmissionAndCheckpointCAS(t *testing.T) {
 	}
 	progress := saved.Progress
 	progress.IntentVersion, progress.LeaseUntil, progress.UpdatedAt = claimed.Version, &lease, now.Add(time.Second)
+	progress.Step = "restrictions"
 	checkpoint, err := store.SaveDocumentProgress(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Progress.Version, progress)
 	if err != nil || checkpoint.Progress.Version != 2 {
 		t.Fatalf("checkpoint=%+v err=%v", checkpoint.Progress, err)
@@ -82,6 +83,102 @@ func TestDocumentCommandStoreMemoryResumeRequiresUncertainCAS(t *testing.T) {
 	}
 }
 
+func TestDocumentCommandStoreMemoryYieldRequiresCleanCheckpointAndFencesWorkers(t *testing.T) {
+	store, fixture := newDocumentStoreForTest(t)
+	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	command := documentCommandForTest(fixture.Tenant, fixture.Engagement, fixture.Integration, "document-yield", "yield", now)
+	saved, _, err := store.CreateDocumentCommand(context.Background(), fixture.Tenant, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := now.Add(time.Minute)
+	claimed, err := store.TransitionIntent(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Intent.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress := saved.Progress
+	progress.IntentVersion, progress.LeaseUntil, progress.UpdatedAt = claimed.Version, &lease, now.Add(time.Second)
+	progress.Step = "restrictions"
+	progress.Remote = docpublish.RemotePage{ID: "page", Version: 1, Revision: "opaque", URL: "https://wiki.example/pages/page"}
+	progress.UploadedReceipts = []ports.DocumentUploadReceipt{{Key: "attachment:0", Digest: strings.Repeat("c", 64)}}
+	checkpoint, err := store.SaveDocumentProgress(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Progress.Version, progress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TransitionIntent(context.Background(), fixture.Tenant, saved.Intent.ID, claimed.Version, docpublish.IntentTransition{Event: docpublish.CheckpointYield}, now.Add(2*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("generic yield err=%v, want conflict", err)
+	}
+	if _, err := store.YieldDocumentCommand(context.Background(), fixture.Tenant, saved.Intent.ID, claimed.Version-1, checkpoint.Progress.Version, now.Add(2*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale intent yield err=%v, want conflict", err)
+	}
+	if _, err := store.YieldDocumentCommand(context.Background(), "other-tenant", saved.Intent.ID, claimed.Version, checkpoint.Progress.Version, now.Add(2*time.Second)); !errors.Is(err, shared.ErrNotFound) {
+		t.Fatalf("cross-tenant yield err=%v, want not found", err)
+	}
+	yielded, err := store.YieldDocumentCommand(context.Background(), fixture.Tenant, saved.Intent.ID, claimed.Version, checkpoint.Progress.Version, now.Add(2*time.Second))
+	if err != nil || yielded.Intent.State != writeintent.Pending || yielded.Intent.LeaseUntil != nil || yielded.Intent.Attempts != 0 || yielded.Progress.LeaseUntil != nil || yielded.Progress.Remote.Revision != "opaque" || len(yielded.Progress.UploadedReceipts) != 1 {
+		t.Fatalf("yielded=%+v err=%v", yielded, err)
+	}
+	if _, err := store.TransitionIntent(context.Background(), fixture.Tenant, saved.Intent.ID, claimed.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now.Add(3*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale claimant err=%v, want conflict", err)
+	}
+	if _, err := store.YieldDocumentCommand(context.Background(), fixture.Tenant, saved.Intent.ID, claimed.Version, checkpoint.Progress.Version, now.Add(3*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("duplicate yield err=%v, want conflict", err)
+	}
+
+	// A stored operation marker means the remote acknowledgement was not yet
+	// proven locally; releasing its lease would permit an unsafe retry.
+	dirty := documentCommandForTest(fixture.Tenant, fixture.Engagement, fixture.Integration, "document-yield-dirty", "yield-dirty", now)
+	dirty.Intent.SourceRef = "report-dirty"
+	dirtySaved, _, err := store.CreateDocumentCommand(context.Background(), fixture.Tenant, dirty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirtyClaimed, err := store.TransitionIntent(context.Background(), fixture.Tenant, dirtySaved.Intent.ID, dirtySaved.Intent.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirtyProgress := dirtySaved.Progress
+	dirtyProgress.IntentVersion, dirtyProgress.LeaseUntil, dirtyProgress.UpdatedAt = dirtyClaimed.Version, &lease, now.Add(time.Second)
+	dirtyProgress.OutstandingOperation, dirtyProgress.OutstandingKey, dirtyProgress.OutstandingDigest = "attachment", "attachment:0", strings.Repeat("d", 64)
+	dirtyCheckpoint, err := store.SaveDocumentProgress(context.Background(), fixture.Tenant, dirtySaved.Intent.ID, dirtySaved.Progress.Version, dirtyProgress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.YieldDocumentCommand(context.Background(), fixture.Tenant, dirtySaved.Intent.ID, dirtyClaimed.Version, dirtyCheckpoint.Progress.Version, now.Add(2*time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("outstanding yield err=%v, want conflict", err)
+	}
+	if _, err := store.YieldDocumentCommand(context.Background(), fixture.Tenant, dirtySaved.Intent.ID, dirtyClaimed.Version, dirtyCheckpoint.Progress.Version, lease); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("expired lease yielded: %v", err)
+	}
+
+	fresh := documentCommandForTest(fixture.Tenant, fixture.Engagement, fixture.Integration, "document-yield-fresh", "yield-fresh", now)
+	fresh.Intent.SourceRef = "report-fresh"
+	freshSaved, _, err := store.CreateDocumentCommand(context.Background(), fixture.Tenant, fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshClaimed, err := store.TransitionIntent(context.Background(), fixture.Tenant, freshSaved.Intent.ID, freshSaved.Intent.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshProgress := freshSaved.Progress
+	freshProgress.IntentVersion, freshProgress.LeaseUntil, freshProgress.UpdatedAt = freshClaimed.Version, &lease, now.Add(time.Second)
+	freshProgress.Step = "restrictions"
+	freshProgress.Remote = docpublish.RemotePage{ID: "page-fresh", Version: 1, URL: "https://wiki.example/pages/fresh"}
+	freshCheckpoint, err := store.SaveDocumentProgress(context.Background(), fixture.Tenant, freshSaved.Intent.ID, freshSaved.Progress.Version, freshProgress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range []time.Time{lease, lease.Add(time.Nanosecond)} {
+		if cleanDocumentYieldCheckpoint(freshCheckpoint.Progress, freshClaimed, at) {
+			t.Fatalf("clean checkpoint eligibility accepted expired lease %s", at)
+		}
+		if _, err := store.YieldDocumentCommand(context.Background(), fixture.Tenant, freshSaved.Intent.ID, freshClaimed.Version, freshCheckpoint.Progress.Version, at); !errors.Is(err, shared.ErrConflict) {
+			t.Fatalf("clean checkpoint yielded at expired lease %s: %v", at, err)
+		}
+	}
+}
+
 func TestDocumentCommandStoreMemoryFairQueueAdvancesPastUnresolvedCommands(t *testing.T) {
 	store, fixture := newDocumentStoreForTest(t)
 	now := time.Date(2026, 10, 17, 13, 0, 0, 0, time.UTC)
@@ -119,4 +216,70 @@ func TestDocumentCommandStoreMemoryFairQueueAdvancesPastUnresolvedCommands(t *te
 		}
 	}
 	t.Fatalf("unvisited pending command was starved by unresolved commands: %+v", second)
+}
+
+func TestDocumentCommandStoreMemoryDeferralRequiresLiveMatchingLease(t *testing.T) {
+	store, fixture := newDocumentStoreForTest(t)
+	now := time.Date(2026, 10, 17, 15, 0, 0, 0, time.UTC)
+	command := documentCommandForTest(fixture.Tenant, fixture.Engagement, fixture.Integration, "document-defer-lease", "defer-lease", now)
+	command.Intent.SourceRef = "report-defer-lease"
+	saved, _, err := store.CreateDocumentCommand(context.Background(), fixture.Tenant, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := now.Add(time.Minute)
+	claimed, err := store.TransitionIntent(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Intent.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress := saved.Progress
+	progress.IntentVersion, progress.LeaseUntil, progress.UpdatedAt = claimed.Version, &lease, now.Add(time.Second)
+	progress.Step = "restrictions"
+	progress.Remote = docpublish.RemotePage{ID: "page-defer", Version: 1, URL: "https://wiki.example/pages/defer"}
+	saved, err = store.SaveDocumentProgress(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Progress.Version, progress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range []time.Time{lease, lease.Add(time.Nanosecond)} {
+		if _, err := store.DeferDocumentCommand(context.Background(), fixture.Tenant, saved.Intent.ID, claimed.Version, saved.Progress.Version, saved.QueueVersion, at.Add(time.Minute), at, ports.DocumentRetryUncertain, ""); !errors.Is(err, shared.ErrConflict) {
+			t.Fatalf("uncertain deferral accepted at expired lease %s: %v", at, err)
+		}
+		if _, err := store.DeferDocumentCommand(context.Background(), fixture.Tenant, saved.Intent.ID, claimed.Version, saved.Progress.Version, saved.QueueVersion, at.Add(time.Minute), at, ports.DocumentRetryReject, "provider_refused"); !errors.Is(err, shared.ErrConflict) {
+			t.Fatalf("reject deferral accepted at expired lease %s: %v", at, err)
+		}
+	}
+
+	mismatched := lease.Add(time.Second)
+	store.mu.Lock()
+	stored := store.commands[fixture.Tenant][saved.Intent.ID]
+	stored.Progress.LeaseUntil = &mismatched
+	store.commands[fixture.Tenant][saved.Intent.ID] = stored
+	store.mu.Unlock()
+	if _, err := store.DeferDocumentCommand(context.Background(), fixture.Tenant, saved.Intent.ID, claimed.Version, saved.Progress.Version, saved.QueueVersion, now.Add(2*time.Minute), now.Add(2*time.Second), ports.DocumentRetryUncertain, ""); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("uncertain deferral accepted mismatched progress lease: %v", err)
+	}
+}
+
+func TestDocumentCommandStoreMemoryClaimHonorsConcurrentRetryDeferral(t *testing.T) {
+	store, fixture := newDocumentStoreForTest(t)
+	now := time.Date(2026, 10, 17, 16, 0, 0, 0, time.UTC)
+	command := documentCommandForTest(fixture.Tenant, fixture.Engagement, fixture.Integration, "document-defer-claim", "defer-claim", now)
+	command.Intent.SourceRef = "report-defer-claim"
+	saved, _, err := store.CreateDocumentCommand(context.Background(), fixture.Tenant, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := now.Add(time.Minute)
+	deferred, err := store.DeferDocumentCommand(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Intent.Version, saved.Progress.Version, saved.QueueVersion, deadline, now, ports.DocumentRetryKeep, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := deadline.Add(time.Minute)
+	if _, err := store.TransitionIntent(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Intent.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale claimant bypassed provider deferral: %v", err)
+	}
+	claimed, err := store.TransitionIntent(context.Background(), fixture.Tenant, saved.Intent.ID, saved.Intent.Version, docpublish.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, deadline)
+	if err != nil || claimed.State != writeintent.InFlight || !deferred.NextAttemptAt.Equal(deadline) {
+		t.Fatalf("claim at retry due intent=%+v deferred=%+v err=%v", claimed, deferred, err)
+	}
 }

@@ -1,0 +1,107 @@
+{
+  "environment": {
+    "database": "isolated PostgreSQL 17 container",
+    "cache_state": "warm",
+    "provider_calls": 0,
+    "live_e2e_stack_touched": false
+  },
+  "queue_fixture": {
+    "document_commands": 100005,
+    "terminal_rows": 100002,
+    "eligible_rows": 3,
+    "terminal_distribution": {
+      "done": 50001,
+      "failed_attempts_5": 50001
+    }
+  },
+  "current_query_before_experimental_index": {
+    "terminal_history_in_returned_due_order": false,
+    "intent_rows_removed_by_filter": 100002,
+    "candidate_selection_ms": 38.7,
+    "full_cte_update_ms": 149.9,
+    "shared_buffers": 5556,
+    "complexity": "O(N tenant intents)"
+  },
+  "index_only_experiment": {
+    "index": "(tenant_id,id) WHERE state IN (pending,uncertain,in_flight) OR (state=failed AND attempts<5)",
+    "result": "insufficient with the existing single OR predicate",
+    "command_rows_scanned": 100004,
+    "execution_ms": 44.682,
+    "shared_buffers": 7550
+  },
+  "split_predicate_experiment": {
+    "index": "(tenant_id,state,lease_until,id) over the same eligible-state predicate",
+    "query_shape": "UNION ALL of pending/uncertain, retryable failed, and due in-flight branches",
+    "returned_due_rows": 2,
+    "execution_ms": 0.265,
+    "shared_buffers": 30,
+    "complexity": "O(A + limit) candidate read, then O(A log A) sort for A eligible active intents",
+    "production_slo_claimed": false
+  },
+  "final_candidate_exact_update": {
+    "eligible_intent_rows_read": 3,
+    "selected_cte_ms": 0.163,
+    "selected_cte_shared_buffers": 28,
+    "full_update_ms": 121.887,
+    "full_update_shared_buffers": 5502,
+    "rls_execution": {
+      "non_superuser": true,
+      "force_rls": true,
+      "tenant_setting": "app.current_tenant",
+      "tenant_policy_visible_in_plan": true
+    },
+    "interpretation": "candidate selection avoids terminal history; the artifact constraint makes a large-row fairness update expensive"
+  },
+  "artifact_constraint_detoast_diagnostic": {
+    "valid_max_pdf_artifact_with_constraint": {
+      "execution_ms": 177.917,
+      "shared_buffers": 5403,
+      "wal_records": 5,
+      "wal_bytes": 413
+    },
+    "same_update_in_rolled_back_transaction_without_constraint": {
+      "execution_ms": 0.564,
+      "shared_buffers": 19,
+      "wal_records": 5,
+      "wal_bytes": 413
+    },
+    "interpretation": "the CHECK expression detoasts/converts artifact JSONB on each metadata update; equal WAL rules out a large artifact rewrite in this measurement"
+  },
+  "artifact_scan_lower_fixture": {
+    "json_bytes": 10485930,
+    "json_mib": 10.00016,
+    "decoded_binary_bytes": 7864320,
+    "decoded_binary_mib": 7.5,
+    "mean_allocated_bytes_per_scan": 21731963,
+    "mean_allocated_mib_per_scan": 20.72521,
+    "mean_elapsed_ms_per_scan": 44.344
+  },
+  "artifact_scan_valid_max_pdf_fixture": {
+    "pdf_binary_bytes": 10485760,
+    "pdf_binary_mib": 10,
+    "json_bytes": 13981163,
+    "json_mib": 13.33348,
+    "mean_allocated_bytes_per_scan": 27840337,
+    "mean_allocated_mib_per_scan": 26.55061,
+    "mean_elapsed_ms_per_scan": 89.33,
+    "successful_yield_or_deferral_two_scans": {
+      "logical_json_bytes": 27962326,
+      "logical_json_mib": 26.66695,
+      "allocated_bytes": 55680674,
+      "allocated_mib": 53.10123,
+      "elapsed_ms": 178.66
+    }
+  },
+  "future_active_backlog_check": {
+    "future_deferred_active_commands": 100000,
+    "due_rows_selected": 3,
+    "execution_ms": 164.441,
+    "active_intent_rows_scanned": 100003,
+    "future_command_rows_filtered": 100000,
+    "starvation_observed": false,
+    "complexity": "O(A active intents), including future-deferred work",
+    "transaction": "rolled back; separate isolated queue-cost database",
+    "local_log_sha256": "06dfbb8e09b5b7db9f09a43e51caf83668c4c7173a3b96ac783b5aea1252b237",
+    "production_slo": false
+  }
+}

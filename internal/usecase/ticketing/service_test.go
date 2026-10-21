@@ -17,9 +17,23 @@ import (
 	usecase "github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing"
 )
 
-type ticketClock struct{ t time.Time }
+type ticketClock struct {
+	t      time.Time
+	shared *time.Time
+}
 
-func (c ticketClock) Now() time.Time { return c.t }
+func (c ticketClock) Now() time.Time {
+	if c.shared != nil {
+		return *c.shared
+	}
+	return c.t
+}
+
+func (c ticketClock) Advance(d time.Duration) {
+	if c.shared != nil {
+		*c.shared = c.shared.Add(d)
+	}
+}
 
 type ticketIDs struct {
 	mu sync.Mutex
@@ -42,7 +56,8 @@ type ticketFixture struct {
 
 func newTicketFixture(t *testing.T) ticketFixture {
 	t.Helper()
-	clock := ticketClock{time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := ticketClock{t: now, shared: &now}
 	engagements := memory.NewEngagementRepository()
 	findings := memory.NewFindingRepository()
 	seedTicketParent(t, engagements, findings, "tenant-a", "eng-a", "finding-a", "", clock.Now())

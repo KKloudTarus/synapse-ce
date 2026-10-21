@@ -1,0 +1,53 @@
+{
+  "provider_acceptance": false,
+  "captures": [
+    {
+      "file": "sharepoint-light.png",
+      "provider": "sharepoint",
+      "theme": "light",
+      "errors": [],
+      "source": "Production configuration form, actual registered descriptors, synthetic API",
+      "sha256": "b64b3d15bde5510bffa8d592b2befadb88ffb403b9d7b3576d4078f65d25d823"
+    },
+    {
+      "file": "sharepoint-dark.png",
+      "provider": "sharepoint",
+      "theme": "dark",
+      "errors": [],
+      "source": "Production configuration form, actual registered descriptors, synthetic API",
+      "sha256": "08bd38a18c1c420552c72212a9e67be5688d128f1836b71906ed83754b3add31"
+    },
+    {
+      "file": "onedrive-light.png",
+      "provider": "onedrive",
+      "theme": "light",
+      "errors": [],
+      "source": "Production configuration form, actual registered descriptors, synthetic API",
+      "sha256": "89277e41afe89d618fa36eee4196e9b2151b91f3378ff85c8342434be2a5b84b"
+    },
+    {
+      "file": "onedrive-dark.png",
+      "provider": "onedrive",
+      "theme": "dark",
+      "errors": [],
+      "source": "Production configuration form, actual registered descriptors, synthetic API",
+      "sha256": "cb8b1e1845a02d7c50688d05ee7786001dc1d4aa49398136723444bfd84d662d"
+    },
+    {
+      "file": "google-drive-light.png",
+      "provider": "google-drive",
+      "theme": "light",
+      "errors": [],
+      "source": "Production configuration form, actual registered descriptors, synthetic API",
+      "sha256": "796594b622d95e650e38ea7948f5d678ce9606286ee3571a836d02017eebf081"
+    },
+    {
+      "file": "google-drive-dark.png",
+      "provider": "google-drive",
+      "theme": "dark",
+      "errors": [],
+      "source": "Production configuration form, actual registered descriptors, synthetic API",
+      "sha256": "31eab4ed48cf23eb49aee122f7452482886021ad72f03ad621f70a7b2338ec69"
+    }
+  ]
+}

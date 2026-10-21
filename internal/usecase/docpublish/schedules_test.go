@@ -74,8 +74,23 @@ func (s *countingScheduleSender) SendDocumentPDF(context.Context, ports.Document
 
 type schedulePublisher struct{}
 
+func (schedulePublisher) ValidateDocumentDestination(context.Context, shared.ID, shared.ID) error {
+	return nil
+}
+
 func (schedulePublisher) PublishArtifact(context.Context, shared.ID, ports.DocumentActor, PublishInput, ports.DocumentArtifact) (ReleaseResult, error) {
 	return ReleaseResult{}, nil
+}
+
+type scheduleValidationPublisher struct {
+	schedulePublisher
+	err   error
+	calls int
+}
+
+func (p *scheduleValidationPublisher) ValidateDocumentDestination(context.Context, shared.ID, shared.ID) error {
+	p.calls++
+	return p.err
 }
 
 type scheduleExecutor struct{}
@@ -130,6 +145,10 @@ func TestScheduleOccurrenceRejectsNewerScheduleReloadedDuringClaim(t *testing.T)
 
 func (p confluencePublisher) PublishArtifact(context.Context, shared.ID, ports.DocumentActor, PublishInput, ports.DocumentArtifact) (ReleaseResult, error) {
 	return p.result, nil
+}
+
+func (confluencePublisher) ValidateDocumentDestination(context.Context, shared.ID, shared.ID) error {
+	return nil
 }
 
 type confluenceExecutor struct{ intent domain.Intent }
@@ -236,7 +255,7 @@ func TestScheduleServiceExpiredSMTPLeaseBecomesUncertainWithoutResend(t *testing
 	}
 }
 
-func TestConfluenceOccurrenceTerminalTransitionsClearLease(t *testing.T) {
+func TestDocumentOccurrenceTerminalTransitionsClearLease(t *testing.T) {
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
 	lease := now.Add(time.Minute)
 	schedule := domain.Schedule{ID: "schedule", IntegrationID: "integration", Source: domain.Source{SourceKind: domain.EngagementReport, SourceRef: "engagement:eng", Scope: domain.Engagement, ScopeID: "eng"}}
@@ -254,7 +273,7 @@ func TestConfluenceOccurrenceTerminalTransitionsClearLease(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &confluenceOccurrenceStore{}
 			svc := &ScheduleService{deps: ScheduleDependencies{Store: store, Publisher: confluencePublisher{tc.result}, Executor: confluenceExecutor{tc.intent}, Clock: &releaseClock{at: now}}}
-			if err := svc.executeConfluenceOccurrence(context.Background(), "tenant", schedule, ports.DocumentActor{UserID: "admin"}, base, now); err != nil {
+			if err := svc.executeDocumentOccurrence(context.Background(), "tenant", schedule, ports.DocumentActor{UserID: "admin"}, base, now); err != nil {
 				t.Fatal(err)
 			}
 			got := store.saves[len(store.saves)-1].Occurrence
