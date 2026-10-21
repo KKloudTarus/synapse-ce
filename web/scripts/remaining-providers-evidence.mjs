@@ -66,6 +66,12 @@ try {
    const file = `${state}-${theme}.png`
    await page.screenshot({ path: resolve(output, file), fullPage: true })
    captures.push({ file, state, theme, source: 'Production console, synthetic API fixtures', errors, sha256: createHash('sha256').update(readFileSync(resolve(output, file))).digest('hex') })
+   if (state === 'orphan') {
+    await page.getByRole('button', { name: 'Delete mapping', exact: true }).scrollIntoViewIfNeeded()
+    const actionsFile = `orphan-actions-${theme}.png`
+    await page.screenshot({ path: resolve(output, actionsFile), fullPage: true })
+    captures.push({ file: actionsFile, state: 'orphan-actions', theme, source: 'Production console, synthetic API fixtures', errors, sha256: createHash('sha256').update(readFileSync(resolve(output, actionsFile))).digest('hex') })
+   }
    if (state === 'github-issues' || state === 'permission') {
     await page.setViewportSize({ width: 390, height: 900 })
     if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)) throw new Error(`Horizontal overflow: ${state} ${theme}`)

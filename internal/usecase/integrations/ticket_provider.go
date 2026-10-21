@@ -45,3 +45,9 @@ func (service *Service) TicketProvider(ctx context.Context, item integration.Int
 	}
 	return provider, nil
 }
+
+// TicketProviderDescriptor exposes code-owned ticket capability metadata to the
+// ticket workflow. Runtime integrations can select only registered providers.
+func (service *Service) TicketProviderDescriptor(provider integration.Provider) (integration.ProviderDescriptor, error) {
+	return service.registry.Descriptor(provider)
+}

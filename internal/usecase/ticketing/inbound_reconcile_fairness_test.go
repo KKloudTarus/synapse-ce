@@ -35,6 +35,9 @@ type inboundFairnessProviders struct{ provider *inboundFairnessProvider }
 func (p inboundFairnessProviders) TicketProvider(context.Context, integration.Integration) (ports.TicketProvider, error) {
 	return p.provider, nil
 }
+func (p inboundFairnessProviders) TicketProviderDescriptor(provider integration.Provider) (integration.ProviderDescriptor, error) {
+	return integration.ProviderDescriptor{Provider: provider, Capabilities: []integration.Capability{integration.CapabilityTickets}}, nil
+}
 
 type inboundFairnessStore struct {
 	ports.TicketInboundStore

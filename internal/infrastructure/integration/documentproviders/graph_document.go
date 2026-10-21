@@ -102,6 +102,26 @@ func (a *graphAdapter) graphItem(ctx context.Context, id string) (graphItem, err
 	return it, nil
 }
 
+// graphFolderIdentity distinguishes a complete, contradictory remote identity
+// from a response that omitted fields needed to make that observation. The
+// latter must fail closed as unverifiable instead of reporting a restriction
+// loss that has not been proven.
+func graphFolderIdentity(folder graphItem, container, drive, expectedMarker string) error {
+	if !presentFacet(folder.Folder) {
+		if !presentFacet(folder.File) {
+			return docError(http.StatusOK, "complete_identity_unverifiable", false)
+		}
+		return restrictionLostError(http.StatusOK, "remote_identity_changed")
+	}
+	if presentFacet(folder.File) || !safeID(folder.Parent.ID) || !safeID(folder.Parent.DriveID) {
+		return docError(http.StatusOK, "complete_identity_unverifiable", false)
+	}
+	if folder.Parent.ID != container || folder.Parent.DriveID != drive || !validMarker(folder.Name) || (expectedMarker != "" && folder.Name != expectedMarker) {
+		return restrictionLostError(http.StatusOK, "remote_identity_changed")
+	}
+	return nil
+}
+
 func (a *graphAdapter) graphChild(ctx context.Context, folder, name string) (graphItem, error) {
 	if !safeID(folder) || (name != "report.html" && name != graphManifestName && !validAttachmentName(name)) {
 		return graphItem{}, shared.ErrValidation
@@ -185,14 +205,7 @@ func isConflict(err error, target **ports.DocumentProviderError) bool {
 }
 
 func shellAmbiguity(err error) error {
-	if err == nil {
-		return nil
-	}
-	var providerErr *ports.DocumentProviderError
-	if errors.As(err, &providerErr) {
-		return docError(providerErr.Status, "shell_incomplete", true)
-	}
-	return docError(0, "shell_incomplete", true)
+	return partialEffectAmbiguity(err, "shell_incomplete")
 }
 
 // partialEffectAmbiguity preserves the reconciliation fence after a remote
@@ -205,7 +218,9 @@ func partialEffectAmbiguity(err error, code string) error {
 	}
 	var providerErr *ports.DocumentProviderError
 	if errors.As(err, &providerErr) {
-		return docError(providerErr.Status, code, true)
+		refusal := *providerErr
+		refusal.Code, refusal.Ambiguous = code, true
+		return &refusal
 	}
 	return docError(0, code, true)
 }
@@ -297,8 +312,8 @@ func (a *graphAdapter) RestrictDocument(ctx context.Context, page, group string)
 }
 
 func (a *graphAdapter) neutralShellItems(ctx context.Context, folder graphItem, marker string, enforceACL bool) (map[string]graphItem, string, error) {
-	if !presentFacet(folder.Folder) || folder.Parent.ID != a.container || folder.Parent.DriveID != a.drive || folder.Name != marker {
-		return nil, "", docError(http.StatusOK, "remote_identity_changed", false)
+	if err := graphFolderIdentity(folder, a.container, a.drive, marker); err != nil {
+		return nil, "", err
 	}
 	folderRef := graphChildPath(a.folderPath, marker)
 	if enforceACL {
@@ -391,8 +406,8 @@ func (a *graphAdapter) completeNeutralShell(ctx context.Context, folderID, marke
 	if err != nil {
 		return err
 	}
-	if !presentFacet(folder.Folder) || folder.Parent.ID != a.container || folder.Parent.DriveID != a.drive || folder.Name != marker {
-		return docError(http.StatusOK, "remote_identity_changed", false)
+	if err = graphFolderIdentity(folder, a.container, a.drive, marker); err != nil {
+		return err
 	}
 	folderRef := graphChildPath(a.folderPath, marker)
 	_, bodyCreated, err := a.ensureNeutralFile(ctx, folder, folderRef, "report.html", []byte(graphNeutralShell))
@@ -483,8 +498,12 @@ func (a *graphAdapter) documentItems(ctx context.Context, page, container, group
 		return graphItem{}, graphItem{}, nil, "", err
 	}
 	logicalPage := validMarker(bodyID)
-	if !presentFacet(folder.Folder) || folder.Parent.ID != container || folder.Parent.DriveID != a.drive || !validMarker(folder.Name) || (logicalPage && folder.Name != bodyID) {
-		return graphItem{}, graphItem{}, nil, "", docError(http.StatusOK, "remote_identity_changed", false)
+	expectedMarker := ""
+	if logicalPage {
+		expectedMarker = bodyID
+	}
+	if err = graphFolderIdentity(folder, container, a.drive, expectedMarker); err != nil {
+		return graphItem{}, graphItem{}, nil, "", err
 	}
 	folderRef := graphChildPath(a.folderPath, folder.Name)
 	if enforceACL {
@@ -507,13 +526,13 @@ func (a *graphAdapter) documentItems(ctx context.Context, page, container, group
 		}
 		if (logicalPage && child.Name == "report.html") || (!logicalPage && child.ID == bodyID) {
 			if foundBody || child.Name != "report.html" {
-				return graphItem{}, graphItem{}, nil, "", docError(http.StatusOK, "remote_identity_changed", false)
+				return graphItem{}, graphItem{}, nil, "", restrictionLostError(http.StatusOK, "remote_identity_changed")
 			}
 			body, foundBody = child, true
 		}
 	}
 	if !foundBody {
-		return graphItem{}, graphItem{}, nil, "", docError(http.StatusOK, "remote_identity_changed", false)
+		return graphItem{}, graphItem{}, nil, "", restrictionLostError(http.StatusOK, "remote_identity_changed")
 	}
 	if err = a.verifyDocumentChildren(ctx, children, folderRef, enforceACL); err != nil {
 		return graphItem{}, graphItem{}, nil, "", err
@@ -618,7 +637,7 @@ func (a *graphAdapter) writeManifest(ctx context.Context, folderRef string, item
 	}
 	confirmed, _, err := a.bodySnapshot(ctx, fileRef)
 	if err != nil {
-		return docError(http.StatusOK, "manifest_readback_unavailable", true)
+		return partialEffectAmbiguity(err, "manifest_readback_unavailable")
 	}
 	if !bytes.Equal(confirmed, raw) || item.Name != graphManifestName {
 		return docError(http.StatusOK, "manifest_readback_invalid", true)
@@ -691,7 +710,7 @@ func (a *graphAdapter) readCompleteDocument(ctx context.Context, page, container
 }
 
 func (a *graphAdapter) remoteState(page string, snapshot graphDocumentSnapshot) ports.DocumentRemoteState {
-	out := ports.DocumentRemoteState{RemotePage: a.graphRemote(page, snapshot.etag), Container: a.container, Marker: snapshot.folder.Name, ContentHash: graphContentHash(snapshot.raw), Neutral: snapshot.source == nil}
+	out := ports.DocumentRemoteState{RemotePage: a.graphRemote(page, snapshot.etag), Container: snapshot.folder.Parent.ID, Marker: snapshot.folder.Name, ContentHash: graphContentHash(snapshot.raw), Neutral: snapshot.source == nil}
 	if snapshot.source != nil {
 		out.Title, out.Storage, out.Marker = snapshot.source.Title, snapshot.source.Storage, snapshot.source.Marker
 	}
@@ -701,6 +720,18 @@ func (a *graphAdapter) remoteState(page string, snapshot graphDocumentSnapshot) 
 func (a *graphAdapter) VerifyDocumentRestriction(ctx context.Context, page, container, group string) error {
 	_, err := a.readCompleteDocument(ctx, page, container, group, true)
 	return err
+}
+
+// ReadRestrictedDocument returns a current body snapshot only after the same
+// operation has proved the configured container and complete restriction set.
+// The snapshot is not an authority cache: write methods still recheck release
+// authority immediately before each provider mutation.
+func (a *graphAdapter) ReadRestrictedDocument(ctx context.Context, page, container, group string) (ports.DocumentRemoteState, error) {
+	snapshot, err := a.readCompleteDocument(ctx, page, container, group, true)
+	if err != nil {
+		return ports.DocumentRemoteState{}, err
+	}
+	return a.remoteState(page, snapshot), nil
 }
 
 func (a *graphAdapter) GetDocument(ctx context.Context, page string) (ports.DocumentRemoteState, error) {
@@ -739,8 +770,8 @@ func (a *graphAdapter) GetDocument(ctx context.Context, page string) (ports.Docu
 }
 
 func (a *graphAdapter) partialNeutralState(ctx context.Context, folder graphItem, marker string, enforceACL bool) (ports.DocumentRemoteState, bool, error) {
-	if !presentFacet(folder.Folder) || folder.Parent.ID != a.container || folder.Parent.DriveID != a.drive || folder.Name != marker {
-		return ports.DocumentRemoteState{}, false, docError(http.StatusOK, "remote_identity_changed", false)
+	if err := graphFolderIdentity(folder, a.container, a.drive, marker); err != nil {
+		return ports.DocumentRemoteState{}, false, err
 	}
 	items, folderRef, err := a.neutralShellItems(ctx, folder, marker, enforceACL)
 	if err != nil {
@@ -781,7 +812,7 @@ func (a *graphAdapter) partialNeutralState(ctx context.Context, folder graphItem
 		}
 	}
 	logical := folder.ID + "~" + marker
-	return ports.DocumentRemoteState{RemotePage: a.graphRemote(logical, etag), Container: a.container, Marker: marker, ContentHash: contentHash, Neutral: true}, true, nil
+	return ports.DocumentRemoteState{RemotePage: a.graphRemote(logical, etag), Container: folder.Parent.ID, Marker: marker, ContentHash: contentHash, Neutral: true}, true, nil
 }
 
 // FindDocumentMarker is deliberately read-only. It reports only an exact,
@@ -842,22 +873,25 @@ func (a *graphAdapter) UploadDocumentAttachment(ctx context.Context, page string
 	if _, _, err = a.spBytes(ctx, http.MethodPost, create, http.Header{"Content-Type": {file.MediaType}}, file.Data, http.StatusOK, http.StatusCreated); err == nil {
 		child, readErr := a.graphChild(ctx, folder, file.Name)
 		if readErr != nil {
-			return docError(http.StatusOK, "attachment_readback_unavailable", true)
+			return partialEffectAmbiguity(readErr, "attachment_readback_unavailable")
 		}
 		if readErr = a.verifyChildACL(ctx, child, fileRef, false); readErr != nil {
 			return partialEffectAmbiguity(readErr, "attachment_ownership_incomplete")
 		}
 		children, readErr := a.children(ctx, folder)
 		if readErr != nil {
-			return docError(http.StatusOK, "ownership_readback_unavailable", true)
+			return partialEffectAmbiguity(readErr, "ownership_readback_unavailable")
 		}
 		manifest, manifestItem, manifestETag, readErr := a.manifestSnapshot(ctx, folderRef, children)
-		if readErr != nil || manifest.Marker != folderItem.Name || manifest.Files[file.Name] != "" {
+		if readErr != nil {
+			return partialEffectAmbiguity(readErr, "ownership_manifest_unavailable")
+		}
+		if manifest.Marker != folderItem.Name || manifest.Files[file.Name] != "" {
 			return docError(http.StatusOK, "ownership_manifest_unavailable", true)
 		}
 		manifest.Files[file.Name] = child.ID
 		if readErr = a.CheckDocumentRelease(ctx, a.container, a.group); readErr != nil {
-			return docError(http.StatusOK, "attachment_ownership_incomplete", true)
+			return partialEffectAmbiguity(readErr, "attachment_ownership_incomplete")
 		}
 		if readErr = a.writeManifest(ctx, folderRef, manifestItem, manifestETag, manifest); readErr != nil {
 			return partialEffectAmbiguity(readErr, "attachment_ownership_incomplete")
@@ -889,7 +923,10 @@ func (a *graphAdapter) UploadDocumentAttachment(ctx context.Context, page string
 		return readErr
 	}
 	manifest, _, _, readErr := a.manifestSnapshot(ctx, folderRef, children)
-	if readErr != nil || manifest.Files[file.Name] != child.ID {
+	if readErr != nil {
+		return readErr
+	}
+	if manifest.Files[file.Name] != child.ID {
 		return docError(http.StatusOK, "attachment_ownership_unverified", false)
 	}
 	return nil
@@ -968,7 +1005,10 @@ func (a *graphAdapter) PurgeDocument(ctx context.Context, page string, guard fun
 		return err
 	}
 	manifest, manifestItem, _, err := a.manifestSnapshot(ctx, folderRef, children)
-	if err != nil || manifest.Marker != folder.Name {
+	if err != nil {
+		return err
+	}
+	if manifest.Marker != folder.Name {
 		return docError(http.StatusOK, "invalid_ownership_manifest", false)
 	}
 	owned := map[string]bool{body.ID: true, manifestItem.ID: true}

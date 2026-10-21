@@ -186,6 +186,12 @@ type workflowProviders struct{ provider ports.TicketProvider }
 func (r workflowProviders) TicketProvider(context.Context, integration.Integration) (ports.TicketProvider, error) {
 	return r.provider, nil
 }
+func (r workflowProviders) TicketProviderDescriptor(provider integration.Provider) (integration.ProviderDescriptor, error) {
+	if provider == "jira-cloud" || provider == "jira-dc" || provider == "github-issues" || provider == "gitlab-issues" || provider == "azure-boards" || provider == "servicenow" || provider == "linear" {
+		return integration.ProviderDescriptor{Provider: provider, Capabilities: []integration.Capability{integration.CapabilityTickets}}, nil
+	}
+	return integration.ProviderDescriptor{}, shared.ErrNotFound
+}
 
 type workflowFixture struct {
 	ticketFixture
@@ -502,6 +508,38 @@ func TestWorkflowRequiredReporterCredentialRevisionChangeRefusesDispatch(t *test
 	stored, err := f.store.GetIntent(context.Background(), "tenant-a", intent.ID)
 	if err != nil || stored.State != writeintent.Failed || stored.ErrorCode != "preflight_refused" || f.provider.posts != 0 {
 		t.Fatalf("credential revision intent=%+v posts=%d err=%v", stored, f.provider.posts, err)
+	}
+}
+
+func TestWorkflowRejectsDefiniteStatusZeroProviderRefusalsWithoutRecovery(t *testing.T) {
+	for _, code := range []string{"connector_missing", "credential_changed", "connector_unavailable", "payload_contains_credential"} {
+		t.Run(code, func(t *testing.T) {
+			f := newWorkflowFixture(t)
+			mapping := f.mapping(t, "security-1")
+			intent := f.submit(t, mapping, "definite-"+code)
+			f.provider.createErr = &ports.TicketProviderError{Status: 0, Code: code, Ambiguous: false}
+			if _, err := f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := f.store.GetIntent(context.Background(), "tenant-a", intent.ID)
+			if err != nil || stored.State != writeintent.Failed || stored.ErrorCode != code || f.provider.posts != 1 {
+				t.Fatalf("definite preflight refusal=%+v posts=%d err=%v", stored, f.provider.posts, err)
+			}
+		})
+	}
+}
+
+func TestWorkflowRetainsAmbiguousStatusZeroProviderRefusalForRecovery(t *testing.T) {
+	f := newWorkflowFixture(t)
+	mapping := f.mapping(t, "security-1")
+	intent := f.submit(t, mapping, "ambiguous-status-zero")
+	f.provider.createErr = &ports.TicketProviderError{Status: 0, Code: "connector_unavailable", Ambiguous: true}
+	if _, err := f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := f.store.GetIntent(context.Background(), "tenant-a", intent.ID)
+	if err != nil || stored.State != writeintent.Uncertain || stored.ErrorCode != "" {
+		t.Fatalf("ambiguous refusal=%+v err=%v", stored, err)
 	}
 }
 
@@ -891,7 +929,7 @@ func TestWorkflowLeaseExpiryRequiresReconciliationWithoutSending(t *testing.T) {
 	if _, ok, err := f.store.AcquireDispatch(context.Background(), "tenant-a", i.ID, i.Version, now, lease); err != nil || !ok {
 		t.Fatalf("claim %t %v", ok, err)
 	}
-	restarted, err := usecase.NewWorkflow(f.store, f.integrations, workflowProviders{f.provider}, f.findings, f.engagements, f.policy, f.audit, &ticketIDs{}, ticketClock{now.Add(2 * time.Minute)})
+	restarted, err := usecase.NewWorkflow(f.store, f.integrations, workflowProviders{f.provider}, f.findings, f.engagements, f.policy, f.audit, &ticketIDs{}, ticketClock{t: now.Add(2 * time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}

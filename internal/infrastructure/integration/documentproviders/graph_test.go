@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -33,6 +34,16 @@ type graphFixture struct {
 	nextRoles              string
 	roleExtra              bool
 	badGroup               bool
+	malformedPrincipal     bool
+	invalidPrincipal       bool
+	malformedRole          bool
+	invalidRoleMask        bool
+	missingRoleEnvelope    bool
+	nullRoleEnvelope       bool
+	missingRoleResults     bool
+	nullRoleResults        bool
+	missingShellParent     bool
+	missingShellFacet      bool
 	unique                 bool
 	currentType            int
 	pendingDelete          bool
@@ -217,6 +228,12 @@ func (f *graphFixture) graph(r *http.Request) (*http.Response, error) {
 				return response(http.StatusForbidden, nil), nil
 			}
 			if item, ok := f.items[rest]; ok {
+				if rest == "shell" && f.missingShellParent {
+					item.Parent.ID = ""
+				}
+				if rest == "shell" && f.missingShellFacet {
+					item.Folder = nil
+				}
 				return response(200, item), nil
 			}
 		}
@@ -238,10 +255,34 @@ func (f *graphFixture) sharePoint(r *http.Request) (*http.Response, error) {
 		}
 	}
 	if strings.Contains(p, "RoleAssignments") {
+		if f.missingRoleEnvelope {
+			return response(200, map[string]any{}), nil
+		}
+		if f.nullRoleEnvelope {
+			return response(200, map[string]any{"d": nil}), nil
+		}
+		if f.missingRoleResults {
+			return response(200, map[string]any{"d": map[string]any{}}), nil
+		}
+		if f.nullRoleResults {
+			return response(200, map[string]any{"d": map[string]any{"results": nil}}), nil
+		}
 		out := graphRoles(f.roleExtra).(map[string]any)
 		d := out["d"].(map[string]any)
 		if f.badGroup {
 			d["results"].([]any)[0].(map[string]any)["Member"].(map[string]any)["PrincipalType"] = 1
+		}
+		if f.malformedPrincipal {
+			d["results"].([]any)[0].(map[string]any)["Member"].(map[string]any)["PrincipalType"] = 0
+		}
+		if f.invalidPrincipal {
+			d["results"].([]any)[0].(map[string]any)["Member"].(map[string]any)["PrincipalType"] = 99
+		}
+		if f.malformedRole {
+			d["results"].([]any)[0].(map[string]any)["RoleDefinitionBindings"].(map[string]any)["results"].([]any)[0].(map[string]any)["RoleTypeKind"] = 0
+		}
+		if f.invalidRoleMask {
+			d["results"].([]any)[0].(map[string]any)["RoleDefinitionBindings"].(map[string]any)["results"].([]any)[0].(map[string]any)["BasePermissions"].(map[string]string)["High"] = "invalid"
 		}
 		if f.nextRoles != "" {
 			d["__next"] = f.nextRoles
@@ -350,6 +391,114 @@ func TestGraphReleaseRequiresCompleteBoundACL(t *testing.T) {
 	}
 }
 
+func TestGraphObservedRestrictionLossHasTypedMarker(t *testing.T) {
+	t.Run("organization link", func(t *testing.T) {
+		f := newGraphFixture(t)
+		f.links["parent"] = json.RawMessage(`{"scope":"organization"}`)
+		err := f.a.CheckDocumentRelease(context.Background(), "parent", "7")
+		var providerErr *ports.DocumentProviderError
+		if !errors.As(err, &providerErr) || !providerErr.RestrictionLost || providerErr.Code != "restricted_sharing_unverified" {
+			t.Fatalf("organization link = %#v, err=%v", providerErr, err)
+		}
+	})
+	t.Run("incomplete role page", func(t *testing.T) {
+		f := newGraphFixture(t)
+		f.nextRoles = "next"
+		err := f.a.CheckDocumentRelease(context.Background(), "parent", "7")
+		var providerErr *ports.DocumentProviderError
+		if !errors.As(err, &providerErr) || providerErr.RestrictionLost || providerErr.Code != "incomplete_permissions" {
+			t.Fatalf("incomplete role page = %#v, err=%v", providerErr, err)
+		}
+	})
+	t.Run("moved publication", func(t *testing.T) {
+		f := newGraphFixture(t)
+		shell, err := f.a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+		if err != nil {
+			t.Fatal(err)
+		}
+		folder := f.items["shell"]
+		folder.Parent.DriveID = "other-drive"
+		f.items["shell"] = folder
+		err = f.a.VerifyDocumentRestriction(context.Background(), shell.ID, "parent", "7")
+		var providerErr *ports.DocumentProviderError
+		if !errors.As(err, &providerErr) || !providerErr.RestrictionLost || providerErr.Code != "remote_identity_changed" {
+			t.Fatalf("moved publication = %#v, err=%v", providerErr, err)
+		}
+	})
+	t.Run("complete but unexpected principal", func(t *testing.T) {
+		f := newGraphFixture(t)
+		f.badGroup = true
+		err := f.a.CheckDocumentRelease(context.Background(), "parent", "7")
+		var providerErr *ports.DocumentProviderError
+		if !errors.As(err, &providerErr) || !providerErr.RestrictionLost || providerErr.Code != "restricted_sharing_unverified" {
+			t.Fatalf("unexpected principal = %#v, err=%v", providerErr, err)
+		}
+	})
+}
+
+func TestGraphMalformedRestrictionProofDoesNotSignalLoss(t *testing.T) {
+	for name, check := range map[string]func(t *testing.T, f *graphFixture){
+		"missing principal type": func(t *testing.T, f *graphFixture) {
+			f.malformedPrincipal = true
+			assertGraphUnverifiable(t, f.a.CheckDocumentRelease(context.Background(), "parent", "7"))
+		},
+		"invalid principal type": func(t *testing.T, f *graphFixture) {
+			f.invalidPrincipal = true
+			assertGraphUnverifiable(t, f.a.CheckDocumentRelease(context.Background(), "parent", "7"))
+		},
+		"missing role type": func(t *testing.T, f *graphFixture) {
+			f.malformedRole = true
+			assertGraphUnverifiable(t, f.a.CheckDocumentRelease(context.Background(), "parent", "7"))
+		},
+		"invalid role mask": func(t *testing.T, f *graphFixture) {
+			f.invalidRoleMask = true
+			assertGraphUnverifiable(t, f.a.CheckDocumentRelease(context.Background(), "parent", "7"))
+		},
+		"missing role results": func(t *testing.T, f *graphFixture) {
+			f.missingRoleResults = true
+			assertGraphUnverifiable(t, f.a.CheckDocumentRelease(context.Background(), "parent", "7"))
+		},
+		"missing role envelope": func(t *testing.T, f *graphFixture) {
+			f.missingRoleEnvelope = true
+			assertGraphUnverifiable(t, f.a.CheckDocumentRelease(context.Background(), "parent", "7"))
+		},
+		"null role envelope": func(t *testing.T, f *graphFixture) {
+			f.nullRoleEnvelope = true
+			assertGraphUnverifiable(t, f.a.CheckDocumentRelease(context.Background(), "parent", "7"))
+		},
+		"null role results": func(t *testing.T, f *graphFixture) {
+			f.nullRoleResults = true
+			assertGraphUnverifiable(t, f.a.CheckDocumentRelease(context.Background(), "parent", "7"))
+		},
+		"missing folder parent": func(t *testing.T, f *graphFixture) {
+			shell, err := f.a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.missingShellParent = true
+			assertGraphUnverifiable(t, f.a.VerifyDocumentRestriction(context.Background(), shell.ID, "parent", "7"))
+		},
+		"missing folder facet": func(t *testing.T, f *graphFixture) {
+			shell, err := f.a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.missingShellFacet = true
+			assertGraphUnverifiable(t, f.a.VerifyDocumentRestriction(context.Background(), shell.ID, "parent", "7"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) { check(t, newGraphFixture(t)) })
+	}
+}
+
+func assertGraphUnverifiable(t *testing.T, err error) {
+	t.Helper()
+	var providerErr *ports.DocumentProviderError
+	if !errors.As(err, &providerErr) || providerErr.RestrictionLost || providerErr.Code != "complete_acl_unverifiable" && providerErr.Code != "complete_identity_unverifiable" {
+		t.Fatalf("malformed restriction proof = %#v, err=%v", providerErr, err)
+	}
+}
+
 func TestGraphReleaseBindsGraphDriveToSharePointFolder(t *testing.T) {
 	for name, change := range map[string]func(*graphFixture){
 		"wrong_list": func(f *graphFixture) {
@@ -384,6 +533,55 @@ func TestGraphConfigFailsClosedWithoutSharePointAuthority(t *testing.T) {
 	item.Config = json.RawMessage(`{"drive_id":"b!drive","space":"parent","folder_path":"/sites/security/restricted","read_group":"7","custodian_principal_id":"9","data_class":"detail"}`)
 	if _, err := newGraph(item, integration.CredentialBundle{"access_token": "graph-token", "sharepoint_token": "sp-token"}, selfhosted.Rules{}); err != nil {
 		t.Fatalf("valid Microsoft Graph b! drive ID rejected: %v", err)
+	}
+}
+
+func TestSharePointPathAndResourceRefuseAmbiguousDelimitersBeforeRequest(t *testing.T) {
+	for _, path := range []string{
+		"/sites/security/restricted?view=all",
+		"/sites/security/restricted#fragment",
+		"/sites/security/restricted folder",
+		"/sites/security/restricted\tchild",
+		"/sites/security/restricted\x00child",
+	} {
+		if validSPPath(path) {
+			t.Fatalf("accepted unsafe SharePoint path %q", path)
+		}
+	}
+	if !validSPFileRef("/sites/security/restricted/chart one.png") {
+		t.Fatal("managed attachment reference with a space was rejected")
+	}
+	for _, path := range []string{"/sites/security/restricted/chart?one.png", "/sites/security/restricted/chart#one.png", "/sites/security/restricted/chart\n.png"} {
+		if validSPFileRef(path) {
+			t.Fatalf("accepted unsafe SharePoint file reference %q", path)
+		}
+	}
+	site, err := url.Parse("https://tenant.sharepoint.com/sites/security")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &graphAdapter{site: site, sharePointToken: "sp-token", client: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("unsafe SharePoint resource reached transport")
+		return nil, nil
+	})}}
+	for _, resource := range []string{
+		"/_api/web/currentuser#fragment",
+		"/_api/web/currentuser?select=one\nX-Injected: yes",
+		"/_api/web/current user",
+		"/_api/web/currentuser?bad=%zz",
+	} {
+		if _, _, err := a.spRequest(context.Background(), http.MethodGet, resource, nil, nil, 1024, http.StatusOK); err == nil {
+			t.Fatalf("accepted unsafe SharePoint resource %q", resource)
+		}
+	}
+}
+
+func TestGraphRemoteStateReportsObservedContainer(t *testing.T) {
+	f := newGraphFixture(t)
+	folder := f.item("shell", "synapse-intent-fixture", "observed-parent", true, "shell-guid")
+	state := f.a.remoteState("shell~synapse-intent-fixture", graphDocumentSnapshot{folder: folder, etag: `"1"`, raw: []byte(graphNeutralShell)})
+	if state.Container != "observed-parent" {
+		t.Fatalf("container = %q, want observed parent", state.Container)
 	}
 }
 
@@ -447,6 +645,36 @@ func TestGraphDocumentLifecycleUsesSameOriginCASAndPermanentPurge(t *testing.T) 
 	})
 	if err != nil || f.deletes != 5 || f.items["shell"].ID != "" {
 		t.Fatalf("purge err=%v deletes=%d items=%v", err, f.deletes, f.items)
+	}
+}
+
+func TestGraphRestrictedReadReturnsCurrentStateAfterACLProof(t *testing.T) {
+	f := newGraphFixture(t)
+	ctx := context.Background()
+	shell, err := f.a.CreateDocumentShell(ctx, "parent", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := f.a.WriteDocumentRevision(ctx, shell, "Report", "<p>Approved</p>", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := atomic.Int64{}
+	f.a.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return f.serve(r)
+	})
+	state, err := f.a.ReadRestrictedDocument(ctx, published.ID, "parent", "7")
+	if err != nil || state.ID != published.ID || state.Revision != published.Revision || state.Container != "parent" || state.Neutral {
+		t.Fatalf("restricted state = %+v, err=%v", state, err)
+	}
+	if requests.Load() > 16 {
+		t.Fatalf("combined restricted read used %d requests; duplicate snapshot reads regressed", requests.Load())
+	}
+	t.Logf("combined restricted read requests=%d", requests.Load())
+	f.links["shell"] = json.RawMessage(`{"scope":"anonymous"}`)
+	if _, err = f.a.ReadRestrictedDocument(ctx, published.ID, "parent", "7"); err == nil {
+		t.Fatal("restricted read accepted a current public link")
 	}
 }
 
@@ -722,7 +950,7 @@ func TestGraphUploadPreflightFailurePreventsWrite(t *testing.T) {
 	}
 }
 
-func TestGraphElevenAttachmentMonitorCompletesWithinObservationBudget(t *testing.T) {
+func TestGraphElevenAttachmentDuplicateReadProofStaysBounded(t *testing.T) {
 	f := newGraphFixture(t)
 	ctx := context.Background()
 	shell, err := f.a.CreateDocumentShell(ctx, "parent", "synapse-intent-fixture")
@@ -757,12 +985,53 @@ func TestGraphElevenAttachmentMonitorCompletesWithinObservationBudget(t *testing
 	}
 	elapsed := time.Since(started)
 	if err != nil {
-		t.Fatalf("eleven-attachment monitor exceeded observation budget after %s (%d requests): %v", elapsed, requests.Load(), err)
+		t.Fatalf("eleven-attachment duplicate read and proof exceeded observation budget after %s (%d requests): %v", elapsed, requests.Load(), err)
 	}
 	if elapsed >= 9*time.Second {
-		t.Fatalf("eleven-attachment monitor used %s (%d requests); bounded child checks did not meet the budget", elapsed, requests.Load())
+		t.Fatalf("eleven-attachment duplicate read and proof used %s (%d requests); bounded child checks did not meet the budget", elapsed, requests.Load())
 	}
-	t.Logf("eleven-attachment monitor requests=%d synthetic-rtt elapsed=%s", requests.Load(), elapsed)
+	t.Logf("eleven-attachment duplicate read and proof requests=%d synthetic-rtt elapsed=%s", requests.Load(), elapsed)
+}
+
+func TestGraphElevenAttachmentVerifyOnlyStaysWithinObservationBudget(t *testing.T) {
+	f := newGraphFixture(t)
+	ctx := context.Background()
+	shell, err := f.a.CreateDocumentShell(ctx, "parent", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := f.a.WriteDocumentRevision(ctx, shell, "Report", "<p>report</p>", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 11; i++ {
+		name := "chart-" + strconv.Itoa(i) + ".png"
+		if err = f.a.UploadDocumentAttachment(ctx, published.ID, ports.DocumentImage{Name: name, MediaType: "image/png", Data: []byte("png")}); err != nil {
+			t.Fatalf("seed attachment %d: %v", i, err)
+		}
+	}
+	requests := atomic.Int64{}
+	f.a.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		requests.Add(1)
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
+		return f.serve(r)
+	})
+	check, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	started := time.Now()
+	err = f.a.VerifyDocumentRestriction(check, published.ID, "parent", "7")
+	elapsed := time.Since(started)
+	if err != nil {
+		t.Fatalf("eleven-attachment verify-only observation failed after %s (%d requests): %v", elapsed, requests.Load(), err)
+	}
+	if requests.Load() > 38 || elapsed >= 5*time.Second {
+		t.Fatalf("eleven-attachment verify-only observation used %s (%d requests); request or latency ratchet regressed", elapsed, requests.Load())
+	}
+	t.Logf("eleven-attachment verify-only requests=%d synthetic-rtt elapsed=%s", requests.Load(), elapsed)
 }
 
 func TestGraphRefusesUnsafeAttachmentCollisionAndChildLink(t *testing.T) {
@@ -874,5 +1143,134 @@ func TestGraphNeutralBodyReadbackMismatchPreservesUncertainty(t *testing.T) {
 	var p *ports.DocumentProviderError
 	if !errors.As(err, &p) || !p.Ambiguous || p.Code != "shell_incomplete" || f.writes != 2 || f.items["manifest"].ID != "" {
 		t.Fatalf("post-create mismatch cleared fence: err=%v writes=%d items=%+v", err, f.writes, f.items)
+	}
+}
+
+func TestGraphCompleteRoleContradictionAndIncompleteProof(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+		lost   bool
+	}{
+		{"extra valid role", func(binding map[string]any) {
+			binding["results"] = append(binding["results"].([]any), map[string]any{"RoleTypeKind": 3, "BasePermissions": map[string]string{"High": "432", "Low": "1011028719"}})
+		}, true},
+		{"empty complete roles", func(binding map[string]any) { binding["results"] = []any{} }, true},
+		{"missing roles", func(binding map[string]any) { delete(binding, "results") }, false},
+		{"null roles", func(binding map[string]any) { binding["results"] = nil }, false},
+		{"paged roles", func(binding map[string]any) { binding["__next"] = "https://example.test/next" }, false},
+		{"malformed additional role", func(binding map[string]any) {
+			binding["results"] = append(binding["results"].([]any), map[string]any{"RoleTypeKind": 0})
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newGraphFixture(t)
+			grants := graphRoles(false).(map[string]any)
+			assignments := grants["d"].(map[string]any)["results"].([]any)
+			tc.mutate(assignments[0].(map[string]any)["RoleDefinitionBindings"].(map[string]any))
+			f.a.client.Transport = transportFunc(func(*http.Request) (*http.Response, error) { return response(200, grants), nil })
+			err := f.a.assertExactACL(context.Background(), f.a.folderPath, true)
+			var refusal *ports.DocumentProviderError
+			if !errors.As(err, &refusal) || refusal.RestrictionLost != tc.lost || refusal.Ambiguous {
+				t.Fatalf("role proof lost=%v: %#v err=%v", tc.lost, refusal, err)
+			}
+		})
+	}
+}
+
+func TestDocumentAmbiguityPreservesProviderThrottle(t *testing.T) {
+	for name, wrap := range map[string]func(error) error{"shell": shellAmbiguity, "partial": func(err error) error { return partialEffectAmbiguity(err, "purge_incomplete") }} {
+		t.Run(name, func(t *testing.T) {
+			cause := &ports.DocumentProviderError{Code: "rate_limited", Status: 429, RetryAfter: 9 * time.Minute}
+			err := wrap(fmt.Errorf("readback: %w", cause))
+			var refusal *ports.DocumentProviderError
+			if !errors.As(err, &refusal) || !refusal.Ambiguous || refusal.Status != 429 || refusal.RetryAfter != 9*time.Minute {
+				t.Fatalf("lost throttle metadata: %#v err=%v", refusal, err)
+			}
+			if cause.Ambiguous || cause.Code != "rate_limited" {
+				t.Fatalf("mutated shared cause: %#v", cause)
+			}
+		})
+	}
+}
+
+func TestGraphAttachmentReadbackThrottlesPreserveRecoveryDelay(t *testing.T) {
+	for _, phase := range []string{"child", "children", "manifest", "release", "manifest_confirmation", "collision_manifest"} {
+		t.Run(phase, func(t *testing.T) {
+			f := newGraphFixture(t)
+			shell, err := f.a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			file := ports.DocumentImage{Name: "chart.png", MediaType: "image/png", Data: []byte("png")}
+			if phase == "collision_manifest" {
+				if err = f.a.UploadDocumentAttachment(context.Background(), shell.ID, file); err != nil {
+					t.Fatal(err)
+				}
+			}
+			base := f.a.client.Transport
+			var dispatched, manifestWritten, throttled atomic.Bool
+			f.a.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+				path := r.URL.Path
+				manifestRead := r.Method == http.MethodGet && strings.Contains(path, graphManifestName) && strings.HasSuffix(path, "/$value")
+				match := false
+				if dispatched.Load() {
+					switch phase {
+					case "child":
+						match = r.Method == http.MethodGet && strings.HasSuffix(path, "/items/shell:/chart.png")
+					case "children":
+						match = r.Method == http.MethodGet && strings.HasSuffix(path, "/items/shell/children")
+					case "manifest", "collision_manifest":
+						match = manifestRead
+					case "release":
+						match = strings.HasSuffix(path, "/_api/web/currentuser")
+					case "manifest_confirmation":
+						match = manifestRead && manifestWritten.Load()
+					}
+				}
+				if match {
+					throttled.Store(true)
+					res := response(429, nil)
+					res.Header.Set("Retry-After", "540")
+					return res, nil
+				}
+				res, err := base.RoundTrip(r)
+				if r.Method == http.MethodPost && strings.Contains(path, "Files/add") && strings.Contains(path, "chart.png") {
+					dispatched.Store(true)
+				}
+				if r.Method == http.MethodPost && strings.Contains(path, graphManifestName) && strings.HasSuffix(path, "/$value") {
+					manifestWritten.Store(true)
+				}
+				return res, err
+			})
+			err = f.a.UploadDocumentAttachment(context.Background(), shell.ID, file)
+			var refusal *ports.DocumentProviderError
+			wantAmbiguous := phase != "collision_manifest"
+			if !throttled.Load() || !errors.As(err, &refusal) || refusal.Status != 429 || refusal.RetryAfter != 9*time.Minute || refusal.Ambiguous != wantAmbiguous {
+				t.Fatalf("readback throttle lost: dispatched=%v throttled=%v err=%v refusal=%#v", dispatched.Load(), throttled.Load(), err, refusal)
+			}
+		})
+	}
+}
+
+func TestGraphPurgeOwnershipReadThrottlePreservesDelayWithoutDelete(t *testing.T) {
+	f := newGraphFixture(t)
+	shell, err := f.a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := f.a.client.Transport
+	f.a.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, graphManifestName) && strings.HasSuffix(r.URL.Path, "/$value") {
+			res := response(429, nil)
+			res.Header.Set("Retry-After", "540")
+			return res, nil
+		}
+		return base.RoundTrip(r)
+	})
+	err = f.a.PurgeDocument(context.Background(), shell.ID, func(context.Context) error { return nil })
+	var refusal *ports.DocumentProviderError
+	if !errors.As(err, &refusal) || refusal.Status != 429 || refusal.RetryAfter != 9*time.Minute || refusal.Ambiguous || f.deletes != 0 {
+		t.Fatalf("purge proof throttle lost: %#v err=%v deletes=%d", refusal, err, f.deletes)
 	}
 }

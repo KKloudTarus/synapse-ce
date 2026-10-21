@@ -7,7 +7,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "2cbe38acb5cbdc60ea1929e37ed06be905122ccfbe858b2d9a74ce48cfa297e8"
+      "sha256": "8dc91ccc02475441b8a00ac26812a343d2d711e64d7246ea789f433d9005e5b9"
     },
     {
       "file": "github-issues-light-mobile.png",
@@ -16,7 +16,7 @@
       "viewport": "mobile",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "554edfb648c7a58e4f2dc6b37ea68b4ad02daa971f879147bd210f6992dabeec"
+      "sha256": "639a045c05c0675d00b216ac39f7e0fb2d9abdb20840bebef427f4bd2acf5fd7"
     },
     {
       "file": "gitlab-issues-light.png",
@@ -24,7 +24,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "14cd3b3120b674a447b91f0028be4e96ea051665b1ca81cb4c69e59e14eca422"
+      "sha256": "8078e784384562c198230404dbb9b0ebe877b6ada25d274bd03397fa842d8913"
     },
     {
       "file": "azure-boards-light.png",
@@ -32,7 +32,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "42839c8f97d56edc61055001f995c6e99f6df370bff54d7e5be3f412861c23a4"
+      "sha256": "2cb84c8578d6cc00cda348b83f6715d72f5d12687cdbab3fc0968430190d52bf"
     },
     {
       "file": "servicenow-light.png",
@@ -40,7 +40,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "7a6741a7da7e7184ae03be23bbcf2005222a8811e47c30ad8bfa5fdcac4d408c"
+      "sha256": "ee0fa52496f5988db75cddbd87800b898bfa816ebfbdd103a3f037075de856e3"
     },
     {
       "file": "linear-light.png",
@@ -48,7 +48,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "b3f88239281d5a061a4cca72c2135f5213c5ecc3f035ebdc3f19f2098b9dd5ba"
+      "sha256": "af2125b4d7c462a243c866596da72a3d2914130045eb2f6bc120536d7ee9db40"
     },
     {
       "file": "loading-light.png",
@@ -64,7 +64,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "2b931824892e839d94436181ec59448b573782a76cda586f3f8d6d9cc39ddb88"
+      "sha256": "04b013c4de46cd6590031ca3a3e62672ca7ef6807e6cba4036f30bb80e8b4826"
     },
     {
       "file": "orphan-light.png",
@@ -72,7 +72,15 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "d24b90050e44bf436bdcfe58188453c2f40f6ed9faf3f57a3110fe86b76213f4"
+      "sha256": "7440f990f899737424cf86f839d01404e7cd2df94303312f79500a8f298fe4c3"
+    },
+    {
+      "file": "orphan-actions-light.png",
+      "state": "orphan-actions",
+      "theme": "light",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "edcbea8a001fef186b6da36bac41ff8257709175aafba3e8c962e52c690f91a2"
     },
     {
       "file": "error-light.png",
@@ -80,7 +88,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "ba4d7b7ceb71b5f129896c82c0ac24f337ff6e212d3e72be85dc5173d56ac72e"
+      "sha256": "eab59468b37bcf8d74eca86e29c9920303894fe51300b29eba84e494e04cc6e5"
     },
     {
       "file": "permission-light.png",
@@ -88,7 +96,7 @@
       "theme": "light",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "ee72715914309d01170a56f125fed504ed6df082600039bcdfd0df324e5e81d1"
+      "sha256": "9917a5d080a65a94221bcaba9ca85857f1c20fc838fc6610af703bcd4ca80aae"
     },
     {
       "file": "permission-light-mobile.png",
@@ -97,7 +105,7 @@
       "viewport": "mobile",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "bf3a79215ddfb8223219f46e3dc5d7a83b068f577d7288a75521744f84a57465"
+      "sha256": "4933d9ad0da6a22861512e3a05833fae027638af2e194a0360caea12562df1fa"
     },
     {
       "file": "github-issues-dark.png",
@@ -105,7 +113,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "539e661aa66a5205f554102539acf24a9d3135f1f1c6ee641a087c40b53ae1ab"
+      "sha256": "27304c706d7f8c18da4af1cecaa0698540a32e554137c9b5fe262c0f9f53761c"
     },
     {
       "file": "github-issues-dark-mobile.png",
@@ -114,7 +122,7 @@
       "viewport": "mobile",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "1725fb731916d2ac71c937e62fb4464529a1e7812a67a6da17d490add82f033c"
+      "sha256": "351a4c0d76965773bd8376908f8c0f8863ea96f7b63d4bcf91d9c0aa9db07d8e"
     },
     {
       "file": "gitlab-issues-dark.png",
@@ -122,7 +130,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "78cdda10c82679485bf35ae8526aab791f356917e1e78080517c15032455ae3c"
+      "sha256": "7451f4938e06899bf78e976286e65b6eef3eeb3d09e8bec6e85a5a3379f99151"
     },
     {
       "file": "azure-boards-dark.png",
@@ -130,7 +138,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "a2f743d4d8adc4e58d0f8edab2144acff9193abe07a5b3df300a9546f90560f0"
+      "sha256": "ebf3f212c6a0daaaff14f67669a1c3b06c11a62fde44d892eddaa070705c2fa2"
     },
     {
       "file": "servicenow-dark.png",
@@ -138,7 +146,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "1f32ed5fe79dbd81a0ccb4be6a4de470391b3a20e488ee02f787e032e7912301"
+      "sha256": "c72165951d1808f4c8dfad8f7af53e7e014a17e83df86aa379b121575f06e412"
     },
     {
       "file": "linear-dark.png",
@@ -146,7 +154,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "0a25ed275325585d275e5701e7220211551e258f62ece82ecf158aa02823ba26"
+      "sha256": "243c1e10b1bd89ad888d4b8244f20fd33cf0c150445268aa695e9b24585e449a"
     },
     {
       "file": "loading-dark.png",
@@ -154,7 +162,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "915a62a848892c046129297ff90d8125a754247ad90a29c27bcc4a65d0d0de3b"
+      "sha256": "b201fc4c2a86cec473bf8b0b69981af6950c99c23a5158c3dcc7597ae155d44b"
     },
     {
       "file": "empty-dark.png",
@@ -162,7 +170,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "cd9afae0453d85e07dfd1b0de870b9fa1d906c82f9736bbe49235cbe0ce5fb03"
+      "sha256": "f7fd35508da2ebc45757c9be60a4d66af05cfdcfbaa6b93fb8bdcf56e158fa79"
     },
     {
       "file": "orphan-dark.png",
@@ -170,7 +178,15 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "1ff006699f84817c1a5315a61cb30090161522778399b560e0b8403dc157feef"
+      "sha256": "72f9b8b837817fab12d1b4fe0a0d3119fc325b376ce36fb5dee8ebf6be4a2f04"
+    },
+    {
+      "file": "orphan-actions-dark.png",
+      "state": "orphan-actions",
+      "theme": "dark",
+      "source": "Production console, synthetic API fixtures",
+      "errors": [],
+      "sha256": "6e8d99c008fa746d225f85d5e3497eec10cbec79d89a7c21c4a4be4ae00cedb2"
     },
     {
       "file": "error-dark.png",
@@ -178,7 +194,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "19383a6151b33edad2dd9ec27fe78a4cd503ec6b70f88ba16ddb9fbd0a03f5f4"
+      "sha256": "9d8ebbecb2717e0140106f2ddc420a7121b8348cf0829b8848c14518ae542a52"
     },
     {
       "file": "permission-dark.png",
@@ -186,7 +202,7 @@
       "theme": "dark",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "075639d0294187d1db8caaa199359a3d2dd094e25baffc455e2a6885004d7e12"
+      "sha256": "1e838e7a4539caccfdbeaf9473d2607fe4d70697f03b18de513afcc1ee4d29bb"
     },
     {
       "file": "permission-dark-mobile.png",
@@ -195,7 +211,7 @@
       "viewport": "mobile",
       "source": "Production console, synthetic API fixtures",
       "errors": [],
-      "sha256": "7112448a2a0340da73075cc4b0a9a9d7827abbdf47c2d060ebbfcaebbc8a81d5"
+      "sha256": "13d91a438dc496ecd461b3bee9508063e0e78b94a3edbd48aaac365db3a6411f"
     }
   ]
 }

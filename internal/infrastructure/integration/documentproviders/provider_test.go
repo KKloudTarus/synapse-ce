@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/integration"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/selfhosted"
@@ -64,6 +65,182 @@ func TestDocumentOriginsAndErrorsDoNotExposeCredentials(t *testing.T) {
 	var p *ports.DocumentProviderError
 	if !errors.As(err, &p) || !p.Ambiguous {
 		t.Fatal("lost write must be ambiguous")
+	}
+}
+
+func TestDocumentRateLimitPreservesBoundedRetryAfter(t *testing.T) {
+	now := time.Date(2026, time.October, 20, 8, 0, 0, 0, time.UTC)
+	for name, input := range map[string]struct {
+		value string
+		want  time.Duration
+	}{
+		"delta":     {value: "7", want: 7 * time.Second},
+		"http date": {value: now.Add(2 * time.Minute).Format(http.TimeFormat), want: 2 * time.Minute},
+		"past date": {value: now.Add(-time.Second).Format(http.TimeFormat), want: 0},
+		"malformed": {value: "later", want: time.Minute},
+		"overflow":  {value: "18446744073709551615", want: maxDocumentRetryAfter},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := documentRetryAfterAt(input.value, now); got != input.want {
+				t.Fatalf("retry after %q = %s, want %s", input.value, got, input.want)
+			}
+		})
+	}
+	request, err := http.NewRequest(http.MethodPost, "https://www.googleapis.com/drive/v2/files", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+		out := response(http.StatusTooManyRequests, nil)
+		out.Header.Set("Retry-After", "7")
+		return out, nil
+	})}
+	_, _, err = readResponse(client, request, 1024, http.StatusOK)
+	var providerErr *ports.DocumentProviderError
+	if !errors.As(err, &providerErr) || providerErr.Code != "rate_limited" || providerErr.RetryAfter != 7*time.Second || providerErr.Ambiguous {
+		t.Fatalf("rate limit classification = %#v, err=%v", providerErr, err)
+	}
+}
+
+func TestDriveObservedRestrictionLossHasTypedMarker(t *testing.T) {
+	t.Run("extra reader", func(t *testing.T) {
+		a, f := newDriveFixture(t)
+		f.extra = true
+		err := a.CheckDocumentRelease(context.Background(), "parent", "group")
+		var providerErr *ports.DocumentProviderError
+		if !errors.As(err, &providerErr) || !providerErr.RestrictionLost || providerErr.Code != "restricted_sharing_unverified" {
+			t.Fatalf("observed extra reader = %#v, err=%v", providerErr, err)
+		}
+	})
+	t.Run("incomplete permissions", func(t *testing.T) {
+		a, f := newDriveFixture(t)
+		f.incomplete = true
+		err := a.CheckDocumentRelease(context.Background(), "parent", "group")
+		var providerErr *ports.DocumentProviderError
+		if !errors.As(err, &providerErr) || providerErr.RestrictionLost || providerErr.Code != "incomplete_permissions" {
+			t.Fatalf("incomplete proof = %#v, err=%v", providerErr, err)
+		}
+	})
+	t.Run("moved publication", func(t *testing.T) {
+		a, f := newDriveFixture(t)
+		shell, err := a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.files["folder"]["parents"] = []map[string]string{{"id": "other-parent"}}
+		err = a.VerifyDocumentRestriction(context.Background(), shell.ID, "parent", "group")
+		var providerErr *ports.DocumentProviderError
+		if !errors.As(err, &providerErr) || !providerErr.RestrictionLost || providerErr.Code != "remote_identity_changed" {
+			t.Fatalf("moved publication = %#v, err=%v", providerErr, err)
+		}
+	})
+}
+
+func TestDriveMalformedRestrictionProofDoesNotSignalLoss(t *testing.T) {
+	for name, permission := range map[string]map[string]any{
+		"missing type": {"id": "group", "role": "reader"},
+		"invalid type": {"id": "group", "type": "robot", "role": "reader"},
+		"missing role": {"id": "group", "type": "group"},
+		"invalid role": {"id": "group", "type": "group", "role": "operator"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, f := newDriveFixture(t)
+			f.permissionPages = map[string]map[string]any{"": {
+				"items": []map[string]any{
+					{"id": "owner", "type": "user", "role": "owner"},
+					permission,
+				},
+			}}
+			err := a.CheckDocumentRelease(context.Background(), "parent", "group")
+			var providerErr *ports.DocumentProviderError
+			if !errors.As(err, &providerErr) || providerErr.RestrictionLost || providerErr.Code != "complete_acl_unverifiable" {
+				t.Fatalf("malformed permission = %#v, err=%v", providerErr, err)
+			}
+		})
+	}
+}
+
+func TestDriveMissingACLAndShellIdentityProofDoesNotSignalLoss(t *testing.T) {
+	for name, page := range map[string]map[string]any{
+		"missing permission items": {},
+		"null permission items":    {"items": nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, f := newDriveFixture(t)
+			f.permissionPages = map[string]map[string]any{"": page}
+			err := a.CheckDocumentRelease(context.Background(), "parent", "group")
+			assertDriveUnverifiable(t, err)
+		})
+	}
+	for _, operation := range []struct {
+		name string
+		call func(*driveAdapter, string) error
+	}{
+		{"verify", func(a *driveAdapter, page string) error {
+			return a.VerifyDocumentRestriction(context.Background(), page, "parent", "group")
+		}},
+		{"restricted read", func(a *driveAdapter, page string) error {
+			_, err := a.ReadRestrictedDocument(context.Background(), page, "parent", "group")
+			return err
+		}},
+	} {
+		for name, mutate := range map[string]func(map[string]any){
+			"missing MIME":         func(file map[string]any) { delete(file, "mimeType") },
+			"null MIME":            func(file map[string]any) { file["mimeType"] = nil },
+			"MIME without subtype": func(file map[string]any) { file["mimeType"] = "application" },
+			"empty MIME":           func(file map[string]any) { file["mimeType"] = "" },
+			"malformed MIME":       func(file map[string]any) { file["mimeType"] = "not a media type" },
+			"missing parents":      func(file map[string]any) { delete(file, "parents") },
+			"null parents":         func(file map[string]any) { file["parents"] = nil },
+			"missing parent ID":    func(file map[string]any) { file["parents"] = []map[string]string{{}} },
+			"invalid parent ID":    func(file map[string]any) { file["parents"] = []map[string]string{{"id": "not an ID"}} },
+			"missing properties":   func(file map[string]any) { delete(file, "properties") },
+			"null properties":      func(file map[string]any) { file["properties"] = nil },
+		} {
+			t.Run(operation.name+" "+name, func(t *testing.T) {
+				a, f := newDriveFixture(t)
+				shell, err := a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+				if err != nil {
+					t.Fatal(err)
+				}
+				mutate(f.files["folder"])
+				assertDriveUnverifiable(t, operation.call(a, shell.ID))
+			})
+		}
+	}
+}
+
+func TestDriveCompleteShellIdentityMismatchSignalsLoss(t *testing.T) {
+	for name, mutate := range map[string]func(map[string]any){
+		"empty parents": func(file map[string]any) { file["parents"] = []map[string]string{} },
+		"missing body property": func(file map[string]any) {
+			file["properties"] = []map[string]string{{"key": "synapse-marker", "value": "synapse-intent-fixture", "visibility": "PRIVATE"}}
+		},
+		"missing marker property": func(file map[string]any) {
+			file["properties"] = []map[string]string{{"key": "synapse-body", "value": "body", "visibility": "PRIVATE"}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, f := newDriveFixture(t)
+			shell, err := a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutate(f.files["folder"])
+			err = a.VerifyDocumentRestriction(context.Background(), shell.ID, "parent", "group")
+			var providerErr *ports.DocumentProviderError
+			if !errors.As(err, &providerErr) || !providerErr.RestrictionLost || providerErr.Code != "remote_identity_changed" {
+				t.Fatalf("complete shell mismatch = %#v, err=%v", providerErr, err)
+			}
+		})
+	}
+}
+
+func assertDriveUnverifiable(t *testing.T, err error) {
+	t.Helper()
+	var providerErr *ports.DocumentProviderError
+	if !errors.As(err, &providerErr) || providerErr.RestrictionLost || (providerErr.Code != "complete_acl_unverifiable" && providerErr.Code != "complete_identity_unverifiable") {
+		t.Fatalf("malformed proof = %#v, err=%v", providerErr, err)
 	}
 }
 
@@ -470,6 +647,29 @@ func TestDriveHTMLAllowsOnlyInertSourceAndLiteralReportText(t *testing.T) {
 	}
 }
 
+func TestDocumentHTMLCanonicalizersRejectUnsafeAndIncompleteAttachmentStructure(t *testing.T) {
+	encoders := map[string]func(string, string, string, map[string]string) ([]byte, error){
+		"drive": encodeDocumentHTML,
+		"graph": encodeGraphHTML,
+	}
+	for name, encode := range encoders {
+		t.Run(name, func(t *testing.T) {
+			for _, storage := range []string{
+				`<p><link href="https://attacker.invalid"><attachment filename="evidence.pdf"/></link></p>`,
+				`<p><image src="https://attacker.invalid"><attachment filename="evidence.pdf"/></image></p>`,
+				`<p><link></link></p>`,
+				`<p><image></image></p>`,
+				`<p><link><attachment filename="evidence.pdf"/></image></p>`,
+				`<p><image><attachment filename="report.html"/></image></p>`,
+			} {
+				if _, err := encode("Report", storage, "synapse-intent-fixture", map[string]string{"evidence.pdf": "attachment", "report.html": "body"}); err == nil {
+					t.Fatalf("accepted unsafe or incomplete storage %q", storage)
+				}
+			}
+		})
+	}
+}
+
 func TestDriveReadbackUsesHeadRevisionThenFencesOriginalMetadata(t *testing.T) {
 	a, f := newDriveFixture(t)
 	ctx := context.Background()
@@ -489,6 +689,49 @@ func TestDriveReadbackUsesHeadRevisionThenFencesOriginalMetadata(t *testing.T) {
 	}
 	if len(f.mediaRevisionIDs) == 0 || f.mediaRevisionIDs[len(f.mediaRevisionIDs)-1] != "head-2" || f.mediaIfMatches[len(f.mediaIfMatches)-1] != "" || f.metadataIfMatches[len(f.metadataIfMatches)-1] != "body-v2" {
 		t.Fatalf("media revisions=%q media conditions=%q metadata conditions=%q", f.mediaRevisionIDs, f.mediaIfMatches, f.metadataIfMatches)
+	}
+}
+
+func TestDriveRestrictedReadReturnsCurrentStateWithoutRepeatingTheProof(t *testing.T) {
+	a, f := newDriveFixture(t)
+	ctx := context.Background()
+	shell, err := a.CreateDocumentShell(ctx, "parent", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := a.WriteDocumentRevision(ctx, shell, "Report", "<p>Approved</p>", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	a.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return f.serve(r)
+	})
+	state, err := a.ReadRestrictedDocument(ctx, published.ID, "parent", "group")
+	if err != nil || state.ID != published.ID || state.Revision != published.Revision || state.Container != "parent" || state.Neutral {
+		t.Fatalf("restricted state = %+v, err=%v", state, err)
+	}
+	if calls > 9 {
+		t.Fatalf("restricted read repeated the same ACL proof: requests=%d", calls)
+	}
+	t.Logf("combined restricted read requests=%d", calls)
+}
+
+func TestDriveRejectsAttachmentNamesTheCanonicalDocumentCannotReference(t *testing.T) {
+	a, f := newDriveFixture(t)
+	shell, err := a.CreateDocumentShell(context.Background(), "parent", "synapse-intent-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := f.writes
+	for _, name := range []string{"report.html", graphManifestName, "chart?one.png", "chart#one.png"} {
+		if err := a.UploadDocumentAttachment(context.Background(), shell.ID, ports.DocumentImage{Name: name, MediaType: "image/png", Data: []byte("png")}); err == nil {
+			t.Fatalf("accepted an unreferenceable attachment name %q", name)
+		}
+	}
+	if f.writes != before {
+		t.Fatalf("invalid attachment name issued an outward write: before=%d after=%d", before, f.writes)
 	}
 }
 
@@ -771,5 +1014,26 @@ func TestDriveMaximumAttachmentProofReadsEachACLOnce(t *testing.T) {
 	}
 	if calls > 18 {
 		t.Fatalf("maximum-size proof repeated metadata/identity reads: requests=%d", calls)
+	}
+}
+
+func TestDriveOwnerProofDistinguishesMissingIdentityFromObservedTransfer(t *testing.T) {
+	for _, tc := range []struct {
+		name, id string
+		lost     bool
+	}{
+		{"missing owner ID", "", false},
+		{"invalid owner ID", "not an ID", false},
+		{"observed transfer", "other-owner", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, f := newDriveFixture(t)
+			f.files["parent"]["owners"] = []map[string]string{{"permissionId": tc.id}}
+			err := a.CheckDocumentRelease(context.Background(), "parent", "group")
+			var refusal *ports.DocumentProviderError
+			if !errors.As(err, &refusal) || refusal.RestrictionLost != tc.lost {
+				t.Fatalf("ownerproof=%+v err=%v wantloss=%t", refusal, err, tc.lost)
+			}
+		})
 	}
 }

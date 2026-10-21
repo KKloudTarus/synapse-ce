@@ -116,4 +116,6 @@ type TicketProviderError struct {
 	Ambiguous  bool
 }
 
-func (e *TicketProviderError) Error() string { return fmt.Sprintf("Jira request failed (%s)", e.Code) }
+func (e *TicketProviderError) Error() string {
+	return fmt.Sprintf("ticket provider request failed (%s)", e.Code)
+}

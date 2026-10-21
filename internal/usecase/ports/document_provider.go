@@ -3,6 +3,7 @@ package ports
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/docpublish"
 )
@@ -27,6 +28,13 @@ type DocumentRevisionWriter interface {
 	WriteDocumentRevision(context.Context, docpublish.RemotePage, string, string, string) (docpublish.RemotePage, error)
 }
 
+// DocumentRestrictedReader combines a fresh exact remote identity/revision read
+// with its complete current restriction proof. The result is valid for this call
+// only; adapters must still recheck immediately before each outward write.
+type DocumentRestrictedReader interface {
+	ReadRestrictedDocument(context.Context, string, string, string) (DocumentRemoteState, error)
+}
+
 // DocumentReleasePreflighter refuses an unsupported provider or destination
 // before an artifact or neutral remote shell is created.
 type DocumentReleasePreflighter interface {
@@ -48,6 +56,12 @@ type DocumentProviderError struct {
 	Code      string
 	Status    int
 	Ambiguous bool
+	// RestrictionLost means a current remote observation contradicted the
+	// required access or identity boundary. Missing proof, transport, credentials
+	// and local configuration failures must leave this false.
+	RestrictionLost bool
+	// RetryAfter is the provider's minimum deferral for a definite refusal.
+	RetryAfter time.Duration
 }
 
 func (e *DocumentProviderError) Error() string {

@@ -21,3 +21,19 @@ type TicketInboundStore interface {
 	ListInboundTicketTargets(context.Context, shared.ID, int) ([]TicketStatusTarget, error)
 	RecordInboundTicketPoll(context.Context, shared.ID, TicketStatusTarget, time.Time) error
 }
+
+// TicketInboundPollClaim reserves one durable target before provider I/O. Its
+// version fences a crashed or stale worker from replacing a later deferral.
+type TicketInboundPollClaim struct {
+	Target     TicketStatusTarget
+	Version    int
+	NextPollAt time.Time
+}
+
+// TicketInboundClaimStore is the durable polling extension. The legacy store
+// methods remain for read-only compatibility doubles; production stores must
+// implement this contract so every provider request has a leased queue turn.
+type TicketInboundClaimStore interface {
+	ClaimInboundTicketTargets(context.Context, shared.ID, int, time.Time, time.Duration) ([]TicketInboundPollClaim, error)
+	CompleteInboundTicketPoll(context.Context, shared.ID, TicketInboundPollClaim, time.Time, time.Time) error
+}

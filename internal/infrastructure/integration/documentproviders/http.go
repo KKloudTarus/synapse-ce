@@ -3,9 +3,12 @@ package documentproviders
 import (
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/safehttp"
@@ -18,6 +21,39 @@ var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
 func safeID(id string) bool { return idPattern.MatchString(id) }
 func docError(status int, code string, ambiguous bool) error {
 	return &ports.DocumentProviderError{Status: status, Code: code, Ambiguous: ambiguous}
+}
+func restrictionLostError(status int, code string) error {
+	return &ports.DocumentProviderError{Status: status, Code: code, RestrictionLost: true}
+}
+
+const maxDocumentRetryAfter = time.Duration(math.MaxInt64)
+
+func documentRetryAfter(value string) time.Duration {
+	return documentRetryAfterAt(value, time.Now())
+}
+
+func documentRetryAfterAt(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Minute
+	}
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil {
+		if seconds > uint64(maxDocumentRetryAfter/time.Second) {
+			return maxDocumentRetryAfter
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return time.Minute
+	}
+	if !when.After(now) {
+		return 0
+	}
+	if when.After(now.Add(maxDocumentRetryAfter)) {
+		return maxDocumentRetryAfter
+	}
+	return when.Sub(now)
 }
 func validateToken(token string) error {
 	if strings.TrimSpace(token) == "" || strings.ContainsAny(token, "\r\n\x00") {
@@ -52,6 +88,9 @@ func readResponse(client *http.Client, req *http.Request, maxBytes int64, want .
 			code = "revision_conflict"
 		case 429:
 			code = "rate_limited"
+		}
+		if response.StatusCode == http.StatusTooManyRequests {
+			return nil, nil, &ports.DocumentProviderError{Status: response.StatusCode, Code: code, RetryAfter: documentRetryAfter(response.Header.Get("Retry-After"))}
 		}
 		return nil, nil, docError(response.StatusCode, code, response.StatusCode >= 500)
 	}

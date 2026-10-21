@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5" //nolint:gosec // Drive exposes md5Checksum for transport readback; security identities use SHA-256.
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"fmt"
 	"html"
-	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -45,6 +43,7 @@ type driveAdapter struct {
 var _ ports.DocumentProvider = (*driveAdapter)(nil)
 var _ ports.DocumentRevisionWriter = (*driveAdapter)(nil)
 var _ ports.DocumentReleasePreflighter = (*driveAdapter)(nil)
+var _ ports.DocumentRestrictedReader = (*driveAdapter)(nil)
 var _ integration.ConnectionTester = (*driveAdapter)(nil)
 
 func newDrive(item integration.Integration, c integration.CredentialBundle, _ selfhosted.Rules) (integration.Adapter, error) {
@@ -152,8 +151,30 @@ type driveFile struct {
 		Value      string `json:"value"`
 		Visibility string `json:"visibility"`
 	} `json:"properties"`
-	HeadRevision string `json:"headRevisionId"`
-	MD5          string `json:"md5Checksum"`
+	HeadRevision                                   string `json:"headRevisionId"`
+	MD5                                            string `json:"md5Checksum"`
+	mimePresent, parentsPresent, propertiesPresent bool
+}
+
+func (f *driveFile) UnmarshalJSON(data []byte) error {
+	type plain driveFile
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields struct {
+		MIME       json.RawMessage `json:"mimeType"`
+		Parents    json.RawMessage `json:"parents"`
+		Properties json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	decoded.mimePresent = presentFacet(fields.MIME)
+	decoded.parentsPresent = presentFacet(fields.Parents)
+	decoded.propertiesPresent = presentFacet(fields.Properties)
+	*f = driveFile(decoded)
+	return nil
 }
 
 func (f driveFile) property(key string) string {
@@ -167,6 +188,57 @@ func (f driveFile) property(key string) string {
 		}
 	}
 	return value
+}
+
+func (f driveFile) shellIdentity(container, body string) error {
+	if !f.mimePresent || !f.parentsPresent || !f.propertiesPresent {
+		return docError(http.StatusOK, "complete_identity_unverifiable", false)
+	}
+	if mediaType, _, err := mime.ParseMediaType(f.MIME); err != nil || !strings.Contains(mediaType, "/") {
+		return docError(http.StatusOK, "complete_identity_unverifiable", false)
+	}
+	for _, parent := range f.Parents {
+		if !safeID(parent.ID) {
+			return docError(http.StatusOK, "complete_identity_unverifiable", false)
+		}
+	}
+	if f.MIME != folderMIME || len(f.Parents) != 1 || f.Parents[0].ID != container {
+		return restrictionLostError(http.StatusOK, "remote_identity_changed")
+	}
+	seenBody, seenMarker := false, false
+	for _, property := range f.Properties {
+		if property.Key == "" {
+			return docError(http.StatusOK, "complete_identity_unverifiable", false)
+		}
+		switch property.Key {
+		case "synapse-body":
+			if property.Value == "" || property.Visibility == "" {
+				return docError(http.StatusOK, "complete_identity_unverifiable", false)
+			}
+			if seenBody {
+				return docError(http.StatusOK, "complete_identity_unverifiable", false)
+			}
+			seenBody = true
+			if property.Visibility != "PRIVATE" || property.Value != body {
+				return restrictionLostError(http.StatusOK, "remote_identity_changed")
+			}
+		case "synapse-marker":
+			if property.Value == "" || property.Visibility == "" {
+				return docError(http.StatusOK, "complete_identity_unverifiable", false)
+			}
+			if seenMarker {
+				return docError(http.StatusOK, "complete_identity_unverifiable", false)
+			}
+			seenMarker = true
+			if property.Visibility != "PRIVATE" || !validMarker(property.Value) {
+				return restrictionLostError(http.StatusOK, "remote_identity_changed")
+			}
+		}
+	}
+	if !seenBody || !seenMarker {
+		return restrictionLostError(http.StatusOK, "remote_identity_changed")
+	}
+	return nil
 }
 func (a *driveAdapter) file(ctx context.Context, id string) (driveFile, error) {
 	return a.fileWithHeaders(ctx, id, nil)
@@ -250,22 +322,19 @@ func (a *driveAdapter) checkACL(ctx context.Context, id, group string) error {
 // page is read for the actual item immediately before the guarded operation.
 func (a *driveAdapter) checkKnownFileACL(ctx context.Context, f driveFile, owner, group string) error {
 	id := f.ID
-	if len(f.Owners) != 1 || f.Owners[0].ID != owner {
+	if len(f.Owners) != 1 || !safeID(f.Owners[0].ID) {
 		return docError(200, "complete_acl_unverifiable", false)
+	}
+	if f.Owners[0].ID != owner {
+		return restrictionLostError(http.StatusOK, "restricted_sharing_unverified")
 	}
 	token := ""
 	seen := map[string]bool{}
 	hasGroup, hasOwner := false, false
 	for page := 0; page < 20; page++ {
 		var out struct {
-			Items []struct {
-				ID              string   `json:"id"`
-				Type            string   `json:"type"`
-				Role            string   `json:"role"`
-				Deleted         bool     `json:"deleted"`
-				AdditionalRoles []string `json:"additionalRoles"`
-			} `json:"items"`
-			Next string `json:"nextPageToken"`
+			Items json.RawMessage `json:"items"`
+			Next  string          `json:"nextPageToken"`
 		}
 		query := url.Values{"maxResults": {"100"}, "fields": {"items(id,type,role,deleted,additionalRoles),nextPageToken"}}
 		if token != "" {
@@ -274,9 +343,36 @@ func (a *driveAdapter) checkKnownFileACL(ctx context.Context, f driveFile, owner
 		if err := a.json(ctx, "GET", "/drive/v2/files/"+id+"/permissions", query, nil, &out, 200); err != nil {
 			return err
 		}
-		for _, p := range out.Items {
-			if p.Deleted || len(p.AdditionalRoles) > 0 || seen[p.ID] || !safeID(p.ID) {
-				return docError(200, "restricted_sharing_unverified", false)
+		if out.Next != "" && (len(out.Next) > 2048 || out.Next == token) {
+			return docError(200, "incomplete_permissions", false)
+		}
+		if !presentFacet(out.Items) {
+			return docError(200, "complete_acl_unverifiable", false)
+		}
+		var permissions []struct {
+			ID              string   `json:"id"`
+			Type            string   `json:"type"`
+			Role            string   `json:"role"`
+			Deleted         bool     `json:"deleted"`
+			AdditionalRoles []string `json:"additionalRoles"`
+		}
+		if json.Unmarshal(out.Items, &permissions) != nil {
+			return docError(200, "complete_acl_unverifiable", false)
+		}
+		for _, p := range permissions {
+			if seen[p.ID] || !safeID(p.ID) {
+				return docError(200, "complete_acl_unverifiable", false)
+			}
+			if !validDrivePermissionType(p.Type) || !validDrivePermissionRole(p.Role) {
+				return docError(200, "complete_acl_unverifiable", false)
+			}
+			for _, role := range p.AdditionalRoles {
+				if !validDrivePermissionRole(role) {
+					return docError(200, "complete_acl_unverifiable", false)
+				}
+			}
+			if p.Deleted || len(p.AdditionalRoles) > 0 {
+				return restrictionLostError(200, "restricted_sharing_unverified")
 			}
 			seen[p.ID] = true
 			switch {
@@ -285,21 +381,36 @@ func (a *driveAdapter) checkKnownFileACL(ctx context.Context, f driveFile, owner
 			case p.Type == "group" && p.Role == "reader" && p.ID == group:
 				hasGroup = true
 			default:
-				return docError(200, "restricted_sharing_unverified", false)
+				return restrictionLostError(200, "restricted_sharing_unverified")
 			}
 		}
 		if out.Next == "" {
 			if !hasGroup || !hasOwner {
-				return docError(200, "restricted_sharing_unverified", false)
+				return restrictionLostError(200, "restricted_sharing_unverified")
 			}
 			return nil
-		}
-		if len(out.Next) > 2048 || out.Next == token {
-			return docError(200, "incomplete_permissions", false)
 		}
 		token = out.Next
 	}
 	return docError(200, "incomplete_permissions", false)
+}
+
+func validDrivePermissionType(value string) bool {
+	switch value {
+	case "user", "group", "domain", "anyone":
+		return true
+	default:
+		return false
+	}
+}
+
+func validDrivePermissionRole(value string) bool {
+	switch value {
+	case "owner", "organizer", "fileOrganizer", "writer", "commenter", "reader":
+		return true
+	default:
+		return false
+	}
 }
 func (a *driveAdapter) CheckDocumentRelease(ctx context.Context, container, group string) error {
 	if container != a.container || group != a.group {
@@ -382,8 +493,8 @@ func (a *driveAdapter) VerifyDocumentRestriction(ctx context.Context, page, cont
 	if err != nil {
 		return err
 	}
-	if f.MIME != folderMIME || len(f.Parents) != 1 || f.Parents[0].ID != container || f.property("synapse-body") != body || !validMarker(f.property("synapse-marker")) {
-		return docError(200, "remote_identity_changed", false)
+	if err = f.shellIdentity(container, body); err != nil {
+		return err
 	}
 	if err = a.checkKnownFileACL(ctx, f, owner, group); err != nil {
 		return err
@@ -463,6 +574,11 @@ func (a *driveAdapter) GetDocument(ctx context.Context, page string) (ports.Docu
 	if err != nil {
 		return out, err
 	}
+	return a.documentState(ctx, folder, body, f, children)
+}
+
+func (a *driveAdapter) documentState(ctx context.Context, folder, body string, f driveFile, children []driveFile) (ports.DocumentRemoteState, error) {
+	out := ports.DocumentRemoteState{RemotePage: driveRemote(folder, body, "new:"+body), Container: f.Parents[0].ID, Marker: f.property("synapse-marker"), Neutral: true}
 	found := false
 	for _, child := range children {
 		if child.ID != body {
@@ -490,6 +606,56 @@ func (a *driveAdapter) GetDocument(ctx context.Context, page string) (ports.Docu
 		out.Neutral = false
 	}
 	return out, nil
+}
+
+// ReadRestrictedDocument obtains the state and its complete ACL proof from the
+// same current metadata/children snapshot. It is a read-only optimisation for a
+// caller's guard; every actual outbound operation still calls its own preflight.
+func (a *driveAdapter) ReadRestrictedDocument(ctx context.Context, page, container, group string) (ports.DocumentRemoteState, error) {
+	folder, body, err := splitDrivePage(page)
+	if err != nil {
+		return ports.DocumentRemoteState{}, err
+	}
+	if container != a.container || group != a.group {
+		return ports.DocumentRemoteState{}, shared.ErrConflict
+	}
+	owner, err := a.identity(ctx)
+	if err != nil {
+		return ports.DocumentRemoteState{}, err
+	}
+	parent, err := a.file(ctx, container)
+	if err != nil {
+		return ports.DocumentRemoteState{}, err
+	}
+	if parent.MIME != folderMIME {
+		return ports.DocumentRemoteState{}, docError(200, "invalid_container", false)
+	}
+	if err = a.checkKnownFileACL(ctx, parent, owner, group); err != nil {
+		return ports.DocumentRemoteState{}, err
+	}
+	f, err := a.file(ctx, folder)
+	if err != nil {
+		return ports.DocumentRemoteState{}, err
+	}
+	if err = f.shellIdentity(container, body); err != nil {
+		return ports.DocumentRemoteState{}, err
+	}
+	if err = a.checkKnownFileACL(ctx, f, owner, group); err != nil {
+		return ports.DocumentRemoteState{}, err
+	}
+	children, err := a.children(ctx, folder)
+	if err != nil {
+		return ports.DocumentRemoteState{}, err
+	}
+	for _, child := range children {
+		if child.MIME == folderMIME || child.property("synapse-folder") != folder {
+			return ports.DocumentRemoteState{}, docError(200, "unmanaged_child", false)
+		}
+		if err = a.checkKnownFileACL(ctx, child, owner, group); err != nil {
+			return ports.DocumentRemoteState{}, err
+		}
+	}
+	return a.documentState(ctx, folder, body, f, children)
 }
 func (a *driveAdapter) FindDocumentMarker(ctx context.Context, container, marker string) ([]ports.DocumentRemoteState, error) {
 	if container != a.container || !validMarker(marker) {
@@ -559,7 +725,7 @@ func (a *driveAdapter) UploadDocumentAttachment(ctx context.Context, page string
 	if err != nil {
 		return err
 	}
-	if len(file.Data) == 0 || len(file.Data) > 20<<20 || len(file.Name) > 255 || strings.ContainsAny(file.Name, "/\\\r\n\x00") || file.Name == "report.html" || (!strings.HasPrefix(file.MediaType, "image/") && file.MediaType != "application/pdf") {
+	if len(file.Data) == 0 || len(file.Data) > 20<<20 || !validAttachmentName(file.Name) || (!strings.HasPrefix(file.MediaType, "image/") && file.MediaType != "application/pdf") {
 		return shared.ErrValidation
 	}
 	if err = a.ValidateDocumentText(file.Name); err != nil {
@@ -662,7 +828,7 @@ func (a *driveAdapter) PurgeDocument(ctx context.Context, page string, guard fun
 		return err
 	}
 	if shell.MIME != folderMIME || len(shell.Parents) != 1 || shell.Parents[0].ID != a.container || shell.property("synapse-body") != body || !validMarker(shell.property("synapse-marker")) || len(shell.Owners) != 1 || shell.Owners[0].ID != owner {
-		return docError(200, "remote_identity_changed", false)
+		return restrictionLostError(200, "remote_identity_changed")
 	}
 	// Include trashed publication artifacts: trash is retained provider history,
 	// not evidence of permanent removal. A broader ACL must not block unpublish.
@@ -705,124 +871,24 @@ func validMarker(marker string) bool {
 	return strings.HasPrefix(marker, "synapse-intent-") && safeID(marker) && len(marker) <= 124
 }
 
-const sourcePrefix = "<!--synapse-source:"
-
-type htmlSource struct {
-	Title, Storage, Marker string
-	Files                  map[string]string `json:",omitempty"`
-}
-
 func encodeDriveHTML(title, storage, marker string) ([]byte, error) {
 	return encodeDocumentHTML(title, storage, marker, nil)
 }
 func encodeDocumentHTML(title, storage, marker string, files map[string]string) ([]byte, error) {
-	if title == "" || len(title) > 4096 || len(storage) > 1<<20 || !validMarker(marker) || len(files) > 256 {
-		return nil, shared.ErrValidation
-	}
-	for name, id := range files {
-		if name == "" || len(name) > 255 || strings.ContainsAny(name, "/\\\r\n\x00") || !safeID(id) {
-			return nil, shared.ErrValidation
-		}
-	}
-	decoder := xml.NewDecoder(strings.NewReader("<root xmlns:ac=\"urn:ac\" xmlns:ri=\"urn:ri\">" + storage + "</root>"))
-	var visible strings.Builder
-	inLink, inImage, linkOpened := false, false, false
-	for {
-		token, err := decoder.Token()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, shared.ErrValidation
-		}
-		switch t := token.(type) {
-		case xml.StartElement:
-			switch t.Name.Local {
-			case "root", "h1", "p", "code", "plain-text-link-body":
-				if t.Name.Local == "h1" || t.Name.Local == "p" || t.Name.Local == "code" {
-					if len(t.Attr) != 0 {
-						return nil, shared.ErrValidation
-					}
-					visible.WriteString("<" + t.Name.Local + ">")
-				}
-			case "link":
-				if inLink || inImage {
-					return nil, shared.ErrValidation
-				}
-				inLink = true
-				linkOpened = false
-			case "image":
-				if inLink || inImage {
-					return nil, shared.ErrValidation
-				}
-				inImage = true
-			case "attachment":
-				filename := ""
-				for _, attr := range t.Attr {
-					if attr.Name.Local != "filename" || filename != "" {
-						return nil, shared.ErrValidation
-					}
-					filename = attr.Value
-				}
-				id := files[filename]
-				if !safeID(id) {
-					return nil, shared.ErrValidation
-				}
-				if inImage {
-					visible.WriteString("<img alt=\"" + html.EscapeString(filename) + "\" src=\"https://drive.google.com/uc?export=view&amp;id=" + id + "\">")
-				} else if inLink && !linkOpened {
-					visible.WriteString("<a href=\"https://drive.google.com/file/d/" + id + "/view\" rel=\"noreferrer\">")
-					linkOpened = true
-				} else {
-					return nil, shared.ErrValidation
-				}
-			default:
-				return nil, shared.ErrValidation
-			}
-		case xml.EndElement:
-			switch t.Name.Local {
-			case "h1", "p", "code":
-				visible.WriteString("</" + t.Name.Local + ">")
-			case "link":
-				if !linkOpened {
-					return nil, shared.ErrValidation
-				}
-				visible.WriteString("</a>")
-				inLink = false
-				linkOpened = false
-			case "image":
-				inImage = false
-			}
-		case xml.CharData:
-			visible.WriteString(html.EscapeString(string(t)))
-		default:
-			return nil, shared.ErrValidation
-		}
-	}
-	source, _ := json.Marshal(htmlSource{Title: title, Storage: storage, Marker: marker, Files: files})
-	return []byte("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + html.EscapeString(title) + "</title></head><body>" + visible.String() + sourcePrefix + base64.StdEncoding.EncodeToString(source) + "--></body></html>"), nil
+	return encodeCanonicalDocumentHTML(title, storage, marker, files, driveAttachmentHTML)
 }
+
+func driveAttachmentHTML(filename, id string, image bool) string {
+	if image {
+		return "<img alt=\"" + html.EscapeString(filename) + "\" src=\"https://drive.google.com/uc?export=view&amp;id=" + id + "\">"
+	}
+	return "<a href=\"https://drive.google.com/file/d/" + id + "/view\" rel=\"noreferrer\">"
+}
+
 func decodeDriveHTML(data []byte) (string, string, string, error) {
-	text := string(data)
-	index := strings.LastIndex(text, sourcePrefix)
-	if index < 0 {
-		return "", "", "", docError(200, "unmanaged_body", false)
-	}
-	end := strings.Index(text[index:], "-->")
-	if end < 0 {
-		return "", "", "", docError(200, "unmanaged_body", false)
-	}
-	raw, err := base64.StdEncoding.DecodeString(text[index+len(sourcePrefix) : index+end])
+	source, err := decodeCanonicalDocumentHTML(data, encodeDocumentHTML)
 	if err != nil {
-		return "", "", "", docError(200, "invalid_source", false)
-	}
-	var source htmlSource
-	if json.Unmarshal(raw, &source) != nil {
-		return "", "", "", docError(200, "invalid_source", false)
-	}
-	canonical, err := encodeDocumentHTML(source.Title, source.Storage, source.Marker, source.Files)
-	if err != nil || !bytes.Equal(canonical, data) {
-		return "", "", "", docError(200, "remote_content_changed", false)
+		return "", "", "", err
 	}
 	return source.Title, source.Storage, source.Marker, nil
 }

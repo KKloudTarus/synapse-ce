@@ -225,7 +225,7 @@ func (s *DocumentStore) TransitionIntent(ctx context.Context, tenant, id shared.
 	// Yield is only safe with the command's clean progress checkpoint. Keep it
 	// behind YieldDocumentCommand so a generic intent transition cannot clear a
 	// lease while an acknowledged provider operation remains outstanding.
-	if change.Event == docpublish.CheckpointYield {
+	if change.Event == docpublish.CheckpointYield || change.Event == docpublish.RetryDeferred {
 		return docpublish.Intent{}, shared.ErrConflict
 	}
 	s.mu.Lock()
@@ -236,6 +236,11 @@ func (s *DocumentStore) TransitionIntent(ctx context.Context, tenant, id shared.
 	}
 	if current.Version != expectedVersion {
 		return docpublish.Intent{}, shared.ErrConflict
+	}
+	if change.Event == writeintent.Claim {
+		if command, exists := s.commands[tenant][id]; exists && !command.NextAttemptAt.IsZero() && at.Before(command.NextAttemptAt) {
+			return docpublish.Intent{}, shared.ErrConflict
+		}
 	}
 	next, err := current.Apply(change, at)
 	if err != nil {

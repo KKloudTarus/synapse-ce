@@ -148,7 +148,28 @@ fields because those controls are unsupported by these serializers. Their native
 policy has no waiver path.
 
 Ticket status polling and recovery create reviewable proposals only; they do not mutate
-finding triage or status automatically. Connection credentials, URLs with query data,
+finding triage or status automatically.
+
+Inbound ticket polling claims due targets atomically by tenant and reserves their
+next poll before provider I/O. A successful target has a one-minute minimum
+interval; unavailable targets wait five minutes. A 429 waits at least five minutes
+and never shortens a longer provider `Retry-After`, including a refusal during
+integration-identity lookup. Other targets on the same integration are skipped
+for that pass after a throttle. Deadlines survive restarts and stale completions
+cannot shorten a newer claim or delay. This is per-target scheduling, not an
+integration-wide quota limiter: previously unclaimed targets can still issue a
+request on a later pass. Size the target set against the provider's quota, allowing
+for privacy/access preflights, identity reads, discovery and outward writes.
+A GitHub target normally requires both a repository preflight and the issue read.
+
+Apply the provider retry-scheduling migration before upgrading APIs and workers,
+and upgrade every worker before relying on the interval or throttle guarantees.
+Older binaries do not observe the new due columns. Disable affected integrations
+and drain workers before rollback; the migration refuses to remove future poll
+claims or provider-directed deferrals. Prefer a forward repair when a delay is
+still active.
+
+Connection credentials, URLs with query data,
 and provider response bodies are not retained in ticket audit records. Selected
 personal ticket sandbox cases have [native evidence](../evidence/remaining-providers/live/README.md);
 remaining acceptance is listed separately and is not represented as passed.

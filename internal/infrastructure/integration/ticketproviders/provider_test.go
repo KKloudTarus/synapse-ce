@@ -128,7 +128,7 @@ func TestCreateLinearTreatsGraphQLErrorsAsFailure(t *testing.T) {
 	defer server.Close()
 	base, _ := url.Parse(server.URL)
 	a := &Adapter{provider: LinearProvider, base: base, client: server.Client(), token: []byte("secret"), project: "team"}
-	_, err := a.createLinear(context.Background(), json.RawMessage(`{"query":"x"}`))
+	_, err := a.createLinearWith(context.Background(), json.RawMessage(`{"query":"x"}`), a.request)
 	var classified *ports.TicketProviderError
 	if !errors.As(err, &classified) || classified.Code != "malformed_create_response" {
 		t.Fatalf("error = %#v", err)
@@ -751,4 +751,146 @@ func TestLinearTicketReadDoesNotRequestUnsupportedUpdatedBy(t *testing.T) {
 	if err != nil || observation.ExternalID != "linear-42" || observation.StatusCategory != "done" || !observation.UpdatedAt.Equal(time.Date(2026, 10, 20, 1, 2, 3, 0, time.UTC)) {
 		t.Fatalf("Linear observation=%#v err=%v", observation, err)
 	}
+}
+
+func TestNewRejectsHostileOrdinaryTicketDestinations(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, endpoint, config string
+		credentials                      integration.CredentialBundle
+	}{
+		{"azure query", string(AzureProvider), "https://dev.azure.com/org/project?redirect=https://evil.example", `{"work_item_type":"Bug"}`, integration.CredentialBundle{"pat": "synthetic"}},
+		{"azure wrong host", string(AzureProvider), "https://wrong.dev.azure.com/org/project", `{"work_item_type":"Bug"}`, integration.CredentialBundle{"pat": "synthetic"}},
+		{"azure wrong port", string(AzureProvider), "https://dev.azure.com:444/org/project", `{"work_item_type":"Bug"}`, integration.CredentialBundle{"pat": "synthetic"}},
+		{"azure malformed organization", string(AzureProvider), "https://dev.azure.com/../project", `{"work_item_type":"Bug"}`, integration.CredentialBundle{"pat": "synthetic"}},
+		{"azure encoded dot segment", string(AzureProvider), "https://dev.azure.com/org/%2E%2E", `{"work_item_type":"Bug"}`, integration.CredentialBundle{"pat": "synthetic"}},
+		{"azure double encoded separator", string(AzureProvider), "https://dev.azure.com/org/project%252Fother", `{"work_item_type":"Bug"}`, integration.CredentialBundle{"pat": "synthetic"}},
+		{"azure trailing space", string(AzureProvider), "https://dev.azure.com/org/project%20", `{"work_item_type":"Bug"}`, integration.CredentialBundle{"pat": "synthetic"}},
+		{"azure malformed project", string(AzureProvider), "https://dev.azure.com/org/project%2Fother", `{"work_item_type":"Bug"}`, integration.CredentialBundle{"pat": "synthetic"}},
+		{"linear wrong host", string(LinearProvider), "https://api.linear.app.evil/graphql", `{"team_id":"team"}`, integration.CredentialBundle{"token": "synthetic"}},
+		{"linear wrong path", string(LinearProvider), "https://api.linear.app/other", `{"team_id":"team"}`, integration.CredentialBundle{"token": "synthetic"}},
+		{"linear user info", string(LinearProvider), "https://user@api.linear.app/graphql", `{"team_id":"team"}`, integration.CredentialBundle{"token": "synthetic"}},
+		{"servicenow root host", string(ServiceNowProvider), "https://service-now.com", `{"table":"incident"}`, integration.CredentialBundle{"token": "synthetic"}},
+		{"servicenow suffix lookalike", string(ServiceNowProvider), "https://instance.service-now.com.evil", `{"table":"incident"}`, integration.CredentialBundle{"token": "synthetic"}},
+		{"servicenow wrong port", string(ServiceNowProvider), "https://instance.service-now.com:444", `{"table":"incident"}`, integration.CredentialBundle{"token": "synthetic"}},
+		{"servicenow path", string(ServiceNowProvider), "https://instance.service-now.com/api/now", `{"table":"incident"}`, integration.CredentialBundle{"token": "synthetic"}},
+		{"servicenow wrong table", string(ServiceNowProvider), "https://instance.service-now.com", `{"table":"sys_user"}`, integration.CredentialBundle{"token": "synthetic"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := integration.Integration{ID: "ticket", TenantID: "tenant", Provider: integration.Provider(tc.provider), Name: "native", Endpoint: tc.endpoint, Config: json.RawMessage(tc.config), Version: 1, ConnectionRevision: 1}
+			if _, err := New(item, tc.credentials, selfhosted.Rules{}, nil, integration.Provider(tc.provider)); !errors.Is(err, shared.ErrValidation) {
+				t.Fatalf("hostile destination accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestNewPinsOrdinaryTicketDestinationToConfiguredProviderHost(t *testing.T) {
+	for _, tc := range []struct {
+		provider, endpoint, config, wantHost, wantProject string
+		credentials                                       integration.CredentialBundle
+	}{
+		{string(AzureProvider), "https://dev.azure.com/org/My%20Project", `{"work_item_type":"Bug"}`, "dev.azure.com", "org/My Project/Bug", integration.CredentialBundle{"pat": "synthetic"}},
+		{string(AzureProvider), "https://dev.azure.com/org/D%E1%BB%B1%20%C3%A1n", `{"work_item_type":"Bug"}`, "dev.azure.com", "org/Dự án/Bug", integration.CredentialBundle{"pat": "synthetic"}},
+		{string(AzureProvider), "https://dev.azure.com/org/project", `{"work_item_type":"Bug"}`, "dev.azure.com", "org/project/Bug", integration.CredentialBundle{"pat": "synthetic"}},
+		{string(LinearProvider), "https://api.linear.app/graphql", `{"team_id":"team"}`, "api.linear.app", "team", integration.CredentialBundle{"token": "synthetic"}},
+		{string(ServiceNowProvider), "https://instance.service-now.com", `{"table":"incident"}`, "instance.service-now.com", "incident", integration.CredentialBundle{"token": "synthetic"}},
+		{string(ServiceNowProvider), "https://instance.service-now.com", `{"table":"sn_vul_vulnerable_item"}`, "instance.service-now.com", "sn_vul_vulnerable_item", integration.CredentialBundle{"token": "synthetic"}},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			item := integration.Integration{ID: "ticket", TenantID: "tenant", Provider: integration.Provider(tc.provider), Name: "native", Endpoint: tc.endpoint, Config: json.RawMessage(tc.config), Version: 1, ConnectionRevision: 1}
+			a, err := New(item, tc.credentials, selfhosted.Rules{}, nil, integration.Provider(tc.provider))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer a.Close()
+			if a.client == nil || a.base == nil || a.base.Hostname() != tc.wantHost || a.project != tc.wantProject {
+				t.Fatalf("un-pinned adapter: base=%v project=%q", a.base, a.project)
+			}
+		})
+	}
+}
+
+func TestOrdinaryTicketClientRefusesUnpinnedDestinationsBeforeNetwork(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, endpoint, config, blockedBase string
+		credentials                                   integration.CredentialBundle
+	}{
+		{"azure wrong host", string(AzureProvider), "https://dev.azure.com/org/project", `{"work_item_type":"Bug"}`, "https://wrong.dev.azure.com", integration.CredentialBundle{"pat": "synthetic"}},
+		{"azure wrong port", string(AzureProvider), "https://dev.azure.com/org/project", `{"work_item_type":"Bug"}`, "https://dev.azure.com:444", integration.CredentialBundle{"pat": "synthetic"}},
+		{"servicenow suffix lookalike", string(ServiceNowProvider), "https://instance.service-now.com", `{"table":"incident"}`, "https://instance.service-now.com.evil", integration.CredentialBundle{"token": "synthetic"}},
+		{"servicenow wrong port", string(ServiceNowProvider), "https://instance.service-now.com", `{"table":"incident"}`, "https://instance.service-now.com:444", integration.CredentialBundle{"token": "synthetic"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := integration.Integration{ID: "ticket", TenantID: "tenant", Provider: integration.Provider(tc.provider), Name: "native", Endpoint: tc.endpoint, Config: json.RawMessage(tc.config), Version: 1, ConnectionRevision: 1}
+			a, err := New(item, tc.credentials, selfhosted.Rules{}, nil, integration.Provider(tc.provider))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer a.Close()
+			blocked, err := url.Parse(tc.blockedBase)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = a.requestWithClient(context.Background(), a.client, blocked, a.token, http.MethodGet, "", nil, nil, nil)
+			if !hasTicketError(t, err, "blocked_destination") {
+				t.Fatalf("unpinned destination was classified as %v, want policy refusal", err)
+			}
+
+			redirect, err := url.Parse("https://redirect.example.test/next")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = a.client.CheckRedirect(&http.Request{URL: redirect}, nil); !errors.Is(err, http.ErrUseLastResponse) {
+				t.Fatalf("client follows redirects: %v", err)
+			}
+		})
+	}
+}
+
+func TestUnknownProviderFailsClosedWithoutOutboundRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer server.Close()
+	base, _ := url.Parse(server.URL)
+	a := &Adapter{provider: "future-provider", base: base, client: server.Client(), token: []byte("synthetic"), project: "team"}
+	if _, err := a.BuildTicketPayload(context.Background(), ports.TicketPayloadInput{Summary: "summary", Description: json.RawMessage(`"description"`)}); !hasTicketError(t, err, "unsupported_provider") {
+		t.Fatalf("unknown provider payload error=%v", err)
+	}
+	if _, err := a.createWithRequest(context.Background(), json.RawMessage(`{}`), a.request); !hasTicketError(t, err, "unsupported_provider") {
+		t.Fatalf("unknown provider create error=%v", err)
+	}
+	if _, err := a.search(context.Background(), "synapse-intent-test"); !hasTicketError(t, err, "unsupported_provider") {
+		t.Fatalf("unknown provider search error=%v", err)
+	}
+	if _, err := a.TicketIdentity(context.Background()); !hasTicketError(t, err, "unsupported_provider") {
+		t.Fatalf("unknown provider identity error=%v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("unknown provider made %d requests", requests)
+	}
+}
+
+func TestLinearRemoteURLRequiresCredentialFreeCanonicalHTTPS(t *testing.T) {
+	for _, tc := range []struct {
+		url  string
+		want bool
+	}{
+		{"https://linear.app/team/issue/SEC-42/title", true},
+		{"http://linear.app/team/issue/SEC-42/title", false},
+		{"https://user:secret@linear.app/team/issue/SEC-42/title", false},
+		{"https://linear.app/team/issue/SEC-42/title?token=secret", false},
+		{"https://linear.app/team/issue/SEC-42/title#secret", false},
+		{"https://linear.app:444/team/issue/SEC-42/title", false},
+		{"https://linear.app", false},
+	} {
+		if got := safeHTTPS(tc.url, "linear.app"); got != tc.want {
+			t.Errorf("safeHTTPS(%q)=%t, want %t", tc.url, got, tc.want)
+		}
+	}
+}
+
+func hasTicketError(t *testing.T, err error, code string) bool {
+	t.Helper()
+	var providerErr *ports.TicketProviderError
+	return errors.As(err, &providerErr) && providerErr.Code == code && !providerErr.Ambiguous
 }

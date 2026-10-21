@@ -37,6 +37,7 @@ type graphAdapter struct {
 var _ ports.DocumentReleasePreflighter = (*graphAdapter)(nil)
 var _ ports.DocumentProvider = (*graphAdapter)(nil)
 var _ ports.DocumentRevisionWriter = (*graphAdapter)(nil)
+var _ ports.DocumentRestrictedReader = (*graphAdapter)(nil)
 var _ integration.ConnectionTester = (*graphAdapter)(nil)
 
 // Microsoft Graph drive IDs commonly use the documented b! prefix. Item IDs

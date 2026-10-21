@@ -117,6 +117,7 @@ func TestTicketStoreConformanceAndRLS(t *testing.T) {
 	assertTicketRetryAuditRollback(t, ctx, pool, store, fixture)
 	assertTicketStoreAuthoritativeProjectReferences(t, ctx, pool, store, fixture)
 	assertTicketMappingUpdateNormalizesOmittedCollections(t, ctx, store, fixture)
+	storetest.InboundPollingClaims(t, store, fixture)
 	for _, table := range []string{"ticket_mappings", "ticket_links", "ticket_intents", "ticket_dispatch_breakers", "ticket_auto_push_receipts", "ticket_external_observations", "ticket_retest_proposals", "ticket_external_comments", "ticket_inbound_poll_progress", "ticket_inbound_poll_backfill_cursors"} {
 		var enabled, forced bool
 		err = pool.QueryRow(ctx, `SELECT relrowsecurity,relforcerowsecurity
@@ -780,6 +781,11 @@ func TestTicketStorePersistsAfterPoolReopen(t *testing.T) {
 		done.RemoteURL != remote.URL || done.ErrorCode != "" {
 		t.Fatalf("reconcile completed intent before second reopen: %+v, %v", done, err)
 	}
+	pollAt := lease.Add(3 * time.Second)
+	pollClaims, err := store.ClaimInboundTicketTargets(ctx, tenant, 1, pollAt, time.Minute)
+	if err != nil || len(pollClaims) != 1 || pollClaims[0].Target.Intent.ID != intent.ID {
+		t.Fatalf("reserve inbound poll before restart: %+v, %v", pollClaims, err)
+	}
 
 	pool.Close()
 	pool, err = Connect(ctx, dsn)
@@ -789,6 +795,12 @@ func TestTicketStorePersistsAfterPoolReopen(t *testing.T) {
 	store, err = NewTicketStore(pool)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if early, err := store.ClaimInboundTicketTargets(ctx, tenant, 1, pollAt.Add(30*time.Second), time.Minute); err != nil || len(early) != 0 {
+		t.Fatalf("reopened store ignored durable poll reservation: %+v, %v", early, err)
+	}
+	if reclaimed, err := store.ClaimInboundTicketTargets(ctx, tenant, 1, pollClaims[0].NextPollAt.Add(time.Nanosecond), time.Minute); err != nil || len(reclaimed) != 1 || reclaimed[0].Target.Intent.ID != intent.ID || reclaimed[0].Version <= pollClaims[0].Version {
+		t.Fatalf("reopened store did not reclaim expired poll reservation: %+v, %v", reclaimed, err)
 	}
 	durable, err := store.GetIntent(ctx, tenant, intent.ID)
 	if err != nil || durable.State != writeintent.Done || durable.Version != 4 || durable.RemoteID != remote.ID ||

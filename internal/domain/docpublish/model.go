@@ -317,6 +317,11 @@ const ReconcileResumable writeintent.Event = "reconcile_resumable"
 // slice can continue immediately without consuming a failure retry.
 const CheckpointYield writeintent.Event = "checkpoint_yield"
 
+// RetryDeferred is intentionally document-local. It releases only a clean
+// in-flight pre-write claim after a provider throttle, so retry accounting is
+// not consumed by repeated read-only 429 responses.
+const RetryDeferred writeintent.Event = "retry_deferred"
+
 // SameCommand reports whether two intents are the same logical command, which is what a
 // replayed request key must be. Identity fields that the server issues (ID, marker, state,
 // timestamps) are deliberately not compared.
@@ -349,6 +354,11 @@ func (i Intent) Apply(change IntentTransition, at time.Time) (Intent, error) {
 			return Intent{}, fmt.Errorf("%w: document checkpoint is not yieldable", shared.ErrConflict)
 		}
 		next = writeintent.Pending
+	} else if change.Event == RetryDeferred {
+		if i.State != writeintent.InFlight || i.LeaseUntil == nil || !at.Before(*i.LeaseUntil) || change.Resumable {
+			return Intent{}, fmt.Errorf("%w: document retry is not deferrable", shared.ErrConflict)
+		}
+		next = writeintent.Pending
 	} else {
 		if change.Resumable {
 			return Intent{}, fmt.Errorf("%w: resumable evidence only applies to document reconciliation", shared.ErrValidation)
@@ -374,9 +384,9 @@ func (i Intent) Apply(change IntentTransition, at time.Time) (Intent, error) {
 			return Intent{}, fmt.Errorf("%w: only a document intent claim may set a lease", shared.ErrValidation)
 		}
 		i.LeaseUntil = nil
-		if change.Event == CheckpointYield {
+		if change.Event == CheckpointYield || change.Event == RetryDeferred {
 			if i.Attempts < 1 {
-				return Intent{}, fmt.Errorf("%w: document yield has no claimed attempt", shared.ErrConflict)
+				return Intent{}, fmt.Errorf("%w: document retry has no claimed attempt", shared.ErrConflict)
 			}
 			i.Attempts--
 		}

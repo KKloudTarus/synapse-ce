@@ -31,7 +31,7 @@ func (w *Workflow) integration(ctx context.Context, tenant, id shared.ID) (integ
 	if item.TenantID != tenant || item.Archived {
 		return integration.Integration{}, shared.ErrNotFound
 	}
-	if !supportedTicketProvider(item.Provider) {
+	if !w.supportedTicketProvider(item.Provider) {
 		return integration.Integration{}, fmt.Errorf("%w: ticket integration is unsupported", shared.ErrValidation)
 	}
 	return item, nil
@@ -329,11 +329,6 @@ func validateNativeTicketSelections(m domain.Mapping, meta ports.TicketMetadata)
 	if len(m.Labels) != 0 || len(m.PriorityMap) != 0 || m.Component != "" || len(m.FieldValues) != 0 {
 		return fmt.Errorf("%w: ticket provider does not support Jira mapping fields", shared.ErrValidation)
 	}
-	for _, label := range m.Labels {
-		if strings.HasPrefix(label, "synapse-intent-") || ticketText(label) != label {
-			return fmt.Errorf("%w: label contains reserved or sensitive content", shared.ErrValidation)
-		}
-	}
 	return nil
 }
 
@@ -341,13 +336,9 @@ func isJiraTicketProvider(provider integration.Provider) bool {
 	return provider == "jira-cloud" || provider == "jira-dc"
 }
 
-func supportedTicketProvider(provider integration.Provider) bool {
-	switch provider {
-	case "jira-cloud", "jira-dc", "github-issues", "gitlab-issues", "azure-boards", "servicenow", "linear":
-		return true
-	default:
-		return false
-	}
+func (w *Workflow) supportedTicketProvider(provider integration.Provider) bool {
+	descriptor, err := w.providers.TicketProviderDescriptor(provider)
+	return err == nil && descriptor.Provider == provider && descriptor.Supports(integration.CapabilityTickets)
 }
 
 func nativeTicketSecurityPolicyValid(policy string) bool {
@@ -419,7 +410,7 @@ func ticketFieldValue(field ports.TicketField, value string) (any, error) {
 func readTicketSnapshot(i domain.Intent) (snapshotFacts, json.RawMessage, error) {
 	var obj map[string]json.RawMessage
 	var facts snapshotFacts
-	if json.Unmarshal(i.Snapshot, &obj) != nil || json.Unmarshal(obj["_synapse"], &facts) != nil || !facts.DataClass.Valid() || facts.Endpoint == "" || !supportedTicketProvider(facts.Provider) || facts.MappingVersion != i.MappingVersion || facts.ConnectionRevision != i.ConnectionRevision || facts.CredentialRevision != i.CredentialRevision {
+	if json.Unmarshal(i.Snapshot, &obj) != nil || json.Unmarshal(obj["_synapse"], &facts) != nil || !facts.DataClass.Valid() || facts.Endpoint == "" || !facts.Provider.Valid() || facts.MappingVersion != i.MappingVersion || facts.ConnectionRevision != i.ConnectionRevision || facts.CredentialRevision != i.CredentialRevision {
 		return facts, nil, fmt.Errorf("%w: immutable ticket snapshot missing", shared.ErrValidation)
 	}
 	u, err := url.Parse(facts.Endpoint)

@@ -24,9 +24,37 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 	if c.Intent.State == writeintent.Done {
 		return c.Intent, nil
 	}
+	// Check the durable due time before constructing an adapter, resolving a
+	// credential, or running preflight. A direct Execute call must honour the
+	// same throttle reservation as a worker-selected command.
+	if !c.NextAttemptAt.IsZero() && s.clock.Now().UTC().Before(c.NextAttemptAt) {
+		return c.Intent, nil
+	}
+	// Settle an expired claim before preflight so a provider throttle can be
+	// persisted against the uncertain state. A live claim performs no provider I/O.
+	if c.Intent.State == writeintent.InFlight {
+		if c.Intent.LeaseUntil != nil && !s.clock.Now().Before(*c.Intent.LeaseUntil) {
+			c.Intent, err = s.store.TransitionIntent(ctx, tenant, id, c.Intent.Version, domain.IntentTransition{Event: writeintent.LeaseExpired}, s.clock.Now().UTC())
+			if err != nil {
+				return c.Intent, err
+			}
+		} else {
+			return c.Intent, nil
+		}
+	}
+	if c.Intent.State == writeintent.Failed && c.Intent.Attempts >= 5 {
+		return c.Intent, nil
+	}
 	in, err := s.guard(ctx, c)
 	if err != nil {
 		return c.Intent, err
+	}
+	if c.Intent.State == writeintent.Failed {
+		// Retrying a classified, definite refusal cannot repeat an unknown write.
+		c.Intent, err = s.store.TransitionIntent(ctx, tenant, id, c.Intent.Version, domain.IntentTransition{Event: writeintent.RetryFailed}, s.clock.Now().UTC())
+		if err != nil {
+			return c.Intent, err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return c.Intent, err
@@ -41,17 +69,10 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 			return c.Intent, err
 		}
 		if err := s.preflightDocumentRelease(ctx, in, c.Intent.Container, c.ReadGroup); err != nil {
-			return c.Intent, err
-		}
-	}
-	if c.Intent.State == writeintent.InFlight {
-		if c.Intent.LeaseUntil != nil && !s.clock.Now().Before(*c.Intent.LeaseUntil) {
-			c.Intent, err = s.store.TransitionIntent(ctx, tenant, id, c.Intent.Version, domain.IntentTransition{Event: writeintent.LeaseExpired}, s.clock.Now().UTC())
-			if err != nil {
-				return c.Intent, err
+			if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+				return deferred, deferErr
 			}
-		} else {
-			return c.Intent, nil
+			return c.Intent, err
 		}
 	}
 	if c.Intent.State == writeintent.Uncertain {
@@ -60,22 +81,19 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 		}
 		return s.reconcile(ctx, c, p)
 	}
-	if c.Intent.State == writeintent.Failed {
-		// Retrying a classified, definite refusal cannot repeat an unknown write.
-		if c.Intent.Attempts >= 5 {
-			return c.Intent, nil
-		}
-		c.Intent, err = s.store.TransitionIntent(ctx, tenant, id, c.Intent.Version, domain.IntentTransition{Event: writeintent.RetryFailed}, s.clock.Now().UTC())
-		if err != nil {
-			return c.Intent, err
-		}
-	}
 	if c.Intent.State != writeintent.Pending {
 		return c.Intent, shared.ErrConflict
 	}
 	now := s.clock.Now().UTC()
 	lease := now.Add(documentLease)
 	c.Intent, err = s.store.TransitionIntent(ctx, tenant, id, c.Intent.Version, domain.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now)
+	if err != nil {
+		return c.Intent, err
+	}
+	// Bind the newly claimed lease to the persisted checkpoint before any
+	// provider operation. Retry deferral and every later checkpoint fence both
+	// the intent and this progress version.
+	c, err = s.saveProgress(ctx, c)
 	if err != nil {
 		return c.Intent, err
 	}
@@ -123,6 +141,9 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 			return s.checkpointAndYield(ctx, c)
 		case "restrictions":
 			if err = s.verifyRemote(ctx, c, p); err != nil {
+				if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryRelease, ""); handled {
+					return deferred, deferErr
+				}
 				return s.refuse(ctx, c, "remote_identity_changed")
 			}
 			if c, err = s.outstanding(ctx, c, "restrictions", c.ReadGroup, digest([]byte(c.ReadGroup))); err != nil {
@@ -141,6 +162,9 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 				return s.checkpointAndYield(ctx, c)
 			}
 			if err = p.VerifyDocumentRestriction(ctx, c.Progress.Remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
+				if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryUncertain, ""); handled {
+					return deferred, deferErr
+				}
 				return s.uncertain(ctx, c)
 			}
 			// Some providers complete a neutral shell while applying its ACL. Read
@@ -149,6 +173,9 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 			// representation can never be adopted as the pending publication.
 			refreshed, readErr := p.GetDocument(ctx, c.Progress.Remote.ID)
 			if readErr != nil {
+				if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, readErr, ports.DocumentRetryUncertain, ""); handled {
+					return deferred, deferErr
+				}
 				return s.uncertain(ctx, c)
 			}
 			if refreshed.ID != c.Progress.Remote.ID || refreshed.Container != c.Intent.Container {
@@ -180,6 +207,9 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 			file := files[i]
 			key := uploadKey(i, file)
 			if err = s.sensitiveGuard(ctx, c, p); err != nil {
+				if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryRelease, ""); handled {
+					return deferred, deferErr
+				}
 				return s.refuse(ctx, c, "restricted_sharing_unverified")
 			}
 			if c, err = s.outstanding(ctx, c, "attachment", key, digest(file.Data)); err != nil {
@@ -196,6 +226,9 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 			return s.checkpointAndYield(ctx, c)
 		case "body":
 			if err = s.sensitiveGuard(ctx, c, p); err != nil {
+				if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryRelease, ""); handled {
+					return deferred, deferErr
+				}
 				return s.refuse(ctx, c, "restricted_sharing_unverified")
 			}
 			body := storageDocument(c)
@@ -232,6 +265,9 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 				return s.refuse(ctx, c, "invalid_checkpoint")
 			}
 			if err = s.verifyRemote(ctx, c, p); err != nil {
+				if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryRelease, ""); handled {
+					return deferred, deferErr
+				}
 				return s.refuse(ctx, c, "remote_identity_changed")
 			}
 			if c, err = s.outstanding(ctx, c, "purge", c.Progress.Remote.ID, c.Intent.ContentHash); err != nil {
@@ -283,6 +319,13 @@ func (s *Service) sensitiveGuard(ctx context.Context, c ports.DocumentCommand, p
 	if _, err := s.guard(ctx, c); err != nil {
 		return err
 	}
+	if reader, ok := p.(ports.DocumentRestrictedReader); ok {
+		remote, err := reader.ReadRestrictedDocument(ctx, c.Progress.Remote.ID, c.Intent.Container, c.ReadGroup)
+		if err != nil {
+			return err
+		}
+		return verifyDocumentRemoteCheckpoint(c, remote)
+	}
 	if err := s.verifyRemote(ctx, c, p); err != nil {
 		return err
 	}
@@ -293,6 +336,10 @@ func (s *Service) verifyRemote(ctx context.Context, c ports.DocumentCommand, p p
 	if err != nil {
 		return err
 	}
+	return verifyDocumentRemoteCheckpoint(c, remote)
+}
+
+func verifyDocumentRemoteCheckpoint(c ports.DocumentCommand, remote ports.DocumentRemoteState) error {
 	if remote.ID != c.Progress.Remote.ID || remote.Container != c.Intent.Container {
 		return shared.ErrConflict
 	}
@@ -342,10 +389,42 @@ func (s *Service) refuse(ctx context.Context, c ports.DocumentCommand, code stri
 }
 func (s *Service) writeFailure(ctx context.Context, c ports.DocumentCommand, cause error) (domain.Intent, error) {
 	var classified *ports.DocumentProviderError
-	if errors.As(cause, &classified) && !classified.Ambiguous {
-		return s.refuse(ctx, c, "provider_refused")
+	if errors.As(cause, &classified) {
+		outcome := ports.DocumentRetryReject
+		if classified.Ambiguous {
+			outcome = ports.DocumentRetryUncertain
+		}
+		if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, cause, outcome, "provider_refused"); handled {
+			return deferred, deferErr
+		}
+		if !classified.Ambiguous {
+			return s.refuse(ctx, c, "provider_refused")
+		}
 	}
 	return s.uncertain(ctx, c)
+}
+
+const documentProviderRetryFloor = time.Minute
+
+// deferProviderRetry stores a provider throttle without making a read-only
+// preflight/reconciliation result look like a failed write. A throttled
+// ambiguous response may be deferred only while preserving the outstanding
+// effect in the uncertain state.
+func (s *Service) deferProviderRetry(ctx context.Context, c ports.DocumentCommand, cause error, outcome ports.DocumentRetryOutcome, code string) (domain.Intent, error, bool) {
+	var classified *ports.DocumentProviderError
+	if !errors.As(cause, &classified) || (classified.Ambiguous && outcome != ports.DocumentRetryUncertain) || (classified.Status != 429 && classified.RetryAfter <= 0) {
+		return domain.Intent{}, nil, false
+	}
+	delay := classified.RetryAfter
+	if delay < documentProviderRetryFloor {
+		delay = documentProviderRetryFloor
+	}
+	now := s.clock.Now().UTC()
+	saved, err := s.store.DeferDocumentCommand(ctx, c.Intent.TenantID, c.Intent.ID, c.Intent.Version, c.Progress.Version, c.QueueVersion, now.Add(delay), now, outcome, code)
+	if err != nil {
+		return c.Intent, err, true
+	}
+	return saved.Intent, nil, true
 }
 
 // uncertain keeps the stored operation fence when an acknowledged mutation can

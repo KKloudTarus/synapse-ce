@@ -13,6 +13,7 @@ import (
 )
 
 var _ ports.TicketInboundStore = (*TicketStore)(nil)
+var _ ports.TicketInboundClaimStore = (*TicketStore)(nil)
 
 func inboundObservationKey(mappingID, engagementID, findingID shared.ID, remote string) string {
 	return mappingID.String() + "\x00" + engagementID.String() + "\x00" + findingID.String() + "\x00" + remote
@@ -75,6 +76,96 @@ func (s *TicketStore) RecordInboundTicketPoll(ctx context.Context, tenant shared
 	item := s.inboundPollProgress[tenant][key]
 	item.checkedAt, item.version = checkedAt.UTC(), item.version+1
 	s.inboundPollProgress[tenant][key] = item
+	return nil
+}
+
+func (s *TicketStore) ClaimInboundTicketTargets(ctx context.Context, tenant shared.ID, limit int, at time.Time, lease time.Duration) ([]ports.TicketInboundPollClaim, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if tenant.IsZero() || limit < 1 || limit > 250 || at.IsZero() || lease <= 0 {
+		return nil, shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inboundPollProgress[tenant] == nil {
+		s.inboundPollProgress[tenant] = map[string]memoryInboundPollProgress{}
+	}
+	candidates := make([]ports.TicketStatusTarget, 0, limit)
+	for _, intent := range s.intents[tenant] {
+		if intent.State != writeintent.Done || intent.Action != ticketing.Create || intent.RemoteID == "" {
+			continue
+		}
+		mapping, ok := s.mappings[tenant][intent.MappingID]
+		if !ok {
+			continue
+		}
+		target := ports.TicketStatusTarget{Mapping: mapping.Clone(), Intent: intent.Clone()}
+		progress := s.inboundPollProgress[tenant][inboundPollKey(target)]
+		if !progress.nextPollAt.IsZero() && progress.nextPollAt.After(at) {
+			continue
+		}
+		candidates = append(candidates, target)
+	}
+	slices.SortFunc(candidates, func(a, b ports.TicketStatusTarget) int {
+		left := s.inboundPollProgress[tenant][inboundPollKey(a)]
+		right := s.inboundPollProgress[tenant][inboundPollKey(b)]
+		if cmp := left.nextPollAt.Compare(right.nextPollAt); cmp != 0 {
+			return cmp
+		}
+		if cmp := left.checkedAt.Compare(right.checkedAt); cmp != 0 {
+			return cmp
+		}
+		if left.version != right.version {
+			return left.version - right.version
+		}
+		return strings.Compare(a.Intent.ID.String(), b.Intent.ID.String())
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	until := at.UTC().Add(lease)
+	out := make([]ports.TicketInboundPollClaim, 0, len(candidates))
+	for _, target := range candidates {
+		key := inboundPollKey(target)
+		progress := s.inboundPollProgress[tenant][key]
+		progress.nextPollAt = until
+		progress.version++
+		if progress.version < 1 {
+			progress.version = 1
+		}
+		s.inboundPollProgress[tenant][key] = progress
+		out = append(out, ports.TicketInboundPollClaim{Target: target, Version: progress.version, NextPollAt: until})
+	}
+	return out, nil
+}
+
+func (s *TicketStore) CompleteInboundTicketPoll(ctx context.Context, tenant shared.ID, claim ports.TicketInboundPollClaim, checkedAt, nextPollAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	target := claim.Target
+	if tenant.IsZero() || claim.Version < 1 || target.Mapping.ID.IsZero() || target.Intent.EngagementID.IsZero() || target.Intent.FindingID.IsZero() || strings.TrimSpace(target.Intent.RemoteID) == "" || nextPollAt.IsZero() {
+		return shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := inboundPollKey(target)
+	progress, ok := s.inboundPollProgress[tenant][key]
+	if !ok {
+		return shared.ErrNotFound
+	}
+	if progress.version != claim.Version {
+		return shared.ErrConflict
+	}
+	if !checkedAt.IsZero() {
+		progress.checkedAt = checkedAt.UTC()
+	}
+	if nextPollAt.After(progress.nextPollAt) {
+		progress.nextPollAt = nextPollAt.UTC()
+	}
+	progress.version++
+	s.inboundPollProgress[tenant][key] = progress
 	return nil
 }
 

@@ -2,7 +2,7 @@
 
 ## Acceptance ledger
 
-Preflight: 20 October 2026, `origin/main` at `545bb50e`. B04 (#1582), document
+Preflight: 20 October 2026, `origin/main` refreshed at `a55a314a`. B04 (#1582), document
 foundation (#1577), and B07 (#1586, merge `17d2e496`) are merged. Existing
 intents, links, reconciliation, release controls, and retained evidence are reused.
 The implementation order is #1437 → #1438 → #1439 → #1440 → #1441 → #1447 →
@@ -82,6 +82,13 @@ prove local behavior; they do not replace the remaining native acceptance.
 
 ## Review corrections
 
+The [request-changes resolution ledger](review-resolution.md) covers the later
+review against `0ac64458`, including restriction classification, durable provider
+throttling, clean lease boundaries, endpoint guards and measured queue cost. Its
+final corrective gate supersedes the historical checks below for changed inputs.
+The [queue measurements](queue-cost.json) retain the large-artifact validation
+cost rather than claiming a production throughput guarantee.
+
 The first combined implementation review and security/performance passes requested
 changes. Their findings are not approvals of the current candidate:
 
@@ -119,7 +126,20 @@ original product goal and acceptance, the released ownership, and feasibility
 notes for a future manual snapshot publication profile. No Notion provider,
 configuration form or connection-only capability ships in this change.
 
-## Local verification
+## Current corrective gate
+
+The [resolution ledger](review-resolution.md) and latest `review_correction_gate`
+section of the [machine summary](verification-summary.json) supersede older source
+checks for this correction. Final Docker build, vet, full Go tests, typecheck,
+hostile harness, seven race packages and Go lint passed. PostgreSQL/RLS/migration
+verification passed **1,153 tests, four skipped**, with no failures in 2,188.447s;
+its dependency inputs remained unchanged afterward. Web verification passed
+**212 files / 1,450 tests**, typecheck/build and lint with zero errors and twenty
+existing warnings. All six final specialist reviews passed after their findings
+were fixed. The 26 current console captures are synthetic production-component
+fixtures. No new native E2E run is claimed.
+
+## Historical local verification
 
 Final checks ran in Docker using Go 1.27.0, Node 22.23.3, pnpm 9.15.9,
 golangci-lint 2.13.2, Helm 3.19.0 and PostgreSQL 17. The runtime defined by
@@ -129,7 +149,7 @@ The runner uses `GOCACHE=/cache/go`, `XDG_CACHE_HOME=/cache` and a persistent ca
 on the host filesystem. Live API, worker and web binaries were rebuilt after the
 fixes; [candidate hashes](live/candidate-provenance.json) identify their inputs.
 
-| Check | Current result |
+| Check | Historical result |
 | --- | --- |
 | `golangci-lint run --timeout=15m && make build vet test typecheck && make harness` | Docker exit 0; lint zero issues; no failing checks |
 | Focused race gate: ticket/document adapters, ticket/document use cases and integration service | Docker exit 0; independent QA also reran both adapter packages with `-race -count=1` |
@@ -171,7 +191,7 @@ credentials and private runtime configuration remain outside source control.
 
 ## Local visual previews
 
-The 96 captures below use synthetic fixtures. They show production components or the
+The 98 captures below use synthetic fixtures. They show production components or the
 actual HTML bytes produced by the document adapters; they are not screenshots from
 live provider sandboxes and do not satisfy native live acceptance.
 
@@ -181,7 +201,9 @@ live provider sandboxes and do not satisfy native live acceptance.
 - [Loading](console/loading-light.png), [empty](console/empty-light.png),
   [provider error](console/error-light.png),
   [permission denied](console/permission-light.png),
-  [orphan mapping recovery](console/orphan-light.png).
+  [orphan mapping recovery](console/orphan-light.png),
+  [orphan actions, light](console/orphan-actions-light.png),
+  [dark](console/orphan-actions-dark.png).
 - [SharePoint configuration, light](configuration/sharepoint-light.png),
   [dark](configuration/sharepoint-dark.png),
   [Drive configuration](configuration/google-drive-light.png).

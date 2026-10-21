@@ -138,7 +138,7 @@ func (p *releaseProvider) RestrictDocument(context.Context, string, string) erro
 func (p *releaseProvider) VerifyDocumentRestriction(context.Context, string, string, string) error {
 	p.checks++
 	if !p.restricted || !p.sharing {
-		return &ports.DocumentProviderError{Code: "public_sharing_unverifiable", Status: 403}
+		return &ports.DocumentProviderError{Code: "public_sharing_unverifiable", Status: 403, RestrictionLost: true}
 	}
 	if p.afterVerify != nil {
 		p.afterVerify()
@@ -254,14 +254,19 @@ type failOnceDocumentTransitionStore struct {
 
 type failCleanDocumentCheckpointStore struct {
 	ports.DocumentCommandStore
-	fail bool
+	fail             bool
+	outstandingSaved bool
 }
 
 func (s *failCleanDocumentCheckpointStore) SaveDocumentProgress(ctx context.Context, tenant, id shared.ID, version int, progress ports.DocumentProgress) (ports.DocumentCommand, error) {
-	if s.fail && progress.OutstandingOperation == "" {
+	if s.fail && s.outstandingSaved && progress.OutstandingOperation == "" {
 		return ports.DocumentCommand{}, shared.ErrConflict
 	}
-	return s.DocumentCommandStore.SaveDocumentProgress(ctx, tenant, id, version, progress)
+	saved, err := s.DocumentCommandStore.SaveDocumentProgress(ctx, tenant, id, version, progress)
+	if err == nil && progress.OutstandingOperation != "" {
+		s.outstandingSaved = true
+	}
+	return saved, err
 }
 
 func (s *failOnceDocumentTransitionStore) TransitionIntent(ctx context.Context, tenant, id shared.ID, version int, change domain.IntentTransition, at time.Time) (domain.Intent, error) {

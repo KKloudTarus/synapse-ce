@@ -115,7 +115,7 @@
       "changed_persistence_inputs_during_run": 0
     }
   },
-  "overall_scope_gate": "implementation_ready_draft",
+  "overall_scope_gate": "implementation_ready_for_re_review",
   "excluded_scope": "Notion issue #1446 is excluded entirely from the current PR, including connection-only support. Ownership is released; future native publication and policy decisions remain on the open issue.",
   "scope_disposition_issue": "https://github.com/KKloudTarus/synapse-ce/issues/1446",
   "partial_effect_recovery": "Durable quarantine for uncertain attachment/purge; exact neutral shell recovery can converge after fresh proof. No automatic purge completion inferred from404.",
@@ -148,7 +148,7 @@
     "ledger": "live/README.md"
   },
   "visual_evidence": {
-    "console": 24,
+    "console": 26,
     "publication-console": 16,
     "configuration": 6,
     "ticket-entry": 46,
@@ -477,5 +477,168 @@
     "remaining_source_leaf_acceptance_gap": null,
     "landing": "PR remains Ready for review and unmerged; no manual closure or merge performed.",
     "limits": "Microsoft native acceptance belongs to1576. Other broader native fault cases retain their unexecuted labels. No fully translated report-template or provider-wide final-binary replay claim."
+  },
+  "latest_gate_section": "review_correction_gate",
+  "review_correction_gate": {
+    "status": "pass",
+    "reviewed_from_head": "0ac6445879ec4a1baed9661c19e112a928588bbc",
+    "source_inputs_sha256": "10b22b6f6d8d808a237e4ce8972a3a433090ab78324e57c24d600712f48328f6",
+    "source_files": 5436,
+    "source_inputs_changed_after_snapshot": 0,
+    "checks": {
+      "backend": {
+        "status": "pass",
+        "command": "make build vet test typecheck && make harness && go test -count=1 -race ./internal/infrastructure/integration/ticketproviders ./internal/infrastructure/integration/documentproviders ./internal/infrastructure/integration/confluence ./internal/usecase/ticketing ./internal/usecase/docpublish ./internal/usecase/integrations ./internal/infrastructure/persistence/memory",
+        "environment": "Docker",
+        "local_log_sha256": "4479488e990fc487316ed6dbefe54ea74562814834c6838727b0e92456e5c237",
+        "exit_code": 0,
+        "oom_killed": false,
+        "started_at": "2026-10-21T00:03:08.996317369Z",
+        "finished_at": "2026-10-21T00:04:26.289823444Z",
+        "image_id": "sha256:a43aacdbc518ab3918c7f21563ce77ea85e927348b488b1f5d36f985709a3fde",
+        "race_package_seconds": {
+          "integration/ticketproviders": 1.143,
+          "integration/documentproviders": 7.458,
+          "integration/confluence": 1.116,
+          "usecase/ticketing": 3.949,
+          "usecase/docpublish": 9.981,
+          "usecase/integrations": 1.023,
+          "persistence/memory": 1.508
+        }
+      },
+      "lint": {
+        "status": "pass",
+        "command": "golangci-lint run --timeout=15m",
+        "environment": "Docker",
+        "local_log_sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+        "issues": 0,
+        "exit_code": 0,
+        "oom_killed": false,
+        "started_at": "2026-10-21T00:03:09.172325599Z",
+        "finished_at": "2026-10-21T00:03:27.955805753Z",
+        "image_id": "sha256:a43aacdbc518ab3918c7f21563ce77ea85e927348b488b1f5d36f985709a3fde"
+      },
+      "postgres": {
+        "status": "pass",
+        "command": "go test -json -timeout90m -count=1 ./internal/infrastructure/persistence/postgres",
+        "environment": "Docker",
+        "local_log_sha256": "953bff9860c038d62a31c6dce072628cea380b7f653e674c116471e28c53bcd7",
+        "test_cases_passed": 1153,
+        "test_cases_skipped": 4,
+        "test_failures": 0,
+        "elapsed_seconds": 2188.447,
+        "postgres_major": 17,
+        "exit_code": 0,
+        "skips": {
+          "TestPostgresAssessmentComparisonScale100K": "opt-in100kassessmentvalidation",
+          "TestAssessmentUIWorker": "explicitlocalbrowserQAhelper",
+          "TestOwnershipRepresentativeScale": "opt-in10kownershipfixture",
+          "TestResponseHaltWriterRoleIsolation": "requiresseparateruntimeandhaltwriterDSNs; unrelatedhaltwriterpathunchanged"
+        }
+      },
+      "web": {
+        "status": "pass",
+        "command": "cd web && pnpm exec tsc --noEmit && pnpm test --run && pnpm build && pnpm lint",
+        "environment": "Docker",
+        "local_log_sha256": "a7df171f3856e8dc625371aaac3609b50ce0eb5942c7888d3fc1550b4bdf9ef9",
+        "test_files_passed": 212,
+        "tests_passed": 1450,
+        "lint_errors": 0,
+        "lint_warnings": 20,
+        "exit_code": 0
+      },
+      "previews": {
+        "status": "pass",
+        "command": "cd web && pnpm exec eslint scripts/remaining-providers-evidence.mjs && node scripts/remaining-providers-evidence.mjs",
+        "environment": "Docker",
+        "local_log_sha256": "d80c520995625abde18129a170006f78a619cab51a2adac0ef7ec8222b9e528e",
+        "captures": 26,
+        "kind": "synthetic production-component fixtures, not native E2E",
+        "exit_code": 0
+      },
+      "docs_api": {
+        "status": "pass",
+        "command": "go test -count=1 ./docs ./api",
+        "environment": "Docker",
+        "exit_code": 0,
+        "package_seconds": {
+          "docs": 1.364,
+          "api": 0.489
+        },
+        "local_log_sha256": "4489221d0e9a1ba20a8b7d8fcf7f1fd98a91016dcfec5b618883776a68185527"
+      },
+      "publication": {
+        "status": "pass",
+        "command": "Private publication scanner plus screenshot/JSON validation",
+        "files_scanned": 8061,
+        "secret_sources_checked": 16,
+        "secret_match_files": 0,
+        "historical_live_capture_hashes_verified": 30
+      }
+    },
+    "provenance_note": "Historical sections retain their original candidates and results. This corrective gate supersedes them for changed inputs. No new native E2E run is claimed. All persistence package, store-conformance, port, domain and migration dependency inputs remained unchanged during and after the full PostgreSQL run. Subsequent provider/use-case fixes are covered by the final backend and race gate.",
+    "reviews": {
+      "implementation-qa": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0,
+        "scope": "Combined writer acceptance and targeted recheck before the final Taurus panel"
+      },
+      "qa-verifier": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      },
+      "security-auditor": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      },
+      "performance-auditor": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0,
+        "retained_limits": [
+          "O(A) selection across active and future-deferred intents; 100000-future fixture selected three due rows in164.441ms",
+          "Existing large-artifact CHECK and fresh List/Execute reads; separate immutable artifact data if measured capacity requires it"
+        ]
+      },
+      "reliability-auditor": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      },
+      "frontend-quality-auditor": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      },
+      "architecture-critic": {
+        "verdict": "pass",
+        "unresolved_material_findings": 0
+      }
+    },
+    "source_fingerprint_algorithm": "SHA256 of UTF-8 JSON path-to-SHA256 map with sorted keys and compact separators",
+    "source_selection": [
+      "internal/",
+      "cmd/",
+      "migrations/",
+      "web/src/",
+      "Makefile",
+      "go.mod",
+      "go.sum",
+      "web/package.json",
+      "web/pnpm-lock.yaml"
+    ],
+    "recorded_at_utc": "2026-10-21T00:04:55.139241+00:00",
+    "resolved_panel_findings": [
+      "Expired initial-shell lease must settle before preflight429",
+      "RetryFailed requires current authority before reactivation, then precedes preflight429",
+      "Canonical Azure project names with spaces/Unicode must acknowledge and reconcile",
+      "Graph ambiguous/readback errors must retain typed Retry-After",
+      "Complete additional SharePoint role bindings prove restriction loss",
+      "Typed GitHub rate-limit403 must retain durable polling delay"
+    ],
+    "remaining_native_acceptance": "Unchanged historical live_e2e.remaining; Microsoft acceptance explicitly deferred to1576 and Notion excluded. No new native run.",
+    "failed_attempts_not_pass_evidence": [
+      "Backend run stopped after final review found a retry-ordering defect; rerun on the settled candidate is recorded separately",
+      "Initial new Graph child-read throttle fixture used the wrong path; corrected fixture reached the real readback and passed",
+      "Earlier helper sanitized its Go environment and missed its default module cache; successful full gate mounts both ordinary and sanitized cache paths"
+    ],
+    "open_material_findings": 0
   }
 }

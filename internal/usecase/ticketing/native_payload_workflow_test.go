@@ -39,7 +39,8 @@ func newNativeWorkflow(t *testing.T) (workflowFixture, *nativeWorkflowProvider) 
 	f.integrations.item.Provider = "github-issues"
 	f.integrations.item.Name = "GitHub Issues"
 	f.integrations.item.Endpoint = "https://github.example.test"
-	f.provider.created = domain.RemoteTicket{ID: "42", URL: "https://github.example.test/browse/42"}
+	f.integrations.item.Config = json.RawMessage(`{"repository":"owner/repo"}`)
+	f.provider.created = domain.RemoteTicket{ID: "42", URL: "https://github.example.test/owner/repo/issues/42"}
 	f.provider.metadata = ports.TicketMetadata{Projects: []ports.TicketChoice{{ID: "SEC", Name: "security/repo"}}, IssueTypes: []ports.TicketChoice{{ID: "10001", Name: "issue"}}, SecurityPolicy: "private_repository"}
 	w, err := usecase.NewWorkflow(f.store, f.integrations, workflowProviders{provider}, f.findings, f.engagements, f.policy, f.audit, &ticketIDs{}, f.clock)
 	if err != nil {
@@ -56,6 +57,18 @@ func newNativeWorkflowForProvider(t *testing.T, provider integration.Provider, e
 	f.integrations.item.Provider = provider
 	f.integrations.item.Endpoint = endpoint
 	f.integrations.item.Name = string(provider)
+	switch provider {
+	case "github-issues":
+		f.integrations.item.Config = json.RawMessage(`{"repository":"owner/repo"}`)
+	case "gitlab-issues":
+		f.integrations.item.Config = json.RawMessage(`{"project":"group/nested/project"}`)
+	case "azure-boards":
+		f.integrations.item.Config = json.RawMessage(`{"work_item_type":"Bug"}`)
+	case "linear":
+		f.integrations.item.Config = json.RawMessage(`{"team_id":"team"}`)
+	case "servicenow":
+		f.integrations.item.Config = json.RawMessage(`{"table":"incident"}`)
+	}
 	native.metadata = ports.TicketMetadata{
 		Projects:       []ports.TicketChoice{{ID: "SEC", Name: "SEC"}},
 		IssueTypes:     []ports.TicketChoice{{ID: "issue", Name: "issue"}},
@@ -149,14 +162,24 @@ func TestNativeTicketPolicyRejectsWaiverAndUnsupportedControls(t *testing.T) {
 func TestNativeTicketWorkflowAcknowledgesAndReconcilesCanonicalProviderURLs(t *testing.T) {
 	const serviceNowID = "0123456789abcdef0123456789abcdef"
 	for _, tc := range []struct {
-		name, endpoint, remoteURL, remoteID string
-		provider                            integration.Provider
+		name, endpoint, remoteURL, remoteID, config string
+		provider                                    integration.Provider
 	}{
-		{"linear", "https://api.linear.app/graphql", "https://linear.app/team/issue/SEC-42/title", "linear-42", "linear"},
-		{"servicenow", "https://instance.service-now.com", "https://instance.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3D" + serviceNowID, serviceNowID, "servicenow"},
+		{"linear", "https://api.linear.app/graphql", "https://linear.app/team/issue/SEC-42/title", "linear-42", "", "linear"},
+		{"servicenow", "https://instance.service-now.com", "https://instance.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3D" + serviceNowID, serviceNowID, "", "servicenow"},
+		{"servicenow vulnerability table", "https://instance.service-now.com", "https://instance.service-now.com/now/nav/ui/classic/params/target/sn_vul_vulnerable_item.do%3Fsys_id%3D" + serviceNowID, serviceNowID, `{"table":"sn_vul_vulnerable_item"}`, "servicenow"},
+		{"github", "https://github.example.test", "https://github.example.test/owner/repo/issues/42", "42", "", "github-issues"},
+		{"gitlab", "https://gitlab.example.test", "https://gitlab.example.test/group/nested/project/-/issues/42", "42", "", "gitlab-issues"},
+		{"gitlab work item", "https://gitlab.example.test", "https://gitlab.example.test/group/nested/project/-/work_items/42", "42", "", "gitlab-issues"},
+		{"azure spaced project", "https://dev.azure.com/org/My%20Project", "https://dev.azure.com/org/My%20Project/_workitems/edit/42", "42", "", "azure-boards"},
+		{"azure Unicode project", "https://dev.azure.com/org/D%E1%BB%B1%20%C3%A1n", "https://dev.azure.com/org/D%E1%BB%B1%20%C3%A1n/_workitems/edit/42", "42", "", "azure-boards"},
+		{"azure", "https://dev.azure.com/org/project", "https://dev.azure.com/org/project/_workitems/edit/42", "42", "", "azure-boards"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, provider := newNativeWorkflowForProvider(t, tc.provider, tc.endpoint)
+			if tc.config != "" {
+				f.integrations.item.Config = json.RawMessage(tc.config)
+			}
 			provider.created = domain.RemoteTicket{ID: tc.remoteID, URL: tc.remoteURL}
 			intent := submitNativeURLTicket(t, f, "canonical-ack-"+tc.name)
 			if completed, err := f.workflow.Tick(context.Background(), "tenant-a", 10); err != nil || completed != 1 {
@@ -195,6 +218,26 @@ func TestNativeTicketWorkflowRejectsUnsafeProviderBrowserURLs(t *testing.T) {
 		{"linear wrong origin", "https://api.linear.app/graphql", "https://other.linear.app/team/issue/SEC-42/title", "linear-42", "linear"},
 		{"linear extra query", "https://api.linear.app/graphql", "https://linear.app/team/issue/SEC-42/title?view=board", "linear-42", "linear"},
 		{"linear credential URI", "https://api.linear.app/graphql", "https://user:secret@linear.app/team/issue/SEC-42/title", "linear-42", "linear"},
+		{"github arbitrary path", "https://github.example.test", "https://github.example.test/other/42", "42", "github-issues"},
+		{"github nonnumeric issue", "https://github.example.test", "https://github.example.test/org/repo/issues/forty-two", "42", "github-issues"},
+		{"github unbound repository", "https://github.example.test", "https://github.example.test/other/repo/issues/42", "42", "github-issues"},
+		{"github unrelated prefix", "https://github.example.test", "https://github.example.test/unrelated/path/to/issues/42", "42", "github-issues"},
+		{"github extra path", "https://github.example.test", "https://github.example.test/owner/repo/issues/42/extra", "42", "github-issues"},
+		{"github encoded separator", "https://github.example.test", "https://github.example.test/owner%2Frepo/issues/42", "42", "github-issues"},
+		{"github dot segment", "https://github.example.test", "https://github.example.test/owner/./repo/issues/42", "42", "github-issues"},
+		{"github dotdot segment", "https://github.example.test", "https://github.example.test/owner/repo/../repo/issues/42", "42", "github-issues"},
+		{"github duplicate separator", "https://github.example.test", "https://github.example.test/owner//repo/issues/42", "42", "github-issues"},
+		{"github query", "https://github.example.test", "https://github.example.test/owner/repo/issues/42?view=all", "42", "github-issues"},
+		{"gitlab arbitrary path", "https://gitlab.example.test", "https://gitlab.example.test/other/42", "42", "gitlab-issues"},
+		{"gitlab unbound project", "https://gitlab.example.test", "https://gitlab.example.test/group/other/project/-/issues/42", "42", "gitlab-issues"},
+		{"gitlab extra path", "https://gitlab.example.test", "https://gitlab.example.test/group/nested/project/-/issues/42/extra", "42", "gitlab-issues"},
+		{"gitlab encoded separator", "https://gitlab.example.test", "https://gitlab.example.test/group%2Fnested/project/-/issues/42", "42", "gitlab-issues"},
+		{"azure arbitrary path", "https://dev.azure.com/org/project", "https://dev.azure.com/org/project/not-work-item/42", "42", "azure-boards"},
+		{"azure nonnumeric item", "https://dev.azure.com/org/project", "https://dev.azure.com/org/project/_workitems/edit/forty-two", "42", "azure-boards"},
+		{"azure foreign organization", "https://dev.azure.com/org/project", "https://dev.azure.com/other/project/_workitems/edit/42", "42", "azure-boards"},
+		{"azure foreign project", "https://dev.azure.com/org/project", "https://dev.azure.com/org/other/_workitems/edit/42", "42", "azure-boards"},
+		{"azure extra path", "https://dev.azure.com/org/project", "https://dev.azure.com/org/project/_workitems/edit/42/extra", "42", "azure-boards"},
+		{"azure encoded separator", "https://dev.azure.com/org/project", "https://dev.azure.com/org%2Fproject/_workitems/edit/42", "42", "azure-boards"},
 		{"servicenow wrong origin", "https://instance.service-now.com", "https://other.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3D" + serviceNowID, serviceNowID, "servicenow"},
 		{"servicenow extra query", "https://instance.service-now.com", "https://instance.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3D" + serviceNowID + "?view=default", serviceNowID, "servicenow"},
 		{"servicenow wrong table", "https://instance.service-now.com", "https://instance.service-now.com/now/nav/ui/classic/params/target/problem.do%3Fsys_id%3D" + serviceNowID, serviceNowID, "servicenow"},
@@ -228,6 +271,21 @@ func TestNativeTicketWorkflowRejectsUnsafeProviderBrowserURLs(t *testing.T) {
 				t.Fatalf("unsafe reconciliation err=%v", err)
 			}
 		})
+	}
+}
+
+func TestNativeTicketPreviewRequiresPayloadBuilder(t *testing.T) {
+	f := newWorkflowFixture(t)
+	f.integrations.item.Provider = "github-issues"
+	f.integrations.item.Endpoint = "https://github.example.test"
+	f.integrations.item.Name = "GitHub"
+	f.provider.metadata = ports.TicketMetadata{Projects: []ports.TicketChoice{{ID: "SEC", Name: "SEC"}}, IssueTypes: []ports.TicketChoice{{ID: "issue", Name: "issue"}}, SecurityPolicy: "private_repository"}
+	mapping, err := f.workflow.SaveMapping(context.Background(), "tenant-a", "", usecase.MappingInput{IntegrationID: "jira", Scope: domain.Engagement, ScopeID: "eng-a", ProjectKey: "SEC", IssueType: "issue", SecurityLevel: "private_repository", SummaryTemplate: "summary", DescriptionTemplate: "description", Actor: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.workflow.Preview(context.Background(), usecase.PreviewRequest{TenantID: "tenant-a", MappingID: mapping.ID, FindingID: "finding-a", EngagementID: "eng-a"}); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("native provider fell back to Jira payload: %v", err)
 	}
 }
 

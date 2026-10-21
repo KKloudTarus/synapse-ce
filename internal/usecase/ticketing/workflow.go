@@ -25,6 +25,7 @@ import (
 
 type TicketProviderRegistry interface {
 	TicketProvider(context.Context, integration.Integration) (ports.TicketProvider, error)
+	TicketProviderDescriptor(integration.Provider) (integration.ProviderDescriptor, error)
 }
 type metadataEntry struct {
 	value ports.TicketMetadata
@@ -567,6 +568,8 @@ func (w *Workflow) Preview(ctx context.Context, req PreviewRequest) (Preview, er
 		facts.Marker = &marker
 		payload["_synapse"] = facts
 		payload["wire"] = native.Wire
+	} else if !isJiraTicketProvider(in.Provider) {
+		return Preview{}, fmt.Errorf("%w: native ticket provider must build its own payload", shared.ErrValidation)
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil || len(raw) > 60<<10 {
@@ -917,7 +920,7 @@ func (w *Workflow) tickOutboundIntents(tenantCtx context.Context, tenant shared.
 		var until *time.Time
 		code := ""
 		if sendErr == nil {
-			if !sameTicketRemoteOrigin(in.Provider, in.Endpoint, remote.URL) {
+			if !sameTicketRemoteOrigin(in, remote.URL) {
 				change = domain.IntentTransition{Event: writeintent.Ambiguous}
 			} else {
 				change = domain.IntentTransition{Event: writeintent.Acknowledge, Remote: &remote}
@@ -925,8 +928,14 @@ func (w *Workflow) tickOutboundIntents(tenantCtx context.Context, tenant shared.
 		} else {
 			var refusal *ports.TicketProviderError
 			if errors.As(sendErr, &refusal) && !refusal.Ambiguous {
-				if refusal.Status == 0 && (refusal.Code == "unsupported_action" || refusal.Code == "update_unsupported" || refusal.Code == "transition_unsupported" || refusal.Code == "comment_unsupported") {
-					code = "invalid_action"
+				if refusal.Status == 0 {
+					code = refusal.Code
+					if code == "unsupported_action" || code == "update_unsupported" || code == "transition_unsupported" || code == "comment_unsupported" {
+						code = "invalid_action"
+					}
+					if code == "" {
+						code = "preflight_refused"
+					}
 					change = domain.IntentTransition{Event: writeintent.Reject, ErrorCode: code}
 				}
 				switch refusal.Status {
@@ -1141,7 +1150,7 @@ func (w *Workflow) Reconcile(ctx context.Context, tenant, id shared.ID, version 
 	}
 	change := domain.IntentTransition{Event: writeintent.ReconcileMultiple}
 	if len(hits) == 1 {
-		if !sameTicketRemoteOrigin(facts.Provider, facts.Endpoint, hits[0].URL) {
+		if !sameTicketRemoteOrigin(in, hits[0].URL) {
 			return domain.Intent{}, shared.ErrValidation
 		}
 		change = domain.IntentTransition{Event: writeintent.ReconcileFound, Remote: &hits[0]}
@@ -1191,8 +1200,8 @@ func closeTicketProvider(provider ports.TicketProvider) {
 		closer.Close()
 	}
 }
-func sameTicketRemoteOrigin(provider integration.Provider, endpoint, remote string) bool {
-	a, e := url.Parse(endpoint)
+func sameTicketRemoteOrigin(in integration.Integration, remote string) bool {
+	a, e := url.Parse(in.Endpoint)
 	if e != nil {
 		return false
 	}
@@ -1200,34 +1209,90 @@ func sameTicketRemoteOrigin(provider integration.Provider, endpoint, remote stri
 	if e != nil {
 		return false
 	}
-	if a.Scheme != "https" || a.User != nil || b.Scheme != "https" || b.User != nil || b.Fragment != "" {
+	if a.Scheme != "https" || a.User != nil || a.RawQuery != "" || a.ForceQuery || a.Fragment != "" || a.RawPath != "" || b.Scheme != "https" || b.User != nil || b.Fragment != "" || b.RawQuery != "" || b.ForceQuery {
 		return false
 	}
-	if provider == "linear" {
-		if a.Host != "api.linear.app" || a.Path != "/graphql" || b.Host != "linear.app" || b.RawQuery != "" || b.ForceQuery {
+	if in.Provider == "linear" {
+		if a.Host != "api.linear.app" || a.Path != "/graphql" || b.Host != "linear.app" || b.RawPath != "" {
 			return false
 		}
-		parts := strings.Split(strings.Trim(b.EscapedPath(), "/"), "/")
+		parts := strings.Split(strings.Trim(b.Path, "/"), "/")
 		return len(parts) >= 3 && parts[1] == "issue" && nativeBrowserPart.MatchString(parts[0]) && nativeBrowserPart.MatchString(parts[2])
 	}
-	if !strings.EqualFold(a.Host, b.Host) {
+	if !sameTicketHost(a, b) {
 		return false
 	}
-	if provider == "servicenow" {
-		return b.RawQuery == "" && !b.ForceQuery && serviceNowBrowserPath.MatchString(b.Path)
+	if in.Provider == "servicenow" {
+		return serviceNowEncodedBrowserPath.MatchString(b.Path)
 	}
-
-	if b.RawQuery != "" || b.ForceQuery {
+	if b.RawPath != "" || (in.Provider != "azure-boards" && strings.Contains(b.EscapedPath(), "%")) {
 		return false
 	}
-	if isJiraTicketProvider(provider) {
+	if isJiraTicketProvider(in.Provider) {
 		return strings.HasPrefix(b.Path, strings.TrimRight(a.Path, "/")+"/browse/")
+	}
+	config, e := integration.DecodeConfig(in.Config)
+	if e != nil {
+		return false
+	}
+	switch in.Provider {
+	case "github-issues":
+		repository, _ := config["repository"].(string)
+		return ticketBrowserPath(b.Path, "/"+repository+"/issues/") && ticketRepositoryPath.MatchString(repository)
+	case "gitlab-issues":
+		project, _ := config["project"].(string)
+		if !ticketProjectPath.MatchString(project) {
+			return false
+		}
+		return ticketBrowserPath(b.Path, "/"+project+"/-/issues/") || ticketBrowserPath(b.Path, "/"+project+"/-/work_items/")
+	case "azure-boards":
+		parts := strings.Split(strings.Trim(a.Path, "/"), "/")
+		if a.Hostname() != "dev.azure.com" || len(parts) != 2 || !ticketPathPart.MatchString(parts[0]) || !azureTicketProjectPart.MatchString(parts[1]) || strings.TrimSpace(parts[1]) != parts[1] {
+			return false
+		}
+		return ticketBrowserPath(b.Path, "/"+parts[0]+"/"+parts[1]+"/_workitems/edit/")
+	default:
+		return false
+	}
+}
+
+func sameTicketHost(a, b *url.URL) bool {
+	return strings.EqualFold(a.Hostname(), b.Hostname()) && effectiveTicketPort(a) == effectiveTicketPort(b)
+}
+
+func effectiveTicketPort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	return "443"
+}
+
+func ticketBrowserPath(path, prefix string) bool {
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	id := strings.TrimPrefix(path, prefix)
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return false
+		}
 	}
 	return true
 }
 
 var nativeBrowserPart = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-var serviceNowBrowserPath = regexp.MustCompile(`^/now/nav/ui/classic/params/target/(incident|sn_vul_vulnerable_item)\.do\?sys_id=[a-f0-9]{32}$`)
+var azureTicketProjectPart = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,99}$`)
+var ticketPathPart = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
+var ticketRepositoryPath = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}/[A-Za-z0-9_.-]{1,128}$`)
+var ticketProjectPath = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}(?:/[A-Za-z0-9_.-]{1,128})+$`)
+
+// serviceNowEncodedBrowserPath is the shared adapter/workflow contract for the
+// browser URL: ServiceNow encodes the record query into the final path segment.
+// The adapter emits this shape and the workflow accepts only this shape.
+var serviceNowEncodedBrowserPath = regexp.MustCompile(`^/now/nav/ui/classic/params/target/(incident|sn_vul_vulnerable_item)\.do\?sys_id=[a-f0-9]{32}$`)
 
 func safeTicketError(err error) error {
 	if err == nil {
@@ -1242,7 +1307,7 @@ func safeTicketError(err error) error {
 	if errors.As(err, &provider) {
 		return provider
 	}
-	return fmt.Errorf("%w: Jira is unavailable", shared.ErrValidation)
+	return fmt.Errorf("%w: ticket provider is unavailable", shared.ErrValidation)
 }
 func mappingClass(m domain.Mapping) notification.DataClass {
 	if m.DataClass.Valid() {

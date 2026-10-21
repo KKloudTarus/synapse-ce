@@ -9,6 +9,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
@@ -26,19 +27,35 @@ const (
 )
 
 func validSPPath(v string) bool {
-	return strings.HasPrefix(v, "/") && v != "/" && path.Clean(v) == v && len(v) <= 1024 && !strings.ContainsAny(v, "\\\r\n")
+	return strings.HasPrefix(v, "/") && v != "/" && path.Clean(v) == v && len(v) <= 1024 && !strings.ContainsAny(v, "\\?#") && !containsSpaceOrControl(v)
+}
+
+// SharePoint returns a file reference for every managed attachment. Attachment
+// names may contain spaces, while the configured publication root may not.
+// Keep the URL-delimiter and control checks common without rejecting a valid
+// server-observed child solely because its display name has a space.
+func validSPFileRef(v string) bool {
+	if !strings.HasPrefix(v, "/") || v == "/" || path.Clean(v) != v || len(v) > 1024 || strings.ContainsAny(v, "\\?#") {
+		return false
+	}
+	for _, r := range v {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 func spQuote(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
 
 func (a *graphAdapter) spRequest(ctx context.Context, method, resource string, headers http.Header, body []byte, max int64, want ...int) ([]byte, http.Header, error) {
-	resourcePath, rawQuery, found := strings.Cut(resource, "?")
-	if !strings.HasPrefix(resourcePath, "/_api/") || (found && strings.Contains(rawQuery, "#")) {
+	parsed, err := parseSharePointResource(resource)
+	if err != nil {
 		return nil, nil, docError(0, "invalid_request", false)
 	}
 	u := *a.site
-	u.Path = strings.TrimSuffix(a.site.Path, "/") + resourcePath
+	u.Path = strings.TrimSuffix(a.site.Path, "/") + parsed.Path
 	u.RawPath = ""
-	u.RawQuery = rawQuery
+	u.RawQuery = parsed.RawQuery
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, docError(0, "invalid_request", false)
@@ -49,6 +66,48 @@ func (a *graphAdapter) spRequest(ctx context.Context, method, resource string, h
 		req.Header[k] = append([]string(nil), v...)
 	}
 	return readResponse(a.client, req, max, want...)
+}
+
+func containsSpaceOrControl(value string) bool {
+	for _, r := range value {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseSharePointResource(resource string) (*url.URL, error) {
+	// OData string literals can contain a space in an already validated file
+	// name. Outside that literal form, whitespace and controls are URI syntax
+	// ambiguities and must not reach the HTTP client.
+	inLiteral := false
+	for _, r := range resource {
+		switch r {
+		case '\'':
+			inLiteral = !inLiteral
+		case '#', '\\':
+			return nil, shared.ErrValidation
+		default:
+			if unicode.IsControl(r) || (unicode.IsSpace(r) && !inLiteral) {
+				return nil, shared.ErrValidation
+			}
+		}
+	}
+	if inLiteral {
+		return nil, shared.ErrValidation
+	}
+	resourcePath, rawQuery, hasQuery := strings.Cut(resource, "?")
+	if !strings.HasPrefix(resourcePath, "/_api/") || (hasQuery && strings.Contains(rawQuery, "?")) {
+		return nil, shared.ErrValidation
+	}
+	if _, err := url.PathUnescape(resourcePath); err != nil {
+		return nil, shared.ErrValidation
+	}
+	if _, err := url.QueryUnescape(rawQuery); err != nil {
+		return nil, shared.ErrValidation
+	}
+	return &url.URL{Path: resourcePath, RawQuery: rawQuery}, nil
 }
 
 func (a *graphAdapter) sp(ctx context.Context, method, resource string, headers http.Header, body []byte, out any, want ...int) (http.Header, error) {
@@ -97,7 +156,7 @@ func (a *graphAdapter) spListItem(ctx context.Context, fileRef string, folder bo
 	if _, err := a.sp(ctx, http.MethodGet, resource, nil, nil, &out, http.StatusOK); err != nil {
 		return sharePointListItem{}, err
 	}
-	if out.D.ID <= 0 || normalizedGUID(out.D.UniqueID) == "" || !validSPPath(out.D.FileRef) || normalizedGUID(out.D.Parent.ID) == "" {
+	if out.D.ID <= 0 || normalizedGUID(out.D.UniqueID) == "" || !validSPFileRef(out.D.FileRef) || normalizedGUID(out.D.Parent.ID) == "" {
 		return sharePointListItem{}, docError(http.StatusOK, "invalid_sharepoint_identity", false)
 	}
 	return out.D, nil
@@ -205,6 +264,7 @@ type sharePointRoleAssignment struct {
 				Low  string `json:"Low"`
 			} `json:"BasePermissions"`
 		} `json:"results"`
+		Next string `json:"__next"`
 	} `json:"RoleDefinitionBindings"`
 }
 
@@ -218,6 +278,30 @@ func roleIs(role struct {
 	return role.RoleType == typ && role.Base.High == high && role.Base.Low == low
 }
 
+func validSharePointPrincipalType(value int) bool {
+	switch value {
+	case 1, 2, 4, 8:
+		return true
+	default:
+		return false
+	}
+}
+
+func validSharePointRole(role struct {
+	RoleType int `json:"RoleTypeKind"`
+	Base     struct {
+		High string `json:"High"`
+		Low  string `json:"Low"`
+	} `json:"BasePermissions"`
+}) bool {
+	if role.RoleType <= 0 || role.Base.High == "" || role.Base.Low == "" {
+		return false
+	}
+	_, highErr := strconv.ParseUint(role.Base.High, 10, 64)
+	_, lowErr := strconv.ParseUint(role.Base.Low, 10, 64)
+	return highErr == nil && lowErr == nil
+}
+
 // assertExactACL accepts precisely the configured direct read group and the
 // currently authenticated full-control custodian. It deliberately rejects a
 // partial page, duplicate grant, custom role, and every extra principal.
@@ -226,23 +310,50 @@ func (a *graphAdapter) assertExactACL(ctx context.Context, fileRef string, folde
 	if folder {
 		base = "/_api/web/GetFolderByServerRelativeUrl(" + spQuote(fileRef) + ")/ListItemAllFields"
 	}
-	var roles struct {
-		D struct {
-			Results []sharePointRoleAssignment `json:"results"`
-			Next    string                     `json:"__next"`
-		} `json:"d"`
+	var payload struct {
+		D json.RawMessage `json:"d"`
 	}
 	resource := base + "/RoleAssignments?$select=Member/Id,Member/PrincipalType,RoleDefinitionBindings/RoleTypeKind,RoleDefinitionBindings/BasePermissions&$expand=Member,RoleDefinitionBindings"
-	if _, err := a.sp(ctx, http.MethodGet, resource, nil, nil, &roles, http.StatusOK); err != nil {
+	if _, err := a.sp(ctx, http.MethodGet, resource, nil, nil, &payload, http.StatusOK); err != nil {
 		return err
 	}
-	if roles.D.Next != "" || len(roles.D.Results) != 2 {
-		return docError(http.StatusOK, "restricted_sharing_unverified", false)
+	if !presentFacet(payload.D) {
+		return docError(http.StatusOK, "complete_acl_unverifiable", false)
+	}
+	var roles struct {
+		Results json.RawMessage `json:"results"`
+		Next    string          `json:"__next"`
+	}
+	if json.Unmarshal(payload.D, &roles) != nil || !presentFacet(roles.Results) {
+		return docError(http.StatusOK, "complete_acl_unverifiable", false)
+	}
+	var assignments []sharePointRoleAssignment
+	if json.Unmarshal(roles.Results, &assignments) != nil {
+		return docError(http.StatusOK, "complete_acl_unverifiable", false)
+	}
+	if roles.Next != "" {
+		return docError(http.StatusOK, "incomplete_permissions", false)
+	}
+	// Establish complete structural proof before interpreting the grant set.
+	// An empty or additional valid binding contradicts the exact-role policy;
+	// an omitted, null, malformed or paginated binding proves no such change.
+	for _, assignment := range assignments {
+		if assignment.Member.ID <= 0 || !validSharePointPrincipalType(assignment.Member.PrincipalType) || assignment.Roles.Results == nil || assignment.Roles.Next != "" {
+			return docError(http.StatusOK, "complete_acl_unverifiable", false)
+		}
+		for _, role := range assignment.Roles.Results {
+			if !validSharePointRole(role) {
+				return docError(http.StatusOK, "complete_acl_unverifiable", false)
+			}
+		}
+	}
+	if len(assignments) != 2 {
+		return restrictionLostError(http.StatusOK, "restricted_sharing_unverified")
 	}
 	seenGroup, seenCustodian := false, false
-	for _, assignment := range roles.D.Results {
-		if assignment.Member.ID <= 0 || len(assignment.Roles.Results) != 1 {
-			return docError(http.StatusOK, "restricted_sharing_unverified", false)
+	for _, assignment := range assignments {
+		if len(assignment.Roles.Results) != 1 {
+			return restrictionLostError(http.StatusOK, "restricted_sharing_unverified")
 		}
 		id := strconv.Itoa(assignment.Member.ID)
 		switch {
@@ -251,11 +362,11 @@ func (a *graphAdapter) assertExactACL(ctx context.Context, fileRef string, folde
 		case id == a.custodian && !seenCustodian && assignment.Member.PrincipalType == 1 && roleIs(assignment.Roles.Results[0], sharePointFullRoleType, sharePointFullHigh, sharePointFullLow):
 			seenCustodian = true
 		default:
-			return docError(http.StatusOK, "restricted_sharing_unverified", false)
+			return restrictionLostError(http.StatusOK, "restricted_sharing_unverified")
 		}
 	}
 	if !seenGroup || !seenCustodian {
-		return docError(http.StatusOK, "restricted_sharing_unverified", false)
+		return restrictionLostError(http.StatusOK, "restricted_sharing_unverified")
 	}
 	return nil
 }
@@ -322,7 +433,7 @@ func (a *graphAdapter) rejectPublicGraphPermissions(ctx context.Context, id stri
 		// public scopes keeps the reason stable while remaining fail-closed for
 		// an unrecognised link scope.
 		if link.Scope == "anonymous" || link.Scope == "organization" || link.Scope != "" {
-			return docError(http.StatusOK, "restricted_sharing_unverified", false)
+			return restrictionLostError(http.StatusOK, "restricted_sharing_unverified")
 		}
 	}
 	return nil

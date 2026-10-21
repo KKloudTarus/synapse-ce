@@ -19,7 +19,7 @@ import (
 
 var _ ports.DocumentCommandStore = (*DocumentStore)(nil)
 
-const documentCommandCols = `actor_user_id,actor_membership_id,actor_person_id,connection_revision,credential_revision,read_group,artifact,progress,progress_version,created_at,updated_at`
+const documentCommandCols = `actor_user_id,actor_membership_id,actor_person_id,connection_revision,credential_revision,read_group,artifact,progress,progress_version,next_attempt_at,check_version,created_at,updated_at`
 
 func documentArtifactJSON(artifact ports.DocumentArtifact) ([]byte, string, error) {
 	if artifact.GeneratedAt.IsZero() || strings.TrimSpace(artifact.Title) == "" || strings.TrimSpace(artifact.SourceRevision) == "" || len(artifact.PDF) == 0 || len(artifact.PDF) > 10<<20 {
@@ -74,8 +74,9 @@ func scanDocumentCommand(ctx context.Context, tx pgx.Tx, tenant, intentID shared
 	var command ports.DocumentCommand
 	var artifact, progress []byte
 	var progressVersion int
+	var nextAttempt *time.Time
 	err := tx.QueryRow(ctx, `SELECT `+documentCommandCols+` FROM document_commands WHERE tenant_id=$1 AND intent_id=$2`, tenant.String(), intentID.String()).Scan(
-		&command.Actor.UserID, &command.Actor.MembershipID, &command.Actor.PersonID, &command.ConnectionRevision, &command.CredentialRevision, &command.ReadGroup, &artifact, &progress, &progressVersion, &command.Intent.CreatedAt, &command.Intent.UpdatedAt)
+		&command.Actor.UserID, &command.Actor.MembershipID, &command.Actor.PersonID, &command.ConnectionRevision, &command.CredentialRevision, &command.ReadGroup, &artifact, &progress, &progressVersion, &nextAttempt, &command.QueueVersion, &command.Intent.CreatedAt, &command.Intent.UpdatedAt)
 	if err != nil {
 		return ports.DocumentCommand{}, err
 	}
@@ -86,6 +87,9 @@ func scanDocumentCommand(ctx context.Context, tx pgx.Tx, tenant, intentID shared
 		return ports.DocumentCommand{}, err
 	}
 	command.Progress.Version = progressVersion
+	if nextAttempt != nil {
+		command.NextAttemptAt = nextAttempt.UTC()
+	}
 	intent, err := scanDocumentIntent(tx.QueryRow(ctx, `SELECT `+documentIntentCols+` FROM document_intents WHERE tenant_id=$1 AND id=$2`, tenant.String(), intentID.String()))
 	if err != nil {
 		return ports.DocumentCommand{}, err
@@ -296,6 +300,134 @@ func cleanDocumentYieldCheckpoint(progress ports.DocumentProgress, intent docpub
 		progress.ExpectedRemoteVersion == 0 && progress.ExpectedRemoteRevision == ""
 }
 
+func cleanDocumentRetryCheckpoint(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
+	if !cleanDocumentYieldCheckpoint(progress, intent, at) && progress.Step != "purge" {
+		return false
+	}
+	if progress.Step == "purge" && (strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "") {
+		return false
+	}
+	return intent.State == writeintent.InFlight && intent.LeaseUntil != nil && at.Before(*intent.LeaseUntil) &&
+		progress.IntentVersion == intent.Version && progress.LeaseUntil != nil && progress.LeaseUntil.Equal(*intent.LeaseUntil) &&
+		progress.OutstandingOperation == "" && progress.OutstandingKey == "" && progress.OutstandingDigest == "" &&
+		progress.ExpectedRemoteVersion == 0 && progress.ExpectedRemoteRevision == ""
+}
+
+func liveDocumentRetryLease(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
+	return intent.State == writeintent.InFlight && intent.LeaseUntil != nil && at.Before(*intent.LeaseUntil) &&
+		progress.IntentVersion == intent.Version && progress.LeaseUntil != nil && progress.LeaseUntil.Equal(*intent.LeaseUntil)
+}
+
+func documentRetryDeadline(current, requested time.Time) time.Time {
+	if current.After(requested) {
+		return current.UTC()
+	}
+	return requested.UTC()
+}
+
+func (s *DocumentStore) DeferDocumentCommand(ctx context.Context, tenant, intentID shared.ID, expectedIntent, expectedProgress, expectedQueue int, deadline, at time.Time, outcome ports.DocumentRetryOutcome, code string) (ports.DocumentCommand, error) {
+	if tenant.IsZero() || intentID.IsZero() || expectedIntent < 1 || expectedProgress < 1 || expectedQueue < 1 || at.IsZero() || deadline.IsZero() || !deadline.After(at) {
+		return ports.DocumentCommand{}, shared.ErrValidation
+	}
+	var out ports.DocumentCommand
+	err := s.withDocumentTx(ctx, tenant, func(tx pgx.Tx) error {
+		intent, err := scanDocumentIntent(tx.QueryRow(ctx, `SELECT `+documentIntentCols+` FROM document_intents WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenant.String(), intentID.String()))
+		if err != nil {
+			return err
+		}
+		command, err := scanDocumentCommand(ctx, tx, tenant, intentID)
+		if err != nil {
+			return err
+		}
+		if intent.Version != expectedIntent || command.Progress.Version != expectedProgress || command.QueueVersion != expectedQueue {
+			return shared.ErrConflict
+		}
+		next := intent
+		progress := command.Progress
+		switch outcome {
+		case ports.DocumentRetryKeep:
+			if intent.State != writeintent.Pending && intent.State != writeintent.Uncertain {
+				return shared.ErrConflict
+			}
+		case ports.DocumentRetryRelease:
+			if !cleanDocumentRetryCheckpoint(progress, intent, at) {
+				return shared.ErrConflict
+			}
+			next, err = intent.Apply(docpublish.IntentTransition{Event: docpublish.RetryDeferred}, at)
+			if err != nil {
+				return err
+			}
+			progress.IntentVersion, progress.LeaseUntil = next.Version, nil
+			progress.Version++
+			progress.UpdatedAt = at.UTC()
+		case ports.DocumentRetryReject:
+			if !liveDocumentRetryLease(progress, intent, at) || strings.TrimSpace(code) == "" {
+				return shared.ErrConflict
+			}
+			next, err = intent.Apply(docpublish.IntentTransition{Event: writeintent.Reject, ErrorCode: code}, at)
+			if err != nil {
+				return err
+			}
+			progress.IntentVersion, progress.LeaseUntil = next.Version, nil
+			progress.OutstandingOperation, progress.OutstandingKey, progress.OutstandingDigest = "", "", ""
+			progress.ExpectedRemoteVersion, progress.ExpectedRemoteRevision = 0, ""
+			progress.Version++
+			progress.UpdatedAt = at.UTC()
+		case ports.DocumentRetryUncertain:
+			if !liveDocumentRetryLease(progress, intent, at) {
+				return shared.ErrConflict
+			}
+			next, err = intent.Apply(docpublish.IntentTransition{Event: writeintent.Ambiguous}, at)
+			if err != nil {
+				return err
+			}
+			progress.IntentVersion, progress.LeaseUntil = next.Version, nil
+			progress.Version++
+			progress.UpdatedAt = at.UTC()
+		default:
+			return shared.ErrValidation
+		}
+		progressJSON, err := commandProgressJSON(progress)
+		if err != nil {
+			return err
+		}
+		// A newer concurrent throttle wins even when its queue fence did not
+		// change yet. The version predicate stops an old worker from shortening a
+		// later reservation after it completed stale I/O.
+		tag, err := tx.Exec(ctx, `UPDATE document_commands
+			SET progress=$3,progress_version=progress_version+$4,next_attempt_at=GREATEST(COALESCE(next_attempt_at,'-infinity'::timestamptz),$5),check_version=check_version+1,updated_at=$6
+			WHERE tenant_id=$1 AND intent_id=$2 AND progress_version=$7 AND check_version=$8`,
+			tenant.String(), intentID.String(), progressJSON, progress.Version-command.Progress.Version, deadline.UTC(), at.UTC(), expectedProgress, expectedQueue)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return shared.ErrConflict
+		}
+		if next.Version != intent.Version {
+			tag, err = tx.Exec(ctx, `UPDATE document_intents
+				SET state=$3,version=$4,attempts=$5,lease_until=$6,remote_id='',remote_url='',remote_version=0,remote_revision='',error_code=$7,updated_at=$8
+				WHERE tenant_id=$1 AND id=$2 AND version=$9`, tenant.String(), intentID.String(), string(next.State), next.Version, next.Attempts, next.LeaseUntil, next.ErrorCode, next.UpdatedAt, expectedIntent)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return shared.ErrConflict
+			}
+		}
+		command.Intent = next
+		command.Progress = progress
+		command.NextAttemptAt = documentRetryDeadline(command.NextAttemptAt, deadline)
+		command.QueueVersion++
+		out = command
+		return nil
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ports.DocumentCommand{}, shared.ErrNotFound
+	}
+	return out, documentWriteError(err)
+}
+
 func (s *DocumentStore) YieldDocumentCommand(ctx context.Context, tenant, intentID shared.ID, expectedIntent, expectedProgress int, at time.Time) (ports.DocumentCommand, error) {
 	if tenant.IsZero() || intentID.IsZero() || expectedIntent < 1 || expectedProgress < 1 || at.IsZero() {
 		return ports.DocumentCommand{}, shared.ErrValidation
@@ -340,8 +472,10 @@ func (s *DocumentStore) YieldDocumentCommand(ctx context.Context, tenant, intent
 		if tag.RowsAffected() != 1 {
 			return shared.ErrConflict
 		}
-		out, e = scanDocumentCommand(ctx, tx, tenant, intentID)
-		return e
+		command.Intent = next
+		command.Progress = progress
+		out = command
+		return nil
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ports.DocumentCommand{}, shared.ErrNotFound
@@ -396,9 +530,15 @@ func (s *DocumentStore) ListDocumentCommands(ctx context.Context, tenant shared.
 	}
 	out := make([]ports.DocumentCommand, 0, limit)
 	err := s.withDocumentTx(ctx, tenant, func(tx pgx.Tx) error {
-		rows, e := tx.Query(ctx, `WITH selected AS (
-            SELECT c.intent_id FROM document_commands c JOIN document_intents i ON i.tenant_id=c.tenant_id AND i.id=c.intent_id
-            WHERE c.tenant_id=$1 AND (i.state='pending' OR i.state='uncertain' OR (i.state='failed' AND i.attempts<5) OR (i.state='in_flight' AND i.lease_until<=$3))
+		rows, e := tx.Query(ctx, `WITH eligible_intents AS (
+            SELECT tenant_id,id FROM document_intents WHERE tenant_id=$1 AND state IN ('pending','uncertain')
+            UNION ALL
+            SELECT tenant_id,id FROM document_intents WHERE tenant_id=$1 AND state='failed' AND attempts<5
+            UNION ALL
+            SELECT tenant_id,id FROM document_intents WHERE tenant_id=$1 AND state='in_flight' AND lease_until<=$3
+        ), selected AS (
+            SELECT c.intent_id FROM document_commands c JOIN eligible_intents i ON i.tenant_id=c.tenant_id AND i.id=c.intent_id
+            WHERE c.tenant_id=$1 AND (c.next_attempt_at IS NULL OR c.next_attempt_at<=$3)
             ORDER BY c.checked_at NULLS FIRST,c.check_version,c.intent_id FOR UPDATE OF c SKIP LOCKED LIMIT $2
         ) UPDATE document_commands c SET checked_at=$3,check_version=c.check_version+1
           FROM selected s WHERE c.tenant_id=$1 AND c.intent_id=s.intent_id RETURNING c.intent_id`, tenant.String(), limit, at.UTC())

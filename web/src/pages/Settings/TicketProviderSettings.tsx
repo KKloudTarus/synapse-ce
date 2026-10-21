@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Link2, RefreshCw, Ticket, Trash2 } from 'lucide-react'
+import { Link01, RefreshCw01, Tag01, Trash01 } from '@untitledui/icons'
 import { Button, Card, EmptyState, ErrorState, Field, Input, Spinner } from '../../components/ui'
 import { api, type TicketMapping, type TicketMetadata } from '../../lib/api'
 import { ticketDestination, ticketDestinationLabel } from '../../lib/ticket-destinations'
@@ -104,12 +104,12 @@ export function TicketProviderSettings() {
   const selectClass = 'w-full rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary'
   if (loading) return <Spinner label="Loading ticket providers…" />
   if (error && role === undefined) return <ErrorState message={error} />
-  if (!canManage) return <EmptyState icon={Ticket} title="Ticket settings require integration access" hint="Ask a tenant administrator or integration administrator to configure ticket destinations." />
+  if (!canManage) return <EmptyState icon={Tag01} title="Ticket settings require integration access" hint="Ask a tenant administrator or integration administrator to configure ticket destinations." />
   return <div className="space-y-5">
-    <header className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold text-primary">Ticket providers</h2><p className="mt-1 text-sm text-secondary">Create tickets from an approved preview. Provider changes produce proposals for human review.</p></div><Button variant="secondary" disabled={busy} onClick={() => setRefresh((value) => value + 1)}><RefreshCw className="size-4" />Refresh</Button></header>
-    <nav className="flex flex-wrap gap-4 text-sm text-brand-primary"><Link to="/settings/integrations/ci"><Link2 className="mr-1 inline size-4" />Manage connections and credentials</Link><Link to="/settings/integrations/jira">Jira settings</Link></nav>
+    <header className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold text-primary">Ticket providers</h2><p className="mt-1 text-sm text-secondary">Create tickets from an approved preview. Provider changes produce proposals for human review.</p></div><Button variant="secondary" disabled={busy} onClick={() => setRefresh((value) => value + 1)}><RefreshCw01 className="size-4" />Refresh</Button></header>
+    <nav className="flex flex-wrap gap-4 text-sm text-brand-primary"><Link to="/settings/integrations/ci"><Link01 className="mr-1 inline size-4" />Manage connections and credentials</Link><Link to="/settings/integrations/jira">Jira settings</Link></nav>
     {error && <ErrorState message={error} />}{metadataError && <ErrorState message={metadataError} />}{notice && <p role="status" className="text-sm text-success-primary">{notice}</p>}
-    {integrations.length === 0 && <EmptyState icon={Ticket} title="No ticket provider connections" hint="Add GitHub Issues, GitLab Issues, Azure Boards, ServiceNow or Linear from Manage connections, test the connection, then enable it." />}
+    {integrations.length === 0 && <EmptyState icon={Tag01} title="No ticket provider connections" hint="Add GitHub Issues, GitLab Issues, Azure Boards, ServiceNow or Linear from Manage connections, test the connection, then enable it." />}
     {(integrations.length > 0 || visibleMappings.length > 0 || scopes.engagement.length > 0 || scopes.project.length > 0) && <Card title="Ticket mappings" bodyClass="space-y-4">
       {!canAdmin && <p className="text-sm text-tertiary">Only tenant administrators can create or change ticket destinations. Existing mappings remain visible.</p>}
       <div className="grid gap-3 md:grid-cols-2"><Field label="Scope"><select aria-label="Ticket mapping scope" className={selectClass} value={draft.scope} disabled={busy} onChange={(event) => changeScope(event.target.value === 'project' ? 'project' : 'engagement')}><option value="engagement">Engagement</option><option value="project">Project</option></select></Field><Field label="Scope target"><select aria-label="Ticket scope target" className={selectClass} value={draft.scopeId} disabled={busy} onChange={(event) => changeScope(draft.scope, event.target.value)}><option value="">Select scope</option>{choices(scopes[draft.scope])}</select></Field></div>
@@ -128,7 +128,7 @@ export function TicketProviderSettings() {
         <Field label="Summary template" hint="Leave blank to use the governed default."><Input value={draft.summaryTemplate} onChange={(event) => update({ summaryTemplate: event.target.value })} /></Field><Field label="Description template" hint="Leave blank to use the governed default."><textarea aria-label="Ticket description template" className={selectClass} rows={3} value={draft.descriptionTemplate} onChange={(event) => update({ descriptionTemplate: event.target.value })} /></Field>
         <p className="md:col-span-2 text-xs text-tertiary">One ticket per finding. Polling reads external state into proposals; it does not change a finding. An uncertain create is reconciled before any retry.</p>
       </fieldset>
-      <div className="flex flex-wrap gap-2"><Button loading={busy} disabled={!canAdmin || busy || mappingLoading || selectedDestinationUnavailable || !draft.scopeId || !draft.projectKey || !draft.issueType || metadataLoading || !metadata} onClick={() => void save()}>{selected ? 'Save ticket mapping' : 'Create ticket mapping'}</Button>{selected && <><Button variant="secondary" disabled={!canAdmin || busy || mappingLoading} onClick={() => { setSelected(null); setDraft(blank(draft.integrationId, draft.scopeId, draft.scope)) }}>New mapping</Button><Button variant="danger" disabled={!canAdmin || busy || mappingLoading} onClick={() => void remove()}><Trash2 className="size-4" />Delete mapping</Button></>}</div>
+      <div className="flex flex-wrap gap-2"><Button loading={busy} disabled={!canAdmin || busy || mappingLoading || selectedDestinationUnavailable || !draft.scopeId || !draft.projectKey || !draft.issueType || metadataLoading || !metadata} onClick={() => void save()}>{selected ? 'Save ticket mapping' : 'Create ticket mapping'}</Button>{selected && <><Button variant="secondary" disabled={!canAdmin || busy || mappingLoading} onClick={() => { setSelected(null); setDraft(blank(draft.integrationId, draft.scopeId, draft.scope)) }}>New mapping</Button><Button variant="danger" disabled={!canAdmin || busy || mappingLoading} onClick={() => void remove()}><Trash01 className="size-4" />Delete mapping</Button></>}</div>
     </Card>}
   </div>
 }

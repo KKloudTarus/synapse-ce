@@ -25,6 +25,9 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 	if c.Progress.OutstandingOperation == "shell" {
 		matches, err := p.FindDocumentMarker(ctx, c.Intent.Container, c.Intent.Marker)
 		if err != nil {
+			if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+				return deferred, deferErr
+			}
 			return c.Intent, err
 		}
 		if len(matches) > 1 {
@@ -40,10 +43,19 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 		return s.resume(ctx, c)
 	}
 	if c.Progress.Remote.ID == "" {
+		// A worker can crash after claiming a new create but before recording the
+		// shell operation. No provider write was allowed before outstanding(), so
+		// this exact empty checkpoint may safely resume and create its first shell.
+		if cleanInitialShellCheckpoint(c) {
+			return s.resume(ctx, c)
+		}
 		return c.Intent, nil
 	}
 	remote, err := p.GetDocument(ctx, c.Progress.Remote.ID)
 	if err != nil {
+		if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+			return deferred, deferErr
+		}
 		return c.Intent, err
 	}
 	if remote.ID != c.Progress.Remote.ID || remote.Container != c.Intent.Container {
@@ -65,6 +77,9 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 			return c.Intent, err
 		}
 		if err := p.VerifyDocumentRestriction(ctx, remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
+			if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+				return deferred, deferErr
+			}
 			return c.Intent, err
 		}
 		c.Progress.Remote = remote.RemotePage
@@ -91,6 +106,9 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 			return c.Intent, err
 		}
 		if err := p.VerifyDocumentRestriction(ctx, remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
+			if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+				return deferred, deferErr
+			}
 			return c.Intent, err
 		}
 		if err := s.record(ctx, c, "document.published", remote.ID); err != nil {
@@ -103,6 +121,9 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 	}
 	if c.Progress.OutstandingOperation == "restrictions" {
 		if err := p.VerifyDocumentRestriction(ctx, remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
+			if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+				return deferred, deferErr
+			}
 			return c.Intent, err
 		}
 		c.Progress.Step = "attachments"
@@ -114,6 +135,14 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 		return s.resume(ctx, c)
 	}
 	return c.Intent, nil
+}
+
+func cleanInitialShellCheckpoint(c ports.DocumentCommand) bool {
+	return c.Intent.Action == domain.Create && c.Progress.Step == "shell" &&
+		c.Progress.Remote.ID == "" && c.Progress.Remote.URL == "" && c.Progress.Remote.Version == 0 && c.Progress.Remote.Revision == "" &&
+		c.Progress.Uploaded == 0 && len(c.Progress.UploadedReceipts) == 0 &&
+		c.Progress.OutstandingOperation == "" && c.Progress.OutstandingKey == "" && c.Progress.OutstandingDigest == "" &&
+		c.Progress.ExpectedRemoteVersion == 0 && c.Progress.ExpectedRemoteRevision == ""
 }
 
 func recoverableNeutralRestriction(c ports.DocumentCommand, remote ports.DocumentRemoteState) bool {

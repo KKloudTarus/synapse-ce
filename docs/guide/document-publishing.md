@@ -83,7 +83,13 @@ Create an enabled `google-drive` integration with endpoint
 `https://www.googleapis.com`. Set `space` to the ID of a dedicated restricted
 parent folder in the integration actor's **My Drive**, `read_group` to the exact
 Google Drive group permission ID, and `data_class` to `detail`. Store the scoped
-Drive access token only in the write-only `access_token` credential field.
+Drive OAuth access token only in the write-only `access_token` credential field.
+This profile accepts an access token, not a refresh token, service-account key or
+OAuth client secret. Synapse does not refresh it. Its lifetime is set by Google
+and the grant; record the expiry in your credential operations and replace the
+sealed value before it expires. Scheduled releases and restriction checks use the
+current credential and fail closed when it expires. A successful connection test
+does not establish that the token will still work at a later schedule.
 
 The destination must remain a service-owned My Drive folder. Before a neutral
 shell, each attachment upload, and the body write, Synapse proves the configured
@@ -116,6 +122,20 @@ scoped SharePoint REST access token in `sharepoint_token`. Both credentials are
 sealed and write-only. The `sharepoint` profile accepts a `documentLibrary` drive;
 the `onedrive` profile accepts a Business drive. Personal OneDrive is outside this
 profile.
+
+Both Microsoft fields accept access tokens for their respective audiences, not
+refresh tokens or client secrets. Synapse does not refresh either token. Track
+both provider-issued expiry times and rotate the sealed fields before expiry;
+a live Graph token cannot replace an expired SharePoint REST token. Scheduled
+publishing and restriction checks fail closed if either proof becomes unavailable.
+Plan credential renewal with the identity owner before enabling schedules.
+
+For both Drive and Microsoft, rotation advances the connection's credential
+revision. An already approved command is pinned to its original revision and
+refuses to write after rotation; do not edit its stored checkpoint to resume it.
+Review any pending or uncertain command through the governed recovery workflow
+before approving a release with the new credential. Restriction monitoring reads
+the current credential independently of the original publication approval.
 
 Before release, Synapse binds the Graph drive and configured folder to the
 authoritative SharePoint site and folder path. It requires unique SharePoint role
@@ -188,8 +208,40 @@ for audit/checkpoint persistence. The 45-second worker pass defers the next tena
 without advancing its rotation when less than twelve seconds remain. A claimed link becomes eligible again
 after five minutes if the worker crashes. Verified links are checked again after
 15 minutes; lost or unverifiable sharing is checked again after five minutes.
+A provider `Retry-After` longer than that interval postpones the next observation
+until its minimum delay has elapsed.
 These are queue intervals, not a guaranteed freshness bound under provider outages
 or a backlog. Inspect the last-check timestamp in the console.
+
+Each tenant pass claims at most one restriction check. For one worker serving one
+otherwise idle tenant, a five-second runner cadence permits at most 180 checks per
+15-minute interval even with negligible provider latency. This is a scheduling
+ceiling, not supported production capacity: publication work, multiple tenants,
+provider quotas and slow proofs reduce it. If a proof takes ten seconds, the
+single-tenant ceiling falls to 90 checks per 15 minutes before other work. A larger
+backlog cannot promise a 15-minute sweep. Track last-check age and due-link backlog;
+measure your native provider latency and quota before choosing a deployment size.
+
+In the synthetic Graph contract fixture, a combined restricted read costs
+`16 + 2N` requests for `N` inherited attachments, with at most four concurrent
+child proofs. A fresh identity-only read followed by a second complete proof costs
+`26 + 3N`; sensitive-write guards now use the combined read. With eleven
+attachments the direct restriction-only observation made 38 requests in 2.041s
+at a synthetic 100ms/request RTT. The old duplicate-read harness made 59 requests
+in 3.262s. These fixtures do not establish native latency or a production SLO.
+The no-attachment Drive combined-read fixture makes nine sequential requests.
+A Graph attachment operation separately makes 32 requests in its fixture; cost
+rises with the existing children. Every actual upload/write retains its own fresh
+restriction check immediately before dispatch. No proof is cached across writes.
+
+Each executor claim persists a version/lease-bound progress checkpoint before
+provider work, including read-only pre-write checks. The PostgreSQL checkpoint
+save currently rereads the immutable artifact once; the encoded artifact limit
+is 32MiB. Yield and throttle-deferral returns reuse their already locked command
+instead of reading it a second time. List and direct execution still perform
+fresh reads. These choices preserve fencing and cost memory/JSON decoding for
+large reports; [queue measurements](../evidence/remaining-providers/queue-cost.json)
+record that bound and the remaining artifact-validation cost.
 
 The sweep reads the page identity and exact restricted-sharing proof using current
 destination credentials. For Confluence Cloud it also reads the public-link policy.
@@ -245,6 +297,23 @@ recipient/channel eligibility. A stale expected version conflicts rather than
 overwriting a schedule.
 
 ## Operational evidence
+
+Provider 429 responses persist a separate next-attempt deadline. Read-only
+preflight or reconciliation throttles postpone observation without exhausting
+write attempts. A clean pre-write checkpoint releases its lease while preserving
+acknowledged progress. Partial upload/purge or confirmation failures retain the
+uncertain state, outstanding operation and receipts; the deadline delays recovery,
+not permission to repeat a write. The retry floor is one minute and a longer
+provider `Retry-After` is preserved. Direct execution honors the same deadline as
+worker selection. Definite no-effect write refusals keep the existing bounded
+failure-attempt policy.
+
+The provider retry-scheduling migration must precede updated binaries. Upgrade all
+workers before relying on persisted throttling: old workers ignore the new due
+columns. Rollback refuses to remove a future document delay or ticket poll claim.
+Disable affected integrations, stop workers and let those deadlines expire before
+rollback, or apply a forward repair. Never clear an uncertain operation to bypass
+the guard.
 
 Apply the new migrations with the migration-owner credential before starting
 updated APIs and workers. Upgrade all writers before enabling automatic ticket

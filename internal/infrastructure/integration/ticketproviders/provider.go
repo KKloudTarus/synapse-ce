@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,6 +44,8 @@ const (
 var markerRE = regexp.MustCompile(`^synapse-intent-[a-z0-9][a-z0-9-]{0,127}$`)
 var repoRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$`)
 var projectPathRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}(?:/[A-Za-z0-9_.-]{1,100})+$`)
+var ordinaryPathPartRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+var azureProjectPartRE = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,99}$`)
 
 type gitLabSearchIssue struct {
 	IID          int      `json:"iid"`
@@ -213,7 +216,7 @@ func (a *Adapter) configureSCM() error {
 }
 func (a *Adapter) configureOrdinary(rules selfhosted.Rules) error {
 	u, err := url.Parse(a.item.Endpoint)
-	if err != nil {
+	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Host == "" {
 		return fmt.Errorf("%w: invalid endpoint", shared.ErrValidation)
 	}
 	host := strings.ToLower(u.Hostname())
@@ -223,16 +226,16 @@ func (a *Adapter) configureOrdinary(rules selfhosted.Rules) error {
 			return fmt.Errorf("%w: Azure Boards requires dev.azure.com", shared.ErrValidation)
 		}
 		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		if len(parts) != 2 || !ordinaryPathPartRE.MatchString(parts[0]) || !azureProjectPartRE.MatchString(parts[1]) || strings.TrimSpace(parts[1]) != parts[1] || u.RawPath != "" {
 			return fmt.Errorf("%w: Azure Boards endpoint must name organization/project", shared.ErrValidation)
 		}
 		a.project = strings.Join(parts, "/")
 	case LinearProvider:
-		if host != "api.linear.app" || strings.Trim(u.Path, "/") != "graphql" {
+		if host != "api.linear.app" || u.Port() != "" && u.Port() != "443" || u.EscapedPath() != "/graphql" {
 			return fmt.Errorf("%w: Linear requires https://api.linear.app/graphql", shared.ErrValidation)
 		}
 	case ServiceNowProvider:
-		if !strings.HasSuffix(host, ".service-now.com") || host == "service-now.com" {
+		if !strings.HasSuffix(host, ".service-now.com") || host == "service-now.com" || u.Port() != "" && u.Port() != "443" || strings.Trim(u.Path, "/") != "" {
 			return fmt.Errorf("%w: ServiceNow requires a SaaS instance host", shared.ErrValidation)
 		}
 	}
@@ -247,11 +250,13 @@ func (a *Adapter) configureOrdinary(rules selfhosted.Rules) error {
 		if a.project != "incident" && a.project != "sn_vul_vulnerable_item" {
 			return fmt.Errorf("%w: ServiceNow table must be incident or sn_vul_vulnerable_item", shared.ErrValidation)
 		}
-	} else {
+	} else if a.provider == LinearProvider {
 		a.project = strings.TrimSpace(stringValue(config, "team_id"))
 		if a.project == "" {
 			return fmt.Errorf("%w: Linear team ID required", shared.ErrValidation)
 		}
+	} else {
+		return fmt.Errorf("%w: unsupported ticket provider", shared.ErrValidation)
 	}
 	// Azure endpoints name the target organization/project but API requests are
 	// rooted at dev.azure.com. Keeping the root here prevents every operation
@@ -290,8 +295,10 @@ func (a *Adapter) BuildTicketPayload(_ context.Context, in ports.TicketPayloadIn
 		return marshalPayload([]map[string]any{{"op": "add", "path": "/fields/System.Title", "value": in.Summary}, {"op": "add", "path": "/fields/System.Description", "value": fragment}}, ports.TicketMarkerDescriptor{Version: 1, Strategy: ports.TicketMarkerJSONPatchAdd, Path: []string{"fields", "System.Tags"}})
 	case ServiceNowProvider:
 		return marshalPayload(map[string]any{"short_description": in.Summary, "description": desc, "correlation_id": ""}, ports.TicketMarkerDescriptor{Version: 1, Strategy: ports.TicketMarkerScalar, Path: []string{"correlation_id"}})
-	default:
+	case LinearProvider:
 		return marshalPayload(map[string]any{"query": "mutation IssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url } } }", "variables": map[string]any{"input": map[string]any{"teamId": a.project, "title": in.Summary, "description": desc}}}, ports.TicketMarkerDescriptor{Version: 1, Strategy: ports.TicketMarkerTextSuffix, Path: []string{"variables", "input", "description"}})
+	default:
+		return ports.TicketPayload{}, ticketErr(0, "unsupported_provider", false)
 	}
 }
 func marshalPayload(v any, m ports.TicketMarkerDescriptor) (ports.TicketPayload, error) {
@@ -479,8 +486,10 @@ func (a *Adapter) createWithRequest(ctx context.Context, payload json.RawMessage
 		return a.createAzureWith(ctx, payload, request)
 	case ServiceNowProvider:
 		return a.createServiceNowWith(ctx, payload, request)
-	default:
+	case LinearProvider:
 		return a.createLinearWith(ctx, payload, request)
+	default:
+		return ticketing.RemoteTicket{}, ticketErr(0, "unsupported_provider", false)
 	}
 }
 func (a *Adapter) SearchTicketMarker(ctx context.Context, project, issueType, marker string) ([]ticketing.RemoteTicket, error) {
@@ -785,7 +794,7 @@ func (a *Adapter) TicketIdentity(ctx context.Context) (string, error) {
 			return "", ticketErr(http.StatusOK, "invalid_identity", false)
 		}
 		return identity(out.Result[0].SysID)
-	default:
+	case LinearProvider:
 		payload, _ := json.Marshal(map[string]string{"query": "query Viewer { viewer { id } }"})
 		var out struct {
 			Data struct {
@@ -802,6 +811,8 @@ func (a *Adapter) TicketIdentity(ctx context.Context) (string, error) {
 			return "", ticketErr(http.StatusOK, "invalid_identity", false)
 		}
 		return identity(out.Data.Viewer.ID)
+	default:
+		return "", ticketErr(0, "unsupported_provider", false)
 	}
 }
 func identity(v string) (string, error) {
@@ -1017,9 +1028,6 @@ func (a *Adapter) createServiceNowWith(ctx context.Context, p json.RawMessage, r
 	}
 	return ticketing.RemoteTicket{ID: out.Result.SysID, URL: a.base.Scheme + "://" + a.base.Host + "/now/nav/ui/classic/params/target/" + url.QueryEscape(a.project+".do?sys_id="+out.Result.SysID)}, nil
 }
-func (a *Adapter) createLinear(ctx context.Context, p json.RawMessage) (ticketing.RemoteTicket, error) {
-	return a.createLinearWith(ctx, p, a.request)
-}
 func (a *Adapter) createLinearWith(ctx context.Context, p json.RawMessage, request ticketRequest) (ticketing.RemoteTicket, error) {
 	var out struct {
 		Data struct {
@@ -1166,7 +1174,7 @@ func (a *Adapter) search(ctx context.Context, marker string) ([]ticketing.Remote
 			r = append(r, ticketing.RemoteTicket{ID: v.SysID, URL: a.base.Scheme + "://" + a.base.Host + "/now/nav/ui/classic/params/target/" + url.QueryEscape(a.project+".do?sys_id="+v.SysID)})
 		}
 		return r, nil
-	default:
+	case LinearProvider:
 		payload, _ := json.Marshal(map[string]any{"query": "query Search($query: String!, $team: String!) { issueSearch(query: $query, first: 3, filter: { team: { id: { eq: $team } } }) { nodes { id url description team { id } } pageInfo { hasNextPage } } }", "variables": map[string]string{"query": marker, "team": a.project}})
 		var out struct {
 			Data struct {
@@ -1203,6 +1211,8 @@ func (a *Adapter) search(ctx context.Context, marker string) ([]ticketing.Remote
 			r = append(r, ticketing.RemoteTicket{ID: v.ID, URL: v.URL})
 		}
 		return r, nil
+	default:
+		return nil, ticketErr(0, "unsupported_provider", false)
 	}
 }
 func wiqlLiteral(value string) string { return strings.ReplaceAll(value, "'", "''") }
@@ -1305,6 +1315,9 @@ func (a *Adapter) requestWithClient(ctx context.Context, client *http.Client, ba
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if errors.Is(err, safehttp.ErrBlockedDestination) {
+			return ticketErr(0, "blocked_destination", false)
+		}
 		return ticketErr(0, "network", method == http.MethodPost || method == http.MethodPatch)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -1354,7 +1367,7 @@ func statusErr(s int, h http.Header) error {
 }
 func safeHTTPS(raw, host string) bool {
 	u, e := url.Parse(raw)
-	return e == nil && u.Scheme == "https" && strings.EqualFold(u.Hostname(), host)
+	return e == nil && u.Scheme == "https" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && !u.ForceQuery && (u.Port() == "" || u.Port() == "443") && strings.EqualFold(u.Hostname(), host) && u.Path != ""
 }
 
 func (a *Adapter) ticketURLValid(raw string) bool {
