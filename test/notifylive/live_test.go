@@ -97,7 +97,7 @@ func TestNotificationLiveClients(t *testing.T) {
 	for _, locale := range locales(t) {
 		for _, target := range destinations {
 			t.Run(target.name+"-"+string(locale), func(t *testing.T) {
-				work := reportGeneratedWork(t, catalog, formatters, target, locale)
+				work := reportGeneratedWork(t, catalog, formatters, target, locale, liveVars(time.Now().UTC().Format(time.RFC3339)))
 				result := sender.Send(ctx, work, target.config)
 				if result.ErrorCode != "" {
 					t.Fatalf("%s refused the message: code=%s status=%d", target.name, result.ErrorCode, result.StatusCode)
@@ -136,8 +136,10 @@ func locales(t *testing.T) []tenancy.Locale {
 	}
 }
 
-func liveVars() map[string]string {
-	now := time.Now().UTC().Format(time.RFC3339)
+// liveVars are the message's variables. The instant is a parameter so a committed capture is
+// byte-stable while a live run stamps the real time.
+func liveVars(instant string) map[string]string {
+	now := instant
 	return map[string]string{
 		"event_type": string(domain.EventReportGenerated), "event_label": "Report generated",
 		"occurred_at": now, "generated_at": now,
@@ -151,20 +153,23 @@ func liveVars() map[string]string {
 // reportGeneratedWork builds the delivery a worker hands the driver: the event with its sealed
 // context, the channel, and the wire payload rendered from the shipped template by the channel's
 // own formatter.
-func reportGeneratedWork(t *testing.T, catalog *notificationbuiltin.Catalog, formatters map[domain.ChannelType]ports.NotificationFormatter, target destination, locale tenancy.Locale) ports.NotificationWork {
+func reportGeneratedWork(t *testing.T, catalog *notificationbuiltin.Catalog, formatters map[domain.ChannelType]ports.NotificationFormatter, target destination, locale tenancy.Locale, vars map[string]string) ports.NotificationWork {
 	t.Helper()
 	spec, ok := domain.LookupEvent(domain.EventReportGenerated)
 	if !ok {
 		t.Fatal("report.generated is missing from the catalog")
 	}
-	vars := liveVars()
 	encoded, err := spec.Snapshot(vars).Encode()
 	if err != nil {
 		t.Fatalf("encode the event context: %v", err)
 	}
+	occurredAt, err := time.Parse(time.RFC3339, vars["occurred_at"])
+	if err != nil {
+		t.Fatalf("event instant: %v", err)
+	}
 	event := domain.Event{
 		TenantID: "live", ID: shared.ID("live-report-generated"), Type: domain.EventReportGenerated,
-		SchemaVersion: spec.SchemaVersion, OccurredAt: time.Now().UTC(), Severity: shared.SeverityHigh,
+		SchemaVersion: spec.SchemaVersion, OccurredAt: occurredAt.UTC(), Severity: shared.SeverityHigh,
 		SubjectKind: "report", SubjectID: vars["content_hash"], Context: encoded,
 	}
 	channel := domain.Channel{
@@ -285,7 +290,7 @@ func TestNotifyLivePayloadsRenderForEveryClient(t *testing.T) {
 // the email subject and the HTML alternative.
 func payloadText(t *testing.T, catalog *notificationbuiltin.Catalog, formatters map[domain.ChannelType]ports.NotificationFormatter, target destination, locale tenancy.Locale) string {
 	t.Helper()
-	work := reportGeneratedWork(t, catalog, formatters, target, locale)
+	work := reportGeneratedWork(t, catalog, formatters, target, locale, liveVars(time.Now().UTC().Format(time.RFC3339)))
 	if work.Formatted == nil {
 		return ""
 	}
