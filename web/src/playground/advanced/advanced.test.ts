@@ -13,7 +13,7 @@ import { vulnerabilityApi } from '@/lib/api/vulnerability'
 import { inboxApi } from '@/lib/api/inbox'
 
 const server = setupServer(...advancedHandlers)
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 afterAll(() => server.close())
 afterEach(() => vi.unstubAllGlobals())
 beforeEach(() => { localStorage.clear(); resetAdvanced('remediation'); resetAdvanced('intelligence'); resetAdvanced('policy'); saveDemoMode('remediation') })

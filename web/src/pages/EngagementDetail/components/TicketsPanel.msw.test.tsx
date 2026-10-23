@@ -20,7 +20,7 @@ const server = setupServer(
   http.post('/api/v1/ticket-intents/:intentId/reconcile', () => { linked = true; return HttpResponse.json({ id: 'intent-uncertain', state: 'done', error_code: '', version: 2, created_at: '' }) }),
 )
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 afterEach(() => { linked = false; server.resetHandlers() })
 afterAll(() => server.close())
 

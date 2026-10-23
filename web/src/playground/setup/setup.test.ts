@@ -16,7 +16,7 @@ import { guidePlacement } from '../guide-placement'
 
 // Match the browser handler order: contract tests must exercise the shipped stack.
 const server = setupServer(...setupHandlers, ...advancedHandlers, ...workflowHandlers, ...scenarioHandlers, ...handlers)
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))
 afterAll(() => server.close())
 afterEach(() => vi.unstubAllEnvs())
 beforeEach(() => { vi.stubEnv('VITE_PLAYGROUND', '1'); localStorage.clear(); resetSetup('ci-setup'); resetSetup('ai-setup'); saveDemoMode('ci-setup') })
