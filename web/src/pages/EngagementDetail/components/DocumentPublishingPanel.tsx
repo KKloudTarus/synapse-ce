@@ -1,4 +1,4 @@
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle } from '@untitledui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle, File06, LinkExternal02, Trash01 } from '@untitledui/icons'
 import { Button, EmptyState, ErrorState, Spinner } from '../../../components/ui'
