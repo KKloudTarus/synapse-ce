@@ -9,6 +9,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- `notion` integration with a connection check. It proves the integration reaches exactly the
+  configured container page, that the page is not in the trash, and that Notion has not published
+  it to the web. Report publication stays unavailable for this provider: the API exposes no page
+  permissions and cannot permanently delete a page.
 - Private GitHub Issues, confidential GitLab Issues, Azure Boards, ServiceNow and
   Linear ticket destinations with frozen native previews, tenant-scoped credentials,
   and polling observations. ServiceNow descriptions render readable plain text;

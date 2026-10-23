@@ -12,7 +12,7 @@ func Register(registry *integration.Registry) error {
 	for _, item := range []struct {
 		descriptor integration.ProviderDescriptor
 		factory    integration.Factory
-	}{{graphDescriptor(SharePoint), newGraph}, {graphDescriptor(OneDrive), newGraph}, {driveDescriptor, newDrive}} {
+	}{{graphDescriptor(SharePoint), newGraph}, {graphDescriptor(OneDrive), newGraph}, {driveDescriptor, newDrive}, {notionDescriptor, newNotion}} {
 		if err := registry.Register(item.descriptor, item.factory); err != nil {
 			return err
 		}
