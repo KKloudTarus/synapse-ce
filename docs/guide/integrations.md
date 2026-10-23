@@ -50,6 +50,14 @@ unpublish APIs.
   custodian principal with the required SharePoint role proof.
 - `confluence-cloud` and `confluence-dc` retain their existing restricted-space
   profiles.
+- `notion` is a connection check only and never appears as a publication
+  destination. Its API returns no page permissions, so the exact reader of a
+  report cannot be proved, and [its own reference](https://developers.notion.com/reference/archive-a-page)
+  states the API does not support permanently deleting pages, so an unpublish
+  could not prove removal. The connection test proves the integration reaches
+  exactly the configured container page, that the page is not in the trash, and
+  that it carries no `public_url`, which is the one sharing fact the API does
+  expose.
 
 Document releases are durable, idempotent commands. The worker rechecks current
 tenant authority, destination configuration, release policy, legal hold, sharing

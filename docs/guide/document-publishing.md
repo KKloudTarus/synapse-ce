@@ -151,6 +151,19 @@ attachments while refusing manual files or a changed ownership manifest. Interru
 neutral-shell creation is recovered by its exact marker; missing neutral files are
 completed only after fresh restriction proof.
 
+## Why Notion is not a destination
+
+A `notion` integration can be created and tested, and it is never offered as a
+publication destination. Two of the three proofs this workflow needs are outside
+the Notion API: no endpoint returns a page's permissions, so the exact reader
+cannot be verified before an upload, and the API cannot permanently delete a
+page, so an unpublish could only move it to the trash. Releasing under either
+gap would report a restriction that was never checked and a deletion that never
+happened. The connection test proves what the API does expose: the integration
+reaches exactly the configured container page, the page is not in the trash, and
+it carries no `public_url`, which Notion sets only once a page is published to
+the web.
+
 ## Release and unpublish
 
 Use `POST /api/v1/document-publications` with an existing integration, source
