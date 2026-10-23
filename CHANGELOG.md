@@ -9,6 +9,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- `report.generated` notification event for a sealed report artifact, with built-in English
+  and Vietnamese templates in every channel family, a published JSON schema and fixture, and
+  capture from engagement, project-quality and assessment-cycle report generation. The outbox
+  key is the report kind and its content digest, so rebuilding a report and releasing it later
+  announce it once.
 - Private GitHub Issues, confidential GitLab Issues, Azure Boards, ServiceNow and
   Linear ticket destinations with frozen native previews, tenant-scoped credentials,
   and polling observations. ServiceNow descriptions render readable plain text;

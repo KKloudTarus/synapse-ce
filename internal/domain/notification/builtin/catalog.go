@@ -49,6 +49,7 @@ func New() *Catalog {
 		notification.EventFindingCommented, notification.EventFindingMentioned,
 		notification.EventApprovalRequested, notification.EventApprovalDecided, notification.EventApprovalTimedOut,
 		notification.EventIncidentUpdated, notification.EventResponseFinished, notification.EventEvidenceChainBroken,
+		notification.EventReportGenerated,
 	}
 	families := []notification.TemplateFamily{
 		notification.FamilyChat,
@@ -204,6 +205,8 @@ func copyFor(event notification.EventType, locale tenancy.Locale) (string, strin
 			return "Phản hồi đã hoàn tất", "Kết quả: {{.outcome}}\nHành động: {{.action_kind}}{{if .target}}\nMục tiêu: {{.target}}{{end}}{{if .actor}}\nNgười thực hiện: {{.actor}}{{end}}"
 		case notification.EventEvidenceChainBroken:
 			return "Chuỗi bằng chứng không hợp lệ", "Mức độ: {{.severity}}\nLý do: {{.reason_code}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}"
+		case notification.EventReportGenerated:
+			return "Báo cáo đã được tạo", "Mức độ: {{.severity}}\nLoại báo cáo: {{.report_kind}}\nSố phát hiện: {{.finding_count}}\nThời gian tạo: {{.generated_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .report_title}}\nTiêu đề: {{.report_title}}{{end}}{{if .content_hash}}\nMã nội dung: {{.content_hash}}{{end}}"
 		default:
 			return "Thông báo Synapse", "Sự kiện: {{.event_label}}\nThời gian: {{.occurred_at}}"
 		}
@@ -267,6 +270,8 @@ func copyFor(event notification.EventType, locale tenancy.Locale) (string, strin
 		return "Response finished", "Outcome: {{.outcome}}\nAction: {{.action_kind}}{{if .target}}\nTarget: {{.target}}{{end}}{{if .actor}}\nActor: {{.actor}}{{end}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}"
 	case notification.EventEvidenceChainBroken:
 		return "Evidence chain broken", "Severity: {{.severity}}\nReason: {{.reason_code}}\nOccurred: {{.occurred_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}"
+	case notification.EventReportGenerated:
+		return "Report generated", "Severity: {{.severity}}\nReport type: {{.report_kind}}\nFindings: {{.finding_count}}\nGenerated: {{.generated_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .report_title}}\nTitle: {{.report_title}}{{end}}{{if .content_hash}}\nContent hash: {{.content_hash}}{{end}}"
 	default:
 		return "Synapse notification", "Event: {{.event_label}}\nOccurred: {{.occurred_at}}"
 	}
