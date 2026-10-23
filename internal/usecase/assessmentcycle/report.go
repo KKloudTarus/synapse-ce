@@ -14,6 +14,7 @@ import (
 	closuredom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentclosure"
 	cmpdom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcomparison"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -39,6 +40,7 @@ type ClosureReportService struct {
 	decisions   ports.AssessmentClosureDecisionReader
 	audit       ports.AuditLogger
 	observer    ports.AssessmentClosureReportObserver
+	events      ports.NotificationOutbox
 }
 
 func NewClosureReportService(closures ports.AssessmentClosureRepository, reports ports.AssessmentClosureReportStore, snapshots ports.AssessmentSnapshotRepository, comparisons ports.AssessmentComparisonRepository, decisions ports.AssessmentClosureDecisionReader, audit ports.AuditLogger) (*ClosureReportService, error) {
@@ -46,6 +48,13 @@ func NewClosureReportService(closures ports.AssessmentClosureRepository, reports
 		return nil, fmt.Errorf("%w: closure report dependencies are required", shared.ErrValidation)
 	}
 	return &ClosureReportService{closures: closures, reports: reports, snapshots: snapshots, comparisons: comparisons, decisions: decisions, audit: audit, observer: noopClosureReportObserver{}}, nil
+}
+
+// SetNotifications enables the report.generated capture for a newly sealed
+// closure report. It is optional, and the record is keyed by the report content
+// so a later release of the same artifact appends nothing further.
+func (service *ClosureReportService) SetNotifications(outbox ports.NotificationOutbox) {
+	service.events = outbox
 }
 
 func (service *ClosureReportService) SetObserver(observer ports.AssessmentClosureReportObserver) {
@@ -227,6 +236,12 @@ func (service *ClosureReportService) Render(ctx context.Context, tenantID, cycle
 		return ports.AssessmentClosureReportArtifact{}, err
 	}
 	if created {
+		if err := service.captureReportGenerated(ctx, tenantID, stored); err != nil {
+			service.observer.ObserveAssessmentClosureReport("failed", "notification")
+			return ports.AssessmentClosureReportArtifact{}, err
+		}
+	}
+	if created {
 		service.observer.ObserveAssessmentClosureReport("generated", "none")
 	} else {
 		service.observer.ObserveAssessmentClosureReport("cached", "none")
@@ -326,4 +341,25 @@ func (service *APIService) SetClosureReportObserver(observer ports.AssessmentClo
 	if service.closure != nil && service.closure.reporter != nil {
 		service.closure.reporter.SetObserver(observer)
 	}
+}
+
+// captureReportGenerated appends report.generated for a closure report the store
+// accepted as new. A cached read appends nothing: the artifact was already
+// announced when it was sealed.
+func (service *ClosureReportService) captureReportGenerated(ctx context.Context, tenantID shared.ID, stored ports.AssessmentClosureReportArtifact) error {
+	if service.events == nil {
+		return nil
+	}
+	record, err := notification.ReportGenerated{
+		TenantID: tenantID, Kind: notification.ReportKindAssessmentCycle, Severity: shared.SeverityUnknown,
+		Title: "Assessment closure report", ContentHash: stored.ContentHash, GeneratedAt: stored.GeneratedAt,
+		FindingCount: -1,
+	}.ReportGeneratedRecord()
+	if err != nil {
+		return err
+	}
+	if err = service.events.Append(ctx, record); err != nil {
+		return fmt.Errorf("append closure report notification: %w", err)
+	}
+	return nil
 }

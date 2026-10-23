@@ -46,8 +46,8 @@ func TestBuiltinRendererGoldenMatrix(t *testing.T) {
 			}
 		}
 	}
-	if len(english) != 360 {
-		t.Fatalf("English matrix has %d cases, want 360", len(english))
+	if len(english) != 372 {
+		t.Fatalf("English matrix has %d cases, want 372", len(english))
 	}
 	encoded, err := json.MarshalIndent(english, "", "  ")
 	if err != nil {
@@ -95,8 +95,8 @@ func TestBuiltinRendererVietnameseMatrix(t *testing.T) {
 			}
 		}
 	}
-	if cases != 360 {
-		t.Fatalf("Vietnamese matrix has %d cases, want 360", cases)
+	if cases != 372 {
+		t.Fatalf("Vietnamese matrix has %d cases, want 372", cases)
 	}
 	encoded, err := json.MarshalIndent(vietnamese, "", "  ")
 	if err != nil {
@@ -155,6 +155,7 @@ func builtinMatrixEvents() []domain.EventType {
 		domain.EventFindingCommented, domain.EventFindingMentioned,
 		domain.EventApprovalRequested, domain.EventApprovalDecided, domain.EventApprovalTimedOut,
 		domain.EventIncidentUpdated, domain.EventResponseFinished, domain.EventEvidenceChainBroken,
+		domain.EventReportGenerated,
 	}
 }
 
@@ -290,6 +291,7 @@ func builtinMatrixSnapshot(spec domain.EventSpec) domain.TemplateContext {
 		"finding_kind": "sast", "status": "confirmed", "from_status": "triage", "to_status": "confirmed", "result": "remediated",
 		"outcome": "failed", "provider": "scanner", "error_code": "timeout", "accepted_at": "2026-10-01T09:00:00Z", "expires_at": "2026-11-01T09:00:00Z", "reminder": "expiry_warning",
 		"authorized_from": "2026-10-03T09:00:00Z", "authorized_to": "2026-10-10T09:00:00Z", "timezone": "Asia/Ho_Chi_Minh", "boundary": "authorized_from",
+		"report_kind": "engagement_report", "finding_count": "12", "generated_at": "2026-10-02T09:00:00Z", "report_title": "summary-report", "content_hash": "detail-content-hash",
 		"update_kind": "status", "disposition": "investigating", "incident_title": "summary-incident", "owner": "summary-owner", "decision": "approved", "kind": "response", "comment_excerpt": "detail-comment", "reason_code": "head_mismatch",
 	}
 	lists := map[string][]map[string]string{"findings": {{"id": "detail-finding-id", "severity": "detail-high", "title": "detail-finding", "status": "detail-new"}}}

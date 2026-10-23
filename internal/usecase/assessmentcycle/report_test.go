@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentsnapshot"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	cycleuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -186,3 +187,47 @@ func (audit *retryReportAudit) RecordOnce(_ context.Context, entry ports.AuditEn
 
 var _ ports.AssessmentSnapshotRepository = snapshotGetOverride{}
 var _ ports.IdempotentAuditLogger = (*retryReportAudit)(nil)
+
+type closureOutbox struct{ records []notification.SourceRecord }
+
+func (o *closureOutbox) Append(_ context.Context, record notification.SourceRecord) error {
+	o.records = append(o.records, record)
+	return nil
+}
+
+// TestClosureReportAnnouncesOnlyTheFirstSeal pins the assessment-cycle half of
+// report.generated: the record is appended when the store accepts a new
+// artifact, and a cached read of the same report announces nothing again.
+func TestClosureReportAnnouncesOnlyTheFirstSeal(t *testing.T) {
+	harness := newClosureHarness(t)
+	manifest := commitClosureForReport(t, harness)
+	outbox := &closureOutbox{}
+	reporter, err := cycleuc.NewClosureReportService(harness.cycles, harness.cycles, harness.snapshots, harness.comparisons, closureDecisionReader{}, &recordAudit{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter.SetNotifications(outbox)
+	report, err := reporter.Render(context.Background(), harness.tenantID, harness.cycleID, shared.ID(manifest.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = reporter.Render(context.Background(), harness.tenantID, harness.cycleID, shared.ID(manifest.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if len(outbox.records) != 1 {
+		t.Fatalf("a cached report must not be announced again, got %d records", len(outbox.records))
+	}
+	record := outbox.records[0]
+	if record.EventType != notification.EventReportGenerated || record.SourceKind != "report" {
+		t.Fatalf("record = %+v", record)
+	}
+	if record.SourceID != "assessment_closure_report:"+report.ContentHash || record.SubjectID != report.ContentHash {
+		t.Fatalf("source key = %q, subject = %q, report hash = %q", record.SourceID, record.SubjectID, report.ContentHash)
+	}
+	if record.OccurredAt != report.GeneratedAt.UTC() {
+		t.Fatalf("occurred_at = %v, want the seal time %v", record.OccurredAt, report.GeneratedAt.UTC())
+	}
+	if !record.EngagementID.IsZero() {
+		t.Fatalf("a closure report belongs to a cycle, not an engagement: %q", record.EngagementID)
+	}
+}

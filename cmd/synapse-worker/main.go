@@ -679,6 +679,11 @@ func main() {
 	}
 	documentArtifacts.SetEvidenceProvider(evidenceService)
 	documentArtifacts.SetEvidenceIntegrityProvider(scaService)
+	if cfg.NotificationEnabled {
+		reportOutbox := postgres.NewNotificationOutbox(pool)
+		documentArtifacts.SetNotifications(reportOutbox)
+		assessmentClosureReportService.SetNotifications(reportOutbox)
+	}
 	documentPublisher, documentPublishErr := docpublishuc.NewService(documentStore, integrationStore, integrationService, documentArtifacts, documentAuthority, documentSourcePolicy, auditLog, ids, clock)
 	if documentPublishErr != nil {
 		log.Error("scheduled document publisher init failed", "err", documentPublishErr)

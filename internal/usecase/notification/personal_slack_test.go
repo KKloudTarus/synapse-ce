@@ -167,8 +167,11 @@ func TestPersonalSlackSkipsABotDisabledOrPausedSinceTheList(t *testing.T) {
 	at := time.Unix(1700000000, 0).UTC()
 	for name, change := range map[string]func(domain.Channel) domain.Channel{
 		"disabled": func(c domain.Channel) domain.Channel { c.Enabled = false; return c },
-		"paused":   func(c domain.Channel) domain.Channel { c.Health.State, c.Health.PausedAt = domain.ChannelPaused, &at; return c },
-		"retyped":  func(c domain.Channel) domain.Channel { c.Type = domain.ChannelSlack; return c },
+		"paused": func(c domain.Channel) domain.Channel {
+			c.Health.State, c.Health.PausedAt = domain.ChannelPaused, &at
+			return c
+		},
+		"retyped": func(c domain.Channel) domain.Channel { c.Type = domain.ChannelSlack; return c },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, direct, _ := newPersonalSlackFixture(t)
