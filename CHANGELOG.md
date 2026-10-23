@@ -17,6 +17,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - Restricted Google Drive and SharePoint/OneDrive Business publication through the
   shared document release workflow, with opaque revision fences and guarded permanent
   unpublish.
+- Governed publication to a restricted prefix of an S3-compatible bucket. The bucket
+  policy is the access authority: exactly one reader principal for the publication
+  prefix, versioning required, a public grant reported as a lost restriction, and an
+  unreadable policy refusing the release. Unpublish removes every object version and
+  delete marker, and refuses a publication held by Object Lock.
 
 - Jira Cloud and Data Center finding synchronization, Project vulnerability grouping,
   proposal-only inbound status/comment observations, and bounded reconciliation.

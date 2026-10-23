@@ -48,14 +48,19 @@ unpublish APIs.
   the authority for a restricted Business folder. They require separate sealed
   Microsoft Graph and SharePoint REST tokens, an exact reader group, and a service
   custodian principal with the required SharePoint role proof.
+- `s3-compatible` uses the HTTPS S3 API origin of an AWS or self-hosted bucket. It
+  requires versioning and a bucket policy that grants read to exactly the
+  configured principal for the publication prefix; a public grant is a lost
+  restriction and an unreadable policy refuses the release.
 - `confluence-cloud` and `confluence-dc` retain their existing restricted-space
   profiles.
 
 Document releases are durable, idempotent commands. The worker rechecks current
 tenant authority, destination configuration, release policy, legal hold, sharing
 proof, and credential/destination revisions before each outward write. Provider
-opaque revision tokens are compared exactly for Drive and SharePoint/OneDrive;
-reconciliation does not infer a changed body from a numeric version or a 404.
+opaque revision tokens are compared exactly for Drive, SharePoint/OneDrive, and
+S3-compatible buckets, which fence on the object version; reconciliation does not
+infer a changed body from a numeric version or a 404.
 Command leases and intent/progress revisions fence stale workers and concurrent
 republish or unpublish operations.
 Contract tests cover the profile boundaries. Selected personal Drive lifecycle cases

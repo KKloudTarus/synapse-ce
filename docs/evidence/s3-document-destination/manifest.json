@@ -1,0 +1,143 @@
+{
+ "issue": 1449,
+ "captured_at": "2026-10-23T16:45:00Z",
+ "language": "English only: the console ships no Vietnamese locale and MinIO renders its own English UI.",
+ "captures": [
+  {
+   "file": "console/engagement-empty-dark.png",
+   "state": "engagement-empty",
+   "theme": "dark",
+   "description": "Engagement with no publication: the empty state of the same panel.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "a86383939603ab8f7b3bb6119d15fc9404156fb34a03f72a81713bba27a9767d"
+  },
+  {
+   "file": "console/engagement-empty-light.png",
+   "state": "engagement-empty",
+   "theme": "light",
+   "description": "Engagement with no publication: the empty state of the same panel.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "b5878770d6b7071f67bd6b12871acbb7027920c62cb699c962a7e11d59f5ac72"
+  },
+  {
+   "file": "console/engagement-error-dark.png",
+   "state": "engagement-error",
+   "theme": "dark",
+   "description": "The panel after the documents request answered HTTP 500 (fulfilled in the browser).",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "2b0655b947d95663a7cb69c18107db62fe837a57e49742cc2a7d8ea38fc4166f"
+  },
+  {
+   "file": "console/engagement-error-light.png",
+   "state": "engagement-error",
+   "theme": "light",
+   "description": "The panel after the documents request answered HTTP 500 (fulfilled in the browser).",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "e7d47b3ceaa5cc2baf85bd262d391dc6a2e982f06673830d0eaea4e8abc21c7b"
+  },
+  {
+   "file": "console/engagement-loading-dark.png",
+   "state": "engagement-loading",
+   "theme": "dark",
+   "description": "The panel while the documents request is still in flight (the request was delayed 15s in the browser).",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "122d5dbdf50a180652e589f349f1df74fecafa93ea27b81104bc185aa0841fec"
+  },
+  {
+   "file": "console/engagement-loading-light.png",
+   "state": "engagement-loading",
+   "theme": "light",
+   "description": "The panel while the documents request is still in flight (the request was delayed 15s in the browser).",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "f6b0a81a3b6dd347a027f0fac19107b08d1c1f3c277f31a4e0756ca082baaf8b"
+  },
+  {
+   "file": "console/engagement-published-dark.png",
+   "state": "engagement-published",
+   "theme": "dark",
+   "description": "Engagement publish panel after a completed release to the bucket, with the schedule destination list.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "421f4ac286ef39e4f6e6b8015e56cde038ccdafebb88c19f0bfecaa1add4215d"
+  },
+  {
+   "file": "console/engagement-published-light.png",
+   "state": "engagement-published",
+   "theme": "light",
+   "description": "Engagement publish panel after a completed release to the bucket, with the schedule destination list.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "51bfc77481828a36b66f7462bf2c15a698c35b12eb6cd3e18d74dd5ca6b4066b"
+  },
+  {
+   "file": "console/integrations-hub-dark.png",
+   "state": "integrations-hub",
+   "theme": "dark",
+   "description": "Settings > Integrations, Documentation group listing the S3-compatible connection.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "bcbdcdc40b7db63f93492528533b7f0ecabd2557ce1555d2b60f150367fd612c"
+  },
+  {
+   "file": "console/integrations-hub-light.png",
+   "state": "integrations-hub",
+   "theme": "light",
+   "description": "Settings > Integrations, Documentation group listing the S3-compatible connection.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "b57a46802cb843c0c8e77d97a67cbe77eb54595e4b09de8017c99dbbc013f6e0"
+  },
+  {
+   "file": "console/integrations-permission-denied-dark.png",
+   "state": "integrations-permission-denied",
+   "theme": "dark",
+   "description": "The same connection read by a readonly role: every management action is withheld.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "1f6327f68598ebc777065f0513a82823614da574874430869462bee9972cfea2"
+  },
+  {
+   "file": "console/integrations-permission-denied-light.png",
+   "state": "integrations-permission-denied",
+   "theme": "light",
+   "description": "The same connection read by a readonly role: every management action is withheld.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "3c33d76f938a610ecbb53f3529fe6d585063c6b7f215c97ec1723596c7201f6e"
+  },
+  {
+   "file": "console/integrations-s3-connection-dark.png",
+   "state": "integrations-s3-connection",
+   "theme": "dark",
+   "description": "The enabled s3-compatible connection with its endpoint, sealed credential and last successful connection test.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "b92a2958228ce6d9d9e7efb375b08d804b896aaa017bb9d1640d19b48ddf0657"
+  },
+  {
+   "file": "console/integrations-s3-connection-light.png",
+   "state": "integrations-s3-connection",
+   "theme": "light",
+   "description": "The enabled s3-compatible connection with its endpoint, sealed credential and last successful connection test.",
+   "source": "Production console, real API and PostgreSQL, real MinIO destination",
+   "sha256": "2b2ca5cbe08b541ce90d9d1e30fe265bd4a760e40101d943ab53afd4295ecf1c"
+  },
+  {
+   "file": "destination/destination-state.json",
+   "description": "Bucket versioning status, the exact bucket policy, and every object version with its Synapse marker metadata.",
+   "source": "MinIO RELEASE.2025-09-07T16-13-09Z over TLS",
+   "sha256": "972d6465036f822452580bd8097e0b6aa2f6c35d9ddbea7f096f836403534bce"
+  },
+  {
+   "file": "destination/minio-object-metadata.png",
+   "description": "report.html object info: one version, ETag, legal hold off, no retention policy.",
+   "source": "MinIO RELEASE.2025-09-07T16-13-09Z over TLS",
+   "sha256": "eba4feae218d080816a26461f1c06f09fa9aa4292d84771a1eeaac66d37ce263"
+  },
+  {
+   "file": "destination/minio-objects.png",
+   "description": "MinIO object browser: the publication prefix holds the neutral shell, the PDF attachment and report.html.",
+   "source": "MinIO RELEASE.2025-09-07T16-13-09Z over TLS",
+   "sha256": "2887e2916c25a28875bd40bea18f49b4ad0dcfe7ad36a55a4062f3df0d778b7f"
+  },
+  {
+   "file": "destination/published-report.png",
+   "description": "report.html served from the bucket. The evidence-chain head and content hash render as inline code.",
+   "source": "MinIO RELEASE.2025-09-07T16-13-09Z over TLS",
+   "sha256": "8cf9ac227ae7fda77744cf4563c2848cbfaa10f4e2e4df357798f7b4ae97b28b"
+  }
+ ]
+}

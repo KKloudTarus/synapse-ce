@@ -10,7 +10,7 @@ import type { AssessmentCycleSummary, Integration } from '../../../lib/types'
 import { isAdminRole } from '../../../lib/roles'
 import { DocumentSchedulePanel } from './DocumentSchedulePanel'
 
-const documentProviders = new Set(['confluence-cloud', 'confluence-dc', 'google-drive', 'sharepoint', 'onedrive'])
+const documentProviders = new Set(['confluence-cloud', 'confluence-dc', 'google-drive', 'sharepoint', 'onedrive', 's3-compatible'])
 const terminalStates = new Set(['done', 'failed', 'uncertain'])
 const cyclePageLimit = 100
 const maxCyclePages = 3

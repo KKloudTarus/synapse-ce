@@ -3,8 +3,9 @@
 [Documentation home](README.md) · [Configuration](configuration.md) · [Notification channels](notification-channels.md)
 
 Synapse can publish a bounded, deterministic stored-source report to an existing
-Confluence Cloud or Data Center integration, a restricted Google Drive folder, or
-a restricted SharePoint or OneDrive Business folder. It supports
+Confluence Cloud or Data Center integration, a restricted Google Drive folder, a
+restricted SharePoint or OneDrive Business folder, or a restricted prefix of an
+S3-compatible bucket. It supports
 `engagement_report`, `assessment_closure_report`, and `project_quality_summary`.
 The API admits a durable command; a worker performs the remote write. The release
 actor, tenant, scope, current authority, source release policy, legal hold,
@@ -151,6 +152,62 @@ attachments while refusing manual files or a changed ownership manifest. Interru
 neutral-shell creation is recovered by its exact marker; missing neutral files are
 completed only after fresh restriction proof.
 
+## Configure an S3-compatible bucket
+
+Create an enabled `s3-compatible` integration. Its endpoint is the HTTPS S3 API
+origin, with no path, query, fragment, or credentials, for example
+`https://s3.eu-west-1.amazonaws.com` for AWS or `https://objects.example.com` for
+a self-hosted gateway. An `*.amazonaws.com` endpoint is pinned to its own host on
+port 443. Any other endpoint must be listed in the deployment's reviewed
+self-hosted allowlist, the same rule the self-hosted forge and Confluence Data
+Center profiles use.
+
+| Field | Required value |
+| --- | --- |
+| `space` | The destination bucket name. |
+| `prefix` | The key prefix that holds publications, such as `engagement-reports`. |
+| `read_group` | The exact reader principal, such as `arn:aws:iam::123456789012:role/report-readers`. A wildcard is refused. |
+| `region` | The bucket region used for request signing. |
+| `data_class` | `detail`. |
+
+Supply the access key in `access_key_id` and the secret in `secret_access_key`,
+both sealed and write-only. `session_token` is optional and holds a temporary STS
+token. Synapse does not refresh a temporary credential: record its expiry in your
+credential operations and reseal the fields before it expires, because scheduled
+releases and restriction checks read the current credential and fail closed.
+
+The destination carries two operator-owned requirements, and Synapse proves both
+before a neutral shell, each attachment upload, and the body write:
+
+- **Versioning is enabled.** The object version is the opaque revision this
+  profile fences on, so a bucket with versioning suspended is refused.
+- **The bucket policy names exactly one reader for the publication prefix.** The
+  bucket policy is the only access authority this profile accepts, because object
+  ACLs are unreadable or inert on several S3-compatible implementations. Keep ACLs
+  disabled (`BucketOwnerEnforced` on AWS) and express the reader as one `Allow`
+  statement for the configured principal, with no condition block.
+
+An observed `Allow` statement that grants the publication prefix to `*` is a lost
+restriction and blocks the release. A statement that grants read to a principal
+other than the configured one is also a breach. A policy that is missing,
+unparsable, conditioned, or duplicated leaves the reader unproven, which refuses
+the release without claiming a breach; that distinction is what restriction
+monitoring reports.
+
+Each publication lives under `<prefix>/<marker>/`. It holds a zero-length
+`.synapse-shell` object that carries the marker, the `report.html` body, and the
+managed attachments, each stamped with the publication marker in user metadata.
+An unstamped or foreign object under that prefix blocks the release: a listing
+that omits user metadata is resolved with one HEAD per object, which is why a
+publication is bounded to 64 objects. `space` and `prefix` are the immutable
+destination container; do not repoint either after a link has been published.
+
+Between the fence read and the write there is a window no S3 API closes: this
+profile does not depend on a conditional-write header, so a concurrent writer is
+detected as an ambiguous outcome and reconciled rather than overwritten. The
+attachment reference inside the body stays relative to the publication prefix, so
+the stored HTML never embeds a presigned or public URL.
+
 ## Release and unpublish
 
 Use `POST /api/v1/document-publications` with an existing integration, source
@@ -171,8 +228,11 @@ or permanent-purge phase, before deleting the page with the same whole-object
 procedure. Google Drive deletes only the proven service-owned publication folder
 and its managed artifacts; its trash history is not treated as proof of deletion.
 SharePoint and OneDrive Business permanently delete only the proven managed body,
-attachments, and publication folder. A retired link cannot be recreated for that
-target.
+attachments, and publication folder. An S3-compatible bucket deletes every version
+and delete marker under the proven publication prefix, then re-lists the prefix to
+confirm it is empty; a version held by Object Lock or a legal hold refuses the
+purge instead of reporting a removal the bucket did not perform. A retired link
+cannot be recreated for that target.
 
 Each worker invocation checkpoints at most one acknowledged remote write and returns
 the command to the pending queue. The next invocation continues from the stored
@@ -274,8 +334,8 @@ the first occurrence. The selected UTC due instant is stored durably.
 Each due occurrence first revalidates the current document destination before it
 builds and freezes an artifact. The persisted `confluence` schedule destination is
 the legacy API value for every enabled document-publishing profile, including
-Google Drive, SharePoint, and OneDrive Business; the console labels it **Document
-publishing**. That validation resolves the current tenant integration, config,
+Google Drive, SharePoint, OneDrive Business, and S3-compatible buckets; the
+console labels it **Document publishing**. That validation resolves the current tenant integration, config,
 provider capability, and release preflight, so an unsupported destination is
 refused before artifact generation. A document schedule uses the frozen
 artifact for its command. An email schedule uses the same PDF as an attachment.
