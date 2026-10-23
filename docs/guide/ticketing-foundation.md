@@ -65,3 +65,56 @@ tenant boundaries, parent references, concurrent creation and claims, atomic rem
 completion, classified rejection and multiple-match reconciliation. PostgreSQL tests
 additionally cover unprivileged RLS, reopened connections, retained finding history
 and fresh/upgrade/rollback migrations.
+
+## Native ticket destinations
+
+Ticket destinations are registered integrations with the `tickets` capability. Their
+outbound IDs are deliberately separate from inbound forge integrations: GitHub Issues
+is `github-issues` and GitLab Issues is `gitlab-issues`. The existing `github`
+integration remains the inbound webhook provider; it does not become an outbound ticket
+destination.
+
+GitHub Issues accepts only a private repository with Issues enabled and a connector
+identity that has push, maintain, or admin repository access. GitLab Issues creates
+only confidential issues and requires project access. Both providers use the existing
+tenant- and forge-host-scoped SCM connector credential. Ticketing never stores a second
+GitHub or GitLab credential. SaaS requests use the documented API origins; a
+self-hosted connector can be used only through its validated API base and the
+operator's host and private-network rules. Repository/project privacy and access are
+rechecked before each outward write. A connector change between that check and the
+write fences the intent as `credential_changed` without sending the request.
+
+Azure Boards requires a `dev.azure.com/{organization}/{project}` endpoint, a work-item
+type, and a sealed PAT. ServiceNow requires a SaaS instance endpoint, a sealed API
+token, and either the `incident` or `sn_vul_vulnerable_item` table. Linear requires
+`https://api.linear.app/graphql`, a team ID, and a sealed API token. These credentials
+are write-only configuration: they are sealed at rest, omitted from API responses and
+audit data, and redacted from request/error handling.
+
+Native providers serialize their exact request body during Preview. Synapse persists
+that wire payload, its digest, and a code-owned correlation-marker location; Submit
+only adds the marker to that frozen payload. A worker never rebuilds a payload from
+current finding data. Native mappings use their discovered visibility policy
+(`private_repository`, `confidential_issue`, or `provider_access`) and do not permit a
+waiver. Grouping, status transitions, Jira labels, priority mappings, components, and
+custom Jira fields are rejected for these providers because their serializers do not
+support them.
+
+Polling and reconciliation are read/propose-only. A terminal remote state can create a
+reviewable local proposal, but it never changes a finding's triage or status directly.
+Marker recovery is bounded and verifies provider-specific privacy, project/team, and
+marker facts before it can settle an uncertain create. A missing, incomplete, malformed,
+or duplicate search result remains uncertain rather than authorizing another write.
+
+The ticket metadata endpoint is `GET /api/v1/integrations/{integrationID}/ticket-metadata`.
+It returns the discovered destination, type, native visibility policy, and explicit
+support flags. It is the provider-neutral alias; the existing `jira-metadata` route
+remains for Jira callers. Managing native mappings is available at
+`/settings/integrations/tickets`; the UI shows loading, empty, provider-error, and
+permission-denied states and does not offer controls that the selected provider does
+not support.
+
+Focused adapter and workflow tests cover native request construction, privacy checks,
+credential rotation fencing, marker recovery, and tenant boundaries. End-to-end runs
+against live provider sandboxes are deferred; no live-provider acceptance is claimed
+without separately recorded sandbox evidence.

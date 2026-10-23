@@ -1,0 +1,233 @@
+{
+  "github-issues_en_done": {
+    "id": "c512e9f685c03cb349ed09c03eb49cd2",
+    "finding_id": "dbe69d1224433eaf402f52dcb404b3d3",
+    "mapping_id": "2c759fa9a123767d1e8bcddfbdd45ab3",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "error_code": "",
+    "remote_id": "1",
+    "remote_url": "https://github.com/pho-veteran/synapse-provider-sandbox/issues/1",
+    "created_at": "2026-10-20T04:07:48.715393Z"
+  },
+  "github-issues_vi_done": {
+    "id": "9c5ec9272a98d5c7d75c80d0f178f68b",
+    "finding_id": "84755488dfe189efe18d8d915ad74647",
+    "mapping_id": "2c759fa9a123767d1e8bcddfbdd45ab3",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "error_code": "",
+    "remote_id": "2",
+    "remote_url": "https://github.com/pho-veteran/synapse-provider-sandbox/issues/2",
+    "created_at": "2026-10-20T04:09:49.873598Z"
+  },
+  "gitlab-issues_en_done": {
+    "id": "b7bb8e9ecfbc9a93abd094e22f340103",
+    "finding_id": "dbe69d1224433eaf402f52dcb404b3d3",
+    "mapping_id": "c08497c145f11fd8ca7f48f39ec63cbe",
+    "state": "done",
+    "version": 4,
+    "attempts": 1,
+    "error_code": "",
+    "remote_id": "1",
+    "remote_url": "https://gitlab.com/pho-veteran/synapse-provider-sandbox/-/work_items/1",
+    "created_at": "2026-10-20T04:10:06.096029Z"
+  },
+  "gitlab-issues_vi_done": {
+    "id": "d9cba68f985f53a5628dda6f8dfe255c",
+    "finding_id": "84755488dfe189efe18d8d915ad74647",
+    "mapping_id": "c08497c145f11fd8ca7f48f39ec63cbe",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "error_code": "",
+    "remote_id": "2",
+    "remote_url": "https://gitlab.com/pho-veteran/synapse-provider-sandbox/-/work_items/2",
+    "created_at": "2026-10-20T04:17:50.60386Z"
+  },
+  "linear_en_done": {
+    "id": "f2abde8973982e1bf0cc6a60a310e34c",
+    "finding_id": "dbe69d1224433eaf402f52dcb404b3d3",
+    "mapping_id": "e8c60ef80c4c73e40184bf33d1861904",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "error_code": "",
+    "remote_id": "537c15e4-cd5b-4de4-99c2-0dfcc93fb7e3",
+    "remote_url": "https://linear.app/synapse-cee/issue/SYN-5/high-finding-synthetic-finding-restricted-integration-acceptance",
+    "created_at": "2026-10-20T04:09:58.520547Z"
+  },
+  "linear_vi_done": {
+    "id": "61a5732a5d3e361cde98811081b5c98c",
+    "finding_id": "84755488dfe189efe18d8d915ad74647",
+    "mapping_id": "e8c60ef80c4c73e40184bf33d1861904",
+    "state": "done",
+    "version": 3,
+    "attempts": 1,
+    "error_code": "",
+    "remote_id": "ddc18be2-8e3d-409b-8997-a5a3fb63a5a1",
+    "remote_url": "https://linear.app/synapse-cee/issue/SYN-6/phat-hien-cao-phat-hien-gia-lap-kiem-thu-tich-hop-gioi-han",
+    "created_at": "2026-10-20T04:10:00.727506Z"
+  },
+  "provider-ack-recovery_uncertain": {
+    "id": "9e6802b09970f8eb3855c10d085077f3",
+    "finding_id": "3bf9fa2692a2992f52d7a0a1b080ad89",
+    "mapping_id": "2c759fa9a123767d1e8bcddfbdd45ab3",
+    "state": "uncertain",
+    "version": 3,
+    "attempts": 1,
+    "error_code": "",
+    "created_at": "2026-10-20T04:22:34.199114Z"
+  },
+  "provider-ack-recovery_done": {
+    "id": "9e6802b09970f8eb3855c10d085077f3",
+    "finding_id": "3bf9fa2692a2992f52d7a0a1b080ad89",
+    "mapping_id": "2c759fa9a123767d1e8bcddfbdd45ab3",
+    "state": "done",
+    "version": 4,
+    "attempts": 1,
+    "error_code": "",
+    "remote_id": "3",
+    "remote_url": "https://github.com/pho-veteran/synapse-provider-sandbox/issues/3",
+    "created_at": "2026-10-20T04:22:34.199114Z"
+  },
+  "drive_lifecycle_initial_done": {
+    "id": "d059a8f78188c2aba86ae4989035bb6c",
+    "action": "create",
+    "state": "done",
+    "version": 11,
+    "attempts": 1,
+    "remote_url": "https://drive.google.com/drive/folders/1H_COUcOUozLUKbNbPd3ekxCvF-ugRRiC",
+    "remote_id": "1H_COUcOUozLUKbNbPd3ekxCvF-ugRRiC~1k6tLYqt5CuoPmBwdmllO3lpXEuWKSaL0",
+    "created_at": "2026-10-20T05:00:58.568866Z",
+    "updated_at": "2026-10-20T05:01:44.940623Z"
+  },
+  "drive_lifecycle_republish_done": {
+    "id": "2e9ae663729101cc0dd7026ff6998452",
+    "link_id": "d059a8f78188c2aba86ae4989035bb6c",
+    "action": "update",
+    "state": "done",
+    "version": 9,
+    "attempts": 1,
+    "remote_url": "https://drive.google.com/drive/folders/1H_COUcOUozLUKbNbPd3ekxCvF-ugRRiC",
+    "remote_id": "1H_COUcOUozLUKbNbPd3ekxCvF-ugRRiC~1k6tLYqt5CuoPmBwdmllO3lpXEuWKSaL0",
+    "created_at": "2026-10-20T05:04:11.600594Z",
+    "updated_at": "2026-10-20T05:05:08.438151Z"
+  },
+  "drive_lifecycle_purge_done": {
+    "id": "b3b2cf1323e69db2c0175e06363802b2",
+    "link_id": "d059a8f78188c2aba86ae4989035bb6c",
+    "action": "purge",
+    "state": "done",
+    "version": 5,
+    "attempts": 1,
+    "remote_url": "https://drive.google.com/drive/folders/1H_COUcOUozLUKbNbPd3ekxCvF-ugRRiC",
+    "remote_id": "1H_COUcOUozLUKbNbPd3ekxCvF-ugRRiC~1k6tLYqt5CuoPmBwdmllO3lpXEuWKSaL0",
+    "created_at": "2026-10-20T05:06:21.352289Z",
+    "updated_at": "2026-10-20T05:06:35.30669Z"
+  },
+  "acknowledgement_fault": {
+    "proven": {
+      "remote_id": "3",
+      "remote_url": "https://github.com/pho-veteran/synapse-provider-sandbox/issues/3",
+      "marker": "synapse-intent-9e6802b09970f8eb3855c10d085077f3",
+      "local_ack_commit_rejected": true
+    },
+    "remote_count": 1,
+    "fault": "local PostgreSQL acknowledgement commit rejected after remote create; not a lost HTTP response"
+  },
+  "retired_drive_link": {
+    "id": "d059a8f78188c2aba86ae4989035bb6c",
+    "remote_url": "https://drive.google.com/drive/folders/1H_COUcOUozLUKbNbPd3ekxCvF-ugRRiC",
+    "remote_revision_kind": "opaque",
+    "revision": 3,
+    "restriction_status": "unchecked",
+    "retired_at": "2026-10-20T05:06:35.30669Z"
+  },
+  "purge_followup": [
+    {
+      "id": "17hrq_r-DLleSuQkADN9rJMLZnKbAL2uu",
+      "resource": "file",
+      "status": 404
+    },
+    {
+      "id": "17hrq_r-DLleSuQkADN9rJMLZnKbAL2uu",
+      "resource": "revisions",
+      "status": 404
+    },
+    {
+      "id": "1H_COUcOUozLUKbNbPd3ekxCvF-ugRRiC",
+      "resource": "file",
+      "status": 404
+    },
+    {
+      "id": "1H_COUcOUozLUKbNbPd3ekxCvF-ugRRiC",
+      "resource": "revisions",
+      "status": 404
+    },
+    {
+      "id": "1ZlPXsB0JHRpbqQsmurZbujExDiOdD0SZ",
+      "resource": "file",
+      "status": 404
+    },
+    {
+      "id": "1ZlPXsB0JHRpbqQsmurZbujExDiOdD0SZ",
+      "resource": "revisions",
+      "status": 404
+    },
+    {
+      "id": "1k6tLYqt5CuoPmBwdmllO3lpXEuWKSaL0",
+      "resource": "file",
+      "status": 404
+    },
+    {
+      "id": "1k6tLYqt5CuoPmBwdmllO3lpXEuWKSaL0",
+      "resource": "revisions",
+      "status": 404
+    }
+  ],
+  "limits": [
+    "Contract tests do not replace native acceptance.",
+    "Earlier screenshots and ticket receipts predate later UI and Drive changes; provenance is retained.",
+    "The original Drive update failed remote_identity_changed before the media-read fix and remains quarantined. The successful lifecycle used a separate synthetic source; no fence was bypassed.",
+    "Interrupted purge/upload and actual lost HTTP response recovery remain live acceptance gaps."
+  ],
+  "final_runtime_destination_previews": [
+    {
+      "provider": "github-issues",
+      "endpoint": "https://github.com",
+      "fields": {
+        "description": "Finding: Synthetic finding\\: restricted integration acceptance\nID: dbe69d1224433eaf402f52dcb404b3d3\nSeverity: high\nStatus: open\n\nDescription:\nSynthetic test data only\\. Confirm that the governed ticket workflow creates one private issue after preview\\.\nOpen finding: https://localhost:8445/engagements/8c3d4300291f2d684795da57442cab23/findings#finding-dbe69d1224433eaf402f52dcb404b3d3",
+        "issuetype": {
+          "id": "issue"
+        },
+        "labels": [],
+        "project": {
+          "key": "pho-veteran/synapse-provider-sandbox"
+        },
+        "summary": "high finding: Synthetic finding: restricted integration acceptance"
+      },
+      "mapping_version": 3,
+      "digest": "fd93f39bda2257c75e0068a424f1e741bc4f7b685ef545c760566731e00ed203"
+    },
+    {
+      "provider": "gitlab-issues",
+      "endpoint": "https://gitlab.com",
+      "fields": {
+        "description": "Finding: Synthetic finding\\: restricted integration acceptance\nID: dbe69d1224433eaf402f52dcb404b3d3\nSeverity: high\nStatus: open\n\nDescription:\nSynthetic test data only\\. Confirm that the governed ticket workflow creates one private issue after preview\\.\nOpen finding: https://localhost:8445/engagements/8c3d4300291f2d684795da57442cab23/findings#finding-dbe69d1224433eaf402f52dcb404b3d3",
+        "issuetype": {
+          "id": "issue"
+        },
+        "labels": [],
+        "project": {
+          "key": "pho-veteran/synapse-provider-sandbox"
+        },
+        "summary": "high finding: Synthetic finding: restricted integration acceptance"
+      },
+      "mapping_version": 3,
+      "digest": "e714daee4eecabd424492b725bc37045058ade498cc178d9451358cc7c5094dd"
+    }
+  ]
+}

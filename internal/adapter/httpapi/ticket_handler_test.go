@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
 	enguc "github.com/KKloudTarus/synapse-ce/internal/usecase/engagement"
+	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 	ticketuc "github.com/KKloudTarus/synapse-ce/internal/usecase/ticketing"
 )
 
@@ -19,6 +21,40 @@ type ticketHTTPFake struct {
 	tenant       shared.ID
 	mappingInput ticketuc.MappingInput
 	resetInput   [4]string
+}
+
+type ticketPreviewFake struct {
+	ticketHTTPFake
+	preview ticketuc.Preview
+}
+
+func (f *ticketPreviewFake) Preview(context.Context, ticketuc.PreviewRequest) (ticketuc.Preview, error) {
+	return f.preview, nil
+}
+
+func TestTicketPreviewDisclosesOnlyDestinationFrozenInDigestPayload(t *testing.T) {
+	fake := &ticketPreviewFake{preview: ticketuc.Preview{
+		Payload: []byte(`{"fields":{"project":{"key":"owner/repo"},"issuetype":{"id":"issue"}},"_synapse":{"provider":"gitlab-issues","endpoint":"https://gitlab.example","credential_revision":9,"waiver_reason":"must not leak"}}`),
+		Digest:  "digest-bound-to-payload",
+	}}
+	rt := &Router{log: discardLog()}
+	rt.SetTicketing(fake)
+	request := httptest.NewRequest("POST", "/api/v1/engagements/eng/findings/finding/ticket-preview", strings.NewReader(`{"mapping_id":"mapping"}`))
+	response := httptest.NewRecorder()
+	rt.previewTicket(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["provider"] != "gitlab-issues" || body["endpoint"] != "https://gitlab.example" || body["digest"] != "digest-bound-to-payload" {
+		t.Fatalf("destination=%v", body)
+	}
+	if strings.Contains(response.Body.String(), "credential_revision") || strings.Contains(response.Body.String(), "waiver_reason") || strings.Contains(response.Body.String(), "_synapse") {
+		t.Fatalf("internal snapshot leaked: %s", response.Body.String())
+	}
 }
 
 func (f *ticketHTTPFake) ResetBreaker(_ context.Context, tenant, id shared.ID, project, issueType, actor string) error {
@@ -69,6 +105,7 @@ func TestTicketRoutesRejectUnauthorizedHumansAndMachines(t *testing.T) {
 		method, path string
 		roles        []string
 	}{
+		{"GET", "/api/v1/integrations/forge/ticket-metadata", []string{"consultant", "reviewer", "readonly", "agent", "mcp", ""}},
 		{"POST", "/api/v1/ticket-mappings", []string{"integration_admin", "consultant", "reviewer", "readonly", "agent", "mcp", ""}},
 		{"PUT", "/api/v1/ticket-mappings/mapping", []string{"integration_admin", "consultant", "reviewer", "readonly", "agent", "mcp", ""}},
 		{"DELETE", "/api/v1/ticket-mappings/mapping", []string{"integration_admin", "consultant", "reviewer", "readonly", "agent", "mcp", ""}},
@@ -138,5 +175,36 @@ func TestMappingRouteDerivesAuthorityAndRejectsAuthorityFields(t *testing.T) {
 	}
 	if fake.mappingInput.Actor != "human-admin" || !fake.mappingInput.AllowAdmin || fake.tenant != "tenant" {
 		t.Fatal("authority did not derive from principal")
+	}
+}
+
+func (f *ticketHTTPFake) Metadata(_ context.Context, tenant, integrationID shared.ID, project, typ, issue string) (ports.TicketMetadata, error) {
+	f.calls++
+	f.tenant = tenant
+	if tenant != "tenant-a" {
+		return ports.TicketMetadata{}, shared.ErrNotFound
+	}
+	return ports.TicketMetadata{Projects: []ports.TicketChoice{{ID: "owner/private", Name: "Private repository"}}, SecurityPolicy: "private_repository"}, nil
+}
+func TestTicketMetadataAliasDerivesTenantAndRequiresIntegrationPermission(t *testing.T) {
+	for _, endpoint := range []string{"ticket-metadata", "jira-metadata"} {
+		fake := &ticketHTTPFake{}
+		rt := &Router{log: discardLog()}
+		rt.SetTicketing(fake)
+		for _, test := range []struct {
+			tenant string
+			status int
+		}{{"tenant-a", 200}, {"tenant-b", 404}} {
+			req := httptest.NewRequest("GET", "/api/v1/integrations/forge/"+endpoint+"?tenant_id=tenant-a", nil)
+			req = req.WithContext(context.WithValue(req.Context(), principalKey, Principal{ID: "integration-user", Role: "integration_admin", TenantID: test.tenant}))
+			res := httptest.NewRecorder()
+			rt.routes().ServeHTTP(res, req)
+			if res.Code != test.status || fake.tenant.String() != test.tenant {
+				t.Fatalf("%s tenant=%s status=%d actualTenant=%s", endpoint, test.tenant, res.Code, fake.tenant)
+			}
+			if test.tenant != "tenant-a" && strings.Contains(res.Body.String(), "owner/private") {
+				t.Fatal("foreign metadata leaked")
+			}
+		}
 	}
 }

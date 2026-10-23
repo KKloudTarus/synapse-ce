@@ -2812,7 +2812,7 @@ export interface VulnerabilityReconcileAccepted {
 }
 
 export type IntegrationFieldKind = 'text' | 'password' | 'boolean'
-export type IntegrationCapability = 'test_connection' | 'discover_pipelines' | 'read_runs'
+export type IntegrationCapability = 'test_connection' | 'discover_pipelines' | 'read_runs' | 'tickets' | 'documents'
 
 export interface IntegrationFieldDescriptor {
   name: string

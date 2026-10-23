@@ -50,7 +50,7 @@ func TestRegisterAndEndpointPolicy(t *testing.T) {
 	}
 	for _, provider := range []integration.Provider{CloudProvider, DCProvider} {
 		d, err := registry.Descriptor(provider)
-		if err != nil || !d.Supports(integration.CapabilityTestConnection) || len(d.Capabilities) != 1 {
+		if err != nil || !d.Supports(integration.CapabilityTestConnection) || !d.Supports(integration.CapabilityTickets) || len(d.Capabilities) != 2 {
 			t.Fatalf("descriptor %q: %+v %v", provider, d, err)
 		}
 	}

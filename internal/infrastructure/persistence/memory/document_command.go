@@ -176,7 +176,7 @@ func (s *DocumentStore) CreateDocumentCommand(ctx context.Context, tenant shared
 		if link.RetiredAt != nil {
 			return ports.DocumentCommand{}, false, shared.ErrConflict
 		}
-		initial.Remote = docpublish.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, URL: link.RemoteURL}
+		initial.Remote = docpublish.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}
 		if command.Intent.Action == docpublish.Update {
 			initial.Step = "restrictions"
 		} else {
@@ -190,6 +190,7 @@ func (s *DocumentStore) CreateDocumentCommand(ctx context.Context, tenant shared
 		s.commands[tenant] = make(map[shared.ID]ports.DocumentCommand)
 	}
 	command.Progress = initial
+	command.QueueVersion = 1
 	s.intents[tenant][command.Intent.ID] = command.Intent.Clone()
 	s.commands[tenant][command.Intent.ID] = cloneDocumentCommand(command)
 	return cloneDocumentCommand(command), true, nil
@@ -252,6 +253,153 @@ func (s *DocumentStore) SaveDocumentProgress(ctx context.Context, tenant, intent
 	return cloneDocumentCommand(command), nil
 }
 
+func cleanDocumentYieldCheckpoint(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
+	if progress.Step != "restrictions" && progress.Step != "attachments" && progress.Step != "body" && progress.Step != "complete" && progress.Step != "purged" {
+		return false
+	}
+	if strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "" {
+		return false
+	}
+	return intent.State == writeintent.InFlight && intent.LeaseUntil != nil && at.Before(*intent.LeaseUntil) &&
+		progress.IntentVersion == intent.Version && progress.LeaseUntil != nil && progress.LeaseUntil.Equal(*intent.LeaseUntil) &&
+		progress.OutstandingOperation == "" && progress.OutstandingKey == "" && progress.OutstandingDigest == "" &&
+		progress.ExpectedRemoteVersion == 0 && progress.ExpectedRemoteRevision == ""
+}
+
+// cleanDocumentRetryCheckpoint is deliberately no broader than a clean yield:
+// a provider throttle may release an in-flight lease only when no outbound
+// effect remains to reconcile. Purge is included because its pre-write identity
+// read has the same no-effect property.
+func cleanDocumentRetryCheckpoint(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
+	if !cleanDocumentYieldCheckpoint(progress, intent, at) && progress.Step != "purge" {
+		return false
+	}
+	if progress.Step == "purge" && (strings.TrimSpace(progress.Remote.ID) == "" || progress.Remote.Version < 1 || strings.TrimSpace(progress.Remote.URL) == "") {
+		return false
+	}
+	return intent.State == writeintent.InFlight && intent.LeaseUntil != nil && at.Before(*intent.LeaseUntil) &&
+		progress.IntentVersion == intent.Version && progress.LeaseUntil != nil && progress.LeaseUntil.Equal(*intent.LeaseUntil) &&
+		progress.OutstandingOperation == "" && progress.OutstandingKey == "" && progress.OutstandingDigest == "" &&
+		progress.ExpectedRemoteVersion == 0 && progress.ExpectedRemoteRevision == ""
+}
+
+func liveDocumentRetryLease(progress ports.DocumentProgress, intent docpublish.Intent, at time.Time) bool {
+	return intent.State == writeintent.InFlight && intent.LeaseUntil != nil && at.Before(*intent.LeaseUntil) &&
+		progress.IntentVersion == intent.Version && progress.LeaseUntil != nil && progress.LeaseUntil.Equal(*intent.LeaseUntil)
+}
+
+func documentRetryDeadline(current, requested time.Time) time.Time {
+	if current.After(requested) {
+		return current.UTC()
+	}
+	return requested.UTC()
+}
+
+func (s *DocumentStore) DeferDocumentCommand(ctx context.Context, tenant, intentID shared.ID, expectedIntent, expectedProgress, expectedQueue int, deadline, at time.Time, outcome ports.DocumentRetryOutcome, code string) (ports.DocumentCommand, error) {
+	if err := ctx.Err(); err != nil {
+		return ports.DocumentCommand{}, err
+	}
+	if tenant.IsZero() || intentID.IsZero() || expectedIntent < 1 || expectedProgress < 1 || expectedQueue < 1 || deadline.IsZero() || !deadline.After(at) || at.IsZero() {
+		return ports.DocumentCommand{}, shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	command, ok := s.commands[tenant][intentID]
+	if !ok {
+		return ports.DocumentCommand{}, shared.ErrNotFound
+	}
+	current := s.intents[tenant][intentID]
+	if current.Version != expectedIntent || command.Progress.Version != expectedProgress || command.QueueVersion != expectedQueue {
+		return ports.DocumentCommand{}, shared.ErrConflict
+	}
+	next := current
+	progress := cloneDocumentProgress(command.Progress)
+	switch outcome {
+	case ports.DocumentRetryKeep:
+		if current.State != writeintent.Pending && current.State != writeintent.Uncertain {
+			return ports.DocumentCommand{}, shared.ErrConflict
+		}
+	case ports.DocumentRetryRelease:
+		if !cleanDocumentRetryCheckpoint(progress, current, at) {
+			return ports.DocumentCommand{}, shared.ErrConflict
+		}
+		var err error
+		next, err = current.Apply(docpublish.IntentTransition{Event: docpublish.RetryDeferred}, at)
+		if err != nil {
+			return ports.DocumentCommand{}, err
+		}
+		progress.IntentVersion, progress.LeaseUntil = next.Version, nil
+		progress.Version++
+		progress.UpdatedAt = at.UTC()
+	case ports.DocumentRetryReject:
+		if !liveDocumentRetryLease(progress, current, at) || strings.TrimSpace(code) == "" {
+			return ports.DocumentCommand{}, shared.ErrConflict
+		}
+		var err error
+		next, err = current.Apply(docpublish.IntentTransition{Event: writeintent.Reject, ErrorCode: code}, at)
+		if err != nil {
+			return ports.DocumentCommand{}, err
+		}
+		progress.IntentVersion, progress.LeaseUntil = next.Version, nil
+		progress.OutstandingOperation, progress.OutstandingKey, progress.OutstandingDigest = "", "", ""
+		progress.ExpectedRemoteVersion, progress.ExpectedRemoteRevision = 0, ""
+		progress.Version++
+		progress.UpdatedAt = at.UTC()
+	case ports.DocumentRetryUncertain:
+		if !liveDocumentRetryLease(progress, current, at) {
+			return ports.DocumentCommand{}, shared.ErrConflict
+		}
+		var err error
+		next, err = current.Apply(docpublish.IntentTransition{Event: writeintent.Ambiguous}, at)
+		if err != nil {
+			return ports.DocumentCommand{}, err
+		}
+		progress.IntentVersion, progress.LeaseUntil = next.Version, nil
+		progress.Version++
+		progress.UpdatedAt = at.UTC()
+	default:
+		return ports.DocumentCommand{}, shared.ErrValidation
+	}
+	command.Intent = next.Clone()
+	command.Progress = progress
+	command.NextAttemptAt = documentRetryDeadline(command.NextAttemptAt, deadline)
+	command.QueueVersion++
+	s.intents[tenant][intentID] = next.Clone()
+	s.commands[tenant][intentID] = cloneDocumentCommand(command)
+	return cloneDocumentCommand(command), nil
+}
+
+func (s *DocumentStore) YieldDocumentCommand(ctx context.Context, tenant, intentID shared.ID, expectedIntent, expectedProgress int, at time.Time) (ports.DocumentCommand, error) {
+	if err := ctx.Err(); err != nil {
+		return ports.DocumentCommand{}, err
+	}
+	if tenant.IsZero() || intentID.IsZero() || expectedIntent < 1 || expectedProgress < 1 || at.IsZero() {
+		return ports.DocumentCommand{}, shared.ErrValidation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	command, ok := s.commands[tenant][intentID]
+	if !ok {
+		return ports.DocumentCommand{}, shared.ErrNotFound
+	}
+	current := s.intents[tenant][intentID]
+	if current.Version != expectedIntent || command.Progress.Version != expectedProgress || !cleanDocumentYieldCheckpoint(command.Progress, current, at) {
+		return ports.DocumentCommand{}, shared.ErrConflict
+	}
+	next, err := current.Apply(docpublish.IntentTransition{Event: docpublish.CheckpointYield}, at)
+	if err != nil {
+		return ports.DocumentCommand{}, err
+	}
+	progress := cloneDocumentProgress(command.Progress)
+	progress.Version = expectedProgress + 1
+	progress.IntentVersion = next.Version
+	progress.LeaseUntil = nil
+	progress.UpdatedAt = at.UTC()
+	command.Intent, command.Progress = next, progress
+	s.intents[tenant][intentID], s.commands[tenant][intentID] = next, cloneDocumentCommand(command)
+	return cloneDocumentCommand(command), nil
+}
+
 func (s *DocumentStore) ResumeDocumentCommand(ctx context.Context, tenant, intentID shared.ID, expectedIntent, expectedProgress int, progress ports.DocumentProgress, at time.Time) (ports.DocumentCommand, error) {
 	if err := ctx.Err(); err != nil {
 		return ports.DocumentCommand{}, err
@@ -294,9 +442,10 @@ func (s *DocumentStore) ListDocumentCommands(ctx context.Context, tenant shared.
 	out := make([]ports.DocumentCommand, 0, limit)
 	for id, item := range s.commands[tenant] {
 		intent := s.intents[tenant][id]
-		eligible := intent.State == writeintent.Pending || intent.State == writeintent.Uncertain ||
+		due := item.NextAttemptAt.IsZero() || !item.NextAttemptAt.After(at)
+		eligible := due && (intent.State == writeintent.Pending || intent.State == writeintent.Uncertain ||
 			(intent.State == writeintent.Failed && intent.Attempts < 5) ||
-			(intent.State == writeintent.InFlight && intent.LeaseUntil != nil && !intent.LeaseUntil.After(at))
+			(intent.State == writeintent.InFlight && intent.LeaseUntil != nil && !intent.LeaseUntil.After(at)))
 		if eligible {
 			out = append(out, cloneDocumentCommand(item))
 		}
@@ -327,10 +476,14 @@ func (s *DocumentStore) ListDocumentCommands(ctx context.Context, tenant shared.
 	if s.commandChecks[tenant] == nil {
 		s.commandChecks[tenant] = map[shared.ID]memoryDocumentCommandCheck{}
 	}
-	for _, item := range out {
+	for i, item := range out {
 		check := s.commandChecks[tenant][item.Intent.ID]
 		check.checkedAt, check.version = at.UTC(), check.version+1
 		s.commandChecks[tenant][item.Intent.ID] = check
+		stored := s.commands[tenant][item.Intent.ID]
+		stored.QueueVersion++
+		s.commands[tenant][item.Intent.ID] = cloneDocumentCommand(stored)
+		out[i] = cloneDocumentCommand(stored)
 	}
 	return out, nil
 }

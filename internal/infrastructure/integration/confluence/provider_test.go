@@ -985,8 +985,8 @@ func TestCloudSharingProofRejectsStaleForeignOrUnappliedPolicies(t *testing.T) {
 					return response(200, `{"data":`+full+`}`), nil
 				}
 			}))
-			if got := providerCode(t, a.verifyCloudPublicSharing(context.Background())); got.Code != "public_sharing_unverifiable" {
-				t.Fatalf("%+v", got)
+			if got := providerCode(t, a.verifyCloudPublicSharing(context.Background())); got.Code != "public_sharing_unverifiable" || got.RestrictionLost != (name == "foreign-site" || name == "missing-org") {
+				t.Fatalf("classification for %s: %+v", name, got)
 			}
 		})
 	}

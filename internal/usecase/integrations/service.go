@@ -479,7 +479,7 @@ func (service *Service) HandleJob(ctx context.Context, jobID string, payload []b
 	if item.Archived || (operation.Type == integration.OperationPoll && !item.Enabled) || item.ConnectionRevision != operation.ConnectionRevision || item.CredentialRevision != operation.CredentialRevision {
 		return service.finishProviderFailure(executionCtx, item.Provider, operation, fmt.Errorf("integration operation revision is stale"))
 	}
-	credentials, err := service.credentials(executionCtx, item.ID, operation.CredentialRevision)
+	credentials, err := service.providerCredentials(executionCtx, item, operation.CredentialRevision)
 	if err != nil {
 		return service.finishProviderFailure(executionCtx, item.Provider, operation, err)
 	}
@@ -738,6 +738,23 @@ func (service *Service) observe(provider integration.Provider, operation integra
 	if service.observer != nil {
 		service.observer.ObserveIntegrationOperation(string(provider), string(operation), string(outcome))
 	}
+}
+
+// providerCredentials leaves credentialless adapters on their reviewed boundary.
+// Forge issue adapters resolve the tenant/host SCM connector themselves and never
+// require an empty credential record in the integration vault.
+func (service *Service) providerCredentials(ctx context.Context, item integration.Integration, expectedRevision int) (integration.CredentialBundle, error) {
+	descriptor, err := service.registry.Descriptor(item.Provider)
+	if err != nil {
+		return nil, err
+	}
+	if item.CredentialRevision != expectedRevision {
+		return nil, shared.ErrConflict
+	}
+	if len(descriptor.SecretFields) == 0 {
+		return integration.CredentialBundle{}, nil
+	}
+	return service.credentials(ctx, item.ID, expectedRevision)
 }
 
 func (service *Service) credentials(ctx context.Context, integrationID shared.ID, expectedRevision int) (integration.CredentialBundle, error) {

@@ -1,0 +1,161 @@
+[
+  {
+    "provider": "sharepoint",
+    "name": "SharePoint",
+    "description": "Governed SharePoint or OneDrive Business publication with complete SharePoint role-assignment proof.",
+    "capabilities": [
+      "test_connection",
+      "documents"
+    ],
+    "config_fields": [
+      {
+        "name": "drive_id",
+        "label": "Drive ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "space",
+        "label": "Restricted folder item ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "folder_path",
+        "label": "Server-relative restricted folder path",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "read_group",
+        "label": "Exact Microsoft group principal ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "custodian_principal_id",
+        "label": "Service custodian SharePoint principal ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "data_class",
+        "label": "Data classification (detail)",
+        "kind": "text",
+        "required": true
+      }
+    ],
+    "secret_fields": [
+      {
+        "name": "access_token",
+        "label": "Scoped Microsoft Graph access token",
+        "kind": "password",
+        "required": true
+      },
+      {
+        "name": "sharepoint_token",
+        "label": "Scoped SharePoint REST access token",
+        "kind": "password",
+        "required": true
+      }
+    ]
+  },
+  {
+    "provider": "onedrive",
+    "name": "OneDrive",
+    "description": "Governed SharePoint or OneDrive Business publication with complete SharePoint role-assignment proof.",
+    "capabilities": [
+      "test_connection",
+      "documents"
+    ],
+    "config_fields": [
+      {
+        "name": "drive_id",
+        "label": "Drive ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "space",
+        "label": "Restricted folder item ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "folder_path",
+        "label": "Server-relative restricted folder path",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "read_group",
+        "label": "Exact Microsoft group principal ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "custodian_principal_id",
+        "label": "Service custodian SharePoint principal ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "data_class",
+        "label": "Data classification (detail)",
+        "kind": "text",
+        "required": true
+      }
+    ],
+    "secret_fields": [
+      {
+        "name": "access_token",
+        "label": "Scoped Microsoft Graph access token",
+        "kind": "password",
+        "required": true
+      },
+      {
+        "name": "sharepoint_token",
+        "label": "Scoped SharePoint REST access token",
+        "kind": "password",
+        "required": true
+      }
+    ]
+  },
+  {
+    "provider": "google-drive",
+    "name": "Google Drive",
+    "description": "Governed HTML report folders in a dedicated service-owned My Drive folder. Exact reader permission and owner are verified before every upload; shared drives are refused.",
+    "capabilities": [
+      "test_connection",
+      "documents"
+    ],
+    "config_fields": [
+      {
+        "name": "space",
+        "label": "Restricted parent folder ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "read_group",
+        "label": "Exact group permission ID",
+        "kind": "text",
+        "required": true
+      },
+      {
+        "name": "data_class",
+        "label": "Data classification (detail)",
+        "kind": "text",
+        "required": true
+      }
+    ],
+    "secret_fields": [
+      {
+        "name": "access_token",
+        "label": "Scoped Drive access token",
+        "kind": "password",
+        "required": true
+      }
+    ]
+  }
+]

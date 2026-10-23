@@ -272,6 +272,25 @@ func TestPurgeRetiresExistingLinkAndResumableIsDocumentLocal(t *testing.T) {
 	}
 }
 
+func TestCheckpointYieldReleasesOnlyAnUnexpiredDocumentClaim(t *testing.T) {
+	intent := pendingIntent("yield-1")
+	lease := t0.Add(time.Minute)
+	claimed, err := intent.Apply(IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yielded, err := claimed.Apply(IntentTransition{Event: CheckpointYield}, t0.Add(time.Second))
+	if err != nil || yielded.State != writeintent.Pending || yielded.LeaseUntil != nil || yielded.Attempts != 0 || yielded.Version != claimed.Version+1 {
+		t.Fatalf("yielded=%+v err=%v", yielded, err)
+	}
+	if _, err := claimed.Apply(IntentTransition{Event: CheckpointYield, Resumable: true}, t0.Add(time.Second)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("resumable yield err=%v, want conflict", err)
+	}
+	if _, err := claimed.Apply(IntentTransition{Event: CheckpointYield}, lease); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("expired claim yielded: %v", err)
+	}
+}
+
 func TestApplyFollowsTheSharedStateMachine(t *testing.T) {
 	intent := pendingIntent("i-1")
 	lease := t0.Add(time.Minute)
@@ -516,5 +535,33 @@ func TestUpdatedAtNeverMovesBackwards(t *testing.T) {
 	link, changed, err := intent.Complete(&existing)
 	if err != nil || !changed || !link.UpdatedAt.Equal(existing.UpdatedAt) {
 		t.Fatalf("link time moved back: %+v %t %v", link, changed, err)
+	}
+}
+
+func TestCompleteUsesOpaqueRemoteRevisionWithoutNumericArithmetic(t *testing.T) {
+	existing := validLink()
+	existing.RemoteVersion = 1
+	existing.RemoteRevision = `W/"opaque-before"`
+	existing.Revision = 2
+	existing.ContentHash = hash("c")
+
+	updated := doneIntent("opaque-update", Update, existing.ID, 1, "d")
+	updated.RemoteRevision = `W/"opaque-after"`
+	link, changed, err := updated.Complete(&existing)
+	if err != nil || !changed || link.RemoteRevision != updated.RemoteRevision || link.RemoteVersion != 1 || link.Revision != 3 {
+		t.Fatalf("opaque revision update=%+v changed=%t err=%v", link, changed, err)
+	}
+
+	replay := doneIntent("opaque-replay", Update, existing.ID, 1, "c")
+	replay.RemoteRevision = existing.RemoteRevision
+	link, changed, err = replay.Complete(&existing)
+	if err != nil || changed || link.Revision != existing.Revision {
+		t.Fatalf("opaque revision replay=%+v changed=%t err=%v", link, changed, err)
+	}
+
+	invalid := validLink()
+	invalid.RemoteRevision = strings.Repeat("r", maxRemoteRevisionBytes+1)
+	if err := invalid.Validate(); !errors.Is(err, shared.ErrValidation) {
+		t.Fatalf("oversized opaque revision accepted: %v", err)
 	}
 }

@@ -38,9 +38,11 @@ func TestDocumentTickReportsSafeFailureAndContinuesIndependentCommands(t *testin
 	broken := command
 	broken.Intent.ID = "unavailable"
 	f.service.store = failingCommandListStore{DocumentCommandStore: f.store, commands: []ports.DocumentCommand{broken, command}}
-	err = f.service.Tick(context.Background(), "tenant", 20)
-	if err == nil || strings.Contains(err.Error(), "sensitive") {
-		t.Fatalf("failure was swallowed or unsafe: %v", err)
+	for tick := 0; tick < 16; tick++ {
+		err = f.service.Tick(context.Background(), "tenant", 20)
+		if err == nil || strings.Contains(err.Error(), "sensitive") {
+			t.Fatalf("tick %d failure was swallowed or unsafe: %v", tick, err)
+		}
 	}
 	done, err := f.store.GetIntent(context.Background(), "tenant", intent.ID)
 	if err != nil || done.State != writeintent.Done {

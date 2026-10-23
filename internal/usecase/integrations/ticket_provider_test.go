@@ -88,3 +88,24 @@ func TestTicketProviderRefusesDispatchWhenCurrentIntegrationWasDisabled(t *testi
 		t.Fatalf("disabled integration metadata discovery error=%v", err)
 	}
 }
+
+func TestCredentiallessProviderDoesNotCreateOrReadIntegrationCredentialVault(t *testing.T) {
+	registry := integration.NewRegistry()
+	descriptor := integration.ProviderDescriptor{Provider: "github-issues", Name: "GitHub Issues", Capabilities: []integration.Capability{integration.CapabilityTickets}}
+	if err := registry.Register(descriptor, func(integration.Integration, integration.CredentialBundle, selfhosted.Rules) (integration.Adapter, error) {
+		return ticketProviderTestAdapter{descriptor: descriptor}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A nil store makes any accidental vault access fail this regression. The
+	// provider obtains its actual credential only at the SCM host boundary.
+	service := &Service{registry: registry}
+	item := integration.Integration{Provider: "github-issues", ID: "forge", CredentialRevision: 0}
+	credentials, err := service.providerCredentials(context.Background(), item, 0)
+	if err != nil || len(credentials) != 0 {
+		t.Fatalf("credentialless resolution=%v err=%v", credentials, err)
+	}
+	if _, err = service.providerCredentials(context.Background(), item, 1); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale revision=%v", err)
+	}
+}

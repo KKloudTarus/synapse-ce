@@ -305,7 +305,7 @@ export function FindingsTab({
           <div className="flex items-center gap-2 self-end lg:self-auto">
             {ticketSelection.size > 0 && (
               <Button variant="secondary" disabled={readOnly} onClick={() => setBulkTickets((value) => !value)} className="h-9 px-3.5 text-xs">
-                Create Jira tickets ({ticketSelection.size})
+                Create tickets ({ticketSelection.size})
               </Button>
             )}
             {historical.length > 0 && (

@@ -9,8 +9,8 @@ beforeEach(() => vi.resetAllMocks())
 it('shows loading then an empty observation view', async () => {
   vi.mocked(api.ticketObservations).mockResolvedValue({ observations: [], proposals: [], comments: [] })
   render(<TicketObservations engagementId="eng" findingId="finding" />)
-  expect(screen.getByText('Loading Jira observations…')).toBeInTheDocument()
-  await screen.findByText('No Jira observations yet.')
+  expect(screen.getByText('Loading ticket observations…')).toBeInTheDocument()
+  await screen.findByText('No ticket observations yet.')
 })
 
 it('renders external comments literally and leaves proposals for human review', async () => {
@@ -28,7 +28,7 @@ it('shows permission denial without prior finding content', async () => {
   vi.mocked(api.ticketObservations).mockRejectedValue(new Error('You do not have permission to view this finding.'))
   render(<TicketObservations engagementId="eng" findingId="finding" />)
   await screen.findByText('You do not have permission to view this finding.')
-  expect(screen.queryByText('No Jira observations yet.')).not.toBeInTheDocument()
+  expect(screen.queryByText('No ticket observations yet.')).not.toBeInTheDocument()
 })
 
 it('ignores a late response from the previous finding', async () => {
@@ -36,7 +36,7 @@ it('ignores a late response from the previous finding', async () => {
   vi.mocked(api.ticketObservations).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve })).mockResolvedValue({ observations: [], proposals: [], comments: [] })
   const { rerender } = render(<TicketObservations engagementId="eng" findingId="first" />)
   rerender(<TicketObservations engagementId="eng" findingId="second" />)
-  await screen.findByText('No Jira observations yet.')
+  await screen.findByText('No ticket observations yet.')
   finish({ observations: [], proposals: [{ id: 'old', remoteId: 'OLD-1', state: 'pending', observedAt: '' }], comments: [] })
   await waitFor(() => expect(screen.queryByText(/OLD-1/)).not.toBeInTheDocument())
 })

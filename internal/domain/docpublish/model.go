@@ -25,14 +25,15 @@ const MaxListLimit = 100
 
 // Persistence-compatible bounds. The migration's CHECK constraints repeat them.
 const (
-	maxSourceRefBytes   = 512
-	maxContainerBytes   = 255
-	maxRemotePageBytes  = 512
-	maxURLBytes         = 2048
-	maxRequestKeyBytes  = 128
-	maxMarkerBytes      = 256
-	markerPrefix        = "synapse-intent-"
-	multipleMatchesCode = "multiple_matches"
+	maxSourceRefBytes      = 512
+	maxContainerBytes      = 255
+	maxRemotePageBytes     = 512
+	maxRemoteRevisionBytes = 512
+	maxURLBytes            = 2048
+	maxRequestKeyBytes     = 128
+	maxMarkerBytes         = 256
+	markerPrefix           = "synapse-intent-"
+	multipleMatchesCode    = "multiple_matches"
 )
 
 // SourceKind is the stored artifact a document is rendered from. The set is closed on
@@ -124,14 +125,22 @@ var errorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // RemotePage is the provider identity recorded after a successful remote write.
 type RemotePage struct {
-	ID      string
+	ID string
+	// Version is the provider numeric page version. Providers that only expose
+	// an opaque revision retain the compatible sentinel value 1 here.
 	Version int
-	URL     string
+	// Revision is an opaque provider concurrency token. It is never parsed,
+	// hashed, or used for arithmetic.
+	Revision string
+	URL      string
 }
 
 func (r RemotePage) validate() error {
 	if !bounded(r.ID, maxRemotePageBytes) || r.Version < 1 {
 		return fmt.Errorf("%w: remote page needs a bounded ID and a version", shared.ErrValidation)
+	}
+	if r.Revision != "" && !bounded(r.Revision, maxRemoteRevisionBytes) {
+		return fmt.Errorf("%w: remote page revision must be a bounded opaque token", shared.ErrValidation)
 	}
 	return validCanonicalURL(r.URL)
 }
@@ -149,10 +158,11 @@ type Link struct {
 	ID       shared.ID
 	TenantID shared.ID
 	Target
-	RemotePageID  string
-	RemoteVersion int
-	RemoteURL     string
-	ContentHash   string
+	RemotePageID   string
+	RemoteVersion  int
+	RemoteRevision string
+	RemoteURL      string
+	ContentHash    string
 	// Revision counts the writes applied to this link, starting at 1.
 	Revision int
 	// RestrictionStatus describes the last background sharing observation, not
@@ -179,7 +189,7 @@ func (l Link) Validate() error {
 	if err := l.Target.Validate(); err != nil {
 		return err
 	}
-	if err := (RemotePage{ID: l.RemotePageID, Version: l.RemoteVersion, URL: l.RemoteURL}).validate(); err != nil {
+	if err := (RemotePage{ID: l.RemotePageID, Version: l.RemoteVersion, Revision: l.RemoteRevision, URL: l.RemoteURL}).validate(); err != nil {
 		return err
 	}
 	if !sha256Pattern.MatchString(l.ContentHash) {
@@ -220,13 +230,14 @@ type Intent struct {
 	Version     int
 	Attempts    int
 	LeaseUntil  *time.Time
-	// RemoteID, RemoteURL and RemoteVersion are the page this write produced; set only when done.
-	RemoteID      string
-	RemoteURL     string
-	RemoteVersion int
-	ErrorCode     string // stable classification only; no raw HTTP/provider errors
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// RemoteID, RemoteURL, RemoteVersion and RemoteRevision are the page this write produced; set only when done.
+	RemoteID       string
+	RemoteURL      string
+	RemoteVersion  int
+	RemoteRevision string
+	ErrorCode      string // stable classification only; no raw HTTP/provider errors
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // IntentTransition supplies the evidence for one state-machine transition.
@@ -275,13 +286,13 @@ func (i Intent) Validate() error {
 		return fmt.Errorf("%w: document intent lease must be in the future", shared.ErrValidation)
 	}
 	if i.State == writeintent.Done {
-		if err := (RemotePage{ID: i.RemoteID, Version: i.RemoteVersion, URL: i.RemoteURL}).validate(); err != nil {
+		if err := (RemotePage{ID: i.RemoteID, Version: i.RemoteVersion, Revision: i.RemoteRevision, URL: i.RemoteURL}).validate(); err != nil {
 			return err
 		}
 		if i.ErrorCode != "" {
 			return fmt.Errorf("%w: completed document intent cannot have an error code", shared.ErrValidation)
 		}
-	} else if i.RemoteID != "" || i.RemoteURL != "" || i.RemoteVersion != 0 {
+	} else if i.RemoteID != "" || i.RemoteURL != "" || i.RemoteVersion != 0 || i.RemoteRevision != "" {
 		return fmt.Errorf("%w: only completed document intents have a remote page", shared.ErrValidation)
 	}
 	if i.State == writeintent.Failed && i.ErrorCode == "" {
@@ -300,6 +311,16 @@ func (i Intent) Validate() error {
 // permits an uncertain document command to resume, while other write domains
 // continue to reject an unknown event.
 const ReconcileResumable writeintent.Event = "reconcile_resumable"
+
+// CheckpointYield is intentionally document-local: a worker that has durably
+// checkpointed one acknowledged remote effect yields its lease so the next
+// slice can continue immediately without consuming a failure retry.
+const CheckpointYield writeintent.Event = "checkpoint_yield"
+
+// RetryDeferred is intentionally document-local. It releases only a clean
+// in-flight pre-write claim after a provider throttle, so retry accounting is
+// not consumed by repeated read-only 429 responses.
+const RetryDeferred writeintent.Event = "retry_deferred"
 
 // SameCommand reports whether two intents are the same logical command, which is what a
 // replayed request key must be. Identity fields that the server issues (ID, marker, state,
@@ -328,6 +349,16 @@ func (i Intent) Apply(change IntentTransition, at time.Time) (Intent, error) {
 			return Intent{}, fmt.Errorf("%w: document reconciliation is not resumable", shared.ErrConflict)
 		}
 		next = writeintent.Pending
+	} else if change.Event == CheckpointYield {
+		if i.State != writeintent.InFlight || i.LeaseUntil == nil || !at.Before(*i.LeaseUntil) || change.Resumable {
+			return Intent{}, fmt.Errorf("%w: document checkpoint is not yieldable", shared.ErrConflict)
+		}
+		next = writeintent.Pending
+	} else if change.Event == RetryDeferred {
+		if i.State != writeintent.InFlight || i.LeaseUntil == nil || !at.Before(*i.LeaseUntil) || change.Resumable {
+			return Intent{}, fmt.Errorf("%w: document retry is not deferrable", shared.ErrConflict)
+		}
+		next = writeintent.Pending
 	} else {
 		if change.Resumable {
 			return Intent{}, fmt.Errorf("%w: resumable evidence only applies to document reconciliation", shared.ErrValidation)
@@ -353,6 +384,12 @@ func (i Intent) Apply(change IntentTransition, at time.Time) (Intent, error) {
 			return Intent{}, fmt.Errorf("%w: only a document intent claim may set a lease", shared.ErrValidation)
 		}
 		i.LeaseUntil = nil
+		if change.Event == CheckpointYield || change.Event == RetryDeferred {
+			if i.Attempts < 1 {
+				return Intent{}, fmt.Errorf("%w: document retry has no claimed attempt", shared.ErrConflict)
+			}
+			i.Attempts--
+		}
 	}
 	if next == writeintent.Done {
 		if change.Remote == nil {
@@ -364,6 +401,7 @@ func (i Intent) Apply(change IntentTransition, at time.Time) (Intent, error) {
 		i.RemoteID = change.Remote.ID
 		i.RemoteURL = change.Remote.URL
 		i.RemoteVersion = change.Remote.Version
+		i.RemoteRevision = change.Remote.Revision
 	} else {
 		if change.Remote != nil {
 			return Intent{}, fmt.Errorf("%w: only a completed document intent may set a remote page", shared.ErrValidation)
@@ -371,6 +409,7 @@ func (i Intent) Apply(change IntentTransition, at time.Time) (Intent, error) {
 		i.RemoteID = ""
 		i.RemoteURL = ""
 		i.RemoteVersion = 0
+		i.RemoteRevision = ""
 	}
 	switch change.Event {
 	case writeintent.Reject:
@@ -417,7 +456,7 @@ func (i Intent) Complete(existing *Link) (Link, bool, error) {
 		}
 		link := Link{
 			ID: i.ID, TenantID: i.TenantID, Target: i.Target,
-			RemotePageID: i.RemoteID, RemoteVersion: i.RemoteVersion, RemoteURL: i.RemoteURL,
+			RemotePageID: i.RemoteID, RemoteVersion: i.RemoteVersion, RemoteRevision: i.RemoteRevision, RemoteURL: i.RemoteURL,
 			ContentHash: i.ContentHash, Revision: 1, CreatedAt: i.UpdatedAt, UpdatedAt: i.UpdatedAt,
 		}
 		if err := link.Validate(); err != nil {
@@ -441,7 +480,7 @@ func (i Intent) Complete(existing *Link) (Link, bool, error) {
 		return Link{}, false, fmt.Errorf("%w: document link is retired", shared.ErrConflict)
 	}
 	if i.Action == Purge {
-		if i.RemoteVersion != existing.RemoteVersion || i.RemoteURL != existing.RemoteURL {
+		if i.RemoteVersion != existing.RemoteVersion || i.RemoteRevision != existing.RemoteRevision || i.RemoteURL != existing.RemoteURL {
 			return Link{}, false, fmt.Errorf("%w: document purge must retain the existing page identity and version", shared.ErrConflict)
 		}
 		next := *existing
@@ -449,6 +488,30 @@ func (i Intent) Complete(existing *Link) (Link, bool, error) {
 		next.RetiredAt = &retired
 		next.UpdatedAt = retired
 		next.Revision++
+		if err := next.Validate(); err != nil {
+			return Link{}, false, err
+		}
+		return next, true, nil
+	}
+	if i.RemoteRevision != "" || existing.RemoteRevision != "" {
+		if i.RemoteRevision == "" || existing.RemoteRevision == "" {
+			return Link{}, false, fmt.Errorf("%w: document remote revision type differs", shared.ErrConflict)
+		}
+		if i.RemoteRevision == existing.RemoteRevision {
+			if existing.ContentHash != i.ContentHash {
+				return Link{}, false, fmt.Errorf("%w: document revision recorded with different content", shared.ErrConflict)
+			}
+			return *existing, false, nil
+		}
+		next := *existing
+		next.RemoteVersion = i.RemoteVersion
+		next.RemoteRevision = i.RemoteRevision
+		next.RemoteURL = i.RemoteURL
+		next.ContentHash = i.ContentHash
+		next.Revision++
+		if i.UpdatedAt.After(next.UpdatedAt) {
+			next.UpdatedAt = i.UpdatedAt
+		}
 		if err := next.Validate(); err != nil {
 			return Link{}, false, err
 		}
@@ -465,6 +528,7 @@ func (i Intent) Complete(existing *Link) (Link, bool, error) {
 	}
 	next := *existing
 	next.RemoteVersion = i.RemoteVersion
+	next.RemoteRevision = i.RemoteRevision
 	next.RemoteURL = i.RemoteURL
 	next.ContentHash = i.ContentHash
 	next.Revision++

@@ -45,6 +45,9 @@ func (w *Workflow) ReceiveInboundWebhook(ctx context.Context, identity ports.Inb
 	if e != nil {
 		return e
 	}
+	if !isJiraTicketProvider(prepared.Provider) {
+		return shared.ErrValidation
+	}
 	provider, e := w.providers.TicketProvider(ctx, prepared)
 	if e != nil {
 		return safeTicketError(e)
@@ -63,6 +66,9 @@ func (w *Workflow) ReceiveInboundWebhook(ctx context.Context, identity ports.Inb
 		in, integrationErr := w.integration(txCtx, identity.TenantID, integrationID)
 		if integrationErr != nil {
 			return integrationErr
+		}
+		if !isJiraTicketProvider(in.Provider) {
+			return shared.ErrValidation
 		}
 		if !config.Enabled || config.ConnectionRevision != in.ConnectionRevision || config.CredentialRevision != in.CredentialRevision || strings.TrimSpace(config.IntegrationAuthor) == "" {
 			return shared.ErrForbidden

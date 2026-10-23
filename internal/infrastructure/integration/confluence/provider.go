@@ -48,7 +48,7 @@ const (
 var (
 	cloudDescriptor = integration.ProviderDescriptor{
 		Provider: CloudProvider, Name: "Confluence Cloud", Description: "Confluence Cloud governed document publishing.",
-		Capabilities: []integration.Capability{integration.CapabilityTestConnection},
+		Capabilities: []integration.Capability{integration.CapabilityTestConnection, integration.CapabilityDocuments},
 		ConfigFields: []integration.FieldDescriptor{
 			{Name: "space", Label: "Confluence space key", Kind: integration.FieldText, Required: true},
 			{Name: "read_group", Label: "Exact read group", Kind: integration.FieldText, Required: true},
@@ -65,7 +65,7 @@ var (
 	}
 	dcDescriptor = integration.ProviderDescriptor{
 		Provider: DCProvider, Name: "Confluence Data Center", Description: "Confluence Data Center governed document publishing.", SelfHosted: true,
-		Capabilities: []integration.Capability{integration.CapabilityTestConnection},
+		Capabilities: []integration.Capability{integration.CapabilityTestConnection, integration.CapabilityDocuments},
 		ConfigFields: []integration.FieldDescriptor{{Name: "space", Label: "Confluence space key", Kind: integration.FieldText, Required: true}, {Name: "read_group", Label: "Exact read group", Kind: integration.FieldText, Required: true}, {Name: "data_class", Label: "Data classification", Kind: integration.FieldText, Required: true}, {Name: "legacy_xmlrpc_restrictions", Label: "Confluence 10.2 XML-RPC restriction compatibility", Kind: integration.FieldBoolean, Description: "Use only for Confluence Data Center 10.2 when its REST API rejects a safe group-only restriction."}},
 		SecretFields: []integration.FieldDescriptor{{Name: "pat", Label: "Personal access token", Kind: integration.FieldPassword, Required: true}},
 	}
@@ -303,8 +303,11 @@ func (a *Adapter) VerifyDocumentRestriction(ctx context.Context, page, container
 	if err != nil {
 		return err
 	}
+	if state.ID != page {
+		return observedRestrictionLoss(200, "remote_identity_changed")
+	}
 	if state.Container != container {
-		return providerError(200, "wrong_container", false)
+		return observedRestrictionLoss(200, "wrong_container")
 	}
 	if a.cloud {
 		if err := a.verifyCloudV2Restriction(ctx, page, group); err != nil {
@@ -317,6 +320,9 @@ func (a *Adapter) VerifyDocumentRestriction(ctx context.Context, page, container
 			return err
 		}
 		if !restrictions.exactGroup(operation, group, a.cloud) {
+			if restrictions.complete(operation, a.cloud) {
+				return observedRestrictionLoss(200, "restriction_unverified")
+			}
 			return providerError(200, "restriction_unverified", false)
 		}
 	}
@@ -332,6 +338,9 @@ func (a *Adapter) verifyCloudV2Restriction(ctx context.Context, page, group stri
 		return err
 	}
 	if state.State != "VIEW_RESTRICTED" {
+		if state.State == "UNRESTRICTED" || state.State == "EDIT_RESTRICTED" {
+			return observedRestrictionLoss(http.StatusOK, "restriction_unverified")
+		}
 		return providerError(http.StatusOK, "restriction_unverified", false)
 	}
 	var permissions cloudPermissionsResponse
@@ -339,6 +348,9 @@ func (a *Adapter) verifyCloudV2Restriction(ctx context.Context, page, group stri
 		return err
 	}
 	if !permissions.exactGroup(group) {
+		if permissions.complete() {
+			return observedRestrictionLoss(http.StatusOK, "restriction_unverified")
+		}
 		return providerError(http.StatusOK, "restriction_unverified", false)
 	}
 	return nil
@@ -541,14 +553,20 @@ func (a *Adapter) verifyCloudPublicSharing(ctx context.Context) error {
 	if err := a.request(ctx, a.client, http.MethodGet, "/_edge/tenant_info", nil, nil, &tenant, false, http.StatusOK); err != nil {
 		return providerErrorFrom(err, "public_sharing_unverifiable")
 	}
-	if !cloudIDPattern.MatchString(tenant.CloudID) || a.siteARI != "ari:cloud:confluence::site/"+tenant.CloudID {
+	if !cloudIDPattern.MatchString(tenant.CloudID) {
 		return refuse()
+	}
+	if a.siteARI != "ari:cloud:confluence::site/"+tenant.CloudID {
+		return observedRestrictionLoss(http.StatusOK, "public_sharing_unverifiable")
 	}
 	policies, err := a.cloudPolicies(ctx)
 	if err != nil {
 		return providerErrorFrom(err, "public_sharing_unverifiable")
 	}
-	if len(policies) == 0 || len(policies) > 64 {
+	if len(policies) == 0 {
+		return observedRestrictionLoss(http.StatusOK, "public_sharing_unverifiable")
+	}
+	if len(policies) > 64 {
 		return refuse()
 	}
 	seen := map[string]bool{}
@@ -604,8 +622,11 @@ func (a *Adapter) verifyCloudPublicSharing(ctx context.Context) error {
 			}
 			orgDefault = true
 		case "WORKSPACE":
-			if listed.ID != a.policyID || targetFound || effect != "block" {
+			if listed.ID != a.policyID || targetFound {
 				return refuse()
+			}
+			if effect != "block" {
+				return observedRestrictionLoss(http.StatusOK, "public_sharing_unverifiable")
 			}
 			resources, err := a.cloudPolicyResources(ctx, listed.ID)
 			if err != nil {
@@ -621,7 +642,7 @@ func (a *Adapter) verifyCloudPublicSharing(ctx context.Context) error {
 				}
 			}
 			if exact != 1 {
-				return refuse()
+				return observedRestrictionLoss(http.StatusOK, "public_sharing_unverifiable")
 			}
 			targetFound = true
 		default:
@@ -629,7 +650,7 @@ func (a *Adapter) verifyCloudPublicSharing(ctx context.Context) error {
 		}
 	}
 	if !orgDefault || !targetFound {
-		return refuse()
+		return observedRestrictionLoss(http.StatusOK, "public_sharing_unverifiable")
 	}
 	return nil
 }
@@ -1066,12 +1087,59 @@ type cloudPermissionsResponse struct {
 	} `json:"_links"`
 }
 
+func (r cloudPermissionsResponse) complete() bool {
+	if r.Results == nil || r.Links == nil || r.Links.Next != "" {
+		return false
+	}
+	for _, permission := range *r.Results {
+		if (permission.Operation != "read" && permission.Operation != "update") || (permission.Principal.Type != "group" && permission.Principal.Type != "user") || permission.Principal.ID == "" {
+			return false
+		}
+	}
+	return true
+}
+
 func (r cloudPermissionsResponse) exactGroup(want string) bool {
 	if r.Results == nil || r.Links == nil || r.Links.Next != "" || len(*r.Results) != 1 {
 		return false
 	}
 	permission := (*r.Results)[0]
 	return (permission.Operation == "read" || permission.Operation == "update") && permission.Principal.Type == "group" && permission.Principal.ID == want
+}
+
+// complete distinguishes a complete contradictory grant set from missing or
+// paginated proof. Both refuse writes, but only the former establishes lost access.
+func (r restrictionResponse) complete(operation string, cloud bool) bool {
+	g, u := r.Restrictions.Group, r.Restrictions.User
+	if r.Operation != operation || g.Size == nil || u.Size == nil || g.Results == nil || u.Results == nil || g.Start != 0 || u.Start != 0 || g.Links.Next != "" || u.Links.Next != "" {
+		return false
+	}
+	for _, group := range g.Results {
+		if (cloud && group.ID == "") || (!cloud && group.Name == "") {
+			return false
+		}
+	}
+	for _, raw := range u.Results {
+		var user map[string]json.RawMessage
+		if json.Unmarshal(raw, &user) != nil {
+			return false
+		}
+		identified := false
+		for _, key := range []string{"accountId", "userKey", "username", "name"} {
+			var value string
+			if json.Unmarshal(user[key], &value) == nil && value != "" {
+				identified = true
+			}
+		}
+		if !identified {
+			return false
+		}
+	}
+	return *g.Size == len(g.Results) && *u.Size == len(u.Results) && (g.Total == nil || *g.Total == *g.Size) && (u.Total == nil || *u.Total == *u.Size)
+}
+
+func observedRestrictionLoss(status int, code string) error {
+	return &ports.DocumentProviderError{Code: code, Status: status, RestrictionLost: true}
 }
 
 func (r restrictionResponse) exactGroup(operation, want string, cloud bool) bool {

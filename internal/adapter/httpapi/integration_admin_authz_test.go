@@ -38,6 +38,7 @@ var integrationSurfacePrefixes = []string{
 var integrationRoutePermissions = map[string]string{
 	"GET /api/v1/integration-providers":                            "PermView",
 	"GET /api/v1/integrations/{integrationID}/jira-metadata":       "PermManageIntegrations",
+	"GET /api/v1/integrations/{integrationID}/ticket-metadata":     "PermManageIntegrations",
 	"POST /api/v1/integrations/{integrationID}/jira-breaker/reset": "PermAdminister",
 	"POST /api/v1/integrations":                                    "PermAdminister",
 	"GET /api/v1/integrations":                                     "PermView",

@@ -43,8 +43,10 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/egressbroker"
 	azurepipelinesintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/azurepipelines"
 	confluenceintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/confluence"
+	documentproviders "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/documentproviders"
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	jiraintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jira"
+	ticketproviders "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/ticketproviders"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
@@ -393,7 +395,22 @@ func main() {
 	vaultCipher := mustVaultCipher(cfg, log)
 	credVault := vault.NewPostgresVault(pool, vaultCipher)
 	integrationStore := postgres.NewIntegrationStore(pool, vaultCipher)
+	scmConnectorStore, scmErr := postgres.NewSCMConnectorRepository(pool, vaultCipher)
+	if scmErr != nil {
+		log.Error("source-control connector store init failed", "err", scmErr)
+		os.Exit(1)
+	}
+
 	integrationRegistry := integrationdom.NewRegistry()
+	if err := ticketproviders.Register(integrationRegistry, scmConnectorStore); err != nil {
+		log.Error("ticket provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := documentproviders.Register(integrationRegistry); err != nil {
+		log.Error("document provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+
 	if err := jenkinsintegration.Register(integrationRegistry); err != nil {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)
@@ -589,11 +606,6 @@ func main() {
 		scaAcquirer, scaSBOMGen, scaSources = integrationsSCAAdapters()
 		log.Info("SCA execution adapters omitted from integrations worker; stored report reads use fail-closed dispatch-only ports")
 	} else {
-		scmConnectorStore, scmErr := postgres.NewSCMConnectorRepository(pool, mustVaultCipher(cfg, log))
-		if scmErr != nil {
-			log.Error("source-control connector store init failed", "err", scmErr)
-			os.Exit(1)
-		}
 		var eerr error
 		scaExecution, eerr = scacompose.BuildExecution(cfg, log, postgres.NewAdvisoryRepository(pool), scmConnectorStore)
 		if eerr != nil {

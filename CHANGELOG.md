@@ -9,6 +9,15 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- Private GitHub Issues, confidential GitLab Issues, Azure Boards, ServiceNow and
+  Linear ticket destinations with frozen native previews, tenant-scoped credentials,
+  and polling observations. ServiceNow descriptions render readable plain text;
+  Azure Boards descriptions preserve safe HTML formatting and typed links.
+  Forge destinations reuse existing SCM connectors.
+- Restricted Google Drive and SharePoint/OneDrive Business publication through the
+  shared document release workflow, with opaque revision fences and guarded permanent
+  unpublish.
+
 - Jira Cloud and Data Center finding synchronization, Project vulnerability grouping,
   proposal-only inbound status/comment observations, and bounded reconciliation.
   Per-ticket refusals remain isolated from unrelated ticket creation.

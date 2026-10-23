@@ -135,6 +135,7 @@ function wikiDescription(value: string, links: TicketPreview['links']) {
 }
 
 function renderedDescription(preview: TicketPreview) {
+  if (preview.wire !== undefined && preview.wire !== null) return { providerReady: false, body: <Markdown className="text-xs text-secondary">{preview.description}</Markdown> }
   const description = preview.fields.description
   if (isRecord(description) && description.type === 'doc' && Array.isArray(description.content)) return { providerReady: true, body: <div className="space-y-1.5 leading-relaxed text-foreground text-xs text-secondary">{adfBlocks(description.content, preview.links, 'adf')}</div> }
   if (typeof description === 'string') return { providerReady: true, body: wikiDescription(description, preview.links) }
@@ -144,16 +145,19 @@ function renderedDescription(preview: TicketPreview) {
 /** Renders the immutable provider-ready ticket payload before an operator submits it. */
 export function TicketPreviewView({ preview, findingId }: { preview: TicketPreview; findingId?: string }) {
   const description = renderedDescription(preview)
+  const destinationReady = Boolean(preview.provider && preview.endpoint)
   return <div className="space-y-2 rounded-lg border border-secondary bg-secondary/40 p-3">
     <p className="text-xs font-semibold text-primary">{findingId ? `Preview · ${findingId} · ` : 'Preview · '}{preview.dataClass}</p>
+    {destinationReady ? <dl aria-label="Authoritative ticket destination" className="grid gap-1 rounded border border-secondary bg-primary/60 p-2 text-xs text-secondary"><div className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">Provider</dt><dd>{preview.provider}</dd></div><div className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">Endpoint</dt><dd className="break-all">{preview.endpoint}</dd></div><div className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">Project / type</dt><dd className="break-all">{value(preview.fields.project)} · {value(preview.fields.issuetype)}</dd></div></dl> : <p role="alert" className="text-xs text-error-primary">This preview does not disclose a destination bound to its digest. It cannot be submitted.</p>}
     <p className="text-sm font-medium text-primary">{preview.summary}</p>
     {preview.securityWaived && <p className="text-xs text-warning-primary">No Jira security level is set; this preview uses the recorded administrator waiver.</p>}
     {entries(preview.fields).length > 0 && <dl className="grid gap-1 text-xs text-secondary">{entries(preview.fields).map(([key, field]) => <div key={key} className="grid grid-cols-[minmax(6rem,auto)_1fr] gap-2"><dt className="font-medium text-primary">{key}</dt><dd className="break-all">{value(field)}</dd></div>)}</dl>}
     {description.body}
+    {preview.wire !== undefined && preview.wire !== null && <details><summary className="cursor-pointer text-xs font-medium text-secondary">Exact provider request</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded border border-secondary p-2 text-xs text-secondary">{JSON.stringify(preview.wire, null, 2)}</pre></details>}
     {!description.providerReady && preview.links?.length ? <ul className="space-y-1 text-xs">{preview.links.map((link) => {
       const href = trustedURL(link.url, preview.links)
       return href ? <li key={href}><a className="text-brand-secondary hover:underline" href={href} target="_blank" rel="noreferrer">{link.label}</a></li> : null
     })}</ul> : null}
-    {preview.markerRequired && <p className="text-xs text-tertiary">Submitting adds the correlation label {preview.markerFormat || 'required by Jira recovery'}.</p>}
+    {preview.markerRequired && <p className="text-xs text-tertiary">Submitting adds the correlation marker {preview.markerFormat || 'required by provider recovery'}.</p>}
   </div>
 }

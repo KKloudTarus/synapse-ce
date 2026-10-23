@@ -25,6 +25,9 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 	if c.Progress.OutstandingOperation == "shell" {
 		matches, err := p.FindDocumentMarker(ctx, c.Intent.Container, c.Intent.Marker)
 		if err != nil {
+			if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+				return deferred, deferErr
+			}
 			return c.Intent, err
 		}
 		if len(matches) > 1 {
@@ -40,10 +43,19 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 		return s.resume(ctx, c)
 	}
 	if c.Progress.Remote.ID == "" {
+		// A worker can crash after claiming a new create but before recording the
+		// shell operation. No provider write was allowed before outstanding(), so
+		// this exact empty checkpoint may safely resume and create its first shell.
+		if cleanInitialShellCheckpoint(c) {
+			return s.resume(ctx, c)
+		}
 		return c.Intent, nil
 	}
 	remote, err := p.GetDocument(ctx, c.Progress.Remote.ID)
 	if err != nil {
+		if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+			return deferred, deferErr
+		}
 		return c.Intent, err
 	}
 	if remote.ID != c.Progress.Remote.ID || remote.Container != c.Intent.Container {
@@ -54,22 +66,49 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 		// prove the uploaded bytes or a purge. Preserve the uncertainty fence.
 		return c.Intent, nil
 	}
+	// A create reservation can be observed before its neutral body exists. Some
+	// providers materialize that body while applying the restriction; if its
+	// acknowledgement was lost, its fresh opaque revision is safe to adopt only
+	// after re-proving the exact neutral shell and its complete restriction.
+	// This deliberately excludes update, published, attachment, body, and purge
+	// reconciliation, where a changed revision is never self-proving.
+	if recoverableNeutralRestriction(c, remote) {
+		if _, err := s.guard(ctx, c); err != nil {
+			return c.Intent, err
+		}
+		if err := p.VerifyDocumentRestriction(ctx, remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
+			if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+				return deferred, deferErr
+			}
+			return c.Intent, err
+		}
+		c.Progress.Remote = remote.RemotePage
+		c.Progress.Step = "attachments"
+		return s.resume(ctx, c)
+	}
 	complete := c.Progress.Step == "complete" || c.Progress.OutstandingOperation == "body"
 	if complete {
 		if len(c.Progress.UploadedReceipts) != len(attachments(c)) || !validReceipts(c) || remote.Marker != c.Intent.Marker || remote.Title != c.Artifact.Title || remote.Storage != storageDocument(c) {
 			return c.Intent, nil
 		}
-		expected := c.Progress.Remote.Version
 		if c.Progress.OutstandingOperation == "body" {
-			expected = c.Progress.ExpectedRemoteVersion + 1
-		}
-		if remote.Version != expected {
+			if c.Progress.ExpectedRemoteRevision != "" {
+				if remote.Revision == c.Progress.ExpectedRemoteRevision {
+					return c.Intent, nil
+				}
+			} else if remote.Version != c.Progress.ExpectedRemoteVersion+1 {
+				return c.Intent, nil
+			}
+		} else if !sameRemoteRevision(remote.RemotePage, c.Progress.Remote) {
 			return c.Intent, nil
 		}
 		if _, err := s.guard(ctx, c); err != nil {
 			return c.Intent, err
 		}
 		if err := p.VerifyDocumentRestriction(ctx, remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
+			if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+				return deferred, deferErr
+			}
 			return c.Intent, err
 		}
 		if err := s.record(ctx, c, "document.published", remote.ID); err != nil {
@@ -77,11 +116,14 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 		}
 		return s.store.TransitionIntent(ctx, c.Intent.TenantID, c.Intent.ID, c.Intent.Version, domain.IntentTransition{Event: writeintent.ReconcileFound, Remote: &remote.RemotePage}, s.clock.Now().UTC())
 	}
-	if remote.Version != c.Progress.Remote.Version {
+	if !sameRemoteRevision(remote.RemotePage, c.Progress.Remote) {
 		return c.Intent, shared.ErrConflict
 	}
 	if c.Progress.OutstandingOperation == "restrictions" {
 		if err := p.VerifyDocumentRestriction(ctx, remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
+			if deferred, deferErr, handled := s.deferProviderRetry(ctx, c, err, ports.DocumentRetryKeep, ""); handled {
+				return deferred, deferErr
+			}
 			return c.Intent, err
 		}
 		c.Progress.Step = "attachments"
@@ -93,6 +135,22 @@ func (s *Service) reconcile(ctx context.Context, c ports.DocumentCommand, p port
 		return s.resume(ctx, c)
 	}
 	return c.Intent, nil
+}
+
+func cleanInitialShellCheckpoint(c ports.DocumentCommand) bool {
+	return c.Intent.Action == domain.Create && c.Progress.Step == "shell" &&
+		c.Progress.Remote.ID == "" && c.Progress.Remote.URL == "" && c.Progress.Remote.Version == 0 && c.Progress.Remote.Revision == "" &&
+		c.Progress.Uploaded == 0 && len(c.Progress.UploadedReceipts) == 0 &&
+		c.Progress.OutstandingOperation == "" && c.Progress.OutstandingKey == "" && c.Progress.OutstandingDigest == "" &&
+		c.Progress.ExpectedRemoteVersion == 0 && c.Progress.ExpectedRemoteRevision == ""
+}
+
+func recoverableNeutralRestriction(c ports.DocumentCommand, remote ports.DocumentRemoteState) bool {
+	return c.Intent.Action == domain.Create &&
+		c.Progress.Step == "restrictions" &&
+		(c.Progress.OutstandingOperation == "restrictions" || c.Progress.OutstandingOperation == "") &&
+		remote.Neutral && remote.Marker == c.Intent.Marker &&
+		validReceipts(c)
 }
 
 func validReceipts(c ports.DocumentCommand) bool {
@@ -115,6 +173,7 @@ func (s *Service) resume(ctx context.Context, c ports.DocumentCommand) (domain.I
 	c.Progress.OutstandingKey = ""
 	c.Progress.OutstandingDigest = ""
 	c.Progress.ExpectedRemoteVersion = 0
+	c.Progress.ExpectedRemoteRevision = ""
 	c.Progress.IntentVersion = c.Intent.Version
 	c.Progress.LeaseUntil = nil
 	c.Progress.UpdatedAt = s.clock.Now().UTC()

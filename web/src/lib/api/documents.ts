@@ -28,6 +28,7 @@ export interface DocumentLink {
   scopeId: string
   container: string
   remoteUrl: string
+  remoteRevisionKind?: 'opaque' | 'numeric'
   remoteVersion: number
   contentHash: string
   revision: number
@@ -44,7 +45,7 @@ export interface DocumentRelease {
 }
 
 const intent = (value: any): DocumentIntent => ({ id: value?.id ?? '', linkId: value?.link_id ?? '', action: value?.action ?? '', state: value?.state ?? '', version: value?.version ?? 0, attempts: value?.attempts ?? 0, errorCode: value?.error_code || undefined, remoteUrl: value?.remote_url || undefined, remoteId: value?.remote_id || undefined, createdAt: value?.created_at ?? '', updatedAt: value?.updated_at ?? '' })
-const link = (value: any): DocumentLink => ({ id: value?.id ?? '', integrationId: value?.integration_id ?? '', sourceKind: value?.source_kind ?? 'engagement_report', sourceRef: value?.source_ref ?? '', scope: value?.scope === 'project' ? 'project' : 'engagement', scopeId: value?.scope_id ?? '', container: value?.container ?? '', remoteUrl: value?.remote_url ?? '', remoteVersion: value?.remote_version ?? 0, contentHash: value?.content_hash ?? '', revision: value?.revision ?? 0, restrictionStatus: value?.restriction_status || undefined, restrictionCheckedAt: value?.restriction_checked_at || undefined, retiredAt: value?.retired_at || undefined, updatedAt: value?.updated_at ?? '' })
+const link = (value: any): DocumentLink => ({ id: value?.id ?? '', integrationId: value?.integration_id ?? '', sourceKind: value?.source_kind ?? 'engagement_report', sourceRef: value?.source_ref ?? '', scope: value?.scope === 'project' ? 'project' : 'engagement', scopeId: value?.scope_id ?? '', container: value?.container ?? '', remoteUrl: value?.remote_url ?? '', remoteRevisionKind: value?.remote_revision_kind === 'opaque' ? 'opaque' : 'numeric', remoteVersion: value?.remote_version ?? 0, contentHash: value?.content_hash ?? '', revision: value?.revision ?? 0, restrictionStatus: value?.restriction_status || undefined, restrictionCheckedAt: value?.restriction_checked_at || undefined, retiredAt: value?.retired_at || undefined, updatedAt: value?.updated_at ?? '' })
 const release = (value: any): DocumentRelease => ({ skipped: value?.skipped === true, intent: value?.intent ? intent(value.intent) : undefined, link: value?.link ? link(value.link) : undefined })
 
 export const documentsApi = {

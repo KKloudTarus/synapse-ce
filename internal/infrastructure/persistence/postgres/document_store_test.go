@@ -402,12 +402,12 @@ func TestDocumentStorePersistsAfterPoolReopen(t *testing.T) {
 		t.Fatalf("intent after reopen: %+v %v", got, err)
 	}
 	done, err := reopened.TransitionIntent(ctx, tenant, intent.ID, 2, docpublish.IntentTransition{Event: writeintent.Acknowledge,
-		Remote: &docpublish.RemotePage{ID: "7", Version: 1, URL: "https://wiki.example/pages/7"}}, now.Add(2*time.Second))
+		Remote: &docpublish.RemotePage{ID: "7", Version: 1, Revision: `W/"opaque-7"`, URL: "https://wiki.example/pages/7"}}, now.Add(2*time.Second))
 	if err != nil || done.State != writeintent.Done {
 		t.Fatalf("complete after reopen: %+v %v", done, err)
 	}
 	link, err := reopened.FindLink(ctx, tenant, target)
-	if err != nil || link.RemotePageID != "7" || link.ID != intent.ID {
+	if err != nil || link.RemotePageID != "7" || link.RemoteRevision != `W/"opaque-7"` || link.ID != intent.ID {
 		t.Fatalf("link after reopen: %+v %v", link, err)
 	}
 }

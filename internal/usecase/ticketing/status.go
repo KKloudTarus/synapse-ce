@@ -242,7 +242,7 @@ func (w *Workflow) validateStatusTarget(ctx context.Context, tenant shared.ID, t
 	if err != nil {
 		return err
 	}
-	if facts.Endpoint != in.Endpoint || facts.Provider != in.Provider || destination.ProjectKey != target.Mapping.ProjectKey || destination.IssueType != target.Mapping.IssueType || target.Intent.SecurityLevel != target.Mapping.SecurityLevel || !sameRemoteOrigin(in.Endpoint, target.Intent.RemoteURL) {
+	if facts.Endpoint != in.Endpoint || facts.Provider != in.Provider || destination.ProjectKey != target.Mapping.ProjectKey || destination.IssueType != target.Mapping.IssueType || target.Intent.SecurityLevel != target.Mapping.SecurityLevel || !sameTicketRemoteOrigin(in, target.Intent.RemoteURL) {
 		return shared.ErrConflict
 	}
 	return nil

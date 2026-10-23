@@ -22,6 +22,12 @@ type ProviderRegistry interface {
 	DocumentProvider(context.Context, integration.Integration) (ports.DocumentProvider, error)
 }
 
+// DocumentReleasePreflightRegistry is optional so legacy provider registries
+// remain compatible while a provider can refuse before any remote shell exists.
+type DocumentReleasePreflightRegistry interface {
+	DocumentReleasePreflighter(context.Context, integration.Integration) (ports.DocumentReleasePreflighter, error)
+}
+
 type Service struct {
 	store        ports.DocumentCommandStore
 	integrations ports.IntegrationStore
@@ -65,6 +71,34 @@ func (s *Service) PublishArtifact(ctx context.Context, tenant shared.ID, actor p
 	return s.publish(ctx, tenant, actor, input, &artifact)
 }
 
+// ValidateDocumentDestination admits an enabled document integration before a
+// schedule freezes an artifact. It keeps scheduled releases on the same
+// current integration, destination, provider, and optional release-preflight
+// boundary as direct publication.
+func (s *Service) ValidateDocumentDestination(ctx context.Context, tenant, integrationID shared.ID) error {
+	if tenant.IsZero() || integrationID.IsZero() {
+		return shared.ErrValidation
+	}
+	ctx = shared.WithTenant(ctx, tenant)
+	in, err := s.integration(ctx, tenant, integrationID)
+	if err != nil {
+		return err
+	}
+	container, group, err := destination(in)
+	if err != nil {
+		return err
+	}
+	if err := s.preflightDocumentRelease(ctx, in, container, group); err != nil {
+		return err
+	}
+	provider, err := s.providers.DocumentProvider(ctx, in)
+	if err != nil {
+		return err
+	}
+	defer closeProvider(provider)
+	return nil
+}
+
 func (s *Service) publish(ctx context.Context, tenant shared.ID, actor ports.DocumentActor, input PublishInput, frozen *ports.DocumentArtifact) (ReleaseResult, error) {
 	ctx = shared.WithTenant(ctx, tenant)
 	if err := s.authorize(ctx, tenant, actor); err != nil {
@@ -103,6 +137,9 @@ func (s *Service) publish(ctx context.Context, tenant shared.ID, actor ports.Doc
 	if err := s.policy.CheckDocumentSource(ctx, tenant, target); err != nil {
 		return ReleaseResult{}, err
 	}
+	if err := s.preflightDocumentRelease(ctx, in, space, group); err != nil {
+		return ReleaseResult{}, err
+	}
 	var artifact ports.DocumentArtifact
 	if frozen != nil {
 		artifact, err = normalizeArtifact(*frozen)
@@ -134,14 +171,14 @@ func (s *Service) publish(ctx context.Context, tenant shared.ID, actor ports.Doc
 		}
 		if link.ContentHash == hash {
 			remote, readErr := provider.GetDocument(ctx, link.RemotePageID)
-			if readErr == nil && remote.ID == link.RemotePageID && remote.Container == target.Container && remote.Version == link.RemoteVersion && provider.VerifyDocumentRestriction(ctx, remote.ID, target.Container, group) == nil {
+			if readErr == nil && remote.ID == link.RemotePageID && remote.Container == target.Container && sameRemoteRevision(remote.RemotePage, domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}) && provider.VerifyDocumentRestriction(ctx, remote.ID, target.Container, group) == nil {
 				return ReleaseResult{Link: &link, Skipped: true}, nil
 			}
 		}
 		intent.Action = domain.Update
 		intent.LinkID = link.ID
 		progress.Step = "restrictions"
-		progress.Remote = domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, URL: link.RemoteURL}
+		progress.Remote = domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}
 	} else if !errors.Is(err, shared.ErrNotFound) {
 		return ReleaseResult{}, err
 	}
@@ -196,7 +233,7 @@ func (s *Service) Unpublish(ctx context.Context, tenant shared.ID, actor ports.D
 	}
 	now := s.clock.Now().UTC()
 	id := s.ids.NewID()
-	command := ports.DocumentCommand{Intent: domain.Intent{ID: id, TenantID: tenant, Target: link.Target, LinkID: link.ID, Action: domain.Purge, RequestKey: requestKey, ContentHash: link.ContentHash, Marker: domain.MarkerFor(id), State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}, Actor: actor, ReadGroup: group, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, Progress: ports.DocumentProgress{Version: 1, IntentVersion: 1, Step: "purge", Remote: domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, URL: link.RemoteURL}, UpdatedAt: now}}
+	command := ports.DocumentCommand{Intent: domain.Intent{ID: id, TenantID: tenant, Target: link.Target, LinkID: link.ID, Action: domain.Purge, RequestKey: requestKey, ContentHash: link.ContentHash, Marker: domain.MarkerFor(id), State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}, Actor: actor, ReadGroup: group, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, Progress: ports.DocumentProgress{Version: 1, IntentVersion: 1, Step: "purge", Remote: domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}, UpdatedAt: now}}
 	command.Intent.PayloadDigest = commandDigest(command)
 	if err := s.record(ctx, command, "document.unpublish_requested", link.RemotePageID); err != nil {
 		return ReleaseResult{}, err
@@ -232,11 +269,14 @@ func (s *Service) ResumePreparedPublication(ctx context.Context, tenant shared.I
 	if c.Intent.State != writeintent.Failed || c.Intent.ErrorCode != "provider_refused" || c.Intent.Action != domain.Create ||
 		(c.Progress.Step != "restrictions" && c.Progress.Step != "attachments") || c.Progress.Remote.ID == "" || c.Progress.Remote.Version < 1 ||
 		c.Progress.Uploaded != 0 || len(c.Progress.UploadedReceipts) != 0 || c.Progress.OutstandingOperation != "" ||
-		c.Progress.OutstandingKey != "" || c.Progress.OutstandingDigest != "" || c.Progress.ExpectedRemoteVersion != 0 {
+		c.Progress.OutstandingKey != "" || c.Progress.OutstandingDigest != "" || c.Progress.ExpectedRemoteVersion != 0 || c.Progress.ExpectedRemoteRevision != "" {
 		return domain.Intent{}, shared.ErrConflict
 	}
 	in, err := s.guard(ctx, c)
 	if err != nil {
+		return domain.Intent{}, err
+	}
+	if err := s.preflightDocumentRelease(ctx, in, c.Intent.Container, c.ReadGroup); err != nil {
 		return domain.Intent{}, err
 	}
 	p, err := s.providers.DocumentProvider(ctx, in)
@@ -248,7 +288,7 @@ func (s *Service) ResumePreparedPublication(ctx context.Context, tenant shared.I
 	if err != nil {
 		return domain.Intent{}, err
 	}
-	if remote.ID != c.Progress.Remote.ID || remote.Container != c.Intent.Container || remote.Version != c.Progress.Remote.Version || remote.Marker != c.Intent.Marker || !remote.Neutral {
+	if remote.ID != c.Progress.Remote.ID || remote.Container != c.Intent.Container || !sameRemoteRevision(remote.RemotePage, c.Progress.Remote) || remote.Marker != c.Intent.Marker || !remote.Neutral {
 		return domain.Intent{}, shared.ErrConflict
 	}
 	if err := p.VerifyDocumentRestriction(ctx, remote.ID, c.Intent.Container, c.ReadGroup); err != nil {
@@ -286,7 +326,7 @@ func (s *Service) integration(ctx context.Context, tenant, id shared.ID) (integr
 	if in.TenantID != tenant {
 		return in, shared.ErrNotFound
 	}
-	if !in.Enabled || in.Archived || (in.Provider != "confluence-cloud" && in.Provider != "confluence-dc") {
+	if !in.Enabled || in.Archived {
 		return in, shared.ErrForbidden
 	}
 	return in, nil
@@ -321,6 +361,24 @@ func (s *Service) guard(ctx context.Context, c ports.DocumentCommand) (integrati
 		return in, shared.ErrConflict
 	}
 	return in, nil
+}
+func (s *Service) preflightDocumentRelease(ctx context.Context, in integration.Integration, container, group string) error {
+	registry, ok := s.providers.(DocumentReleasePreflightRegistry)
+	if !ok {
+		return nil
+	}
+	preflighter, err := registry.DocumentReleasePreflighter(ctx, in)
+	if err != nil || preflighter == nil {
+		return err
+	}
+	if closer, ok := preflighter.(interface{ Close() }); ok {
+		defer closer.Close()
+	}
+	return preflighter.CheckDocumentRelease(ctx, container, group)
+}
+
+func sameRemoteRevision(left, right domain.RemotePage) bool {
+	return left.Version == right.Version && left.Revision == right.Revision
 }
 func validKey(v string) bool {
 	return utf8.ValidString(v) && len(v) > 0 && len(v) <= 128 && strings.TrimSpace(v) == v && !strings.ContainsAny(v, "\x00\r\n\t")

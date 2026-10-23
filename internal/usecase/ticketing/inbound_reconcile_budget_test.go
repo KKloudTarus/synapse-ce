@@ -52,6 +52,9 @@ type reconcileBudgetProviders struct{ p *reconcileBudgetProvider }
 func (f reconcileBudgetProviders) TicketProvider(context.Context, integration.Integration) (ports.TicketProvider, error) {
 	return f.p, nil
 }
+func (f reconcileBudgetProviders) TicketProviderDescriptor(provider integration.Provider) (integration.ProviderDescriptor, error) {
+	return integration.ProviderDescriptor{Provider: provider, Capabilities: []integration.Capability{integration.CapabilityTickets}}, nil
+}
 
 type reconcileBudgetStore struct {
 	ports.TicketInboundStore

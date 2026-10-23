@@ -61,10 +61,12 @@ import (
 	azurepipelinesintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/azurepipelines"
 	bitbucketintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/bitbucket"
 	confluenceintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/confluence"
+	documentproviders "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/documentproviders"
 	githubintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/github"
 	gitlabintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/gitlab"
 	jenkinsintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jenkins"
 	jiraintegration "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/jira"
+	ticketproviders "github.com/KKloudTarus/synapse-ce/internal/infrastructure/integration/ticketproviders"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/llm/openai"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/logstream"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/messageformat"
@@ -998,6 +1000,15 @@ func main() {
 	engService.SetCompletionSnapshotPolicy(assessmentSnapshotStore, cfg.AssessmentSnapshotCompletionForTenant)
 	projectService := projectuc.NewService(projectRepo, repo, clock, ids, auditLog, !cfg.IsProduction())
 	integrationRegistry := integrationdom.NewRegistry()
+	if err := ticketproviders.Register(integrationRegistry, scmConnectorStore); err != nil {
+		log.Error("ticket provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := documentproviders.Register(integrationRegistry); err != nil {
+		log.Error("document provider registry init failed", "err", err)
+		os.Exit(1)
+	}
+
 	if err := jenkinsintegration.Register(integrationRegistry); err != nil {
 		log.Error("integration provider registry init failed", "err", err)
 		os.Exit(1)

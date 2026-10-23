@@ -5,10 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	domain "github.com/KKloudTarus/synapse-ce/internal/domain/ticketing"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
+)
+
+const (
+	inboundPollFloor          = time.Minute
+	inboundPollFailureBackoff = 5 * time.Minute
 )
 
 // tickInboundTicketObservations reads existing provider tickets into the same
@@ -22,14 +28,34 @@ func (w *Workflow) tickInboundTicketObservations(ctx context.Context, tenant sha
 // losing the fair polling checkpoint for a target that was actually attempted.
 // progressCtx remains the worker context; it still honors caller cancellation.
 func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progressCtx context.Context, tenant shared.ID, store ports.TicketInboundStore, limit int) error {
-	targets, err := store.ListInboundTicketTargets(providerCtx, tenant, limit)
-	if err != nil {
-		return err
+	type queuedTarget struct {
+		target ports.TicketStatusTarget
+		claim  *ports.TicketInboundPollClaim
+	}
+	queued := make([]queuedTarget, 0, limit)
+	if claims, ok := store.(ports.TicketInboundClaimStore); ok {
+		claimed, err := claims.ClaimInboundTicketTargets(providerCtx, tenant, limit, w.clock.Now().UTC(), inboundPollFloor)
+		if err != nil {
+			return err
+		}
+		for i := range claimed {
+			queued = append(queued, queuedTarget{target: claimed[i].Target, claim: &claimed[i]})
+		}
+	} else {
+		targets, err := store.ListInboundTicketTargets(providerCtx, tenant, limit)
+		if err != nil {
+			return err
+		}
+		for _, target := range targets {
+			queued = append(queued, queuedTarget{target: target})
+		}
 	}
 	principals := map[shared.ID]string{}
 	principalChecked := map[shared.ID]bool{}
+	throttled := map[shared.ID]time.Duration{}
 	remainingRequests := 250
-	for _, target := range targets {
+	for _, queuedTarget := range queued {
+		target := queuedTarget.target
 		if err := providerCtx.Err(); err != nil {
 			return err
 		}
@@ -37,8 +63,27 @@ func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progre
 			break
 		}
 		now := w.clock.Now().UTC()
-		record := func() error { return store.RecordInboundTicketPoll(progressCtx, tenant, target, now) }
+		delay := inboundPollFloor
+		observed := false
+		record := func() error {
+			if queuedTarget.claim != nil {
+				checkedAt := time.Time{}
+				if observed {
+					checkedAt = now
+				}
+				return store.(ports.TicketInboundClaimStore).CompleteInboundTicketPoll(progressCtx, tenant, *queuedTarget.claim, checkedAt, now.Add(delay))
+			}
+			return store.RecordInboundTicketPoll(progressCtx, tenant, target, now)
+		}
+		if blockedDelay, blocked := throttled[target.Mapping.IntegrationID]; blocked {
+			delay = blockedDelay
+			if err := record(); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := w.validateStatusTarget(providerCtx, tenant, target); err != nil {
+			delay = inboundPollFailureBackoff
 			if recordErr := record(); recordErr != nil {
 				return recordErr
 			}
@@ -46,6 +91,7 @@ func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progre
 		}
 		in, err := w.integration(providerCtx, tenant, target.Mapping.IntegrationID)
 		if err != nil || !in.Enabled {
+			delay = inboundPollFailureBackoff
 			if recordErr := record(); recordErr != nil {
 				return recordErr
 			}
@@ -53,6 +99,7 @@ func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progre
 		}
 		provider, err := w.providers.TicketProvider(providerCtx, in)
 		if err != nil {
+			delay = inboundPollFailureBackoff
 			if recordErr := record(); recordErr != nil {
 				return recordErr
 			}
@@ -61,12 +108,14 @@ func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progre
 		reader, ok := provider.(ports.TicketReader)
 		if !ok {
 			closeTicketProvider(provider)
+			delay = inboundPollFailureBackoff
 			if recordErr := record(); recordErr != nil {
 				return recordErr
 			}
 			continue
 		}
 		remainingRequests--
+		observed = true
 		remote, readErr := reader.GetTicket(providerCtx, target.Intent.RemoteID)
 		closeTicketProvider(provider)
 		if readErr != nil {
@@ -77,7 +126,12 @@ func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progre
 				return providerCtx.Err()
 			}
 			var providerErr *ports.TicketProviderError
-			if !errors.As(readErr, &providerErr) || (providerErr.Status != 403 && providerErr.Status != 404) {
+			if !errors.As(readErr, &providerErr) || inboundProviderThrottle(providerErr) || (providerErr.Status != 403 && providerErr.Status != 404) {
+				delay = inboundPollFailureBackoff
+				if errors.As(readErr, &providerErr) && inboundProviderThrottle(providerErr) {
+					delay = inboundRateLimitDelay(providerErr.RetryAfter)
+					throttled[in.ID] = delay
+				}
 				if recordErr := record(); recordErr != nil {
 					return recordErr
 				}
@@ -112,11 +166,16 @@ func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progre
 						remainingRequests--
 						principal, identityErr = identity.TicketIdentity(providerCtx)
 					} else {
-						identityErr = fmt.Errorf("%w: Jira integration identity unavailable", shared.ErrConflict)
+						identityErr = fmt.Errorf("%w: ticket integration identity unavailable", shared.ErrConflict)
 					}
 					closeTicketProvider(identityProvider)
 				}
 				if identityErr != nil {
+					var providerErr *ports.TicketProviderError
+					if errors.As(identityErr, &providerErr) && inboundProviderThrottle(providerErr) {
+						delay = inboundRateLimitDelay(providerErr.RetryAfter)
+						throttled[in.ID] = delay
+					}
 					principal = ""
 				}
 			}
@@ -138,6 +197,7 @@ func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progre
 		}
 		linked, err := store.ResolveInboundTicket(providerCtx, tenant, in.ID, target.Intent.RemoteID)
 		if err != nil {
+			delay = inboundPollFailureBackoff
 			if recordErr := record(); recordErr != nil {
 				return recordErr
 			}
@@ -159,6 +219,7 @@ func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progre
 		}
 		if len(observations) > 0 {
 			if err := store.ReduceInboundTicket(providerCtx, tenant, observations, nil, now); err != nil {
+				delay = inboundPollFailureBackoff
 				if recordErr := record(); recordErr != nil {
 					return recordErr
 				}
@@ -170,4 +231,15 @@ func (w *Workflow) tickInboundTicketObservationsWithProgress(providerCtx, progre
 		}
 	}
 	return nil
+}
+
+func inboundRateLimitDelay(retryAfter time.Duration) time.Duration {
+	if retryAfter < inboundPollFailureBackoff {
+		return inboundPollFailureBackoff
+	}
+	return retryAfter
+}
+
+func inboundProviderThrottle(refusal *ports.TicketProviderError) bool {
+	return refusal.Status == 429 || refusal.Code == "rate_limited"
 }

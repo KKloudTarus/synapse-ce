@@ -31,8 +31,8 @@ func (w *Workflow) integration(ctx context.Context, tenant, id shared.ID) (integ
 	if item.TenantID != tenant || item.Archived {
 		return integration.Integration{}, shared.ErrNotFound
 	}
-	if item.Provider != "jira-cloud" && item.Provider != "jira-dc" {
-		return integration.Integration{}, fmt.Errorf("%w: choose a Jira integration", shared.ErrValidation)
+	if !w.supportedTicketProvider(item.Provider) {
+		return integration.Integration{}, fmt.Errorf("%w: ticket integration is unsupported", shared.ErrValidation)
 	}
 	return item, nil
 }
@@ -112,7 +112,7 @@ func (w *Workflow) Metadata(ctx context.Context, tenant, integrationID shared.ID
 		}
 		if len(w.metadataActive) >= 4 {
 			w.metadataMu.Unlock()
-			return nil, fmt.Errorf("%w: Jira metadata discovery capacity reached", shared.ErrConflict)
+			return nil, fmt.Errorf("%w: ticket metadata discovery capacity reached", shared.ErrConflict)
 		}
 		w.metadataActive[key] = struct{}{}
 		w.metadataMu.Unlock()
@@ -133,9 +133,10 @@ func (w *Workflow) Metadata(ctx context.Context, tenant, integrationID shared.ID
 		if e != nil {
 			return nil, safeTicketError(e)
 		}
+		meta = normalizeTicketMetadata(item.Provider, meta)
 		raw, e := json.Marshal(meta)
 		if e != nil || len(raw) > 256<<10 {
-			return nil, fmt.Errorf("%w: Jira metadata exceeds supported bounds", shared.ErrValidation)
+			return nil, fmt.Errorf("%w: ticket metadata exceeds supported bounds", shared.ErrValidation)
 		}
 		w.metadataMu.Lock()
 		defer w.metadataMu.Unlock()
@@ -162,6 +163,18 @@ func (w *Workflow) Metadata(ctx context.Context, tenant, integrationID shared.ID
 		return cloneTicketMetadata(answer.Val.(ports.TicketMetadata)), nil
 	}
 }
+
+func normalizeTicketMetadata(provider integration.Provider, meta ports.TicketMetadata) ports.TicketMetadata {
+	if isJiraTicketProvider(provider) {
+		// Pre-native Jira adapters did not publish capability flags. Preserve the
+		// established behavior for API consumers as well as server validation.
+		meta.SupportsGrouping = true
+		meta.SupportsStatusSync = true
+		meta.SupportsStatusTransitions = true
+	}
+	return meta
+}
+
 func cloneTicketMetadata(meta ports.TicketMetadata) ports.TicketMetadata {
 	raw, _ := json.Marshal(meta)
 	var out ports.TicketMetadata
@@ -183,7 +196,10 @@ func choiceExists(choices []ports.TicketChoice, id string) bool {
 	}
 	return false
 }
-func (w *Workflow) validateSelections(m domain.Mapping, meta ports.TicketMetadata) error {
+func (w *Workflow) validateSelections(m domain.Mapping, meta ports.TicketMetadata, provider integration.Provider) error {
+	if !isJiraTicketProvider(provider) {
+		return validateNativeTicketSelections(m, meta)
+	}
 	if !choiceExists(meta.Projects, m.ProjectKey) || !choiceExists(meta.IssueTypes, m.IssueType) {
 		return fmt.Errorf("%w: select a discovered Jira project and issue type", shared.ErrValidation)
 	}
@@ -291,6 +307,49 @@ func (w *Workflow) validateSelections(m domain.Mapping, meta ports.TicketMetadat
 	return nil
 }
 
+func validateNativeTicketSelections(m domain.Mapping, meta ports.TicketMetadata) error {
+	if !choiceExists(meta.Projects, m.ProjectKey) || !choiceExists(meta.IssueTypes, m.IssueType) {
+		return fmt.Errorf("%w: select a discovered ticket destination", shared.ErrValidation)
+	}
+	if strings.TrimSpace(meta.SecurityPolicy) == "" || m.SecurityLevel != meta.SecurityPolicy || strings.TrimSpace(m.WaiverReason) != "" {
+		return fmt.Errorf("%w: select the provider visibility policy without a waiver", shared.ErrValidation)
+	}
+	if m.GroupingMode != domain.GroupingFinding && !meta.SupportsGrouping {
+		return fmt.Errorf("%w: ticket provider does not support grouping", shared.ErrValidation)
+	}
+	if len(m.StatusTransitions) != 0 && (!meta.SupportsStatusSync || !meta.SupportsStatusTransitions) {
+		return fmt.Errorf("%w: ticket provider does not support status transitions", shared.ErrValidation)
+	}
+	if m.Transition != "" && !meta.SupportsStatusTransitions {
+		return fmt.Errorf("%w: ticket provider does not support transitions", shared.ErrValidation)
+	}
+	// Native provider serializers deliberately accept only their documented
+	// title/body fields. Refuse Jira-specific mapping controls here instead of
+	// silently dropping labels, priority mappings, components, or custom fields.
+	if len(m.Labels) != 0 || len(m.PriorityMap) != 0 || m.Component != "" || len(m.FieldValues) != 0 {
+		return fmt.Errorf("%w: ticket provider does not support Jira mapping fields", shared.ErrValidation)
+	}
+	return nil
+}
+
+func isJiraTicketProvider(provider integration.Provider) bool {
+	return provider == "jira-cloud" || provider == "jira-dc"
+}
+
+func (w *Workflow) supportedTicketProvider(provider integration.Provider) bool {
+	descriptor, err := w.providers.TicketProviderDescriptor(provider)
+	return err == nil && descriptor.Provider == provider && descriptor.Supports(integration.CapabilityTickets)
+}
+
+func nativeTicketSecurityPolicyValid(policy string) bool {
+	switch policy {
+	case "private_repository", "confidential_issue", "provider_access":
+		return true
+	default:
+		return false
+	}
+}
+
 func validResolvedReporter(value string) bool {
 	value = strings.TrimSpace(value)
 	return value != "" && len(value) <= 255
@@ -351,11 +410,35 @@ func ticketFieldValue(field ports.TicketField, value string) (any, error) {
 func readTicketSnapshot(i domain.Intent) (snapshotFacts, json.RawMessage, error) {
 	var obj map[string]json.RawMessage
 	var facts snapshotFacts
-	if json.Unmarshal(i.Snapshot, &obj) != nil || json.Unmarshal(obj["_synapse"], &facts) != nil || !facts.DataClass.Valid() || facts.Endpoint == "" || (facts.Provider != "jira-cloud" && facts.Provider != "jira-dc") || facts.MappingVersion != i.MappingVersion || facts.ConnectionRevision != i.ConnectionRevision || facts.CredentialRevision != i.CredentialRevision {
+	if json.Unmarshal(i.Snapshot, &obj) != nil || json.Unmarshal(obj["_synapse"], &facts) != nil || !facts.DataClass.Valid() || facts.Endpoint == "" || !facts.Provider.Valid() || facts.MappingVersion != i.MappingVersion || facts.ConnectionRevision != i.ConnectionRevision || facts.CredentialRevision != i.CredentialRevision {
 		return facts, nil, fmt.Errorf("%w: immutable ticket snapshot missing", shared.ErrValidation)
 	}
 	u, err := url.Parse(facts.Endpoint)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return facts, nil, shared.ErrValidation
+	}
+	if wire, native := obj["wire"]; native {
+		if i.Action != domain.Create || facts.Marker == nil || ticketMarkerDescriptorValid(*facts.Marker) != nil {
+			return facts, nil, shared.ErrValidation
+		}
+		unsignedWire, markerErr := removeTicketMarker(wire, *facts.Marker, i.Marker)
+		if markerErr != nil {
+			return facts, nil, markerErr
+		}
+		base := make(map[string]json.RawMessage, len(obj))
+		for key, value := range obj {
+			base[key] = value
+		}
+		base["wire"] = unsignedWire
+		raw, marshalErr := json.Marshal(base)
+		if marshalErr != nil || ticketDigest(raw) != i.PayloadDigest {
+			return facts, nil, fmt.Errorf("%w: ticket snapshot digest mismatch", shared.ErrConflict)
+		}
+		// The marker remains in the outbound native wire for uncertain-create
+		// recovery. unsignedWire was used only to verify the frozen digest.
+		return facts, wire, nil
+	}
+	if facts.Marker != nil {
 		return facts, nil, shared.ErrValidation
 	}
 	var fields map[string]json.RawMessage
@@ -456,7 +539,7 @@ func (w *Workflow) executionPreflight(ctx context.Context, i domain.Intent, fact
 	if err != nil {
 		return in, err
 	}
-	if err = w.validateSelections(m, meta); err != nil {
+	if err = w.validateSelections(m, meta, in.Provider); err != nil {
 		return in, err
 	}
 	return in, nil

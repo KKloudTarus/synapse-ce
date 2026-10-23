@@ -1,0 +1,19 @@
+{
+  "recorded_at_utc": "2026-10-20T13:42:41.916738+00:00",
+  "repository_head_at_capture": "d3c4698c0d9944d4791746b099343a021bb3aa7d",
+  "source": "https://github.com/pho-veteran/synapse-provider-sandbox/issues/1",
+  "action": "Clicked the native issue body Open finding HTTPS link, then authenticated on that origin using the existing masked local test-token field. No security warning was bypassed by the agent.",
+  "destination": "https://localhost:8445/engagements/8c3d4300291f2d684795da57442cab23/findings#finding-dbe69d1224433eaf402f52dcb404b3d3",
+  "expected_finding_id": "dbe69d1224433eaf402f52dcb404b3d3",
+  "observed_finding_title": "Synthetic finding: restricted integration acceptance",
+  "observed_engagement": "Provider acceptance sandbox",
+  "observed_expanded": true,
+  "observed_status": "Open",
+  "result": "pass",
+  "screenshot": "github-finding-link-arrival.png",
+  "runtime_images": {
+    "synapse-provider-live-web-1": "sha256:7fd5b75c3eaf328a32e12b77bd5a335dc0b41c74eaba59bd8d5936db741fa9a5",
+    "synapse-provider-live-synapse-api-1": "sha256:0b15c65d5c903b9483f394da0a3ca5ad49002b51247be5538bacae0ea55768b2"
+  },
+  "runtime_provenance": "Existing Docker full stack retained; API/worker input and binary hashes in servicenow-formatted-results.json. Capture is link-navigation acceptance, not a rebuild or rerun of all provider scenarios on the repository HEAD."
+}

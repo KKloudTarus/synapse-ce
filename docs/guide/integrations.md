@@ -32,6 +32,148 @@ Synapse verifies `X-Hub-Signature-256` over the exact raw body and durably dedup
 
 Fork pull requests are treated as untrusted source. Synapse does not resolve or present a source-control connector credential for their clone/fetch path and disables Maven, Gradle, npm, manifest-resolver, and Go dependency-graph command execution. Static source analysis and SBOM inspection continue without executing repository-controlled build/dependency commands.
 
+## Document publishing connections
+
+The Documentation group in **Settings → Integrations** lists only providers that
+advertise the `documents` capability. It uses the same tenant-scoped integration
+records, sealed write-only credentials, endpoint validation, permissions, audit
+trail, and PostgreSQL row-level security as the other integration groups. See
+[Governed document publishing](document-publishing.md) for release and
+unpublish APIs.
+
+- `google-drive` accepts only `https://www.googleapis.com` and a dedicated
+  service-owned My Drive parent folder. The configured group permission and owner
+  are proved before sensitive writes; shared drives are refused.
+- `sharepoint` and `onedrive` use the configured HTTPS SharePoint site origin as
+  the authority for a restricted Business folder. They require separate sealed
+  Microsoft Graph and SharePoint REST tokens, an exact reader group, and a service
+  custodian principal with the required SharePoint role proof.
+- `confluence-cloud` and `confluence-dc` retain their existing restricted-space
+  profiles.
+
+Document releases are durable, idempotent commands. The worker rechecks current
+tenant authority, destination configuration, release policy, legal hold, sharing
+proof, and credential/destination revisions before each outward write. Provider
+opaque revision tokens are compared exactly for Drive and SharePoint/OneDrive;
+reconciliation does not infer a changed body from a numeric version or a 404.
+Command leases and intent/progress revisions fence stale workers and concurrent
+republish or unpublish operations.
+Contract tests cover the profile boundaries. Selected personal Drive lifecycle cases
+have native evidence; Microsoft and broader failure acceptance remain open in the
+[acceptance ledger](../evidence/remaining-providers/live/README.md).
+
+## Ticket provider connections
+
+The Ticketing group in **Settings → Integrations** opens **Manage tickets** at
+`/settings/integrations/tickets`. It lists only connections with the `tickets`
+capability and provides loading, empty, provider-error, and permission-denied states.
+Tenant administrators and integration administrators can inspect ticket connections;
+tenant administrators create or change destination mappings. The mapping form discovers
+metadata through `GET /api/v1/integrations/{integrationID}/ticket-metadata` and only
+offers the provider's returned destinations, issue type, and visibility policy.
+
+Add the outbound providers from **Manage connections and credentials**:
+
+- `github-issues` requires an HTTPS forge host and an `owner/repository` value. It
+  reuses the tenant's SCM connector for that exact forge host; do not enter a second
+  token. Only private repositories with Issues enabled and sufficient repository access
+  can receive a finding ticket.
+- `gitlab-issues` requires an HTTPS forge host and a project path, including nested
+  namespaces. It also reuses the host's tenant SCM connector and creates confidential
+  issues only.
+- `azure-boards` requires a `https://dev.azure.com/{organization}/{project}` endpoint,
+  a work-item type, and a sealed PAT.
+- `servicenow` requires a SaaS instance endpoint, an `incident` or
+  `sn_vul_vulnerable_item` table, and a sealed API token.
+- `linear` requires `https://api.linear.app/graphql`, a team ID, and a sealed API token.
+
+Azure Boards renders the canonical message subset as safe HTML while building the
+preview's native JSON Patch. Paragraphs, line breaks, lists, emphasis and code are
+preserved; body-supplied HTML and links remain literal, with explicit URL forms
+defanged. Only separately supplied, validated HTTPS links become anchors. The
+rendered wire is frozen with the preview and is not rendered again during dispatch.
+This uses the existing email fragment renderer; email's layout and severity stay
+unchanged. Native Azure rendering acceptance still requires an authorized sandbox.
+
+ServiceNow identifies its authenticated principal through the standard Table API:
+`GET /api/now/table/sys_user` with the fixed query
+`sys_id=javascript:gs.getUserID()`, fields `sys_id`, and limit `2`. Exactly one
+32-character user ID is required. An empty, ambiguous, or malformed result fails
+closed; a username or display name is never substituted.
+
+Provision ServiceNow credentials for GET collection/record and POST collection on
+the selected ticket table, plus GET collection on `sys_user` for the authenticated
+user's own identity. The query is not an authorization boundary: enforce own-row
+read access independently with a Deny-Unless ACL for the dedicated machine user,
+preserving other callers' existing access. Do not grant user-directory writes.
+
+For OAuth, enable **Enforce Token Restrictions**, use a client-specific
+authentication profile and table- and method-specific API access policies, and
+preserve the endpoint's existing authentication profiles. A policy profile alone
+does not deny unlinked endpoints. On instances with Machine Identity Access
+Control, link the web-service-only machine user to exactly those policies and
+tables; leave child tables and SOAP disabled. Verify explicit authorization denials
+for other tables, resources and write methods with the actual token. An empty
+200 response is not proof of endpoint isolation. Do not change shared scope mappings
+or other clients to make this connection work. The tested personal instance uses
+client-specific Broadly scoped OAuth together with this machine boundary; never
+use Broadly scoped alone as proof of restricted access. Client Credentials also
+requires ServiceNow's documented instance property, not a Synapse environment variable.
+
+Field ACLs must permit every approved payload field during insert. ServiceNow can
+silently omit fields that lack write permission. The personal incident sandbox
+needed a parallel `incident.description` write Allow-If ACL with
+`UserIsAuthenticated` and a script requiring the exact machine user ID and
+`current.isNewRecord()`. It has no required roles and preserves the existing
+same-target ACL's Admin overrides value; existing native ACLs remain unchanged.
+Verify full description, summary and correlation readback after creating a
+synthetic record. Descriptions render the message subset as plain text: punctuation
+and literal hostile markup are preserved without Markdown backslashes, while
+server-built links remain separate. Keep existing-record update/delete methods denied; do not grant
+`itil`, `sn_incident_write` or admin merely to satisfy field access. This sandbox
+configuration proves the incident profile only; a vulnerability table needs its
+own policy, field-permission and native acceptance checks.
+
+GitHub's inbound `github` provider remains separate: it receives webhooks for source
+scanning and is not an outbound Issues connection. GitLab's inbound identity is also
+not reused as an outbound ticket provider. SCM credentials are tenant/host scoped and
+remain the only credential source for GitHub Issues and GitLab Issues. Azure Boards,
+ServiceNow, and Linear keep their supplied credential sealed and write-only.
+
+Every ticket is built from a required preview. For native providers, the exact vendor
+wire request is frozen with the preview digest, then Submit adds the durable correlation
+marker. An uncertain create is reconciled before a retry. Native mappings intentionally
+do not expose grouping, transitions, labels, priority maps, components, or custom Jira
+fields because those controls are unsupported by these serializers. Their native privacy
+policy has no waiver path.
+
+Ticket status polling and recovery create reviewable proposals only; they do not mutate
+finding triage or status automatically.
+
+Inbound ticket polling claims due targets atomically by tenant and reserves their
+next poll before provider I/O. A successful target has a one-minute minimum
+interval; unavailable targets wait five minutes. A 429 waits at least five minutes
+and never shortens a longer provider `Retry-After`, including a refusal during
+integration-identity lookup. Other targets on the same integration are skipped
+for that pass after a throttle. Deadlines survive restarts and stale completions
+cannot shorten a newer claim or delay. This is per-target scheduling, not an
+integration-wide quota limiter: previously unclaimed targets can still issue a
+request on a later pass. Size the target set against the provider's quota, allowing
+for privacy/access preflights, identity reads, discovery and outward writes.
+A GitHub target normally requires both a repository preflight and the issue read.
+
+Apply the provider retry-scheduling migration before upgrading APIs and workers,
+and upgrade every worker before relying on the interval or throttle guarantees.
+Older binaries do not observe the new due columns. Disable affected integrations
+and drain workers before rollback; the migration refuses to remove future poll
+claims or provider-directed deferrals. Prefer a forward repair when a delay is
+still active.
+
+Connection credentials, URLs with query data,
+and provider response bodies are not retained in ticket audit records. Selected
+personal ticket sandbox cases have [native evidence](../evidence/remaining-providers/live/README.md);
+remaining acceptance is listed separately and is not represented as passed.
+
 ## Architecture
 
 ```text
