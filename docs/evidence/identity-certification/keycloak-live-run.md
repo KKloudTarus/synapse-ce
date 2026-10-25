@@ -140,6 +140,47 @@ hostname decision remains separate; no silent issuer rebinding is allowed.
 
 Other required issue #1517 cells remain open, including cross/custom-base-path realm boundaries,
 approved pairwise enrollment/linking, client-secret rotation and the complete shared-flow
-matrix. Historical enrollment/outage controls are retained locally but are not all mapped into
-this worksheet yet. The owner's theme waiver applies; no theme matrix is claimed. This incremental
+matrix. Historical enrollment and local logout are mapped below; the full Keycloak outage and
+recovery cells remain open. The owner's theme waiver applies; no theme matrix is claimed. This incremental
 run is not a declaration that #1517 is ready to close.
+
+## Enrollment and local session lifecycle
+
+The earlier 25 October 2026 run at 09:00–09:30 UTC used the shared Auth0 source candidate based
+on `27bd3c96`, with its recorded source delta. Its API image was
+`sha256:4707488f9ef6576264ad2e1d0b0c9f446deea8033bbafe6135b3f38c00ff68ef` and web image was
+`sha256:095c61d7e5b97747abea4a2092966d179b47adb72faeb3a68e42975ae88b571e`.
+These are historical images, separate from the current runtime identified at the top of this file.
+The snapshot files have no embedded image ID; the retained source provenance, promotion and
+pending-activation records bind that earlier runtime. This does not certify the unmodified
+Keycloak PR executable head.
+
+Native Settings / Authentication Test and Activate enabled revision 1/version 2/epoch 1. The real
+Test at 09:00:25 UTC expired exactly one hour later. Existing Auth0 connections and secondary
+Required policy remained unchanged. Before enrollment, ordinary provider authentication for the
+unapproved synthetic user reached a useful denial. Persistence stayed at three persons, four
+memberships and four authenticators, with no Keycloak membership or session.
+
+After the explicitly approved readonly invitation, that first Keycloak profile user appeared as
+one person, one secondary readonly membership and one approved authenticator. Local logout left
+no active session for that person. Ordinary login without an invitation, followed by Profile
+reauthentication, returned to the same person and readonly role. The second synthetic user then
+accepted its own approved readonly invitation and completed ordinary login/reauthentication.
+The run ended at five persons, six memberships and six authenticators. Earlier memberships,
+Auth0 connections and the Required policy were preserved.
+
+The contemporaneous functional summary records invitation acceptance; the persistence snapshots
+do not contain invitation-consumption state. Consumed codes were not replayed. Reauthentication
+reused recent provider SSO; this run does not claim a forced password prompt or termination of the
+provider session. Existing signed-in same-person enrollment, signed verified-email variants and
+complete disable/recovery/rollback remain separate required cells.
+
+[`keycloak-enrollment-run.json`](keycloak-enrollment-run.json) contains the reduced observations,
+source/image binding, raw-observation hashes and limits. No invitation code, credential, token or
+session identifier is published.
+
+![Unknown Keycloak identity denied before enrollment](keycloak-unknown-denied.png)
+
+![First readonly user's approved Keycloak identity](keycloak-unknown-enrolled-profile.png)
+
+![Second readonly user returns after login and reauthentication](keycloak-approved-repeat-reauth.png)
