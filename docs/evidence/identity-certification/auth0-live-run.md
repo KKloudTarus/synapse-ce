@@ -152,14 +152,52 @@ other browser engines and screen-reader behavior were not independently exercise
 Sources: `identity-invitation-functional.json`, `identity-invitation-final-checks.json`,
 `identity-invitation-provenance.json`, and `identity-invitation-promotion.json`.
 
+## Mailbox fallback and delivery retry
+
+An Auth0 database user with an unverified email accepted an explicitly approved readonly
+invitation into the first tenant while already signed in readonly in the second tenant. Both
+memberships retained the same existing person. This exercises the subject-bound mailbox fallback;
+no provider claim was treated as verified mailbox ownership.
+
+Stopping the private Mailpit container caused actual SMTP failure. No message arrived and no
+membership or authenticator was added. After Mailpit returned, retrying that same invitation
+exposed a duplicate-challenge constraint error. The repair replaces an unused challenge only
+while its current invitation remains pending and unexpired. It replaces the digest, prospective
+person and expiry together; consumed proofs and inactive invitations cannot be renewed.
+
+The next hosted attempt delivered mail but exposed a browser continuation failure: ordinary
+session discovery rotated the initiating cookie before mailbox completion could validate its
+exact source binding. The repaired mailbox screen defers that discovery, retains its nonsecret
+continuation marker across reload, and resumes ordinary restoration only after completion or
+Cancel. The server's exact source binding remains unchanged. Rotation in another tab still
+fails closed and requires restarting the invitation.
+
+The final browser run reloaded the mailbox page, refused an earlier delivered code before its
+expiry, and accepted the newest code from a real local Mailpit receipt. Counts changed from five
+persons/six memberships/seven authenticators to five/seven/eight. Both memberships for that
+person remained readonly. Connection revisions, policies and other memberships were unchanged.
+The consumed invitation was refused on reuse. Local logout revoked the new session; ordinary
+Auth0 password login then succeeded without another invitation. A marker without a pending proof
+showed an unavailable-verification message, and Cancel restored the existing session.
+
+Mailpit was private and had no published port; no email went to an external inbox. The SMTP
+outage occurred before the repair, so the new unavailable-error classification is separately
+covered by a service regression test. This run does not prove an expired invitation or Gmail
+delivery. Password and one-use proofs are encrypted locally and omitted from published evidence.
+
+Sources: `auth0-mailbox-flow-functional.json`, `identity-mailbox-retry-design.json`,
+`identity-mailbox-retry-focused.log`, and `identity-mailbox-session-final.log`. The API candidate
+was `sha256:5c296e93079bfb543f1837e7e49ad9b76c3b93cb40fa2171c64b1cd409913117`; the web candidate
+was `sha256:ebfddcd30ad5ef66adf6494dbd8ba5cecb06afa05614ede261144782c126fb48`.
+
 ## Remaining acceptance
 
 - Isolated stale-source-age and provider-outage cases during additive Auth0 linking. Success,
   session rotation, ordinary later login, owned-subject denial, provider cancellation and a
   missing/revoked source callback now pass; the broader outage drill did not target linking.
-- Enrollment mailbox challenge/fallback, unavailable sender, and an actual expired invitation.
-  Successful direct admissions imply the strict verified-email branch, but raw `email_verified`
-  claims were not captured.
+- An actual expired invitation. Mailbox fallback, unavailable SMTP sender and recovery through
+  the same invitation now pass. Successful direct admissions imply the strict verified-email
+  branch, but raw `email_verified` claims were not captured.
 - Pending destination callback versus connection revision/disable changes.
 - A different Auth0 issuer/custom domain and actual subject remap/email change. The current
   Custom Domains screen requires adding a credit card, including for its free-domain option;

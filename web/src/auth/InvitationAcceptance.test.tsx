@@ -8,7 +8,7 @@ const retry = vi.fn(async () => {})
 const mockedAuth = vi.mocked(useAuth)
 
 function auth(): ReturnType<typeof useAuth> {
-  return { phase: 'unauthenticated', aup: null, currentUser: null, error: null, errorRequestId: null, canRetry: false, retrying: false, connecting: false, oidcAvailable: true, connect: async () => {}, acceptAup: async () => {}, logout: async () => {}, retry, completeOrganizationSwitch: async () => {} }
+  return { phase: 'unauthenticated', aup: null, currentUser: null, error: null, errorRequestId: null, canRetry: false, retrying: false, connecting: false, oidcAvailable: true, connect: async () => {}, acceptAup: async () => {}, logout: async () => {}, retry, completeMailboxContinuation: retry, completeOrganizationSwitch: async () => {} }
 }
 
 describe('InvitationAcceptance', () => {
@@ -36,7 +36,7 @@ describe('InvitationAcceptance', () => {
     respond({ csrf_token: 'replacement-csrf' })
     render(<InvitationAcceptance />)
     await screen.findByRole('heading', { name: 'Verify your mailbox' })
-    expect(window.location.search).toBe('')
+    expect(window.location.search).toContain('mailbox_verification_required')
     fireEvent.change(screen.getByLabelText('Mailbox verification code'), { target: { value: 'mailbox-code' } })
     fireEvent.click(screen.getByRole('button', { name: 'Verify mailbox' }))
     await waitFor(() => expect(retry).toHaveBeenCalledTimes(1))

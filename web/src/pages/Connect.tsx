@@ -15,6 +15,8 @@ export function Connect() {
   const [signingOut, setSigningOut] = useState(false)
   const operatorEntry = new URLSearchParams(window.location.search).get('operator') === '1'
 
+  if (phase === 'mailbox') return <AuthShell><Brand /><Panel><InvitationAcceptance /></Panel></AuthShell>
+
   if (phase === 'connecting') {
     return (
       <AuthShell>

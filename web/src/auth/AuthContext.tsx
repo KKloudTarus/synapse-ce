@@ -15,7 +15,7 @@ import type { AupStatus, CurrentUser } from '../lib/types'
 // The development/automation bearer token is kept in sessionStorage so it dies with the
 // browser tab instead of persisting across restarts for later XSS to read.
 const TOKEN_KEY = 'synapse.token'
-type Phase = 'connecting' | 'unauthenticated' | 'need-aup' | 'ready'
+type Phase = 'connecting' | 'mailbox' | 'unauthenticated' | 'need-aup' | 'ready'
 type AuthMethod = 'session' | 'token'
 
 const INVALID_TOKEN = 'Invalid API token.'
@@ -45,6 +45,7 @@ interface AuthState {
    * visible identity, and restores the authenticated state for the destination tenant.
    */
   completeOrganizationSwitch: (csrfToken: string) => Promise<void>
+  completeMailboxContinuation: () => Promise<void>
 }
 
 const Ctx = createContext<AuthState | null>(null)
@@ -105,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { message: reason === 'access_denied' ? ACCESS_DENIED : SIGN_IN_FAILED, requestId: null, canRetry: false }
   })
   const callbackFailure = useRef(failure)
+  const mailboxContinuation = useRef(readAuthErrorParam() === 'mailbox_verification_required')
   const [connecting, setConnecting] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [oidcAvailable, setOidcAvailable] = useState(true)
@@ -196,6 +198,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // is discarded; a dependency failure keeps it and offers Retry.
   const restore = useCallback(async () => {
     const gen = ++generation.current
+    // Discovery rotates the cookie that an invitation proof binds exactly. Hold
+    // restoration until mailbox completion or cancellation, including generic retries.
+    if (mailboxContinuation.current) { setPhase('mailbox'); return }
     const current = () => gen === generation.current
     setApiToken('')
     setCSRFToken('')
@@ -280,6 +285,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRetrying(false)
     }
   }, [restore])
+
+  const completeMailboxContinuation = useCallback(async () => {
+    mailboxContinuation.current = false
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('auth_error') === 'mailbox_verification_required') {
+      url.searchParams.delete('auth_error')
+      window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash)
+    }
+    setPhase('connecting')
+    await retry()
+  }, [retry])
 
   const completeOrganizationSwitch = useCallback(async (csrfToken: string) => {
     callbackFailure.current = null
@@ -430,8 +446,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const canRetry = failure?.canRetry ?? false
 
   const value = useMemo(
-    () => ({ phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch }),
-    [phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch],
+    () => ({ phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch, completeMailboxContinuation }),
+    [phase, aup, currentUser, error, errorRequestId, canRetry, retrying, connecting, oidcAvailable, connect, acceptAup, logout, retry, completeOrganizationSwitch, completeMailboxContinuation],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

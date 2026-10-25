@@ -124,7 +124,20 @@ func (s *IdentityFoundationStore) CreateMailboxChallenge(ctx context.Context, te
 		return shared.ErrValidation
 	}
 	return s.withIdentityTenant(ctx, tenant, func(tx pgx.Tx) error {
-		ct, err := tx.Exec(ctx, `INSERT INTO identity_invitation_challenges(tenant_id,invitation_id,invitation_version,subject,prospective_person_id,challenge_digest,expires_at) SELECT $1,$2,$3,$4,$5,$6,$7 WHERE EXISTS(SELECT 1 FROM identity_invitations WHERE tenant_id=$1 AND id=$2 AND version=$3 AND state='pending' AND expires_at>$8)`, tenant.String(), invitation.String(), version, subject, person.String(), digest, expires, now)
+		// Match admission's invitation-before-challenge lock order. A restart may
+		// replace an undelivered proof, but cannot race past acceptance or revocation.
+		var eligible bool
+		err := tx.QueryRow(ctx, `SELECT true FROM identity_invitations WHERE tenant_id=$1 AND id=$2 AND version=$3 AND state='pending' AND expires_at>$4 FOR UPDATE`, tenant.String(), invitation.String(), version, now).Scan(&eligible)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return shared.ErrForbidden
+		}
+		if err != nil {
+			return err
+		}
+		ct, err := tx.Exec(ctx, `INSERT INTO identity_invitation_challenges(tenant_id,invitation_id,invitation_version,subject,prospective_person_id,challenge_digest,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)
+ ON CONFLICT (tenant_id,invitation_id,invitation_version,subject) DO UPDATE SET
+ prospective_person_id=EXCLUDED.prospective_person_id,challenge_digest=EXCLUDED.challenge_digest,expires_at=EXCLUDED.expires_at
+ WHERE identity_invitation_challenges.consumed_at IS NULL AND identity_invitation_challenges.challenge_digest<>EXCLUDED.challenge_digest`, tenant.String(), invitation.String(), version, subject, person.String(), digest, expires)
 		if err != nil {
 			return err
 		}
