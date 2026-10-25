@@ -95,13 +95,42 @@ and optional scopes, deleting the temporary scope and retrying produced a new ca
 revisions remained unchanged, without API restart. The restore timer is inactive.
 
 Missing authentication time is inferred from the isolated real-provider mapper omission and
-callback denial; raw callback JWTs were not retained. This run does not claim stale signed proof
-or a new password prompt. The previous fresh-password run remains the separate positive control.
+callback denial; raw callback JWTs were not retained. This omission run does not claim stale proof
+or a new password prompt; the separate stale-time control below covers that condition. The previous fresh-password run remains the separate positive control.
 See [the nonsecret evidence and artifact hashes](keycloak-missing-auth-time.json).
 
 ![Missing authentication-time mapper denied without losing source access](keycloak-missing-time-denied.png)
 
 ![Restored authentication-time mapper permits the readonly destination](keycloak-missing-time-restored.png)
+
+## Stale authentication time and retry
+
+At 14:23 UTC, the synthetic person obtained a new Auth0 password session in default readonly.
+A guarded client-local Keycloak scope replaced only the ordinary authentication-time mapper with
+an official hardcoded-claim mapper. It set `auth_time` to the JSON `long` value for 14:03:46 UTC.
+The original subject mapper and all other scopes remained. The unsigned admin example showed the
+integer old value with the same subject, issuer, audience, client, email and boolean verification.
+The shared `basic` scope, client secret, issuer, Synapse clock and session records were untouched.
+
+A real Keycloak password reauthentication then completed, but its destination callback was denied
+with the existing-sign-in-active message. At the post-denial observation, the mapped timestamp was
+1,267 seconds old, exceeding the 900-second freshness limit. The Auth0 source authentication was
+still recent. No new secondary session appeared and the source Dashboard worked after reload.
+After restoring the exact original default/optional scopes and deleting the temporary scope, a new
+ordinary callback reached the same secondary readonly person. The persisted authentication time
+was the real recent Keycloak password time, rather than the controlled old value. Roles, policies,
+connection revisions and five persons/seven memberships/eight authenticators remained unchanged;
+the API did not restart and the restore timer is inactive.
+
+This is a synthetic negative provider fixture: no natural fifteen-minute wait or old real-user
+authentication time is claimed. The callback claim value is inferred from the isolated real
+Keycloak mapper and actual denial; raw callback JWTs were not retained. The fresh password
+procedure alone did not admit a token configured with stale proof. See
+[the nonsecret fixture, session observations and capture hashes](keycloak-stale-auth-time.json).
+
+![Stale authentication-time callback denied with source retained](keycloak-stale-time-denied.png)
+
+![Ordinary mapper restored and same readonly destination recovered](keycloak-stale-time-restored.png)
 
 ## Remaining certification
 
