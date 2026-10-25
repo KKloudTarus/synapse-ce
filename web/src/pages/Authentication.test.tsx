@@ -195,6 +195,16 @@ describe('Authentication', () => {
     await waitFor(() => expect(mockedIdentityApi.activateConnection).toHaveBeenCalledWith('connection-a', 3, 7, undefined))
   })
 
+  it('shows an active revision separately from its untested pending draft', async () => {
+    mockedIdentityApi.connections.mockResolvedValue([{
+      id: 'connection-a', displayName: 'Primary identity', issuer: 'https://issuer.example', enabled: true,
+      revision: 1, draftRevision: 2, version: 7, testPassed: false,
+    }])
+    render(<Authentication enabled />)
+
+    expect(await screen.findByText('Active · revision 1 · draft 2 · not tested')).toBeInTheDocument()
+  })
+
   it('saves an exact optional Auth0 organization ID in a connection draft', async () => {
     mockedIdentityApi.draftConnection.mockResolvedValue(undefined)
     render(<Authentication enabled />)
@@ -279,12 +289,37 @@ describe('Authentication', () => {
     expect(screen.getByLabelText('Auth0 organization ID (optional)')).toHaveProperty('readOnly', true)
   })
 
-  it('does not offer legacy configuration controls for a native connection and clears a canceled secret', async () => {
+  it('updates a native connection without changing its trust and clears a canceled secret', async () => {
+    mockedIdentityApi.connections.mockResolvedValue([{
+      id: 'native-connection',
+      displayName: 'Primary identity',
+      issuer: 'https://issuer.example',
+      enabled: true,
+      revision: 1,
+      draftRevision: 1,
+      version: 1,
+      testPassed: true,
+      auth0OrganizationId: 'org_CaseSensitive',
+      clientId: 'native-client',
+    }])
     render(<Authentication enabled />)
     await screen.findByText('Primary identity')
     expect(screen.queryByRole('button', { name: 'Configure' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Update secret' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Update connection' }))
+    expect(screen.getByRole('heading', { name: 'Update connection' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Issuer URL')).toHaveProperty('readOnly', true)
+    expect(screen.getByLabelText('Client ID')).toHaveProperty('readOnly', true)
+    expect(screen.getByLabelText('Auth0 organization ID (optional)')).toHaveProperty('readOnly', true)
+    expect(screen.getByLabelText('Client secret')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'discard-me' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
+    expect(screen.getByRole('heading', { name: 'Create connection draft' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Client secret')).toHaveValue('')
+  })
+
+  it('clears a canceled legacy connection secret', async () => {
     mockedIdentityApi.connections.mockResolvedValue([{
       id: 'legacy-connection',
       displayName: 'Imported identity',
@@ -297,6 +332,8 @@ describe('Authentication', () => {
       configurationPending: true,
       clientId: '',
     }])
+    render(<Authentication enabled />)
+    await screen.findByRole('button', { name: 'Configure' })
     fireEvent.click(screen.getByRole('button', { name: 'Rehearse recovery' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Configure' }))
     fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'discard-me' } })
@@ -304,6 +341,45 @@ describe('Authentication', () => {
 
     expect(screen.getByRole('heading', { name: 'Create connection draft' })).toBeInTheDocument()
     expect(screen.getByLabelText('Client secret')).toHaveValue('')
+  })
+
+  it('saves a native secret update against the selected version without activating it', async () => {
+    mockedIdentityApi.connections.mockResolvedValue([{
+      id: 'native-connection', displayName: 'Primary identity', issuer: 'https://issuer.example', enabled: true,
+      revision: 1, draftRevision: 1, version: 7, testPassed: true, auth0OrganizationId: 'org_CaseSensitive', clientId: 'native-client',
+    }])
+    mockedIdentityApi.draftConnection.mockResolvedValue(undefined)
+    render(<Authentication enabled />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update connection' }))
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Primary identity rotated' } })
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'replacement-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save configuration' }))
+
+    await waitFor(() => expect(mockedIdentityApi.draftConnection).toHaveBeenCalledWith({
+      id: 'native-connection', version: 7, displayName: 'Primary identity rotated', issuer: 'https://issuer.example',
+      clientId: 'native-client', clientSecret: 'replacement-secret', auth0OrganizationId: 'org_CaseSensitive',
+    }, undefined))
+    expect(mockedIdentityApi.activateConnection).not.toHaveBeenCalled()
+  })
+
+  it('clears a stale selected native secret update and reloads the current connection', async () => {
+    const native = {
+      id: 'native-connection', displayName: 'Primary identity', issuer: 'https://issuer.example', enabled: true,
+      revision: 1, draftRevision: 1, version: 7, testPassed: true, auth0OrganizationId: 'org_CaseSensitive', clientId: 'native-client',
+    }
+    mockedIdentityApi.connections.mockResolvedValue([native])
+    mockedIdentityApi.draftConnection.mockRejectedValueOnce(new ApiError(409, 'stale configuration'))
+    render(<Authentication enabled />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Update connection' }))
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'discard-me' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save configuration' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('latest settings have been loaded')
+    expect(screen.getByRole('heading', { name: 'Create connection draft' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Client secret')).toHaveValue('')
+    await waitFor(() => expect(mockedIdentityApi.connections).toHaveBeenCalledTimes(2))
   })
 
   it('discards a stale selected legacy configuration after a conflict and requires reselect', async () => {
@@ -371,7 +447,7 @@ describe('Authentication', () => {
 
     completeRefresh([{ ...oldConnection, enabled: true, draftRevision: 3, version: 3, configurationPending: undefined, clientId: undefined }])
 
-    await waitFor(() => expect(screen.getByText(/Active · revision 3/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Active · revision 1 · draft 3/)).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'Create connection draft' })).toBeInTheDocument()
     expect(screen.getByLabelText('Client secret')).toHaveValue('')
     expect(screen.queryByRole('button', { name: 'Update secret' })).not.toBeInTheDocument()

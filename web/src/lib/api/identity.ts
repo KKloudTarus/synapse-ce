@@ -14,9 +14,8 @@ export interface EnterpriseConnection {
   version: number
   testPassed: boolean
   auth0OrganizationId?: string
-  // This administrative-only marker identifies a legacy imported scaffold that can
-  // receive its first configuration. The server exposes its client ID only while
-  // this marker is true, and never returns a client secret.
+  // The administrative connection list may include a client ID so an administrator
+  // can prepare the next revision. It never includes a client secret.
   configurationPending?: boolean
   clientId?: string
 }
@@ -85,11 +84,11 @@ function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null
 }
 
-function connectionFromWire(value: unknown): EnterpriseConnection {
+function connectionFromWire(value: unknown, includeClientID = false): EnterpriseConnection {
   const connection = asRecord(value)
   const auth0OrganizationId = stringValue(connection.auth0_organization_id)
   const configurationPending = connection.configuration_pending === true
-  const clientId = configurationPending ? stringValue(connection.client_id) : ''
+  const clientId = includeClientID ? stringValue(connection.client_id) : ''
   return {
     id: stringValue(connection.id),
     displayName: stringValue(connection.display_name) || stringValue(connection.name) || stringValue(connection.id),
@@ -100,7 +99,7 @@ function connectionFromWire(value: unknown): EnterpriseConnection {
     version: numberValue(connection.version),
     testPassed: connection.test_passed === true,
     ...(auth0OrganizationId ? { auth0OrganizationId } : {}),
-    ...(configurationPending ? { configurationPending: true, clientId } : {}),
+    ...(configurationPending ? { configurationPending: true, ...(includeClientID ? { clientId } : {}) } : clientId ? { clientId } : {}),
   }
 }
 
@@ -160,7 +159,7 @@ export async function identityAuthRequest(path: string, init?: RequestInit): Pro
 export const identityApi = {
   async context(signal?: AbortSignal): Promise<EnterpriseContext> {
     const response = asRecord(await identityAuthRequest('/api/auth/enterprise/context', { signal }))
-    const connections = Array.isArray(response.connections) ? response.connections.map(connectionFromWire) : []
+    const connections = Array.isArray(response.connections) ? response.connections.map((connection) => connectionFromWire(connection)) : []
     return {
       enabled: response.enabled === true,
       tenantId: stringValue(response.tenant_id),
@@ -179,7 +178,7 @@ export const identityApi = {
 
   async connections(signal?: AbortSignal): Promise<EnterpriseConnection[]> {
     const response = asRecord(await request('/identity/connections', { signal }))
-    return Array.isArray(response.connections) ? response.connections.map(connectionFromWire) : []
+    return Array.isArray(response.connections) ? response.connections.map((connection) => connectionFromWire(connection, true)) : []
   },
 
   async bootstrap(): Promise<string> {

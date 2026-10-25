@@ -76,7 +76,7 @@ describe('identityApi', () => {
     }])
   })
 
-  it('maps legacy configuration metadata without exposing a client ID for normal connections', async () => {
+  it('maps an administrative native client ID only for connection updates', async () => {
     respond({
       connections: [
         {
@@ -86,7 +86,7 @@ describe('identityApi', () => {
         },
         {
           id: 'native', display_name: 'Native identity', issuer: 'https://native.example', enabled: false,
-          revision: 1, draft_revision: 1, version: 1, test_passed: false, client_id: 'must-not-project',
+        revision: 1, draft_revision: 1, version: 1, test_passed: false, client_id: 'native-client',
         },
       ],
     })
@@ -100,8 +100,22 @@ describe('identityApi', () => {
       {
         id: 'native', displayName: 'Native identity', issuer: 'https://native.example', enabled: false,
         revision: 1, draftRevision: 1, version: 1, testPassed: false,
+        clientId: 'native-client',
       },
     ])
+  })
+
+  it('does not retain connection settings from the public sign-in context', async () => {
+    respond({
+      enabled: true,
+      tenant_id: 'tenant-a',
+      requirement: 'required',
+      connections: [{ id: 'connection-a', name: 'Primary identity', client_id: 'must-not-project', configuration_pending: true }],
+    })
+
+    await expect(identityApi.context()).resolves.toEqual(expect.objectContaining({
+      connections: [expect.not.objectContaining({ clientId: expect.anything() })],
+    }))
   })
 
   it('sends the display name and bootstrap proof without persisting either', async () => {

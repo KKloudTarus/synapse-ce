@@ -137,8 +137,9 @@ func (rt *Router) enterpriseConnections(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"connections": projected})
 }
 
-// enterpriseConnectionProjection is the secret-free administrative response. Settings remain
-// internal; only the bounded organization restriction is projected for operator visibility.
+// enterpriseConnectionProjection is the secret-free administrative response. A client ID is
+// projected only to authenticated administrators so they can prepare a replacement secret;
+// client secrets remain internal.
 type enterpriseConnectionProjection struct {
 	ID                   shared.ID `json:"id"`
 	DisplayName          string    `json:"display_name"`
@@ -157,6 +158,8 @@ func enterpriseConnectionView(connection ports.IdentityConnection) enterpriseCon
 	view := enterpriseConnectionProjection{ID: connection.ID, DisplayName: connection.DisplayName, Issuer: connection.Issuer, Enabled: connection.Enabled, Revision: connection.Revision, DraftRevision: connection.DraftRevision, Version: connection.Version, TestPassed: connection.TestPassed, Auth0OrganizationID: connection.Settings.Auth0OrganizationID, ConfigurationPending: connection.ConfigurationPending}
 	if connection.ConfigurationPending {
 		view.ClientID = connection.ConfigurationClientID
+	} else {
+		view.ClientID = connection.Settings.ClientID
 	}
 	return view
 }

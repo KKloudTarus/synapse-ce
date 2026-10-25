@@ -248,9 +248,54 @@ Source: `auth0-invitation-expiry-live.json`, with immutable hashes of the timing
 control and restoration observations. The preserved fixture and encrypted one-use codes are
 local evidence; they are not reusable setup credentials.
 
+## Pending destination callback changes
+
+The native administrator screen now offers Update connection for an existing configured
+connection. It keeps issuer, client ID and organization trust read-only, starts with an empty
+secret, and saves against the selected connection version. Saving appends a draft without
+activating it. Cancel, successful save, a stale-version conflict and authoritative reload clear
+the secret. Active and pending draft revisions are shown separately.
+
+A real Auth0 administrator saved the retained secret unchanged, tested draft 2 through hosted
+Auth0 and left revision 1 active. A second user began a default-readonly to secondary-member
+switch at 12:58:25 UTC. While Auth0 consent was pending, an independent restricted recovery
+session activated revision 2. Activation consumed the old transaction; completing its real
+provider callback was denied while the source readonly session remained usable. Retrying through
+revision 2 reached the secondary Dashboard with the same person and member role.
+
+A separate run used the existing person linked to Auth0 and Keycloak. Its readonly source session
+began a Keycloak destination switch at 13:06:47 UTC. The recovery operator disabled that connection
+before the password callback. The callback was refused and the default readonly session remained
+usable. Reactivating the same tested Keycloak revision and retrying admitted that same person
+readonly in the secondary tenant. Auth0 stayed enabled and Required policy was never relaxed.
+
+All snapshots retained five persons, seven memberships, eight authenticators, the existing roles
+and policies. The recovery alert reached private Mailpit; the recovery session was signed out.
+The independent operator used a temporary API replica with the exact localhost public origin,
+sharing the durable database and existing credentials. This preserved Origin/CSRF validation and
+used the existing trusted loopback listener. The replica was removed, original API/web images
+and nginx configuration restored, and trusted API context verified after the drill. No cloud
+resource, host port, external email or billing was added.
+
+An initial save with naturally expired administrator proof was refused before a fresh hosted
+reauthentication allowed it. A Keycloak browser network-change error recovered through ordinary
+reload. Neither precondition is counted as a successful callback race. Resaving the retained
+Auth0 secret is not provider client-secret rotation.
+
+The final API binary was identical to the first tested candidate; the final web build corrected
+the active/draft label observed during the first save. Focused tests, Go HTTP API tests/vet,
+TypeScript, targeted ESLint and both builds passed. The bounded web suite passed 215 files and
+1,533 tests before the final label edit; its separate 26-test suite, typecheck and lint then passed.
+The earlier unbounded resource-related timeout remains in local evidence. Functional
+proof preceded independent security, frontend and integration acceptance review.
+
+Source: `native-connection-revision-functional.json`, binding the observations and screenshots
+by SHA-256, and `native-connection-revision-final-images.json`, binding the six changed source
+files to the tested API/web images. This closes the pending destination revision/disable race
+cell, not the remaining provider lifecycle cells below.
+
 ## Remaining acceptance
 
-- Pending destination callback versus connection revision/disable changes.
 - A different Auth0 issuer/custom domain and actual subject remap/email change. The current
   Custom Domains screen requires adding a credit card, including for its free-domain option;
   the no-card constraint was preserved and this hosted case remains unproved.

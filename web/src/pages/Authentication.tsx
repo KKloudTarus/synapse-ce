@@ -20,7 +20,7 @@ type PendingAction =
   | { kind: 'disable'; connection: EnterpriseConnection }
   | null
 
-type LegacyConfigurationSelection = Pick<EnterpriseConnection, 'id' | 'version' | 'issuer' | 'auth0OrganizationId' | 'clientId'>
+type ConnectionConfigurationSelection = Pick<EnterpriseConnection, 'id' | 'version' | 'issuer' | 'auth0OrganizationId' | 'clientId'> & { legacy: boolean }
 
 const emptyDraft: ConnectionDraft = { displayName: '', issuer: '', clientId: '', clientSecret: '', auth0OrganizationId: '' }
 
@@ -49,8 +49,8 @@ export function Authentication({ enabled }: AuthenticationProps) {
   const [draft, setDraft] = useState<ConnectionDraft>(emptyDraft)
   // This is deliberately a snapshot of the row the administrator selected. A later
   // list response cannot silently move a secret submission to a newer version.
-  const [legacyConfiguration, setLegacyConfiguration] = useState<LegacyConfigurationSelection | null>(null)
-  const legacyConfigurationRef = useRef<LegacyConfigurationSelection | null>(null)
+  const [connectionConfiguration, setConnectionConfiguration] = useState<ConnectionConfigurationSelection | null>(null)
+  const connectionConfigurationRef = useRef<ConnectionConfigurationSelection | null>(null)
   const [membershipId, setMembershipId] = useState('')
   const [personId, setPersonId] = useState('')
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null)
@@ -67,8 +67,8 @@ export function Authentication({ enabled }: AuthenticationProps) {
   const policyEdits = useRef(0)
 
   const load = useCallback(async (clearError = true) => {
-    const legacyConfigurationAtStart = legacyConfigurationRef.current
-    if (legacyConfigurationRef.current) clearLegacyConfiguration()
+    const connectionConfigurationAtStart = connectionConfigurationRef.current
+    if (connectionConfigurationRef.current) clearConnectionConfiguration()
     loadController.current?.abort()
     const requestGeneration = ++generation.current
     const controller = new AbortController()
@@ -98,7 +98,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
         setConnections(value)
         // The list may have changed while an old row remained visible during this read.
         // Never retain a secret editor against that later authoritative version.
-        if (legacyConfigurationRef.current && legacyConfigurationRef.current !== legacyConfigurationAtStart) clearLegacyConfiguration()
+        if (connectionConfigurationRef.current && connectionConfigurationRef.current !== connectionConfigurationAtStart) clearConnectionConfiguration()
       })
       .catch(report)
       .finally(settled)
@@ -225,7 +225,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
     }, 'Recovery code created. Copy it now; it will not be shown again.', false)
   }
 
-  function selectLegacyConfiguration(connection: EnterpriseConnection) {
+  function selectConnectionConfiguration(connection: EnterpriseConnection) {
     setError(null)
     setNotice(null)
     const selected = {
@@ -234,9 +234,10 @@ export function Authentication({ enabled }: AuthenticationProps) {
       issuer: connection.issuer,
       auth0OrganizationId: connection.auth0OrganizationId,
       clientId: connection.clientId,
+      legacy: connection.configurationPending === true,
     }
-    legacyConfigurationRef.current = selected
-    setLegacyConfiguration(selected)
+    connectionConfigurationRef.current = selected
+    setConnectionConfiguration(selected)
     setDraft({
       displayName: connection.displayName,
       issuer: connection.issuer,
@@ -246,16 +247,16 @@ export function Authentication({ enabled }: AuthenticationProps) {
     })
   }
 
-  function clearLegacyConfiguration() {
-    legacyConfigurationRef.current = null
-    setLegacyConfiguration(null)
+  function clearConnectionConfiguration() {
+    connectionConfigurationRef.current = null
+    setConnectionConfiguration(null)
     setDraft(emptyDraft)
   }
 
   async function saveConnectionDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (saving) return
-    const selected = legacyConfiguration
+    const selected = connectionConfiguration
     const submitted = selected
       ? { ...draft, id: selected.id, version: selected.version }
       : draft
@@ -264,8 +265,8 @@ export function Authentication({ enabled }: AuthenticationProps) {
     setNotice(null)
     try {
       await identityApi.draftConnection(submitted, bootstrapProof ?? undefined)
-      clearLegacyConfiguration()
-      setNotice(selected ? 'Legacy connection configuration saved.' : 'Connection draft saved.')
+      clearConnectionConfiguration()
+      setNotice(selected ? (selected.legacy ? 'Legacy connection configuration saved.' : 'Connection update saved.') : 'Connection draft saved.')
       void load()
     } catch (cause) {
       setError(messageFor(cause, 'Could not save the connection draft.'))
@@ -273,7 +274,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
       if (cause instanceof ApiError && cause.status === 409) {
         // A configuration correction is CAS-protected. Discard the secret and require
         // an explicit reselect after the authoritative row has been reloaded.
-        clearLegacyConfiguration()
+        clearConnectionConfiguration()
         void load(false)
       }
     } finally {
@@ -339,11 +340,11 @@ export function Authentication({ enabled }: AuthenticationProps) {
                   <li key={connection.id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-secondary p-3">
                     <div>
                       <strong>{connection.displayName}</strong>
-                      <span className="ml-2 text-sm text-secondary">{connection.enabled ? 'Active' : 'Draft'} · revision {connection.draftRevision} · {connection.testPassed ? 'tested' : 'not tested'}</span>
+                      <span className="ml-2 text-sm text-secondary">{connection.enabled ? `Active · revision ${connection.revision}${connection.draftRevision !== connection.revision ? ` · draft ${connection.draftRevision}` : ''}` : `Draft · revision ${connection.draftRevision}`} · {connection.testPassed ? 'tested' : 'not tested'}</span>
                       {connection.auth0OrganizationId ? <p className="mt-1 text-sm text-secondary">Auth0 organization ID: <code>{connection.auth0OrganizationId}</code></p> : null}
                     </div>
                     <span className="flex gap-2">
-                      {connection.configurationPending ? <button type="button" disabled={saving} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => selectLegacyConfiguration(connection)}>{connection.clientId ? 'Update secret' : 'Configure'}</button> : null}
+                      {connection.configurationPending ? <button type="button" disabled={saving} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => selectConnectionConfiguration(connection)}>{connection.clientId ? 'Update secret' : 'Configure'}</button> : connection.clientId ? <button type="button" disabled={saving} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => selectConnectionConfiguration(connection)}>Update connection</button> : null}
                       <button type="button" disabled={saving} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => void testConnection(connection)}>Test</button>
                       <button type="button" disabled={saving || connection.draftRevision === 0 || connection.version === 0} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => setPendingAction({ kind: 'activate', connection })}>Activate</button>
                       <button type="button" disabled={saving || !connection.enabled || connection.version === 0} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => setPendingAction({ kind: 'disable', connection })}>Disable</button>
@@ -355,8 +356,8 @@ export function Authentication({ enabled }: AuthenticationProps) {
           </section>
 
           <form className="rounded-lg border border-secondary p-5" onSubmit={(event) => { void saveConnectionDraft(event) }}>
-            <h2 className="text-lg font-semibold text-primary">{legacyConfiguration ? (legacyConfiguration.clientId ? 'Update legacy connection secret' : 'Configure legacy connection') : 'Create connection draft'}</h2>
-            {legacyConfiguration ? <p className="mt-1 text-sm text-secondary">This imported connection keeps its existing issuer and organization trust. Enter a client secret to save its next revision.</p> : null}
+            <h2 className="text-lg font-semibold text-primary">{connectionConfiguration ? (connectionConfiguration.legacy ? (connectionConfiguration.clientId ? 'Update legacy connection secret' : 'Configure legacy connection') : 'Update connection') : 'Create connection draft'}</h2>
+            {connectionConfiguration ? <p className="mt-1 text-sm text-secondary">This connection keeps its existing issuer and organization trust. Enter a client secret to save its next revision.</p> : null}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {([
                 ['displayName', 'Display name', 'text'],
@@ -365,17 +366,17 @@ export function Authentication({ enabled }: AuthenticationProps) {
                 ['clientSecret', 'Client secret', 'password'],
               ] as const).map(([field, label, type]) => (
                 <label key={field} className="grid gap-1 text-sm text-primary">{label}
-                  <input required type={type} value={draft[field]} readOnly={legacyConfiguration !== null && (field === 'issuer' || (field === 'clientId' && legacyConfiguration.clientId !== ''))} onChange={(event) => setDraft((current) => ({ ...current, [field]: event.target.value }))} className="rounded border border-secondary px-3 py-2 read-only:bg-secondary" />
+                  <input required type={type} value={draft[field]} readOnly={connectionConfiguration !== null && (field === 'issuer' || (field === 'clientId' && connectionConfiguration.clientId !== ''))} onChange={(event) => setDraft((current) => ({ ...current, [field]: event.target.value }))} className="rounded border border-secondary px-3 py-2 read-only:bg-secondary" />
                 </label>
               ))}
               <label className="grid gap-1 text-sm text-primary">Auth0 organization ID (optional)
-                <input type="text" value={draft.auth0OrganizationId ?? ''} readOnly={legacyConfiguration !== null && legacyConfiguration.auth0OrganizationId === undefined} onChange={(event) => setDraft((current) => ({ ...current, auth0OrganizationId: event.target.value }))} aria-describedby="auth0-organization-id-help" className="rounded border border-secondary px-3 py-2 read-only:bg-secondary" />
+                <input type="text" value={draft.auth0OrganizationId ?? ''} readOnly={connectionConfiguration !== null && (!connectionConfiguration.legacy || connectionConfiguration.auth0OrganizationId === undefined)} onChange={(event) => setDraft((current) => ({ ...current, auth0OrganizationId: event.target.value }))} aria-describedby="auth0-organization-id-help" className="rounded border border-secondary px-3 py-2 read-only:bg-secondary" />
               </label>
             </div>
             <p id="auth0-organization-id-help" className="mt-2 text-sm text-secondary">Use the stable, case-sensitive Auth0 organization ID, not an organization name.</p>
             <div className="mt-4 flex gap-3">
-              <button disabled={saving} className="rounded bg-brand-primary px-3 py-2 text-white disabled:opacity-50">{legacyConfiguration ? 'Save configuration' : 'Save draft'}</button>
-              {legacyConfiguration ? <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={clearLegacyConfiguration}>Cancel</button> : null}
+              <button disabled={saving} className="rounded bg-brand-primary px-3 py-2 text-white disabled:opacity-50">{connectionConfiguration ? 'Save configuration' : 'Save draft'}</button>
+              {connectionConfiguration ? <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={clearConnectionConfiguration}>Cancel</button> : null}
             </div>
           </form>
 
