@@ -141,7 +141,8 @@ hostname decision remains separate; no silent issuer rebinding is allowed.
 Other required issue #1517 cells remain open, including cross/custom-base-path realm boundaries,
 approved pairwise enrollment/linking, client-secret rotation and the complete shared-flow
 matrix. Historical enrollment, local logout and existing-session provider-outage recovery are
-mapped below; signed-out federation and the full canary recovery cells remain open. The owner's
+mapped below; the full canary recovery cells remain open. Signed-out Connect is covered in the
+subsequent run below. The owner's
 theme waiver applies; no theme matrix is claimed. This incremental run is not a declaration that
 #1517 is ready to close.
 
@@ -226,3 +227,34 @@ not retained.
 ![External authorization endpoint fails during the real outage](keycloak-outage-federation-504.png)
 
 ![Real password retry returns the same readonly user](keycloak-outage-recovered.png)
+
+## Signed-out Connect during provider outage
+
+A separate run signed the same readonly user out locally, verified that person had no active
+Synapse session, and selected the activated Keycloak connection on the Required secondary
+organization's Connect page. An eight-minute restore timer was registered before stopping only
+the existing Keycloak container.
+
+Continuing with Keycloak reached the real authorization endpoint, which displayed external
+Cloudflare 502 at 15:49:47 UTC. No session was created for that person; authority stayed at five
+persons, seven memberships and eight authenticators, with identical roles, policies and connection
+revisions. Browser Back returned to Connect with Keycloak still selected and Continue enabled.
+
+Starting the same Keycloak container restored exact-issuer discovery. Continue then followed the
+ordinary provider SSO/callback to the same person's secondary readonly Dashboard. Recent upstream
+SSO was reused, with authentication time 15:42:51 UTC; no forced password prompt or new upstream
+authentication time is claimed for this ordinary-login retry. The prior separate reauthentication
+run provides that fresh-password observation.
+
+API/web/gateway/tunnel identities, images and start times were unchanged; only the same Keycloak
+container restarted. The provider is restored and the timer is inactive. No invitation, grant,
+credential, policy, public hostname or billing change was made. This extends the existing-session
+outage proof to signed-out Connect; token-exchange callback errors, allowed legacy credentials and
+complete canary recovery remain separate paths.
+
+Source: [`keycloak-connect-outage.json`](keycloak-connect-outage.json), with reduced observations,
+fixed runtime identity and hashes. The shared runtime dependency on #1612 remains explicit.
+
+![Signed-out authorization fails while Keycloak is stopped](keycloak-connect-outage-502.png)
+
+![Connect retry returns the existing readonly user](keycloak-connect-outage-recovered.png)
