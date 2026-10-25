@@ -18,6 +18,21 @@ function failure(cause: unknown): Failure {
   return { message: cause instanceof Error ? cause.message : 'The request could not be completed.', retryable: false }
 }
 
+type InvitationStatus = { label: string; actionable: boolean }
+
+function invitationStatus(invitation: EnterpriseInvitation): InvitationStatus {
+  const state = invitation.state.trim().toLowerCase()
+  if (state === 'accepted') return { label: 'Accepted', actionable: false }
+  if (state === 'revoked') return { label: 'Revoked', actionable: false }
+  if (state === 'expired') return { label: 'Expired', actionable: false }
+  if (state !== 'pending') return { label: 'Status unavailable', actionable: false }
+
+  const expiresAt = Date.parse(invitation.expiresAt)
+  if (!Number.isFinite(expiresAt)) return { label: 'Pending — expiry unavailable', actionable: false }
+  if (expiresAt <= Date.now()) return { label: 'Expired', actionable: false }
+  return { label: 'Pending', actionable: true }
+}
+
 export function EnterpriseTeam() {
   const auth = useOptionalAuth()
   const [members, setMembers] = useState<EnterpriseMember[]>([])
@@ -111,7 +126,10 @@ export function EnterpriseTeam() {
         {members.length ? <div className="divide-y divide-secondary">{members.map((member) => <article key={member.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium text-primary">{member.name}</p><p className="text-sm text-tertiary">{member.role} · {member.state}</p></div><div className="flex flex-col gap-2 sm:flex-row"><select aria-label={`Role for ${member.name}`} className={select} value={member.role} disabled={busy} onChange={(event) => setPending({ member, kind: 'change_role', role: event.target.value })}>{roles.map((item) => <option key={item} value={item}>{item}</option>)}</select><button type="button" className={secondaryButton} disabled={busy} onClick={() => setPending({ member, kind: member.state === 'active' ? 'suspend' : 'reactivate' })}>{member.state === 'active' ? 'Suspend' : 'Reactivate'}</button></div></article>)}</div> : <p className="px-4 py-6 text-sm text-tertiary">No enterprise members yet.</p>}</section>
       <section className="space-y-4 rounded-xl border border-secondary bg-primary p-4 sm:p-5"><div><h3 className="font-semibold text-primary">Create invitation</h3><p className="mt-1 text-sm text-tertiary">The code is shown once after creation.</p></div><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto]"><label className="sr-only" htmlFor="enterprise-invitation-email">Invitation email</label><input id="enterprise-invitation-email" aria-label="Invitation email" className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary shadow-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20" type="email" value={email} disabled={busy} onChange={(event) => setEmail(event.target.value)} /><label className="sr-only" htmlFor="enterprise-invitation-role">Invitation role</label><select id="enterprise-invitation-role" aria-label="Invitation role" className={select} value={role} disabled={busy} onChange={(event) => setRole(event.target.value)}>{roles.map((item) => <option key={item} value={item}>{item}</option>)}</select><button type="button" className={button} disabled={!email || busy} onClick={createInvitation}>Create invitation</button></div>
         {code ? <div role="status" className="rounded-lg border border-warning-subtle bg-warning-primary/10 p-3"><div className="flex flex-wrap items-center gap-2"><code className="min-w-0 break-all rounded bg-primary px-2 py-1 text-sm text-primary">{revealed ? code : '•'.repeat(Math.min(28, code.length))}</code><button type="button" className={secondaryButton} onClick={() => setRevealed(!revealed)}>{revealed ? 'Hide' : 'Reveal'}</button><button type="button" className={secondaryButton} onClick={() => { setCode(undefined); setRevealed(false) }}>Dismiss</button></div><p className="mt-2 text-sm text-tertiary">Copy this code now. It cannot be retrieved again.</p></div> : null}</section>
-      <section className="overflow-hidden rounded-xl border border-secondary bg-primary"><div className="border-b border-secondary px-4 py-3"><h3 className="font-semibold text-primary">Invitations</h3></div>{invitations.length ? <div className="divide-y divide-secondary">{invitations.map((invitation) => <div key={invitation.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><p className="min-w-0 break-all text-sm text-primary">{invitation.recipient}<span className="text-tertiary"> · {invitation.role}</span></p><button type="button" className={secondaryButton} disabled={busy} onClick={() => setPending({ invitation, kind: 'revoke' })}>Revoke</button></div>)}</div> : <p className="px-4 py-6 text-sm text-tertiary">No pending invitations.</p>}</section>
+      <section className="overflow-hidden rounded-xl border border-secondary bg-primary"><div className="border-b border-secondary px-4 py-3"><h3 className="font-semibold text-primary">Invitations</h3></div>{invitations.length ? <div className="divide-y divide-secondary">{invitations.map((invitation) => {
+        const status = invitationStatus(invitation)
+        return <div key={invitation.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="min-w-0 break-all text-sm text-primary">{invitation.recipient}<span className="text-tertiary"> · {invitation.role}</span></p><p className="text-sm text-tertiary">{status.label}</p></div>{status.actionable ? <button type="button" className={secondaryButton} disabled={busy} onClick={() => setPending({ invitation, kind: 'revoke' })}>Revoke</button> : null}</div>
+      })}</div> : <p className="px-4 py-6 text-sm text-tertiary">No invitations yet.</p>}</section>
     </>}
     <ConfirmDialog open={pending !== null} title="Confirm enterprise access change" description="The server records this access change." confirmLabel="Confirm" busy={busy} error={null} onCancel={() => setPending(null)} onConfirm={confirm} />
   </section>

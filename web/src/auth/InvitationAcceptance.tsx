@@ -38,6 +38,24 @@ function takeMailboxMarker(): boolean {
   return true
 }
 
+function invitationError(cause: unknown, action: Action['kind']): string {
+  if (cause instanceof ApiError) {
+    if (cause.status === 401) return action === 'challenge'
+      ? 'Your sign-in session is no longer available. Sign in again, then retry mailbox verification.'
+      : 'Your sign-in session is no longer available. Sign in again, then retry the invitation.'
+    if (cause.status === 429) return 'Too many attempts. Wait a moment, then retry.'
+    if ([400, 403, 404, 409, 410, 422].includes(cause.status)) {
+      if (action === 'challenge') return 'This mailbox verification code is invalid or expired. Ask your administrator for a new invitation if you need one.'
+      return 'This invitation is invalid, expired, or no longer active. Ask your administrator for a current invitation.'
+    }
+  }
+  return cause instanceof Error ? cause.message : 'Could not continue the invitation.'
+}
+
+function retryableInvitationError(cause: unknown): boolean {
+  return cause instanceof ApiError && (cause.status === 0 || cause.status === 429 || cause.status >= 500)
+}
+
 /** Accepts server-routed invitation and mailbox codes without storing either outside component state. */
 export function InvitationAcceptance() {
   const { retry } = useAuth()
@@ -70,7 +88,7 @@ export function InvitationAcceptance() {
     } catch (cause) {
       if (!(cause instanceof DOMException && cause.name === 'AbortError') && generation.current === generationAtStart) {
         setError(cause instanceof Error ? cause.message : 'Could not check mailbox verification.')
-        setCanRetry(cause instanceof ApiError && (cause.status === 0 || cause.status >= 500))
+        setCanRetry(retryableInvitationError(cause))
       }
     } finally { if (generation.current === generationAtStart) setLoading(false) }
   }, [])
@@ -111,8 +129,8 @@ export function InvitationAcceptance() {
       throw new Error('The invitation response did not include an approved identity provider.')
     } catch (cause) {
       if (!(cause instanceof DOMException && cause.name === 'AbortError') && generation.current === generationAtStart) {
-        setError(cause instanceof Error ? cause.message : 'Could not continue the invitation.')
-        setCanRetry(cause instanceof ApiError && (cause.status === 0 || cause.status >= 500))
+        setError(invitationError(cause, action.kind))
+        setCanRetry(retryableInvitationError(cause))
       }
     } finally { if (generation.current === generationAtStart) setLoading(false) }
   }, [retry])
