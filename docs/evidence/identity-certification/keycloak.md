@@ -24,6 +24,35 @@ differs by one path segment fails at callback time, not at save time.
 - Keep the client's PKCE method as S256; the client always sends a code challenge.
 - Leave the realm's `email_verified` mapper on, and confirm the realm issues `auth_time` for a `max_age` request.
 
+## Repeatable protocol and admission gate
+
+On Linux with Docker, Python 3 and the Go version from `go.mod`, run:
+
+```sh
+make keycloak-integration
+```
+
+The runner uses pinned Keycloak 26.8.1 and PostgreSQL images, creates isolated temporary networks
+and databases, generates synthetic credentials for that run, and removes its containers and
+networks on success, failure, SIGINT or SIGTERM. It does not read the retained browser sandbox,
+provider accounts or credentials. Missing dependencies and a missing required test are failures.
+
+The tagged Go test uses the existing private OIDC test-client seam with a local TLS proxy, while
+retaining real Keycloak discovery, S256 authorization-code exchange, signed-token verification and
+PostgreSQL-backed enterprise approval/admission. Production construction continues to use the safe
+client that rejects private addresses. This test seam is not a deployment override or a proof of
+public DNS/SSRF transport. The separate live public-HTTPS runs cover that deployment boundary.
+
+The CI job `Keycloak enterprise conformance` runs the same command for pull requests and pushes
+to `main` and `release/**`. The Release workflow requires the same reusable gate before publishing
+binaries or images. Protocol/admission coverage and recorded live browser evidence remain
+separate requirements; a passing automated gate does not fill an unobserved worksheet cell.
+
+The [recorded local run](keycloak-conformance-run.json) passed both layouts against a clean source
+archive, with the inherited local issuer patch excluded. Fault checks also verified failure when
+the child exits unsuccessfully or reports no required test, and cleanup after SIGTERM. Hosted CI
+results must be observed separately after pushing this change.
+
 ## Worksheet
 
 | Cell | What proves it | Observed | Evidence |

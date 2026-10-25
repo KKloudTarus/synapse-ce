@@ -1,4 +1,4 @@
-.PHONY: help install tools dev build run test harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify sca-accuracy-run sca-accuracy-test reachability-benchmark \
+.PHONY: help install tools dev build run test keycloak-integration harness dataplane-e2e vet lint format typecheck tidy ebpf-generate ai-triage-eval ai-triage-compare ai-triage-release ai-triage-drift ai-triage-curate ai-triage-verify sca-accuracy-run sca-accuracy-test reachability-benchmark \
         rulepack-verify rulepack-replay rulepack-gate docker-build docker-up docker-down kind-smoke helm-render-test clean web-dev web-build smoke release-smoke
 
 GO ?= go
@@ -50,6 +50,9 @@ run: ## Run the API server (:8080)
 
 test: ## Run Go tests
 	$(GO) test -timeout $(GO_TEST_TIMEOUT) ./...
+
+keycloak-integration: ## Test real Keycloak and enterprise admission with disposable local dependencies
+	python3 scripts/run_keycloak_integration.py --go "$(GO)"
 
 harness: ## Run the hostile tenant-isolation harness
 	$(GO) test ./internal/adapter/httpapi -run '^TestHostileHarness$$'
