@@ -37,7 +37,7 @@ differs by one path segment fails at callback time, not at save time.
 | Stale or missing auth_time | A proof older than 15 minutes, or an ID token without `auth_time`, leaves access unchanged and offers a retry. |  |  |
 | Destination proof | Switching to a required-SSO organization uses that organization's approved enabled connection and the same person. |  |  |
 | Issuer and key boundary | A token from another authorization server, realm, tenant or environment of this provider is denied. Rotate the signing key and show discovery picking it up. | Key overlap and actual login after RS256 signer rotation passed without API restart. Wrong/custom-base-path realm boundary remains open. | [Signing-key run](keycloak-live-run.md#signing-key-overlap-and-login) |
-| Subject remap | A changed or remapped subject is denied rather than reused on the existing link. |  |  |
+| Subject remap | A changed or remapped subject is denied rather than reused on the existing link. | Passed for a real pairwise remap of the existing Keycloak account: callback denied, independent Auth0 source usable; restore returned to the same secondary readonly person. Approved pairwise enrollment/linking remains open. | [Pairwise remap run](keycloak-live-run.md#pairwise-subject-remap-and-restoration) |
 | Provider outage | With the provider unreachable, new federation fails usefully, locally valid sessions keep working, and retry recovers. |  |  |
 | Local logout | Logout revokes the Synapse session. Record whether the provider session survived. |  |  |
 | Activation and rollback | Per-organization activation, disable and recovery leave other organizations unchanged. |  |  |

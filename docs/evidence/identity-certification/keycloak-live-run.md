@@ -40,6 +40,43 @@ and hashes of the original observations and screenshots. Private key material wa
 
 ![Same readonly person after Keycloak key rotation](keycloak-jwks-after-dashboard.png)
 
+## Pairwise subject remap and restoration
+
+At 14:05 UTC, the existing linked synthetic person signed in through Auth0 to the default
+readonly membership. Only the Keycloak synthetic client's default scope assignment was then
+changed: a temporary copy retained the original `auth_time` fields and replaced the public-sub
+mapper with Keycloak's `oidc-sha256-pairwise-sub-mapper`. The shared `basic` scope, issuer, client
+secret, other scopes, users, Synapse connections and policies were untouched. Keycloak added an
+explicit `userinfo.token.claim=true` default to the copied authentication-time mapper. The client
+had one loopback redirect host and the original scope had no role-scope mappings to omit.
+
+The admin-generated example ID-token payload showed a different subject hash while issuer,
+audience, client, email and JSON boolean `email_verified=true` stayed equal. This unsigned preview
+was a configuration precondition, not the federation proof; raw callback JWTs were not retained.
+A real browser destination switch then forced the same Keycloak user to enter its password.
+The callback displayed “The identity you selected is not approved for this action. Your existing
+sign-in is still active.” The default Dashboard remained usable after reload. Persistence showed
+no new secondary session and preserved the source Auth0 authentication time of 14:05:07 UTC.
+
+Restoration reattached the original `basic` scope, detached and deleted only the temporary scope,
+and verified the exact original default and optional scope sets plus the original example subject.
+A new ordinary Keycloak callback then reached secondary readonly as the same existing person at
+14:08:58 UTC. No API restart occurred. All stages kept five persons, seven memberships and eight
+authenticators, unchanged membership roles, connection revisions and policies. The twenty-minute
+automatic restore guard was stopped; no remapping remains active. A preflight mapper-default
+assertion had previously stopped before attaching the temporary scope and restored it successfully.
+
+This proves denial of a changed pairwise subject on an existing link and recovery after restoring
+the original subject. It does not prove approved pairwise enrollment or additive linking.
+No membership, credential, cloud resource or billing was added. Nonsecret observations and capture
+hashes are in [the remap evidence](keycloak-pairwise-remap.json).
+The mapper and example endpoints follow the official [Keycloak mapper reference](https://www.keycloak.org/admin-api/protocol-mappers)
+and [Admin REST API](https://www.keycloak.org/docs-api/26.8.1/rest-api/index.html).
+
+![Remapped subject denied while default readonly remains usable](keycloak-pairwise-denied.png)
+
+![Original subject restored and secondary readonly reached](keycloak-pairwise-restored.png)
+
 ## Remaining certification
 
 The retained accountless Quick Tunnel provides actual public HTTPS but its hostname depends on
@@ -47,7 +84,7 @@ that process. No permanent issuer availability after tunnel replacement is claim
 hostname decision remains separate; no silent issuer rebinding is allowed.
 
 Other required issue #1517 cells remain open, including cross/custom-base-path realm boundaries,
-provider subject remap/pairwise behavior, client-secret rotation and the complete shared-flow
+approved pairwise enrollment/linking, client-secret rotation and the complete shared-flow
 matrix. Historical enrollment/outage controls are retained locally but are not all mapped into
 this worksheet yet. The owner's theme waiver applies; no theme matrix is claimed. This incremental
 run is not a declaration that #1517 is ready to close.
