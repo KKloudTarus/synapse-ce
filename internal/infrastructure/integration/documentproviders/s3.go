@@ -32,12 +32,14 @@ import (
 const S3 integration.Provider = "s3-compatible"
 
 const (
-	s3ShellName     = ".synapse-shell"
-	s3BodyName      = "report.html"
-	s3MarkerMeta    = "Synapse-Marker"
-	s3MaxObjects    = 64
-	s3MaxBodyBytes  = 8 << 20
-	s3MaxAttachment = 20 << 20
+	s3ShellName          = ".synapse-shell"
+	s3BodyName           = "report.html"
+	s3MarkerMeta         = "Synapse-Marker"
+	s3MaxObjects         = 64
+	s3MaxHistoryVersions = 256
+	s3WriteHistoryLimit  = s3MaxHistoryVersions - s3MaxObjects
+	s3MaxBodyBytes       = 8 << 20
+	s3MaxAttachment      = 20 << 20
 )
 
 var s3BucketPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
@@ -68,6 +70,7 @@ var s3Descriptor = integration.ProviderDescriptor{
 		{Name: "prefix", Label: "Publication key prefix", Kind: integration.FieldText, Required: true},
 		{Name: "read_group", Label: "Exact reader principal", Kind: integration.FieldText, Required: true},
 		{Name: "region", Label: "Region", Kind: integration.FieldText, Required: true},
+		{Name: "read_endpoint", Label: "Authenticated reader base URL for this bucket", Kind: integration.FieldText, Required: true},
 		{Name: "data_class", Label: "Data classification (detail)", Kind: integration.FieldText, Required: true},
 	},
 	SecretFields: []integration.FieldDescriptor{
@@ -81,6 +84,7 @@ type s3Adapter struct {
 	client                              *minio.Client
 	transport                           *http.Transport
 	bucket, prefix, principal, endpoint string
+	readEndpoint                        string
 	accessKey, secretKey, sessionToken  string
 }
 
@@ -114,11 +118,12 @@ func newS3(item integration.Integration, c integration.CredentialBundle, rules s
 		}
 	}
 	var cfg struct {
-		Space  string `json:"space"`
-		Prefix string `json:"prefix"`
-		Group  string `json:"read_group"`
-		Region string `json:"region"`
-		Class  string `json:"data_class"`
+		Space        string `json:"space"`
+		Prefix       string `json:"prefix"`
+		Group        string `json:"read_group"`
+		Region       string `json:"region"`
+		Class        string `json:"data_class"`
+		ReadEndpoint string `json:"read_endpoint"`
 	}
 	if json.Unmarshal(item.Config, &cfg) != nil {
 		return nil, shared.ErrValidation
@@ -129,22 +134,44 @@ func newS3(item integration.Integration, c integration.CredentialBundle, rules s
 		!s3RegionPattern.MatchString(cfg.Region) || cfg.Class != "detail" {
 		return nil, shared.ErrValidation
 	}
+	readEndpoint, err := docpublish.CanonicalURL(cfg.ReadEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("%w: an authenticated S3 reader base URL is required", shared.ErrValidation)
+	}
+	reader, _ := url.Parse(readEndpoint)
+	if reader.RawPath != "" || strings.Contains(reader.Path, "\\") {
+		return nil, shared.ErrValidation
+	}
+	for _, segment := range strings.Split(reader.Path, "/") {
+		if segment == "." || segment == ".." {
+			return nil, shared.ErrValidation
+		}
+	}
+	// Check the longest supported page identity before any remote mutation can
+	// return a URL that the publication model cannot store.
+	if _, err := docpublish.CanonicalURL(strings.TrimRight(readEndpoint, "/") + "/" + prefix + "/" + strings.Repeat("a", 124) + "/" + s3BodyName); err != nil {
+		return nil, fmt.Errorf("%w: S3 reader base URL is too long", shared.ErrValidation)
+	}
 	policy, err := s3Policy(item, endpoint, rules)
 	if err != nil {
 		return nil, err
 	}
 	transport := s3Transport(policy)
 	client, err := minio.New(endpoint.Host, &minio.Options{
-		Creds:     credentials.NewStaticV4(c["access_key_id"], c["secret_access_key"], c["session_token"]),
-		Secure:    true,
-		Region:    cfg.Region,
-		Transport: transport,
+		Creds:        credentials.NewStaticV4(c["access_key_id"], c["secret_access_key"], c["session_token"]),
+		Secure:       true,
+		Region:       cfg.Region,
+		Transport:    transport,
+		BucketLookup: minio.BucketLookupPath,
+		MaxRetries:   1,
 	})
 	if err != nil {
 		return nil, shared.ErrValidation
 	}
+	client.SetS3EnableDualstack(false)
 	return &s3Adapter{
-		client: client, transport: transport, bucket: cfg.Space, prefix: prefix, principal: cfg.Group,
+		readEndpoint: strings.TrimRight(readEndpoint, "/"),
+		client:       client, transport: transport, bucket: cfg.Space, prefix: prefix, principal: cfg.Group,
 		endpoint: endpoint.Scheme + "://" + endpoint.Host, accessKey: c["access_key_id"],
 		secretKey: c["secret_access_key"], sessionToken: c["session_token"],
 	}, nil
@@ -255,7 +282,7 @@ func (a *s3Adapter) publicationPrefix(marker string) string {
 }
 
 func (a *s3Adapter) browserURL(marker string) string {
-	return a.endpoint + "/" + a.bucket + "/" + a.publicationPrefix(marker)
+	return a.readEndpoint + "/" + a.publicationPrefix(marker) + s3BodyName
 }
 
 func s3Remote(marker, browser, revision string) docpublish.RemotePage {
@@ -267,7 +294,7 @@ func (a *s3Adapter) TestConnection(ctx context.Context) error {
 }
 
 // CheckDocumentRelease proves the destination before a neutral shell exists:
-// the configured bucket, versioning that makes an opaque revision meaningful,
+// the configured bucket, versioning for exact historical reads and removal,
 // and a policy that grants read to exactly the configured principal.
 func (a *s3Adapter) CheckDocumentRelease(ctx context.Context, container, group string) error {
 	if container != a.bucket || group != a.principal {
@@ -281,87 +308,6 @@ func (a *s3Adapter) CheckDocumentRelease(ctx context.Context, container, group s
 		return docError(http.StatusOK, "versioning_required", false)
 	}
 	return a.checkBucketPolicy(ctx)
-}
-
-type s3Statement struct {
-	Sid       string          `json:"Sid"`
-	Effect    string          `json:"Effect"`
-	Principal json.RawMessage `json:"Principal"`
-	Action    json.RawMessage `json:"Action"`
-	Resource  json.RawMessage `json:"Resource"`
-	Condition json.RawMessage `json:"Condition"`
-}
-
-func s3StringList(raw json.RawMessage) ([]string, bool) {
-	if len(raw) == 0 {
-		return nil, true
-	}
-	var single string
-	if json.Unmarshal(raw, &single) == nil {
-		return []string{single}, true
-	}
-	var many []string
-	if json.Unmarshal(raw, &many) == nil {
-		return many, true
-	}
-	return nil, false
-}
-
-// s3Principals flattens the two documented shapes, the "*" shorthand and the
-// {"AWS": [...]} map. An unrecognised shape is never treated as narrow.
-func s3Principals(raw json.RawMessage) ([]string, bool) {
-	if values, ok := s3StringList(raw); ok && len(values) > 0 {
-		return values, true
-	}
-	var object map[string]json.RawMessage
-	if json.Unmarshal(raw, &object) != nil {
-		return nil, false
-	}
-	out := []string{}
-	for _, value := range object {
-		values, ok := s3StringList(value)
-		if !ok {
-			return nil, false
-		}
-		out = append(out, values...)
-	}
-	return out, true
-}
-
-func s3Public(principals []string) bool {
-	for _, principal := range principals {
-		if strings.TrimSpace(principal) == "*" {
-			return true
-		}
-	}
-	return false
-}
-
-func (a *s3Adapter) coversPublications(resources []string) bool {
-	owned := "arn:aws:s3:::" + a.bucket + "/" + a.prefix + "/"
-	for _, resource := range resources {
-		value := strings.TrimSpace(resource)
-		switch {
-		case value == "arn:aws:s3:::"+a.bucket, value == "arn:aws:s3:::"+a.bucket+"/*":
-			return true
-		case strings.HasSuffix(value, "*") && strings.HasPrefix(owned, strings.TrimSuffix(value, "*")):
-			return true
-		case strings.HasPrefix(value, owned):
-			return true
-		}
-	}
-	return false
-}
-
-func s3GrantsObjectRead(actions []string) bool {
-	for _, action := range actions {
-		value := strings.ToLower(strings.TrimSpace(action))
-		if value == "*" || value == "s3:*" || value == "s3:getobject" || value == "s3:getobjectversion" ||
-			(strings.HasSuffix(value, "*") && strings.HasPrefix("s3:getobject", strings.TrimSuffix(value, "*"))) {
-			return true
-		}
-	}
-	return false
 }
 
 // checkBucketPolicy is the access proof. A policy that cannot be read or parsed
@@ -378,52 +324,13 @@ func (a *s3Adapter) checkBucketPolicy(ctx context.Context) error {
 	if strings.TrimSpace(raw) == "" {
 		return docError(http.StatusOK, "reader_policy_unverifiable", false)
 	}
-	var document struct {
-		Statement []s3Statement `json:"Statement"`
-	}
-	if json.Unmarshal([]byte(raw), &document) != nil || len(document.Statement) == 0 {
-		return docError(http.StatusOK, "reader_policy_unverifiable", false)
-	}
-	readers := 0
-	for _, statement := range document.Statement {
-		if !strings.EqualFold(statement.Effect, "Allow") {
-			continue
-		}
-		principals, ok := s3Principals(statement.Principal)
-		if !ok {
-			return docError(http.StatusOK, "reader_policy_unverifiable", false)
-		}
-		actions, actionOK := s3StringList(statement.Action)
-		resources, resourceOK := s3StringList(statement.Resource)
-		if !actionOK || !resourceOK {
-			return docError(http.StatusOK, "reader_policy_unverifiable", false)
-		}
-		if !a.coversPublications(resources) {
-			continue
-		}
-		if s3Public(principals) {
-			return restrictionLostError(http.StatusOK, "public_bucket_policy")
-		}
-		if !s3GrantsObjectRead(actions) {
-			continue
-		}
-		if len(principals) != 1 || strings.TrimSpace(principals[0]) != a.principal {
-			return restrictionLostError(http.StatusOK, "unexpected_reader_principal")
-		}
-		if len(statement.Condition) > 0 {
-			return docError(http.StatusOK, "reader_policy_unverifiable", false)
-		}
-		readers++
-	}
-	if readers != 1 {
-		return docError(http.StatusOK, "reader_policy_unverifiable", false)
-	}
-	return nil
+	return verifyS3ReaderPolicy(raw, a.bucket, a.prefix, a.principal)
 }
 
 type s3Object struct {
 	key, versionID, etag, marker string
 	size                         int64
+	deleteMarker, latest         bool
 }
 
 // s3Marker reads the publication stamp. A listing spells it as the raw
@@ -438,14 +345,13 @@ func s3Marker(meta map[string]string) string {
 	return ""
 }
 
-// publicationObjects lists the current version of every key under one
-// publication. A delete marker hides its key, which is why the listing carries
-// versions and the latest flag rather than a plain object list.
+// publicationObjects reads only live keys. History has its own bounded snapshot
+// for purge; it does not consume the current-object budget.
 func (a *s3Adapter) publicationObjects(ctx context.Context, marker string) (map[string]s3Object, error) {
 	prefix := a.publicationPrefix(marker)
 	out := map[string]s3Object{}
 	count := 0
-	for item := range a.client.ListObjects(ctx, a.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true, WithVersions: true, WithMetadata: true}) {
+	for item := range a.client.ListObjectsIter(ctx, a.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true, WithMetadata: true}) {
 		if item.Err != nil {
 			return nil, s3Err(item.Err, false)
 		}
@@ -453,14 +359,7 @@ func (a *s3Adapter) publicationObjects(ctx context.Context, marker string) (map[
 		if count > s3MaxObjects {
 			return nil, docError(http.StatusOK, "publication_too_large", false)
 		}
-		if !item.IsLatest {
-			continue
-		}
 		name := strings.TrimPrefix(item.Key, prefix)
-		if item.IsDeleteMarker {
-			delete(out, name)
-			continue
-		}
 		if name == "" || strings.Contains(name, "/") {
 			return nil, docError(http.StatusOK, "unmanaged_child", false)
 		}
@@ -472,6 +371,9 @@ func (a *s3Adapter) publicationObjects(ctx context.Context, marker string) (map[
 			marker: s3Marker(item.UserMetadata), size: item.Size,
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return a.resolveMarkers(ctx, out)
 }
 
@@ -480,15 +382,23 @@ func (a *s3Adapter) publicationObjects(ctx context.Context, marker string) (map[
 // the bounded object count is what keeps the preflight to a handful of calls.
 func (a *s3Adapter) resolveMarkers(ctx context.Context, objects map[string]s3Object) (map[string]s3Object, error) {
 	for name, object := range objects {
-		if object.marker != "" {
+		if object.marker != "" && object.versionID != "" {
 			continue
 		}
 		stat, err := a.client.StatObject(ctx, a.bucket, object.key, minio.StatObjectOptions{VersionID: object.versionID})
 		if err != nil {
 			return nil, s3Err(err, false)
 		}
+		if object.etag != "" && object.etag != strings.Trim(stat.ETag, `"`) {
+			return nil, shared.ErrConflict
+		}
+		if stat.VersionID == "" {
+			return nil, docError(http.StatusOK, "versioning_required", false)
+		}
 		object.marker = s3Marker(stat.UserMetadata)
 		object.size = stat.Size
+		object.versionID = stat.VersionID
+		object.etag = strings.Trim(stat.ETag, `"`)
 		objects[name] = object
 	}
 	return objects, nil
@@ -572,10 +482,19 @@ func (a *s3Adapter) CreateDocumentShell(ctx context.Context, container, marker s
 	if len(objects) > 0 {
 		return docpublish.RemotePage{}, shared.ErrConflict
 	}
-	if _, err = a.client.PutObject(ctx, a.bucket, a.key(marker, s3ShellName), bytes.NewReader(nil), 0, minio.PutObjectOptions{
-		ContentType:  "application/octet-stream",
+	versions, err := a.allVersions(ctx, marker)
+	if err != nil {
+		return docpublish.RemotePage{}, err
+	}
+	if len(versions) != 0 {
+		return docpublish.RemotePage{}, shared.ErrConflict
+	}
+	opts := minio.PutObjectOptions{
+		ContentType: "application/octet-stream", DisableMultipart: true,
 		UserMetadata: map[string]string{s3MarkerMeta: marker},
-	}); err != nil {
+	}
+	opts.SetMatchETagExcept("*")
+	if _, err = a.client.PutObject(ctx, a.bucket, a.key(marker, s3ShellName), bytes.NewReader(nil), 0, opts); err != nil {
 		return docpublish.RemotePage{}, s3Err(err, true)
 	}
 	return s3Remote(marker, a.browserURL(marker), "new:"+marker), nil
@@ -629,10 +548,16 @@ func (a *s3Adapter) documentState(ctx context.Context, marker string, objects ma
 	if err = a.ValidateDocumentText(source.Title + source.Storage + string(raw)); err != nil {
 		return out, err
 	}
-	if source.Marker != marker {
+	if !validMarker(source.Marker) {
 		return out, restrictionLostError(http.StatusOK, "remote_identity_changed")
 	}
-	out.RemotePage = s3Remote(marker, a.browserURL(marker), body.versionID)
+	for name, etag := range source.Files {
+		object, present := objects[name]
+		if !present || object.etag != etag {
+			return out, docError(http.StatusOK, "remote_content_changed", false)
+		}
+	}
+	out.RemotePage = s3Remote(marker, a.browserURL(marker), body.etag)
 	out.Title, out.Storage, out.Marker, out.Neutral = source.Title, source.Storage, source.Marker, false
 	out.ContentHash = body.etag
 	return out, nil
@@ -692,10 +617,22 @@ func (a *s3Adapter) UploadDocumentAttachment(ctx context.Context, page string, f
 		}
 		return nil
 	}
-	if _, err = a.client.PutObject(ctx, a.bucket, a.key(page, file.Name), bytes.NewReader(file.Data), int64(len(file.Data)), minio.PutObjectOptions{
-		ContentType:  file.MediaType,
+	count := len(objects) + 1
+	if _, hasBody := objects[s3BodyName]; !hasBody {
+		count++ // Keep the body slot available after a staged attachment.
+	}
+	if count > s3MaxObjects {
+		return docError(http.StatusOK, "publication_too_large", false)
+	}
+	if err = a.checkWriteHistory(ctx, page); err != nil {
+		return err
+	}
+	opts := minio.PutObjectOptions{
+		ContentType: file.MediaType, DisableMultipart: true,
 		UserMetadata: map[string]string{s3MarkerMeta: page},
-	}); err != nil {
+	}
+	opts.SetMatchETagExcept("*")
+	if _, err = a.client.PutObject(ctx, a.bucket, a.key(page, file.Name), bytes.NewReader(file.Data), int64(len(file.Data)), opts); err != nil {
 		return s3Err(err, true)
 	}
 	return nil
@@ -705,12 +642,11 @@ func (*s3Adapter) WriteDocument(context.Context, string, int, string, string, st
 	return docpublish.RemotePage{}, docError(0, "opaque_revision_required", false)
 }
 
-// WriteDocumentRevision fences on the object version that was read, which is the
-// only revision S3 exposes that changes on every write. The window between the
-// fence read and the write is covered by the uncertainty contract: an ambiguous
-// outcome reconciles rather than repeating the write.
+// WriteDocumentRevision conditionally replaces the expected content ETag. Every
+// managed release embeds a unique intent marker in its canonical body. Version
+// IDs address exact reads and history, but are not S3 PUT preconditions.
 func (a *s3Adapter) WriteDocumentRevision(ctx context.Context, expected docpublish.RemotePage, title, storage, marker string) (docpublish.RemotePage, error) {
-	if !validMarker(expected.ID) || expected.ID != marker {
+	if !validMarker(expected.ID) || !validMarker(marker) {
 		return docpublish.RemotePage{}, shared.ErrValidation
 	}
 	objects, err := a.verifiedPublication(ctx, expected.ID, a.bucket, a.principal)
@@ -741,106 +677,33 @@ func (a *s3Adapter) WriteDocumentRevision(ctx context.Context, expected docpubli
 	if err = a.ValidateDocumentText(title + storage); err != nil {
 		return docpublish.RemotePage{}, err
 	}
-	info, err := a.client.PutObject(ctx, a.bucket, a.key(expected.ID, s3BodyName), bytes.NewReader(rendered), int64(len(rendered)), minio.PutObjectOptions{
-		ContentType:  "text/html; charset=utf-8",
-		UserMetadata: map[string]string{s3MarkerMeta: marker},
-	})
+	if err = a.checkWriteHistory(ctx, expected.ID); err != nil {
+		return docpublish.RemotePage{}, err
+	}
+	opts := minio.PutObjectOptions{
+		ContentType: "text/html; charset=utf-8", DisableMultipart: true,
+		UserMetadata: map[string]string{s3MarkerMeta: expected.ID},
+	}
+	if body, exists := objects[s3BodyName]; exists {
+		if !safeID(body.etag) {
+			return docpublish.RemotePage{}, docError(http.StatusOK, "invalid_revision", false)
+		}
+		opts.SetMatchETag(expected.Revision)
+	} else {
+		if len(objects) >= s3MaxObjects {
+			return docpublish.RemotePage{}, docError(http.StatusOK, "publication_too_large", false)
+		}
+		opts.SetMatchETagExcept("*")
+	}
+	info, err := a.client.PutObject(ctx, a.bucket, a.key(expected.ID, s3BodyName), bytes.NewReader(rendered), int64(len(rendered)), opts)
 	if err != nil {
 		return docpublish.RemotePage{}, s3Err(err, true)
 	}
-	if info.VersionID == "" {
+	etag := strings.Trim(info.ETag, `"`)
+	if info.VersionID == "" || !safeID(etag) {
 		return docpublish.RemotePage{}, docError(http.StatusOK, "invalid_revision", true)
 	}
-	return s3Remote(expected.ID, a.browserURL(expected.ID), info.VersionID), nil
-}
-
-// PurgeDocument removes every version and delete marker under the publication.
-// Object Lock is retained provider authority: a locked version refuses the purge
-// rather than reporting a removal the bucket did not perform.
-func (a *s3Adapter) PurgeDocument(ctx context.Context, page string, guard func(context.Context) error) error {
-	if !validMarker(page) || guard == nil {
-		return shared.ErrValidation
-	}
-	objects, err := a.publicationObjects(ctx, page)
-	if err != nil {
-		return err
-	}
-	if err = a.verifyPublicationIdentity(page, objects); err != nil {
-		return err
-	}
-	if err = a.refuseLockedPublication(ctx, page); err != nil {
-		return err
-	}
-	versions, err := a.allVersions(ctx, page)
-	if err != nil {
-		return err
-	}
-	dispatched := false
-	for _, version := range versions {
-		if err = guard(ctx); err != nil {
-			if dispatched {
-				return partialEffectAmbiguity(err, "purge_incomplete")
-			}
-			return err
-		}
-		dispatched = true
-		if err = a.client.RemoveObject(ctx, a.bucket, version.key, minio.RemoveObjectOptions{VersionID: version.versionID}); err != nil {
-			return partialEffectAmbiguity(s3Err(err, true), "purge_incomplete")
-		}
-	}
-	remaining, err := a.allVersions(ctx, page)
-	if err != nil {
-		return partialEffectAmbiguity(err, "purge_incomplete")
-	}
-	if len(remaining) != 0 {
-		return partialEffectAmbiguity(docError(http.StatusOK, "purge_incomplete", true), "purge_incomplete")
-	}
-	return nil
-}
-
-func (a *s3Adapter) allVersions(ctx context.Context, marker string) ([]s3Object, error) {
-	prefix := a.publicationPrefix(marker)
-	out := []s3Object{}
-	for item := range a.client.ListObjects(ctx, a.bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true, WithVersions: true}) {
-		if item.Err != nil {
-			return nil, s3Err(item.Err, false)
-		}
-		if len(out) >= s3MaxObjects {
-			return nil, docError(http.StatusOK, "publication_too_large", false)
-		}
-		if item.VersionID == "" {
-			return nil, docError(http.StatusOK, "versioning_required", false)
-		}
-		out = append(out, s3Object{key: item.Key, versionID: item.VersionID})
-	}
-	return out, nil
-}
-
-// refuseLockedPublication reports a retained version rather than attempting a
-// delete the bucket will reject halfway through the publication.
-func (a *s3Adapter) refuseLockedPublication(ctx context.Context, marker string) error {
-	if _, _, _, _, err := a.client.GetObjectLockConfig(ctx, a.bucket); err != nil {
-		code := minio.ToErrorResponse(err).Code
-		if code == "ObjectLockConfigurationNotFoundError" || code == "InvalidRequest" || code == "NoSuchObjectLockConfiguration" {
-			return nil
-		}
-		return s3Err(err, false)
-	}
-	versions, err := a.allVersions(ctx, marker)
-	if err != nil {
-		return err
-	}
-	for _, version := range versions {
-		hold, holdErr := a.client.GetObjectLegalHold(ctx, a.bucket, version.key, minio.GetObjectLegalHoldOptions{VersionID: version.versionID})
-		if holdErr == nil && hold != nil && *hold == minio.LegalHoldEnabled {
-			return docError(http.StatusOK, "object_lock_retained", false)
-		}
-		mode, until, retentionErr := a.client.GetObjectRetention(ctx, a.bucket, version.key, version.versionID)
-		if retentionErr == nil && mode != nil && until != nil && until.After(time.Now().UTC()) {
-			return docError(http.StatusOK, "object_lock_retained", false)
-		}
-	}
-	return nil
+	return s3Remote(expected.ID, a.browserURL(expected.ID), etag), nil
 }
 
 func encodeS3HTML(title, storage, marker string, files map[string]string) ([]byte, error) {

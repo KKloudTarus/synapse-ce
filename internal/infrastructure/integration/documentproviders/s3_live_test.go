@@ -1,12 +1,15 @@
 package documentproviders
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,7 +34,7 @@ import (
 //	SYNAPSE_TEST_S3_SECURE      optional, set to 1 for an https endpoint
 //
 // What a fake cannot prove is here: that a real implementation accepts the
-// zero-length stamped shell, returns an opaque version for every write, reports
+// zero-length stamped shell, enforces ETag content preconditions, reports
 // the policy Synapse installed, and removes every version on purge.
 const (
 	envS3Endpoint  = "SYNAPSE_TEST_S3_ENDPOINT"
@@ -63,7 +66,7 @@ func liveS3Adapter(t *testing.T) (*s3Adapter, string) {
 		region = "us-east-1"
 	}
 	secure := os.Getenv(envS3Secure) == "1"
-	client, err := minio.New(host, &minio.Options{Creds: credentials.NewStaticV4(access, secret, ""), Secure: secure, Region: region})
+	client, err := minio.New(host, &minio.Options{Creds: credentials.NewStaticV4(access, secret, ""), Secure: secure, Region: region, MaxRetries: 1})
 	if err != nil {
 		t.Fatalf("live client: %v", err)
 	}
@@ -74,7 +77,7 @@ func liveS3Adapter(t *testing.T) (*s3Adapter, string) {
 	}
 	return &s3Adapter{
 		client: client, bucket: bucket, prefix: prefix, principal: liveReader,
-		endpoint: scheme + host, accessKey: access, secretKey: secret,
+		endpoint: scheme + host, readEndpoint: scheme + host + "/" + bucket, accessKey: access, secretKey: secret,
 	}, prefix
 }
 
@@ -144,7 +147,7 @@ func TestS3LiveLifecycle(t *testing.T) {
 		t.Fatalf("write body: %v", err)
 	}
 	if written.Revision == "" || written.Revision == page.Revision {
-		t.Fatalf("the write must return a new opaque version: %+v", written)
+		t.Fatalf("the write must return a new opaque content revision: %+v", written)
 	}
 	current, err := adapter.GetDocument(ctx, page.ID)
 	if err != nil {
@@ -183,5 +186,147 @@ func TestS3LiveLifecycle(t *testing.T) {
 	}
 	if remaining != 0 {
 		t.Fatalf("%d versions remain after the purge", remaining)
+	}
+}
+
+// beforeS3PutTransport injects a real competing S3 write immediately before the
+// adapter's conditional request reaches the same backend.
+type beforeS3PutTransport struct {
+	base   http.RoundTripper
+	before func()
+}
+
+func (t beforeS3PutTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.Method == http.MethodPut && strings.HasSuffix(request.URL.Path, "/"+s3BodyName) {
+		t.before()
+	}
+	return t.base.RoundTrip(request)
+}
+
+func TestS3LiveContentRaceAndHistory(t *testing.T) {
+	adapter, prefix := liveS3Adapter(t)
+	liveS3Prepare(t, adapter, prefix)
+	ctx := context.Background()
+	marker := fmt.Sprintf("synapse-intent-content-%d", time.Now().UTC().UnixNano())
+	t.Cleanup(func() { liveS3Clean(t, adapter, marker) })
+	page, err := adapter.CreateDocumentShell(ctx, adapter.bucket, marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := adapter.WriteDocumentRevision(ctx, page, "Initial", "<p>initial</p>", marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := adapter.WriteDocumentRevision(ctx, written, "Republished", "<p>republished</p>", marker+"-next")
+	if err != nil {
+		t.Fatalf("first republish: %v", err)
+	}
+	originalClient := adapter.client
+	competingBody := s3Document(t, "Competing", "<p>competing</p>")
+	var once sync.Once
+	competing := beforeS3PutTransport{base: http.DefaultTransport, before: func() {
+		once.Do(func() {
+			_, putErr := originalClient.PutObject(ctx, adapter.bucket, adapter.key(marker, s3BodyName), bytes.NewReader(competingBody), int64(len(competingBody)), minio.PutObjectOptions{
+				ContentType: "text/html; charset=utf-8", UserMetadata: map[string]string{s3MarkerMeta: marker}, DisableMultipart: true,
+			})
+			if putErr != nil {
+				t.Fatalf("competing backend write: %v", putErr)
+			}
+		})
+	}}
+	endpoint, _ := url.Parse(adapter.endpoint)
+	adapter.client, err = minio.New(endpoint.Host, &minio.Options{Creds: credentials.NewStaticV4(adapter.accessKey, adapter.secretKey, ""), Secure: endpoint.Scheme == "https", Region: func() string {
+		if r := os.Getenv(envS3Region); r != "" {
+			return r
+		}
+		return "us-east-1"
+	}(), Transport: competing, MaxRetries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adapter.WriteDocumentRevision(ctx, updated, "Stale", "<p>stale</p>", marker+"-stale")
+	if refusal := s3Refusal(t, err); refusal.Code != "revision_conflict" || refusal.Ambiguous {
+		t.Fatalf("real backend accepted a stale If-Match: %+v", refusal)
+	}
+	adapter.client = originalClient
+	current, err := adapter.GetDocument(ctx, marker)
+	if err != nil || current.Title != "Competing" {
+		t.Fatalf("concurrent backend content was overwritten: %+v, %v", current, err)
+	}
+	for i := 0; i < 65; i++ {
+		_, err = originalClient.PutObject(ctx, adapter.bucket, adapter.key(marker, s3BodyName), bytes.NewReader(competingBody), int64(len(competingBody)), minio.PutObjectOptions{
+			ContentType: "text/html; charset=utf-8", UserMetadata: map[string]string{s3MarkerMeta: marker}, DisableMultipart: true,
+		})
+		if err != nil {
+			t.Fatalf("seed real version history: %v", err)
+		}
+	}
+	if _, err = adapter.GetDocument(ctx, marker); err != nil {
+		t.Fatalf("65 historical writes blocked current read: %v", err)
+	}
+	if err = adapter.PurgeDocument(ctx, marker, func(context.Context) error { return nil }); err != nil {
+		t.Fatalf("real paginated history purge: %v", err)
+	}
+	versions, err := adapter.allVersions(ctx, marker)
+	if err != nil || len(versions) != 0 {
+		t.Fatalf("history remains after purge: %d, %v", len(versions), err)
+	}
+}
+
+func TestS3LiveLegalHold(t *testing.T) {
+	adapter, prefix := liveS3Adapter(t)
+	adapter.bucket += "-lock"
+	ctx := context.Background()
+	exists, err := adapter.client.BucketExists(ctx, adapter.bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		if err = adapter.client.MakeBucket(ctx, adapter.bucket, minio.MakeBucketOptions{ObjectLocking: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	liveS3Prepare(t, adapter, prefix)
+	marker := fmt.Sprintf("synapse-intent-held-%d", time.Now().UTC().UnixNano())
+	page, err := adapter.CreateDocumentShell(ctx, adapter.bucket, marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = adapter.WriteDocumentRevision(ctx, page, "Held", "<p>held</p>", marker); err != nil {
+		t.Fatal(err)
+	}
+	versions, err := adapter.allVersions(ctx, marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := versions[0]
+	for _, version := range versions {
+		if strings.HasSuffix(version.key, "/"+s3BodyName) {
+			body = version
+		}
+	}
+	setHold := func(hold minio.LegalHoldStatus) error {
+		return adapter.client.PutObjectLegalHold(ctx, adapter.bucket, body.key, minio.PutObjectLegalHoldOptions{VersionID: body.versionID, Status: &hold})
+	}
+	t.Cleanup(func() {
+		_ = setHold(minio.LegalHoldDisabled)
+		liveS3Clean(t, adapter, marker)
+	})
+	if err = setHold(minio.LegalHoldEnabled); err != nil {
+		t.Fatal(err)
+	}
+	err = adapter.PurgeDocument(ctx, marker, func(context.Context) error { return nil })
+	if refusal := s3Refusal(t, err); refusal.Code != "object_lock_retained" {
+		t.Fatalf("real legal hold was not recognized: %+v", refusal)
+	}
+	remaining, err := adapter.allVersions(ctx, marker)
+	if err != nil || len(remaining) != len(versions) {
+		t.Fatalf("held publication was partly deleted: before=%d after=%d err=%v", len(versions), len(remaining), err)
+	}
+	if err = setHold(minio.LegalHoldDisabled); err != nil {
+		t.Fatal(err)
+	}
+	if err = adapter.PurgeDocument(ctx, marker, func(context.Context) error { return nil }); err != nil {
+		t.Fatalf("unheld, lock-enabled publication could not be purged: %v", err)
 	}
 }

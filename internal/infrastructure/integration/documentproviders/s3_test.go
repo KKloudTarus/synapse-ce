@@ -2,6 +2,7 @@ package documentproviders
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,7 +73,7 @@ func (f *fakeS3) put(key, marker, contentType string, body []byte) string {
 
 func (f *fakeS3) putLocked(key, marker, contentType string, body []byte) string {
 	f.nextID++
-	version := s3Version{versionID: fmt.Sprintf("v%d", f.nextID), etag: fmt.Sprintf("%032x", f.nextID), marker: marker, contentType: contentType, body: body}
+	version := s3Version{versionID: fmt.Sprintf("v%d", f.nextID), etag: fmt.Sprintf("%x", md5.Sum(body)), marker: marker, contentType: contentType, body: body}
 	f.objects[key] = append(f.objects[key], version)
 	return version.versionID
 }
@@ -120,7 +122,9 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = io.WriteString(w, `<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>`)
 	case key == "" && query.Has("versions"):
-		f.listVersions(w, query.Get("prefix"))
+		f.listObjects(w, query, true)
+	case key == "" && query.Get("list-type") == "2":
+		f.listObjects(w, query, false)
 	case key != "" && query.Has("legal-hold"):
 		status := "OFF"
 		if f.legalHold[key] {
@@ -130,7 +134,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case key != "" && query.Has("retention"):
 		f.xmlError(w, http.StatusNotFound, "NoSuchObjectLockConfiguration")
 	case r.Method == http.MethodHead && key != "":
-		f.serveHead(w, key)
+		f.serveHead(w, key, query.Get("versionId"))
 	case r.Method == http.MethodGet && key != "":
 		f.serveGet(w, key, query.Get("versionId"))
 	case r.Method == http.MethodPut && key != "":
@@ -142,37 +146,99 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (f *fakeS3) listVersions(w http.ResponseWriter, prefix string) {
+func (f *fakeS3) listObjects(w http.ResponseWriter, query url.Values, history bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var body strings.Builder
-	body.WriteString(`<ListVersionsResult><Name>` + s3TestBucket + `</Name><Prefix>` + prefix + `</Prefix><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated>`)
-	for key, versions := range f.objects {
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-		for index, version := range versions {
-			element := "Version"
-			if version.deleteMarker {
-				element = "DeleteMarker"
-			}
-			body.WriteString("<" + element + "><Key>" + key + "</Key><VersionId>" + version.versionID +
-				"</VersionId><IsLatest>" + strconv.FormatBool(index == len(versions)-1) +
-				"</IsLatest><LastModified>2026-10-23T00:00:00.000Z</LastModified><ETag>&#34;" + version.etag +
-				"&#34;</ETag><Size>" + strconv.Itoa(len(version.body)) + "</Size><StorageClass>STANDARD</StorageClass>")
-			if f.listMeta && version.marker != "" {
-				body.WriteString("<UserMetadata><X-Amz-Meta-Synapse-Marker>" + version.marker + "</X-Amz-Meta-Synapse-Marker></UserMetadata>")
-			}
-			body.WriteString("</" + element + ">")
+	type entry struct {
+		key     string
+		version s3Version
+		latest  bool
+	}
+	var entries []entry
+	keys := make([]string, 0, len(f.objects))
+	for key := range f.objects {
+		if strings.HasPrefix(key, query.Get("prefix")) {
+			keys = append(keys, key)
 		}
 	}
-	body.WriteString(`</ListVersionsResult>`)
+	sort.Strings(keys)
+	for _, key := range keys {
+		versions := f.objects[key]
+		for i := len(versions) - 1; i >= 0; i-- {
+			if !history && (i != len(versions)-1 || versions[i].deleteMarker) {
+				continue
+			}
+			entries = append(entries, entry{key, versions[i], i == len(versions)-1})
+		}
+	}
+	start := 0
+	if history && query.Get("key-marker") != "" {
+		for i, item := range entries {
+			if item.key == query.Get("key-marker") && item.version.versionID == query.Get("version-id-marker") {
+				start = i + 1
+				break
+			}
+		}
+	} else if !history {
+		start, _ = strconv.Atoi(query.Get("continuation-token"))
+	}
+	limit, _ := strconv.Atoi(query.Get("max-keys"))
+	if limit <= 0 {
+		limit = 1000
+	}
+	end := min(start+limit, len(entries))
+	start = min(start, len(entries))
+	var body strings.Builder
+	element := "ListBucketResult"
+	if history {
+		element = "ListVersionsResult"
+	}
+	body.WriteString("<" + element + "><Name>" + s3TestBucket + "</Name><Prefix>" + query.Get("prefix") + "</Prefix><MaxKeys>" + strconv.Itoa(limit) + "</MaxKeys><IsTruncated>" + strconv.FormatBool(end < len(entries)) + "</IsTruncated>")
+	if end < len(entries) {
+		last := entries[end-1]
+		if history {
+			body.WriteString("<NextKeyMarker>" + last.key + "</NextKeyMarker><NextVersionIdMarker>" + last.version.versionID + "</NextVersionIdMarker>")
+		} else {
+			body.WriteString("<NextContinuationToken>" + strconv.Itoa(end) + "</NextContinuationToken>")
+		}
+	}
+	for _, item := range entries[start:end] {
+		tag := "Contents"
+		if history {
+			tag = "Version"
+			if item.version.deleteMarker {
+				tag = "DeleteMarker"
+			}
+		}
+		v := item.version
+		body.WriteString("<" + tag + "><Key>" + item.key + "</Key><LastModified>2026-10-23T00:00:00.000Z</LastModified><ETag>&#34;" + v.etag + "&#34;</ETag><Size>" + strconv.Itoa(len(v.body)) + "</Size><StorageClass>STANDARD</StorageClass>")
+		if history {
+			body.WriteString("<VersionId>" + v.versionID + "</VersionId><IsLatest>" + strconv.FormatBool(item.latest) + "</IsLatest>")
+		}
+		if f.listMeta && v.marker != "" {
+			body.WriteString("<UserMetadata><X-Amz-Meta-Synapse-Marker>" + v.marker + "</X-Amz-Meta-Synapse-Marker></UserMetadata>")
+		}
+		body.WriteString("</" + tag + ">")
+	}
+	body.WriteString("</" + element + ">")
 	w.Header().Set("Content-Type", "application/xml")
 	_, _ = io.WriteString(w, body.String())
 }
 
-func (f *fakeS3) serveHead(w http.ResponseWriter, key string) {
-	version, ok := f.head(key)
+func (f *fakeS3) serveHead(w http.ResponseWriter, key, versionID string) {
+	f.mu.Lock()
+	versions := f.objects[key]
+	var version s3Version
+	ok := false
+	for i := len(versions) - 1; i >= 0; i-- {
+		if versionID != "" && versions[i].versionID != versionID {
+			continue
+		}
+		version = versions[i]
+		ok = !version.deleteMarker
+		break
+	}
+	f.mu.Unlock()
 	if !ok {
 		f.xmlError(w, http.StatusNotFound, "NoSuchKey")
 		return
@@ -220,6 +286,19 @@ func (f *fakeS3) servePut(w http.ResponseWriter, r *http.Request, key string) {
 		f.xmlError(w, status, "AccessDenied")
 		return
 	}
+	versions := f.objects[key]
+	var current *s3Version
+	if len(versions) > 0 && !versions[len(versions)-1].deleteMarker {
+		current = &versions[len(versions)-1]
+	}
+	if r.Header.Get("If-None-Match") == "*" && current != nil {
+		f.xmlError(w, http.StatusPreconditionFailed, "PreconditionFailed")
+		return
+	}
+	if match := r.Header.Get("If-Match"); match != "" && (current == nil || match != `"`+current.etag+`"`) {
+		f.xmlError(w, http.StatusPreconditionFailed, "PreconditionFailed")
+		return
+	}
 	f.puts = append(f.puts, key)
 	versionID := f.putLocked(key, r.Header.Get("X-Amz-Meta-Synapse-Marker"), r.Header.Get("Content-Type"), body)
 	w.Header().Set("ETag", `"`+f.objects[key][len(f.objects[key])-1].etag+`"`)
@@ -256,17 +335,18 @@ func newS3TestAdapter(t *testing.T, fake *fakeS3) (*s3Adapter, *httptest.Server)
 		t.Fatalf("parse test endpoint: %v", err)
 	}
 	client, err := minio.New(endpoint.Host, &minio.Options{
-		Creds:     credentials.NewStaticV4("AKIAEXAMPLE000000000", "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY", ""),
-		Secure:    true,
-		Region:    "us-east-1",
-		Transport: server.Client().Transport,
+		Creds:      credentials.NewStaticV4("AKIAEXAMPLE000000000", "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY", ""),
+		Secure:     true,
+		Region:     "us-east-1",
+		Transport:  server.Client().Transport,
+		MaxRetries: 1,
 	})
 	if err != nil {
 		t.Fatalf("minio client: %v", err)
 	}
 	return &s3Adapter{
 		client: client, bucket: s3TestBucket, prefix: s3TestPrefix, principal: s3TestReader,
-		endpoint: server.URL, accessKey: "AKIAEXAMPLE000000000", secretKey: "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
+		endpoint: server.URL, readEndpoint: server.URL + "/" + s3TestBucket, accessKey: "AKIAEXAMPLE000000000", secretKey: "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY",
 	}, server
 }
 
@@ -298,7 +378,7 @@ func s3Document(t *testing.T, title, storage string) []byte {
 func TestS3NewValidatesDestination(t *testing.T) {
 	secrets := integration.CredentialBundle{"access_key_id": "AKIAEXAMPLE000000000", "secret_access_key": "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY"}
 	config := func(overrides map[string]string) []byte {
-		values := map[string]string{"space": s3TestBucket, "prefix": s3TestPrefix, "read_group": s3TestReader, "region": "us-east-1", "data_class": "detail"}
+		values := map[string]string{"space": s3TestBucket, "prefix": s3TestPrefix, "read_group": s3TestReader, "region": "us-east-1", "data_class": "detail", "read_endpoint": "https://reports.example.com/bucket"}
 		for key, value := range overrides {
 			values[key] = value
 		}
@@ -327,6 +407,12 @@ func TestS3NewValidatesDestination(t *testing.T) {
 		{name: "wildcard reader", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(map[string]string{"read_group": "*"}), secrets: secrets, wantErr: true},
 		{name: "summary data class", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(map[string]string{"data_class": "summary"}), secrets: secrets, wantErr: true},
 		{name: "bad region", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(map[string]string{"region": "EU West 1"}), secrets: secrets, wantErr: true},
+		{name: "missing reader endpoint", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(map[string]string{"read_endpoint": ""}), secrets: secrets, wantErr: true},
+		{name: "plaintext reader endpoint", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(map[string]string{"read_endpoint": "http://reports.example.com"}), secrets: secrets, wantErr: true},
+		{name: "reader query credential", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(map[string]string{"read_endpoint": "https://reports.example.com?token=secret"}), secrets: secrets, wantErr: true},
+		{name: "reader path traversal", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(map[string]string{"read_endpoint": "https://reports.example.com/a/../bucket"}), secrets: secrets, wantErr: true},
+		{name: "reader escaped path", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(map[string]string{"read_endpoint": "https://reports.example.com/a%2fbucket"}), secrets: secrets, wantErr: true},
+		{name: "reader URL leaves no publication room", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(map[string]string{"read_endpoint": "https://reports.example.com/" + strings.Repeat("a", 1900)}), secrets: secrets, wantErr: true},
 		{name: "missing secret", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(nil), secrets: integration.CredentialBundle{"access_key_id": "AKIAEXAMPLE000000000"}, wantErr: true},
 		{name: "secret with whitespace", endpoint: "https://s3.eu-west-1.amazonaws.com", config: config(nil), secrets: integration.CredentialBundle{"access_key_id": "AKIAEXAMPLE000000000", "secret_access_key": "has space"}, wantErr: true},
 	} {
@@ -493,7 +579,7 @@ func TestS3ShellAndStateRoundTrip(t *testing.T) {
 	}
 }
 
-func TestS3WriteRevisionFencesOnTheReadVersion(t *testing.T) {
+func TestS3WriteRevisionFencesOnTheReadContent(t *testing.T) {
 	fake := newFakeS3()
 	seedS3Publication(fake, s3Document(t, "First", "<p>one</p>"))
 	adapter, _ := newS3TestAdapter(t, fake)
@@ -515,7 +601,7 @@ func TestS3WriteRevisionFencesOnTheReadVersion(t *testing.T) {
 		t.Fatalf("fenced write on the current revision: %v", err)
 	}
 	if _, err = adapter.WriteDocument(ctx, s3TestMarker, 1, "Mine", "<p>mine</p>", s3TestMarker); err == nil {
-		t.Fatalf("the version-numbered write must be refused")
+		t.Fatalf("the write without a content precondition must be refused")
 	}
 }
 
@@ -580,8 +666,8 @@ func TestS3AttachmentConflictAndIdempotence(t *testing.T) {
 	if !strings.Contains(string(body.body), `src="./chart.png"`) {
 		t.Fatalf("attachment reference must stay relative to the publication: %s", body.body)
 	}
-	if written.Revision != body.versionID {
-		t.Fatalf("returned revision %q does not name the stored version %q", written.Revision, body.versionID)
+	if written.Revision != body.etag {
+		t.Fatalf("returned revision %q does not match the stored ETag %q", written.Revision, body.etag)
 	}
 }
 
@@ -649,7 +735,7 @@ func TestS3PurgeRemovesEveryVersion(t *testing.T) {
 	})
 }
 
-func TestS3ListingMetadataAvoidsHeadRequests(t *testing.T) {
+func TestS3ListingMetadataPinsObjectVersions(t *testing.T) {
 	fake := newFakeS3()
 	fake.listMeta = true
 	seedS3Publication(fake, s3Document(t, "First", "<p>one</p>"))
@@ -664,8 +750,8 @@ func TestS3ListingMetadataAvoidsHeadRequests(t *testing.T) {
 	if _, err := adapter.GetDocument(context.Background(), s3TestMarker); err != nil {
 		t.Fatalf("read document: %v", err)
 	}
-	if heads != 0 {
-		t.Fatalf("a listing that carries the stamp must need no HEAD, got %d", heads)
+	if heads != 2 {
+		t.Fatalf("a listing without version IDs must pin both current objects with HEAD, got %d", heads)
 	}
 }
 
@@ -734,7 +820,7 @@ func TestS3ProviderRegistered(t *testing.T) {
 	if descriptor.Provider != S3 {
 		t.Fatalf("descriptor = %+v", descriptor)
 	}
-	if len(descriptor.ConfigFields) != 5 || len(descriptor.SecretFields) != 3 {
+	if len(descriptor.ConfigFields) != 6 || len(descriptor.SecretFields) != 3 {
 		t.Fatalf("descriptor fields = %d config, %d secret", len(descriptor.ConfigFields), len(descriptor.SecretFields))
 	}
 	page := s3Remote(s3TestMarker, "https://example.invalid/b/p/", "v1")
