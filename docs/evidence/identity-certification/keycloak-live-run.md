@@ -258,3 +258,55 @@ fixed runtime identity and hashes. The shared runtime dependency on #1612 remain
 ![Signed-out authorization fails while Keycloak is stopped](keycloak-connect-outage-502.png)
 
 ![Connect retry returns the existing readonly user](keycloak-connect-outage-recovered.png)
+
+## Mailbox proof and existing-person enrollment
+
+On 2026-10-25, the default Keycloak draft completed a real provider Test, remained absent from
+Connect until activation, then was activated with explicit operator approval. Three readonly
+invitations were created for the two retained synthetic users: two accepted, one diagnostic revoked.
+Ordinary login before approval and use of the revoked code were denied without JIT access.
+
+The first existing person initiated enrollment while signed in through its linked Auth0 identity.
+With the Keycloak user’s boolean email verification flag temporarily false, the actual signed callback
+required a subject-bound Mailpit challenge. Stopping the isolated sender prevented admission while
+the initiating session remained usable. Restoring that same sender and retrying delivered a real
+private SMTP message. Wrong-code submission was denied. Correct-code admission initially exposed
+a `user_contacts_pkey` collision; the transaction rolled back completely.
+
+The additive repair derives a prospective manual contact ID from the tenant and locked invitation,
+retaining the value-based upsert and existing contact IDs. On the exact candidate build, a new real
+callback/message/code admitted the same person, membership and readonly role. Every field of the
+old manual contact was preserved and the new proven address was added. Real PostgreSQL regressions
+reproduced the old failure, then passed historical-ID reuse, post-write audit-failure rollback/retry,
+concurrent first admissions and exact retry. Focused tests took 3.252s; race tests took 17.663s.
+
+For the second existing person, the retained provider flag was the JSON boolean true. Its actual
+callback accepted the explicit default readonly invitation directly: zero mailbox challenges and one
+verified imported OIDC contact. The controlled flags and actual verified-callback branches establish
+the two outcomes; raw JWTs were not retained or directly inspected. Both users completed local logout
+and ordinary default Keycloak login afterward; recent provider SSO was reused.
+
+The second person then selected the Required secondary organization. The UI required an explicit
+destination provider choice before redirect. Selecting its approved Keycloak connection completed
+the real callback and reached the same person with the existing secondary readonly role. Validated
+upstream authentication time was 17:33:31 UTC; no new authority was created by the switch.
+
+![Mailbox enrollment after contact repair](keycloak-mailbox-contact-repair-accepted.png)
+
+![Verified-email direct enrollment](keycloak-verified-email-accepted.png)
+
+![Destination provider required before switching](keycloak-required-switch-proof-required.png)
+
+![Same readonly person after Required destination proof](keycloak-verified-email-required-switch.png)
+
+[The nonsecret proof](keycloak-mailbox-enrollment.json) binds the exact eight source hashes, candidate
+images, contact/approval observations and captures. Across the two approved enrollments, counts
+changed only from 5 persons / 7 memberships / 8 authenticators to 5 / 8 / 10: no new person, one approved readonly
+membership and two authenticators. All provider flags and the sender were restored; the guarded
+candidate preview returned to the exact reviewed baseline. Ordinary future login needs no invitation.
+
+This records a candidate functional subset. The eight shared source files remain uncommitted at
+base #1612 `043e9d74`, and are not claimed as standalone #1609 source or durably promoted code. Bounded
+combined implementation QA passed; final PR review remains deferred until the complete issue
+acceptance. Pairwise linking, public custom-base-path/realm proof, client-secret rotation and full
+canary/recovery remain open. No billing or Auth0 signing-key rotation was performed.
