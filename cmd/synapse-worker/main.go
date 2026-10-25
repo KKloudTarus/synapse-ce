@@ -359,6 +359,16 @@ func main() {
 		log.Error("assessment closure report service init failed", "err", err)
 		os.Exit(1)
 	}
+	// A lifecycle worker can seal a report before the all/integrations composition
+	// reaches its notification setup. Wire source capture before selecting a profile
+	// so every profile that can render the report records report.generated exactly
+	// when a new artifact is stored.
+	if cfg.NotificationEnabled {
+		if err := assessmentClosureReportService.SetNotifications(postgres.NewTenantTransactionRunner(pool), postgres.NewNotificationOutbox(pool)); err != nil {
+			log.Error("assessment closure report notification producers init failed", "err", err)
+			os.Exit(1)
+		}
+	}
 	if cfg.WorkerProfile == config.WorkerProfileLifecycle {
 		handlers := map[string]worker.Handler{
 			comparisonuc.JobKind:                   assessmentComparisonJobHandler{svc: assessmentComparisonService},
@@ -679,15 +689,16 @@ func main() {
 	}
 	documentArtifacts.SetEvidenceProvider(evidenceService)
 	documentArtifacts.SetEvidenceIntegrityProvider(scaService)
-	if cfg.NotificationEnabled {
-		reportOutbox := postgres.NewNotificationOutbox(pool)
-		documentArtifacts.SetNotifications(reportOutbox)
-		assessmentClosureReportService.SetNotifications(reportOutbox)
-	}
 	documentPublisher, documentPublishErr := docpublishuc.NewService(documentStore, integrationStore, integrationService, documentArtifacts, documentAuthority, documentSourcePolicy, auditLog, ids, clock)
 	if documentPublishErr != nil {
 		log.Error("scheduled document publisher init failed", "err", documentPublishErr)
 		os.Exit(1)
+	}
+	if cfg.NotificationEnabled {
+		if err := documentPublisher.SetNotifications(postgres.NewTenantTransactionRunner(pool), postgres.NewNotificationOutbox(pool)); err != nil {
+			log.Error("document publication notification producers init failed", "err", err)
+			os.Exit(1)
+		}
 	}
 	var scheduleRuntime documentScheduleRuntime
 	if cfg.NotificationEnabled {

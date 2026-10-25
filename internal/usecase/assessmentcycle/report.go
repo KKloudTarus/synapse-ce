@@ -33,14 +33,15 @@ type AssessmentClosureReportJob struct {
 }
 
 type ClosureReportService struct {
-	closures    ports.AssessmentClosureRepository
-	reports     ports.AssessmentClosureReportStore
-	snapshots   ports.AssessmentSnapshotRepository
-	comparisons ports.AssessmentComparisonRepository
-	decisions   ports.AssessmentClosureDecisionReader
-	audit       ports.AuditLogger
-	observer    ports.AssessmentClosureReportObserver
-	events      ports.NotificationOutbox
+	closures     ports.AssessmentClosureRepository
+	reports      ports.AssessmentClosureReportStore
+	snapshots    ports.AssessmentSnapshotRepository
+	comparisons  ports.AssessmentComparisonRepository
+	decisions    ports.AssessmentClosureDecisionReader
+	audit        ports.AuditLogger
+	observer     ports.AssessmentClosureReportObserver
+	transactions ports.TenantTransactionRunner
+	events       ports.NotificationOutbox
 }
 
 func NewClosureReportService(closures ports.AssessmentClosureRepository, reports ports.AssessmentClosureReportStore, snapshots ports.AssessmentSnapshotRepository, comparisons ports.AssessmentComparisonRepository, decisions ports.AssessmentClosureDecisionReader, audit ports.AuditLogger) (*ClosureReportService, error) {
@@ -53,8 +54,13 @@ func NewClosureReportService(closures ports.AssessmentClosureRepository, reports
 // SetNotifications enables the report.generated capture for a newly sealed
 // closure report. It is optional, and the record is keyed by the report content
 // so a later release of the same artifact appends nothing further.
-func (service *ClosureReportService) SetNotifications(outbox ports.NotificationOutbox) {
+func (service *ClosureReportService) SetNotifications(transactions ports.TenantTransactionRunner, outbox ports.NotificationOutbox) error {
+	if transactions == nil || outbox == nil {
+		return fmt.Errorf("%w: closure report notification transaction and outbox are required", shared.ErrValidation)
+	}
+	service.transactions = transactions
 	service.events = outbox
+	return nil
 }
 
 func (service *ClosureReportService) SetObserver(observer ports.AssessmentClosureReportObserver) {
@@ -226,20 +232,36 @@ func (service *ClosureReportService) Render(ctx context.Context, tenantID, cycle
 		TenantID: tenantID, CycleID: cycleID, ManifestID: manifestID, RendererContractVersion: manifest.RendererContractVersion,
 		ContentHash: hex.EncodeToString(contentDigest[:]), Content: content, GeneratedAt: payload.GeneratedAt,
 	}
-	stored, created, err := service.reports.SaveClosureReport(ctx, artifact)
-	if err != nil {
-		service.observer.ObserveAssessmentClosureReport("failed", "artifact_write")
-		return ports.AssessmentClosureReportArtifact{}, err
-	}
-	if err := service.recordGeneratedAudit(ctx, manifest, stored, created); err != nil {
-		service.observer.ObserveAssessmentClosureReport("failed", "audit")
-		return ports.AssessmentClosureReportArtifact{}, err
-	}
-	if created {
-		if err := service.captureReportGenerated(ctx, tenantID, stored); err != nil {
-			service.observer.ObserveAssessmentClosureReport("failed", "notification")
-			return ports.AssessmentClosureReportArtifact{}, err
+	var stored ports.AssessmentClosureReportArtifact
+	var created bool
+	persist := func(txCtx context.Context) error {
+		var err error
+		stored, created, err = service.reports.SaveClosureReport(txCtx, artifact)
+		if err != nil {
+			return fmt.Errorf("save closure report: %w", err)
 		}
+		if created {
+			if err := service.captureReportGenerated(txCtx, tenantID, stored); err != nil {
+				return err
+			}
+			if err := service.recordGeneratedAudit(txCtx, manifest, stored, true); err != nil {
+				return fmt.Errorf("record closure report audit: %w", err)
+			}
+		}
+		return nil
+	}
+	if service.events != nil {
+		if service.transactions == nil {
+			service.observer.ObserveAssessmentClosureReport("failed", "notification")
+			return ports.AssessmentClosureReportArtifact{}, fmt.Errorf("%w: closure report notifications require a tenant transaction", shared.ErrValidation)
+		}
+		err = service.transactions.Run(ctx, tenantID, persist)
+	} else {
+		err = persist(ctx)
+	}
+	if err != nil {
+		service.observer.ObserveAssessmentClosureReport("failed", "persist")
+		return ports.AssessmentClosureReportArtifact{}, err
 	}
 	if created {
 		service.observer.ObserveAssessmentClosureReport("generated", "none")
@@ -352,7 +374,7 @@ func (service *ClosureReportService) captureReportGenerated(ctx context.Context,
 	}
 	record, err := notification.ReportGenerated{
 		TenantID: tenantID, Kind: notification.ReportKindAssessmentCycle, Severity: shared.SeverityUnknown,
-		Title: "Assessment closure report", ContentHash: stored.ContentHash, GeneratedAt: stored.GeneratedAt,
+		Title: "Assessment closure report", ContentHash: stored.ContentHash, GeneratedAt: stored.GeneratedAt, CycleID: stored.CycleID,
 		FindingCount: -1,
 	}.ReportGeneratedRecord()
 	if err != nil {

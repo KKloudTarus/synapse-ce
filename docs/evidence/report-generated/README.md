@@ -27,3 +27,8 @@ workspaces and logs the file name for each capture.
 composes that line in English at `internal/infrastructure/messageformat/email.go:159` and receives
 no locale, so every non-English email carries it. It predates this event and affects all of them;
 fixing it means threading the locale into the formatters.
+
+
+## Native functional run
+
+See [native delivery acceptance](live-acceptance.md) for real producer/delivery evidence and its remaining limits. The payload fixtures above remain formatter contract evidence.

@@ -244,7 +244,11 @@ func newAssessmentClosureHTTPRouterState(t *testing.T, closeCycle bool) (*Router
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := api.SetClosureDependencies(cycles, snapshots, comparisons, closureHTTPDecisionReader{}, queue, []byte("0123456789abcdef0123456789abcdef")); err != nil {
+	reporter, err := cycleuc.NewClosureReportService(cycles, cycles, snapshots, comparisons, closureHTTPDecisionReader{}, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := api.SetClosureDependencies(cycles, snapshots, comparisons, closureHTTPDecisionReader{}, reporter, queue, []byte("0123456789abcdef0123456789abcdef")); err != nil {
 		t.Fatal(err)
 	}
 	router := &Router{log: discardLog(), eng: engagementService}

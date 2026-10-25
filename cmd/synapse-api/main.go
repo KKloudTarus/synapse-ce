@@ -2223,14 +2223,21 @@ func main() {
 		documentArtifacts.SetEvidenceProvider(evidenceService)
 		documentArtifacts.SetEvidenceIntegrityProvider(scaService)
 		if cfg.NotificationEnabled {
-			reportOutbox := postgres.NewNotificationOutbox(databasePool)
-			documentArtifacts.SetNotifications(reportOutbox)
-			assessmentClosureReportService.SetNotifications(reportOutbox)
+			if err := assessmentClosureReportService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool)); err != nil {
+				log.Error("assessment closure report notification producers init failed", "err", err)
+				os.Exit(1)
+			}
 		}
 		documentService, documentErr := docpublishuc.NewService(documentStore, integrationStore, integrationService, documentArtifacts, documentAuthority, documentSourcePolicy, auditLog, ids, clock)
 		if documentErr != nil {
 			log.Error("document publishing service init failed", "err", documentErr)
 			os.Exit(1)
+		}
+		if cfg.NotificationEnabled {
+			if err := documentService.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool)); err != nil {
+				log.Error("document publication notification producers init failed", "err", err)
+				os.Exit(1)
+			}
 		}
 		router.SetDocumentPublishing(documentService)
 		if notificationService != nil {
@@ -2245,6 +2252,12 @@ func main() {
 			if scheduleErr != nil {
 				log.Error("document schedule service init failed", "err", scheduleErr)
 				os.Exit(1)
+			}
+			if cfg.NotificationEnabled {
+				if scheduleErr := documentSchedules.SetNotifications(postgres.NewTenantTransactionRunner(databasePool), postgres.NewNotificationOutbox(databasePool)); scheduleErr != nil {
+					log.Error("document schedule notification producers init failed", "err", scheduleErr)
+					os.Exit(1)
+				}
 			}
 			documentScheduleHistory, scheduleErr := docpublishuc.NewScheduleHistoryService(documentStore, documentStore)
 			if scheduleErr != nil {
@@ -2526,7 +2539,7 @@ func main() {
 				log.Error("assessment closure preview key generation failed", "err", keyErr)
 				os.Exit(1)
 			}
-			if cycleErr := cycleAPI.SetClosureDependencies(assessmentCycleStore, assessmentSnapshotStore, assessmentComparisonStore, closureDecisionReader, vulnerabilityQueue, closureTokenKey); cycleErr != nil {
+			if cycleErr := cycleAPI.SetClosureDependencies(assessmentCycleStore, assessmentSnapshotStore, assessmentComparisonStore, closureDecisionReader, assessmentClosureReportService, vulnerabilityQueue, closureTokenKey); cycleErr != nil {
 				log.Error("assessment closure service init failed", "err", cycleErr)
 				os.Exit(1)
 			}

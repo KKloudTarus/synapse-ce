@@ -26,7 +26,12 @@ type ReportGenerated struct {
 	TenantID     shared.ID
 	Kind         ReportGeneratedKind
 	EngagementID shared.ID
-	Severity     shared.Severity
+	// CycleID and ProjectKey are optional, typed navigation facts. They live in
+	// the stored source data only; notification template variables remain the
+	// stable event-v1 contract.
+	CycleID    shared.ID
+	ProjectKey string
+	Severity   shared.Severity
 	// Title is the report's own title. It is scrubbed and bounded here.
 	Title string
 	// ContentHash is the digest of the sealed content. It is the idempotency key:
@@ -67,6 +72,12 @@ func (r ReportGenerated) ReportGeneratedRecord() (SourceRecord, error) {
 	}
 	if !r.EngagementID.IsZero() {
 		data["engagement_id"] = r.EngagementID.String()
+	}
+	if !r.CycleID.IsZero() {
+		data["cycle_id"] = r.CycleID.String()
+	}
+	if r.ProjectKey != "" {
+		data["project_key"] = r.ProjectKey
 	}
 	if r.FindingCount >= 0 {
 		data["finding_count"] = r.FindingCount

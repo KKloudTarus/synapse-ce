@@ -8,6 +8,7 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/composition"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/notificationsender"
+	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/postgres"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/vault"
 	"github.com/KKloudTarus/synapse-ce/internal/platform/config"
 	docpublishuc "github.com/KKloudTarus/synapse-ce/internal/usecase/docpublish"
@@ -53,6 +54,12 @@ func configureDocumentScheduleRuntime(deps documentScheduleRuntimeDependencies) 
 	if err != nil {
 		notifications.close()
 		return documentScheduleRuntime{}, fmt.Errorf("create document schedule service: %w", err)
+	}
+	if deps.cfg.NotificationEnabled {
+		if err := schedules.SetNotifications(postgres.NewTenantTransactionRunner(deps.pool), postgres.NewNotificationOutbox(deps.pool)); err != nil {
+			notifications.close()
+			return documentScheduleRuntime{}, fmt.Errorf("configure document schedule report notifications: %w", err)
+		}
 	}
 	runner, err := composition.NewDocumentPublicationRunner(schedules, deps.tenants, deps.log)
 	if err != nil {

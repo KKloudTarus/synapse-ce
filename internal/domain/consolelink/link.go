@@ -16,10 +16,12 @@ import (
 type SubjectKind string
 
 const (
-	KindFinding    SubjectKind = "finding"
-	KindScan       SubjectKind = "scan"
-	KindEngagement SubjectKind = "engagement"
-	KindIncident   SubjectKind = "incident"
+	KindFinding         SubjectKind = "finding"
+	KindScan            SubjectKind = "scan"
+	KindEngagement      SubjectKind = "engagement"
+	KindAssessmentCycle SubjectKind = "assessment_cycle"
+	KindProject         SubjectKind = "project"
+	KindIncident        SubjectKind = "incident"
 )
 
 // Link is immutable outside this package, so a formatter cannot manufacture
@@ -169,6 +171,26 @@ func (b Builder) Engagement(engagementID shared.ID) (Link, error) {
 		return Link{}, err
 	}
 	return b.link(KindEngagement, engagementID, "/engagements/"+e)
+}
+
+// AssessmentCycle links to the existing assessment-cycle console route.
+func (b Builder) AssessmentCycle(cycleID shared.ID) (Link, error) {
+	cycle, err := escapeID(cycleID)
+	if err != nil {
+		return Link{}, err
+	}
+	return b.link(KindAssessmentCycle, cycleID, "/assessment-cycles/"+cycle)
+}
+
+// Project links to the existing code-quality project route. Project keys are
+// server-derived and path-escaped before they are joined to the trusted base.
+func (b Builder) Project(projectKey string) (Link, error) {
+	key := shared.ID(projectKey)
+	escaped, err := escapeID(key)
+	if err != nil {
+		return Link{}, err
+	}
+	return b.link(KindProject, key, "/code-quality/projects/"+escaped)
 }
 
 func (b Builder) Incident(incidentID shared.ID) (Link, error) {

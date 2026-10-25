@@ -1,106 +1,79 @@
 package docpublish
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	document "github.com/KKloudTarus/synapse-ce/internal/domain/docpublish"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
 
-type recordingOutbox struct {
-	records []notification.SourceRecord
-	err     error
-}
-
-func (o *recordingOutbox) Append(_ context.Context, record notification.SourceRecord) error {
-	if o.err != nil {
-		return o.err
+func TestArtifactBuilderBuildsWithoutPublicationCapture(t *testing.T) {
+	builder := newArtifactBuilder(t, ports.ReportInsight{EvidenceCount: 1, EvidenceIntact: true, EvidenceHead: strings.Repeat("a", 64), HasScan: true, ScanTime: artifactAt})
+	target := documentTarget(document.EngagementReport, EngagementSourceRef("engagement-a"), document.Engagement, "engagement-a")
+	first, err := builder.BuildDocumentArtifact(t.Context(), "tenant-a", target)
+	if err != nil {
+		t.Fatalf("build first artifact: %v", err)
 	}
-	o.records = append(o.records, record)
-	return nil
+	second, err := builder.BuildDocumentArtifact(t.Context(), "tenant-a", target)
+	if err != nil {
+		t.Fatalf("build second artifact: %v", err)
+	}
+	if artifactBytesDigest(first.PDF) != artifactBytesDigest(second.PDF) {
+		t.Fatalf("pure report builds must keep the sealed PDF stable")
+	}
 }
 
-var _ ports.NotificationOutbox = (*recordingOutbox)(nil)
+func TestReportGeneratedRecordUsesStoredPDFIdentity(t *testing.T) {
+	artifact := ports.DocumentArtifact{Title: "Báo cáo", Paragraphs: []string{"fact"}, PDF: []byte("%PDF-1.7\\nsealed"), SourceRevision: "revision", GeneratedAt: artifactAt}
+	record, err := reportGeneratedRecord("tenant-a", document.Source{SourceKind: document.EngagementReport, SourceRef: EngagementSourceRef("engagement-a"), Scope: document.Engagement, ScopeID: "engagement-a"}, artifact)
+	if err != nil {
+		t.Fatalf("build record: %v", err)
+	}
+	hash := artifactBytesDigest(artifact.PDF)
+	if record.EventType != notification.EventReportGenerated || record.SourceID != "engagement_report:"+hash || record.SubjectID != hash || record.EngagementID != "engagement-a" {
+		t.Fatalf("record does not identify the stored PDF: %+v", record)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(record.Data, &data); err != nil {
+		t.Fatalf("decode data: %v", err)
+	}
+	if data["content_hash"] != hash || data["report_kind"] != "engagement_report" {
+		t.Fatalf("record payload = %v", data)
+	}
+}
 
-// TestArtifactBuilderCapturesReportGenerated pins the producer half of
-// report.generated: one record per sealed report, keyed by the report kind and
-// its content digest so a rebuild of the same content cannot announce it twice.
-func TestArtifactBuilderCapturesReportGenerated(t *testing.T) {
-	insight := ports.ReportInsight{EvidenceCount: 1, EvidenceIntact: true, EvidenceHead: strings.Repeat("a", 64), HasScan: true, ScanTime: artifactAt}
+func TestReportGeneratedRecordCarriesOnlyTypedSourceNavigationFacts(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		target       document.Target
-		wantKind     string
-		wantEngaged  shared.ID
-		wantPDFBytes string
+		name      string
+		source    document.Source
+		artifact  ports.DocumentArtifact
+		dataKey   string
+		wantValue string
 	}{
-		{"engagement", documentTarget(document.EngagementReport, EngagementSourceRef("engagement-a"), document.Engagement, "engagement-a"), "engagement_report", "engagement-a", "%PDF-engagement"},
-		{"quality", documentTarget(document.ProjectQualitySummary, ProjectQualitySourceRef("project-a"), document.Project, "project-a"), "project_quality_summary", "", ""},
+		{
+			name: "assessment cycle", source: document.Source{SourceKind: document.AssessmentClosureReport, SourceRef: AssessmentClosureSourceRef("cycle-a"), Scope: document.Project, ScopeID: "project-a"},
+			artifact: ports.DocumentArtifact{Title: "Closure", Paragraphs: []string{"fact"}, PDF: []byte("closure"), SourceRevision: "sealed", GeneratedAt: artifactAt, CycleID: "cycle-a"}, dataKey: "cycle_id", wantValue: "cycle-a",
+		},
+		{
+			name: "project quality", source: document.Source{SourceKind: document.ProjectQualitySummary, SourceRef: ProjectQualitySourceRef("project-a"), Scope: document.Project, ScopeID: "project-a"},
+			artifact: ports.DocumentArtifact{Title: "Quality", Paragraphs: []string{"fact"}, PDF: []byte("quality"), SourceRevision: "sealed", GeneratedAt: artifactAt, ProjectKey: "payments-api"}, dataKey: "project_key", wantValue: "payments-api",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			builder := newArtifactBuilder(t, insight)
-			outbox := &recordingOutbox{}
-			builder.SetNotifications(outbox)
-			artifact, err := builder.BuildDocumentArtifact(context.Background(), "tenant-a", tc.target)
+			record, err := reportGeneratedRecord("tenant-a", tc.source, tc.artifact)
 			if err != nil {
-				t.Fatalf("build: %v", err)
-			}
-			if _, err = builder.BuildDocumentArtifact(context.Background(), "tenant-a", tc.target); err != nil {
-				t.Fatalf("rebuild: %v", err)
-			}
-			if len(outbox.records) != 2 {
-				t.Fatalf("every build appends its record for the outbox to deduplicate, got %d", len(outbox.records))
-			}
-			first, second := outbox.records[0], outbox.records[1]
-			if first.SourceID != second.SourceID || first.SourceKind != second.SourceKind {
-				t.Fatalf("the same sealed report must reuse its key: %q then %q", first.SourceID, second.SourceID)
-			}
-			hash := artifactBytesDigest(artifact.PDF)
-			if first.SourceKind != "report" || first.SourceID != tc.wantKind+":"+hash {
-				t.Fatalf("source key = %s/%s", first.SourceKind, first.SourceID)
-			}
-			if first.EventType != notification.EventReportGenerated || first.SubjectKind != "report" || first.SubjectID != hash {
-				t.Fatalf("record = %+v", first)
-			}
-			if first.EngagementID != tc.wantEngaged {
-				t.Fatalf("engagement = %q, want %q", first.EngagementID, tc.wantEngaged)
-			}
-			if first.OccurredAt != artifactAt {
-				t.Fatalf("occurred_at = %v, want the seal time %v", first.OccurredAt, artifactAt)
+				t.Fatal(err)
 			}
 			var data map[string]any
-			if err = json.Unmarshal(first.Data, &data); err != nil {
-				t.Fatalf("decode data: %v", err)
+			if err := json.Unmarshal(record.Data, &data); err != nil {
+				t.Fatal(err)
 			}
-			if data["report_kind"] != tc.wantKind || data["content_hash"] != hash || data["report_id"] != hash {
-				t.Fatalf("data = %v", data)
-			}
-			if _, ok := data["finding_count"]; ok {
-				t.Fatalf("a producer that cannot count findings must omit the field: %v", data)
+			if data[tc.dataKey] != tc.wantValue {
+				t.Fatalf("data=%v, want %s=%q", data, tc.dataKey, tc.wantValue)
 			}
 		})
-	}
-}
-
-func TestArtifactBuilderWithoutNotificationsStillBuilds(t *testing.T) {
-	builder := newArtifactBuilder(t, ports.ReportInsight{EvidenceCount: 1, EvidenceIntact: true, EvidenceHead: strings.Repeat("a", 64), HasScan: true, ScanTime: artifactAt})
-	if _, err := builder.BuildDocumentArtifact(context.Background(), "tenant-a", documentTarget(document.EngagementReport, EngagementSourceRef("engagement-a"), document.Engagement, "engagement-a")); err != nil {
-		t.Fatalf("build without an outbox: %v", err)
-	}
-}
-
-// TestArtifactBuilderFailsWhenTheOutboxFails keeps the capture inside the
-// producer's own failure path: a report that cannot be announced is not handed
-// to a publisher as if it had been.
-func TestArtifactBuilderFailsWhenTheOutboxFails(t *testing.T) {
-	builder := newArtifactBuilder(t, ports.ReportInsight{EvidenceCount: 1, EvidenceIntact: true, EvidenceHead: strings.Repeat("a", 64), HasScan: true, ScanTime: artifactAt})
-	builder.SetNotifications(&recordingOutbox{err: shared.ErrConflict})
-	if _, err := builder.BuildDocumentArtifact(context.Background(), "tenant-a", documentTarget(document.EngagementReport, EngagementSourceRef("engagement-a"), document.Engagement, "engagement-a")); err == nil {
-		t.Fatalf("a failed append must fail the build")
 	}
 }

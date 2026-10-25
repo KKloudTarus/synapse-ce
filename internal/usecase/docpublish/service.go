@@ -38,6 +38,20 @@ type Service struct {
 	audit        ports.AuditLogger
 	ids          ports.IDGenerator
 	clock        ports.Clock
+	transactions ports.TenantTransactionRunner
+	events       ports.NotificationOutbox
+}
+
+// SetNotifications makes newly persisted publication commands and their
+// report.generated records one transaction. It is optional so compositions
+// without notifications retain their existing command path.
+func (s *Service) SetNotifications(transactions ports.TenantTransactionRunner, outbox ports.NotificationOutbox) error {
+	if transactions == nil || outbox == nil {
+		return fmt.Errorf("%w: document notification transaction and outbox are required", shared.ErrValidation)
+	}
+	s.transactions = transactions
+	s.events = outbox
+	return nil
 }
 
 func NewService(store ports.DocumentCommandStore, integrations ports.IntegrationStore, providers ProviderRegistry, sources ports.DocumentArtifactSource, authority ports.DocumentAuthorityReader, policy ports.DocumentSourceReleaseReader, audit ports.AuditLogger, ids ports.IDGenerator, clock ports.Clock) (*Service, error) {
@@ -184,14 +198,45 @@ func (s *Service) publish(ctx context.Context, tenant shared.ID, actor ports.Doc
 	}
 	command := ports.DocumentCommand{Intent: intent, Actor: actor, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, ReadGroup: group, Artifact: artifact, Progress: progress}
 	command.Intent.PayloadDigest = commandDigest(command)
-	if err := s.record(ctx, command, "document.release_requested", ""); err != nil {
-		return ReleaseResult{}, err
-	}
-	saved, _, err := s.store.CreateDocumentCommand(ctx, tenant, command)
+	saved, err := s.persistReleaseCommand(ctx, tenant, command)
 	if err != nil {
 		return ReleaseResult{}, err
 	}
 	return ReleaseResult{Intent: &saved.Intent}, nil
+}
+
+func (s *Service) persistReleaseCommand(ctx context.Context, tenant shared.ID, command ports.DocumentCommand) (ports.DocumentCommand, error) {
+	if s.transactions == nil || s.events == nil {
+		if err := s.record(ctx, command, "document.release_requested", ""); err != nil {
+			return ports.DocumentCommand{}, err
+		}
+		saved, _, err := s.store.CreateDocumentCommand(ctx, tenant, command)
+		return saved, err
+	}
+	var saved ports.DocumentCommand
+	err := s.transactions.Run(ctx, tenant, func(txCtx context.Context) error {
+		var created bool
+		var err error
+		saved, created, err = s.store.CreateDocumentCommand(txCtx, tenant, command)
+		if err != nil || !created {
+			return err
+		}
+		record, err := reportGeneratedRecord(tenant, saved.Intent.Source(), saved.Artifact)
+		if err != nil {
+			return err
+		}
+		if err = s.events.Append(txCtx, record); err != nil {
+			return fmt.Errorf("append report notification: %w", err)
+		}
+		if err = s.record(txCtx, saved, "document.release_requested", ""); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return ports.DocumentCommand{}, err
+	}
+	return saved, nil
 }
 
 func (s *Service) Unpublish(ctx context.Context, tenant shared.ID, actor ports.DocumentActor, linkID shared.ID, requestKey string) (ReleaseResult, error) {

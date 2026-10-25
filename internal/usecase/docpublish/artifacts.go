@@ -16,7 +16,6 @@ import (
 	closuredom "github.com/KKloudTarus/synapse-ce/internal/domain/assessmentclosure"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/assessmentcycle"
 	document "github.com/KKloudTarus/synapse-ce/internal/domain/docpublish"
-	"github.com/KKloudTarus/synapse-ce/internal/domain/notification"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	closureuc "github.com/KKloudTarus/synapse-ce/internal/usecase/assessmentcycle"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
@@ -60,7 +59,6 @@ type ArtifactBuilder struct {
 	projector   ports.DocumentArtifactPDFRenderer
 	evidence    ports.ReportEvidenceProvider
 	integrity   ports.ReportInsightProvider
-	events      ports.NotificationOutbox
 }
 
 // NewArtifactBuilder requires every closed source dependency. Keeping these
@@ -91,13 +89,6 @@ func NewArtifactBuilder(
 // reach a remote publisher.
 func (b *ArtifactBuilder) SetEvidenceProvider(provider ports.ReportEvidenceProvider) {
 	b.evidence = provider
-}
-
-// SetNotifications enables the report.generated capture. It is optional so a
-// composition without notifications keeps building artifacts. The outbox row is
-// keyed by the sealed content, so rebuilding the same report appends once.
-func (b *ArtifactBuilder) SetNotifications(outbox ports.NotificationOutbox) {
-	b.events = outbox
 }
 
 // SetEvidenceIntegrityProvider enables evidence-chain checks for document
@@ -159,36 +150,7 @@ func (b *ArtifactBuilder) BuildSourceArtifact(ctx context.Context, tenant shared
 	if err != nil {
 		return ports.DocumentArtifact{}, err
 	}
-	if err = b.captureReportGenerated(ctx, tenant, source, artifact); err != nil {
-		return ports.DocumentArtifact{}, err
-	}
 	return artifact, nil
-}
-
-// captureReportGenerated appends report.generated for one sealed artifact. The
-// source key is the report kind and the content digest, so a rebuild of the same
-// content and a later release of it append one record, and a changed report
-// appends its own.
-func (b *ArtifactBuilder) captureReportGenerated(ctx context.Context, tenant shared.ID, source document.Source, artifact ports.DocumentArtifact) error {
-	if b.events == nil {
-		return nil
-	}
-	generated := notification.ReportGenerated{
-		TenantID: tenant, Kind: notification.ReportGeneratedKind(source.SourceKind), Severity: artifact.Severity,
-		Title: artifact.Title, ContentHash: artifactBytesDigest(artifact.PDF), GeneratedAt: artifact.GeneratedAt,
-		FindingCount: -1,
-	}
-	if source.SourceKind == document.EngagementReport {
-		generated.EngagementID = source.ScopeID
-	}
-	record, err := generated.ReportGeneratedRecord()
-	if err != nil {
-		return err
-	}
-	if err = b.events.Append(ctx, record); err != nil {
-		return fmt.Errorf("append report notification: %w", err)
-	}
-	return nil
 }
 
 func (b *ArtifactBuilder) buildEngagement(ctx context.Context, tenant shared.ID, source document.Source) (ports.DocumentArtifact, error) {
@@ -430,6 +392,7 @@ func (b *ArtifactBuilder) buildClosureByProjectScope(ctx context.Context, tenant
 		EvidenceHead:   finalHead,
 		SourceRevision: "closure:" + manifest.ID.String() + ":" + strings.TrimSpace(stored.ContentHash),
 		GeneratedAt:    stored.GeneratedAt.UTC(),
+		CycleID:        cycleID,
 	}
 	pdf, err := b.projector.RenderDocumentArtifact(ctx, projection)
 	if err != nil {
@@ -528,6 +491,7 @@ func (b *ArtifactBuilder) buildQuality(ctx context.Context, tenant shared.ID, so
 		SourceRevision: summary.SourceRevision,
 		GeneratedAt:    summary.GeneratedAt.UTC(),
 		Images:         cloneImages(summary.Images),
+		ProjectKey:     summary.ProjectKey,
 	}
 	pdf, err := b.projector.RenderDocumentArtifact(ctx, projection)
 	if err != nil {

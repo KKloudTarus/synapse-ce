@@ -71,6 +71,12 @@
         "engagement_id": {
           "type": "string"
         },
+        "cycle_id": {
+          "type": "string"
+        },
+        "project_key": {
+          "type": "string"
+        },
         "engagement_name": {
           "type": "string"
         },
