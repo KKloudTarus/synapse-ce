@@ -67,7 +67,7 @@ still requires real provider results.
 | Provider outage | With the provider unreachable, new federation fails usefully, locally valid sessions keep working, and retry recovers. | Passed with a reversible API connectivity fault. | [Availability and recovery](auth0-live-run.md#availability-and-recovery) |
 | Local logout | Logout revokes the Synapse session. Record whether the provider session survived. | Passed; Auth0/Google SSO survived local logout. | [Availability and recovery](auth0-live-run.md#availability-and-recovery) |
 | Activation and rollback | Per-organization activation, disable and recovery leave other organizations unchanged. | Passed, including last-admin guard and restoration of Required policy. | [Availability and recovery](auth0-live-run.md#availability-and-recovery) |
-| Console states | Settings / Authentication and Connect in light and dark, desktop and mobile, with loading, validation, denied, dependency-error and retry states. | Functional Edge journeys passed; owner excluded theme sweeps. Additive Auth0 linking and remaining invitation cases are unfinished. | [Invitation denial and lifecycle](auth0-live-run.md#invitation-denial-and-lifecycle) |
+| Console states | Settings / Authentication and Connect in light and dark, desktop and mobile, with loading, validation, denied, dependency-error and retry states. | Functional Edge journeys and additive Auth0 linking passed, including session rotation, later login and several denial paths; remaining linking/invitation cases stay open. Owner excluded theme sweeps. | [Additive Auth0 linking](auth0-live-run.md#additive-auth0-linking), [invitation denial and lifecycle](auth0-live-run.md#invitation-denial-and-lifecycle) |
 
 ## Open questions for this provider
 

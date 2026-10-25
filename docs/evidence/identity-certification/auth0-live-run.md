@@ -1,7 +1,7 @@
 # Auth0 live acceptance record
 
-Observed 2026-10-24 through 2026-10-25 using a sandbox Auth0 tenant, its existing Google connection,
-and trusted loopback HTTPS. No card, paid feature, or new billable cloud service was added.
+Observed 2026-10-24 through 2026-10-25 using a sandbox Auth0 tenant, its existing Google and database
+connections, and trusted loopback HTTPS. No card, paid feature, or new billable cloud service was added.
 This is a progress record, not full provider certification. Personal account identifiers, invitation
 codes, client secrets, tokens and raw provider responses are excluded.
 
@@ -47,6 +47,44 @@ the private archive or credentials:
 
 Sources: `auth0-first-enrollment-live.json`, `auth0-additional-enrollment-live.json`,
 `identity-secondary-required-switch-live.json`, and `identity-legacy-functional.json`.
+
+## Additive Auth0 linking
+
+An existing Keycloak readonly person used Profile to link an explicitly authorized synthetic
+Auth0 database user in the approved organization. A real password login returned to Dashboard;
+Profile then listed both approved providers. Person and membership counts stayed at five and six,
+and authenticators increased from six to seven. The person's membership remained readonly.
+The source Keycloak sessions were revoked and a new Auth0 session became active. Local logout
+revoked that session; ordinary Auth0 sign-in, without an invitation, returned to the same person
+and role. Auth0 SSO survived local logout and displayed organization consent on repeat login.
+
+The password is encrypted in the local vault; a decrypt-and-compare check and actual password
+login passed. The database connection was already enabled for the sandbox application. Enabling
+it in the approved organization retained disabled automatic membership and organization signup.
+The synthetic user's email remains unverified: linking is not evidence of mailbox verification
+during enrollment. No additional Synapse membership or elevated role was granted by linking.
+
+Negative journeys also used real hosted Auth0:
+
+- Selecting a Google identity already owned by another person refused the link and kept the
+  source readonly session usable, with contextual feedback and a Profile retry link.
+- Declining Auth0 consent preserved the source session and all identity authority.
+- Logging out the source in a second tab while Auth0 consent was pending caused the returning
+  callback to fail without a new session or authenticator. The first logout hit stale CSRF;
+  refreshing that tab and successfully logging out preceded callback completion. This proves a
+  missing/revoked source case, not an isolated source-age test. Normal Keycloak login recovered.
+
+Connection revisions, policies and membership authority were unchanged by these link journeys.
+Session rotation was established from server-side revocation and replacement metadata; browser
+cookie values were not read. The separate stale-source-age linking case remains open.
+
+The source identities were prepared through two authorized Keycloak readonly invitations. Both
+users passed enrollment, local logout, ordinary repeat login and recent-SSO reauthentication;
+the unknown subject was refused before enrollment. Those observations cover the shared runtime,
+not the separate Keycloak PR's source gate or stable-hostname requirement.
+
+Sources: `auth0-additive-link-functional.json`, `auth0-link-owned-subject-functional.json`,
+`auth0-link-negative-functional.json`, and `keycloak-enrollment-functional.json`.
 
 ## Proof and organization boundaries
 
@@ -116,9 +154,9 @@ Sources: `identity-invitation-functional.json`, `identity-invitation-final-check
 
 ## Remaining acceptance
 
-- Same-tenant additive **Auth0-target** Profile linking, session rotation and subsequent login,
-  with its missing/stale source, wrong-person and provider-error paths. Cross-tenant invitation
-  acceptance is not a substitute.
+- Isolated stale-source-age and provider-outage cases during additive Auth0 linking. Success,
+  session rotation, ordinary later login, owned-subject denial, provider cancellation and a
+  missing/revoked source callback now pass; the broader outage drill did not target linking.
 - Enrollment mailbox challenge/fallback, unavailable sender, and an actual expired invitation.
   Successful direct admissions imply the strict verified-email branch, but raw `email_verified`
   claims were not captured.
