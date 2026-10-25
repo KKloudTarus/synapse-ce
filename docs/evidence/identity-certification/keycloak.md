@@ -9,10 +9,10 @@ that blocks support for this profile.
 
 | Field | Value |
 | --- | --- |
-| Issuer | `https://<host>/realms/<realm>` |
-| Client ID | the application's client ID |
+| Issuer | `https://challenges-burke-pacific-survivors.trycloudflare.com/realms/synapse-e2e` (current process-bound sandbox origin) |
+| Client ID | `synapse-e2e` (existing synthetic confidential client) |
 | Client secret | sealed per tenant and connection; never returned by any API |
-| Redirect URL | the deployment's fixed callback, not chosen per connection |
+| Redirect URL | `https://127.0.0.1:8446/api/auth/enterprise/callback` |
 
 Read the issuer from the provider's own discovery document before saving the connection. An issuer that
 differs by one path segment fails at callback time, not at save time.
@@ -20,7 +20,7 @@ differs by one path segment fails at callback time, not at save time.
 ## Provider setup
 
 - Create a confidential client in the realm with the standard flow enabled and the authorization-code grant.
-- Set the valid redirect URI to the deployment's exact callback, `https://<api-host>/api/auth/oidc/callback`.
+- Set the valid redirect URI to the deployment's exact callback, `https://127.0.0.1:8446/api/auth/enterprise/callback`.
 - Keep the client's PKCE method as S256; the client always sends a code challenge.
 - Leave the realm's `email_verified` mapper on, and confirm the realm issues `auth_time` for a `max_age` request.
 
@@ -28,15 +28,15 @@ differs by one path segment fails at callback time, not at save time.
 
 | Cell | What proves it | Observed | Evidence |
 | --- | --- | --- | --- |
-| Approved sign-in | A person with an approved link signs in and reaches the expected membership and role. |  |  |
+| Approved sign-in | A person with an approved link signs in and reaches the expected membership and role. | Passed for the existing linked readonly person before and after signing-key rotation. | [Signing-key run](keycloak-live-run.md#signing-key-overlap-and-login) |
 | Unknown subject | An authenticated identity with no approved link is denied; no person, membership or session is created. |  |  |
 | First enrollment | The first approved user accepts an explicit invitation, then signs in normally. |  |  |
 | Additional enrollment | A second user enrolls the same way; an existing signed-in person keeps its membership role. |  |  |
 | Mailbox proof | Record whether `email_verified` arrived as the JSON boolean `true`, or the subject-bound mailbox challenge was used. |  |  |
-| Fresh authentication | A sensitive action forces a real re-authentication and returns `auth_time` inside 15 minutes. Record the provider's prompt behaviour. |  |  |
+| Fresh authentication | A sensitive action forces a real re-authentication and returns `auth_time` inside 15 minutes. Record the provider's prompt behaviour. | Actual password prompt during destination switch returned validated authentication time 13:45:18 UTC; admitted session created four seconds later. | [Signing-key run](keycloak-live-run.md#signing-key-overlap-and-login) |
 | Stale or missing auth_time | A proof older than 15 minutes, or an ID token without `auth_time`, leaves access unchanged and offers a retry. |  |  |
 | Destination proof | Switching to a required-SSO organization uses that organization's approved enabled connection and the same person. |  |  |
-| Issuer and key boundary | A token from another authorization server, realm, tenant or environment of this provider is denied. Rotate the signing key and show discovery picking it up. |  |  |
+| Issuer and key boundary | A token from another authorization server, realm, tenant or environment of this provider is denied. Rotate the signing key and show discovery picking it up. | Key overlap and actual login after RS256 signer rotation passed without API restart. Wrong/custom-base-path realm boundary remains open. | [Signing-key run](keycloak-live-run.md#signing-key-overlap-and-login) |
 | Subject remap | A changed or remapped subject is denied rather than reused on the existing link. |  |  |
 | Provider outage | With the provider unreachable, new federation fails usefully, locally valid sessions keep working, and retry recovers. |  |  |
 | Local logout | Logout revokes the Synapse session. Record whether the provider session survived. |  |  |
