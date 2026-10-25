@@ -2072,7 +2072,7 @@ func main() {
 		}
 		router.SetOIDC(httpOIDCService, cfg.OIDCFrontendURL)
 	}
-	if err := wireEnterpriseIdentity(cfg, router, auth, databasePool, vaultCipher, notificationSender, clock, ids); err != nil {
+	if err := wireEnterpriseIdentity(cfg, router, auth, databasePool, vaultCipher, notificationSender, clock, ids, usersService.BootstrapCredentialID()); err != nil {
 		log.Error("enterprise identity initialization failed", "err", err)
 		os.Exit(1)
 	}

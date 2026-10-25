@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -19,12 +20,14 @@ import (
 const authorizationLifetime = 10 * time.Minute
 
 type Service struct {
-	connections  ports.IdentityConnectionStore
-	transactions ports.IdentityAuthorizationStore
-	providers    ports.IdentityOIDCProviderFactory
-	protector    ports.IdentitySecretProtector
-	clock        ports.Clock
-	ids          ports.IDGenerator
+	connections           ports.IdentityConnectionStore
+	transactions          ports.IdentityAuthorizationStore
+	providers             ports.IdentityOIDCProviderFactory
+	protector             ports.IdentitySecretProtector
+	clock                 ports.Clock
+	ids                   ports.IDGenerator
+	bootstrapCredentialID string
+	provisioning          *Provisioning
 }
 
 func NewService(connections ports.IdentityConnectionStore, transactions ports.IdentityAuthorizationStore, providers ports.IdentityOIDCProviderFactory, protector ports.IdentitySecretProtector, clock ports.Clock, ids ports.IDGenerator) (*Service, error) {
@@ -34,13 +37,35 @@ func NewService(connections ports.IdentityConnectionStore, transactions ports.Id
 	return &Service{connections: connections, transactions: transactions, providers: providers, protector: protector, clock: clock, ids: ids}, nil
 }
 
+// SetBootstrapCredentialID binds bootstrap Test callbacks to this process's configured
+// deployment credential. Composition calls it once before the service handles requests.
+func (s *Service) SetBootstrapCredentialID(id string) error {
+	if id == "" || strings.TrimSpace(id) != id || len(id) > 256 {
+		return fmt.Errorf("%w: bootstrap credential binding is required", shared.ErrValidation)
+	}
+	if s.bootstrapCredentialID != "" && s.bootstrapCredentialID != id {
+		return fmt.Errorf("%w: bootstrap credential binding is already configured", shared.ErrConflict)
+	}
+	s.bootstrapCredentialID = id
+	return nil
+}
+
+func (s *Service) SetProvisioning(provisioning *Provisioning) error {
+	if provisioning == nil || s.provisioning != nil || provisioning.cfg.BootstrapCredentialID != s.bootstrapCredentialID {
+		return fmt.Errorf("%w: initial provisioning authority does not match this process", shared.ErrValidation)
+	}
+	s.provisioning = provisioning
+	return nil
+}
+
 type BeginInput struct {
-	TenantID     shared.ID
-	ConnectionID shared.ID
-	Revision     int
-	Purpose      ports.IdentityAuthorizationPurpose
-	CallerNonce  string
-	AdminProof   *ports.IdentityAdminProof
+	TenantID          shared.ID
+	ConnectionID      shared.ID
+	Revision          int
+	Purpose           ports.IdentityAuthorizationPurpose
+	CallerNonce       string
+	AdminProof        *ports.IdentityAdminProof
+	ProvisioningToken string
 	// Context is authenticated and sealed, and may contain an initiating session identity. It is
 	// never copied into state, callback URLs, or provider requests.
 	Context []byte
@@ -56,8 +81,28 @@ func (s *Service) Begin(ctx context.Context, in BeginInput) (BeginResult, error)
 	if in.TenantID.IsZero() || in.ConnectionID.IsZero() || !in.Purpose.Valid() || (in.Revision < 0) || strings.TrimSpace(in.CallerNonce) == "" {
 		return BeginResult{}, fmt.Errorf("%w: invalid authorization start", shared.ErrValidation)
 	}
-	if in.Purpose == ports.IdentityAuthorizationTest && in.AdminProof == nil {
+	if in.ProvisioningToken != "" && (in.Purpose != ports.IdentityAuthorizationTest || in.AdminProof != nil || s.provisioning == nil) {
+		return BeginResult{}, shared.ErrForbidden
+	}
+	if in.Purpose == ports.IdentityAuthorizationTest && in.AdminProof == nil && in.ProvisioningToken == "" {
 		return BeginResult{}, fmt.Errorf("%w: connection test requires administrator proof", shared.ErrForbidden)
+	}
+	if in.ProvisioningToken != "" {
+		proof, err := s.provisioning.Proof(ctx, in.ProvisioningToken)
+		if err != nil || proof.TenantID != in.TenantID || proof.ConnectionID != in.ConnectionID {
+			return BeginResult{}, shared.ErrForbidden
+		}
+		state, err := s.provisioning.store.ReadIdentityProvisioning(ctx, proof)
+		if err != nil {
+			return BeginResult{}, err
+		}
+		if !provisioningTestEligible(state) {
+			return BeginResult{}, shared.ErrForbidden
+		}
+	} else if in.Purpose == ports.IdentityAuthorizationTest {
+		if err := s.checkBootstrapTestProof(in.AdminProof, in.TenantID, s.clock.Now().UTC()); err != nil {
+			return BeginResult{}, err
+		}
 	}
 	revision := in.Revision
 	if revision == 0 {
@@ -103,7 +148,7 @@ func (s *Service) Begin(ctx context.Context, in BeginInput) (BeginResult, error)
 	}
 	// Nonce is protocol secret material too: retain it only inside the authenticated context
 	// envelope so the callback can provide it to signed-token verification.
-	contextPayload, err := json.Marshal(sealedCallbackContext{Nonce: nonce, Context: base64.RawURLEncoding.EncodeToString(in.Context), AdminProof: in.AdminProof})
+	contextPayload, err := json.Marshal(sealedCallbackContext{Nonce: nonce, Context: base64.RawURLEncoding.EncodeToString(in.Context), AdminProof: in.AdminProof, ProvisioningToken: in.ProvisioningToken})
 	if err != nil {
 		return BeginResult{}, fmt.Errorf("encode authorization context: %w", err)
 	}
@@ -134,33 +179,80 @@ type CallbackInput struct {
 	CallerNonce string
 }
 type CallbackResult struct {
-	Purpose         ports.IdentityAuthorizationPurpose
-	TransactionID   shared.ID
-	ConnectionID    shared.ID
-	Revision        int
-	Subject         string
-	Email           string
-	Name            string
-	EmailVerified   bool
-	AuthenticatedAt time.Time
-	Context         []byte
+	Purpose              ports.IdentityAuthorizationPurpose
+	TransactionID        shared.ID
+	ConnectionID         shared.ID
+	Revision             int
+	Subject              string
+	Email                string
+	Name                 string
+	EmailVerified        bool
+	AuthenticatedAt      time.Time
+	Context              []byte
+	ProvisioningTenantID shared.ID
 }
 type sealedCallbackContext struct {
-	Nonce      string                    `json:"nonce"`
-	Context    string                    `json:"context"`
-	AdminProof *ports.IdentityAdminProof `json:"admin_proof,omitempty"`
+	Nonce             string                    `json:"nonce"`
+	Context           string                    `json:"context"`
+	AdminProof        *ports.IdentityAdminProof `json:"admin_proof,omitempty"`
+	ProvisioningToken string                    `json:"initial_provisioning,omitempty"`
 }
 
 // Callback consumes before exchange. It returns neutral verified protocol evidence; admission
 // policy and any session/membership mutation are intentionally performed by the caller's command.
-func (s *Service) Callback(ctx context.Context, in CallbackInput) (CallbackResult, error) {
-	if in.TenantID.IsZero() || strings.TrimSpace(in.State) == "" || strings.TrimSpace(in.Code) == "" || strings.TrimSpace(in.CallerNonce) == "" {
+func (s *Service) Callback(ctx context.Context, in CallbackInput) (out CallbackResult, err error) {
+	if in.TenantID.IsZero() || strings.TrimSpace(in.State) == "" || strings.TrimSpace(in.CallerNonce) == "" {
 		return CallbackResult{}, fmt.Errorf("%w: invalid authorization callback", shared.ErrValidation)
 	}
 	now := s.clock.Now().UTC()
 	tx, err := s.transactions.ConsumeIdentityAuthorization(ctx, in.TenantID, digestAuthorization(in.State), digestAuthorization(in.CallerNonce), now)
 	if err != nil {
 		return CallbackResult{}, fmt.Errorf("consume authorization state: %w", err)
+	}
+	verifier, err := s.protector.Open(ctx, tx.PKCEVerifierSealed, authorizationAAD(tx.TenantID, tx.ID, "pkce"))
+	if err != nil {
+		return CallbackResult{}, fmt.Errorf("open PKCE verifier: %w", err)
+	}
+	defer zero(verifier)
+	payload, err := s.protector.Open(ctx, tx.ContextSealed, authorizationAAD(tx.TenantID, tx.ID, "context"))
+	if err != nil {
+		return CallbackResult{}, fmt.Errorf("open authorization context: %w", err)
+	}
+	defer zero(payload)
+	var sealed sealedCallbackContext
+	if err := json.Unmarshal(payload, &sealed); err != nil || digestAuthorization(sealed.Nonce) != tx.NonceDigest {
+		return CallbackResult{}, fmt.Errorf("%w: authorization context is malformed", shared.ErrForbidden)
+	}
+	if sealed.ProvisioningToken != "" {
+		if tx.Purpose != ports.IdentityAuthorizationTest || sealed.AdminProof != nil || s.provisioning == nil {
+			return CallbackResult{}, shared.ErrForbidden
+		}
+		proof, proofErr := s.provisioning.Proof(ctx, sealed.ProvisioningToken)
+		if proofErr != nil || proof.TenantID != tx.TenantID || proof.ConnectionID != tx.ConnectionID {
+			return CallbackResult{}, shared.ErrForbidden
+		}
+		state, readErr := s.provisioning.store.ReadIdentityProvisioning(ctx, proof)
+		if readErr != nil {
+			err = readErr
+			return CallbackResult{}, err
+		}
+		if !provisioningTestEligible(state) {
+			return CallbackResult{}, shared.ErrForbidden
+		}
+		// Only trusted, current provisioning context may select the fixed setup return.
+		// Errors before this point must stay on the ordinary fail-closed callback path.
+		defer func() {
+			if err != nil {
+				err = &ProvisioningCallbackError{TenantID: tx.TenantID, Cause: err}
+			}
+		}()
+	} else if tx.Purpose == ports.IdentityAuthorizationTest {
+		if err := s.checkBootstrapTestProof(sealed.AdminProof, tx.TenantID, now); err != nil {
+			return CallbackResult{}, err
+		}
+	}
+	if strings.TrimSpace(in.Code) == "" {
+		return CallbackResult{}, fmt.Errorf("%w: authorization callback did not include a code", shared.ErrValidation)
 	}
 	c, err := s.connections.GetIdentityConnection(ctx, tx.TenantID, tx.ConnectionID, tx.ConnectionRevision)
 	if err != nil {
@@ -177,24 +269,11 @@ func (s *Service) Callback(ctx context.Context, in CallbackInput) (CallbackResul
 	if !ok {
 		return CallbackResult{}, fmt.Errorf("%w: provider lacks authenticated protocol flow", shared.ErrForbidden)
 	}
-	verifier, err := s.protector.Open(ctx, tx.PKCEVerifierSealed, authorizationAAD(tx.TenantID, tx.ID, "pkce"))
-	if err != nil {
-		return CallbackResult{}, fmt.Errorf("open PKCE verifier: %w", err)
-	}
-	defer zero(verifier)
-	payload, err := s.protector.Open(ctx, tx.ContextSealed, authorizationAAD(tx.TenantID, tx.ID, "context"))
-	if err != nil {
-		return CallbackResult{}, fmt.Errorf("open authorization context: %w", err)
-	}
-	defer zero(payload)
-	var sealed sealedCallbackContext
-	if err := json.Unmarshal(payload, &sealed); err != nil || digestAuthorization(sealed.Nonce) != tx.NonceDigest {
-		return CallbackResult{}, fmt.Errorf("%w: authorization context is malformed", shared.ErrForbidden)
-	}
 	identity, err := sensitive.ExchangeAndVerifyWithMaxAge(ctx, in.Code, string(verifier), sealed.Nonce, 15*time.Minute)
 	if err != nil {
 		return CallbackResult{}, fmt.Errorf("exchange authorization code: %w", err)
 	}
+	now = s.clock.Now().UTC()
 	if identity.Issuer != c.Issuer || strings.TrimSpace(identity.Subject) == "" || identity.AuthenticatedAt.IsZero() || identity.AuthenticatedAt.After(now) || !now.Before(identity.AuthenticatedAt.Add(15*time.Minute)) {
 		return CallbackResult{}, fmt.Errorf("%w: upstream identity does not satisfy callback policy", shared.ErrForbidden)
 	}
@@ -203,15 +282,46 @@ func (s *Service) Callback(ctx context.Context, in CallbackInput) (CallbackResul
 		return CallbackResult{}, fmt.Errorf("%w: authorization context encoding is invalid", shared.ErrValidation)
 	}
 	if tx.Purpose == ports.IdentityAuthorizationTest {
-		if sealed.AdminProof == nil {
-			return CallbackResult{}, fmt.Errorf("%w: missing connection test proof", shared.ErrForbidden)
+		test := ports.IdentityConnectionTest{ID: s.ids.NewID(), TenantID: tx.TenantID, ConnectionID: tx.ConnectionID, Revision: tx.ConnectionRevision, Passed: true, At: now, ExpiresAt: now.Add(time.Hour)}
+		if sealed.ProvisioningToken != "" {
+			err = s.provisioning.RecordTest(ctx, sealed.ProvisioningToken, test)
+		} else {
+			if err := s.checkBootstrapTestProof(sealed.AdminProof, tx.TenantID, now); err != nil {
+				return CallbackResult{}, err
+			}
+			sealed.AdminProof.At = now
+			err = s.connections.RecordIdentityConnectionTest(ctx, test, *sealed.AdminProof)
 		}
-		sealed.AdminProof.At = now
-		if err := s.connections.RecordIdentityConnectionTest(ctx, ports.IdentityConnectionTest{ID: s.ids.NewID(), TenantID: tx.TenantID, ConnectionID: tx.ConnectionID, Revision: tx.ConnectionRevision, Passed: true, At: now, ExpiresAt: now.Add(24 * time.Hour)}, *sealed.AdminProof); err != nil {
+		if err != nil {
 			return CallbackResult{}, fmt.Errorf("record connection test: %w", err)
 		}
 	}
-	return CallbackResult{Purpose: tx.Purpose, TransactionID: tx.ID, ConnectionID: tx.ConnectionID, Revision: tx.ConnectionRevision, Subject: identity.Subject, Email: identity.Email, EmailVerified: identity.EmailVerified, Name: identity.Name, AuthenticatedAt: identity.AuthenticatedAt, Context: plainContext}, nil
+	out = CallbackResult{Purpose: tx.Purpose, TransactionID: tx.ID, ConnectionID: tx.ConnectionID, Revision: tx.ConnectionRevision, Subject: identity.Subject, Email: identity.Email, EmailVerified: identity.EmailVerified, Name: identity.Name, AuthenticatedAt: identity.AuthenticatedAt, Context: plainContext}
+	if sealed.ProvisioningToken != "" {
+		out.ProvisioningTenantID = tx.TenantID
+	}
+	return out, nil
+}
+
+func (s *Service) checkBootstrapTestProof(proof *ports.IdentityAdminProof, tenant shared.ID, now time.Time) error {
+	if proof == nil {
+		return fmt.Errorf("%w: missing connection test proof", shared.ErrForbidden)
+	}
+	p := proof.Principal
+	if !p.IsBootstrap() {
+		return nil // Native administrator authority is revalidated by the transactional store.
+	}
+	if s.bootstrapCredentialID == "" || p.Credential != (authz.Credential{Kind: authz.KindBootstrap, ID: s.bootstrapCredentialID}) || p.TenantID != tenant.String() || proof.Bootstrap == nil || !proof.Bootstrap.Active(now) || proof.Bootstrap.Principal != p {
+		return fmt.Errorf("%w: bootstrap connection test proof is no longer valid", shared.ErrForbidden)
+	}
+	return nil
+}
+
+// provisioningTestEligible is deliberately narrower than the states that can be
+// read or resumed. A Test changes provisioning authority and is allowed only before
+// activation, while the scoped operation is drafting or has an existing test.
+func provisioningTestEligible(state ports.IdentityInitialProvisioning) bool {
+	return state.State == "draft" || state.State == "tested"
 }
 
 func authorizationAAD(t, id shared.ID, field string) []byte {

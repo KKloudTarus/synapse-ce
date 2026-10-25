@@ -36,7 +36,7 @@ interface AuthState {
   retrying: boolean
   connecting: boolean
   oidcAvailable: boolean
-  connect: (token: string) => Promise<void>
+  connect: (token: string, requiredCredential?: 'bootstrap') => Promise<void>
   acceptAup: () => Promise<void>
   logout: () => Promise<void>
   retry: () => Promise<void>
@@ -88,6 +88,13 @@ function readAuthErrorParam(): string | null {
   return new URLSearchParams(window.location.search).get('auth_error')
 }
 
+function preserveOrganizationLogin(user: CurrentUser | null) {
+  if (user?.credentialKind !== 'browser_session' || !user.tenantId) return
+  // This is a public routing hint. The server still validates the selected tenant and provider.
+  const query = new URLSearchParams({ tenant_id: user.tenantId })
+  window.history.replaceState(window.history.state, '', `/?${query}`)
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>('connecting')
   const [aup, setAup] = useState<AupStatus | null>(null)
@@ -97,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!reason || reason === 'mailbox_verification_required') return null
     return { message: reason === 'access_denied' ? ACCESS_DENIED : SIGN_IN_FAILED, requestId: null, canRetry: false }
   })
+  const callbackFailure = useRef(failure)
   const [connecting, setConnecting] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [oidcAvailable, setOidcAvailable] = useState(true)
@@ -115,6 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [phase, authMethod])
 
   const setError = useCallback((message: string | null) => {
+    callbackFailure.current = null
     setFailure(message ? { message, requestId: null, canRetry: false } : null)
   }, [])
 
@@ -137,18 +146,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // still applies. Once the AUP is accepted, /me is part of authentication restoration: any failure
   // remains a failure instead of presenting a ready state with an unknown user.
   const loadAuthenticated = useCallback(async () => {
-    const status = await api.aup()
+    let status: AupStatus
+    try {
+      status = await api.aup()
+    } catch (cause) {
+      // Break-glass sessions intentionally cannot accept the ordinary AUP. The identity returned
+      // by the same authenticated client is the only authority for entering its isolated console.
+      if (!(cause instanceof ApiError) || cause.status !== 403 || cause.code !== 'permission_denied') throw cause
+      let me: CurrentUser
+      try {
+        me = await api.me()
+      } catch (identityError) {
+        // A failed identity read never grants recovery access. Preserve failures that restoration
+        // already knows how to recover from or explain; only mask definitive non-recovery denials.
+        if (isUnauthenticated(identityError) || !(identityError instanceof ApiError) || identityError.retryable) throw identityError
+        throw cause
+      }
+      if (me.credentialKind !== 'break_glass') throw cause
+      return { status: null, me }
+    }
     const me = status.accepted && typeof api.me === 'function' ? await api.me() : null
     return { status, me }
   }, [])
 
-  const applyAuthenticated = useCallback((result: { status: AupStatus; me: CurrentUser | null }) => {
+  const applyAuthenticated = useCallback((result: { status: AupStatus | null; me: CurrentUser | null }) => {
+    if (result.status === null && result.me?.credentialKind !== 'break_glass') {
+      throw new Error('Recovery authentication requires a verified break-glass credential.')
+    }
     setAup(result.status)
     setCurrentUser(result.me)
-    const nextPhase = result.status.accepted ? 'ready' : 'need-aup'
+    const nextPhase = result.status === null || result.status.accepted ? 'ready' : 'need-aup'
     phaseRef.current = nextPhase
     setPhase(nextPhase)
   }, [])
+
+  const completeRestoration = useCallback((result: { status: AupStatus | null; me: CurrentUser | null }) => {
+    const refused = callbackFailure.current
+    callbackFailure.current = null
+    setFailure(refused ? {
+      ...refused,
+      message: refused.message === ACCESS_DENIED
+        ? 'The identity you selected is not approved for this action. Your existing sign-in is still active.'
+        : 'The additional sign-in attempt could not be completed. Your existing sign-in is still active.',
+    } : null)
+    applyAuthenticated(result)
+  }, [applyAuthenticated])
 
   // Restoration: try the BFF cookie session, then a saved bearer token. Only a rejected credential
   // is discarded; a dependency failure keeps it and offers Retry.
@@ -172,8 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const result = await loadAuthenticated()
         if (!current()) return
-        setFailure(null)
-        applyAuthenticated(result)
+        completeRestoration(result)
       } catch (e) {
         if (!current()) return
         setPhase('unauthenticated')
@@ -214,8 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const result = await loadAuthenticated()
       if (!current()) return
-      setFailure(null)
-      applyAuthenticated(result)
+      completeRestoration(result)
     } catch (e) {
       if (!current()) return
       setPhase('unauthenticated')
@@ -227,7 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setFailure(keptFailure(e, 'Could not restore your sign-in session'))
       }
     }
-  }, [applyAuthenticated, clearAuthentication, loadAuthenticated, resetLocalAuthentication, setError])
+  }, [completeRestoration, clearAuthentication, loadAuthenticated, resetLocalAuthentication, setError])
 
   const retry = useCallback(async () => {
     if (retryInFlight.current) return
@@ -242,6 +282,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [restore])
 
   const completeOrganizationSwitch = useCallback(async (csrfToken: string) => {
+    callbackFailure.current = null
     // A switch replaces the browser session. Clear tenant-derived UI before restoring so an
     // in-flight request or cached component cannot present the previous organization's data as
     // belonging to the destination.
@@ -277,10 +318,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
     if (gen !== generation.current) return
+    preserveOrganizationLogin(currentUser)
     clearAuthentication()
     setError(null)
     setPhase('unauthenticated')
-  }, [authMethod, clearAuthentication, setError])
+  }, [authMethod, clearAuthentication, currentUser, setError])
 
   // Requests made after sign-in report authentication outcomes here. Restoration and connect handle
   // their own responses, so the handler acts only on an established session.
@@ -292,14 +334,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!invalid && !isUnauthenticated(e)) return
       generation.current++
       const message = authMethodRef.current === 'token' ? INVALID_TOKEN : SESSION_EXPIRED
+      if (authMethodRef.current === 'session') preserveOrganizationLogin(currentUser)
       if (invalid) clearAuthentication()
       else resetLocalAuthentication()
       setPhase('unauthenticated')
       setError(message)
     })
-  }, [clearAuthentication, resetLocalAuthentication, setError])
+  }, [clearAuthentication, currentUser, resetLocalAuthentication, setError])
 
-  const connect = useCallback(async (raw: string) => {
+  const connect = useCallback(async (raw: string, requiredCredential?: 'bootstrap') => {
     const t = raw.trim()
     if (!t) return
     const gen = ++generation.current
@@ -309,6 +352,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCSRFToken('')
     setAuthMethod('token')
     try {
+      if (requiredCredential === 'bootstrap') {
+        // /me is available before AUP acceptance. Reject an ordinary API credential before
+        // it can be stored or enter either authenticated phase through the operator entrance.
+        const operator = await api.me()
+        if (gen !== generation.current) return
+        if (operator.credentialKind !== 'bootstrap' || operator.role !== 'admin') {
+          throw new Error('Use the deployment operator credential for this sign-in. Organization members must use organization sign-in.')
+        }
+      }
       const result = await loadAuthenticated()
       if (gen !== generation.current) return
       sessionStorage.setItem(TOKEN_KEY, t)

@@ -23,6 +23,34 @@ differs by one path segment fails at callback time, not at save time.
 - Add the deployment's exact callback as an allowed callback URL.
 - Decide whether the connection uses the canonical tenant domain or the custom domain, and use that exact value as the issuer.
 
+### Organization restriction
+
+When using Auth0 Organizations, set the optional **Auth0 organization ID** in the connection
+draft. The API field is `auth0_organization_id`. Use the stable, case-sensitive `org_…` ID;
+an organization name, email domain or callback parameter cannot select this boundary.
+The setting controls both the `organization` authorization parameter and exact comparison with
+the signed ID token's `org_id`. Missing, null, malformed or different organization proof fails
+before a connection test or authentication succeeds. An unrestricted connection accepts ordinary
+tenant tokens without `org_id`; an unsolicited `org_id` is refused rather than silently trusted.
+See [Auth0's token guidance](https://auth0.com/docs/manage-users/organizations/using-tokens).
+
+The restriction is immutable alongside issuer, client ID and callback. Secret rotation with the
+same restriction creates a new settings revision. Adding, removing or changing the restriction
+requires a different connection identity. The existing schema allows only one exact issuer per
+Synapse tenant, so replacing an existing same-issuer connection is currently blocked. Initial
+restricted profiles need a genuinely new tenant without legacy issuer adoption. Do not alter a
+trust row, concatenate the organization into the issuer, or run issuer-only legacy backfill over
+a restricted connection to work around that limit.
+
+Older binaries ignore the additional settings JSON. They must not serve login, test,
+administration or callback traffic against a restricted dataset. Disabling a connection is not a
+rollback fence because connection tests can still use disabled connections. Before storing a
+restriction, isolate the dataset and pin every serving and administrative instance to a supporting
+candidate. Recovery must keep that supporting boundary, or close all traffic and select a complete
+pre-feature dataset before starting an older binary. This profile does not certify mixed-version
+rollout. Local protocol and persistence tests are conformance evidence; the live worksheet below
+still requires real provider results.
+
 ## Worksheet
 
 | Cell | What proves it | Observed | Evidence |

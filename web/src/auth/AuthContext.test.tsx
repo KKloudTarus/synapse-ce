@@ -45,6 +45,16 @@ function PhaseProbe() {
   return <output data-testid="phase">{phase}</output>
 }
 
+function RestoredSessionProbe() {
+  const { error, currentUser, retry } = useAuth()
+  return <><PhaseProbe /><output data-testid="restored-error">{error}</output><output data-testid="restored-role">{currentUser?.role}</output><button type="button" onClick={() => { void retry() }}>Retry restoration</button></>
+}
+
+function BreakGlassProbe() {
+  const { phase, aup, currentUser } = useAuth()
+  return <><output data-testid="phase">{phase}</output><output data-testid="recovery-aup">{aup?.version}</output><output data-testid="recovery-credential">{currentUser?.credentialKind}</output></>
+}
+
 function SwitchProbe() {
   const { completeOrganizationSwitch } = useAuth()
   return <button type="button" onClick={() => { void completeOrganizationSwitch('destination-csrf') }}>Complete organization switch</button>
@@ -87,6 +97,79 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('deployment operator entry', () => {
+  function enterOperator() {
+    window.history.replaceState(null, '', '/settings/authentication?operator=1')
+    return renderConnect()
+  }
+
+  async function submitOperator() {
+    const input = await screen.findByLabelText('Deployment operator token')
+    fireEvent.change(input, { target: { value: 'operator-token' } })
+    fireEvent.submit(input.closest('form')!)
+  }
+
+  it.each([ACCEPTED, PENDING_AUP])('refuses a valid ordinary key before AUP or persistence (%j)', async (status) => {
+    mocks.aup.mockResolvedValue(status)
+    mocks.me.mockResolvedValue({ ...CURRENT_USER, credentialKind: 'api_key' })
+    enterOperator()
+    await submitOperator()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Use the deployment operator credential')
+    expect(mocks.aup).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('synapse.token')).toBeNull()
+    expect(phase()).toBe('unauthenticated')
+    expect(screen.getByLabelText('Deployment operator token')).toHaveValue('')
+  })
+
+  it.each([undefined, 'browser_session'])('fails closed for an unknown or native credential kind (%s)', async (credentialKind) => {
+    mocks.me.mockResolvedValue({ ...CURRENT_USER, credentialKind })
+    enterOperator()
+    await submitOperator()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Use the deployment operator credential')
+    expect(mocks.aup).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('synapse.token')).toBeNull()
+  })
+
+  it('allows the verified bootstrap credential to continue through AUP', async () => {
+    mocks.me.mockResolvedValue({ ...CURRENT_USER, credentialKind: 'bootstrap' })
+    mocks.aup.mockResolvedValue(PENDING_AUP)
+    enterOperator()
+    await submitOperator()
+    await waitFor(() => expect(phase()).toBe('need-aup'))
+    expect(sessionStorage.getItem('synapse.token')).toBe('operator-token')
+    mocks.aup.mockResolvedValue(ACCEPTED)
+    fireEvent.click(screen.getByRole('button', { name: 'Accept & continue' }))
+    await waitFor(() => expect(phase()).toBe('ready'))
+  })
+
+  it('keeps a failed operator lookup out of stored and authenticated state', async () => {
+    mocks.me.mockRejectedValue(new Error('Operator lookup unavailable'))
+    enterOperator()
+    await submitOperator()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Operator lookup unavailable')
+    expect(mocks.aup).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('synapse.token')).toBeNull()
+    expect(phase()).toBe('unauthenticated')
+  })
+
+  it('discards late operator validation after logout', async () => {
+    const lookup = deferred<typeof CURRENT_USER & { credentialKind: string }>()
+    mocks.me.mockReturnValue(lookup.promise)
+    function Logout() {
+      const { logout } = useAuth()
+      return <button onClick={() => { void logout() }}>Cancel operator sign-in</button>
+    }
+    window.history.replaceState(null, '', '/?operator=1')
+    render(<AuthProvider><PhaseProbe /><Connect /><Logout /></AuthProvider>)
+    await submitOperator()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel operator sign-in' }))
+    await act(async () => { lookup.resolve({ ...CURRENT_USER, credentialKind: 'bootstrap' }) })
+    expect(mocks.aup).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('synapse.token')).toBeNull()
+    expect(phase()).toBe('unauthenticated')
+  })
 })
 
 describe('BFF authentication', () => {
@@ -356,6 +439,68 @@ describe('credential restoration outcomes', () => {
     expect(sessionStorage.getItem('synapse.token')).toBe('saved-token')
     // A 403 is final for this request, so there is no retry loop that could later promote it.
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(mocks.me).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores a verified break-glass cookie session without fabricating AUP acceptance', async () => {
+    vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'recovery-csrf' })
+    mocks.aup.mockRejectedValue(apiError(403, 'permission_denied'))
+    mocks.me.mockResolvedValue({ ...CURRENT_USER, credentialKind: 'break_glass', tenantId: 'recovery-tenant' })
+    render(<AuthProvider><BreakGlassProbe /></AuthProvider>)
+
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(screen.getByTestId('recovery-credential')).toHaveTextContent('break_glass')
+    expect(screen.getByTestId('recovery-aup')).toBeEmptyDOMElement()
+    expect(mocks.aup).toHaveBeenCalledTimes(1)
+    expect(mocks.me).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([undefined, 'browser_session'])('does not promote permission_denied for an untrusted credential kind (%s)', async (credentialKind) => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup.mockRejectedValue(apiError(403, 'permission_denied'))
+    mocks.me.mockResolvedValue({ ...CURRENT_USER, credentialKind })
+    renderConnect()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/permission_denied/)
+    expect(phase()).toBe('unauthenticated')
+  })
+
+  it('keeps the original AUP denial when recovery identity lookup is definitively denied', async () => {
+    sessionStorage.setItem('synapse.token', 'saved-token')
+    mocks.aup.mockRejectedValue(apiError(403, 'permission_denied'))
+    mocks.me.mockRejectedValue(apiError(403, 'permission_denied'))
+    renderConnect()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/permission_denied/)
+    expect(phase()).toBe('unauthenticated')
+  })
+
+  it('retries a transient recovery identity lookup and enters the recovery console only after verification', async () => {
+    vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'recovery-csrf' })
+    mocks.aup.mockRejectedValue(apiError(403, 'permission_denied'))
+    mocks.me
+      .mockRejectedValueOnce(apiError(503, 'authentication_unavailable', { retryable: true }))
+      .mockResolvedValueOnce({ ...CURRENT_USER, credentialKind: 'break_glass' })
+    render(<AuthProvider><BreakGlassProbe /><Connect /></AuthProvider>)
+
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(phase()).toBe('unauthenticated')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(screen.getByTestId('recovery-credential')).toHaveTextContent('break_glass')
+    expect(mocks.me).toHaveBeenCalledTimes(2)
+  })
+
+  it('expires a cookie session when recovery identity lookup rejects its credential', async () => {
+    vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'recovery-csrf' })
+    mocks.aup.mockRejectedValue(apiError(403, 'permission_denied'))
+    mocks.me.mockRejectedValue(apiError(401, 'authentication_invalid'))
+    render(<AuthProvider><BreakGlassProbe /><Connect /></AuthProvider>)
+
+    expect(await screen.findByText('Your sign-in session expired. Sign in again.')).toBeInTheDocument()
+    expect(phase()).toBe('unauthenticated')
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
   })
 
   it('keeps a cookie session and offers retry when session discovery is unavailable', async () => {
@@ -481,6 +626,42 @@ describe('requests after sign-in', () => {
   })
 })
 
+describe('authenticated callback refusal', () => {
+  it('keeps the refused attempt visible after restoring the readonly session in StrictMode', async () => {
+    window.history.replaceState(null, '', '/?auth_error=access_denied&keep=1')
+    vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'source-csrf' })
+    mocks.me.mockResolvedValue({ ...CURRENT_USER, role: 'readonly' })
+    render(<StrictMode><AuthProvider><RestoredSessionProbe /></AuthProvider></StrictMode>)
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(screen.getByTestId('restored-error')).toHaveTextContent('The identity you selected is not approved for this action. Your existing sign-in is still active.')
+    expect(screen.getByTestId('restored-role')).toHaveTextContent('readonly')
+    expect(window.location.search).toBe('?keep=1')
+    expect(logoutSession).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry restoration' }))
+    await waitFor(() => expect(screen.getByTestId('restored-error')).toBeEmptyDOMElement())
+    expect(phase()).toBe('ready')
+    expect(screen.getByTestId('restored-role')).toHaveTextContent('readonly')
+  })
+
+  it('retains a callback failure through a transient restoration failure until a session is proved', async () => {
+    window.history.replaceState(null, '', '/?auth_error=unavailable')
+    vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'source-csrf' })
+    mocks.aup.mockRejectedValueOnce(apiError(503, 'authentication_unavailable', { retryable: true })).mockResolvedValue(ACCEPTED)
+    render(<AuthProvider><RestoredSessionProbe /></AuthProvider>)
+    await waitFor(() => expect(phase()).toBe('unauthenticated'))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry restoration' }))
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(screen.getByTestId('restored-error')).toHaveTextContent('The additional sign-in attempt could not be completed. Your existing sign-in is still active.')
+  })
+
+  it('does not invent a refusal for an ordinary restored session', async () => {
+    vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'source-csrf' })
+    render(<AuthProvider><RestoredSessionProbe /></AuthProvider>)
+    await waitFor(() => expect(phase()).toBe('ready'))
+    expect(screen.getByTestId('restored-error')).toBeEmptyDOMElement()
+  })
+})
+
 describe('OIDC access denied', () => {
   it('shows the access-denied notice without retrying and removes it from the URL', async () => {
     window.history.replaceState(null, '', '/?auth_error=access_denied&keep=1')
@@ -519,5 +700,40 @@ describe('keyboard access', () => {
     await user.keyboard('{Enter}')
     await waitFor(() => expect(phase()).toBe('ready'))
     expect(mocks.aup).toHaveBeenCalledTimes(2)
+  })
+})
+
+
+describe('native organization sign-in recovery', () => {
+  function SessionActions() {
+    const { logout, error } = useAuth()
+    return <><PhaseProbe /><button onClick={() => { void logout() }}>End native session</button><output>{error}</output></>
+  }
+  async function restoreSecondary() {
+    window.history.replaceState(null, '', '/settings/team')
+    vi.mocked(discoverSession).mockResolvedValue({ authenticated: true, csrfToken: 'native-csrf' })
+    mocks.me.mockResolvedValue({ ...CURRENT_USER, credentialKind: 'browser_session', tenantId: 'sandbox-secondary' })
+    render(<AuthProvider><SessionActions /></AuthProvider>)
+    await waitFor(() => expect(phase()).toBe('ready'))
+  }
+  it('preserves the served organization after successful native logout', async () => {
+    await restoreSecondary()
+    fireEvent.click(screen.getByRole('button', { name: 'End native session' }))
+    await waitFor(() => expect(phase()).toBe('unauthenticated'))
+    expect(window.location.pathname + window.location.search).toBe('/?tenant_id=sandbox-secondary')
+  })
+  it('preserves the authenticated page when native revocation fails', async () => {
+    vi.mocked(logoutSession).mockRejectedValue(new Error('gateway unavailable'))
+    await restoreSecondary()
+    fireEvent.click(screen.getByRole('button', { name: 'End native session' }))
+    await screen.findByText(/Could not end the server session/)
+    expect(phase()).toBe('ready')
+    expect(window.location.pathname + window.location.search).toBe('/settings/team')
+  })
+  it('preserves the organization after an established native session expires', async () => {
+    await restoreSecondary()
+    act(() => latestUnauthorizedHandler()(apiError(401, 'authentication_invalid')))
+    expect(phase()).toBe('unauthenticated')
+    expect(window.location.search).toBe('?tenant_id=sandbox-secondary')
   })
 })

@@ -2,7 +2,11 @@ package ports
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -21,24 +25,51 @@ type IdentityAdminProof struct {
 // IdentityOIDCSettings contains immutable trust inputs and a sealed client secret. The secret
 // never appears in administrative projections or audit diffs.
 type IdentityOIDCSettings struct {
-	ClientID           string `json:"client_id"`
-	RedirectURL        string `json:"redirect_url"`
-	SealedClientSecret string `json:"sealed_client_secret"`
+	ClientID            string `json:"client_id"`
+	RedirectURL         string `json:"redirect_url"`
+	SealedClientSecret  string `json:"sealed_client_secret"`
+	Auth0OrganizationID string `json:"auth0_organization_id,omitempty"`
+}
+
+// ValidateAuth0OrganizationID accepts the stable opaque Auth0 organization identifier without
+// changing its bytes. An empty value leaves the connection unrestricted.
+func ValidateAuth0OrganizationID(value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) > 256 || !utf8.ValidString(value) || !strings.HasPrefix(value, "org_") || len(value) == len("org_") {
+		return fmt.Errorf("%w: Auth0 organization ID must be an org_ identifier of at most 256 bytes", shared.ErrValidation)
+	}
+	for _, r := range value {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return fmt.Errorf("%w: Auth0 organization ID must not contain whitespace or control characters", shared.ErrValidation)
+		}
+	}
+	return nil
 }
 
 type IdentityConnection struct {
-	TenantID         shared.ID            `json:"-"`
-	ID               shared.ID            `json:"id"`
-	DisplayName      string               `json:"display_name"`
-	Issuer           string               `json:"issuer"`
-	Enabled          bool                 `json:"enabled"`
-	Revision         int                  `json:"revision"`
-	DraftRevision    int                  `json:"draft_revision"`
-	Version          int                  `json:"version"`
-	Epoch            int64                `json:"-"`
+	TenantID      shared.ID `json:"-"`
+	ID            shared.ID `json:"id"`
+	DisplayName   string    `json:"display_name"`
+	Issuer        string    `json:"issuer"`
+	Enabled       bool      `json:"enabled"`
+	Revision      int       `json:"revision"`
+	DraftRevision int       `json:"draft_revision"`
+	Version       int       `json:"version"`
+	Epoch         int64     `json:"-"`
+	// TestPassed reports historical active-revision success for GetIdentityConnection and
+	// ListIdentityConnections(..., true), which authorization relies on. The administrator
+	// ListIdentityConnections(..., false) read instead reports the latest, unexpired result for
+	// the newest draft revision so operators can decide whether activation is ready.
 	TestPassed       bool                 `json:"test_passed"`
 	Settings         IdentityOIDCSettings `json:"-"`
 	SettingsRevision int                  `json:"-"`
+	// ConfigurationPending identifies an imported disabled legacy OIDC scaffold that is
+	// awaiting its first active configured revision. It is derived by the store and is
+	// never caller-controlled.
+	ConfigurationPending  bool   `json:"configuration_pending,omitempty"`
+	ConfigurationClientID string `json:"-"`
 }
 
 type IdentityConnectionDraft struct {
