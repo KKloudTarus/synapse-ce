@@ -24,6 +24,7 @@ const endpointExamples: Record<string, string> = {
   linear: 'https://api.linear.app/graphql',
   sharepoint: 'https://tenant.sharepoint.com/sites/security', onedrive: 'https://tenant-my.sharepoint.com/personal/service_account',
   'google-drive': 'https://www.googleapis.com', bitbucket: 'https://bitbucket.org',
+  's3-compatible': 'https://s3.eu-west-1.amazonaws.com',
 }
 
 

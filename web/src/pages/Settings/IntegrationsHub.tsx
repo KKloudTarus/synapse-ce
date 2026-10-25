@@ -333,7 +333,7 @@ interface ProviderItem {
 type ProviderCategory = 'ci' | 'documentation'
 
 const JIRA_PROVIDERS = new Set(['jira-cloud', 'jira-dc', 'github-issues', 'gitlab-issues', 'azure-boards', 'servicenow', 'linear'])
-const DOCUMENTATION_PROVIDERS = new Set(['confluence-cloud', 'confluence-dc', 'sharepoint', 'onedrive', 'google-drive'])
+const DOCUMENTATION_PROVIDERS = new Set(['confluence-cloud', 'confluence-dc', 'sharepoint', 'onedrive', 'google-drive', 's3-compatible'])
 
 function belongsToProviderCategory(provider: string, category: ProviderCategory) {
   if (category === 'documentation') return DOCUMENTATION_PROVIDERS.has(provider)
