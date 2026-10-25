@@ -27,3 +27,19 @@ This record covers native closure production and scheduled engagement/Project qu
 Replace API, lifecycle, integration and notification writers together. Mixed versions retain the original capture defect. Broken baseline artifacts were preserved for diagnosis; cached reads do not backfill their missing events. Historical reconciliation requires a separate decision. Queue retry is safe for artifact/source atomicity, while an external provider accepting a request before acknowledgment is lost can still cause at-least-once delivery. No process-kill-between-commit-and-ACK experiment or throughput improvement is claimed.
 
 No card, paid plan, paid inference or cloud server was used. The accountless webhook receiver is limited to synthetic metadata, expires after seven days and accepts at most100 requests. Its private address and signing secret are excluded from this evidence.
+
+## Published client captures
+
+The Slack frame contains the original native EN/VI signal/detail receipts. The two Telegram
+frames were recaptured from the retained sandbox bot conversation and together show all four
+native loopback-link receipts. Telegram capture excludes the unrelated chat sidebar; the rendered
+messages were not edited. Hashes and the exact report identities are in `receipts/manifest.json`.
+
+![Slack native EN/VI report receipts](receipts/slack-report-generated-en-vi.png)
+
+![Telegram VI detail and EN signal](receipts/telegram-report-generated-vi-detail-en-signal.png)
+
+![Telegram EN detail and VI signal](receipts/telegram-report-generated-en-detail-vi-signal.png)
+
+Discord and private SMTP captures remain in local evidence pending a publication-safe frame.
+These frames do not add Gmail evidence or a theme sweep.

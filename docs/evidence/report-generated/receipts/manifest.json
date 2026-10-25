@@ -1,0 +1,13 @@
+{
+  "captured_at": "2026-10-25T13:41:22.200575+00:00",
+  "method": "Slack retained original client capture; Telegram newly captured from existing sandbox chat using browser screenshot clip to exclude unrelated conversations. No rendered message content edited.",
+  "slack_artifact_digest": "d9b81856eae7e817280219a1ae2f469d1c821ffd3dbd43a00df0fee5cf05edcb",
+  "telegram_artifact_digest": "8a7352e04ce43839222b432ceded8fed447b6cd55c0a76c0b34c16f810d1e2ab",
+  "telegram_cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+  "theme_matrix": "waived by owner; screenshots retain actual client theme",
+  "files": {
+    "slack-report-generated-en-vi.png": "179787427295c86b85b619e0f02b34901b89f47201030e8f57c34e9c2dbc6dba",
+    "telegram-report-generated-en-detail-vi-signal.png": "eac60a7b22ab7ef30051728f9e65af03d98c2ce395645734c34753132d5ece9f",
+    "telegram-report-generated-vi-detail-en-signal.png": "760bfb2b8a9d37526614a86fe0065d2bd303d151b1d59003b99661a85d8e26c3"
+  }
+}
