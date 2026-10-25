@@ -294,11 +294,30 @@ by SHA-256, and `native-connection-revision-final-images.json`, binding the six 
 files to the tested API/web images. This closes the pending destination revision/disable race
 cell, not the remaining provider lifecycle cells below.
 
+## Provider email change
+
+The existing Auth0 database user changed from one synthetic email address to another through
+the provider's user Details screen. The provider user ID stayed unchanged and email remained
+Unverified. No password, membership, organization restriction or verification flag changed.
+After local logout and provider-local logout, ordinary hosted login with the changed email and
+retained password reached the existing default readonly membership on the same Synapse person.
+
+The original provider email was then restored. Another logout and ordinary password login with
+the retained original credentials succeeded. Both observations preserved five persons, seven
+memberships, eight authenticators, connection revisions, policies and all roles. This proves
+that a provider email change does not replace the subject-bound identity or create new authority.
+It does not prove a changed subject. The provider profile and real login establish the changed
+email path; raw token claims were not retained. No cloud resource or billing change was made.
+
+Source: `auth0-email-change-live.json`, with hashes of the provider screenshots, successful
+login/restoration screenshots and unchanged authority observations.
+
 ## Remaining acceptance
 
-- A different Auth0 issuer/custom domain and actual subject remap/email change. The current
-  Custom Domains screen requires adding a credit card, including for its free-domain option;
-  the no-card constraint was preserved and this hosted case remains unproved.
+- A different Auth0 issuer/custom domain and actual subject remap. The current Auth0 team
+  lists one tenant and reports that additional tenants require a plan upgrade. Custom Domains
+  requires adding a credit card, including for its free-domain option. No upgrade, new tenant
+  or card was added; these hosted boundary cases remain unproved under the no-billing constraint.
 - Signing-key rotation without API restart: explicitly deferred by the owner until after merge
   on 2026-10-25. It has not run and is not counted as passed.
 - Actual provider client-secret rotation, distinct from resaving the same sealed credential.
