@@ -13,9 +13,11 @@ they are not a claim that every path ran again against the final commit.
 
 | Surface | Tested artifact | Scope |
 | --- | --- | --- |
-| Durable API | `sha256:4707488f9ef6576264ad2e1d0b0c9f446deea8033bbafe6135b3f38c00ff68ef` | Native Auth0 flows and corrected one-hour connection Test lifetime. |
+| Earlier durable API | `sha256:4707488f9ef6576264ad2e1d0b0c9f446deea8033bbafe6135b3f38c00ff68ef` | Native Auth0 flows and corrected one-hour connection Test lifetime. Superseded by the mailbox and provider-outage repairs. |
 | Isolated legacy candidate API | `sha256:df34d3856b19097afe280a55cb5d42e85ffbd828d3b29b25f0a62487a4b074b9` | Legacy handover, including first configuration of an imported connection. This API is not the durable serving image. |
-| Invitation web | `sha256:63c49cb68985dcdcf3c1659130ff3ca553212aa267301d1c019b8d50b85ad4c5` | Exact four changed source-file hashes match the committed bytes; real preview proof preceded final reviews. Now durably serving. |
+| Invitation web | `sha256:63c49cb68985dcdcf3c1659130ff3ca553212aa267301d1c019b8d50b85ad4c5` | Exact four changed source-file hashes match the committed bytes; real preview proof preceded final reviews. Later superseded by the mailbox repair. |
+| Current durable API | `sha256:fd5aa931698ba575ecd44d740ce837144644dada4471639cd45e289d4628ba74` | Mailbox recovery and authorization-provider outage repairs, published in `89194497` and `0bd9b19a`. |
+| Current durable web | `sha256:ebfddcd30ad5ef66adf6494dbd8ba5cecb06afa05614ede261144782c126fb48` | Mailbox continuation preserves the initiating session through reload, retry and completion. |
 
 The local evidence archive retains dated metadata, screenshots, gate reports and source/image
 hashes. The following immutable report hashes identify the reviewed checkpoints without exposing
@@ -84,7 +86,17 @@ Negative journeys also used real hosted Auth0:
 
 Connection revisions, policies and membership authority were unchanged by these link journeys.
 Session rotation was established from server-side revocation and replacement metadata; browser
-cookie values were not read. The separate stale-source-age linking case remains open.
+cookie values were not read.
+
+The initiating-proof age gate was exercised separately with natural elapsed time. A source proof
+3,798 seconds old left Profile usable but replaced linking controls with explicit reauthentication
+guidance. Real Keycloak password reauthentication restored the controls. Keeping that Profile open
+past the 15-minute boundary and submitting Link identity produced `forbidden` at 926 seconds,
+with zero new link transactions and no authority changes. The existing Reauthenticate action
+returned fresh upstream proof; the same Link identity action then created one transaction and
+reached the real Auth0 login screen. No extra link was completed. This isolates stale proof at
+begin; it does not claim an age-only callback race. The previously opened Profile retains generic
+`forbidden` feedback, while a newly loaded stale Profile explains the required reauthentication.
 
 The source identities were prepared through two authorized Keycloak readonly invitations. Both
 users passed enrollment, local logout, ordinary repeat login and recent-SSO reauthentication;
@@ -92,8 +104,8 @@ the unknown subject was refused before enrollment. Those observations cover the 
 not the separate Keycloak PR's source gate or stable-hostname requirement.
 
 Sources: `auth0-additive-link-functional.json`, `auth0-link-owned-subject-functional.json`,
-`auth0-link-negative-functional.json`, `keycloak-enrollment-functional.json`, and
-`auth0-link-retry-live.json`. The outage repair used API candidate
+`auth0-link-negative-functional.json`, `keycloak-enrollment-functional.json`,
+`auth0-link-retry-live.json`, and `auth0-link-source-age-live.json`. The outage repair used API candidate
 `sha256:fd5aa931698ba575ecd44d740ce837144644dada4471639cd45e289d4628ba74` with the unchanged
 mailbox-certified web image. The temporary network topology and prior API were restored after
 the journey; no cloud settings, credentials, membership roles or billing changed.
@@ -194,7 +206,7 @@ showed an unavailable-verification message, and Cancel restored the existing ses
 
 Mailpit was private and had no published port; no email went to an external inbox. The SMTP
 outage occurred before the repair, so the new unavailable-error classification is separately
-covered by a service regression test. This run does not prove an expired invitation or Gmail
+covered by a service regression test. This mailbox run does not prove an expired invitation or Gmail
 delivery. Password and one-use proofs are encrypted locally and omitted from published evidence.
 
 Sources: `auth0-mailbox-flow-functional.json`, `identity-mailbox-retry-design.json`,
@@ -202,14 +214,42 @@ Sources: `auth0-mailbox-flow-functional.json`, `identity-mailbox-retry-design.js
 was `sha256:5c296e93079bfb543f1837e7e49ad9b76c3b93cb40fa2171c64b1cd409913117`; the web candidate
 was `sha256:ebfddcd30ad5ef66adf6494dbd8ba5cecb06afa05614ede261144782c126fb48`.
 
+## Invitation expiry
+
+The current durable API and web were exercised against the retained isolated legacy database,
+using its already activated Auth0 connection. A disclosed fixture inserted a new pending readonly
+invitation with its creation time seven days before a deadline a few minutes ahead. Normal RLS,
+the invitation-route trigger, provider verification and application clocks were retained. No
+existing durable invitation or clock was edited; this does not claim that seven days elapsed
+since ordinary UI creation.
+
+The browser began authorization at 12:08:23 UTC, while the invitation was still valid, and selected
+the matching Google recipient through hosted Auth0. Consent was completed after the invitation's
+12:11:57 UTC deadline. The returning callback consumed its transaction before the transaction's
+12:18:23 UTC expiry but was denied admission. Person, membership, authenticator, session and
+connection/policy observations were unchanged. Re-entering the same invitation code was refused
+before another provider transaction, with the current-invitation retry guidance visible.
+
+An otherwise equivalent unexpired readonly invitation for the same recipient then used the same
+Auth0 session and connection. Its callback reached Dashboard and admitted one person, membership
+and authenticator in the isolated copy, retaining readonly. No mailbox challenge was created;
+the verified-email path is inferred from the production branch, without retaining a raw token.
+Local logout revoked the control session. This successful control distinguishes expiry rejection
+from an unusable provider or recipient.
+
+Two precondition attempts are retained separately: a cookie from the durable database was not
+valid in the copy, and provider SSO initially selected a different recipient. Those attempts do
+not count as expiry proof. Normal login/logout and provider-local logout prepared the measured
+run. Afterward, trusted loopback routing returned to the durable stack, its authority fingerprints
+were unchanged, and the isolated API/PostgreSQL services were stopped. No cloud resource, external
+email, port or billing was added.
+
+Source: `auth0-invitation-expiry-live.json`, with immutable hashes of the timing, authority,
+control and restoration observations. The preserved fixture and encrypted one-use codes are
+local evidence; they are not reusable setup credentials.
+
 ## Remaining acceptance
 
-- Isolated stale-source-age during additive Auth0 linking. Success,
-  session rotation, ordinary later login, owned-subject denial, provider cancellation and a
-  missing/revoked source callback now pass; a separate linking outage/retry drill also passes.
-- An actual expired invitation. Mailbox fallback, unavailable SMTP sender and recovery through
-  the same invitation now pass. Successful direct admissions imply the strict verified-email
-  branch, but raw `email_verified` claims were not captured.
 - Pending destination callback versus connection revision/disable changes.
 - A different Auth0 issuer/custom domain and actual subject remap/email change. The current
   Custom Domains screen requires adding a credit card, including for its free-domain option;
@@ -218,5 +258,5 @@ was `sha256:ebfddcd30ad5ef66adf6494dbd8ba5cecb06afa05614ede261144782c126fb48`.
   on 2026-10-25. It has not run and is not counted as passed.
 - Actual provider client-secret rotation, distinct from resaving the same sealed credential.
 
-The legacy candidate has not been promoted to the durable API. Remaining functional work must
+The isolated legacy dataset remains separate from the durable sandbox. Remaining functional work must
 finish before its final consolidated acceptance decision; this record does not close #1521.
