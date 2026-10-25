@@ -140,9 +140,10 @@ hostname decision remains separate; no silent issuer rebinding is allowed.
 
 Other required issue #1517 cells remain open, including cross/custom-base-path realm boundaries,
 approved pairwise enrollment/linking, client-secret rotation and the complete shared-flow
-matrix. Historical enrollment and local logout are mapped below; the full Keycloak outage and
-recovery cells remain open. The owner's theme waiver applies; no theme matrix is claimed. This incremental
-run is not a declaration that #1517 is ready to close.
+matrix. Historical enrollment, local logout and existing-session provider-outage recovery are
+mapped below; signed-out federation and the full canary recovery cells remain open. The owner's
+theme waiver applies; no theme matrix is claimed. This incremental run is not a declaration that
+#1517 is ready to close.
 
 ## Enrollment and local session lifecycle
 
@@ -184,3 +185,44 @@ session identifier is published.
 ![First readonly user's approved Keycloak identity](keycloak-unknown-enrolled-profile.png)
 
 ![Second readonly user returns after login and reauthentication](keycloak-approved-repeat-reauth.png)
+
+## Provider outage and reauthentication recovery
+
+At 15:39 UTC, a timer was registered to start the exact retained Keycloak container after eight
+minutes if the operator stopped. Only that existing synthetic provider container was then stopped.
+The API, web, gateway, public tunnel, hostname, provider credentials, connections and Required
+policy were unchanged. This run used the current shared `a2de17b9` API/web images identified at
+the top of this file.
+
+The existing Keycloak readonly user reloaded Dashboard successfully while the provider was down.
+Profile reauthentication used cached discovery and reached the real public authorization endpoint,
+which displayed Cloudflare's external 504 error at 15:40:36 UTC. Browser Back returned to Profile,
+and a fresh source reload still succeeded. Five persons, seven memberships, eight authenticators,
+connection revisions and policies stayed equal. Active upstream proof tuples remained unchanged;
+no fresh provider authentication appeared during the failure.
+
+The total session row count grew from 258 to 260 because local browser-cookie refresh rotates
+session records. Those rows retained the previous 14:24:40 UTC authentication time; they do not
+represent successful federation. The active source proof remained valid throughout.
+
+Starting the same Keycloak container restored discovery at the exact existing public issuer.
+Retrying the Profile reauthentication button displayed the real provider password form; using the
+retained synthetic account returned through the callback to the same secondary readonly person.
+Its new validated authentication time was 15:42:51 UTC. The API, web, gateway and tunnel had the
+same container IDs, image IDs and start times as before. The restore timer was stopped only after
+these checks and is inactive.
+
+This proves existing-session reauthentication failure/preservation/recovery. The error was an
+external provider 504, not an in-app callback error or a native 503. Browser Back supplied the
+reachable retry. Signed-out Connect, allowed legacy credentials and complete canary/break-glass
+rollback remain separate acceptance paths. No grant, credential or billing change was made.
+
+Source: [`keycloak-provider-outage.json`](keycloak-provider-outage.json), with reduced proof tuples,
+raw-observation hashes and fixed runtime identity. Raw authorization query strings and tokens are
+not retained.
+
+![Local Dashboard remains available while Keycloak is stopped](keycloak-outage-local-session.png)
+
+![External authorization endpoint fails during the real outage](keycloak-outage-federation-504.png)
+
+![Real password retry returns the same readonly user](keycloak-outage-recovered.png)
