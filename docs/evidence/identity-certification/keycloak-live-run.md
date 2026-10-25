@@ -77,6 +77,32 @@ and [Admin REST API](https://www.keycloak.org/docs-api/26.8.1/rest-api/index.htm
 
 ![Original subject restored and secondary readonly reached](keycloak-pairwise-restored.png)
 
+## Missing authentication time and retry
+
+At 14:14 UTC, the same synthetic person held an Auth0 default readonly session. A second
+client-local scope replacement retained only the original Keycloak subject mapper and omitted
+`auth_time`. The shared `basic` scope and all other client assignments stayed unchanged. The admin
+example kept the same subject, issuer, audience, client, email and boolean verification. The
+preview has no user-session authentication time even in the baseline, so it was not used as proof
+that the callback claim was missing.
+
+Ordinary Keycloak authorization reused recent provider SSO. The real destination callback at
+14:15 UTC was denied with the existing-sign-in-active message. No new secondary session appeared;
+default readonly Dashboard still loaded after browser reload. Restoring the exact original default
+and optional scopes, deleting the temporary scope and retrying produced a new callback session at
+14:16:47 UTC for the same secondary readonly person. Validated provider authentication time was
+14:07:24 UTC. Five persons, seven memberships, eight authenticators, roles, policies and connection
+revisions remained unchanged, without API restart. The restore timer is inactive.
+
+Missing authentication time is inferred from the isolated real-provider mapper omission and
+callback denial; raw callback JWTs were not retained. This run does not claim stale signed proof
+or a new password prompt. The previous fresh-password run remains the separate positive control.
+See [the nonsecret evidence and artifact hashes](keycloak-missing-auth-time.json).
+
+![Missing authentication-time mapper denied without losing source access](keycloak-missing-time-denied.png)
+
+![Restored authentication-time mapper permits the readonly destination](keycloak-missing-time-restored.png)
+
 ## Remaining certification
 
 The retained accountless Quick Tunnel provides actual public HTTPS but its hostname depends on
