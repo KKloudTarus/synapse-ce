@@ -167,7 +167,7 @@ func (s *Service) Begin(ctx context.Context, in BeginInput) (BeginResult, error)
 	}
 	url, err := sensitive.AuthorizationURLWithMaxAge(ctx, state, nonce, verifier, 15*time.Minute)
 	if err != nil {
-		return BeginResult{}, fmt.Errorf("build authorization URL: %w", err)
+		return BeginResult{}, fmt.Errorf("build authorization URL: %w: %w", authz.ErrAuthenticationUnavailable, err)
 	}
 	return BeginResult{AuthorizationURL: url, TransactionID: txID, ExpiresAt: now.Add(authorizationLifetime)}, nil
 }

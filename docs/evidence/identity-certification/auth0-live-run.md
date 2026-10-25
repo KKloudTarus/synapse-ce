@@ -73,6 +73,14 @@ Negative journeys also used real hosted Auth0:
   callback to fail without a new session or authenticator. The first logout hit stale CSRF;
   refreshing that tab and successfully logging out preceded callback completion. This proves a
   missing/revoked source case, not an isolated source-age test. Normal Keycloak login recovered.
+- Blocking the API's provider egress while a fresh Keycloak session started an Auth0 link
+  initially exposed a generic internal error. The repair classifies authorization-URL dependency
+  failure as authentication unavailable. A second real outage showed the useful retry message;
+  restoring connectivity let the same Profile action reach Auth0 password login and callback.
+  Selecting an Auth0 subject already owned by another person was still refused, with the source
+  session usable. Counts remained five persons, seven memberships and eight authenticators.
+  This proves outage/retry without adding another link; the earlier successful link remains its
+  own evidence. Invalid provider metadata also remains unavailable until the operator fixes it.
 
 Connection revisions, policies and membership authority were unchanged by these link journeys.
 Session rotation was established from server-side revocation and replacement metadata; browser
@@ -84,7 +92,11 @@ the unknown subject was refused before enrollment. Those observations cover the 
 not the separate Keycloak PR's source gate or stable-hostname requirement.
 
 Sources: `auth0-additive-link-functional.json`, `auth0-link-owned-subject-functional.json`,
-`auth0-link-negative-functional.json`, and `keycloak-enrollment-functional.json`.
+`auth0-link-negative-functional.json`, `keycloak-enrollment-functional.json`, and
+`auth0-link-retry-live.json`. The outage repair used API candidate
+`sha256:fd5aa931698ba575ecd44d740ce837144644dada4471639cd45e289d4628ba74` with the unchanged
+mailbox-certified web image. The temporary network topology and prior API were restored after
+the journey; no cloud settings, credentials, membership roles or billing changed.
 
 ## Proof and organization boundaries
 
@@ -192,9 +204,9 @@ was `sha256:ebfddcd30ad5ef66adf6494dbd8ba5cecb06afa05614ede261144782c126fb48`.
 
 ## Remaining acceptance
 
-- Isolated stale-source-age and provider-outage cases during additive Auth0 linking. Success,
+- Isolated stale-source-age during additive Auth0 linking. Success,
   session rotation, ordinary later login, owned-subject denial, provider cancellation and a
-  missing/revoked source callback now pass; the broader outage drill did not target linking.
+  missing/revoked source callback now pass; a separate linking outage/retry drill also passes.
 - An actual expired invitation. Mailbox fallback, unavailable SMTP sender and recovery through
   the same invitation now pass. Successful direct admissions imply the strict verified-email
   branch, but raw `email_verified` claims were not captured.
