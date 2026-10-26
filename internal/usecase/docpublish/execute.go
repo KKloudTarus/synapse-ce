@@ -47,6 +47,9 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 	}
 	in, err := s.guard(ctx, c)
 	if err != nil {
+		if c.AccessProfile == domain.DestinationManagedSnapshotProfile {
+			return s.failManagedBeforeClaim(ctx, c, "release_authority_changed")
+		}
 		return c.Intent, err
 	}
 	if c.Intent.State == writeintent.Failed {
@@ -64,7 +67,21 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 		return c.Intent, err
 	}
 	defer closeProvider(p)
-	if c.Progress.Step == "shell" {
+	if c.AccessProfile == domain.DestinationManagedSnapshotProfile {
+		snapshot, ok := p.(ports.DocumentSnapshotProvider)
+		if !ok || snapshot.DocumentAccessProfile() != c.AccessProfile {
+			return c.Intent, shared.ErrConflict
+		}
+		if c.Intent.State == writeintent.Uncertain {
+			return c.Intent, nil
+		}
+		// The profile has no strict ACL proof. Its checks are destination
+		// observations only, and managed mutation starts after the usual claim.
+		if c.Progress.Step == "shell" {
+			return c.Intent, shared.ErrConflict
+		}
+	}
+	if c.Progress.Step == "shell" || c.Progress.Step == "snapshot_shell" {
 		if err := ctx.Err(); err != nil {
 			return c.Intent, err
 		}
@@ -97,7 +114,7 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 	if err != nil {
 		return c.Intent, err
 	}
-	if c.Intent.Action != domain.Purge {
+	if c.Intent.Action != domain.Purge && c.Intent.Action != domain.Trash {
 		if err = validateArtifact(c.Artifact); err != nil {
 			return s.refuse(ctx, c, "invalid_artifact")
 		}
@@ -107,6 +124,9 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 		if err = validateLiterals(p, c.Artifact); err != nil {
 			return s.refuse(ctx, c, "unsafe_artifact")
 		}
+	}
+	if c.AccessProfile == domain.DestinationManagedSnapshotProfile {
+		return s.executeManagedSnapshot(ctx, c, p.(ports.DocumentSnapshotProvider))
 	}
 	for step := 0; step < 16; step++ {
 		// A canceled caller may not begin another provider operation. A remote
@@ -288,6 +308,24 @@ func (s *Service) Execute(ctx context.Context, tenant, id shared.ID) (domain.Int
 		}
 	}
 	return c.Intent, fmt.Errorf("%w: document checkpoint bound exceeded", shared.ErrConflict)
+}
+
+func (s *Service) failManagedBeforeClaim(ctx context.Context, c ports.DocumentCommand, code string) (domain.Intent, error) {
+	if c.Intent.State != writeintent.Pending {
+		return c.Intent, shared.ErrConflict
+	}
+	now := s.clock.Now().UTC()
+	lease := now.Add(documentLease)
+	claimed, err := s.store.TransitionIntent(ctx, c.Intent.TenantID, c.Intent.ID, c.Intent.Version, domain.IntentTransition{Event: writeintent.Claim, LeaseUntil: &lease}, now)
+	if err != nil {
+		return c.Intent, err
+	}
+	c.Intent = claimed
+	c, err = s.saveProgress(ctx, c)
+	if err != nil {
+		return c.Intent, err
+	}
+	return s.refuse(ctx, c, code)
 }
 
 // checkpointAndYield stores an acknowledged provider effect before handing the

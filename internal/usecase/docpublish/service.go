@@ -82,6 +82,19 @@ func (s *Service) Publish(ctx context.Context, tenant shared.ID, actor ports.Doc
 // PublishArtifact admits the immutable artifact already generated and verified
 // for a durable schedule occurrence. It is absent from the HTTP capability.
 func (s *Service) PublishArtifact(ctx context.Context, tenant shared.ID, actor ports.DocumentActor, input PublishInput, artifact ports.DocumentArtifact) (ReleaseResult, error) {
+	// Scheduled occurrences cannot truthfully verify destination-managed sharing.
+	// They are intentionally unavailable for that profile.
+	ctx = shared.WithTenant(ctx, tenant)
+	if err := s.authorize(ctx, tenant, actor); err != nil {
+		return ReleaseResult{}, err
+	}
+	in, err := s.integration(ctx, tenant, input.IntegrationID)
+	if err != nil {
+		return ReleaseResult{}, err
+	}
+	if documentAccessProfile(in) == domain.DestinationManagedSnapshotProfile {
+		return ReleaseResult{}, shared.ErrForbidden
+	}
 	return s.publish(ctx, tenant, actor, input, &artifact)
 }
 
@@ -97,6 +110,9 @@ func (s *Service) ValidateDocumentDestination(ctx context.Context, tenant, integ
 	in, err := s.integration(ctx, tenant, integrationID)
 	if err != nil {
 		return err
+	}
+	if documentAccessProfile(in) == domain.DestinationManagedSnapshotProfile {
+		return shared.ErrForbidden
 	}
 	container, group, err := destination(in)
 	if err != nil {
@@ -122,7 +138,7 @@ func (s *Service) publish(ctx context.Context, tenant shared.ID, actor ports.Doc
 		return ReleaseResult{}, shared.ErrValidation
 	}
 	if old, err := s.store.FindDocumentCommand(ctx, tenant, input.IntegrationID, input.RequestKey); err == nil {
-		if old.Actor != actor || old.Intent.SourceKind != input.SourceKind || old.Intent.ScopeID != input.ScopeID || old.Intent.SourceRef != input.SourceRef || old.Intent.Action == domain.Purge {
+		if old.Actor != actor || old.Intent.SourceKind != input.SourceKind || old.Intent.ScopeID != input.ScopeID || old.Intent.SourceRef != input.SourceRef || old.Intent.Action == domain.Purge || old.Intent.Action == domain.Trash {
 			return ReleaseResult{}, shared.ErrConflict
 		}
 		if frozen != nil {
@@ -174,29 +190,59 @@ func (s *Service) publish(ctx context.Context, tenant shared.ID, actor ports.Doc
 	if err := validateLiterals(provider, artifact); err != nil {
 		return ReleaseResult{}, err
 	}
+	profile := documentAccessProfile(in)
+	if profile == domain.DestinationManagedSnapshotProfile {
+		snapshot, ok := provider.(ports.DocumentSnapshotProvider)
+		if !ok || snapshot.DocumentAccessProfile() != profile || snapshot.ValidateDocumentSnapshot(artifact) != nil {
+			return ReleaseResult{}, shared.ErrForbidden
+		}
+	}
 	hash := artifactHash(artifact)
 	now := s.clock.Now().UTC()
 	id := s.ids.NewID()
-	intent := domain.Intent{ID: id, TenantID: tenant, Target: target, Action: domain.Create, RequestKey: input.RequestKey, ContentHash: hash, Marker: domain.MarkerFor(id), State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}
+	intent := domain.Intent{ID: id, TenantID: tenant, Target: target, Action: domain.Create, RequestKey: input.RequestKey, ContentHash: hash, AccessProfile: profile, Marker: domain.MarkerFor(id), State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}
 	progress := ports.DocumentProgress{Version: 1, IntentVersion: 1, Step: "shell", UpdatedAt: now}
+	if profile == domain.DestinationManagedSnapshotProfile {
+		progress.Step = "snapshot_shell"
+	}
 	if link, err := s.store.FindLink(ctx, tenant, target); err == nil {
-		if link.RetiredAt != nil {
+		if link.AccessProfile != profile {
+			return ReleaseResult{}, shared.ErrConflict
+		}
+		if link.RetiredAt != nil && (profile != domain.DestinationManagedSnapshotProfile || link.RemovalKind != domain.RemovalTrash) {
 			return ReleaseResult{}, shared.ErrConflict
 		}
 		if link.ContentHash == hash {
-			remote, readErr := provider.GetDocument(ctx, link.RemotePageID)
-			if readErr == nil && remote.ID == link.RemotePageID && remote.Container == target.Container && sameRemoteRevision(remote.RemotePage, domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}) && provider.VerifyDocumentRestriction(ctx, remote.ID, target.Container, group) == nil {
-				return ReleaseResult{Link: &link, Skipped: true}, nil
+			if profile == domain.DestinationManagedSnapshotProfile {
+				snapshot, ok := provider.(ports.DocumentSnapshotProvider)
+				if ok && snapshot.DocumentAccessProfile() == profile {
+					remote, readErr := snapshot.ObserveDocumentDestination(ctx, link.RemotePageID, target.Container)
+					if readErr == nil && remote.ID == link.RemotePageID && remote.Container == target.Container && sameRemoteRevision(remote.RemotePage, domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}) {
+						return ReleaseResult{Link: &link, Skipped: true}, nil
+					}
+				}
+			} else {
+				remote, readErr := provider.GetDocument(ctx, link.RemotePageID)
+				if readErr == nil && remote.ID == link.RemotePageID && remote.Container == target.Container && sameRemoteRevision(remote.RemotePage, domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}) && provider.VerifyDocumentRestriction(ctx, remote.ID, target.Container, group) == nil {
+					return ReleaseResult{Link: &link, Skipped: true}, nil
+				}
 			}
 		}
-		intent.Action = domain.Update
+		if profile == domain.DestinationManagedSnapshotProfile {
+			intent.Action, intent.ExpectedLinkRevision = domain.Snapshot, link.Revision
+			progress.Step, progress.Remote = "snapshot_shell", domain.RemotePage{}
+		} else {
+			intent.Action = domain.Update
+		}
 		intent.LinkID = link.ID
-		progress.Step = "restrictions"
-		progress.Remote = domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}
+		if profile != domain.DestinationManagedSnapshotProfile {
+			progress.Step = "restrictions"
+			progress.Remote = domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}
+		}
 	} else if !errors.Is(err, shared.ErrNotFound) {
 		return ReleaseResult{}, err
 	}
-	command := ports.DocumentCommand{Intent: intent, Actor: actor, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, ReadGroup: group, Artifact: artifact, Progress: progress}
+	command := ports.DocumentCommand{Intent: intent, Actor: actor, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, ReadGroup: group, AccessProfile: profile, Artifact: artifact, Progress: progress}
 	command.Intent.PayloadDigest = commandDigest(command)
 	saved, err := s.persistReleaseCommand(ctx, tenant, command)
 	if err != nil {
@@ -252,7 +298,7 @@ func (s *Service) Unpublish(ctx context.Context, tenant shared.ID, actor ports.D
 		return ReleaseResult{}, err
 	}
 	if old, err := s.store.FindDocumentCommand(ctx, tenant, link.IntegrationID, requestKey); err == nil {
-		if old.Intent.Action != domain.Purge || old.Intent.LinkID != linkID || old.Actor != actor {
+		if (old.Intent.Action != domain.Purge && old.Intent.Action != domain.Trash) || old.Intent.LinkID != linkID || old.Actor != actor {
 			return ReleaseResult{}, shared.ErrConflict
 		}
 		return ReleaseResult{Intent: &old.Intent}, nil
@@ -278,7 +324,14 @@ func (s *Service) Unpublish(ctx context.Context, tenant shared.ID, actor ports.D
 	}
 	now := s.clock.Now().UTC()
 	id := s.ids.NewID()
-	command := ports.DocumentCommand{Intent: domain.Intent{ID: id, TenantID: tenant, Target: link.Target, LinkID: link.ID, Action: domain.Purge, RequestKey: requestKey, ContentHash: link.ContentHash, Marker: domain.MarkerFor(id), State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}, Actor: actor, ReadGroup: group, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, Progress: ports.DocumentProgress{Version: 1, IntentVersion: 1, Step: "purge", Remote: domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}, UpdatedAt: now}}
+	profile := documentAccessProfile(in)
+	action, step := domain.Purge, "purge"
+	expectedRevision := 0
+	if profile == domain.DestinationManagedSnapshotProfile {
+		action, step = domain.Trash, "trash"
+		expectedRevision = link.Revision
+	}
+	command := ports.DocumentCommand{Intent: domain.Intent{ID: id, TenantID: tenant, Target: link.Target, LinkID: link.ID, ExpectedLinkRevision: expectedRevision, Action: action, RequestKey: requestKey, ContentHash: link.ContentHash, AccessProfile: profile, Marker: domain.MarkerFor(id), State: writeintent.Pending, Version: 1, CreatedAt: now, UpdatedAt: now}, Actor: actor, ReadGroup: group, AccessProfile: profile, ConnectionRevision: in.ConnectionRevision, CredentialRevision: in.CredentialRevision, Progress: ports.DocumentProgress{Version: 1, IntentVersion: 1, Step: step, Remote: domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}, UpdatedAt: now}}
 	command.Intent.PayloadDigest = commandDigest(command)
 	if err := s.record(ctx, command, "document.unpublish_requested", link.RemotePageID); err != nil {
 		return ReleaseResult{}, err
@@ -387,6 +440,15 @@ func destination(in integration.Integration) (string, string, error) {
 	}
 	return config.Space, config.Group, nil
 }
+func documentAccessProfile(in integration.Integration) string {
+	var config struct {
+		Profile string `json:"publication_profile"`
+	}
+	if json.Unmarshal(in.Config, &config) != nil {
+		return ""
+	}
+	return strings.TrimSpace(config.Profile)
+}
 func (s *Service) guard(ctx context.Context, c ports.DocumentCommand) (integration.Integration, error) {
 	if err := s.authorize(ctx, c.Intent.TenantID, c.Actor); err != nil {
 		return integration.Integration{}, err
@@ -402,7 +464,7 @@ func (s *Service) guard(ctx context.Context, c ports.DocumentCommand) (integrati
 	if err != nil {
 		return in, err
 	}
-	if in.ConnectionRevision != c.ConnectionRevision || in.CredentialRevision != c.CredentialRevision || space != c.Intent.Container || group != c.ReadGroup {
+	if in.ConnectionRevision != c.ConnectionRevision || in.CredentialRevision != c.CredentialRevision || space != c.Intent.Container || group != c.ReadGroup || documentAccessProfile(in) != c.AccessProfile || c.Intent.AccessProfile != c.AccessProfile {
 		return in, shared.ErrConflict
 	}
 	return in, nil
@@ -438,7 +500,9 @@ func commandDigest(c ports.DocumentCommand) string {
 		Group, Hash            string
 		Action                 domain.Action
 		Link                   shared.ID
-	}{c.Intent.Target, c.Actor, c.ConnectionRevision, c.CredentialRevision, c.ReadGroup, c.Intent.ContentHash, c.Intent.Action, c.Intent.LinkID})
+		ExpectedLinkRevision   int
+		AccessProfile          string
+	}{c.Intent.Target, c.Actor, c.ConnectionRevision, c.CredentialRevision, c.ReadGroup, c.Intent.ContentHash, c.Intent.Action, c.Intent.LinkID, c.Intent.ExpectedLinkRevision, c.AccessProfile})
 	return digest(raw)
 }
 func closeProvider(p ports.DocumentProvider) {
@@ -455,6 +519,9 @@ func (s *Service) Links(ctx context.Context, tenant shared.ID, scope domain.Scop
 }
 func (s *Service) Intent(ctx context.Context, tenant, id shared.ID) (domain.Intent, error) {
 	return s.store.GetIntent(shared.WithTenant(ctx, tenant), tenant, id)
+}
+func (s *Service) Snapshots(ctx context.Context, tenant, linkID shared.ID) ([]domain.Intent, error) {
+	return s.store.ListDocumentSnapshots(shared.WithTenant(ctx, tenant), tenant, linkID, domain.MaxListLimit)
 }
 
 // Tick is bounded by the caller's tenant loop. It performs no global tenant read.

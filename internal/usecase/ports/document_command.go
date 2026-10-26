@@ -27,8 +27,11 @@ type DocumentCommand struct {
 	ConnectionRevision int
 	CredentialRevision int
 	ReadGroup          string
-	Artifact           DocumentArtifact
-	Progress           DocumentProgress
+	// AccessProfile freezes the admission contract; an adapter profile change
+	// cannot silently turn a managed destination into a strict release.
+	AccessProfile string
+	Artifact      DocumentArtifact
+	Progress      DocumentProgress
 	// NextAttemptAt is a durable provider-directed delay. A zero value is due
 	// immediately. QueueVersion fences a delayed worker from shortening a newer
 	// delay after another worker has claimed the queue turn.
@@ -70,6 +73,7 @@ type DocumentProgress struct {
 	ExpectedRemoteVersion  int
 	ExpectedRemoteRevision string
 	UploadedReceipts       []DocumentUploadReceipt
+	SnapshotReceipt        *DocumentSnapshotReceipt
 	UpdatedAt              time.Time
 }
 
@@ -78,6 +82,8 @@ type DocumentProgress struct {
 type DocumentUploadReceipt struct {
 	Key    string
 	Digest string
+	// UploadID binds an acknowledged staged upload; empty for legacy providers.
+	UploadID string
 }
 
 type DocumentCommandStore interface {

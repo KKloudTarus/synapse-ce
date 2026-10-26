@@ -9,6 +9,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- `notion` destination-managed snapshot publication, enabled only by the explicit
+  `destination_managed_snapshot_v1` integration profile. Each manual publish creates a new page
+  with the stored report PDF and summary; unpublish moves only the current page to recoverable
+  Trash. Notion sharing remains workspace-owner managed, so Synapse does not claim effective ACL
+  verification or permanent deletion, and the profile is excluded from schedules.
 - `report.generated` notification event for a sealed report artifact, with built-in English
   and Vietnamese templates in every channel family, a published JSON schema and fixture, and
   capture from engagement, project-quality and assessment-cycle report generation. The outbox

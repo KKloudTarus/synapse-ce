@@ -67,6 +67,15 @@ publication access proof. See
 [Native ticket destinations](ticketing-foundation.md#native-ticket-destinations) and
 [document destination profiles](document-publishing.md).
 
+Notion has no process-wide publishing switch. It is connection-only unless the
+tenant integration configuration explicitly sets
+`publication_profile=destination_managed_snapshot_v1`, alongside its configured
+container page and sealed integration token. That profile creates manual snapshots
+only; it is excluded from the document scheduler. Its workspace owner controls
+effective sharing, including inherited, guest, and anonymous-link access. Synapse
+cannot verify the effective ACL, and a missing Notion `public_url` does not prove a
+page is private. See [Notion destination-managed snapshots](document-publishing.md#configure-notion-destination-managed-snapshots).
+
 
 ```json
 {"key": "notifications.channel_types", "name": "Notification channel types", "enabled": true,

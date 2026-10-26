@@ -7992,10 +7992,11 @@ paths:
     delete:
       tags: [document-publishing]
       operationId: unpublishDocument
-      summary: Admit a governed document and attachment purge
+      summary: Admit a governed document removal
       description: >-
-        Requires review permission and a unique request key. An ambiguous purge remains
-        uncertain for reconciliation and is never blindly repeated.
+        Requires review permission and a unique request key. Strict destinations receive a
+        governed purge; destination-managed snapshots are moved to recoverable Trash. An
+        ambiguous remote removal remains uncertain for reconciliation and is never blindly repeated.
       parameters: [{name: id, in: path, required: true, schema: {type: string}}]
       requestBody:
         required: true
@@ -8003,11 +8004,24 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/DocumentUnpublishRequest'}
       responses:
-        '202': {description: Purge command admitted or idempotent result returned, content: {application/json: {schema: {$ref: '#/components/schemas/DocumentReleaseResult'}}}}
+        '202': {description: Removal command admitted or idempotent result returned, content: {application/json: {schema: {$ref: '#/components/schemas/DocumentReleaseResult'}}}}
         '400': {description: Invalid request key}
         '403': {description: Current actor lacks release authority or a hold blocks release}
         '404': {description: Link not found in this tenant}
-        '409': {description: Request key conflict or link cannot be purged}
+        '409': {description: Request key conflict or link cannot be removed}
+  /api/v1/document-links/{id}/snapshots:
+    get:
+      tags: [document-publishing]
+      operationId: listDocumentSnapshots
+      summary: List bounded completed snapshot history for one document link
+      description: >-
+        Returns only tenant-scoped completed create and destination-managed snapshot commands.
+        The response excludes frozen report artifacts, upload receipts, and progress checkpoints.
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Bounded safe publication history, content: {application/json: {schema: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DocumentIntent'}}}}}
+        '403': {description: View permission denied}
+        '404': {description: Link not found in this tenant}
   /api/v1/engagements/{id}/documents:
     get:
       tags: [document-publishing]
@@ -15427,13 +15441,15 @@ components:
       properties:
         id: {type: string}
         link_id: {type: string}
-        action: {type: string, enum: [create, update, purge]}
+        action: {type: string, enum: [create, update, purge, snapshot, trash]}
         state: {type: string, enum: [pending, in_flight, done, failed, uncertain]}
         version: {type: integer, minimum: 1}
         attempts: {type: integer, minimum: 0}
         error_code: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
         remote_url: {type: string, format: uri}
         remote_id: {type: string}
+        content_hash: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the stored source artifact for this completed snapshot.}
+        access_profile: {type: string, enum: [destination_managed_snapshot_v1], description: Frozen destination access contract. Omitted for strict profiles.}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     DocumentLink:
@@ -15452,9 +15468,11 @@ components:
         remote_version: {type: integer, minimum: 1}
         content_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
         revision: {type: integer, minimum: 1}
-        restriction_status: {type: string, enum: [unchecked, verified, restriction_lost, unverifiable], description: Latest periodic sharing observation; remote access can change between checks}
+        restriction_status: {type: string, enum: [unchecked, verified, restriction_lost, unverifiable, destination_managed], description: Latest periodic sharing observation; destination_managed records destination identity without verifying effective sharing. Remote access can change between checks.}
         restriction_checked_at: {type: string, format: date-time}
         retired_at: {type: string, format: date-time}
+        removal_kind: {type: string, enum: [purge, trash], description: Recorded only after a retired link's governed removal completes.}
+        access_profile: {type: string, enum: [destination_managed_snapshot_v1], description: Frozen destination access contract. Omitted for strict profiles.}
         updated_at: {type: string, format: date-time}
     DocumentReleaseResult:
       type: object

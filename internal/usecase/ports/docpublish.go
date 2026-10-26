@@ -19,6 +19,9 @@ type DocumentStore interface {
 	// ListLinks returns the newest links of one scope, at most limit of them
 	// (1 through docpublish.MaxListLimit).
 	ListLinks(ctx context.Context, tenant shared.ID, scope docpublish.Scope, scopeID shared.ID, limit int) ([]docpublish.Link, error)
+	// ListDocumentSnapshots returns bounded completed create/snapshot history for
+	// one current link. It never exposes command artifacts or checkpoints.
+	ListDocumentSnapshots(ctx context.Context, tenant, linkID shared.ID, limit int) ([]docpublish.Intent, error)
 	// CreateOrGetIntent records a pending command. A replayed request key returns the original
 	// command with created=false; the same key with different content is shared.ErrConflict.
 	// A create for a target that already has a link is shared.ErrConflict: its page exists.
