@@ -226,6 +226,69 @@ describe('Authentication', () => {
     }, undefined))
   })
 
+  it.each([
+    'http://invalid.example.test/realms/sandbox',
+    'https://operator@issuer.example/realms/sandbox',
+    'https://issuer.example/realms/sandbox?tenant=default',
+    'https://issuer.example/realms/sandbox#configuration',
+  ])('rejects an unsafe issuer locally and focuses it for correction: %s', async (issuer) => {
+    render(<Authentication enabled />)
+
+    await screen.findByText('Primary identity')
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Keycloak validation' } })
+    fireEvent.change(screen.getByLabelText('Issuer URL'), { target: { value: issuer } })
+    fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'sandbox-validation' } })
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'synthetic-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    const issuerInput = screen.getByLabelText('Issuer URL')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter an absolute HTTPS issuer URL with a host and without credentials, a query, or a fragment.')
+    expect(issuerInput).toHaveFocus()
+    expect(issuerInput).toHaveAttribute('aria-invalid', 'true')
+    expect(issuerInput).toHaveAccessibleDescription('Enter an absolute HTTPS issuer URL with a host and without credentials, a query, or a fragment.')
+    expect(mockedIdentityApi.draftConnection).not.toHaveBeenCalled()
+  })
+
+  it('submits the exact corrected HTTPS issuer after a local validation error', async () => {
+    mockedIdentityApi.draftConnection.mockResolvedValue(undefined)
+    render(<Authentication enabled />)
+
+    await screen.findByText('Primary identity')
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Keycloak validation' } })
+    fireEvent.change(screen.getByLabelText('Issuer URL'), { target: { value: 'http://invalid.example.test/realms/sandbox' } })
+    fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'sandbox-validation' } })
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'synthetic-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+    await screen.findByRole('alert')
+
+    fireEvent.change(screen.getByLabelText('Issuer URL'), { target: { value: 'https://issuer.example/auth/CaseSensitive/' } })
+    expect(screen.queryByText('Enter an absolute HTTPS issuer URL with a host and without credentials, a query, or a fragment.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    await waitFor(() => expect(mockedIdentityApi.draftConnection).toHaveBeenCalledWith({
+      displayName: 'Keycloak validation',
+      issuer: 'https://issuer.example/auth/CaseSensitive/',
+      clientId: 'sandbox-validation',
+      clientSecret: 'synthetic-secret',
+      auth0OrganizationId: '',
+    }, undefined))
+  })
+
+  it('gives actionable connection settings feedback when the server rejects a valid issuer', async () => {
+    mockedIdentityApi.draftConnection.mockRejectedValue(new ApiError(400, 'validation error'))
+    render(<Authentication enabled />)
+
+    await screen.findByText('Primary identity')
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Keycloak validation' } })
+    fireEvent.change(screen.getByLabelText('Issuer URL'), { target: { value: 'https://issuer.example/auth' } })
+    fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'sandbox-validation' } })
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'synthetic-secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Check the issuer URL, client ID, client secret, and Auth0 organization ID, then try again.')
+    expect(screen.getByLabelText('Client secret')).toHaveValue('')
+  })
+
   it('configures a pending legacy connection with its selected ID and version', async () => {
     mockedIdentityApi.connections.mockResolvedValue([{
       id: 'legacy-connection',

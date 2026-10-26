@@ -24,6 +24,21 @@ type ConnectionConfigurationSelection = Pick<EnterpriseConnection, 'id' | 'versi
 
 const emptyDraft: ConnectionDraft = { displayName: '', issuer: '', clientId: '', clientSecret: '', auth0OrganizationId: '' }
 
+const issuerValidationMessage = 'Enter an absolute HTTPS issuer URL with a host and without credentials, a query, or a fragment.'
+
+function validIssuerURL(value: string): boolean {
+  // Keep the value itself untouched. The server remains authoritative, but this catches
+  // configuration errors that it can reject without sending a secret anywhere.
+  const authority = value.match(/^https:\/\/([^/?#]*)/i)?.[1]
+  if (!authority || authority.includes('@')) return false
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' && parsed.host !== '' && parsed.username === '' && parsed.password === '' && parsed.search === '' && parsed.hash === ''
+  } catch {
+    return false
+  }
+}
+
 function messageFor(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.status === 409) {
     return 'This request could not be completed. The latest settings have been loaded; review them and try again.'
@@ -58,6 +73,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [issuerError, setIssuerError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const generation = useRef(0)
@@ -65,6 +81,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
   // Counts the administrator's own changes to the sign-in requirement, including the one a
   // save makes. A read in flight across one of these must not put its answer back.
   const policyEdits = useRef(0)
+  const issuerInput = useRef<HTMLInputElement | null>(null)
 
   const load = useCallback(async (clearError = true) => {
     const connectionConfigurationAtStart = connectionConfigurationRef.current
@@ -227,6 +244,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
 
   function selectConnectionConfiguration(connection: EnterpriseConnection) {
     setError(null)
+    setIssuerError(null)
     setNotice(null)
     const selected = {
       id: connection.id,
@@ -251,17 +269,26 @@ export function Authentication({ enabled }: AuthenticationProps) {
     connectionConfigurationRef.current = null
     setConnectionConfiguration(null)
     setDraft(emptyDraft)
+    setIssuerError(null)
   }
 
   async function saveConnectionDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (saving) return
+    if (!validIssuerURL(draft.issuer)) {
+      setError(null)
+      setNotice(null)
+      setIssuerError(issuerValidationMessage)
+      issuerInput.current?.focus()
+      return
+    }
     const selected = connectionConfiguration
     const submitted = selected
       ? { ...draft, id: selected.id, version: selected.version }
       : draft
     setSaving(true)
     setError(null)
+    setIssuerError(null)
     setNotice(null)
     try {
       await identityApi.draftConnection(submitted, bootstrapProof ?? undefined)
@@ -269,7 +296,9 @@ export function Authentication({ enabled }: AuthenticationProps) {
       setNotice(selected ? (selected.legacy ? 'Legacy connection configuration saved.' : 'Connection update saved.') : 'Connection draft saved.')
       void load()
     } catch (cause) {
-      setError(messageFor(cause, 'Could not save the connection draft.'))
+      setError(cause instanceof ApiError && cause.status === 400
+        ? 'Could not save the connection draft. Check the issuer URL, client ID, client secret, and Auth0 organization ID, then try again.'
+        : messageFor(cause, 'Could not save the connection draft.'))
       setDraft((current) => ({ ...current, clientSecret: '' }))
       if (cause instanceof ApiError && cause.status === 409) {
         // A configuration correction is CAS-protected. Discard the secret and require
@@ -366,13 +395,27 @@ export function Authentication({ enabled }: AuthenticationProps) {
                 ['clientSecret', 'Client secret', 'password'],
               ] as const).map(([field, label, type]) => (
                 <label key={field} className="grid gap-1 text-sm text-primary">{label}
-                  <input required type={type} value={draft[field]} readOnly={connectionConfiguration !== null && (field === 'issuer' || (field === 'clientId' && connectionConfiguration.clientId !== ''))} onChange={(event) => setDraft((current) => ({ ...current, [field]: event.target.value }))} className="rounded border border-secondary px-3 py-2 read-only:bg-secondary" />
+                  <input
+                    ref={field === 'issuer' ? issuerInput : undefined}
+                    required
+                    type={type}
+                    value={draft[field]}
+                    readOnly={connectionConfiguration !== null && (field === 'issuer' || (field === 'clientId' && connectionConfiguration.clientId !== ''))}
+                    aria-invalid={field === 'issuer' && issuerError ? true : undefined}
+                    aria-describedby={field === 'issuer' && issuerError ? 'issuer-url-error' : undefined}
+                    onChange={(event) => {
+                      if (field === 'issuer') setIssuerError(null)
+                      setDraft((current) => ({ ...current, [field]: event.target.value }))
+                    }}
+                    className="rounded border border-secondary px-3 py-2 read-only:bg-secondary"
+                  />
                 </label>
               ))}
               <label className="grid gap-1 text-sm text-primary">Auth0 organization ID (optional)
                 <input type="text" value={draft.auth0OrganizationId ?? ''} readOnly={connectionConfiguration !== null && (!connectionConfiguration.legacy || connectionConfiguration.auth0OrganizationId === undefined)} onChange={(event) => setDraft((current) => ({ ...current, auth0OrganizationId: event.target.value }))} aria-describedby="auth0-organization-id-help" className="rounded border border-secondary px-3 py-2 read-only:bg-secondary" />
               </label>
             </div>
+            {issuerError ? <p id="issuer-url-error" role="alert" className="mt-2 text-sm text-error-primary">{issuerError}</p> : null}
             <p id="auth0-organization-id-help" className="mt-2 text-sm text-secondary">Use the stable, case-sensitive Auth0 organization ID, not an organization name.</p>
             <div className="mt-4 flex gap-3">
               <button disabled={saving} className="rounded bg-brand-primary px-3 py-2 text-white disabled:opacity-50">{connectionConfiguration ? 'Save configuration' : 'Save draft'}</button>
