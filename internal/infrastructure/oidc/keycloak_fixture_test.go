@@ -41,6 +41,9 @@ type keycloakFixture struct {
 	realmB                string
 	clientID              string
 	clientSecret          string
+	adminUsername         string
+	adminPassword         string
+	adminBase             string
 	callbackURL           string
 	issuer                string
 	users                 map[string]string
@@ -55,7 +58,7 @@ func newKeycloakFixture(t *testing.T, relativePath string) *keycloakFixture {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Fatal("keycloak integration requires docker")
 	}
-	f := &keycloakFixture{t: t, realm: "synapse" + keycloakRandom(t, 8), realmB: "synapse" + keycloakRandom(t, 8), clientID: "synapse" + keycloakRandom(t, 8), clientSecret: keycloakRandom(t, 32), users: make(map[string]string)}
+	f := &keycloakFixture{t: t, realm: "synapse" + keycloakRandom(t, 8), realmB: "synapse" + keycloakRandom(t, 8), clientID: "synapse" + keycloakRandom(t, 8), clientSecret: keycloakRandom(t, 32), adminUsername: "synapse" + keycloakRandom(t, 8), adminPassword: keycloakRandom(t, 32), users: make(map[string]string)}
 	f.proxy = httptest.NewUnstartedServer(http.HandlerFunc(f.serveProxy))
 	f.proxy.StartTLS()
 	t.Cleanup(f.proxy.Close)
@@ -63,6 +66,7 @@ func newKeycloakFixture(t *testing.T, relativePath string) *keycloakFixture {
 	f.callbackURL = base + "/callback"
 	path := strings.TrimSuffix(relativePath, "/")
 	f.issuer = base + path + "/realms/" + f.realm
+	f.adminBase = base + path
 	f.network = "synapse-kc-" + keycloakRandom(t, 8)
 	f.container = "synapse-kc-" + keycloakRandom(t, 8)
 	runID := os.Getenv("SYNAPSE_KEYCLOAK_RUN_ID")
@@ -105,11 +109,15 @@ func newKeycloakFixture(t *testing.T, relativePath string) *keycloakFixture {
 	if err := os.WriteFile(importB, realmB, 0o600); err != nil {
 		t.Fatal("write Keycloak realm B import")
 	}
+	bootstrapEnv := filepath.Join(tempDir, "bootstrap-admin.env")
+	if err := os.WriteFile(bootstrapEnv, []byte("KC_BOOTSTRAP_ADMIN_USERNAME="+f.adminUsername+"\nKC_BOOTSTRAP_ADMIN_PASSWORD="+f.adminPassword+"\n"), 0o600); err != nil {
+		t.Fatal("write Keycloak bootstrap administrator environment")
+	}
 
 	hostname := base + path
 	// The shell is static: it only waits for the root-only chown marker, then starts Keycloak.
 	// Realm data and generated credentials are never interpolated into an argv or shell string.
-	createArgs := []string{"create", "--name", f.container, "--label", label, "--network", f.network, "--memory", "1g", "--cpus", "2", "--pids-limit", "256", "-e", "KC_HTTP_ENABLED=true", "-e", "KC_PROXY_HEADERS=xforwarded", "-e", "KC_HOSTNAME=" + hostname}
+	createArgs := []string{"create", "--name", f.container, "--label", label, "--network", f.network, "--memory", "1g", "--cpus", "2", "--pids-limit", "256", "--env-file", bootstrapEnv, "-e", "KC_HTTP_ENABLED=true", "-e", "KC_PROXY_HEADERS=xforwarded", "-e", "KC_HOSTNAME=" + hostname}
 	if path != "" {
 		createArgs = append(createArgs, "-e", "KC_HTTP_RELATIVE_PATH="+path)
 	}
@@ -222,6 +230,88 @@ func (f *keycloakFixture) providerB() *Provider {
 	client.Timeout = 15 * time.Second
 	issuer := strings.Replace(f.issuer, "/realms/"+f.realm, "/realms/"+f.realmB, 1)
 	return newProvider(Config{Issuer: issuer, ClientID: f.clientID, ClientSecret: f.clientSecret, RedirectURL: f.callbackURL}, issuer, client)
+}
+
+// rotateClientSecret uses the native Keycloak administrator API through the fixture's fixed TLS
+// front door. The bootstrap administrator and its password exist only in the disposable fixture.
+func (f *keycloakFixture) rotateClientSecret(ctx context.Context) string {
+	f.t.Helper()
+	token := f.adminAccessToken(ctx)
+	clientsURL := f.adminBase + "/admin/realms/" + url.PathEscape(f.realm) + "/clients?clientId=" + url.QueryEscape(f.clientID)
+	response := f.adminRequest(ctx, http.MethodGet, clientsURL, nil, "", token)
+	if response.StatusCode != http.StatusOK {
+		_ = response.Body.Close()
+		f.t.Fatalf("Keycloak administrator client lookup returned status %d", response.StatusCode)
+	}
+	var clients []struct {
+		ID       string `json:"id"`
+		ClientID string `json:"clientId"`
+	}
+	err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&clients)
+	_ = response.Body.Close()
+	if err != nil || len(clients) != 1 || clients[0].ID == "" || clients[0].ClientID != f.clientID {
+		f.t.Fatal("Keycloak administrator client lookup returned an unexpected client")
+	}
+	rotateURL := f.adminBase + "/admin/realms/" + url.PathEscape(f.realm) + "/clients/" + url.PathEscape(clients[0].ID) + "/client-secret"
+	response = f.adminRequest(ctx, http.MethodPost, rotateURL, http.NoBody, "application/json", token)
+	if response.StatusCode != http.StatusOK {
+		_ = response.Body.Close()
+		f.t.Fatalf("Keycloak administrator client secret rotation returned status %d", response.StatusCode)
+	}
+	var credential struct {
+		Value string `json:"value"`
+	}
+	err = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&credential)
+	_ = response.Body.Close()
+	if err != nil || credential.Value == "" || credential.Value == f.clientSecret {
+		f.t.Fatal("Keycloak administrator client secret rotation returned an invalid secret")
+	}
+	return credential.Value
+}
+
+func (f *keycloakFixture) adminAccessToken(ctx context.Context) string {
+	f.t.Helper()
+	form := url.Values{
+		"client_id":  {"admin-cli"},
+		"grant_type": {"password"},
+		"password":   {f.adminPassword},
+		"username":   {f.adminUsername},
+	}
+	response := f.adminRequest(ctx, http.MethodPost, f.adminBase+"/realms/master/protocol/openid-connect/token", strings.NewReader(form.Encode()), "application/x-www-form-urlencoded", "")
+	if response.StatusCode != http.StatusOK {
+		_ = response.Body.Close()
+		f.t.Fatalf("Keycloak administrator token request returned status %d", response.StatusCode)
+	}
+	var token struct {
+		AccessToken string `json:"access_token"`
+	}
+	err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&token)
+	_ = response.Body.Close()
+	if err != nil || token.AccessToken == "" {
+		f.t.Fatal("Keycloak administrator token response was invalid")
+	}
+	return token.AccessToken
+}
+
+func (f *keycloakFixture) adminRequest(ctx context.Context, method, endpoint string, body io.Reader, contentType, token string) *http.Response {
+	f.t.Helper()
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		f.t.Fatal("create Keycloak administrator request")
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := f.proxy.Client()
+	client.Timeout = 15 * time.Second
+	response, err := client.Do(req)
+	if err != nil {
+		f.t.Fatal("Keycloak administrator request failed")
+	}
+	return response
 }
 
 func (f *keycloakFixture) substituteNextAFlowWithB() {

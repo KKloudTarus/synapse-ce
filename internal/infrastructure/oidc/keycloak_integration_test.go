@@ -7,15 +7,18 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/oauth2"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
@@ -152,6 +155,87 @@ func TestKeycloakEnterpriseConformance(t *testing.T) {
 			if _, err := browser.Authenticate(ctx, loggedIn.Session.Token, "", false); err != nil {
 				t.Fatal("issued browser session did not authenticate")
 			}
+
+			// Keycloak rotates the confidential-client credential with its native administrator API.
+			// Keep the existing local session as a control while the old credential is rejected,
+			// then test and activate the sealed replacement through the production factory.
+			beforeRotation := fixture.authorityCounts(t, tenant)
+			newSecret := keycloak.rotateClientSecret(ctx)
+			oldSecretLogin, err := browser.Begin(ctx, identityenterprise.BrowserAuthorization{TenantID: tenant, ConnectionID: active.ID, Purpose: ports.IdentityAuthorizationLogin, CallerNonce: "old-client-secret"})
+			if err != nil {
+				t.Fatal("begin cached old client secret negative control")
+			}
+			oldCode, oldState := keycloak.authorize(ctx, oldSecretLogin.AuthorizationURL, "recipient@example.test")
+			if _, err = browser.Complete(ctx, identityenterprise.BrowserCallback{TenantID: tenant, State: oldState, Code: oldCode, CallerNonce: "old-client-secret"}); !keycloakClientCredentialDenied(err) {
+				t.Fatal("old Keycloak client secret was not rejected as a client credential denial")
+			}
+			if after := fixture.authorityCounts(t, tenant); after != beforeRotation {
+				t.Fatalf("old client secret control changed authority: before=%v after=%v", beforeRotation, after)
+			}
+			if _, err := browser.Authenticate(ctx, loggedIn.Session.Token, "", false); err != nil {
+				t.Fatal("existing local session did not survive client secret rotation")
+			}
+
+			rotationProof, err := connections.AdminProof(ctx, loggedIn.Principal, "")
+			if err != nil || rotationProof.Principal.PersonID != loggedIn.Principal.PersonID {
+				t.Fatal("fresh enrolled administrator proof was unavailable for client secret rotation")
+			}
+			rotatedDraft, err := connections.SaveDraft(ctx, loggedIn.Principal, "", identityenterprise.ConnectionDraftInput{ID: active.ID, DisplayName: "Keycloak", Issuer: keycloak.issuer, ClientID: keycloak.clientID, ClientSecret: newSecret, ExpectedVersion: active.Version})
+			if err != nil {
+				t.Fatal("save rotated Keycloak client secret draft")
+			}
+			if rotatedDraft.ID != active.ID || rotatedDraft.Issuer != active.Issuer || rotatedDraft.Settings.ClientID != active.Settings.ClientID || rotatedDraft.DraftRevision <= active.DraftRevision {
+				t.Fatal("rotated Keycloak draft did not preserve the connection trust boundary")
+			}
+			rotationTest, err := browser.Begin(ctx, identityenterprise.BrowserAuthorization{TenantID: tenant, ConnectionID: rotatedDraft.ID, Purpose: ports.IdentityAuthorizationTest, CallerNonce: "rotated-connection-test", AdminProof: &rotationProof})
+			if err != nil {
+				t.Fatal("begin rotated Keycloak provider test")
+			}
+			rotationCode, rotationState := keycloak.authorize(ctx, rotationTest.AuthorizationURL, "recipient@example.test")
+			rotationResult, err := browser.Complete(ctx, identityenterprise.BrowserCallback{TenantID: tenant, State: rotationState, Code: rotationCode, CallerNonce: "rotated-connection-test"})
+			if err != nil || !rotationResult.TestOnly {
+				t.Fatal("rotated Keycloak provider test callback was not accepted")
+			}
+			rotatedActive, err := connections.Activate(ctx, loggedIn.Principal, "", rotatedDraft.ID, rotatedDraft.DraftRevision, rotatedDraft.Version)
+			if err != nil {
+				t.Fatal("activate tested rotated Keycloak client secret")
+			}
+			if rotatedActive.ID != active.ID || rotatedActive.Revision != rotatedDraft.DraftRevision || !rotatedActive.Enabled {
+				t.Fatal("rotated Keycloak client secret did not activate the tested revision")
+			}
+			rotatedLogin, err := browser.Begin(ctx, identityenterprise.BrowserAuthorization{TenantID: tenant, ConnectionID: rotatedActive.ID, Purpose: ports.IdentityAuthorizationLogin, CallerNonce: "rotated-ordinary-login"})
+			if err != nil {
+				t.Fatal("begin ordinary login with rotated Keycloak client secret")
+			}
+			rotatedCode, rotatedState := keycloak.authorize(ctx, rotatedLogin.AuthorizationURL, "recipient@example.test")
+			rotatedLoggedIn, err := browser.Complete(ctx, identityenterprise.BrowserCallback{TenantID: tenant, State: rotatedState, Code: rotatedCode, CallerNonce: "rotated-ordinary-login"})
+			if err != nil || rotatedLoggedIn.Principal.PersonID != accepted.Principal.PersonID || rotatedLoggedIn.Principal.MembershipID != accepted.Principal.MembershipID || rotatedLoggedIn.Principal.TenantID != tenant.String() || rotatedLoggedIn.Principal.Role != user.RoleAdmin {
+				t.Fatal("ordinary login with rotated Keycloak client secret changed authority")
+			}
+			rotatedPrincipal, err := browser.Authenticate(ctx, rotatedLoggedIn.Session.Token, "", false)
+			if err != nil || rotatedPrincipal.PersonID != accepted.Principal.PersonID || rotatedPrincipal.MembershipID != accepted.Principal.MembershipID || rotatedPrincipal.TenantID != tenant.String() || rotatedPrincipal.Role != user.RoleAdmin {
+				t.Fatal("rotated Keycloak browser session did not authenticate the expected principal")
+			}
+			afterRotation := fixture.authorityCounts(t, tenant)
+			if afterRotation[0] != beforeRotation[0] || afterRotation[1] != beforeRotation[1] || afterRotation[2] != beforeRotation[2] || afterRotation[3] <= beforeRotation[3] {
+				t.Fatalf("rotated Keycloak login changed authority unexpectedly: before=%v after=%v", beforeRotation, afterRotation)
+			}
+
+			// This disposable organization remains Optional. The live Required canary uses
+			// an independent administrator connection to recover after disabling Keycloak.
+			disabled, err := connections.Disable(ctx, rotatedLoggedIn.Principal, "", rotatedActive.ID, rotatedActive.Version)
+			if err != nil || disabled.Enabled || disabled.ID != rotatedActive.ID || disabled.Epoch <= rotatedActive.Epoch {
+				t.Fatal("disable Keycloak connection did not fence its prior session epoch")
+			}
+			if _, err = browser.Authenticate(ctx, rotatedLoggedIn.Session.Token, "", false); !errors.Is(err, authz.ErrCredentialInvalid) {
+				t.Fatal("disabled Keycloak connection still authenticated its existing session")
+			}
+			if _, err = browser.Begin(ctx, identityenterprise.BrowserAuthorization{TenantID: tenant, ConnectionID: disabled.ID, Purpose: ports.IdentityAuthorizationLogin, CallerNonce: "disabled-login"}); !errors.Is(err, shared.ErrForbidden) {
+				t.Fatal("disabled Keycloak connection still began a new login")
+			}
+			if after := fixture.authorityCounts(t, tenant); after != afterRotation {
+				t.Fatalf("disabled Keycloak connection changed identity records: before=%v after=%v", afterRotation, after)
+			}
 		})
 	}
 }
@@ -169,10 +253,81 @@ func (g *keycloakIDs) NewID() shared.ID {
 	return shared.ID(fmt.Sprintf("keycloak-%s-%d", g.prefix, g.n.Add(1)))
 }
 
-type keycloakFactory struct{ provider *Provider }
+// keycloakFactory preserves the production ConnectionFactory's sealed secret, revision and cache
+// behavior. The wrapper substitutes the fixture's TLS client before a Provider is returned, so the
+// production constructor never performs I/O with a private fixture address.
+type keycloakFactory struct {
+	factory *ConnectionFactory
+	client  *http.Client
+	mu      sync.Mutex
+	bound   map[*Provider]struct{}
+}
 
-func (f keycloakFactory) ProviderForConnection(context.Context, ports.IdentityConnection) (ports.OIDCProvider, error) {
-	return f.provider, nil
+func (f *keycloakFactory) ProviderForConnection(ctx context.Context, c ports.IdentityConnection) (ports.OIDCProvider, error) {
+	provider, err := f.factory.ProviderForConnection(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	p, ok := provider.(*Provider)
+	if !ok {
+		return nil, fmt.Errorf("unexpected OIDC provider type")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.bound == nil {
+		f.bound = make(map[*Provider]struct{})
+	}
+	if _, alreadyBound := f.bound[p]; !alreadyBound {
+		p.client = f.client
+		f.bound[p] = struct{}{}
+	}
+	return p, nil
+}
+
+func keycloakClientCredentialDenied(err error) bool {
+	var retrieve *oauth2.RetrieveError
+	if !errors.As(err, &retrieve) || retrieve.Response == nil {
+		return false
+	}
+	switch retrieve.Response.StatusCode {
+	case http.StatusBadRequest:
+		return retrieve.ErrorCode == "invalid_client"
+	case http.StatusUnauthorized:
+		return retrieve.ErrorCode == "invalid_client" || retrieve.ErrorCode == "unauthorized_client"
+	default:
+		return false
+	}
+}
+
+func TestKeycloakClientCredentialDenied(t *testing.T) {
+	retrieve := func(status int, code string, response bool) error {
+		err := &oauth2.RetrieveError{ErrorCode: code}
+		if response {
+			err.Response = &http.Response{StatusCode: status}
+		}
+		return err
+	}
+	wrapped := func(err error) error { return fmt.Errorf("wrapped provider response: %w", err) }
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "wrapped 400 invalid client", err: wrapped(retrieve(http.StatusBadRequest, "invalid_client", true)), want: true},
+		{name: "wrapped 401 invalid client", err: wrapped(retrieve(http.StatusUnauthorized, "invalid_client", true)), want: true},
+		{name: "wrapped 401 Keycloak unauthorized client", err: wrapped(retrieve(http.StatusUnauthorized, "unauthorized_client", true)), want: true},
+		{name: "nil error", err: nil},
+		{name: "nil response", err: retrieve(http.StatusUnauthorized, "unauthorized_client", false)},
+		{name: "400 invalid grant", err: retrieve(http.StatusBadRequest, "invalid_grant", true)},
+		{name: "401 arbitrary code", err: retrieve(http.StatusUnauthorized, "access_denied", true)},
+		{name: "500 invalid client", err: retrieve(http.StatusInternalServerError, "invalid_client", true)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := keycloakClientCredentialDenied(tc.err); got != tc.want {
+				t.Fatalf("keycloakClientCredentialDenied() = %t, want %t", got, tc.want)
+			}
+		})
+	}
 }
 
 type keycloakMailer struct{}
@@ -207,9 +362,16 @@ func keycloakBrowser(t *testing.T, f *keycloakPostgresFixture, kc *keycloakFixtu
 	if err != nil {
 		t.Fatal("read bootstrap eligibility")
 	}
-	protocol, err := identityenterprise.NewService(f.store, f.store, keycloakFactory{provider: kc.provider()}, protector, clock, ids)
+	realFactory, err := NewConnectionFactory(protector, kc.callbackURL)
+	if err != nil {
+		t.Fatal("create production connection factory")
+	}
+	protocol, err := identityenterprise.NewService(f.store, f.store, &keycloakFactory{factory: realFactory, client: kc.proxy.Client()}, protector, clock, ids)
 	if err != nil {
 		t.Fatal("create enterprise protocol")
+	}
+	if err := protocol.SetBootstrapCredentialID(bootstrap.Credential.ID); err != nil {
+		t.Fatal("bind bootstrap credential")
 	}
 	admission, err := identityenterprise.NewAdmissionService(f.store, keycloakMailer{}, ids, clock)
 	if err != nil {
