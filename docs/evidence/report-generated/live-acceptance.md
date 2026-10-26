@@ -22,7 +22,7 @@ The engagement and Project quality producers also ran through the native documen
 
 ## Limits and rollout
 
-This record covers native closure production and scheduled engagement/Project quality PDF production. Direct remote publication through document commands is not established by the schedule runs. Gmail receipt remains open; local SMTP capture is not Gmail evidence. Excluded providers remain excluded. Functional client receipts do not certify every acceptance criterion of the parent issue.
+This record covers native closure production and scheduled engagement/Project quality PDF production. Direct remote publication through document commands is not established by the schedule runs. The accepted release scope covers configured Slack, Discord, Telegram, SMTP email and webhook delivery. Actual SMTP/Mailpit receipt establishes the email-family function, MIME/PDF integrity, rendered HTML and correct links. Gmail has no configured SMTP/OAuth channel in this sandbox; Gmail and Outlook web-client rendering are unverified and outside this live-channel scope. Excluded providers remain excluded. This follows the operator's 26 October decision to accept established functional proof without adding provider setup or repeated theme/client sweeps. The producer, isolation, template/context goldens and crash-recovery gates remain required and passed; this scope decision does not weaken them.
 
 Replace API, lifecycle, integration and notification writers together. Mixed versions retain the original capture defect. Broken baseline artifacts were preserved for diagnosis; cached reads do not backfill their missing events. Historical reconciliation requires a separate decision. Queue retry is safe for artifact/source atomicity, while an external provider accepting a request before acknowledgment is lost can still cause at-least-once delivery. No process-kill-between-commit-and-ACK experiment or throughput improvement is claimed.
 
@@ -41,5 +41,12 @@ messages were not edited. Hashes and the exact report identities are in `receipt
 
 ![Telegram EN detail and VI signal](receipts/telegram-report-generated-en-detail-vi-signal.png)
 
-Discord and private SMTP captures remain in local evidence pending a publication-safe frame.
+The following Discord frames show both English classes and a Vietnamese signal example; the original Vietnamese frame only includes the beginning of its detail message. The native receipt records cover all four deliveries. The SMTP frame is a retained excerpt of the actual Vietnamese detail email body; the adjacent SMTP receipts establish the complete four locale/class deliveries, rendered anchors and PDF bytes. This evidence does not claim a full email-client screenshot matrix. No message content was edited.
+
+![Discord English signal and detail](receipts/discord-report-generated-en-detail-signal.png)
+
+![Discord Vietnamese signal excerpt](receipts/discord-report-generated-vi-signal-excerpt.png)
+
+![SMTP Vietnamese detail body excerpt](receipts/smtp-report-generated-vi-detail-excerpt.png)
+
 These frames do not add Gmail evidence or a theme sweep.
