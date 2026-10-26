@@ -77,6 +77,46 @@ func TestIdentityInitialProvisioningBeginConvergesAndFencesBinding(t *testing.T)
 	}
 }
 
+func TestIdentityInitialProvisioningCredentialRebindResumesExistingReservation(t *testing.T) {
+	f, originalPrincipal, original, at := declaredInitialTenant(t)
+	ctx := context.Background()
+	rotatedPrincipal := originalPrincipal
+	rotatedPrincipal.Credential.ID = "bootstrap-generation-b"
+	begin := initialProvisioningBegin(original.TenantID.String(), rotatedPrincipal, original.Recipient, at.Add(time.Minute))
+	// The use case allocates new candidate IDs on each Begin, including retries.
+	begin.ID, begin.ConnectionID, begin.InvitationID = "retry-provisioning", "retry-connection", "retry-invitation"
+	rebound, err := f.store.BeginIdentityProvisioning(ctx, begin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rebound.ID != original.ID || rebound.ConnectionID != original.ConnectionID || rebound.InvitationID != original.InvitationID || rebound.CredentialID != rotatedPrincipal.Credential.ID || rebound.Version != original.Version+1 {
+		t.Fatalf("reservation was not rebound in place: original=%+v rebound=%+v", original, rebound)
+	}
+	if _, err := f.store.ReadIdentityProvisioning(ctx, initialProvisioningProof(original, originalPrincipal, begin.At)); !errors.Is(err, shared.ErrForbidden) {
+		t.Fatalf("old credential proof=%v, want ErrForbidden", err)
+	}
+	proof := initialProvisioningProof(rebound, rotatedPrincipal, begin.At)
+	if _, err := f.store.ReadIdentityProvisioning(ctx, proof); err != nil {
+		t.Fatalf("new credential status: %v", err)
+	}
+	draft := ports.IdentityConnectionDraft{TenantID: original.TenantID, ID: original.ConnectionID, DisplayName: "Sandbox Auth0", Issuer: "https://issuer.example/", Settings: ports.IdentityOIDCSettings{ClientID: "client", RedirectURL: "https://127.0.0.1:8446/api/auth/enterprise/callback", SealedClientSecret: "sealed"}}
+	if _, err := f.store.SaveIdentityProvisioningDraft(ctx, draft, proof); err != nil {
+		t.Fatalf("continue draft after credential rotation: %v", err)
+	}
+	if n := f.adminCount(t, `SELECT count(*) FROM audit_log WHERE tenant_id=$1 AND action='identity.initial_provisioning_credential_rebound' AND target=$2`, original.TenantID.String(), original.ID.String()); n != 1 {
+		t.Fatalf("rebind audits for retained reservation=%d, want one", n)
+	}
+	if n := f.adminCount(t, `SELECT count(*) FROM identity_initial_provisioning WHERE tenant_id=$1`, original.TenantID.String()); n != 1 {
+		t.Fatalf("reservations=%d, want one", n)
+	}
+	if _, err := f.store.BeginIdentityProvisioning(ctx, begin); err != nil {
+		t.Fatalf("repeat Begin with current credential: %v", err)
+	}
+	if n := f.adminCount(t, `SELECT count(*) FROM audit_log WHERE tenant_id=$1 AND action='identity.initial_provisioning_credential_rebound'`, original.TenantID.String()); n != 1 {
+		t.Fatalf("repeated Begin emitted %d rebind audits, want one", n)
+	}
+}
+
 func TestIdentityInitialProvisioningProofFencesCredentialAndExpiry(t *testing.T) {
 	f, p, state, at := declaredInitialTenant(t)
 	proof := initialProvisioningProof(state, p, at)

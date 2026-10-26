@@ -316,10 +316,14 @@ func (s *IdentityFoundationStore) BeginIdentityProvisioning(ctx context.Context,
 			return err
 		}
 		if existing.CredentialID != begin.Principal.Credential.ID {
-			if _, err := tx.Exec(ctx, `UPDATE identity_initial_provisioning SET credential_id=$3,updated_at=$4,version=version+1 WHERE tenant_id=$1 AND id=$2`, begin.TenantID.String(), begin.ID.String(), begin.Principal.Credential.ID, begin.At.UTC()); err != nil {
+			updated, err := tx.Exec(ctx, `UPDATE identity_initial_provisioning SET credential_id=$3,updated_at=$4,version=version+1 WHERE tenant_id=$1 AND id=$2`, begin.TenantID.String(), existing.ID.String(), begin.Principal.Credential.ID, begin.At.UTC())
+			if err != nil {
 				return err
 			}
-			if err := appendTenantAudit(ctx, tx, begin.TenantID.String(), ports.AuditEntry{Actor: begin.Principal.ActorID, Action: "identity.initial_provisioning_credential_rebound", Target: begin.ID.String(), At: begin.At}); err != nil {
+			if updated.RowsAffected() != 1 {
+				return shared.ErrConflict
+			}
+			if err := appendTenantAudit(ctx, tx, begin.TenantID.String(), ports.AuditEntry{Actor: begin.Principal.ActorID, Action: "identity.initial_provisioning_credential_rebound", Target: existing.ID.String(), At: begin.At}); err != nil {
 				return err
 			}
 		}
