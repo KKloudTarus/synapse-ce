@@ -15,6 +15,8 @@ const contentVersion = "v1"
 
 const scanPagerContentVersion = "v2"
 
+const reportGeneratedContentVersion = "v2"
+
 // Catalog is an immutable built-in template catalog. It returns copies because callers may use a
 // returned field map while rendering and must not be able to mutate the catalog for other sends.
 type Catalog struct {
@@ -85,6 +87,9 @@ func (c *Catalog) add(event notification.EventType, family notification.Template
 func assetVersion(event notification.EventType, family notification.TemplateFamily) string {
 	if event == notification.EventScanCompleted && family == notification.FamilyPager {
 		return scanPagerContentVersion
+	}
+	if event == notification.EventReportGenerated && family != notification.FamilyWebhook {
+		return reportGeneratedContentVersion
 	}
 	return contentVersion
 }
@@ -206,7 +211,7 @@ func copyFor(event notification.EventType, locale tenancy.Locale) (string, strin
 		case notification.EventEvidenceChainBroken:
 			return "Chuỗi bằng chứng không hợp lệ", "Mức độ: {{.severity}}\nLý do: {{.reason_code}}\nThời gian: {{.occurred_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}"
 		case notification.EventReportGenerated:
-			return "Báo cáo đã được tạo", "Mức độ: {{.severity}}\nLoại báo cáo: {{.report_kind}}\nSố phát hiện: {{.finding_count}}\nThời gian tạo: {{.generated_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .report_title}}\nTiêu đề: {{.report_title}}{{end}}{{if .content_hash}}\nMã nội dung: {{.content_hash}}{{end}}"
+			return "Báo cáo đã được tạo", "{{if .severity}}Mức độ: {{.severity}}\n{{end}}Loại báo cáo: {{.report_kind}}{{if .finding_count}}\nSố phát hiện: {{.finding_count}}{{end}}\nThời gian tạo: {{.generated_at}}{{if .engagement_name}}\nĐợt đánh giá: {{.engagement_name}}{{end}}{{if .report_title}}\nTiêu đề: {{.report_title}}{{end}}{{if .content_hash}}\nMã nội dung: {{.content_hash}}{{end}}"
 		default:
 			return "Thông báo Synapse", "Sự kiện: {{.event_label}}\nThời gian: {{.occurred_at}}"
 		}
@@ -271,7 +276,7 @@ func copyFor(event notification.EventType, locale tenancy.Locale) (string, strin
 	case notification.EventEvidenceChainBroken:
 		return "Evidence chain broken", "Severity: {{.severity}}\nReason: {{.reason_code}}\nOccurred: {{.occurred_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}"
 	case notification.EventReportGenerated:
-		return "Report generated", "Severity: {{.severity}}\nReport type: {{.report_kind}}\nFindings: {{.finding_count}}\nGenerated: {{.generated_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .report_title}}\nTitle: {{.report_title}}{{end}}{{if .content_hash}}\nContent hash: {{.content_hash}}{{end}}"
+		return "Report generated", "{{if .severity}}Severity: {{.severity}}\n{{end}}Report type: {{.report_kind}}{{if .finding_count}}\nFindings: {{.finding_count}}{{end}}\nGenerated: {{.generated_at}}{{if .engagement_name}}\nEngagement: {{.engagement_name}}{{end}}{{if .report_title}}\nTitle: {{.report_title}}{{end}}{{if .content_hash}}\nContent hash: {{.content_hash}}{{end}}"
 	default:
 		return "Synapse notification", "Event: {{.event_label}}\nOccurred: {{.occurred_at}}"
 	}

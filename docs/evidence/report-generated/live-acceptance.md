@@ -30,6 +30,8 @@ No card, paid plan, paid inference or cloud server was used. The accountless web
 
 ## Published client captures
 
+These retained captures use the original v1 templates. The v2 chat, email and pager templates omit absent Findings and Severity lines while retaining known values, including zero; renderer regressions cover that correction. The historical messages and images remain unchanged.
+
 The Slack frame contains the original native EN/VI signal/detail receipts. The two Telegram
 frames were recaptured from the retained sandbox bot conversation and together show all four
 native loopback-link receipts. Telegram capture excludes the unrelated chat sidebar; the rendered
