@@ -20,7 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func wireEnterpriseIdentity(cfg config.Config, router *httpapi.Router, auth *httpapi.Authenticator, pool *pgxpool.Pool, cipher *vault.Cipher, sender *notificationsender.Sender, clock ports.Clock, ids ports.IDGenerator) error {
+func wireEnterpriseIdentity(cfg config.Config, router *httpapi.Router, auth *httpapi.Authenticator, pool *pgxpool.Pool, cipher *vault.Cipher, sender *notificationsender.Sender, clock ports.Clock, ids ports.IDGenerator, bootstrapCredentialID string) error {
 	if err := cfg.ValidateIdentityCutover(); err != nil {
 		return err
 	}
@@ -80,6 +80,16 @@ func wireEnterpriseIdentity(cfg config.Config, router *httpapi.Router, auth *htt
 	if err != nil {
 		return err
 	}
+	if err := protocol.SetBootstrapCredentialID(bootstrapCredentialID); err != nil {
+		return err
+	}
+	provisioning, err := identityenterprise.NewProvisioning(store, protector, clock, ids, identityenterprise.ProvisioningConfig{CallbackURL: callback.String(), BootstrapCredentialID: bootstrapCredentialID, AllowedTenant: cfg.IdentityCutoverMutationForTenant})
+	if err != nil {
+		return err
+	}
+	if err := protocol.SetProvisioning(provisioning); err != nil {
+		return err
+	}
 	connections, err := identityenterprise.NewConnections(store, protector, clock, ids, callback.String())
 	if err != nil {
 		return err
@@ -124,5 +134,8 @@ func wireEnterpriseIdentity(cfg config.Config, router *httpapi.Router, auth *htt
 			return legacy(ctx, token)
 		}
 	})
-	return router.SetEnterprise(browser, connections, recovery, admission, store, protector, clock, tenant, base.String())
+	if err := router.SetEnterprise(browser, connections, recovery, admission, store, protector, clock, tenant, base.String()); err != nil {
+		return err
+	}
+	return router.SetEnterpriseProvisioning(provisioning, protocol)
 }

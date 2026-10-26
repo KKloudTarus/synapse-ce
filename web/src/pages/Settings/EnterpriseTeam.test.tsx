@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnterpriseTeam } from './EnterpriseTeam'
 import { ApiError } from '../../lib/api/errors'
@@ -14,7 +14,7 @@ describe('EnterpriseTeam', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     administration.roster.mockResolvedValue([{ id: 'm1', personId: 'p1', name: 'Ada', role: 'member', state: 'active', version: 7 }])
-    administration.invitations.mockResolvedValue([{ id: 'i1', recipient: 'ada@example.test', role: 'member', state: 'pending', version: 2, expiresAt: '' }])
+    administration.invitations.mockResolvedValue([{ id: 'i1', recipient: 'ada@example.test', role: 'member', state: 'pending', version: 2, expiresAt: '2099-01-01T00:00:00Z' }])
     administration.change.mockResolvedValue(undefined); administration.revokeInvitation.mockResolvedValue(undefined)
   })
 
@@ -32,6 +32,29 @@ describe('EnterpriseTeam', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Revoke' }))
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
     await waitFor(() => expect(administration.revokeInvitation).toHaveBeenCalledWith('i1', 2, undefined))
+  })
+
+  it.each([
+    ['accepted', '2099-01-01T00:00:00Z', 'Accepted'],
+    ['revoked', '2099-01-01T00:00:00Z', 'Revoked'],
+    ['pending', '2000-01-01T00:00:00Z', 'Expired'],
+    ['pending', '', 'Pending — expiry unavailable'],
+    ['pending', 'not-a-date', 'Pending — expiry unavailable'],
+    ['unexpected', '2099-01-01T00:00:00Z', 'Status unavailable'],
+  ])('renders %s invitations as %s without an actionable revoke control', async (state, expiresAt, label) => {
+    administration.invitations.mockResolvedValue([{ id: 'i1', recipient: 'ada@example.test', role: 'member', state, version: 2, expiresAt }])
+    render(<EnterpriseTeam />)
+    const recipient = await screen.findByText('ada@example.test')
+    const invitation = recipient.closest('div')?.parentElement
+    expect(invitation).toHaveTextContent(label)
+    expect(within(invitation as HTMLElement).queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument()
+  })
+
+  it('shows a pending nonexpired invitation as actionable', async () => {
+    administration.invitations.mockResolvedValue([{ id: 'i1', recipient: 'ada@example.test', role: 'member', state: 'pending', version: 2, expiresAt: '2099-01-01T00:00:00Z' }])
+    render(<EnterpriseTeam />)
+    await screen.findByText('Pending')
+    expect(screen.getByRole('button', { name: 'Revoke' })).toBeEnabled()
   })
 
   it('masks a newly issued invitation code until it is revealed and dismisses it', async () => {
