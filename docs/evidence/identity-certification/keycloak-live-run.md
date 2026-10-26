@@ -8,6 +8,41 @@ shared source in Auth0 PR #1612 commit `a2de17b9`. The original #1609 executable
 equivalent to the earlier Auth0 baseline, but this run consumes later shared repairs. It does not
 claim that the unmodified #1609 source head alone contains those repairs.
 
+## Accepted release scope
+
+The final delivery incorporates the reviewed Auth0 foundation through commit
+`35e1a435d038bc1e3634e69a781c46e088dbe9f0`; all production Go, API, migration and frontend bytes
+match that reviewed parent. The Keycloak-specific delta contains its maintained native conformance,
+release gate and evidence. It does not preserve a parallel backport of shared identity features.
+
+The release decision on 26 October 2026 accepts the existing real browser journeys together with
+maintained native conformance. A second sandbox realm grant or another additive-link enrollment is
+not required to repeat the shared approved-link flow. The separate custom-path sandbox realm and
+connection remain disabled; no activation or new access is inferred from this scope decision.
+
+Public discovery and signed Test of the custom-base-path realm passed against the strict gateway.
+The native gate exercises real Keycloak discovery, signed tokens and approved admission under both
+ordinary and `/auth` paths, unknown/wrong-realm denial, PKCE, real client-secret replacement with
+old-secret denial, ordinary login preserving the existing link, and session-epoch rejection after
+disable. Retained browser evidence separately proves public transport, default-subject enrollment,
+pairwise remap denial/restoration, signing-key overlap, mailbox recovery and Required canary fallback.
+No receipt is relabelled as a new run or a different provider.
+
+Shared UI validation and token-outage repairs are included in the reviewed Auth0 parent. Their
+functional candidate provenance covers the exact executable files now inherited here. Earlier
+paragraphs that describe uncommitted backports or open shared-repair cells are historical checkpoints,
+superseded by this source consolidation and the final verification record. The existing hostname,
+credentials and sandbox configuration remain retained; this does not promise permanent Quick Tunnel
+DNS or permit silently changing an issuer after restart. No billing, new cloud service, extra grant
+or Auth0 signing-key rotation was added.
+
+The final combined-source native run passed ordinary and `/auth` layouts in 45.87 and
+43.52 seconds respectively. Its source hashes, pinned images, actual result and zero-resource
+cleanup are recorded in [the final conformance receipt](keycloak-release-conformance.json).
+The native test files and all production bytes remained unchanged during this run; only evidence
+Markdown/JSON was reconciled afterward. Hosted repository Actions are still disabled, so this
+receipt claims local native execution only.
+
 ## Signing-key overlap and login
 
 On 25 October 2026, the existing linked synthetic person first switched from default readonly to
