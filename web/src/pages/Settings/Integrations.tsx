@@ -25,6 +25,7 @@ const endpointExamples: Record<string, string> = {
   sharepoint: 'https://tenant.sharepoint.com/sites/security', onedrive: 'https://tenant-my.sharepoint.com/personal/service_account',
   'google-drive': 'https://www.googleapis.com', bitbucket: 'https://bitbucket.org',
   notion: 'https://api.notion.com',
+  's3-compatible': 'https://s3.eu-west-1.amazonaws.com',
 }
 
 

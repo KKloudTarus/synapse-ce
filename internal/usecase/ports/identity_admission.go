@@ -74,6 +74,10 @@ type IdentityAdmissionStore interface {
 	RevokeIdentityInvitation(context.Context, shared.ID, shared.ID, int, IdentityAdminProof, time.Time) error
 	GetIdentityInvitation(context.Context, shared.ID, shared.ID) (IdentityInvitation, error)
 	ResolveIdentityInvitationCode(context.Context, string) (IdentityInvitationRoute, error)
+	// CreateMailboxChallenge issues a fresh proof, replacing the unused proof for
+	// this invitation version and subject. Person, digest and expiry rotate together;
+	// consumed proofs and inactive invitations cannot be renewed. Reusing the current
+	// digest is refused. The latest issuance wins even if mail arrives out of order.
 	CreateMailboxChallenge(context.Context, shared.ID, shared.ID, int, string, shared.ID, string, time.Time, time.Time) error
 	AdmitIdentity(context.Context, IdentityAdmissionCommand) (IdentityAdmissionResult, error)
 }

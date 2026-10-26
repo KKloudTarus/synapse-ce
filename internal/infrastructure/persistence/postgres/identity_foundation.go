@@ -248,6 +248,12 @@ func (s *IdentityFoundationStore) AddMembership(ctx context.Context, tenantID, p
 	membershipID := legacyIdentityID("membership_", tenantID, personID)
 	var out ports.IdentityMembership
 	err = s.withIdentityTenant(ctx, tenantID, func(tx pgx.Tx) error {
+		// The membership-close trigger may need this same policy lock. Acquire it before the
+		// SECURITY DEFINER projection takes its FOR SHARE lock, so first provisioning and native
+		// membership creation serialize in one order instead of deadlocking on lock upgrades.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM identity_policies WHERE tenant_id=$1 FOR UPDATE`, tenantID.String()); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `SELECT synapse_identity_project_member_user($1,$2,$3,$4,$5,$6)`,
 			tenantID.String(), projected.ID.String(), projected.Name, string(role), unusable, at); err != nil {
 			return fmt.Errorf("project member user: %w", err)

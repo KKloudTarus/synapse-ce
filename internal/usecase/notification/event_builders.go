@@ -125,6 +125,21 @@ func eventBuilders() map[domain.EventType]eventBuilder {
 				return map[string]string{"severity": string(e.Severity), "reason_code": data.text("reason_code"), "engagement_name": data.text("engagement_name")}
 			},
 		},
+		domain.EventReportGenerated: {
+			subjectKey: "report_id",
+			vars: func(e domain.Event, data eventData, _ sourceFacts) map[string]string {
+				generated, ok := data.time("generated_at")
+				if !ok {
+					generated = e.OccurredAt
+				}
+				return map[string]string{
+					"severity": string(e.Severity), "report_kind": data.text("report_kind"),
+					"finding_count": data.text("finding_count"), "generated_at": formatTime(generated),
+					"engagement_name": data.text("engagement_name"), "report_title": data.text("report_title"),
+					"content_hash": data.text("content_hash"),
+				}
+			},
+		},
 		domain.EventChannelPaused:      {subjectKey: "channel_id"},
 		domain.EventDestinationChanged: {},
 		domain.EventTest:               {},

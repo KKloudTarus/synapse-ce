@@ -1,0 +1,25 @@
+{
+  "body": {
+    "cardsV2": [
+      {
+        "card": {
+          "header": {
+            "title": "🟠 Report generated"
+          },
+          "sections": [
+            {
+              "widgets": [
+                {
+                  "textParagraph": {
+                    "text": "Severity: high\u003cbr\u003eReport type: engagement_report\u003cbr\u003eFindings: 7\u003cbr\u003eGenerated: 2026-10-23T09:00:00Z\u003cbr\u003eEngagement: Live acceptance\u003cbr\u003eTitle: Security assessment report: Live acceptance\u003cbr\u003eContent hash: 3f786850e387550fdab836ed7e6dc881de23001b1b4ca1f1e1b9a1c0d2e3f4a5"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "cardId": "synapse-notification"
+      }
+    ]
+  }
+}

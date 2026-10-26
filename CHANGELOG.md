@@ -13,6 +13,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
   configured container page, that the page is not in the trash, and that Notion has not published
   it to the web. Report publication stays unavailable for this provider: the API exposes no page
   permissions and cannot permanently delete a page.
+- `report.generated` notification event for a sealed report artifact, with built-in English
+  and Vietnamese templates in every channel family, a published JSON schema and fixture, and
+  capture from engagement, project-quality and assessment-cycle report generation. The outbox
+  key is the report kind and its content digest, so rebuilding a report and releasing it later
+  announce it once.
 - Private GitHub Issues, confidential GitLab Issues, Azure Boards, ServiceNow and
   Linear ticket destinations with frozen native previews, tenant-scoped credentials,
   and polling observations. ServiceNow descriptions render readable plain text;
@@ -21,6 +26,11 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 - Restricted Google Drive and SharePoint/OneDrive Business publication through the
   shared document release workflow, with opaque revision fences and guarded permanent
   unpublish.
+- Governed publication to a restricted prefix of an S3-compatible bucket. The bucket
+  policy is the access authority: exactly one reader principal for the publication
+  prefix, versioning required, a public grant reported as a lost restriction, and an
+  unreadable policy refusing the release. Unpublish removes every object version and
+  delete marker, and refuses a publication held by Object Lock.
 
 - Jira Cloud and Data Center finding synchronization, Project vulnerability grouping,
   proposal-only inbound status/comment observations, and bounded reconciliation.

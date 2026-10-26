@@ -13,6 +13,11 @@ export interface EnterpriseConnection {
   draftRevision: number
   version: number
   testPassed: boolean
+  auth0OrganizationId?: string
+  // The administrative connection list may include a client ID so an administrator
+  // can prepare the next revision. It never includes a client secret.
+  configurationPending?: boolean
+  clientId?: string
 }
 
 export interface EnterpriseContext {
@@ -32,10 +37,13 @@ export interface IdentityPolicy {
 }
 
 export interface ConnectionDraft {
+  id?: string
+  version?: number
   displayName: string
   issuer: string
   clientId: string
   clientSecret: string
+  auth0OrganizationId?: string
 }
 
 export interface RecoveryCodeRequest {
@@ -76,8 +84,11 @@ function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null
 }
 
-function connectionFromWire(value: unknown): EnterpriseConnection {
+function connectionFromWire(value: unknown, includeClientID = false): EnterpriseConnection {
   const connection = asRecord(value)
+  const auth0OrganizationId = stringValue(connection.auth0_organization_id)
+  const configurationPending = connection.configuration_pending === true
+  const clientId = includeClientID ? stringValue(connection.client_id) : ''
   return {
     id: stringValue(connection.id),
     displayName: stringValue(connection.display_name) || stringValue(connection.name) || stringValue(connection.id),
@@ -87,6 +98,8 @@ function connectionFromWire(value: unknown): EnterpriseConnection {
     draftRevision: numberValue(connection.draft_revision),
     version: numberValue(connection.version),
     testPassed: connection.test_passed === true,
+    ...(auth0OrganizationId ? { auth0OrganizationId } : {}),
+    ...(configurationPending ? { configurationPending: true, ...(includeClientID ? { clientId } : {}) } : clientId ? { clientId } : {}),
   }
 }
 
@@ -123,11 +136,14 @@ function request(path: string, init?: RequestInit): Promise<unknown> {
   return req(path, init) as Promise<unknown>
 }
 
-async function authRequest(path: string, init?: RequestInit): Promise<unknown> {
+export async function identityAuthRequest(path: string, init?: RequestInit): Promise<unknown> {
   const auth = snapshotAuth()
+  const requestInit = auth.requestInit(init)
+  // Test callbacks require the caller-binding nonce cookie even during token bootstrap.
+  if (path === '/api/v1/identity/connections/test' || path === '/api/v1/identity/provisioning/test') requestInit.credentials = 'same-origin'
   let response: Response
   try {
-    response = await fetch(path, auth.requestInit(init))
+    response = await fetch(path, requestInit)
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
     throw new Error('Cannot reach the API. Is the server running on :8080?')
@@ -142,8 +158,8 @@ async function authRequest(path: string, init?: RequestInit): Promise<unknown> {
 
 export const identityApi = {
   async context(signal?: AbortSignal): Promise<EnterpriseContext> {
-    const response = asRecord(await authRequest('/api/auth/enterprise/context', { signal }))
-    const connections = Array.isArray(response.connections) ? response.connections.map(connectionFromWire) : []
+    const response = asRecord(await identityAuthRequest('/api/auth/enterprise/context', { signal }))
+    const connections = Array.isArray(response.connections) ? response.connections.map((connection) => connectionFromWire(connection)) : []
     return {
       enabled: response.enabled === true,
       tenantId: stringValue(response.tenant_id),
@@ -154,7 +170,7 @@ export const identityApi = {
   },
 
   begin(connectionId: string, purpose: EnterprisePurpose, bootstrapEligibility?: string): Promise<unknown> {
-    return authRequest('/api/auth/enterprise/begin', {
+    return identityAuthRequest('/api/auth/enterprise/begin', {
       method: 'POST',
       body: JSON.stringify({ connection_id: connectionId, purpose, ...withProof(bootstrapEligibility) }),
     })
@@ -162,7 +178,7 @@ export const identityApi = {
 
   async connections(signal?: AbortSignal): Promise<EnterpriseConnection[]> {
     const response = asRecord(await request('/identity/connections', { signal }))
-    return Array.isArray(response.connections) ? response.connections.map(connectionFromWire) : []
+    return Array.isArray(response.connections) ? response.connections.map((connection) => connectionFromWire(connection, true)) : []
   },
 
   async bootstrap(): Promise<string> {
@@ -176,17 +192,20 @@ export const identityApi = {
     return request('/identity/connections/draft', {
       method: 'POST',
       body: JSON.stringify({
+        ...(draft.id ? { id: draft.id } : {}),
+        ...(draft.version === undefined ? {} : { version: draft.version }),
         display_name: draft.displayName,
         issuer: draft.issuer,
         client_id: draft.clientId,
         client_secret: draft.clientSecret,
+        ...(draft.auth0OrganizationId ? { auth0_organization_id: draft.auth0OrganizationId } : {}),
         ...withProof(bootstrapEligibility),
       }),
     })
   },
 
   async testConnection(id: string, bootstrapEligibility?: string): Promise<{ authorizationURL: string }> {
-    const response = asRecord(await request('/identity/connections/test', {
+    const response = asRecord(await identityAuthRequest('/api/v1/identity/connections/test', {
       method: 'POST',
       body: JSON.stringify({ id, ...withProof(bootstrapEligibility) }),
     }))

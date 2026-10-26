@@ -70,7 +70,8 @@ export function ProfilePage() {
             </div>}
           </article>) }
       </section>
-      <PersonalLinks contacts={contacts} busy={busy} run={run} />{enterprise && <EnterpriseIdentities />}
+      <PersonalLinks contacts={contacts} busy={busy} run={run} />
     </>}
+    {enterprise && <EnterpriseIdentities />}
   </div>
 }

@@ -2877,6 +2877,141 @@
       }
     }
   },
+  "report.generated/chat/detail": {
+    "fields": {
+      "body": "Severity: critical\nReport type: engagement\\_report\nFindings: 12\nGenerated: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTitle: summary\\-report\nContent hash: detail\\-content\\-hash",
+      "title": "Report generated"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Report generated\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Report type: engagement_report\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Generated: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Title: summary-report\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Content hash: detail-content-hash\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Report generated\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "report.generated/chat/signal": {
+    "fields": {
+      "body": "Severity: critical\nReport type: engagement\\_report\nFindings: 12\nGenerated: 2026\\-10\\-02 09\\:00 UTC",
+      "title": "Report generated"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Report generated\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Report type: engagement_report\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Generated: 2026-10-02 09:00 UTC\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Report generated\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "report.generated/chat/summary": {
+    "fields": {
+      "body": "Severity: critical\nReport type: engagement\\_report\nFindings: 12\nGenerated: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTitle: summary\\-report",
+      "title": "Report generated"
+    },
+    "formatted": "{\"blocks\":[{\"text\":{\"emoji\":false,\"text\":\"Report generated\",\"type\":\"plain_text\"},\"type\":\"header\"},{\"elements\":[{\"elements\":[{\"text\":\"Severity: critical\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Report type: engagement_report\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Findings: 12\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Generated: 2026-10-02 09:00 UTC\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Engagement: summary-engagement\",\"type\":\"text\"},{\"text\":\"\\n\",\"type\":\"text\"},{\"text\":\"Title: summary-report\",\"type\":\"text\"}],\"type\":\"rich_text_section\"}],\"type\":\"rich_text\"}],\"text\":\"Report generated\",\"unfurl_links\":false,\"unfurl_media\":false}"
+  },
+  "report.generated/email/detail": {
+    "fields": {
+      "body": "Severity: critical\nReport type: engagement\\_report\nFindings: 12\nGenerated: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTitle: summary\\-report\nContent hash: detail\\-content\\-hash",
+      "subject": "Report generated"
+    },
+    "formatted": "Severity: critical\nReport type: engagement_report\nFindings: 12\nGenerated: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTitle: summary-report\nContent hash: detail-content-hash",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nReport type: engagement_report\u003cbr\u003e\nFindings: 12\u003cbr\u003e\nGenerated: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTitle: summary-report\u003cbr\u003e\nContent hash: detail-content-hash\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "report.generated/email/signal": {
+    "fields": {
+      "body": "Severity: critical\nReport type: engagement\\_report\nFindings: 12\nGenerated: 2026\\-10\\-02 09\\:00 UTC",
+      "subject": "Report generated"
+    },
+    "formatted": "Severity: critical\nReport type: engagement_report\nFindings: 12\nGenerated: 2026-10-02 09:00 UTC",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nReport type: engagement_report\u003cbr\u003e\nFindings: 12\u003cbr\u003e\nGenerated: 2026-10-02 09:00 UTC\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "report.generated/email/summary": {
+    "fields": {
+      "body": "Severity: critical\nReport type: engagement\\_report\nFindings: 12\nGenerated: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTitle: summary\\-report",
+      "subject": "Report generated"
+    },
+    "formatted": "Severity: critical\nReport type: engagement_report\nFindings: 12\nGenerated: 2026-10-02 09:00 UTC\nEngagement: summary-engagement\nTitle: summary-report",
+    "html": "\u003c!doctype html\u003e\u003chtml lang=\"en\"\u003e\u003chead\u003e\u003cmeta charset=\"utf-8\"\u003e\u003c/head\u003e\u003cbody\u003e\u003cmain\u003e\u003cp\u003eSeverity: critical\u003cbr\u003e\nReport type: engagement_report\u003cbr\u003e\nFindings: 12\u003cbr\u003e\nGenerated: 2026-10-02 09:00 UTC\u003cbr\u003e\nEngagement: summary-engagement\u003cbr\u003e\nTitle: summary-report\u003c/p\u003e\n\u003c/main\u003e\u003c/body\u003e\u003c/html\u003e"
+  },
+  "report.generated/pager/detail": {
+    "fields": {
+      "summary": "Report generated: Severity: critical\nReport type: engagement\\_report\nFindings: 12\nGenerated: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTitle: summary\\-report\nContent hash: detail\\-content\\-hash"
+    }
+  },
+  "report.generated/pager/signal": {
+    "fields": {
+      "summary": "Report generated: Severity: critical\nReport type: engagement\\_report\nFindings: 12\nGenerated: 2026\\-10\\-02 09\\:00 UTC"
+    }
+  },
+  "report.generated/pager/summary": {
+    "fields": {
+      "summary": "Report generated: Severity: critical\nReport type: engagement\\_report\nFindings: 12\nGenerated: 2026\\-10\\-02 09\\:00 UTC\nEngagement: summary\\-engagement\nTitle: summary\\-report"
+    }
+  },
+  "report.generated/webhook/detail": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-report.generated",
+        "type": "report.generated",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "content_hash": "detail-content-hash",
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "report.generated",
+          "finding_count": "12",
+          "generated_at": "2026-10-02T09:00:00Z",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "report_kind": "engagement_report",
+          "report_title": "summary-report",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
+  "report.generated/webhook/signal": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-report.generated",
+        "type": "report.generated",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "event_label": "signal-event-label",
+          "event_type": "report.generated",
+          "finding_count": "12",
+          "generated_at": "2026-10-02T09:00:00Z",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "report_kind": "engagement_report",
+          "severity": "critical"
+        }
+      }
+    }
+  },
+  "report.generated/webhook/summary": {
+    "webhook": {
+      "version": "synapse.notification.v1",
+      "event": {
+        "id": "matrix-report.generated",
+        "type": "report.generated",
+        "schema_version": 1,
+        "occurred_at": "2026-10-02T09:00:00Z"
+      },
+      "data": {
+        "vars": {
+          "engagement_name": "summary-engagement",
+          "event_label": "signal-event-label",
+          "event_type": "report.generated",
+          "finding_count": "12",
+          "generated_at": "2026-10-02T09:00:00Z",
+          "occurred_at": "2026-10-02T09:00:00Z",
+          "report_kind": "engagement_report",
+          "report_title": "summary-report",
+          "severity": "critical",
+          "summary": "summary-description",
+          "title": "summary-title"
+        }
+      }
+    }
+  },
   "response.finished/chat/detail": {
     "fields": {
       "body": "Outcome: failed\nAction: \nTarget: summary\\-target\\.example\nActor: summary\\-actor\nEngagement: summary\\-engagement",

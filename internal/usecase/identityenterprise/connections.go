@@ -73,12 +73,13 @@ func (s *Connections) RepairProof(ctx context.Context, p authz.Principal, bootst
 }
 
 type ConnectionDraftInput struct {
-	ID              shared.ID
-	DisplayName     string
-	Issuer          string
-	ClientID        string
-	ClientSecret    string
-	ExpectedVersion int
+	ID                  shared.ID
+	DisplayName         string
+	Issuer              string
+	ClientID            string
+	ClientSecret        string
+	Auth0OrganizationID string
+	ExpectedVersion     int
 }
 
 func (s *Connections) SaveDraft(ctx context.Context, p authz.Principal, bootstrapToken string, in ConnectionDraftInput) (ports.IdentityConnection, error) {
@@ -86,18 +87,29 @@ func (s *Connections) SaveDraft(ctx context.Context, p authz.Principal, bootstra
 	if err != nil {
 		return ports.IdentityConnection{}, err
 	}
+	draft, err := prepareConnectionDraft(ctx, s.protector, s.ids, s.callbackURL, shared.ID(p.TenantID), in)
+	if err != nil {
+		return ports.IdentityConnection{}, err
+	}
+	return s.store.SaveIdentityConnectionDraft(ctx, draft, proof)
+}
+
+func prepareConnectionDraft(ctx context.Context, protector ports.IdentitySecretProtector, ids ports.IDGenerator, callback string, tenant shared.ID, in ConnectionDraftInput) (ports.IdentityConnectionDraft, error) {
 	u, err := url.Parse(in.Issuer)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.TrimSpace(in.DisplayName) == "" || len(in.DisplayName) > 200 || strings.TrimSpace(in.ClientID) == "" || len(in.ClientID) > 512 || len(in.ClientSecret) > 4096 || in.ClientSecret == "" {
-		return ports.IdentityConnection{}, shared.ErrValidation
+		return ports.IdentityConnectionDraft{}, shared.ErrValidation
+	}
+	if err := ports.ValidateAuth0OrganizationID(in.Auth0OrganizationID); err != nil {
+		return ports.IdentityConnectionDraft{}, err
 	}
 	if in.ID.IsZero() {
-		in.ID = s.ids.NewID()
+		in.ID = ids.NewID()
 	}
-	sealed, err := s.protector.Seal(ctx, []byte(in.ClientSecret), []byte("identity-connection:"+p.TenantID+":"+in.ID.String()))
+	sealed, err := protector.Seal(ctx, []byte(in.ClientSecret), []byte("identity-connection:"+tenant.String()+":"+in.ID.String()))
 	if err != nil {
-		return ports.IdentityConnection{}, fmt.Errorf("seal connection client secret: %w", err)
+		return ports.IdentityConnectionDraft{}, fmt.Errorf("seal connection client secret: %w", err)
 	}
-	return s.store.SaveIdentityConnectionDraft(ctx, ports.IdentityConnectionDraft{TenantID: shared.ID(p.TenantID), ID: in.ID, DisplayName: strings.TrimSpace(in.DisplayName), Issuer: strings.TrimRight(u.String(), "/"), Settings: ports.IdentityOIDCSettings{ClientID: in.ClientID, RedirectURL: s.callbackURL, SealedClientSecret: sealed}, ExpectedVersion: in.ExpectedVersion}, proof)
+	return ports.IdentityConnectionDraft{TenantID: tenant, ID: in.ID, DisplayName: strings.TrimSpace(in.DisplayName), Issuer: u.String(), Settings: ports.IdentityOIDCSettings{ClientID: in.ClientID, RedirectURL: callback, SealedClientSecret: sealed, Auth0OrganizationID: in.Auth0OrganizationID}, ExpectedVersion: in.ExpectedVersion}, nil
 }
 
 func (s *Connections) Activate(ctx context.Context, p authz.Principal, bootstrapToken string, id shared.ID, revision, version int) (ports.IdentityConnection, error) {

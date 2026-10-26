@@ -129,6 +129,72 @@ func TestTLSProviderVerifiesSingleAudienceSignedIdentityAndNonce(t *testing.T) {
 	}
 }
 
+func TestTLSProviderEnforcesConfiguredAuth0OrganizationClaim(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issuer, raw string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]any{"issuer": issuer, "authorization_endpoint": issuer + "/authorize", "token_endpoint": issuer + "/token", "jwks_uri": issuer + "/keys", "code_challenge_methods_supported": []string{"S256"}})
+		case "/keys":
+			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "approved", Use: "sig", Algorithm: "RS256"}}})
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "access", "token_type": "Bearer", "id_token": raw})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	issuer = server.URL
+	now := time.Now().UTC().Truncate(time.Second)
+
+	makeToken := func(include bool, organization any) string {
+		claims := map[string]any{"iss": issuer, "sub": "approved-person", "aud": "client", "exp": now.Add(time.Hour).Unix(), "iat": now.Unix(), "nonce": "nonce"}
+		if include {
+			claims["org_id"] = organization
+		}
+		return signIdentity(t, key, "approved", claims)
+	}
+	configured := newProvider(Config{Issuer: issuer, ClientID: "client", ClientSecret: "secret", RedirectURL: "https://synapse.example/callback", Auth0OrganizationID: "org_CaseSensitive"}, issuer, server.Client())
+	for _, tc := range []struct {
+		name    string
+		include bool
+		claim   any
+		wantErr bool
+	}{
+		{name: "exact signed claim", include: true, claim: "org_CaseSensitive"},
+		{name: "wrong organization with same issuer client and subject", include: true, claim: "org_Other", wantErr: true},
+		{name: "case changed organization", include: true, claim: "org_casesensitive", wantErr: true},
+		{name: "missing claim", wantErr: true},
+		{name: "null claim", include: true, claim: nil, wantErr: true},
+		{name: "non string claim", include: true, claim: 7, wantErr: true},
+		{name: "empty claim", include: true, claim: "", wantErr: true},
+		{name: "malformed claim", include: true, claim: "organization_CaseSensitive", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw = makeToken(tc.include, tc.claim)
+			_, err := configured.ExchangeAndVerify(t.Context(), "code", "verifier", "nonce")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ExchangeAndVerify() error = %v, wantErr %t", err, tc.wantErr)
+			}
+		})
+	}
+
+	unconfigured := newProvider(Config{Issuer: issuer, ClientID: "client", ClientSecret: "secret", RedirectURL: "https://synapse.example/callback"}, issuer, server.Client())
+	raw = makeToken(false, nil)
+	if _, err := unconfigured.ExchangeAndVerify(t.Context(), "code", "verifier", "nonce"); err != nil {
+		t.Fatalf("ordinary tenant token rejected: %v", err)
+	}
+	raw = makeToken(true, "org_Unsolicited")
+	if _, err := unconfigured.ExchangeAndVerify(t.Context(), "code", "verifier", "nonce"); err == nil {
+		t.Fatal("unconfigured provider accepted unsolicited org_id")
+	}
+}
+
 func TestCappedBodyRejectsUnknownLengthOverflow(t *testing.T) {
 	body := &limitedReadCloser{ReadCloser: io.NopCloser(strings.NewReader(strings.Repeat("x", int(maxOIDCResponseBytes)+1))), remaining: maxOIDCResponseBytes}
 	if _, err := io.ReadAll(body); err == nil {

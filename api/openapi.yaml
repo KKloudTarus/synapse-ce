@@ -7623,6 +7623,168 @@ paths:
       responses:
         "200": {description: Sink status, content: {application/json: {schema: {$ref: "#/components/schemas/SIEMStatus"}}}}
 
+  /api/auth/enterprise/context:
+    get:
+      tags: [enterprise-identity]
+      operationId: getEnterpriseLoginContext
+      summary: Read the enabled sign-in connections for one public login target
+      security: []
+      description: >-
+        Omitting `tenant_id` keeps the deployment default. A supplied identifier must occur exactly
+        once, be a bounded non-empty identifier without surrounding whitespace or controls, and name
+        a tenant declared for identity that this process may both read and mutate. An unknown,
+        undeclared, or disabled target fails closed; it never falls back to the default tenant.
+      parameters:
+        - name: tenant_id
+          in: query
+          required: false
+          schema: {type: string, minLength: 1, maxLength: 128}
+          description: Optional bookmarkable organization selected for an ordinary sign-in.
+      responses:
+        '200':
+          description: Public sign-in context
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+                  tenant_id: {type: string}
+                  requirement: {type: string, enum: [optional, required]}
+                  connections: {type: array, items: {type: object, required: [id, name], properties: {id: {type: string}, name: {type: string}}}}
+                  bootstrap_eligible: {type: boolean}
+        '400': {description: Ambiguous or malformed tenant selector}
+        '503': {description: The explicitly selected tenant is undeclared or unavailable in this process}
+
+  /api/auth/enterprise/begin:
+    post:
+      tags: [enterprise-identity]
+      operationId: beginEnterpriseAuthorization
+      summary: Begin a public OIDC authorization flow
+      security: []
+      description: >-
+        `tenant_id` is accepted only when `purpose` is `login`; omitted preserves default-tenant
+        behavior. Test, invitation, link, and step-up targets are server-derived from their existing
+        proof, code, or session and reject a selector. A selected Login target must pass the same
+        declared/read/mutation checks as public context and the connection is loaded in that tenant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [connection_id, purpose]
+              properties:
+                tenant_id: {type: string, minLength: 1, maxLength: 128, description: Login only; never send this field for another purpose.}
+                connection_id: {type: string}
+                purpose: {type: string, enum: [login, link, test, step_up, invitation]}
+                bootstrap_eligibility: {type: string, writeOnly: true}
+                invitation_code: {type: string, writeOnly: true}
+      responses:
+        '200': {description: Provider authorization destination and a short-lived nonce cookie, content: {application/json: {schema: {$ref: '#/components/schemas/IdentityAuthorizationDestination'}}}}
+        '400': {description: Malformed request or selector used outside Login}
+        '403': {description: Tenant, connection, or proof is not eligible}
+        '503': {description: Selected tenant authority unavailable}
+
+  /api/auth/enterprise/callback:
+    get:
+      tags: [enterprise-identity]
+      operationId: completeEnterpriseAuthorization
+      summary: Complete a public OIDC authorization flow
+      security: []
+      description: >-
+        The callback consumes one sealed state and nonce cookie. Its tenant comes only from that
+        server-sealed cookie and transaction; a callback query `tenant_id` is ignored. Ordinary
+        Login and invitation returns carry the same non-secret `tenant_id` hint to the configured
+        frontend on success or failure. Provisioning tests return only to the fixed setup path with
+        `provisioning_tenant`; no capability, client secret, or invitation code appears in the URL.
+      responses:
+        '303': {description: Redirect to the configured frontend or fixed provisioning setup path}
+        '401': {description: Missing, expired, or invalid callback nonce}
+
+  /api/v1/identity/provisioning/begin:
+    post:
+      tags: [enterprise-identity]
+      operationId: beginInitialIdentityProvisioning
+      summary: Reserve scoped initial identity provisioning for a fresh configured tenant
+      description: >-
+        Platform bootstrap administrator only. Reserves one target tenant, one connection, and one
+        first administrator invitation without changing the operator's tenant or memberships. The
+        returned capability is scoped to that reservation, expires quickly, and must remain in memory.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [tenant_id, recipient]
+              properties:
+                tenant_id: {type: string, maxLength: 128}
+                recipient:
+                  description: An email is required for the first reservation. An empty string resumes an existing reservation for this operator and target.
+                  oneOf:
+                    - {type: string, const: ''}
+                    - {type: string, minLength: 1, format: email}
+      responses:
+        '200': {description: Reservation and scoped capability; a closed reservation omits capability, content: {application/json: {schema: {$ref: '#/components/schemas/InitialIdentityProvisioningBeginResponse'}}}}
+        '403': {description: Caller is not the configured platform bootstrap administrator or target is not allowed}
+        '409': {description: Target has conflicting identity state or a different reservation}
+
+  /api/v1/identity/provisioning/status:
+    post:
+      tags: [enterprise-identity]
+      operationId: getInitialIdentityProvisioning
+      summary: Read one scoped initial provisioning reservation
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [capability], properties: {capability: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Safe reservation state; no capability, sealed secret, or invitation code is returned, content: {application/json: {schema: {$ref: '#/components/schemas/InitialIdentityProvisioningResponse'}}}}, '403': {description: Capability expired or is not bound to this operator}}
+
+  /api/v1/identity/provisioning/draft:
+    post:
+      tags: [enterprise-identity]
+      operationId: saveInitialIdentityProvisioningDraft
+      summary: Save the pinned initial connection draft
+      description: >-
+        The connection ID and target tenant are pinned by the capability. Version zero saves the
+        initial draft. Before activation, a current-version client-secret correction creates a new
+        revision and requires a fresh Test; issuer, client ID, callback, and organization remain fixed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [capability, display_name, issuer, client_id, client_secret, version], properties: {capability: {type: string, writeOnly: true}, display_name: {type: string}, issuer: {type: string, format: uri}, client_id: {type: string}, client_secret: {type: string, writeOnly: true}, auth0_organization_id: {type: string, maxLength: 256}, version: {type: integer, minimum: 0}}}
+      responses: {'200': {description: Safe reservation state after draft save, content: {application/json: {schema: {$ref: '#/components/schemas/InitialIdentityProvisioningResponse'}}}}, '403': {description: Expired or mismatched capability}, '409': {description: Provisioning state no longer permits a draft}}
+
+  /api/v1/identity/provisioning/test:
+    post:
+      tags: [enterprise-identity]
+      operationId: testInitialIdentityProvisioningConnection
+      summary: Begin a real provider test for the pinned initial connection
+      description: The callback records a successful test only for this reservation and returns to the fixed setup path.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [capability], properties: {capability: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Provider authorization destination, content: {application/json: {schema: {$ref: '#/components/schemas/IdentityAuthorizationDestination'}}}}, '403': {description: Capability, target authority, or draft is not eligible}}
+
+  /api/v1/identity/provisioning/activate:
+    post:
+      tags: [enterprise-identity]
+      operationId: activateInitialIdentityProvisioningConnection
+      summary: Activate the pinned connection after its real provider test
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [capability, revision, version], properties: {capability: {type: string, writeOnly: true}, revision: {type: integer, minimum: 1}, version: {type: integer, minimum: 1}}}}}}
+      responses: {'200': {description: Safe active reservation state, content: {application/json: {schema: {$ref: '#/components/schemas/InitialIdentityProvisioningResponse'}}}}, '403': {description: Expired or mismatched capability}, '409': {description: Untested revision, stale version, or terminal state}}
+
+  /api/v1/identity/provisioning/invitation:
+    post:
+      tags: [enterprise-identity]
+      operationId: issueInitialIdentityProvisioningInvitation
+      summary: Issue the pinned first administrator invitation
+      description: >-
+        Available only after activation. The recipient and admin role are pinned at reservation time;
+        the one-time code is returned only in this response and must not be persisted by a client.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [capability], properties: {capability: {type: string, writeOnly: true}}}}}}
+      responses: {'200': {description: Safe reservation state and the first invitation code, content: {application/json: {schema: {$ref: '#/components/schemas/InitialIdentityProvisioningInvitationResponse'}}}}, '403': {description: Expired or mismatched capability}, '409': {description: Connection is not active or invitation is no longer issuable}}
+
   /api/v1/identity/memberships:
     get:
       tags: [enterprise-identity]
@@ -7637,7 +7799,7 @@ paths:
       operationId: listIdentityConnections
       summary: List organization identity connection drafts and active connections
       responses:
-        '200': {description: Connection list}
+        '200': {description: Secret-free connection list, content: {application/json: {schema: {$ref: '#/components/schemas/IdentityConnectionList'}}}}
         '403': {description: Administrator or permitted break-glass recovery action required}
   /api/v1/identity/connections/draft:
     post:
@@ -7653,14 +7815,15 @@ paths:
               required: [display_name, issuer, client_id]
               additionalProperties: false
               properties:
-                id: {type: string, description: Existing connection ID for a routine draft revision}
-                version: {type: integer, minimum: 0, description: Current connection version; zero for a new connection}
+                id: {type: string, description: Existing connection ID. An imported configuration-pending connection requires this with its current version.}
+                version: {type: integer, minimum: 0, description: Current connection version; zero for a new connection. Required with id for a configuration-pending connection.}
                 display_name: {type: string}
                 issuer: {type: string, format: uri}
                 client_id: {type: string}
                 client_secret: {type: string, writeOnly: true}
+                auth0_organization_id: {type: string, maxLength: 256, description: Optional exact Auth0 organization identifier for the signed org_id claim}
                 bootstrap_eligibility: {type: string, writeOnly: true}
-      responses: {'200': {description: Draft saved}, '403': {description: Administrator or recovery repair permission required}}
+      responses: {'200': {description: Secret-free saved connection projection, content: {application/json: {schema: {$ref: '#/components/schemas/IdentityConnection'}}}}, '403': {description: Administrator or recovery repair permission required}, '409': {description: Stale version, ineligible imported scaffold, or immutable trust input changed}}
   /api/v1/identity/connections/activate:
     post:
       tags: [enterprise-identity]
@@ -8212,6 +8375,113 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
 
   schemas:
+    IdentityConnection:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, issuer, enabled, revision, draft_revision, version, test_passed]
+      oneOf:
+        - required: [configuration_pending]
+          properties:
+            configuration_pending: {const: true}
+        - allOf:
+            - not: {required: [configuration_pending]}
+            - not: {required: [client_id]}
+      properties:
+        id: {type: string}
+        display_name: {type: string}
+        issuer: {type: string, format: uri}
+        enabled: {type: boolean}
+        revision: {type: integer}
+        draft_revision: {type: integer}
+        version: {type: integer}
+        test_passed: {type: boolean}
+        auth0_organization_id: {type: string, maxLength: 256}
+        configuration_pending:
+          type: boolean
+          description: Present only for an imported disabled legacy OIDC scaffold that may receive its first configuration.
+        client_id:
+          type: string
+          description: Present only when configuration_pending is true; empty before the first configuration and never accompanied by a client secret.
+    IdentityConnectionList:
+      type: object
+      additionalProperties: false
+      required: [connections]
+      properties:
+        connections: {type: array, items: {$ref: '#/components/schemas/IdentityConnection'}}
+    IdentityAuthorizationDestination:
+      type: object
+      additionalProperties: false
+      required: [authorization_url]
+      properties:
+        authorization_url: {type: string, format: uri}
+    InitialIdentityConnection:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, issuer, client_id, enabled, revision, draft_revision, version, test_passed]
+      properties:
+        id: {type: string}
+        display_name: {type: string}
+        issuer: {type: string, format: uri}
+        client_id: {type: string}
+        enabled: {type: boolean}
+        revision: {type: integer}
+        draft_revision: {type: integer}
+        version: {type: integer}
+        test_passed: {type: boolean}
+        auth0_organization_id: {type: string}
+    InitialIdentityInvitation:
+      type: object
+      additionalProperties: false
+      required: [id, recipient, role, state, version, expires_at]
+      properties:
+        id: {type: string}
+        recipient: {type: string, format: email}
+        role: {type: string}
+        state: {type: string}
+        version: {type: integer}
+        expires_at: {type: string, format: date-time}
+    InitialIdentityProvisioning:
+      type: object
+      additionalProperties: false
+      required: [id, tenant_id, recipient, state, version]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        recipient: {type: string, format: email}
+        state: {type: string, enum: [open, draft, tested, active, invited, closed]}
+        version: {type: integer}
+        connection:
+          oneOf:
+            - {$ref: '#/components/schemas/InitialIdentityConnection'}
+            - {type: 'null'}
+        invitation:
+          oneOf:
+            - {$ref: '#/components/schemas/InitialIdentityInvitation'}
+            - {type: 'null'}
+    InitialIdentityProvisioningResponse:
+      type: object
+      additionalProperties: false
+      required: [provisioning]
+      properties:
+        provisioning: {$ref: '#/components/schemas/InitialIdentityProvisioning'}
+    InitialIdentityProvisioningBeginResponse:
+      type: object
+      additionalProperties: false
+      required: [provisioning]
+      properties:
+        provisioning: {$ref: '#/components/schemas/InitialIdentityProvisioning'}
+        capability:
+          type: string
+          description: Short-lived reservation capability. Keep only in client memory; absent for a closed reservation.
+    InitialIdentityProvisioningInvitationResponse:
+      type: object
+      additionalProperties: false
+      required: [provisioning, code]
+      properties:
+        provisioning: {$ref: '#/components/schemas/InitialIdentityProvisioning'}
+        code:
+          type: string
+          description: One-time first-administrator invitation code. Do not persist it in a client.
     TicketMappingInput: {"type":"object","additionalProperties":false,"required":["integration_id","scope","scope_id","project_key","issue_type"],"properties":{"integration_id":{"type":"string"},"scope":{"type":"string","enum":["project","engagement"]},"scope_id":{"type":"string"},"project_key":{"type":"string"},"issue_type":{"type":"string"},"component":{"type":"string"},"security_level":{"type":"string"},"summary_template":{"type":"string"},"description_template":{"type":"string"},"transition_id":{"type":"string"},"data_class":{"type":"string","enum":["signal","summary","detail"]},"locale":{"type":"string","enum":["en","vi"]},"waiver_reason":{"type":"string"},"labels":{"type":"array","maxItems":32,"items":{"type":"string"}},"priority_map":{"type":"object","additionalProperties":{"type":"string"}},"field_values":{"type":"object","additionalProperties":{"type":"string"}},"version":{"type":"integer","minimum":1},"auto_push_enabled":{"type":"boolean","default":false,"description":"Administrator opt-in to automatic confirmed-finding ticket creation."},"auto_push_min_severity":{"type":"string","enum":["critical","high","medium","low","info"],"default":"high"},"grouping_mode":{"type":"string","enum":["finding","vulnerability_project"],"default":"finding","description":"Vulnerability grouping requires a project scope and effective detail class."},"status_transitions":{"type":"object","additionalProperties":false,"properties":{"remediated":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"accepted":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"false_positive":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"reopen":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"}},"description":"Outbound transition IDs by Synapse state; empty disables status sync."}}}
     TicketMapping: {"type":"object","properties":{"integration_id":{"type":"string"},"scope":{"type":"string","enum":["project","engagement"]},"scope_id":{"type":"string"},"project_key":{"type":"string"},"issue_type":{"type":"string"},"component":{"type":"string"},"security_level":{"type":"string"},"summary_template":{"type":"string"},"description_template":{"type":"string"},"transition_id":{"type":"string"},"data_class":{"type":"string","enum":["signal","summary","detail"]},"locale":{"type":"string","enum":["en","vi"]},"waiver_reason":{"type":"string"},"labels":{"type":"array","maxItems":32,"items":{"type":"string"}},"priority_map":{"type":"object","additionalProperties":{"type":"string"}},"field_values":{"type":"object","additionalProperties":{"type":"string"}},"version":{"type":"integer","minimum":1},"id":{"type":"string"},"auto_push_enabled":{"type":"boolean","default":false,"description":"Administrator opt-in to automatic confirmed-finding ticket creation."},"auto_push_min_severity":{"type":"string","enum":["critical","high","medium","low","info"],"default":"high"},"grouping_mode":{"type":"string","enum":["finding","vulnerability_project"],"default":"finding","description":"Vulnerability grouping requires a project scope and effective detail class."},"status_transitions":{"type":"object","additionalProperties":false,"properties":{"remediated":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"accepted":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"false_positive":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"},"reopen":{"type":"string","pattern":"^[1-9][0-9]{0,18}$"}},"description":"Outbound transition IDs by Synapse state; empty disables status sync."}}}
     ManualTicketLink: {"type":"object","additionalProperties":false,"required":["url"],"properties":{"url":{"type":"string","format":"uri","maxLength":2048}}}
