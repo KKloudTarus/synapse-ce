@@ -335,7 +335,7 @@ func (s *IdentityFoundationStore) AdmitIdentity(ctx context.Context, c ports.Ide
 					return e
 				}
 			} else {
-				contactID = legacyIdentityID("contact_mailbox_", c.TenantID, member.ID)
+				contactID = legacyIdentityID("contact_mailbox_", c.TenantID, c.InvitationID)
 				if e = tx.QueryRow(ctx, `INSERT INTO user_contacts(tenant_id,id,user_id,kind,source,value,verified_at,created_at,updated_at) VALUES($1,$2,$3,'email','manual',$4,$5,$5,$5) ON CONFLICT(tenant_id,user_id,kind,value) WHERE source='manual' DO UPDATE SET verified_at=EXCLUDED.verified_at,updated_at=EXCLUDED.updated_at RETURNING id`, c.TenantID.String(), contactID.String(), member.LegacyUserID.String(), recipient, c.Now).Scan(&contactID); e != nil {
 					return e
 				}
