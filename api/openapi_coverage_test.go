@@ -39,7 +39,23 @@ var routeRegistrationFiles = []string{
 	"../internal/adapter/httpapi/ownership_handler.go",
 	"../internal/adapter/httpapi/enterprise_handler.go",
 	"../internal/adapter/httpapi/enterprise_admin_handler.go",
+	"../internal/adapter/httpapi/enterprise_provisioning_handler.go",
 	"../internal/adapter/httpapi/jira_webhook_admin.go",
+}
+
+// enterpriseBrowserRouteCoverage names every browser route under the enterprise namespace. Only
+// the true entries participate in the public OpenAPI comparison. The false entries are existing
+// browser flows outside the documented public entry surface, but remain listed so a new route in
+// this namespace cannot silently escape the coverage guard.
+var enterpriseBrowserRouteCoverage = map[string]bool{
+	"GET /api/auth/enterprise/context":               true,
+	"POST /api/auth/enterprise/begin":                true,
+	"GET /api/auth/enterprise/callback":              true,
+	"POST /api/auth/enterprise/recovery":             false,
+	"POST /api/auth/enterprise/switch":               false,
+	"POST /api/auth/enterprise/invitation":           false,
+	"GET /api/auth/enterprise/invitation/pending":    false,
+	"POST /api/auth/enterprise/invitation/challenge": false,
 }
 
 // nonAPIRouteRegistrationFiles register routes on their own mux outside /api/v1, so this
@@ -194,7 +210,7 @@ func registeredOperations(t *testing.T) []string {
 			return
 		}
 		method, path, ok := strings.Cut(pattern, " ")
-		if !ok || !strings.HasPrefix(path, "/api/v1") {
+		if !ok {
 			return
 		}
 		if method == "" || method != strings.ToUpper(method) {
@@ -202,6 +218,18 @@ func registeredOperations(t *testing.T) []string {
 			return
 		}
 		op := method + " " + pathParam.ReplaceAllString(path, "{p}")
+		if strings.HasPrefix(path, "/api/auth/enterprise/") {
+			covered, known := enterpriseBrowserRouteCoverage[op]
+			if !known {
+				t.Errorf("unknown enterprise browser route %q at %s; add it to the explicit coverage allowlist", op, fset.Position(literal.Pos()))
+				return
+			}
+			if !covered {
+				return
+			}
+		} else if !strings.HasPrefix(path, "/api/v1") {
+			return
+		}
 		if !seen[op] {
 			seen[op] = true
 			out = append(out, op)

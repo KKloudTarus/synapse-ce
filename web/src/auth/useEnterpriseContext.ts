@@ -96,6 +96,7 @@ export function useEnterpriseContext() {
   const [beginning, setBeginning] = useState(false)
   const [recovering, setRecovering] = useState(false)
   const contextRef = useRef<EnterpriseContext | null>(null)
+  const explicitTenant = useRef(false)
   const generation = useRef(0)
   const contextAbort = useRef<AbortController | null>(null)
   const actionAbort = useRef<AbortController | null>(null)
@@ -106,11 +107,16 @@ export function useEnterpriseContext() {
     const controller = new AbortController()
     contextAbort.current = controller
     contextRef.current = null
+    explicitTenant.current = false
     setState({ status: 'loading', context: null, message: null })
     try {
-      const response = await fetch('/api/auth/enterprise/context', { credentials: 'same-origin', signal: controller.signal })
+      const requested = new URLSearchParams(window.location.search).getAll('tenant_id')
+      const query = new URLSearchParams()
+      requested.forEach((tenant) => query.append('tenant_id', tenant))
+      const selected = requested.length > 0
+      const response = await fetch(`/api/auth/enterprise/context${selected ? `?${query}` : ''}`, { credentials: 'same-origin', signal: controller.signal })
       if (requestGeneration !== generation.current) return
-      if (response.status === 404) {
+      if (response.status === 404 && !selected) {
         setState({ status: 'legacy', context: null, message: null })
         return
       }
@@ -121,10 +127,17 @@ export function useEnterpriseContext() {
       const context = parseContext(await responseJSON(response))
       if (requestGeneration !== generation.current) return
       if (context === null) {
-        setState({ status: 'legacy', context: null, message: null })
+        setState(selected
+          ? { status: 'error', context: null, message: 'The selected organization is not available for sign-in.' }
+          : { status: 'legacy', context: null, message: null })
+        return
+      }
+      if (selected && (requested.length !== 1 || context.tenantId !== requested[0])) {
+        setState({ status: 'error', context: null, message: 'The selected organization could not be loaded. Open its organization sign-in link again.' })
         return
       }
       contextRef.current = context
+      explicitTenant.current = selected
       setState({ status: 'ready', context, message: null })
     } catch (error) {
       if (controller.signal.aborted || requestGeneration !== generation.current) return
@@ -143,7 +156,8 @@ export function useEnterpriseContext() {
   }, [load])
 
   const begin = useCallback(async (connectionID: string): Promise<string> => {
-    if (!contextRef.current?.connections.some((connection) => connection.id === connectionID)) {
+    const context = contextRef.current
+    if (!context?.connections.some((connection) => connection.id === connectionID)) {
       throw new Error('The selected sign-in connection is no longer available. Refresh and try again.')
     }
     actionAbort.current?.abort()
@@ -152,14 +166,14 @@ export function useEnterpriseContext() {
     const requestGeneration = ++generation.current
     setBeginning(true)
     try {
-      const result = await postJSON('/api/auth/enterprise/begin', { connection_id: connectionID, purpose: 'login' }, controller.signal)
+      const result = await postJSON('/api/auth/enterprise/begin', { connection_id: connectionID, purpose: 'login', ...(explicitTenant.current ? { tenant_id: context.tenantId } : {}) }, controller.signal)
       if (requestGeneration !== generation.current || controller.signal.aborted) throw new DOMException('stale request', 'AbortError')
       if (!result || typeof result !== 'object' || typeof (result as { authorization_url?: unknown }).authorization_url !== 'string') {
         throw new Error('invalid authorization URL')
       }
       const authorizationURL = (result as { authorization_url: string }).authorization_url
       const parsed = new URL(authorizationURL)
-      if ((parsed.protocol !== 'https:' && parsed.protocol !== 'http:') || authorizationURL === '') throw new Error('invalid authorization URL')
+      if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') throw new Error('invalid authorization URL')
       return authorizationURL
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') throw error

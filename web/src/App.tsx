@@ -1,6 +1,6 @@
 import { Menu01 } from '@untitledui/icons'
 import { lazy, Suspense, useState, type ReactNode } from 'react'
-import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoadingFallback } from './components/layout/LoadingFallback'
@@ -10,6 +10,7 @@ import { ToastProvider } from './components/synapse/Toast'
 import { VulnerabilityExposureNotifier } from './components/synapse/VulnerabilityExposureNotifier'
 import { Connect } from './pages/Connect'
 import { NotFound } from './pages/NotFound'
+import type { CurrentUser } from './lib/types'
 
 // --- Lazy-loaded page components ---
 const SetupPreview = import.meta.env.VITE_PLAYGROUND === '1' ? lazy(() => import('./playground/setup/SetupPreview').then(m => ({ default: m.SetupPreview }))) : null
@@ -98,8 +99,9 @@ export default function App() {
 }
 
 function Gate() {
-  const { phase } = useAuth()
+  const { phase, currentUser, error, errorRequestId, logout } = useAuth()
   if (phase !== 'ready') return <Connect />
+  if (currentUser?.credentialKind === 'break_glass') return <RecoveryConsole currentUser={currentUser} error={error} errorRequestId={errorRequestId} onSignOut={() => void logout()} />
   return (
     <Routes>
       {DemoEntry && <Route path="demo" element={<Suspense fallback={<LoadingFallback />}><DemoEntry /></Suspense>} />}
@@ -189,6 +191,31 @@ function Gate() {
   )
 }
 
+function RecoveryConsole({ currentUser, error, errorRequestId, onSignOut }: { currentUser: CurrentUser; error: string | null; errorRequestId: string | null; onSignOut: () => void }) {
+  return (
+    <main className="min-h-screen bg-secondary p-4 sm:p-6 xl:p-8">
+      <section aria-labelledby="recovery-console-heading" className="mx-auto max-w-6xl">
+        <div role="alert" className="mb-6 rounded-lg border border-warning-primary bg-warning-primary p-4 text-sm text-warning-primary">
+          <p className="font-semibold">Recovery access is active.</p>
+          <p className="mt-1">Only authentication recovery controls are available in this session.</p>
+        </div>
+        {error ? <div role="alert" className="mb-6 rounded-lg border border-error-primary bg-error-primary p-4 text-sm text-error-primary">
+          <p>{error}</p>
+          {errorRequestId ? <p className="mt-1">Request ID: {errorRequestId}</p> : null}
+        </div> : null}
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <div>
+            <h1 id="recovery-console-heading" className="text-2xl font-bold text-primary">Recovery console</h1>
+            <p className="mt-1 text-sm text-secondary">{currentUser.name || 'Recovery operator'}{currentUser.tenantId ? ` · ${currentUser.tenantId}` : ''}</p>
+          </div>
+          <button type="button" onClick={onSignOut} className="rounded border border-secondary px-3 py-2 text-sm font-semibold text-primary hover:bg-primary_hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">Sign out</button>
+        </div>
+        <Suspense fallback={<LoadingFallback />}><Authentication enabled /></Suspense>
+      </section>
+    </main>
+  )
+}
+
 function AssessmentLifecycleRoute({ children }: { children: ReactNode }) {
   const { currentUser } = useAuth()
   if (currentUser?.features?.assessmentLifecycleUIDefault !== true) return <Navigate to="/engagements" replace />
@@ -201,6 +228,7 @@ function EnterpriseAuthenticationRoute() {
 }
 
 function Shell() {
+  const { error } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
   return (
@@ -240,6 +268,10 @@ function Shell() {
           tabIndex={-1}
           className="flex-1 overflow-auto bg-secondary p-4 sm:p-6 xl:p-8 outline-none md:rounded-tl-[40px] md:border-t md:border-l md:border-secondary md:shadow-md"
         >
+          {error && <div role="alert" className="mb-6 space-y-2 rounded-lg border border-error-primary bg-error-primary p-4 text-sm text-error-primary">
+            <p>{error}</p>
+            <Link to="/profile" className="inline-block rounded font-semibold underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">Review sign-in</Link>
+          </div>}
           <ErrorBoundary key={location.pathname}>
             <Suspense fallback={<LoadingFallback />}>
               <Outlet />

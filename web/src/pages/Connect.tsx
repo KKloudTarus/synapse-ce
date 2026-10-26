@@ -13,6 +13,9 @@ export function Connect() {
   const [showToken, setShowToken] = useState(false)
   const [accepting, setAccepting] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
+  const operatorEntry = new URLSearchParams(window.location.search).get('operator') === '1'
+
+  if (phase === 'mailbox') return <AuthShell><Brand /><Panel><InvitationAcceptance /></Panel></AuthShell>
 
   if (phase === 'connecting') {
     return (
@@ -54,7 +57,7 @@ export function Connect() {
           </div>
           <p className="mt-3 text-center text-[11px] text-quaternary">Policy version {aup.version}</p>
         </Panel>
-      ) : enterprise.status === 'loading' ? <EnterpriseLoading /> : enterprise.status === 'legacy' ? (
+      ) : operatorEntry ? <OperatorSignIn connecting={connecting} connect={(value) => connect(value, 'bootstrap')} error={error} /> : enterprise.status === 'loading' ? <EnterpriseLoading /> : enterprise.status === 'legacy' ? (
         <LegacySignIn {...{ error, errorRequestId, canRetry, retrying, retry, connecting, connect, oidcAvailable, token, setToken, showToken, setShowToken }} />
       ) : enterprise.status === 'error' ? (
         <EnterpriseUnavailable message={enterprise.message} onRetry={enterprise.reload} />
@@ -66,6 +69,25 @@ export function Connect() {
       )}
     </AuthShell>
   )
+}
+
+function OperatorSignIn({ connecting, connect, error }: { connecting: boolean; connect: (token: string) => Promise<void>; error: string | null }) {
+  const [token, setToken] = useState('')
+  return <Panel>
+    <h2 className="text-xl font-bold tracking-tight text-primary">Deployment operator</h2>
+    <p className="mt-2 text-sm text-secondary">Use the deployment credential to set up an organization. Organization members should use their approved sign-in connection.</p>
+    {error ? <p role="alert" className="mt-4 text-sm text-error-primary">{error}</p> : null}
+    <form className="mt-5 space-y-4" onSubmit={(event) => {
+      event.preventDefault()
+      const submitted = token
+      setToken('')
+      void connect(submitted)
+    }}>
+      <Field label="Deployment operator token"><Input aria-label="Deployment operator token" type="password" required autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} /></Field>
+      <Button type="submit" loading={connecting} disabled={!token.trim()}>Sign in as deployment operator</Button>
+    </form>
+    <a className="mt-4 inline-block text-sm underline" href="/settings/authentication">Return to organization sign-in</a>
+  </Panel>
 }
 
 function EnterpriseLoading() {
@@ -114,7 +136,7 @@ function EnterpriseSignIn({ context, beginning, recovering, begin, recover, refr
   }
 
   return <Panel>
-    <div className="mb-5 text-center"><h2 className="text-xl font-bold tracking-tight text-primary">Welcome back</h2><p className="mt-1 text-sm text-tertiary">Use an approved organization connection to continue.</p><p className="mt-2 text-xs font-medium text-secondary">Organization sign-in is {context.requirement === 'required' ? 'required' : 'optional'}.</p></div>
+    <div className="mb-5 text-center"><h2 className="text-xl font-bold tracking-tight text-primary">Welcome back</h2><p className="mt-1 text-sm text-tertiary">Use an approved organization connection to continue.</p><p className="mt-2 text-sm text-secondary">Organization: <strong>{context.tenantId}</strong></p><p className="mt-2 text-xs font-medium text-secondary">Organization sign-in is {context.requirement === 'required' ? 'required' : 'optional'}.</p></div>
     {error && <AuthError className="mb-4" message={error} requestId={null} canRetry={false} retrying={false} onRetry={async () => {}} />}
     {context.connections.length === 0 ? <p role="status" className="rounded-lg border border-secondary bg-secondary/30 px-4 py-3 text-sm text-tertiary">No approved sign-in connections are available. Contact your administrator or use emergency activation.</p> : context.connections.length === 1 ? <Button className="w-full" loading={beginning} disabled={recovering} onClick={() => { void start() }}><LogIn04 className="size-5" /> Continue with {context.connections[0].name}</Button> : <div className="space-y-4"><Field label="Approved sign-in connection" htmlFor="enterprise-connection"><select id="enterprise-connection" value={connectionID} onChange={(event) => setConnectionID(event.target.value)} disabled={beginning || recovering} className="input-inset w-full rounded-lg border border-secondary bg-secondary px-3.5 py-2.5 text-sm text-primary outline-none transition-colors focus:border-brand focus:ring-2 focus:ring-brand/40"><option value="">Select a connection</option>{context.connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></Field><Button className="w-full" loading={beginning} disabled={!connectionID || recovering} onClick={() => { void start() }}><LogIn04 className="size-5" /> Continue with selected connection</Button></div>}
     <details className="group mt-5 rounded-xl border border-secondary bg-secondary/30 transition-colors open:bg-secondary/50 hover:border-borderstrong"><summary className="flex cursor-pointer list-none items-center gap-3 p-3.5 [&::-webkit-details-marker]:hidden"><span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-primary text-brand-secondary ring-1 ring-inset ring-brand/20"><Key01 className="size-4" /></span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-primary">Emergency activation</span><span className="block text-xs text-tertiary">Use an administrator-provided recovery code</span></span><ChevronDown className="size-4 shrink-0 text-tertiary transition-transform duration-200 group-open:rotate-180" /></summary><form onSubmit={(event) => { void activateRecovery(event) }} className="space-y-4 border-t border-secondary p-3.5"><Field label="Recovery code"><Input type="password" autoComplete="one-time-code" required value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="enter recovery code" className="font-mono" /></Field><Button type="submit" variant="secondary" loading={recovering} disabled={!secret || beginning} className="w-full"><Key01 className="size-4" /> Activate emergency session</Button></form></details>
