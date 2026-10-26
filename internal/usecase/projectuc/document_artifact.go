@@ -45,6 +45,7 @@ func (s *Service) ReadProjectQualitySummary(ctx context.Context, tenantID, proje
 	return ports.ProjectQualitySummary{
 		TenantID:          tenantID,
 		ProjectID:         projectID,
+		ProjectKey:        project.Key,
 		Title:             "Project quality summary: " + overview.Project.Name,
 		Paragraphs:        qualitySummaryParagraphs(overview, analysis, head),
 		EvidenceHead:      "",

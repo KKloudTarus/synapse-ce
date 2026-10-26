@@ -1,0 +1,68 @@
+{
+  "cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+  "manifest_id": "ad09f89708eb33507071bc176bdeee0d",
+  "job_id": "92ffb5bb4336a9adf0404f0303a20cfc",
+  "coverage_guard_refused": true,
+  "coverage_override": "explicit synthetic-only; no exhaustive coverage claim",
+  "report_get_before_worker_terminal": false,
+  "job": {
+    "status": "done",
+    "attempts": 1
+  },
+  "source": {
+    "source_id": "assessment_closure_report:4d96471eeca1f9044fd5ca2ced370d86c4d95de06e61450a7967b7ee811919d8",
+    "processed": false,
+    "data": {
+      "title": "Report generated",
+      "summary": "A report artifact was sealed from stored data.",
+      "cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+      "report_id": "4d96471eeca1f9044fd5ca2ced370d86c4d95de06e61450a7967b7ee811919d8",
+      "report_kind": "assessment_closure_report",
+      "content_hash": "4d96471eeca1f9044fd5ca2ced370d86c4d95de06e61450a7967b7ee811919d8",
+      "generated_at": "2026-10-24T13:46:29Z",
+      "report_title": "Assessment closure report"
+    }
+  },
+  "deliveries": [
+    {
+      "event_id": "610504761acc63ccfe8a134bb9d39cfe",
+      "channel_id": "918a5cf312a77f004d032859d406eb74",
+      "type": "webhook",
+      "state": "delivered",
+      "attempts": 1,
+      "delivery_id": "77f8da6cea14a6c819066e5219fd06d5"
+    },
+    {
+      "event_id": "610504761acc63ccfe8a134bb9d39cfe",
+      "channel_id": "955780c3d96513f93a9e49766b20ad63",
+      "type": "webhook",
+      "state": "delivered",
+      "attempts": 1,
+      "delivery_id": "b7ad3d1035d6f968f4ce66126c81ab99"
+    },
+    {
+      "event_id": "610504761acc63ccfe8a134bb9d39cfe",
+      "channel_id": "c0db97a340c607a37719aa2eca68a62b",
+      "type": "webhook",
+      "state": "delivered",
+      "attempts": 1,
+      "delivery_id": "52597760e219be0813cf15a22b182d4e"
+    },
+    {
+      "event_id": "610504761acc63ccfe8a134bb9d39cfe",
+      "channel_id": "d7c4632a7cf9a9cc4f175e749b1d2319",
+      "type": "webhook",
+      "state": "delivered",
+      "attempts": 1,
+      "delivery_id": "128da036aad6863cb699bc51e523dc03"
+    }
+  ],
+  "canonical_json_sha256": "96b683cc39ea3006f57d31ba8642e8a8458b186ee34ed7ee979e88978e1b08b9",
+  "idempotent_commit_replay": true,
+  "cached_report_stable": true,
+  "counts_after_replay": {
+    "sources": 1,
+    "events": 1,
+    "deliveries": 4
+  }
+}

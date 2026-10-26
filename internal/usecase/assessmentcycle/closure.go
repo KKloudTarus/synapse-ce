@@ -50,17 +50,13 @@ type closureSupport struct {
 	tokenKey    []byte
 }
 
-func (service *APIService) SetClosureDependencies(store ports.AssessmentClosureRepository, snapshots ports.AssessmentSnapshotRepository, comparisons ports.AssessmentComparisonRepository, decisions ports.AssessmentClosureDecisionReader, queue ports.JobQueue, tokenKey []byte) error {
-	if store == nil || snapshots == nil || comparisons == nil || decisions == nil || queue == nil || service.audit == nil || len(tokenKey) < 32 {
-		return fmt.Errorf("%w: closure store, immutable artifacts, queue, audit, and a 32-byte token key are required", shared.ErrValidation)
+func (service *APIService) SetClosureDependencies(store ports.AssessmentClosureRepository, snapshots ports.AssessmentSnapshotRepository, comparisons ports.AssessmentComparisonRepository, decisions ports.AssessmentClosureDecisionReader, reporter *ClosureReportService, queue ports.JobQueue, tokenKey []byte) error {
+	if store == nil || snapshots == nil || comparisons == nil || decisions == nil || reporter == nil || queue == nil || service.audit == nil || len(tokenKey) < 32 {
+		return fmt.Errorf("%w: closure store, immutable artifacts, reporter, queue, audit, and a 32-byte token key are required", shared.ErrValidation)
 	}
-	reports, ok := store.(ports.AssessmentClosureReportStore)
+	_, ok := store.(ports.AssessmentClosureReportStore)
 	if !ok {
 		return fmt.Errorf("%w: closure store does not support immutable report artifacts", shared.ErrValidation)
-	}
-	reporter, err := NewClosureReportService(store, reports, snapshots, comparisons, decisions, service.audit)
-	if err != nil {
-		return err
 	}
 	service.closure = &closureSupport{store: store, snapshots: snapshots, comparisons: comparisons, decisions: decisions, queue: queue, reporter: reporter, tokenKey: append([]byte(nil), tokenKey...)}
 	return nil

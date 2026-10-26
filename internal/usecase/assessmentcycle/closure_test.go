@@ -147,6 +147,7 @@ type closureHarness struct {
 	cycles      *memory.AssessmentCycleRepository
 	snapshots   *memory.AssessmentSnapshotRepository
 	comparisons *memory.AssessmentComparisonRepository
+	reporter    *cycleuc.ClosureReportService
 	queue       *memory.JobQueue
 	clock       fixedClock
 	tenantID    shared.ID
@@ -228,10 +229,14 @@ func newClosureHarness(t *testing.T) closureHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := api.SetClosureDependencies(cycles, snapshots, comparisons, closureDecisionReader{}, queue, []byte("0123456789abcdef0123456789abcdef")); err != nil {
+	reporter, err := cycleuc.NewClosureReportService(cycles, cycles, snapshots, comparisons, closureDecisionReader{}, audit)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return closureHarness{api: api, cycles: cycles, snapshots: snapshots, comparisons: comparisons, queue: queue, clock: clock, tenantID: tenantID, cycleID: cycle.ID}
+	if err := api.SetClosureDependencies(cycles, snapshots, comparisons, closureDecisionReader{}, reporter, queue, []byte("0123456789abcdef0123456789abcdef")); err != nil {
+		t.Fatal(err)
+	}
+	return closureHarness{api: api, cycles: cycles, snapshots: snapshots, comparisons: comparisons, reporter: reporter, queue: queue, clock: clock, tenantID: tenantID, cycleID: cycle.ID}
 }
 
 func completedClosureEngagement(t *testing.T, tenantID, id shared.ID, now time.Time) *engdom.Engagement {
