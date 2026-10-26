@@ -310,3 +310,39 @@ base #1612 `043e9d74`, and are not claimed as standalone #1609 source or durably
 combined implementation QA passed; final PR review remains deferred until the complete issue
 acceptance. Pairwise linking, public custom-base-path/realm proof, client-secret rotation and full
 canary/recovery remain open. No billing or Auth0 signing-key rotation was performed.
+
+## Required canary disable and recovery
+
+The retained PostgreSQL runtime exercised this canary on 25 October 2026 at
+18:20–18:32 UTC. Secondary organization SSO stayed Required at policy version 5
+throughout. Disabling its existing Keycloak connection changed version/epoch from
+4/2 to 5/3. Signed-out Connect then offered only the independent approved Auth0
+connection; the disabled Keycloak connection and the other disabled draft were absent.
+
+Ordinary Keycloak login to the default organization still reached readonly access,
+with validated provider authentication time 18:23:34 UTC. The existing secondary
+Auth0 administrator then signed in at 18:26:15 UTC and opened the protected
+administration controls. No recovery credential or weaker SSO policy was needed.
+A real provider Test passed before the same Keycloak connection was reactivated
+at version/epoch 6/3. Ordinary Keycloak authorization subsequently returned the
+existing person to secondary readonly Dashboard, reusing the recent provider session.
+Five persons, eight memberships, ten authenticators, every membership role, other
+connections and all organization policies remained unchanged at every observation.
+
+A browser network-change error during the recovery Test was followed by a successful
+refresh and real callback. The separate temporary custom-path gateway guard restored
+the exact original gateway configuration during that interval. The Keycloak service,
+root issuer, client credentials and retained links were preserved. The custom-path
+realm remains disabled pending its separate additive-link authorization.
+
+This is a real retained-browser canary against the shared runtime identified above.
+It does not establish standalone PR source equivalence. Database rows reported as
+unrevoked and unexpired alone are not proof that their session credentials remain
+valid after an epoch change; no old browser cookie was exported or injected here.
+The separate native Keycloak/PostgreSQL conformance run verifies actual rejection
+of a previously valid credential after disabling its connection.
+See [the nonsecret recovery observations and artifact hashes](keycloak-required-recovery.json).
+
+![Only the approved fallback remains while Keycloak is disabled](keycloak-required-disabled-connect.png)
+
+![Ordinary Keycloak sign-in works after restoring the tested connection](keycloak-required-recovered-ordinary-login.png)
