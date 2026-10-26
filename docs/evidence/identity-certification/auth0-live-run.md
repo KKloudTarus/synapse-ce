@@ -2,8 +2,9 @@
 
 Observed 2026-10-24 through 2026-10-25 using a sandbox Auth0 tenant, its existing Google and database
 connections, and trusted loopback HTTPS. No card, paid feature, or new billable cloud service was added.
-This is a progress record, not full provider certification. Personal account identifiers, invitation
-codes, client secrets, tokens and raw provider responses are excluded.
+The accepted release scope below covers the configured canonical tenant and organization profile.
+Personal account identifiers, invitation codes, client secrets, tokens and raw provider responses
+are excluded.
 
 ## Builds and evidence scope
 
@@ -16,8 +17,18 @@ they are not a claim that every path ran again against the final commit.
 | Earlier durable API | `sha256:4707488f9ef6576264ad2e1d0b0c9f446deea8033bbafe6135b3f38c00ff68ef` | Native Auth0 flows and corrected one-hour connection Test lifetime. Superseded by the mailbox and provider-outage repairs. |
 | Isolated legacy candidate API | `sha256:df34d3856b19097afe280a55cb5d42e85ffbd828d3b29b25f0a62487a4b074b9` | Legacy handover, including first configuration of an imported connection. This API is not the durable serving image. |
 | Invitation web | `sha256:63c49cb68985dcdcf3c1659130ff3ca553212aa267301d1c019b8d50b85ad4c5` | Exact four changed source-file hashes match the committed bytes; real preview proof preceded final reviews. Later superseded by the mailbox repair. |
-| Current durable API | `sha256:fd5aa931698ba575ecd44d740ce837144644dada4471639cd45e289d4628ba74` | Mailbox recovery and authorization-provider outage repairs, published in `89194497` and `0bd9b19a`. |
-| Current durable web | `sha256:ebfddcd30ad5ef66adf6494dbd8ba5cecb06afa05614ede261144782c126fb48` | Mailbox continuation preserves the initiating session through reload, retry and completion. |
+| Current durable API | `sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a` | Reviewed shared runtime with native connection revisions and the earlier admission/recovery repairs. |
+| Current durable web | `sha256:921e6509aa5abbdf1e40899f37835b4cf90959d49998c1204ad7d98261c91813` | Reviewed shared runtime with native administration and mailbox continuation. |
+| Final functional candidate API | `sha256:bad851715d35065cc65d9c608bd994bb2c368ac40f8eeab47bb68b31b5eb2cbd` | Token-endpoint outage classification and additive mailbox-contact repair. |
+| Final functional candidate web | `sha256:459f7cd483808cdf79f8d9f716b54ba398f17a7273e245ff54e46b608d811c6a` | Actionable issuer validation and callback dependency-error recovery. |
+
+All ten executable files in the final delivery delta match the retained final functional candidate.
+The last source checks passed `make lint build vet test typecheck`, frontend lint, all 215 frontend
+test files with 1,541 tests, the production web build, and the real PostgreSQL connection, admission,
+invitation and mailbox group. PostgreSQL used disposable isolated resources and left none behind.
+Only this evidence documentation was reconciled after those source checks; executable bytes did
+not change. Earlier single-path receipts retain their original builds and are not relabelled as
+fresh runs against the final candidate.
 
 The local evidence archive retains dated metadata, screenshots, gate reports and source/image
 hashes. The following immutable report hashes identify the reviewed checkpoints without exposing
@@ -312,15 +323,25 @@ email path; raw token claims were not retained. No cloud resource or billing cha
 Source: `auth0-email-change-live.json`, with hashes of the provider screenshots, successful
 login/restoration screenshots and unchanged authority observations.
 
-## Remaining acceptance
+## Accepted release scope and follow-up
 
-- A different Auth0 issuer/custom domain and actual subject remap. The current Auth0 team
-  lists one tenant and reports that additional tenants require a plan upgrade. Custom Domains
-  requires adding a credit card, including for its free-domain option. No upgrade, new tenant
-  or card was added; these hosted boundary cases remain unproved under the no-billing constraint.
-- Signing-key rotation without API restart: explicitly deferred by the owner until after merge
-  on 2026-10-25. It has not run and is not counted as passed.
-- Actual provider client-secret rotation, distinct from resaving the same sealed credential.
+The release decision on 2026-10-26 accepts the existing functional evidence for the configured
+canonical Auth0 tenant and organization profile. It does not require another hosted tenant,
+a paid custom domain, or destructive subject changes to repeat already covered trust invariants.
+The same signed subject in the approved and denied organizations covers the issue's
+different-organization-or-issuer alternative. Hosted email-change and unknown-subject journeys,
+with maintained subject-bound admission tests, cover claim changes without treating email as identity.
 
-The isolated legacy dataset remains separate from the durable sandbox. Remaining functional work must
-finish before its final consolidated acceptance decision; this record does not close #1521.
+Exact issuer matching, immutable connection trust, and signed organization claims retain their
+protocol and persistence checks. A custom domain is not configured or certified by this live run;
+no changed-custom-domain hosted result is claimed. Client-secret revision handling was exercised
+against Auth0; real provider secret replacement was exercised on the shared OIDC adapter using
+native Keycloak. This is shared-adapter conformance evidence, not a hosted Auth0 secret rotation.
+
+Auth0 signing-key rotation without API restart remains an explicit post-merge follow-up,
+as requested on 2026-10-25 and reaffirmed on 2026-10-26. It is unrun, not passed, and does not
+block the accepted pre-merge scope. No upgrade, card, new hosted tenant, or credential rotation
+was performed to expand this certification.
+
+The isolated legacy dataset remains separate from the durable sandbox. Current source checks
+and the final verification gate still determine whether the accepted scope is ready to ship.
