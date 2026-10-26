@@ -101,12 +101,12 @@ func TestNotionConnectionTest(t *testing.T) {
 	}{
 		{name: "private container", fake: &notionFake{bot: bot, page: notionPageJSON(nil)}, wantOK: true},
 		{name: "dashed id", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"id": "01234567-89ab-cdef-0123-456789abcdef"})}, wantOK: true},
-		{name: "published to web", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"public_url": "https://example.notion.site/report"})}, wantCode: "container_published_to_web", wantRestricted: true},
-		{name: "unreadable sharing state", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"public_url": 42})}, wantCode: "container_published_to_web", wantRestricted: true},
-		{name: "container in trash", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"in_trash": true})}, wantCode: "container_in_trash"},
-		{name: "legacy archived flag", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"archived": true})}, wantCode: "container_in_trash"},
-		{name: "another page", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"id": "ffffffffffffffffffffffffffffffff"})}, wantCode: "invalid_container"},
-		{name: "database instead of page", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"object": "database"})}, wantCode: "invalid_container"},
+		{name: "published to web", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"public_url": "https://example.notion.site/report"})}, wantCode: "page_published_to_web", wantRestricted: true},
+		{name: "unreadable sharing state", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"public_url": 42})}, wantCode: "invalid_public_url"},
+		{name: "container in trash", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"in_trash": true})}, wantCode: "page_in_trash", wantRestricted: true},
+		{name: "legacy archived flag", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"archived": true})}, wantCode: "page_in_trash", wantRestricted: true},
+		{name: "another page", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"id": "ffffffffffffffffffffffffffffffff"})}, wantCode: "invalid_remote_identity"},
+		{name: "database instead of page", fake: &notionFake{bot: bot, page: notionPageJSON(map[string]any{"object": "database"})}, wantCode: "invalid_remote_identity"},
 		{name: "parent withheld", fake: &notionFake{bot: bot, page: `{"object":"page","id":"` + notionContainer + `","in_trash":false,"public_url":null}`}, wantCode: "complete_identity_unverifiable"},
 		{name: "person token", fake: &notionFake{bot: `{"object":"user","type":"person","id":"user-1"}`, page: notionPageJSON(nil)}, wantCode: "invalid_identity"},
 		{name: "revoked token", fake: &notionFake{botCode: http.StatusUnauthorized, page: notionPageJSON(nil)}, wantCode: "permission_denied"},
@@ -138,7 +138,7 @@ func TestNotionConnectionTest(t *testing.T) {
 	}
 }
 
-func TestNotionNeverOffersPublication(t *testing.T) {
+func TestNotionPublicationRequiresExplicitProfile(t *testing.T) {
 	registry := integration.NewRegistry()
 	if err := Register(registry); err != nil {
 		t.Fatalf("register: %v", err)
@@ -147,15 +147,15 @@ func TestNotionNeverOffersPublication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("descriptor: %v", err)
 	}
-	for _, capability := range descriptor.Capabilities {
-		if capability == integration.CapabilityDocuments {
-			t.Fatalf("Notion must not advertise document publication: %v", descriptor.Capabilities)
-		}
+	if !descriptor.Supports(integration.CapabilityDocuments) {
+		t.Fatalf("Notion must declare the opt-in snapshot capability")
 	}
-	// The adapter type itself must stay off the document port, so a future
-	// composition cannot wire it as a destination by accident.
-	if _, ok := any(&notionAdapter{}).(ports.DocumentProvider); ok {
-		t.Fatalf("the Notion adapter must not satisfy the document provider port")
+	a := &notionAdapter{container: notionContainer, group: "readers"}
+	if err := a.CheckDocumentRelease(context.Background(), notionContainer, "readers"); err == nil {
+		t.Fatal("omitted publication_profile must refuse release before I/O")
+	}
+	if _, ok := any(a).(ports.DocumentSnapshotProvider); !ok {
+		t.Fatal("the opt-in adapter must satisfy the snapshot port")
 	}
 }
 
@@ -208,4 +208,188 @@ func TestNotionFactoryValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNotionPageIdentityRejectsUnsafeDestinationShapes(t *testing.T) {
+	base := notionPage{}
+	if err := json.Unmarshal([]byte(notionPageJSON(map[string]any{
+		"parent": map[string]any{"type": "page_id", "page_id": notionContainer},
+	})), &base); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*notionPage){
+		"missing public URL":   func(p *notionPage) { p.PublicURL = nil },
+		"malformed public URL": func(p *notionPage) { p.PublicURL = json.RawMessage(`42`) },
+		"moved child":          func(p *notionPage) { p.Parent.PageID = "ffffffffffffffffffffffffffffffff" },
+		"trashed child":        func(p *notionPage) { v := true; p.InTrash = &v },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := base
+			mutate(&p)
+			if err := p.validate(notionContainer, notionContainer, true, false); err == nil {
+				t.Fatal("unsafe page shape was accepted")
+			}
+		})
+	}
+}
+
+func TestNotionSnapshotValidationPreservesPDFAndBoundsBlocks(t *testing.T) {
+	a := &notionAdapter{token: "secret-token"}
+	valid := ports.DocumentArtifact{Title: "Report", Paragraphs: []string{"One"}, PDF: []byte("%PDF-1.7"), EvidenceHead: ""}
+	if err := a.ValidateDocumentSnapshot(valid); err != nil {
+		t.Fatalf("empty evidence head is represented explicitly later: %v", err)
+	}
+	tooLarge := valid
+	tooLarge.PDF = make([]byte, notionMaxFileBytes+1)
+	if err := a.ValidateDocumentSnapshot(tooLarge); err == nil {
+		t.Fatal("oversized PDF must never be truncated or accepted")
+	}
+	tooMany := valid
+	tooMany.Paragraphs = make([]string, notionMaxBlocks)
+	for i := range tooMany.Paragraphs {
+		tooMany.Paragraphs[i] = "x"
+	}
+	if err := a.ValidateDocumentSnapshot(tooMany); err == nil {
+		t.Fatal("append that exceeds Notion's bounded block request was accepted")
+	}
+}
+
+func TestNotionAppendReadbackRequiresExactArtifactProjection(t *testing.T) {
+	artifact := ports.DocumentArtifact{Title: "Report", Paragraphs: []string{"expected paragraph"}, PDF: []byte("%PDF-1.7"), EvidenceHead: "evidence"}
+	hash := strings.Repeat("a", 64)
+	blocks := []notionBlock{
+		{Type: "paragraph", Paragraph: notionParagraph("expected paragraph")},
+		{Type: "paragraph", Paragraph: notionParagraph("Evidence: evidence")},
+		{Type: "paragraph", Paragraph: notionParagraph("Artifact SHA-256: " + hash)},
+		{Type: "pdf"},
+	}
+	if !matchesSnapshotAppend(blocks, artifact, hash) {
+		t.Fatal("exact append projection was rejected")
+	}
+	blocks[0].Paragraph = notionParagraph("substituted paragraph")
+	if matchesSnapshotAppend(blocks, artifact, hash) {
+		t.Fatal("changed paragraph was accepted by readback proof")
+	}
+	blocks[0].Paragraph = notionParagraph("expected paragraph")
+	blocks[3].Type = "image"
+	if matchesSnapshotAppend(blocks, artifact, hash) {
+		t.Fatal("wrong PDF block kind was accepted by readback proof")
+	}
+}
+
+func notionParagraph(value string) struct {
+	RichText []notionRichText `json:"rich_text"`
+} {
+	var out struct {
+		RichText []notionRichText `json:"rich_text"`
+	}
+	out.RichText = []notionRichText{{PlainText: value}}
+	return out
+}
+
+func TestNotionSnapshotHTTPFlowAndWrongTitleAcknowledgement(t *testing.T) {
+	const pageID = "11111111-1111-1111-1111-111111111111"
+	const uploadID = "22222222-2222-2222-2222-222222222222"
+	marker := "synapse-intent-http-fixture"
+	contentHash := strings.Repeat("a", 64)
+	state := struct {
+		title      string
+		blocks     []map[string]any
+		sent       bool
+		wrongTitle bool
+	}{title: notionNeutralTitle, blocks: []map[string]any{snapshotParagraph("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", marker)}}
+	page := func(id, parent, title string) map[string]any {
+		value := map[string]any{"object": "page", "id": id, "in_trash": false, "archived": false, "public_url": nil,
+			"properties": map[string]any{"title": map[string]any{"type": "title", "title": []any{map[string]any{"plain_text": title}}}}}
+		if parent == "" {
+			value["parent"] = map[string]any{"type": "workspace"}
+		} else {
+			value["parent"] = map[string]any{"type": "page_id", "page_id": parent}
+		}
+		return value
+	}
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		write := func(v any) { _ = json.NewEncoder(w).Encode(v) }
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/pages/"+notionContainer:
+			write(page(notionContainer, "", notionNeutralTitle))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/pages/"+pageID:
+			write(page(pageID, notionContainer, state.title))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/blocks/"+pageID+"/children":
+			write(map[string]any{"results": state.blocks, "has_more": false})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/file_uploads":
+			write(map[string]any{"id": uploadID})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/file_uploads/"+uploadID+"/send":
+			if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data;") {
+				t.Errorf("send content type = %q", r.Header.Get("Content-Type"))
+			}
+			state.sent = true
+			write(map[string]any{"id": uploadID, "status": "uploaded", "content_length": len("%PDF-1.7")})
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/blocks/"+pageID+"/children":
+			if !state.sent {
+				t.Error("append occurred before upload send")
+			}
+			state.blocks = append(state.blocks,
+				snapshotParagraph("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "paragraph"),
+				snapshotParagraph("cccccccc-cccc-cccc-cccc-cccccccccccc", "Evidence: evidence"),
+				snapshotParagraph("dddddddd-dddd-dddd-dddd-dddddddddddd", "Artifact SHA-256: "+contentHash),
+				map[string]any{"object": "block", "id": "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", "type": "pdf", "pdf": map[string]any{"name": "report.pdf", "file": map[string]any{"url": "https://files.notion.so/report.pdf?signature=ephemeral"}}},
+			)
+			write(map[string]any{"results": state.blocks[1:]})
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/pages/"+pageID:
+			if state.wrongTitle {
+				state.title = "wrong title"
+			} else {
+				state.title = "Published title"
+			}
+			write(page(pageID, notionContainer, state.title))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			write(map[string]any{"code": "not_found"})
+		}
+	}))
+	defer fake.Close()
+	client := fake.Client()
+	client.Transport = notionRewrite{host: strings.TrimPrefix(fake.URL, "http://"), inner: client.Transport}
+	a := &notionAdapter{client: client, token: "secret", container: notionContainer, group: "readers", profile: ports.DestinationManagedSnapshot}
+	initialPage := page(pageID, notionContainer, notionNeutralTitle)
+	raw, _ := json.Marshal(initialPage)
+	var parsed notionPage
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	initialBlocks := []notionBlock{{Object: "block", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", Type: "paragraph", Paragraph: notionParagraph(marker)}}
+	remote := remote(parsed, initialBlocks)
+	file := ports.DocumentImage{Name: "report-aaaaaaaaaaaaaaaa.pdf", MediaType: "application/pdf", Data: []byte("%PDF-1.7")}
+	artifact := ports.DocumentArtifact{Title: "Published title", Paragraphs: []string{"paragraph"}, PDF: file.Data, EvidenceHead: "evidence"}
+	id, err := a.AllocateDocumentUpload(context.Background(), file)
+	if err != nil || id != uploadID {
+		t.Fatalf("allocate = %q, %v", id, err)
+	}
+	if err = a.SendDocumentUpload(context.Background(), id, file); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	receipt, err := a.AppendDocumentSnapshot(context.Background(), remote, artifact, []ports.DocumentUploadReceipt{{Key: "attachment:0:" + fileDigest(file.Data), Digest: fileDigest(file.Data), UploadID: id}}, marker, contentHash)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	updated, err := a.SetDocumentSnapshotTitle(context.Background(), receipt.Remote, artifact.Title)
+	if err != nil {
+		t.Fatalf("title: %v", err)
+	}
+	receipt.Remote = updated
+	if _, err = a.VerifyDocumentSnapshot(context.Background(), pageID, receipt, marker); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	state.wrongTitle = true
+	if _, err = a.SetDocumentSnapshotTitle(context.Background(), updated, artifact.Title); err == nil {
+		t.Fatal("wrong title acknowledgement was accepted")
+	} else if provider, ok := err.(*ports.DocumentProviderError); !ok || !provider.Ambiguous || provider.Code != "invalid_title_response" {
+		t.Fatalf("wrong title error = %#v", err)
+	}
+}
+
+func snapshotParagraph(id, value string) map[string]any {
+	return map[string]any{"object": "block", "id": id, "type": "paragraph", "paragraph": map[string]any{"rich_text": []any{map[string]any{"plain_text": value}}}}
 }

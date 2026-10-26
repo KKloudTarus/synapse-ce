@@ -152,18 +152,40 @@ attachments while refusing manual files or a changed ownership manifest. Interru
 neutral-shell creation is recovered by its exact marker; missing neutral files are
 completed only after fresh restriction proof.
 
-## Why Notion is not a destination
+## Configure Notion destination-managed snapshots
 
-A `notion` integration can be created and tested, and it is never offered as a
-publication destination. Two of the three proofs this workflow needs are outside
-the Notion API: no endpoint returns a page's permissions, so the exact reader
-cannot be verified before an upload, and the API cannot permanently delete a
-page, so an unpublish could only move it to the trash. Releasing under either
-gap would report a restriction that was never checked and a deletion that never
-happened. The connection test proves what the API does expose: the integration
-reaches exactly the configured container page, the page is not in the trash, and
-it carries no `public_url`, which Notion sets only once a page is published to
-the web.
+A `notion` integration is eligible for manual publication only when its
+configuration explicitly sets `publication_profile` to
+`destination_managed_snapshot_v1`, it has credentials, and it is enabled. A
+missing or different value remains connection-only. This profile publishes a
+full PDF report and a concise page summary as a new child page below the
+configured container. It does not update a prior page: every republish creates
+a new snapshot, and the console exposes bounded retained snapshot history.
+
+This is a destination-managed-sharing profile. The Notion workspace owner
+controls effective workspace, inherited, guest, and anonymous-link access.
+Synapse cannot read or verify the effective ACL. The integration observes a
+page's `public_url` where the API exposes it, but a missing `public_url` does
+not prove that a page is private. Configure the destination and share the
+integration deliberately before publishing; the profile acknowledgement and
+the publish action are the only human acknowledgements this workflow requires.
+
+The adapter keeps each page summary to at most 100 blocks and keeps the PDF
+attachment at or below 5 MiB so the profile remains usable on free Notion
+workspaces. It derives its title, blocks, and upload metadata from the frozen
+stored report artifact. The API does not provide a compare-and-swap write for
+this flow. Synapse instead fences each current link with its durable revision,
+checkpoints acknowledged uploads and blocks, and quarantines an ambiguous remote
+write as uncertain. This profile has no automatic reconciliation or Resume action
+for an ambiguous write. Preserve its intent and receipts for reviewed operator
+recovery; do not clear the command or replay the mutation blindly.
+
+Unpublish moves only the current snapshot page to Notion's recoverable Trash.
+Files may persist according to Notion's lifecycle, and Synapse does not claim a
+permanent purge. Older snapshots are retained and no automated job removes
+them. Notion snapshot destinations are excluded from scheduled delivery; use a
+manual publish whenever a new snapshot is required.
+
 ## Configure an S3-compatible bucket
 
 Create an enabled `s3-compatible` integration. Its endpoint is the HTTPS S3 API
@@ -260,7 +282,9 @@ when its full payload is identical. A changed payload is a conflict. Inspect
 project instead of assuming that `202 Accepted` means the remote write completed.
 
 `DELETE /api/v1/document-links/{id}` accepts a separate request key and creates a
-governed purge command. Confluence deletes every attachment, including its trash
+governed removal command. A Notion destination-managed snapshot is moved to
+recoverable Trash; that action retains older snapshots and does not claim a
+permanent file or page purge. Confluence deletes every attachment, including its trash
 or permanent-purge phase, before deleting the page with the same whole-object
 procedure. Google Drive deletes only the proven service-owned publication folder
 and its managed artifacts; its trash history is not treated as proof of deletion.
@@ -392,6 +416,10 @@ Saving, disabling, and executing a schedule rechecks current document-release
 authority, source policy, legal hold, destination configuration, and current
 recipient/channel eligibility. A stale expected version conflicts rather than
 overwriting a schedule.
+
+Notion's `destination_managed_snapshot_v1` profile is deliberately not a schedule
+destination. It requires an explicit manual publication and never creates
+unattended snapshot pages.
 
 ## Operational evidence
 

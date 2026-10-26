@@ -55,14 +55,14 @@ unpublish APIs.
   restriction and unsupported policy syntax refuses the release.
 - `confluence-cloud` and `confluence-dc` retain their existing restricted-space
   profiles.
-- `notion` is a connection check only and never appears as a publication
-  destination. Its API returns no page permissions, so the exact reader of a
-  report cannot be proved, and [its own reference](https://developers.notion.com/reference/archive-a-page)
-  states the API does not support permanently deleting pages, so an unpublish
-  could not prove removal. The connection test proves the integration reaches
-  exactly the configured container page, that the page is not in the trash, and
-  that it carries no `public_url`, which is the one sharing fact the API does
-  expose.
+- `notion` becomes a manual destination only when its configuration explicitly
+  selects `publication_profile=destination_managed_snapshot_v1`. The profile
+  creates one new, destination-managed snapshot page per publish and moves only
+  the current page to recoverable Trash on unpublish. Notion does not expose an
+  effective page ACL and a missing `public_url` does not prove privacy, so the
+  workspace owner remains responsible for workspace, inherited, guest, and
+  anonymous-link access. Snapshot publication is excluded from schedules; see
+  [Governed document publishing](document-publishing.md#configure-notion-destination-managed-snapshots).
 
 Document releases are durable, idempotent commands. The worker rechecks current
 tenant authority, destination configuration, release policy, legal hold, sharing
