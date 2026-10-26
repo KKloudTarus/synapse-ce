@@ -46,8 +46,8 @@ function PhaseProbe() {
 }
 
 function RestoredSessionProbe() {
-  const { error, currentUser, retry } = useAuth()
-  return <><PhaseProbe /><output data-testid="restored-error">{error}</output><output data-testid="restored-role">{currentUser?.role}</output><button type="button" onClick={() => { void retry() }}>Retry restoration</button></>
+  const { error, currentUser, canRetry, retry } = useAuth()
+  return <><PhaseProbe /><output data-testid="restored-error">{error}</output><output data-testid="restored-role">{currentUser?.role}</output><output data-testid="restored-can-retry">{String(canRetry)}</output><button type="button" onClick={() => { void retry() }}>Retry restoration</button></>
 }
 
 function BreakGlassProbe() {
@@ -696,7 +696,9 @@ describe('authenticated callback refusal', () => {
     await waitFor(() => expect(phase()).toBe('unauthenticated'))
     fireEvent.click(screen.getByRole('button', { name: 'Retry restoration' }))
     await waitFor(() => expect(phase()).toBe('ready'))
-    expect(screen.getByTestId('restored-error')).toHaveTextContent('The additional sign-in attempt could not be completed. Your existing sign-in is still active.')
+    expect(screen.getByTestId('restored-error')).toHaveTextContent('Your organization sign-in is temporarily unavailable. Your existing sign-in is still active. Use Review sign-in to retry an approved connection.')
+    expect(screen.getByTestId('restored-role')).toHaveTextContent('admin')
+    expect(screen.getByTestId('restored-can-retry')).toHaveTextContent('false')
   })
 
   it('does not invent a refusal for an ordinary restored session', async () => {
@@ -724,6 +726,25 @@ describe('OIDC access denied', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Organization sign-in could not be completed.')
     expect(window.location.search).toBe('')
+  })
+
+  it('explains an unavailable provider and keeps the approved required-SSO retry path', async () => {
+    window.history.replaceState(null, '', '/?auth_error=unavailable&keep=1')
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({
+      enabled: true,
+      tenant_id: 'tenant-a',
+      requirement: 'required',
+      connections: [{ id: 'approved', name: 'Approved SSO' }],
+      bootstrap_eligible: false,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+    renderConnect()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your organization sign-in is temporarily unavailable. Try the approved sign-in connection again.')
+    expect(screen.getByRole('button', { name: 'Continue with Approved SSO' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('API token')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    expect(window.location.search).toBe('?keep=1')
   })
 })
 

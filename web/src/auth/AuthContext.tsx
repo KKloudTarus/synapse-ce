@@ -21,6 +21,7 @@ type AuthMethod = 'session' | 'token'
 const INVALID_TOKEN = 'Invalid API token.'
 const SESSION_EXPIRED = 'Your sign-in session expired. Sign in again.'
 const ACCESS_DENIED = 'This sign-in is not approved for Synapse. Ask an administrator to link your identity.'
+const ENTERPRISE_UNAVAILABLE = 'Your organization sign-in is temporarily unavailable. Try the approved sign-in connection again.'
 const SIGN_IN_FAILED = 'Organization sign-in could not be completed. Try again, or use an API token.'
 
 interface AuthState {
@@ -89,6 +90,17 @@ function readAuthErrorParam(): string | null {
   return new URLSearchParams(window.location.search).get('auth_error')
 }
 
+function callbackFailureFor(reason: string): Failure {
+  const message = reason === 'access_denied'
+    ? ACCESS_DENIED
+    : reason === 'unavailable'
+      ? ENTERPRISE_UNAVAILABLE
+      : SIGN_IN_FAILED
+  // Retrying only restores the local credential. It does not repeat the provider sign-in that
+  // produced this callback, so the user must use the connection already shown by the sign-in UI.
+  return { message, requestId: null, canRetry: false }
+}
+
 function preserveOrganizationLogin(user: CurrentUser | null) {
   if (user?.credentialKind !== 'browser_session' || !user.tenantId) return
   // This is a public routing hint. The server still validates the selected tenant and provider.
@@ -103,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [failure, setFailure] = useState<Failure | null>(() => {
     const reason = readAuthErrorParam()
     if (!reason || reason === 'mailbox_verification_required') return null
-    return { message: reason === 'access_denied' ? ACCESS_DENIED : SIGN_IN_FAILED, requestId: null, canRetry: false }
+    return callbackFailureFor(reason)
   })
   const callbackFailure = useRef(failure)
   const mailboxContinuation = useRef(readAuthErrorParam() === 'mailbox_verification_required')
@@ -189,6 +201,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ...refused,
       message: refused.message === ACCESS_DENIED
         ? 'The identity you selected is not approved for this action. Your existing sign-in is still active.'
+        : refused.message === ENTERPRISE_UNAVAILABLE
+          ? 'Your organization sign-in is temporarily unavailable. Your existing sign-in is still active. Use Review sign-in to retry an approved connection.'
         : 'The additional sign-in attempt could not be completed. Your existing sign-in is still active.',
     } : null)
     applyAuthenticated(result)

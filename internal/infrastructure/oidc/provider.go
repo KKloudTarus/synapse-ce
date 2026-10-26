@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/authz"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/user"
 	"github.com/KKloudTarus/synapse-ce/internal/usecase/ports"
 )
@@ -330,6 +332,9 @@ func (p *Provider) ExchangeAndVerifyWithMaxAge(ctx context.Context, code, verifi
 	ctx = coreoidc.ClientContext(ctx, p.client)
 	token, err := stateful.oauth.Exchange(ctx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
+		if tokenEndpointUnavailable(err) {
+			return ports.OIDCIdentity{}, fmt.Errorf("%w: exchange OIDC authorization code: %w", authz.ErrAuthenticationUnavailable, err)
+		}
 		return ports.OIDCIdentity{}, fmt.Errorf("exchange OIDC authorization code: %w", err)
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
@@ -379,6 +384,13 @@ func (p *Provider) ExchangeAndVerifyWithMaxAge(ctx context.Context, code, verifi
 		return ports.OIDCIdentity{}, err
 	}
 	return ports.OIDCIdentity{Issuer: idToken.Issuer, Subject: idToken.Subject, Email: email, EmailVerified: verifiedEmail, Name: boundedName(claims.Name), AuthenticatedAt: authenticatedAt}, nil
+}
+
+// tokenEndpointUnavailable recognizes a transient OAuth token-endpoint failure without
+// turning protocol denials (such as invalid_grant or invalid_client) into retryable errors.
+func tokenEndpointUnavailable(err error) bool {
+	var retrieve *oauth2.RetrieveError
+	return errors.As(err, &retrieve) && retrieve.Response != nil && retrieve.Response.StatusCode >= http.StatusInternalServerError && retrieve.Response.StatusCode < 600
 }
 
 func verifyAuthorizedParty(audience []string, authorizedParty, clientID string) error {
