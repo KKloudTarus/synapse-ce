@@ -1,82 +1,99 @@
 # Certifying an identity provider
 
-A provider is certified by evidence, not by code. Synapse has one OIDC client and one connection
-model; an Okta, Google Workspace, Auth0, PingOne or Keycloak connection is the same record with a
-different issuer. There is no provider adapter and no vendor switch in policy, so certifying a
-provider means proving that this client's fixed demands hold against that provider, and recording
-the evidence.
+Synapse uses a shared OIDC client and tenant-owned connection records. Certification
+shows that a particular provider configuration works with that client and the
+connection lifecycle. Provider settings, such as an Auth0 organization restriction
+or an Entra discovery mode, add checks to this shared contract. They do not grant
+membership or roles.
 
-This page is the shared half of the per-provider certification issues (#1517, #1519, #1520, #1521,
-#1522): what the client requires, what the connection lifecycle enforces, and the worksheet each
-certification fills in. The provider sections at the end carry only what can be stated without a
-tenant; every behavioural cell is answered during certification, not assumed here.
+Use this guide with the provider's evidence record. Record the tested revision,
+provider tenant or build, connection settings, expected result and observed result.
+Keep credentials, authorization codes and private mailbox contents out of published
+evidence.
 
-## What the client demands
+## Client and connection contract
 
-Every item below is enforced in `internal/infrastructure/oidc/provider.go` and
-`internal/usecase/identityenterprise`. A provider that cannot satisfy one of them cannot be
-certified, whatever its documentation claims.
+The implementation lives in `internal/infrastructure/oidc`,
+`internal/usecase/identityenterprise` and the identity persistence adapters.
 
-| Demand | Detail |
+| Boundary | Required behavior |
 | --- | --- |
-| HTTPS issuer, exact match | The connection stores the issuer with no query, fragment, credentials or trailing slash. The `iss` claim must equal it exactly. A provider that issues tokens under a different host or path than its configured issuer fails here. |
-| Public addresses only | Discovery resolves the issuer host and refuses a loopback, private, unique-local or cloud-metadata answer, with no override. See [identity foundation rollout](identity-foundation-rollout.md#where-the-provider-has-to-be-reachable-from). |
-| Discovery | `<issuer>/.well-known/openid-configuration` is read by the client. The client follows no provider redirect and ignores ambient proxy settings. A failed discovery enters a cooldown, so a misconfigured issuer does not hammer the provider. |
-| PKCE S256 and nonce | Every authorization sends both. A returned ID token whose `nonce` does not match the stored one is refused. |
-| `max_age=900` and `auth_time` | Every enterprise authorization, sign-in included, asks for authentication no older than 15 minutes, so the provider must re-authenticate the person and return an integral numeric `auth_time`. A missing, non-numeric, future or stale value is refused, and the callback refuses again against the same 15-minute window. |
-| `azp` | When the ID token carries `azp`, or carries more than one audience, `azp` must equal the connection's client ID. |
-| `at_hash` | When the ID token carries `at_hash`, it is verified against the access token. |
-| `email_verified` | Only the JSON boolean `true` counts. The string `"true"`, a missing claim or a verified-elsewhere claim leaves the address unverified, and enrollment then needs the subject-bound mailbox challenge. No other claim is ever read as proof of mailbox ownership. |
-| Subject | A non-empty `sub`. The link is to that exact subject; a remapped or recycled subject is a different identity and is denied rather than reused. |
-| Logout | Logout is local: the Synapse session is revoked. The client sends no RP-initiated logout, so a provider session can survive a Synapse logout, and that limit belongs in the provider's certification record. |
-| Groups | Provider groups and custom claims never create a membership or assign a role. `SYNAPSE_OIDC_GROUP_ROLE_MAPPING` is accepted and ignored. |
+| Issuer | Use the provider's exact HTTPS issuer, including a trailing slash when present. Query, fragment and user information are refused. Generic OIDC checks the token issuer exactly. Entra's explicit discovery modes additionally bind the concrete token issuer and tenant claims; see its evidence record. |
+| Network | Discovery and provider requests refuse private, loopback, unique-local and metadata destinations. No private-address override is available. A local provider therefore needs a supported public HTTPS endpoint; a loopback Synapse callback does not make private provider discovery acceptable. |
+| Discovery | The client reads the well-known discovery document, refuses provider redirects and ignores ambient proxy settings. Failed discovery enters a cooldown. Entra discovery follows its configured mode. |
+| Authorization | Every enterprise authorization uses PKCE S256, a nonce and `max_age=900`. The provider may reuse an authentication that is still fresh; a new prompt on every login is not required. |
+| Authentication time | The returned `auth_time` must be integral numeric seconds, not in the future, and less than 15 minutes old. Callback admission checks freshness again. Missing or stale proof is refused. |
+| Token binding | A present `azp`, or a token with multiple audiences, must identify the client. A present `at_hash` is checked against the access token. The returned nonce must match the saved request. |
+| Email | Only JSON boolean `email_verified: true` supplies verified email. An unverified or absent claim cannot satisfy mailbox ownership; enrollment uses the subject-bound mailbox challenge where required. |
+| Subject | Links bind the issuer and exact non-empty subject. A different subject does not inherit an existing link. Providers must keep subjects stable and avoid recycling them: an identical recycled issuer/subject cannot be distinguished from the original identity by this client. |
+| Membership | An unknown identity receives no just-in-time membership or role. Enrollment requires an explicit invitation; linking requires the existing person's authorization. Groups and custom claims do not assign roles. `SYNAPSE_OIDC_GROUP_ROLE_MAPPING` is accepted and ignored. |
+| Logout | Logout revokes the local Synapse session. No RP-initiated provider logout is sent, so the provider session may remain available. |
 
-## What the connection lifecycle enforces
+See [identity foundation rollout](identity-foundation-rollout.md#where-the-provider-has-to-be-reachable-from)
+for provider reachability and [identity recovery](identity-recovery.md) for recovery
+requirements.
 
-| Step | Rule |
+| Lifecycle step | Required behavior |
 | --- | --- |
-| Draft | An administrator with a browser session authenticated in the last 15 minutes saves the issuer, client ID and client secret. The secret is sealed per tenant and connection and is never returned by any API. The redirect URL is the deployment's fixed callback; a connection cannot choose its own. |
-| Test | A test runs the real authorization and callback against the draft. Its result is bound to the connection revision and expires one hour after it passes. |
-| Activate | Activation requires the revision that passed the test. Editing the connection changes the revision, which invalidates the test, so an edited connection cannot be activated on an older proof. |
-| Disable | Disabling rejects the sessions that connection authenticated, without touching other organizations or weakening required SSO elsewhere. |
-| Rollback | A disabled or superseded connection leaves locally valid sessions and allowed existing credentials usable, which is what a provider outage must also leave standing. |
+| Draft | An authorized administrator uses fresh authentication or the permitted repair mechanism. The client secret is sealed per tenant and connection and is not returned by connection APIs. The callback is fixed by the deployment. |
+| Test | A real authorization and callback test is bound to the draft revision. A passing result expires after one hour. |
+| Activate | Activation requires the tested revision and current proof. Editing a draft cannot reuse a test for a different revision. |
+| Disable | Disabled connections stop admitting sign-ins and sessions authenticated through them. Admission checks connection state and session epoch; this need not physically revoke every stored session row. Other organizations and their roles remain unchanged. |
+| Recovery | Use an independently valid connection or the permitted recovery mechanism. Required-SSO guards still apply. Restore the intended policy and prove ordinary login after recovery. A session from a disabled connection is not a recovery credential. |
+| Provider outage | New federation fails without granting access. Locally valid sessions remain usable while their connection and local admission conditions remain valid; retry can recover when the provider returns. |
 
-## The certification worksheet
+## Functional evidence before final review
 
-Each per-provider issue lists the same cells. A certification is complete when every cell is filled
-with a real observation, and the record names the provider build or tenant it came from.
+Prove the affected user journey before opening final review. Retain accepted evidence
+when the relevant code, provider settings and deployment behavior have not changed.
+Builds and mocks alone do not prove a provider login works, but a new run need not
+repeat unaffected journeys or an exhaustive theme matrix.
 
-| Cell | What proves it |
+| Journey | Evidence to retain |
 | --- | --- |
-| Approved sign-in | A person with an approved link signs in through the provider and reaches the expected membership and role. |
-| Unknown subject | An authenticated provider identity with no approved link is denied, with no person, membership or session created. |
-| Enrollment | First and additional users accept an explicit invitation, then sign in normally. Record whether the provider's `email_verified` carried the mailbox proof or the subject-bound challenge was used. |
-| Fresh authentication | A sensitive action forces a real provider re-authentication and returns `auth_time` inside 15 minutes. Record the provider's own prompt behaviour, and what a stale or missing `auth_time` produced. |
-| Destination proof | Switching to a required-SSO organization uses that organization's approved enabled connection and the same person; a missing or wrong destination proof does not switch. |
-| Issuer and key boundary | A token from another authorization server, realm, tenant or environment of the same provider is denied. Rotate the signing key and show that discovery picks up the new key without manual work. |
-| Subject remap | A changed or remapped subject is denied rather than reused on the existing link. |
-| Outage | With the provider unreachable, new federation fails with a useful error, locally valid sessions keep working, and retry recovers. |
-| Local logout | Logout revokes the Synapse session. Record whether the provider session survived. |
-| Activation and rollback | Per-organization activation, disable and recovery leave other organizations unchanged. |
+| Approved sign-in | Real login reaches the expected person, tenant, membership and role. |
+| Unknown identity | An authenticated but unlinked subject is denied without a new person, membership or usable session. |
+| Enrollment and linking | First and additional users accept approved invitations and subsequently sign in normally. Record whether verified email or a mailbox challenge supplied proof; check the applicable retry path. Linking preserves the existing person's roles. |
+| Fresh authentication | Observe provider behavior when existing proof has expired and confirm a fresh `auth_time`. Record stale or missing proof rejection with its actual test method. |
+| Tenant switching | A required-SSO destination requires its own enabled, approved connection proof for the same person. Missing or wrong proof does not switch tenants. |
+| Provider restriction | Exercise any enabled organization, tenant or authorization-server restriction, including a representative denial. |
+| Failure and recovery | Exercise relevant outage/retry, local logout, activation, disable and recovery paths. Confirm that other tenants and memberships are unchanged. |
+| Console | Show the affected Settings, Connect, Profile or invitation flow at a usable viewport. Include narrow layouts or another theme when a change affects them; do not duplicate provider runs solely for presentation variants. |
 
-Console cells, in light and dark at desktop and mobile width, come from the shared Settings /
-Authentication and Connect screens. They are shared surfaces: a provider certification records
-their behaviour and does not add a vendor-specific screen.
+Use signed local conformance tests for adversarial issuer, audience, subject,
+`auth_time` and key-boundary cases where changing a hosted provider would be unsafe
+or unnecessary. Label these as conformance evidence, separately from real provider
+observations. They must exercise the shipped verifier and cannot replace the real
+login, enrollment or recovery paths they do not cover.
 
-## Provider notes
+Record key-refresh behavior and the environment used to test it. A maintainer may
+defer hosted signing-key rotation until post-merge cleanup; record that decision
+without labeling the hosted rotation as passed or blocking otherwise sufficient
+functional acceptance. The same distinction applies to a deferred destructive
+subject or credential change. Runtime validation remains mandatory.
 
-The issuer below is a starting point. Read the real value from the provider's own discovery
-document before saving a connection, because an issuer that differs by one path segment fails the
-exact-match rule at callback time rather than at save time.
+Keep any remaining dependency or explicitly deferred provider acceptance visible in
+its owning issue. A shared guide or an implementation merge does not certify an
+untested provider. Final review covers the ready change and its stated acceptance;
+repeat it only when a relevant edit or concrete finding invalidates the evidence.
 
-| Provider | Issuer shape | Open questions for its certification |
-| --- | --- | --- |
-| Keycloak (#1517) | `https://<host>/realms/<realm>` | The realm host must be publicly resolvable. A realm published only on an internal network cannot be certified; this is the blocker recorded on the issue. |
-| Okta Workforce (#1519) | Org server `https://<org>.okta.com`; custom authorization server `https://<org>.okta.com/oauth2/<serverId>` | Treat each authorization server as its own issuer and key boundary. Confirm `auth_time` under `max_age` on both server types, and which one carries the claims the deployment expects. |
-| Google Workspace (#1520) | `https://accounts.google.com` | One issuer serves every Google tenant, so the hosted-domain restriction and the approved-link check carry the organization boundary. Confirm `auth_time` behaviour and what re-authentication a `max_age` of 900 seconds actually triggers. |
-| Auth0 (#1521) | `https://<tenant>.<region>.auth0.com` or the tenant's custom domain | A custom domain changes the issuer, so a connection saved against one and tokens issued by the other is exactly the mismatch the exact-match rule refuses. Confirm organization-scoped logins keep one stable subject. |
-| PingOne (#1522) | `https://auth.pingone.<region-tld>/<environmentId>/as` | Confirm the environment's issuer in its application configuration, including custom-domain environments, and whether a regional domain change alters the issuer. |
+## Provider evidence
 
-Sources for the issuer shapes: Okta's org authorization server documentation and its custom
-authorization server path, and PingOne's discovery document URI page. Both state the shape only;
-neither certifies the behaviour cells above.
+The following records describe tested settings, source revisions and limitations.
+They are more specific than an illustrative issuer shape; use the actual discovery
+issuer when configuring a new connection.
+
+- [Keycloak certification](https://github.com/KKloudTarus/synapse-ce/blob/213f6c4486e2745ed1a392cb26c6e69c3ffaa619/docs/evidence/identity-certification/keycloak.md) and
+  [live run](https://github.com/KKloudTarus/synapse-ce/blob/213f6c4486e2745ed1a392cb26c6e69c3ffaa619/docs/evidence/identity-certification/keycloak-live-run.md).
+- [Auth0 certification](https://github.com/KKloudTarus/synapse-ce/blob/213f6c4486e2745ed1a392cb26c6e69c3ffaa619/docs/evidence/identity-certification/auth0.md) and
+  [live run](https://github.com/KKloudTarus/synapse-ce/blob/213f6c4486e2745ed1a392cb26c6e69c3ffaa619/docs/evidence/identity-certification/auth0-live-run.md). Preserve the issuer's
+  trailing slash and configure the approved organization ID when organization
+  restriction is required.
+- [Entra certification](https://github.com/KKloudTarus/synapse-ce/blob/213f6c4486e2745ed1a392cb26c6e69c3ffaa619/docs/evidence/identity-certification/entra.md) and
+  [live run](https://github.com/KKloudTarus/synapse-ce/blob/213f6c4486e2745ed1a392cb26c6e69c3ffaa619/docs/evidence/identity-certification/entra-live-run.md). Distinguish
+  tenant-specific, `common` and `organizations` discovery from the concrete token
+  issuer and allowed tenant.
+
+Okta, Google Workspace and PingOne require their own scoped certification records
+when a deployment enables them. An issuer example or an existing personal account
+is not evidence that an organization's requirements are satisfied.

@@ -63,6 +63,21 @@ var catalog = map[EventType]EventSpec{
 		Filters: []Filter{FilterEngagements, FilterOutcomes}, MaxDataClass: DataClassDetail,
 		Variables: variables(signal("outcome", "Terminal response outcome"), signal("action_kind", "Kind of governed response action"), summary("actor", "Actor recorded with the response"), summary("engagement_name", "Name of the associated engagement"), detail("target", "Sanitized response target")),
 	},
+	EventReportGenerated: {
+		Type: EventReportGenerated, Label: "Report generated", SchemaVersion: 1, SubjectKind: "report",
+		HasEngagement: true, HasSeverity: true,
+		Filters:      []Filter{FilterMinSeverity, FilterEngagements},
+		MaxDataClass: DataClassDetail,
+		Variables: variables(
+			signal("severity", "Highest severity recorded in the report"),
+			signal("report_kind", "Kind of report, such as engagement_report"),
+			signal("finding_count", "Findings the report covers"),
+			instant("generated_at", "When the report content was sealed"),
+			summary("engagement_name", "Name of the engagement the report covers"),
+			summary("report_title", "Title of the generated report"),
+			detail("content_hash", "SHA-256 of the sealed report content"),
+		),
+	},
 	EventEvidenceChainBroken: {
 		Type: EventEvidenceChainBroken, Label: "Evidence chain broken", SchemaVersion: 1, SubjectKind: "evidence_chain", HasEngagement: true, HasSeverity: true,
 		MaxDataClass: DataClassSummary, Mandatory: true,

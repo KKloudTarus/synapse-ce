@@ -1,0 +1,100 @@
+{
+  "cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+  "manifest_id": "fdc7104717118950dd06fe785deb695e",
+  "job_id": "0734e391b5fa26b3ea83b39b172bfa67",
+  "coverage_guard_refused": true,
+  "coverage_override": "explicit synthetic-only; no exhaustive coverage claim",
+  "report_get_before_worker_terminal": false,
+  "job": {
+    "status": "done",
+    "attempts": 1
+  },
+  "source": {
+    "source_id": "assessment_closure_report:8a7352e04ce43839222b432ceded8fed447b6cd55c0a76c0b34c16f810d1e2ab",
+    "processed": false,
+    "data": {
+      "title": "Report generated",
+      "summary": "A report artifact was sealed from stored data.",
+      "cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+      "report_id": "8a7352e04ce43839222b432ceded8fed447b6cd55c0a76c0b34c16f810d1e2ab",
+      "report_kind": "assessment_closure_report",
+      "content_hash": "8a7352e04ce43839222b432ceded8fed447b6cd55c0a76c0b34c16f810d1e2ab",
+      "generated_at": "2026-10-24T14:24:36Z",
+      "report_title": "Assessment closure report"
+    }
+  },
+  "deliveries": [
+    {
+      "delivery_id": "f6c4229e70329337bfc103ca82684635",
+      "event_id": "307cb089563211c438d13ac6baaf03ac",
+      "channel_id": "89496b8316b55f8f21692a071a479f82",
+      "type": "telegram",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "delivery_id": "5b79fbf954f2f092a66125276170b942",
+      "event_id": "307cb089563211c438d13ac6baaf03ac",
+      "channel_id": "9987831e3b4e862bbf683e6c70bc05ab",
+      "type": "telegram",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "delivery_id": "fafc9e0977d3a5867e05bec4381752cd",
+      "event_id": "307cb089563211c438d13ac6baaf03ac",
+      "channel_id": "c65f7a5877dc553acfd750cddddac90c",
+      "type": "telegram",
+      "state": "delivered",
+      "attempts": 1
+    },
+    {
+      "delivery_id": "1d8e987bb9c9f75a32d254403b454c6c",
+      "event_id": "307cb089563211c438d13ac6baaf03ac",
+      "channel_id": "f7562be8cdb6cc58c583a0ef3df3d287",
+      "type": "telegram",
+      "state": "delivered",
+      "attempts": 1
+    }
+  ],
+  "canonical_json_sha256": "c705889019d78851ebdb64a40571e6a8b8d0a4ed99b14aff13abb466a0832248",
+  "idempotent_commit_replay": true,
+  "cached_report_stable": true,
+  "counts_after_replay": {
+    "sources": 1,
+    "events": 1,
+    "deliveries": 4
+  },
+  "browser_receipts": {
+    "telegram": {
+      "en_vi": true,
+      "signal_detail": true,
+      "rendered_html_anchors": 4,
+      "anchor_target": "https://127.0.0.1:8445/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478",
+      "receipt_screenshot_private": "report-telegram-loopback-receipt-private.png",
+      "link_clicked": true,
+      "telegram_open_link_confirmation": true,
+      "unauthenticated_landing_requires_sign_in": true,
+      "normal_development_token_form_login": true,
+      "actor": "existing encrypted synthetic reviewer credential",
+      "landing_cycle_id": "66b4b62dc843603b9f10e8c95edb8478",
+      "landing_closure_version": 7,
+      "landing_manifest_id": "fdc7104717118950dd06fe785deb695e",
+      "screenshot": "report-telegram-loopback-landing.png",
+      "oidc_certification_claim": false
+    }
+  },
+  "diagnostic_evidence": [
+    "telegram-link-boundary.json",
+    "telegram-ip-link-boundary.json"
+  ],
+  "configuration": {
+    "public_base_url": "https://127.0.0.1:8445",
+    "listener_scope": "loopback only",
+    "certificate_validation": "existing constrained CA; no bypass",
+    "auth0_legacy_callback": "unchanged localhost:8445",
+    "private_public_tunnel_created": false,
+    "billing_change": false
+  },
+  "checked_at": "2026-10-24T14:29:00.280634+00:00"
+}

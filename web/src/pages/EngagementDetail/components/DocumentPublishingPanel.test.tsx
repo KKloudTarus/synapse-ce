@@ -4,15 +4,15 @@ import { DocumentPublishingPanel } from './DocumentPublishingPanel'
 
 vi.mock('../../../lib/api', () => ({ api: { me: vi.fn(), listAssessmentCycles: vi.fn() } }))
 vi.mock('../../../lib/api/integrations', () => ({ integrationsApi: { listIntegrations: vi.fn() } }))
-vi.mock('../../../lib/api/documents', () => ({ documentsApi: { listEngagementDocuments: vi.fn(), listProjectDocuments: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), documentIntent: vi.fn(), resumePreparedPublication: vi.fn() } }))
-vi.mock('../../../components/synapse/ConfirmDialog', () => ({ ConfirmDialog: ({ open, onConfirm }: { open: boolean; onConfirm: () => void }) => open ? <button onClick={onConfirm}>Confirm permanent unpublish</button> : null }))
+vi.mock('../../../lib/api/documents', () => ({ documentsApi: { listEngagementDocuments: vi.fn(), listProjectDocuments: vi.fn(), listSnapshots: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), documentIntent: vi.fn(), resumePreparedPublication: vi.fn() } }))
+vi.mock('../../../components/synapse/ConfirmDialog', () => ({ ConfirmDialog: ({ open, onConfirm, confirmLabel, description }: { open: boolean; onConfirm: () => void; confirmLabel: string; description: string }) => open ? <div><p>{description}</p><button onClick={onConfirm}>{confirmLabel}</button></div> : null }))
 
 import { api } from '../../../lib/api'
 import { integrationsApi } from '../../../lib/api/integrations'
 import { documentsApi } from '../../../lib/api/documents'
 
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); vi.useRealTimers(); window.sessionStorage.clear() })
-function ready(role = 'reviewer', identity: Record<string, unknown> = {}) { vi.mocked(api.me).mockResolvedValue({ role, ...identity } as never); vi.mocked(api.listAssessmentCycles).mockResolvedValue({ items: [], nextCursor: '' } as never); vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([{ id: 'confluence', name: 'Confluence', provider: 'confluence-cloud', enabled: true, archived: false, credentialConfigured: true }] as never); vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([]); vi.mocked(documentsApi.listProjectDocuments).mockResolvedValue([]) }
+function ready(role = 'reviewer', identity: Record<string, unknown> = {}) { vi.mocked(api.me).mockResolvedValue({ role, ...identity } as never); vi.mocked(api.listAssessmentCycles).mockResolvedValue({ items: [], nextCursor: '' } as never); vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([{ id: 'confluence', name: 'Confluence', provider: 'confluence-cloud', enabled: true, archived: false, credentialConfigured: true }] as never); vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([]); vi.mocked(documentsApi.listProjectDocuments).mockResolvedValue([]); vi.mocked(documentsApi.listSnapshots).mockResolvedValue([]) }
 
 describe('DocumentPublishingPanel', () => {
   it.each([
@@ -36,7 +36,65 @@ describe('DocumentPublishingPanel', () => {
     expect(screen.queryByLabelText(/group/i)).not.toBeInTheDocument()
   })
   it('hides write controls for non-review roles', async () => { ready('consultant'); render(<DocumentPublishingPanel engagementId="eng-1" />); expect(await screen.findByText(/reviewer or administrator/i)).toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Publish report' })).not.toBeInTheDocument() })
-  it('confirms permanent unpublish before requesting the purge', async () => { ready(); vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([{ id: 'link', remoteUrl: 'https://confluence.test/page', remoteVersion: 1, contentHash: 'a'.repeat(64) }] as never); vi.mocked(documentsApi.unpublish).mockResolvedValue({ skipped: false, intent: { id: 'purge', state: 'pending' } } as never); render(<DocumentPublishingPanel engagementId="eng-1" />); fireEvent.click(await screen.findByRole('button', { name: 'Unpublish' })); fireEvent.click(screen.getByRole('button', { name: 'Confirm permanent unpublish' })); await waitFor(() => expect(documentsApi.unpublish).toHaveBeenCalledWith('link', expect.any(String))) })
+  it('confirms permanent unpublish before requesting the purge', async () => { ready(); vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([{ id: 'link', remoteUrl: 'https://confluence.test/page', remoteVersion: 1, contentHash: 'a'.repeat(64) }] as never); vi.mocked(documentsApi.unpublish).mockResolvedValue({ skipped: false, intent: { id: 'purge', state: 'pending' } } as never); render(<DocumentPublishingPanel engagementId="eng-1" />); fireEvent.click(await screen.findByRole('button', { name: 'Unpublish' })); fireEvent.click(screen.getByRole('button', { name: 'Unpublish permanently' })); await waitFor(() => expect(documentsApi.unpublish).toHaveBeenCalledWith('link', expect.any(String))) })
+  it('offers Notion only with the explicit destination-managed snapshot profile and explains the access boundary', async () => {
+    ready()
+    vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([
+      { id: 'notion-missing-profile', name: 'Notion connection only', provider: 'notion', enabled: true, archived: false, credentialConfigured: true, config: {} },
+      { id: 'notion-profile', name: 'Managed Notion', provider: 'notion', enabled: true, archived: false, credentialConfigured: true, config: { publication_profile: 'destination_managed_snapshot_v1' } },
+    ] as never)
+    render(<DocumentPublishingPanel engagementId="eng-1" />)
+    const connection = await screen.findByLabelText('Document connection')
+    expect(connection).toHaveTextContent('Managed Notion')
+    expect(connection).not.toHaveTextContent('Notion connection only')
+    expect(screen.getByRole('note')).toHaveTextContent(/cannot verify the effective ACL/i)
+    expect(screen.getByRole('note')).toHaveTextContent(/public URL does not prove the page is private/i)
+  })
+  it('moves only the current Notion snapshot to recoverable trash', async () => {
+    ready()
+    vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([{ id: 'link', remoteUrl: 'https://notion.so/current', remoteVersion: 1, contentHash: 'a'.repeat(64), accessProfile: 'destination_managed_snapshot_v1' }] as never)
+    vi.mocked(documentsApi.unpublish).mockResolvedValue({ skipped: false, intent: { id: 'trash', state: 'pending', action: 'trash' } } as never)
+    render(<DocumentPublishingPanel engagementId="eng-1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Unpublish' }))
+    expect(screen.getByText(/older snapshots remain/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Move current snapshot to Trash' }))
+    await waitFor(() => expect(documentsApi.unpublish).toHaveBeenCalledWith('link', expect.any(String)))
+  })
+  it('shows on-demand snapshot history to readonly users even when the integration is disabled', async () => {
+    ready('readonly')
+    vi.mocked(integrationsApi.listIntegrations).mockResolvedValue([{ id: 'notion', name: 'Disabled Notion', provider: 'notion', enabled: false, archived: true, credentialConfigured: false, config: {} }] as never)
+    vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([{ id: 'link', remoteUrl: 'https://notion.so/current', remoteVersion: 1, contentHash: 'b'.repeat(64), accessProfile: 'destination_managed_snapshot_v1', restrictionStatus: 'unverifiable', restrictionCheckedAt: '2026-10-21T00:00:00Z' }] as never)
+    vi.mocked(documentsApi.listSnapshots).mockResolvedValue([
+      { id: 'old', remoteUrl: 'https://notion.so/old', contentHash: 'a'.repeat(64), createdAt: '2026-10-20T00:00:00Z', updatedAt: '2026-10-20T00:00:00Z' },
+      { id: 'current', remoteUrl: 'https://notion.so/current', contentHash: 'b'.repeat(64), createdAt: '2026-10-21T00:00:00Z', updatedAt: '2026-10-21T00:00:00Z' },
+    ] as never)
+    render(<DocumentPublishingPanel engagementId="eng-1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Publication history' }))
+    await waitFor(() => expect(documentsApi.listSnapshots).toHaveBeenCalledWith('link'))
+    expect(screen.getByLabelText('Publication history for link')).toHaveTextContent('Current snapshot')
+    expect(screen.getByRole('note')).toHaveTextContent(/cannot verify the effective ACL/i)
+    expect(screen.getByRole('status')).toHaveTextContent('Destination observation failed')
+    expect(screen.getByText(/Last destination check/)).toBeInTheDocument()
+    expect(screen.queryByText(/Last sharing check/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Unpublish' })).not.toBeInTheDocument()
+  })
+  it('shows an on-demand history error without hiding the published link', async () => {
+    ready('readonly')
+    vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([{ id: 'link', remoteUrl: 'https://notion.so/current', remoteVersion: 1, contentHash: 'a'.repeat(64), accessProfile: 'destination_managed_snapshot_v1' }] as never)
+    vi.mocked(documentsApi.listSnapshots).mockRejectedValue(new Error('History is unavailable.'))
+    render(<DocumentPublishingPanel engagementId="eng-1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Publication history' }))
+    expect(await screen.findByText('History is unavailable.')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Destination-managed snapshot')
+  })
+  it('does not offer incomplete snapshot history for strict publication links', async () => {
+    ready('readonly')
+    vi.mocked(documentsApi.listEngagementDocuments).mockResolvedValue([{ id: 'link', remoteUrl: 'https://confluence.test/current', remoteVersion: 1, contentHash: 'a'.repeat(64) }] as never)
+    render(<DocumentPublishingPanel engagementId="eng-1" />)
+    await screen.findByText('Published · v1')
+    expect(screen.queryByRole('button', { name: 'Publication history' })).not.toBeInTheDocument()
+    expect(documentsApi.listSnapshots).not.toHaveBeenCalled()
+  })
   it('derives a project summary and only offers completed cycles with a final manifest', async () => {
     ready()
     vi.mocked(api.listAssessmentCycles).mockResolvedValue({ items: [
@@ -147,6 +205,16 @@ describe('DocumentPublishingPanel', () => {
     expect(await screen.findByRole('button', { name: 'Resume prepared publication' })).toBeInTheDocument()
     expect(documentsApi.documentIntent).toHaveBeenCalledWith('intent-1')
     expect(documentsApi.publish).not.toHaveBeenCalled()
+  })
+  it('does not offer strict sharing recovery for a restored managed snapshot failure', async () => {
+    ready('reviewer', { id: 'user-1', tenantId: 'tenant-1' })
+    window.sessionStorage.setItem('synapse.document-publication.intent:tenant-1:user-1:engagement:eng-1', 'managed-intent')
+    vi.mocked(documentsApi.documentIntent).mockResolvedValue({ id: 'managed-intent', state: 'failed', action: 'create', errorCode: 'provider_refused', version: 4, attempts: 5, accessProfile: 'destination_managed_snapshot_v1' } as never)
+    render(<DocumentPublishingPanel engagementId="eng-1" />)
+    expect(await screen.findByText(/Publication intent failed/)).toBeInTheDocument()
+    expect(documentsApi.documentIntent).toHaveBeenCalledWith('managed-intent')
+    expect(screen.queryByRole('button', { name: 'Resume prepared publication' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/verifies restricted sharing before any report content is uploaded/i)).not.toBeInTheDocument()
   })
   it('does not restore an intent for another user or scope', async () => {
     ready('reviewer', { id: 'user-1', tenantId: 'tenant-1' })

@@ -78,7 +78,7 @@ func (s *Service) observeRestriction(ctx context.Context, tenant shared.ID, link
 		return "unverifiable", 0
 	}
 	space, group, err := destination(in)
-	if err != nil || space != link.Container {
+	if err != nil || space != link.Container || documentAccessProfile(in) != link.AccessProfile {
 		return "unverifiable", 0
 	}
 	provider, err := s.providers.DocumentProvider(ctx, in)
@@ -86,14 +86,32 @@ func (s *Service) observeRestriction(ctx context.Context, tenant shared.ID, link
 		return "unverifiable", 0
 	}
 	defer closeProvider(provider)
-	// The provider verifies both remote identity/container and complete current
-	// sharing. Fetching the document separately duplicates that bounded proof.
-	err = provider.VerifyDocumentRestriction(ctx, link.RemotePageID, link.Container, group)
+	managed := link.AccessProfile == domain.DestinationManagedSnapshotProfile
+	if managed {
+		snapshot, ok := provider.(ports.DocumentSnapshotProvider)
+		if !ok || snapshot.DocumentAccessProfile() != link.AccessProfile {
+			return "unverifiable", 0
+		}
+		state, observeErr := snapshot.ObserveDocumentDestination(ctx, link.RemotePageID, link.Container)
+		if observeErr != nil || state.ID != link.RemotePageID || state.Container != link.Container || !sameRemoteRevision(state.RemotePage, domain.RemotePage{ID: link.RemotePageID, Version: link.RemoteVersion, Revision: link.RemoteRevision, URL: link.RemoteURL}) {
+			err = observeErr
+			if err == nil {
+				return "unverifiable", 0
+			}
+		}
+	} else {
+		// The provider verifies both remote identity/container and complete current
+		// sharing. Fetching the document separately duplicates that bounded proof.
+		err = provider.VerifyDocumentRestriction(ctx, link.RemotePageID, link.Container, group)
+	}
 	// Re-read configuration after the remote observation, so a rotated credential
 	// or changed destination cannot make an old proof look current.
 	current, readErr := s.integration(ctx, tenant, link.IntegrationID)
-	if readErr != nil || current.ConnectionRevision != in.ConnectionRevision || current.CredentialRevision != in.CredentialRevision {
+	if readErr != nil || current.ConnectionRevision != in.ConnectionRevision || current.CredentialRevision != in.CredentialRevision || documentAccessProfile(current) != link.AccessProfile {
 		return "unverifiable", 0
+	}
+	if managed && err == nil {
+		return "destination_managed", 0
 	}
 	if err == nil {
 		return "verified", 0

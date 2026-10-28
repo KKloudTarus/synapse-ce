@@ -1,0 +1,214 @@
+{
+  "status": "observed_functional_pass_with_explicit_remaining_cells",
+  "provider": "Keycloak26.8.1 retained synthetic realm",
+  "source_binding": {
+    "candidate_base_head": "27bd3c96a365a9209869b24a8d88d237a23b19ec",
+    "api_image": "sha256:4707488f9ef6576264ad2e1d0b0c9f446deea8033bbafe6135b3f38c00ff68ef",
+    "web_image": "sha256:095c61d7e5b97747abea4a2092966d179b47adb72faeb3a68e42975ae88b571e",
+    "source_candidate_provenance_sha256": "390f787d1992a734caa27236ab094f2d523d9fe4476ce9304095e0e6f547d447",
+    "source_binding_note": "Earlier shared Auth0PR1612 source candidate, including its recorded source delta; snapshot JSON itself does not carry image IDs. Retained provenance/promotion/pending-activation records bind that historical runtime, not current images or unmodified PR1609 head."
+  },
+  "activation": {
+    "connection": "8378f8c58c80d74164b92b38fd804303",
+    "tenant": "sandbox-secondary",
+    "enabled": true,
+    "revision": 1,
+    "version": 2,
+    "epoch": 1,
+    "latest_test": {
+      "state": "passed",
+      "revision": 1,
+      "tested_at": "2026-10-25T09:00:25.239275+00:00",
+      "expires_at": "2026-10-25T10:00:25.239275+00:00",
+      "lifetime_seconds": 3600.0
+    },
+    "at": "2026-10-25T09:01:45.699905+00:00",
+    "native_browser_test": true,
+    "native_browser_activate": true,
+    "new_memberships": 0,
+    "new_cloud_or_billing": false,
+    "screenshot": "keycloak-activated-live.png"
+  },
+  "enrollment_summary": {
+    "at": "2026-10-25T09:30:10.112741+00:00",
+    "status": "pass",
+    "checks": [
+      "Test and Activate real provider, one-hour Test expiry",
+      "unknown subject denied before enrollment with zero JIT admission",
+      "two explicit invitations each accepted into readonly membership",
+      "both users ordinary login without invitation after local logout",
+      "both Profile reauthentication returned to Dashboard",
+      "original memberships, Auth0 connections and policies unchanged"
+    ],
+    "counts_before": [
+      3,
+      4,
+      4
+    ],
+    "counts_after": [
+      5,
+      6,
+      6
+    ],
+    "limits": [
+      "Reauthentication reused recent provider SSO; no forced password prompt claimed.",
+      "One transient ERR_NETWORK_CHANGED recovered by browser Refresh.",
+      "Quick Tunnel hostname still depends on retained process; not a stable-hostname certification.",
+      "This runtime evidence does not certify the separate PR1609 source head."
+    ],
+    "sources": [
+      "auth0-closure-keycloak-unknown-denied.json",
+      "auth0-closure-keycloak-unknown-enrolled.json",
+      "auth0-closure-keycloak-unknown-logout.json",
+      "auth0-closure-keycloak-unknown-repeat-login.json",
+      "auth0-closure-keycloak-unknown-reauthenticated.json",
+      "auth0-closure-keycloak-approved-enrolled.json",
+      "auth0-closure-keycloak-approved-repeat-reauth.json"
+    ]
+  },
+  "observations": [
+    {
+      "source": "auth0-closure-keycloak-unknown-denied.json",
+      "sha256": "12fe5d9e31eca1fedf87cb3e6f62ffdad8a3d008ec1d53fd4a2fbb4d3ddf0b12",
+      "at": "2026-10-25T09:06:50.447791+00:00",
+      "counts": {
+        "persons": 3,
+        "memberships": 4,
+        "authenticators": 4
+      },
+      "keycloak_readonly_persons": [],
+      "keycloak_authenticators": 0,
+      "active_keycloak_sessions": []
+    },
+    {
+      "source": "auth0-closure-keycloak-unknown-enrolled.json",
+      "sha256": "58f771abda6969341eef4d2380450b31536369c4da141642e1eef7ed32f6c739",
+      "at": "2026-10-25T09:07:32.501387+00:00",
+      "counts": {
+        "persons": 4,
+        "memberships": 5,
+        "authenticators": 5
+      },
+      "keycloak_readonly_persons": [
+        "439ae5598e97613dcce354bd63adde75"
+      ],
+      "keycloak_authenticators": 1,
+      "active_keycloak_sessions": [
+        {
+          "person": "439ae5598e97613dcce354bd63adde75",
+          "authenticated_at": "2026-10-25T09:05:48+00:00"
+        }
+      ]
+    },
+    {
+      "source": "auth0-closure-keycloak-unknown-logout.json",
+      "sha256": "dbaaa8616ea4878b2cbf47dffdd0d1cd27199e9850435b131001dd8db500ee25",
+      "at": "2026-10-25T09:08:45.315584+00:00",
+      "counts": {
+        "persons": 4,
+        "memberships": 5,
+        "authenticators": 5
+      },
+      "keycloak_readonly_persons": [
+        "439ae5598e97613dcce354bd63adde75"
+      ],
+      "keycloak_authenticators": 1,
+      "active_keycloak_sessions": []
+    },
+    {
+      "source": "auth0-closure-keycloak-unknown-repeat-login.json",
+      "sha256": "9ae8ee1f00fa5ead06e7d34030fab5f289d2fb1918ae65601a3999b8044df8c3",
+      "at": "2026-10-25T09:10:24.104718+00:00",
+      "counts": {
+        "persons": 4,
+        "memberships": 5,
+        "authenticators": 5
+      },
+      "keycloak_readonly_persons": [
+        "439ae5598e97613dcce354bd63adde75"
+      ],
+      "keycloak_authenticators": 1,
+      "active_keycloak_sessions": [
+        {
+          "person": "439ae5598e97613dcce354bd63adde75",
+          "authenticated_at": "2026-10-25T09:05:48+00:00"
+        }
+      ]
+    },
+    {
+      "source": "auth0-closure-keycloak-unknown-reauthenticated.json",
+      "sha256": "f290892462de4029cfea849a1f393aad4fedb14e829691190a4c979b8c2a7330",
+      "at": "2026-10-25T09:12:01.944880+00:00",
+      "counts": {
+        "persons": 4,
+        "memberships": 5,
+        "authenticators": 5
+      },
+      "keycloak_readonly_persons": [
+        "439ae5598e97613dcce354bd63adde75"
+      ],
+      "keycloak_authenticators": 1,
+      "active_keycloak_sessions": [
+        {
+          "person": "439ae5598e97613dcce354bd63adde75",
+          "authenticated_at": "2026-10-25T09:05:48+00:00"
+        }
+      ]
+    },
+    {
+      "source": "auth0-closure-keycloak-approved-enrolled.json",
+      "sha256": "3c7959573547f4a88c20566e77856c34ed3527dd9997c85344cf239ce322e90f",
+      "at": "2026-10-25T09:14:45.333685+00:00",
+      "counts": {
+        "persons": 5,
+        "memberships": 6,
+        "authenticators": 6
+      },
+      "keycloak_readonly_persons": [
+        "16999d77cd54321aaab2efe104579729",
+        "439ae5598e97613dcce354bd63adde75"
+      ],
+      "keycloak_authenticators": 2,
+      "active_keycloak_sessions": [
+        {
+          "person": "16999d77cd54321aaab2efe104579729",
+          "authenticated_at": "2026-10-25T09:14:11+00:00"
+        }
+      ]
+    },
+    {
+      "source": "auth0-closure-keycloak-approved-repeat-reauth.json",
+      "sha256": "a42ffebdc6f302bb8099b6ad03cfdb37d3eb8fde3baafbc0514240f554d8d0f7",
+      "at": "2026-10-25T09:16:22.528837+00:00",
+      "counts": {
+        "persons": 5,
+        "memberships": 6,
+        "authenticators": 6
+      },
+      "keycloak_readonly_persons": [
+        "16999d77cd54321aaab2efe104579729",
+        "439ae5598e97613dcce354bd63adde75"
+      ],
+      "keycloak_authenticators": 2,
+      "active_keycloak_sessions": [
+        {
+          "person": "16999d77cd54321aaab2efe104579729",
+          "authenticated_at": "2026-10-25T09:14:11+00:00"
+        }
+      ]
+    }
+  ],
+  "screenshots": {
+    "keycloak-unknown-denied.png": "2909241d46501ae06857e9d6236aee0dadb02d59515d2e30f82d04db97652733",
+    "keycloak-unknown-enrolled-profile.png": "a861f57868c942711382e3854a23d7d7ba9fcbd90c23909abf92a446411d35db",
+    "keycloak-approved-repeat-reauth.png": "524e7ad7793ff7ff51b0da01f880620df7f27e359b03d4af512f05af9d7a7c7d"
+  },
+  "limitations": [
+    "Snapshots do not record invitation consumption state; explicit acceptance is reported by the contemporaneous functional summary, and consumed codes were not replayed",
+    "Both are new Keycloak profile users; existing signed-in same-person enrollment remains a separate unproved cell",
+    "Recent provider SSO was reused on reauthentication; no forced password prompt or provider-session termination is claimed for this historical run",
+    "Native Test/Activate are observed; full disable/recovery/rollback is not established by this run",
+    "Signed email_verified JSON type/value was not retained here; true/false/mailbox variants remain open",
+    "Historical runtime uses shared repairs not yet integrated into the current PR1609 executable head"
+  ]
+}

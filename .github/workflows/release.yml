@@ -14,7 +14,14 @@ permissions:
   packages: write # push the container image to GHCR
 
 jobs:
+  keycloak-integration:
+    name: Keycloak enterprise conformance
+    permissions:
+      contents: read
+    uses: ./.github/workflows/keycloak-conformance.yml
+
   goreleaser:
+    needs: keycloak-integration
     name: goreleaser
     runs-on: ubuntu-latest
     steps:
@@ -39,7 +46,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -87,9 +94,11 @@ jobs:
           git push --force origin "refs/tags/$ACTION_MAJOR"
 
   image:
+    needs: keycloak-integration
     name: ${{ matrix.image }} image
     runs-on: ubuntu-latest
-    # Independent of goreleaser: a release whose binaries publish but whose image build fails must be visible
+    # Both publication jobs require protocol conformance; image builds remain independent of
+    # goreleaser: a release whose binaries publish but whose image build fails must be visible
     # as a failed image job, not hidden behind a skipped step. One row per image the deploy artefacts
     # reference, so an image nobody built is a red job rather than a pull that fails in a cluster months
     # later. Two releases shipped with the Helm chart pointing at ghcr.io/kkloudtarus/synapse and
@@ -137,7 +146,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

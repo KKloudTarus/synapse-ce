@@ -7,7 +7,7 @@ import { documentSchedulesApi, type DocumentSchedule, type DocumentScheduleDesti
 import type { Integration } from '../../../lib/types'
 import type { DocumentSourceOption } from './DocumentPublishingPanel'
 
-const documentProviders = new Set(['confluence-cloud', 'confluence-dc', 'google-drive', 'sharepoint', 'onedrive'])
+const documentProviders = new Set(['confluence-cloud', 'confluence-dc', 'google-drive', 'sharepoint', 'onedrive', 's3-compatible'])
 const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 function message(cause: unknown): string { return cause instanceof Error ? cause.message : 'The schedule request could not be completed.' }

@@ -1,0 +1,85 @@
+{
+  "verified_at": "2026-10-26T11:05:24.894674+00:00",
+  "scope": "Synthetic engagement report; real Synapse API, PostgreSQL queue, integrations worker and Notion API",
+  "access_contract": "destination_managed_snapshot_v1; effective sharing controlled by destination owner, not API-verified",
+  "checks": [
+    {
+      "name": "profile_configured_and_live_tested"
+    },
+    {
+      "name": "first_idempotent_admission"
+    },
+    {
+      "name": "restart_after_upload_checkpoint"
+    },
+    {
+      "name": "first_publication_readback",
+      "pdf_sha256": "4d255362c594f4b6c4d6fdb743e4dfb9587e0cb242f4221a4f8708e7241ab34e",
+      "block_count": 62,
+      "snapshot_history_count": 1
+    },
+    {
+      "name": "source_changed_through_native_api"
+    },
+    {
+      "name": "second_idempotent_admission"
+    },
+    {
+      "name": "second_publication_readback",
+      "pdf_sha256": "817de3bd0789fa06234679d78ec6161e95fc5c4e02668f7ed4eb104f62f08635",
+      "block_count": 70,
+      "snapshot_history_count": 2
+    },
+    {
+      "name": "current_snapshot_trashed_previous_retained"
+    },
+    {
+      "name": "restored_idempotent_admission"
+    },
+    {
+      "name": "restored_publication_readback",
+      "pdf_sha256": "817de3bd0789fa06234679d78ec6161e95fc5c4e02668f7ed4eb104f62f08635",
+      "block_count": 70,
+      "snapshot_history_count": 3
+    },
+    {
+      "name": "notion_schedule_refused",
+      "http_status": 403,
+      "no_schedule_created": true
+    },
+    {
+      "name": "unchanged_source_skipped_after_live_observation",
+      "no_new_intent": true
+    }
+  ],
+  "pdf_text": {
+    "pdf_text_extractable": true,
+    "synthetic_english_title": true,
+    "vietnamese_text": true,
+    "chars": 3378
+  },
+  "limitations": [
+    "Recoverable Trash only; uploaded files can persist and old snapshots remain.",
+    "No automated schedules.",
+    "Ambiguous mutations remain quarantined; no blind retry.",
+    "No effective ACL or private-access proof."
+  ],
+  "billing": "Existing sandbox entitlement and credentials; no subscription, card, trial or paid resource created.",
+  "browser": {
+    "verified_at": "2026-10-26T11:26:28.502152+00:00",
+    "status": "pass",
+    "ui_publish_same_source_no_duplicate": true,
+    "snapshot_history_count": 3,
+    "frozen_intent_profile": "destination_managed_snapshot_v1",
+    "destination_status": "destination_managed",
+    "browser": "Existing development loopback endpoint in IAB",
+    "ui_checks": [
+      "owner-managed disclosure survives destination selection",
+      "three retained snapshots and current marker",
+      "Trash confirmation states recoverability and file retention",
+      "Notion excluded from schedule destination",
+      "publish returns without duplicate snapshot"
+    ],
+    "cloud_ui_limit": "Edge unavailable; real Notion page/block/PDF readback verified through API, no cloud sharing-screen claim"
+  }
+}

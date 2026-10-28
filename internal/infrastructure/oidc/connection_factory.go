@@ -49,7 +49,7 @@ func (f *ConnectionFactory) ProviderForConnection(ctx context.Context, c ports.I
 			plain[i] = 0
 		}
 	}()
-	p, err := New(ctx, Config{Issuer: c.Issuer, ClientID: c.Settings.ClientID, ClientSecret: string(plain), RedirectURL: f.callbackURL, ConnectionRevision: int64(revision)})
+	p, err := New(ctx, Config{Issuer: c.Issuer, ClientID: c.Settings.ClientID, ClientSecret: string(plain), RedirectURL: f.callbackURL, Auth0OrganizationID: c.Settings.Auth0OrganizationID, EntraDiscoveryMode: c.Settings.EntraDiscoveryMode, ConnectionRevision: int64(revision)})
 	if err != nil {
 		return nil, err
 	}

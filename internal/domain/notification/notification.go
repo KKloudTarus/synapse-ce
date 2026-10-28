@@ -93,6 +93,7 @@ const (
 	EventIncidentUpdated          EventType = "incident.updated"
 	EventResponseFinished         EventType = "response.finished"
 	EventEvidenceChainBroken      EventType = "evidence.chain_broken"
+	EventReportGenerated          EventType = "report.generated"
 )
 
 // Valid reports whether the event type is declared in the catalog.

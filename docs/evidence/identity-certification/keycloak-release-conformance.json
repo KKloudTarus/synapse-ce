@@ -1,0 +1,53 @@
+{
+  "scope": "Maintained real native Keycloak/PostgreSQL conformance on the combined reviewed foundation; separate from retained public browser receipts",
+  "reviewed_auth0_parent": "35e1a435d038bc1e3634e69a781c46e088dbe9f0",
+  "production_source_identical_to_parent": true,
+  "native_test_source_sha256": {
+    "internal/infrastructure/oidc/keycloak_fixture_test.go": "99b26f15dc18d1e6df03834042aa1240f815f7a4b7626831f11cef021712fdc4",
+    "internal/infrastructure/oidc/keycloak_integration_test.go": "073b0762e8484bc5999a56ff92162696bfa275cd440c29031df75e9a9cf8a185"
+  },
+  "runner_sha256": "228d3e81c407cae605cb8e063a187fbade4c215f5bdbd689c338d26d2542104e",
+  "images": {
+    "POSTGRES_IMAGE": "postgres@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3",
+    "KEYCLOAK_IMAGE": "quay.io/keycloak/keycloak@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b"
+  },
+  "started_at": "2026-10-26T02:06:31.387733+00:00",
+  "completed_at": "2026-10-26T02:08:24.879025+00:00",
+  "invocation": {
+    "runner": "python3 scripts/run_keycloak_integration.py",
+    "go_version": "1.27.0",
+    "equivalent_make_target": "make keycloak-integration"
+  },
+  "exit_code": 0,
+  "pass": true,
+  "base_path_results": [
+    {
+      "Action": "pass",
+      "Test": "TestKeycloakEnterpriseConformance/baseRoot",
+      "Elapsed": 45.87
+    },
+    {
+      "Action": "pass",
+      "Test": "TestKeycloakEnterpriseConformance/baseAuth",
+      "Elapsed": 43.52
+    }
+  ],
+  "cleanup": {
+    "containers": 0,
+    "networks": 0
+  },
+  "retained_provider_credentials_read": false,
+  "retained_runtime_changed": false,
+  "billing_added": false,
+  "hosted_ci_claimed": false,
+  "asserted_flows": [
+    "real discovery and PKCE S256 authorization-code exchange",
+    "signed subject, email verification and fresh auth_time",
+    "explicit approved native enrollment and ordinary same-person login",
+    "unknown and wrong-realm subject denial without JIT",
+    "production ConnectionFactory sealed secret/revision handling",
+    "real client-secret replacement, old-secret refusal and retained local session",
+    "new-secret Test/Activate and ordinary login with existing person/role",
+    "disabled connection rejects its previously valid session credential"
+  ]
+}

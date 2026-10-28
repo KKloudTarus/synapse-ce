@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,13 +18,17 @@ import (
 )
 
 type documentHTTPFake struct {
-	publishCalls int
-	resumeCalls  int
-	resumeErr    error
-	tenant       shared.ID
-	actor        ports.DocumentActor
-	input        documentuc.PublishInput
-	linksTenant  shared.ID
+	publishCalls   int
+	resumeCalls    int
+	resumeErr      error
+	tenant         shared.ID
+	actor          ports.DocumentActor
+	input          documentuc.PublishInput
+	linksTenant    shared.ID
+	snapshotTenant shared.ID
+	snapshotLinkID shared.ID
+	snapshots      []docpublish.Intent
+	snapshotErr    error
 }
 
 func (f *documentHTTPFake) Publish(_ context.Context, tenant shared.ID, actor ports.DocumentActor, input documentuc.PublishInput) (documentuc.ReleaseResult, error) {
@@ -52,6 +57,11 @@ func (f *documentHTTPFake) Links(_ context.Context, tenant shared.ID, _ docpubli
 
 func (f *documentHTTPFake) Intent(context.Context, shared.ID, shared.ID) (docpublish.Intent, error) {
 	return docpublish.Intent{}, nil
+}
+
+func (f *documentHTTPFake) Snapshots(_ context.Context, tenant, linkID shared.ID) ([]docpublish.Intent, error) {
+	f.snapshotTenant, f.snapshotLinkID = tenant, linkID
+	return f.snapshots, f.snapshotErr
 }
 
 func documentRequest(method, target, body, role, tenant string) *http.Request {
@@ -154,5 +164,38 @@ func TestResumePreparedDocumentPublicationReturnsSafeAccessRefusal(t *testing.T)
 	}
 	if w.Code != http.StatusConflict || body.Error != "Destination access or restricted sharing could not be verified. Correct access before resuming." || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("status=%d body=%+v cache=%q", w.Code, body, w.Header().Get("Cache-Control"))
+	}
+}
+
+func TestDocumentSnapshotsAreReadOnlyTenantScopedAndDoNotExposeProgress(t *testing.T) {
+	fake := &documentHTTPFake{snapshots: []docpublish.Intent{{
+		ID: "snapshot-1", LinkID: "link-1", Action: docpublish.Snapshot, State: "done", Version: 3,
+		RemoteID: "remote-1", RemoteURL: "https://notion.so/snapshot-1", ContentHash: strings.Repeat("a", 64),
+		AccessProfile: docpublish.DestinationManagedSnapshotProfile,
+		CreatedAt:     time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 10, 20, 0, 1, 0, 0, time.UTC),
+	}}}
+	router := &Router{log: discardLog(), documentPublishing: fake}
+	req := documentRequest(http.MethodGet, "/api/v1/document-links/link-1/snapshots", "", "readonly", "tenant-b")
+	w := httptest.NewRecorder()
+	router.routes().ServeHTTP(w, req)
+	if w.Code != http.StatusOK || fake.snapshotTenant != "tenant-b" || fake.snapshotLinkID != "link-1" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status=%d tenant=%q link=%q cache=%q body=%s", w.Code, fake.snapshotTenant, fake.snapshotLinkID, w.Header().Get("Cache-Control"), w.Body.String())
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil || len(items) != 1 {
+		t.Fatalf("response=%s err=%v", w.Body.String(), err)
+	}
+	if items[0]["remote_id"] != "remote-1" || items[0]["content_hash"] != strings.Repeat("a", 64) || items[0]["access_profile"] != docpublish.DestinationManagedSnapshotProfile {
+		t.Fatalf("snapshot identity missing: %#v", items[0])
+	}
+	if _, found := items[0]["artifact"]; found {
+		t.Fatalf("snapshot history exposed artifact: %#v", items[0])
+	}
+}
+
+func TestDocumentLinkResponseEmitsPersistedAccessAndRemovalContracts(t *testing.T) {
+	view := documentLinkResponse(docpublish.Link{AccessProfile: docpublish.DestinationManagedSnapshotProfile, RemovalKind: docpublish.RemovalTrash})
+	if view.AccessProfile != docpublish.DestinationManagedSnapshotProfile || view.RemovalKind != docpublish.RemovalTrash {
+		t.Fatalf("link view lost destination-managed fields: %#v", view)
 	}
 }

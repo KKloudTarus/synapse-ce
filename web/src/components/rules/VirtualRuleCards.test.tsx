@@ -104,11 +104,19 @@ describe('VirtualRuleCards', () => {
     container.scrollTop = 20000
     fireEvent.scroll(container)
 
-    // Give the virtualizer a moment to update
+    // The window moved far down. Assert that, not one index: the virtualizer
+    // picks its own overscan, and a patch release that shifts it by a few cards
+    // is not a regression.
     await waitFor(() => {
-      // At scrollTop 20000, indices around 45-60 are in view.
-      expect(screen.queryByText('Virtual Rule 50')).toBeInTheDocument()
+      expect(screen.queryByText('Virtual Rule 0')).not.toBeInTheDocument()
     })
+    const rendered = screen
+      .getAllByText(/^Virtual Rule \d+$/)
+      .map((node) => Number(node.textContent?.replace('Virtual Rule ', '')))
+    expect(rendered.length).toBeGreaterThan(0)
+    // 20000px at an estimated 220px per card is past card 80; the floor leaves
+    // room for measurement and overscan without admitting the top of the list.
+    expect(Math.min(...rendered)).toBeGreaterThan(40)
   })
 
   it('detail links preserve encoded keys and from state', async () => {

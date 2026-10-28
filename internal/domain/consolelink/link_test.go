@@ -26,6 +26,8 @@ func TestBuilderCreatesTypedConsoleLinks(t *testing.T) {
 		{"project source finding", func() (Link, error) { return b.ProjectSourceFinding("project-1", "find-1") }, KindFinding, "find-1", "https://console.example/console/code-quality/projects/project-1/source-findings#finding-find-1"},
 		{"scan", func() (Link, error) { return b.Scan("eng-1", "scan-1") }, KindScan, "scan-1", "https://console.example/console/engagements/eng-1/scanruns#scan-scan-1"},
 		{"engagement", func() (Link, error) { return b.Engagement("eng-1") }, KindEngagement, "eng-1", "https://console.example/console/engagements/eng-1"},
+		{"assessment cycle", func() (Link, error) { return b.AssessmentCycle("cycle-1") }, KindAssessmentCycle, "cycle-1", "https://console.example/console/assessment-cycles/cycle-1"},
+		{"project", func() (Link, error) { return b.Project("project-1") }, KindProject, "project-1", "https://console.example/console/code-quality/projects/project-1"},
 		{"incident", func() (Link, error) { return b.Incident("inc-1") }, KindIncident, "inc-1", "https://console.example/console/fleet/incidents/inc-1"},
 	}
 	for _, tc := range cases {
@@ -98,6 +100,15 @@ func TestBuilderEscapesIDsAndRejectsInvalidSubjects(t *testing.T) {
 	}
 	if _, err := (Builder{}).Incident("inc"); !errors.Is(err, ErrInvalidOrigin) {
 		t.Fatalf("zero-value builder generated a link: %v", err)
+	}
+	for _, unsafe := range []string{"", ".", "..", "project\nheader", "project\u202eevil"} {
+		if _, err := b.Project(unsafe); !errors.Is(err, ErrInvalidSubject) {
+			t.Fatalf("unsafe project key accepted (%q): %v", unsafe, err)
+		}
+	}
+	link, err := b.AssessmentCycle("cycle/../escape")
+	if err != nil || link.Href() != "https://console.example/assessment-cycles/cycle%2F..%2Fescape" {
+		t.Fatalf("escaped cycle link=%+v err=%v", link, err)
 	}
 }
 

@@ -1,0 +1,148 @@
+{
+  "receipts": [
+    {
+      "locale": "vi",
+      "data_class": "detail",
+      "body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "610504761acc63ccfe8a134bb9d39cfe",
+          "type": "report.generated",
+          "schema_version": 1,
+          "occurred_at": "2026-10-24T13:46:29.388125Z",
+          "severity": "unknown"
+        },
+        "data": {
+          "vars": {
+            "content_hash": "4d96471eeca1f9044fd5ca2ced370d86c4d95de06e61450a7967b7ee811919d8",
+            "event_label": "Report generated",
+            "event_type": "report.generated",
+            "generated_at": "2026-10-24T13:46:29Z",
+            "occurred_at": "2026-10-24T13:46:29Z",
+            "report_kind": "assessment_closure_report",
+            "report_title": "Assessment closure report",
+            "severity": "unknown",
+            "summary": "A report artifact was sealed from stored data.",
+            "title": "Report generated"
+          }
+        },
+        "links": [
+          {
+            "label": "Open report",
+            "url": "https://localhost:8445/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478"
+          }
+        ]
+      },
+      "signature_verified": true,
+      "event_id": "610504761acc63ccfe8a134bb9d39cfe",
+      "delivery_id": "128da036aad6863cb699bc51e523dc03"
+    },
+    {
+      "locale": "en",
+      "data_class": "signal",
+      "body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "610504761acc63ccfe8a134bb9d39cfe",
+          "type": "report.generated",
+          "schema_version": 1,
+          "occurred_at": "2026-10-24T13:46:29.388125Z",
+          "severity": "unknown"
+        },
+        "data": {
+          "vars": {
+            "event_label": "Report generated",
+            "event_type": "report.generated",
+            "generated_at": "2026-10-24T13:46:29Z",
+            "occurred_at": "2026-10-24T13:46:29Z",
+            "report_kind": "assessment_closure_report",
+            "severity": "unknown"
+          }
+        },
+        "links": [
+          {
+            "label": "Open report",
+            "url": "https://localhost:8445/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478"
+          }
+        ]
+      },
+      "signature_verified": true,
+      "event_id": "610504761acc63ccfe8a134bb9d39cfe",
+      "delivery_id": "52597760e219be0813cf15a22b182d4e"
+    },
+    {
+      "locale": "en",
+      "data_class": "detail",
+      "body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "610504761acc63ccfe8a134bb9d39cfe",
+          "type": "report.generated",
+          "schema_version": 1,
+          "occurred_at": "2026-10-24T13:46:29.388125Z",
+          "severity": "unknown"
+        },
+        "data": {
+          "vars": {
+            "content_hash": "4d96471eeca1f9044fd5ca2ced370d86c4d95de06e61450a7967b7ee811919d8",
+            "event_label": "Report generated",
+            "event_type": "report.generated",
+            "generated_at": "2026-10-24T13:46:29Z",
+            "occurred_at": "2026-10-24T13:46:29Z",
+            "report_kind": "assessment_closure_report",
+            "report_title": "Assessment closure report",
+            "severity": "unknown",
+            "summary": "A report artifact was sealed from stored data.",
+            "title": "Report generated"
+          }
+        },
+        "links": [
+          {
+            "label": "Open report",
+            "url": "https://localhost:8445/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478"
+          }
+        ]
+      },
+      "signature_verified": true,
+      "event_id": "610504761acc63ccfe8a134bb9d39cfe",
+      "delivery_id": "b7ad3d1035d6f968f4ce66126c81ab99"
+    },
+    {
+      "locale": "vi",
+      "data_class": "signal",
+      "body": {
+        "version": "synapse.notification.v1",
+        "event": {
+          "id": "610504761acc63ccfe8a134bb9d39cfe",
+          "type": "report.generated",
+          "schema_version": 1,
+          "occurred_at": "2026-10-24T13:46:29.388125Z",
+          "severity": "unknown"
+        },
+        "data": {
+          "vars": {
+            "event_label": "Report generated",
+            "event_type": "report.generated",
+            "generated_at": "2026-10-24T13:46:29Z",
+            "occurred_at": "2026-10-24T13:46:29Z",
+            "report_kind": "assessment_closure_report",
+            "severity": "unknown"
+          }
+        },
+        "links": [
+          {
+            "label": "Open report",
+            "url": "https://localhost:8445/assessment-cycles/66b4b62dc843603b9f10e8c95edb8478"
+          }
+        ]
+      },
+      "signature_verified": true,
+      "event_id": "610504761acc63ccfe8a134bb9d39cfe",
+      "delivery_id": "77f8da6cea14a6c819066e5219fd06d5"
+    }
+  ],
+  "hmac_verified": true,
+  "class_filter_verified": true,
+  "native_producer_before_report_get": true,
+  "provider_request_metadata_omitted": true
+}
