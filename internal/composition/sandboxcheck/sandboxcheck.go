@@ -307,7 +307,7 @@ func integrityCheck(runner *sandbox.Runner, self string) CheckResult {
 	if _, err := runner.Run(context.Background(), ports.ToolSpec{Name: copyPath, Args: []string{"-probe=ok"}, Workdir: dir}); err != nil {
 		return FailResult("binary-integrity", "integrity", "initial binary pin failed: "+redact.String(err.Error(), nil))
 	}
-	if err := os.WriteFile(copyPath, append(contents, '\n'), 0o755); err != nil {
+	if err := replaceProbeExecutable(copyPath, append(contents, '\n')); err != nil {
 		return FailResult("binary-integrity", "integrity", "tamper temporary tool: "+redact.String(err.Error(), nil))
 	}
 	_, err = runner.Run(context.Background(), ports.ToolSpec{Name: copyPath, Args: []string{"-probe=ok"}, Workdir: dir})
@@ -315,6 +315,15 @@ func integrityCheck(runner *sandbox.Runner, self string) CheckResult {
 		return FailResult("binary-integrity", "integrity", "tampered binary was not rejected")
 	}
 	return PassResult("binary-integrity", "integrity", "tampered TOFU-pinned binary was rejected before execution")
+}
+
+func replaceProbeExecutable(path string, contents []byte) error {
+	// Replace the path without truncating an inode that Linux may still hold for execution.
+	replacement := path + ".replacement"
+	if err := os.WriteFile(replacement, contents, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(replacement, path)
 }
 
 func runCheck(runner *sandbox.Runner, c checkSpec) CheckResult {
