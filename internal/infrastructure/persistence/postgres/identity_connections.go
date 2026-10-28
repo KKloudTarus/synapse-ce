@@ -22,7 +22,7 @@ var _ ports.IdentityConnectionStore = (*IdentityFoundationStore)(nil)
 const connectionProjectionPrefix = `c.tenant_id,c.id,c.display_name,c.trust_namespace,c.enabled,c.revision,
  (SELECT max(r.revision) FROM identity_connection_revisions r WHERE r.tenant_id=c.tenant_id AND r.connection_id=c.id),
  c.version,c.epoch,`
-const connectionProjectionSuffix = `,false,r.settings,r.revision`
+const connectionProjectionSuffix = `,false,r.settings,r.revision,COALESCE((SELECT d.settings->>'entra_discovery_mode' FROM identity_connection_revisions d WHERE d.tenant_id=c.tenant_id AND d.connection_id=c.id ORDER BY d.revision DESC LIMIT 1),'')`
 const activeConnectionTestProjection = `COALESCE((SELECT t.state='passed' FROM identity_connection_tests t
  WHERE t.tenant_id=c.tenant_id AND t.connection_id=c.id AND t.revision=c.revision
  ORDER BY t.tested_at DESC,t.id DESC LIMIT 1),false)`
@@ -35,7 +35,7 @@ const administrativeConnectionProjection = connectionProjectionPrefix + currentD
 func scanConnection(row pgx.Row) (ports.IdentityConnection, error) {
 	var c ports.IdentityConnection
 	var settings []byte
-	err := row.Scan(&c.TenantID, &c.ID, &c.DisplayName, &c.Issuer, &c.Enabled, &c.Revision, &c.DraftRevision, &c.Version, &c.Epoch, &c.TestPassed, &c.ConfigurationPending, &settings, &c.SettingsRevision)
+	err := row.Scan(&c.TenantID, &c.ID, &c.DisplayName, &c.Issuer, &c.Enabled, &c.Revision, &c.DraftRevision, &c.Version, &c.Epoch, &c.TestPassed, &c.ConfigurationPending, &settings, &c.SettingsRevision, &c.DraftEntraDiscoveryMode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, shared.ErrNotFound
 	}
@@ -196,6 +196,9 @@ func (s *IdentityFoundationStore) SaveIdentityConnectionDraft(ctx context.Contex
 	if err := ports.ValidateAuth0OrganizationID(d.Settings.Auth0OrganizationID); err != nil {
 		return ports.IdentityConnection{}, err
 	}
+	if err := ports.ValidateEntraSettings(d.Issuer, d.Settings.EntraDiscoveryMode, d.Settings.Auth0OrganizationID); err != nil {
+		return ports.IdentityConnection{}, err
+	}
 	var out ports.IdentityConnection
 	err := s.withIdentityTenant(ctx, d.TenantID, func(tx pgx.Tx) error {
 		if err := lockIdentityAdministration(ctx, tx, d.TenantID); err != nil {
@@ -237,7 +240,7 @@ func (s *IdentityFoundationStore) SaveIdentityConnectionDraft(ctx context.Contex
 					return stateErr
 				}
 				pending, configured := state.pending(d.TenantID)
-				if !ok || !pending || current.Issuer != d.Issuer || d.Settings.Auth0OrganizationID != "" || d.Settings.RedirectURL == "" {
+				if !ok || !pending || current.Issuer != d.Issuer || d.Settings.Auth0OrganizationID != "" || d.Settings.EntraDiscoveryMode != "" || d.Settings.RedirectURL == "" {
 					return fmt.Errorf("%w: legacy connection configuration scaffold is not eligible", shared.ErrConflict)
 				}
 				if configured.ClientID != "" && (configured.ClientID != d.Settings.ClientID || configured.RedirectURL != d.Settings.RedirectURL) {

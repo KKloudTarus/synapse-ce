@@ -28,7 +28,7 @@ func TestInitialProvisioningWireSchemas(t *testing.T) {
 	for key, value := range provisioning {
 		draft[key] = value
 	}
-	draft["connection"] = map[string]any{"id": "connection", "display_name": "Identity", "issuer": "https://issuer.example/", "client_id": "public-client", "enabled": false, "revision": 0, "draft_revision": 1, "version": 1, "test_passed": false, "auth0_organization_id": ""}
+	draft["connection"] = map[string]any{"id": "connection", "display_name": "Identity", "issuer": "https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0", "client_id": "public-client", "enabled": false, "revision": 0, "draft_revision": 1, "version": 1, "test_passed": false, "auth0_organization_id": "", "entra_discovery_mode": "common", "draft_entra_discovery_mode": "common"}
 	for _, tc := range []struct {
 		name, schema string
 		body         map[string]any

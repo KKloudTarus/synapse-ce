@@ -7754,7 +7754,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: {type: object, additionalProperties: false, required: [capability, display_name, issuer, client_id, client_secret, version], properties: {capability: {type: string, writeOnly: true}, display_name: {type: string}, issuer: {type: string, format: uri}, client_id: {type: string}, client_secret: {type: string, writeOnly: true}, auth0_organization_id: {type: string, maxLength: 256}, version: {type: integer, minimum: 0}}}
+            schema: {type: object, additionalProperties: false, required: [capability, display_name, issuer, client_id, client_secret, version], properties: {capability: {type: string, writeOnly: true}, display_name: {type: string}, issuer: {type: string, format: uri}, client_id: {type: string}, client_secret: {type: string, writeOnly: true}, auth0_organization_id: {type: string, maxLength: 256}, entra_discovery_mode: {type: string, enum: ["", common, organizations]}, version: {type: integer, minimum: 0}}}
       responses: {'200': {description: Safe reservation state after draft save, content: {application/json: {schema: {$ref: '#/components/schemas/InitialIdentityProvisioningResponse'}}}}, '403': {description: Expired or mismatched capability}, '409': {description: Provisioning state no longer permits a draft}}
 
   /api/v1/identity/provisioning/test:
@@ -7822,6 +7822,7 @@ paths:
                 client_id: {type: string}
                 client_secret: {type: string, writeOnly: true}
                 auth0_organization_id: {type: string, maxLength: 256, description: Optional exact Auth0 organization identifier for the signed org_id claim}
+                entra_discovery_mode: {type: string, enum: ["", common, organizations], description: Metadata discovery mode for a canonical Entra tenant issuer}
                 bootstrap_eligibility: {type: string, writeOnly: true}
       responses: {'200': {description: Secret-free saved connection projection, content: {application/json: {schema: {$ref: '#/components/schemas/IdentityConnection'}}}}, '403': {description: Administrator or recovery repair permission required}, '409': {description: Stale version, ineligible imported scaffold, or immutable trust input changed}}
   /api/v1/identity/connections/activate:
@@ -8392,14 +8393,7 @@ components:
     IdentityConnection:
       type: object
       additionalProperties: false
-      required: [id, display_name, issuer, enabled, revision, draft_revision, version, test_passed]
-      oneOf:
-        - required: [configuration_pending]
-          properties:
-            configuration_pending: {const: true}
-        - allOf:
-            - not: {required: [configuration_pending]}
-            - not: {required: [client_id]}
+      required: [id, display_name, issuer, enabled, revision, draft_revision, version, test_passed, entra_discovery_mode, draft_entra_discovery_mode]
       properties:
         id: {type: string}
         display_name: {type: string}
@@ -8410,12 +8404,14 @@ components:
         version: {type: integer}
         test_passed: {type: boolean}
         auth0_organization_id: {type: string, maxLength: 256}
+        entra_discovery_mode: {type: string, enum: ["", common, organizations]}
+        draft_entra_discovery_mode: {type: string, enum: ["", common, organizations]}
         configuration_pending:
-          type: boolean
+          const: true
           description: Present only for an imported disabled legacy OIDC scaffold that may receive its first configuration.
         client_id:
           type: string
-          description: Present only when configuration_pending is true; empty before the first configuration and never accompanied by a client secret.
+          description: Nonsecret client identifier, when available to the administrator.
     IdentityConnectionList:
       type: object
       additionalProperties: false
@@ -8431,7 +8427,7 @@ components:
     InitialIdentityConnection:
       type: object
       additionalProperties: false
-      required: [id, display_name, issuer, client_id, enabled, revision, draft_revision, version, test_passed]
+      required: [id, display_name, issuer, client_id, enabled, revision, draft_revision, version, test_passed, entra_discovery_mode, draft_entra_discovery_mode]
       properties:
         id: {type: string}
         display_name: {type: string}
@@ -8443,6 +8439,8 @@ components:
         version: {type: integer}
         test_passed: {type: boolean}
         auth0_organization_id: {type: string}
+        entra_discovery_mode: {type: string, enum: ["", common, organizations]}
+        draft_entra_discovery_mode: {type: string, enum: ["", common, organizations]}
     InitialIdentityInvitation:
       type: object
       additionalProperties: false

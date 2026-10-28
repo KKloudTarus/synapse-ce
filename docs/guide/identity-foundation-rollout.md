@@ -40,7 +40,8 @@ work either.
 
 What this means in practice:
 
-- A hosted provider (Entra ID, Okta, Auth0, Google) works as it is.
+- A hosted provider must expose public HTTPS discovery and signing keys, and satisfy the protocol
+  checks below. Reachability alone does not certify a connection.
 - A self-hosted provider has to be published on a public name with a certificate the API trusts.
   Keycloak, Authentik or Zitadel on an internal network cannot be reached from the API, and the
   failure appears at the connection test rather than at startup.
@@ -58,6 +59,36 @@ relied on that behavior must be corrected to match the provider. Existing stored
 approved links are not rewritten: correcting a connection issuer requires a new tested connection,
 and fixed-provider subjects require explicit approval under the correct issuer.
 
+## Microsoft Entra ID discovery
+
+Use the canonical public-cloud tenant issuer:
+`https://login.microsoftonline.com/<lowercase-directory-guid>/v2.0`. Keep the app's Web redirect URI
+exactly equal to the callback shown by Synapse. The connection uses `openid`, `profile`, and `email`;
+provider groups, display names, email addresses, and UPNs do not grant membership or identify a person.
+
+The optional `entra_discovery_mode` selects metadata discovery: an empty string uses the tenant URL,
+while `common` and `organizations` use the corresponding Microsoft metadata endpoint. These aliases
+still authorize and exchange tokens at the configured directory's tenant endpoint. The signed issuer
+and `tid` must match that directory, and each eligible signing key must carry the matching issuer or
+Microsoft's tenant issuer template. Selecting an alias never allows a second directory to sign in.
+
+Synapse continues to send PKCE S256. Microsoft's recognized discovery documents may omit the PKCE
+capability field; an explicit unsupported or malformed value is rejected. The omission exception
+requires the exact public-cloud Entra metadata and endpoint combination.
+
+For an existing connection, changing metadata mode creates a draft. Save does not change the active
+revision. Complete a fresh provider Test and Activate the tested draft; the page shows active and
+pending modes separately. Activation fences old authorization transactions without revoking existing
+sessions for the same authority. Disable still revokes the connection's sessions. Issuer, client ID,
+callback, and organization restriction remain fixed for the connection.
+
+During initial organization provisioning, the first draft fixes the metadata mode. A credential
+correction must resend that same mode; a conflicting retry is rejected. Legacy adoption uses only the
+tenant-specific mode. During a mixed-version rollout, keep configuration writes on
+updated replicas; older settings codecs do not preserve the new mode when saving a
+revision. Application rollback does not require reversing memberships or restoring
+an older database backup.
+
 ## Initial organization provisioning
 
 Initial provisioning creates the first identity connection and first administrator for one fresh,
@@ -72,7 +103,7 @@ The bootstrap administrator runs the scoped sequence for the target tenant:
    `provisioning` view plus a short-lived capability when the reservation is still open.
 2. `POST /api/v1/identity/provisioning/draft` with that capability and the connection fields
    (`display_name`, `issuer`, `client_id`, `client_secret`, optional
-   `auth0_organization_id`, and `version`). The connection ID and tenant come from the reservation,
+   `auth0_organization_id`, `entra_discovery_mode`, and `version`). The connection ID and tenant come from the reservation,
    not from the request. Use version `0` for the first save. Before activation, a secret correction
    uses the current connection version, creates a new revision, and requires a fresh provider Test.
    Issuer, client ID, callback, and organization restriction remain fixed.

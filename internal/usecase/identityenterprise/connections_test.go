@@ -88,3 +88,32 @@ func TestConnectionDraftPreservesExactIssuer(t *testing.T) {
 		})
 	}
 }
+
+func TestConnectionDraftEntraModeValidationAndForwarding(t *testing.T) {
+	const issuer = "https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0"
+	for _, tc := range []struct {
+		issuer, mode, org string
+		valid             bool
+	}{
+		{issuer, "common", "", true}, {issuer, "organizations", "", true},
+		{issuer, "common", "org_abc", false}, {"https://issuer.example", "common", "", false}, {issuer, "unexpected", "", false},
+	} {
+		store := &draftConnections{}
+		service, err := NewConnections(store, authProtector{}, authClock{time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}, &authIDs{}, "https://synapse.example/callback")
+		if err != nil {
+			t.Fatal(err)
+		}
+		principal := authz.Principal{ActorID: authz.BootstrapActorID, TenantID: "tenant", Credential: authz.Credential{Kind: authz.KindBootstrap, ID: "deployment"}}
+		proof, err := service.BeginBootstrap(t.Context(), principal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = service.SaveDraft(t.Context(), principal, proof, ConnectionDraftInput{DisplayName: "Entra", Issuer: tc.issuer, ClientID: "client", ClientSecret: "secret", EntraDiscoveryMode: tc.mode, Auth0OrganizationID: tc.org})
+		if (err == nil) != tc.valid {
+			t.Fatalf("issuer=%q mode=%q org=%q: %v", tc.issuer, tc.mode, tc.org, err)
+		}
+		if tc.valid && store.draft.Settings.EntraDiscoveryMode != tc.mode {
+			t.Fatalf("mode not forwarded: %+v", store.draft)
+		}
+	}
+}

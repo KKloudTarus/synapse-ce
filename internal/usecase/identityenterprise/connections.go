@@ -79,6 +79,7 @@ type ConnectionDraftInput struct {
 	ClientID            string
 	ClientSecret        string
 	Auth0OrganizationID string
+	EntraDiscoveryMode  string
 	ExpectedVersion     int
 }
 
@@ -102,6 +103,9 @@ func prepareConnectionDraft(ctx context.Context, protector ports.IdentitySecretP
 	if err := ports.ValidateAuth0OrganizationID(in.Auth0OrganizationID); err != nil {
 		return ports.IdentityConnectionDraft{}, err
 	}
+	if err := ports.ValidateEntraSettings(u.String(), in.EntraDiscoveryMode, in.Auth0OrganizationID); err != nil {
+		return ports.IdentityConnectionDraft{}, err
+	}
 	if in.ID.IsZero() {
 		in.ID = ids.NewID()
 	}
@@ -109,7 +113,7 @@ func prepareConnectionDraft(ctx context.Context, protector ports.IdentitySecretP
 	if err != nil {
 		return ports.IdentityConnectionDraft{}, fmt.Errorf("seal connection client secret: %w", err)
 	}
-	return ports.IdentityConnectionDraft{TenantID: tenant, ID: in.ID, DisplayName: strings.TrimSpace(in.DisplayName), Issuer: u.String(), Settings: ports.IdentityOIDCSettings{ClientID: in.ClientID, RedirectURL: callback, SealedClientSecret: sealed, Auth0OrganizationID: in.Auth0OrganizationID}, ExpectedVersion: in.ExpectedVersion}, nil
+	return ports.IdentityConnectionDraft{TenantID: tenant, ID: in.ID, DisplayName: strings.TrimSpace(in.DisplayName), Issuer: u.String(), Settings: ports.IdentityOIDCSettings{ClientID: in.ClientID, RedirectURL: callback, SealedClientSecret: sealed, Auth0OrganizationID: in.Auth0OrganizationID, EntraDiscoveryMode: in.EntraDiscoveryMode}, ExpectedVersion: in.ExpectedVersion}, nil
 }
 
 func (s *Connections) Activate(ctx context.Context, p authz.Principal, bootstrapToken string, id shared.ID, revision, version int) (ports.IdentityConnection, error) {

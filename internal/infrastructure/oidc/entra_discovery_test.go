@@ -118,3 +118,86 @@ func TestEntraOmittedMetadataPreservesS256ChallengeAndExchangeVerifier(t *testin
 		t.Fatalf("exchange must reach the provider with PKCE and reject its denial: attempts=%d err=%v", exchanges, err)
 	}
 }
+
+func TestEntraAliasMetadataIsStrictAndRoutesToTenant(t *testing.T) {
+	for _, mode := range []string{"common", "organizations"} {
+		for _, tc := range []struct {
+			name, field string
+			value       any
+			ok          bool
+		}{
+			{name: "valid", ok: true}, {name: "issuer tenant", field: "issuer", value: entraTestOrigin + "/v2.0"},
+			{name: "issuer foreign", field: "issuer", value: "https://evil.example/{tenantid}/v2.0"},
+			{name: "wrong authorize", field: "authorization_endpoint", value: entraTestOrigin + "/oauth2/v2.0/authorize"},
+			{name: "wrong token", field: "token_endpoint", value: "https://evil.example/token"},
+			{name: "wrong keys", field: "jwks_uri", value: "https://login.microsoftonline.com/other/discovery/v2.0/keys"},
+			{name: "null pkce", field: "code_challenge_methods_supported", value: nil},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				base := "https://login.microsoftonline.com/" + mode
+				metadata := map[string]any{"issuer": "https://login.microsoftonline.com/{tenantid}/v2.0", "authorization_endpoint": base + "/oauth2/v2.0/authorize", "token_endpoint": base + "/oauth2/v2.0/token", "jwks_uri": base + "/discovery/v2.0/keys"}
+				if tc.field != "" {
+					metadata[tc.field] = tc.value
+				}
+				body, _ := json.Marshal(metadata)
+				client := &http.Client{Transport: entraFixtureTransport(func(r *http.Request) (*http.Response, error) {
+					if r.URL.String() != base+"/v2.0/.well-known/openid-configuration" {
+						t.Errorf("unexpected discovery URL %s", r.URL)
+					}
+					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
+				})}
+				issuer := entraTestOrigin + "/v2.0"
+				p := newProvider(Config{Issuer: issuer, EntraDiscoveryMode: mode, ClientID: "client", ClientSecret: "secret", RedirectURL: "https://synapse.example/callback"}, issuer, client)
+				state, err := p.ensure(t.Context())
+				if (err == nil) != tc.ok {
+					t.Fatalf("ensure error %v", err)
+				}
+				if tc.ok && (state.oauth.Endpoint.AuthURL != entraTestOrigin+"/oauth2/v2.0/authorize" || state.oauth.Endpoint.TokenURL != entraTestOrigin+"/oauth2/v2.0/token") {
+					t.Fatalf("wrong routes: %+v", state.oauth.Endpoint)
+				}
+			})
+		}
+	}
+}
+
+func TestNewRejectsInvalidEntraModeCombinations(t *testing.T) {
+	for _, tc := range []struct{ issuer, mode, org string }{
+		{"https://issuer.example", "common", ""}, {entraTestOrigin + "/v2.0", "invalid", ""}, {entraTestOrigin + "/v2.0", "common", "org_example"},
+	} {
+		_, err := New(t.Context(), Config{Issuer: tc.issuer, EntraDiscoveryMode: tc.mode, Auth0OrganizationID: tc.org, ClientID: "client", ClientSecret: "secret", RedirectURL: "https://synapse.example/callback"})
+		if err == nil {
+			t.Fatalf("accepted issuer=%q mode=%q org=%q", tc.issuer, tc.mode, tc.org)
+		}
+	}
+}
+
+func TestEntraAdvertisedS256RejectsMismatchedEndpoints(t *testing.T) {
+	for _, mode := range []string{"", "common", "organizations"} {
+		for _, field := range []string{"authorization_endpoint", "token_endpoint", "jwks_uri"} {
+			t.Run(mode+"/"+field, func(t *testing.T) {
+				metadata := entraDiscoveryMetadata()
+				if mode != "" {
+					base := "https://login.microsoftonline.com/" + mode
+					metadata["issuer"] = "https://login.microsoftonline.com/{tenantid}/v2.0"
+					metadata["authorization_endpoint"] = base + "/oauth2/v2.0/authorize"
+					metadata["token_endpoint"] = base + "/oauth2/v2.0/token"
+					metadata["jwks_uri"] = base + "/discovery/v2.0/keys"
+				}
+				metadata[field] = "https://foreign.example/endpoint"
+				metadata["code_challenge_methods_supported"] = []string{"S256"}
+				body, err := json.Marshal(metadata)
+				if err != nil {
+					t.Fatal(err)
+				}
+				client := &http.Client{Transport: entraFixtureTransport(func(r *http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
+				})}
+				issuer := entraTestOrigin + "/v2.0"
+				p := newProvider(Config{Issuer: issuer, EntraDiscoveryMode: mode, ClientID: "client", ClientSecret: "secret", RedirectURL: "https://synapse.example/callback"}, issuer, client)
+				if _, err := p.ensure(t.Context()); err == nil {
+					t.Fatalf("accepted mismatched %s for mode %q", field, mode)
+				}
+			})
+		}
+	}
+}

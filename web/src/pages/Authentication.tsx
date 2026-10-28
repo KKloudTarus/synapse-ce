@@ -1,3 +1,4 @@
+import { EntraDiscoverySettings, entraDirectory, entraModeLabel } from './EntraDiscoverySettings'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { InitialOrganizationProvisioning } from './InitialOrganizationProvisioning'
 import { ConfirmDialog } from '../components/synapse/ConfirmDialog'
@@ -262,6 +263,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
       clientId: connection.clientId ?? '',
       clientSecret: '',
       auth0OrganizationId: connection.auth0OrganizationId ?? '',
+      ...(entraDirectory(connection.issuer) && !connection.auth0OrganizationId && !connection.configurationPending ? { entraDiscoveryMode: connection.draftEntraDiscoveryMode ?? connection.entraDiscoveryMode ?? '' } : {}),
     })
   }
 
@@ -370,6 +372,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
                     <div>
                       <strong>{connection.displayName}</strong>
                       <span className="ml-2 text-sm text-secondary">{connection.enabled ? `Active · revision ${connection.revision}${connection.draftRevision !== connection.revision ? ` · draft ${connection.draftRevision}` : ''}` : `Draft · revision ${connection.draftRevision}`} · {connection.testPassed ? 'tested' : 'not tested'}</span>
+                      {entraDirectory(connection.issuer) && !connection.auth0OrganizationId ? <div className="mt-1 text-sm text-secondary">{connection.enabled ? <p>Active Entra metadata discovery: {entraModeLabel(connection.entraDiscoveryMode)}</p> : null}{connection.draftRevision !== connection.revision || !connection.enabled ? <p>Draft Entra metadata discovery: {entraModeLabel(connection.draftEntraDiscoveryMode)}</p> : null}</div> : null}
                       {connection.auth0OrganizationId ? <p className="mt-1 text-sm text-secondary">Auth0 organization ID: <code>{connection.auth0OrganizationId}</code></p> : null}
                     </div>
                     <span className="flex gap-2">
@@ -405,16 +408,21 @@ export function Authentication({ enabled }: AuthenticationProps) {
                     aria-describedby={field === 'issuer' && issuerError ? 'issuer-url-error' : undefined}
                     onChange={(event) => {
                       if (field === 'issuer') setIssuerError(null)
-                      setDraft((current) => ({ ...current, [field]: event.target.value }))
+                      setDraft((current) => {
+                        if (field !== 'issuer') return { ...current, [field]: event.target.value }
+                        const { entraDiscoveryMode: _mode, ...rest } = current
+                        return { ...rest, issuer: event.target.value }
+                      })
                     }}
                     className="rounded border border-secondary px-3 py-2 read-only:bg-secondary"
                   />
                 </label>
               ))}
               <label className="grid gap-1 text-sm text-primary">Auth0 organization ID (optional)
-                <input type="text" value={draft.auth0OrganizationId ?? ''} readOnly={connectionConfiguration !== null && (!connectionConfiguration.legacy || connectionConfiguration.auth0OrganizationId === undefined)} onChange={(event) => setDraft((current) => ({ ...current, auth0OrganizationId: event.target.value }))} aria-describedby="auth0-organization-id-help" className="rounded border border-secondary px-3 py-2 read-only:bg-secondary" />
+                <input type="text" value={draft.auth0OrganizationId ?? ''} readOnly={connectionConfiguration !== null && (!connectionConfiguration.legacy || connectionConfiguration.auth0OrganizationId === undefined)} onChange={(event) => setDraft((current) => { const { entraDiscoveryMode: _mode, ...rest } = current; return { ...rest, auth0OrganizationId: event.target.value } })} aria-describedby="auth0-organization-id-help" className="rounded border border-secondary px-3 py-2 read-only:bg-secondary" />
               </label>
             </div>
+            {entraDirectory(draft.issuer) && !draft.auth0OrganizationId && !connectionConfiguration?.legacy ? <EntraDiscoverySettings issuer={draft.issuer} mode={draft.entraDiscoveryMode ?? ''} onChange={(mode) => setDraft((current) => ({ ...current, entraDiscoveryMode: mode }))} /> : null}
             {issuerError ? <p id="issuer-url-error" role="alert" className="mt-2 text-sm text-error-primary">{issuerError}</p> : null}
             <p id="auth0-organization-id-help" className="mt-2 text-sm text-secondary">Use the stable, case-sensitive Auth0 organization ID, not an organization name.</p>
             <div className="mt-4 flex gap-3">

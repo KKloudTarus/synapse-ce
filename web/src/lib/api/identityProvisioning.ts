@@ -1,4 +1,4 @@
-import { identityAuthRequest, type ConnectionDraft, type EnterpriseConnection } from './identity'
+import { entraMode, identityAuthRequest, type ConnectionDraft, type EnterpriseConnection } from './identity'
 
 type RecordValue = Record<string, unknown>
 
@@ -67,6 +67,8 @@ function connectionFromWire(value: unknown): ProvisioningConnection {
     version: numberValue(connection.version),
     testPassed: connection.test_passed === true,
     auth0OrganizationId: stringValue(connection.auth0_organization_id),
+    ...(typeof connection.entra_discovery_mode === 'string' ? { entraDiscoveryMode: entraMode(connection.entra_discovery_mode) } : {}),
+    ...(typeof connection.draft_entra_discovery_mode === 'string' ? { draftEntraDiscoveryMode: entraMode(connection.draft_entra_discovery_mode) } : {}),
   }
 }
 
@@ -140,6 +142,7 @@ export const identityProvisioningApi = {
       client_id: input.clientId,
       client_secret: input.clientSecret,
       auth0_organization_id: input.auth0OrganizationId,
+      ...(input.entraDiscoveryMode ? { entra_discovery_mode: input.entraDiscoveryMode } : {}),
       version: input.version,
     }))
   },

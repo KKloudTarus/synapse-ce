@@ -60,6 +60,40 @@ describe('Authentication', () => {
   })
 
 
+  it('shows active and draft Entra modes and prefills the newest revision', async () => {
+    mockedIdentityApi.connections.mockResolvedValue([{ id: 'entra', displayName: 'Entra', issuer: 'https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0', clientId: 'client', enabled: true, revision: 1, draftRevision: 2, version: 2, testPassed: false, entraDiscoveryMode: 'common', draftEntraDiscoveryMode: 'organizations' }])
+    render(<Authentication enabled />)
+    expect(await screen.findByText(/Active Entra metadata discovery: Common/)).toBeInTheDocument()
+    expect(screen.getByText(/Draft Entra metadata discovery: Organizations/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Update connection' }))
+    expect(screen.getByLabelText('Entra metadata discovery')).toHaveValue('organizations')
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'replacement' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save configuration' }))
+    await waitFor(() => expect(mockedIdentityApi.draftConnection).toHaveBeenCalledWith(expect.objectContaining({ entraDiscoveryMode: 'organizations' }), undefined))
+  })
+
+  it('clears Entra mode when issuer or Auth0 restriction changes', async () => {
+    render(<Authentication enabled />)
+    await screen.findByText('Primary identity')
+    const issuer = screen.getByLabelText('Issuer URL')
+    fireEvent.change(issuer, { target: { value: 'https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0' } })
+    fireEvent.change(screen.getByLabelText('Entra metadata discovery'), { target: { value: 'common' } })
+    fireEvent.change(issuer, { target: { value: 'https://issuer.example' } })
+    expect(screen.queryByLabelText('Entra metadata discovery')).not.toBeInTheDocument()
+    fireEvent.change(issuer, { target: { value: 'https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0' } })
+    expect(screen.getByLabelText('Entra metadata discovery')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('Auth0 organization ID (optional)'), { target: { value: 'org' } })
+    expect(screen.queryByLabelText('Entra metadata discovery')).not.toBeInTheDocument()
+  })
+
+  it('does not offer Entra discovery changes during legacy adoption', async () => {
+    mockedIdentityApi.connections.mockResolvedValue([{ id: 'legacy', displayName: 'Legacy', issuer: 'https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0', clientId: 'client', enabled: false, revision: 1, draftRevision: 1, version: 1, testPassed: false, configurationPending: true }])
+    render(<Authentication enabled />)
+    await screen.findByText('Legacy')
+    fireEvent.click(screen.getByRole('button', { name: 'Update secret' }))
+    expect(screen.queryByLabelText('Entra metadata discovery')).not.toBeInTheDocument()
+  })
+
   it('keeps the connection list when the organization has no policy row yet', async () => {
     mockedIdentityApi.policy.mockRejectedValue(new ApiError(404, 'not found', { code: 'not_found' }))
     render(<Authentication enabled />)

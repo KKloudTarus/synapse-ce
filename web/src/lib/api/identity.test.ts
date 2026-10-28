@@ -21,6 +21,15 @@ describe('identityApi', () => {
     } as Response)
   }
 
+  it('round trips Entra discovery modes independently for active and draft revisions', async () => {
+    respond({ connections: [{ id: 'entra', issuer: 'https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0', entra_discovery_mode: 'common', draft_entra_discovery_mode: 'organizations' }] })
+    const [connection] = await identityApi.connections()
+    expect(connection).toMatchObject({ entraDiscoveryMode: 'common', draftEntraDiscoveryMode: 'organizations' })
+    respond({})
+    await identityApi.draftConnection({ displayName: 'Entra', issuer: connection.issuer, clientId: 'client', clientSecret: 'secret', entraDiscoveryMode: 'organizations' })
+    expect(JSON.parse(fetchSpy.mock.calls.at(-1)![1]!.body as string)).toHaveProperty('entra_discovery_mode', 'organizations')
+  })
+
   it('maps the identity connection contract fields used by activation', async () => {
     respond({
       connections: [{

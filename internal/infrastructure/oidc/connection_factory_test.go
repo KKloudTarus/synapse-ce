@@ -38,3 +38,31 @@ func TestConnectionFactoryPropagatesAuth0OrganizationRestrictionBySettingsRevisi
 		t.Fatal("factory cache key changed from tenant/connection/settings revision")
 	}
 }
+
+func TestConnectionFactoryForwardsEntraModeBySettingsRevision(t *testing.T) {
+	factory, err := NewConnectionFactory(factoryProtector{}, "https://synapse.example/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := ports.IdentityConnection{TenantID: shared.ID("tenant"), ID: shared.ID("connection"), Issuer: entraTestOrigin + "/v2.0", SettingsRevision: 1, Settings: ports.IdentityOIDCSettings{ClientID: "client", RedirectURL: "https://synapse.example/callback", SealedClientSecret: "sealed", EntraDiscoveryMode: "common"}}
+	first, err := factory.ProviderForConnection(t.Context(), connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.(*Provider).cfg.EntraDiscoveryMode != "common" {
+		t.Fatal("mode not forwarded")
+	}
+	connection.Settings.EntraDiscoveryMode = "organizations"
+	cached, err := factory.ProviderForConnection(t.Context(), connection)
+	if err != nil || cached != first {
+		t.Fatalf("same revision cache: %v", err)
+	}
+	connection.SettingsRevision++
+	next, err := factory.ProviderForConnection(t.Context(), connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next == first || next.(*Provider).cfg.EntraDiscoveryMode != "organizations" {
+		t.Fatal("new revision did not use new mode")
+	}
+}
