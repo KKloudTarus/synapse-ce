@@ -156,11 +156,11 @@ func (p *Provider) discover(ctx context.Context) (*providerState, error) {
 		return nil, fmt.Errorf("discover OIDC issuer: %w", err)
 	}
 	var metadata struct {
-		Issuer                        string   `json:"issuer"`
-		AuthorizationEndpoint         string   `json:"authorization_endpoint"`
-		TokenEndpoint                 string   `json:"token_endpoint"`
-		JWKSURI                       string   `json:"jwks_uri"`
-		CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
+		Issuer                        string          `json:"issuer"`
+		AuthorizationEndpoint         string          `json:"authorization_endpoint"`
+		TokenEndpoint                 string          `json:"token_endpoint"`
+		JWKSURI                       string          `json:"jwks_uri"`
+		CodeChallengeMethodsSupported json.RawMessage `json:"code_challenge_methods_supported"`
 	}
 	if err := provider.Claims(&metadata); err != nil {
 		return nil, fmt.Errorf("decode OIDC discovery: %w", err)
@@ -177,11 +177,40 @@ func (p *Provider) discover(ctx context.Context) (*providerState, error) {
 	if _, err := httpsEndpoint(metadata.JWKSURI); err != nil {
 		return nil, fmt.Errorf("OIDC JWKS endpoint: %w", err)
 	}
-	if !supportsS256(metadata.CodeChallengeMethodsSupported) {
+	var challengeMethods []string
+	if len(metadata.CodeChallengeMethodsSupported) > 0 {
+		if err := json.Unmarshal(metadata.CodeChallengeMethodsSupported, &challengeMethods); err != nil {
+			return nil, fmt.Errorf("decode OIDC PKCE methods: %w", err)
+		}
+	}
+	if !supportsS256(challengeMethods) && !(len(metadata.CodeChallengeMethodsSupported) == 0 && entraS256Metadata(p.issuer, metadata.AuthorizationEndpoint, metadata.TokenEndpoint, metadata.JWKSURI)) {
 		return nil, fmt.Errorf("OIDC provider does not advertise PKCE S256 support")
 	}
 	keys := &boundedKeySet{client: p.client, url: metadata.JWKSURI, now: p.now, cooldown: unknownKeyRefreshCooldown}
 	return &providerState{verifier: coreoidc.NewVerifier(p.issuer, keys, &coreoidc.Config{ClientID: p.cfg.ClientID}), oauth: oauth2.Config{ClientID: p.cfg.ClientID, ClientSecret: p.cfg.ClientSecret, RedirectURL: p.cfg.RedirectURL, Endpoint: provider.Endpoint(), Scopes: []string{coreoidc.ScopeOpenID, "profile", "email"}}}, nil
+}
+
+// Entra's public-cloud v2 discovery omits PKCE metadata, but Microsoft documents
+// S256 enforcement at https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow.
+// Recognize only canonical tenant-specific endpoints; other omissions fail closed.
+func entraS256Metadata(issuer, authorization, token, keys string) bool {
+	const origin = "https://login.microsoftonline.com/"
+	path, ok := strings.CutPrefix(issuer, origin)
+	if !ok || len(path) != 36+len("/v2.0") || path[36:] != "/v2.0" {
+		return false
+	}
+	tenant := path[:36]
+	for i, c := range tenant {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	base := origin + tenant
+	return authorization == base+"/oauth2/v2.0/authorize" && token == base+"/oauth2/v2.0/token" && keys == base+"/discovery/v2.0/keys"
 }
 
 // boundedKeySet coalesces metadata refreshes, never token verification results. Every
