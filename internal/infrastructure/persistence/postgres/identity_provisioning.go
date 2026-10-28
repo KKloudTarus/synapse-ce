@@ -362,6 +362,9 @@ func (s *IdentityFoundationStore) SaveIdentityProvisioningDraft(ctx context.Cont
 	if err := ports.ValidateAuth0OrganizationID(draft.Settings.Auth0OrganizationID); err != nil {
 		return out, err
 	}
+	if err := ports.ValidateEntraSettings(draft.Issuer, draft.Settings.EntraDiscoveryMode, draft.Settings.Auth0OrganizationID); err != nil {
+		return out, err
+	}
 	err = s.withIdentityTenant(ctx, proof.TenantID, func(tx pgx.Tx) error {
 		state, err := loadInitialProvisioning(ctx, tx, proof, false)
 		if err != nil {
@@ -372,7 +375,7 @@ func (s *IdentityFoundationStore) SaveIdentityProvisioningDraft(ctx context.Cont
 		}
 		current, getErr := connectionByRevision(ctx, tx, proof.TenantID, proof.ConnectionID, 0)
 		if getErr == nil {
-			if current.Issuer != draft.Issuer || current.DisplayName != draft.DisplayName || current.Settings.ClientID != draft.Settings.ClientID || current.Settings.RedirectURL != draft.Settings.RedirectURL || current.Settings.Auth0OrganizationID != draft.Settings.Auth0OrganizationID {
+			if current.Issuer != draft.Issuer || current.DisplayName != draft.DisplayName || current.Settings.ClientID != draft.Settings.ClientID || current.Settings.RedirectURL != draft.Settings.RedirectURL || current.Settings.Auth0OrganizationID != draft.Settings.Auth0OrganizationID || current.Settings.EntraDiscoveryMode != draft.Settings.EntraDiscoveryMode {
 				return fmt.Errorf("%w: trust changes require a new connection", shared.ErrConflict)
 			}
 			if state.State != "draft" && state.State != "tested" {

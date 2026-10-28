@@ -2,6 +2,7 @@ import { req, snapshotAuth } from './client'
 import { errorFromResponse } from './errors'
 
 export type EnterprisePurpose = 'login' | 'link' | 'test' | 'step_up'
+export type EntraDiscoveryMode = '' | 'common' | 'organizations'
 export type SSORequirement = 'optional' | 'required'
 
 export interface EnterpriseConnection {
@@ -14,6 +15,8 @@ export interface EnterpriseConnection {
   version: number
   testPassed: boolean
   auth0OrganizationId?: string
+  entraDiscoveryMode?: EntraDiscoveryMode
+  draftEntraDiscoveryMode?: EntraDiscoveryMode
   // The administrative connection list may include a client ID so an administrator
   // can prepare the next revision. It never includes a client secret.
   configurationPending?: boolean
@@ -44,6 +47,7 @@ export interface ConnectionDraft {
   clientId: string
   clientSecret: string
   auth0OrganizationId?: string
+  entraDiscoveryMode?: EntraDiscoveryMode
 }
 
 export interface RecoveryCodeRequest {
@@ -70,6 +74,10 @@ function asRecord(value: unknown): RecordValue {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+export function entraMode(value: unknown): EntraDiscoveryMode {
+  return value === 'common' || value === 'organizations' ? value : ''
 }
 
 function numberValue(value: unknown): number {
@@ -99,6 +107,8 @@ function connectionFromWire(value: unknown, includeClientID = false): Enterprise
     version: numberValue(connection.version),
     testPassed: connection.test_passed === true,
     ...(auth0OrganizationId ? { auth0OrganizationId } : {}),
+    ...(typeof connection.entra_discovery_mode === 'string' ? { entraDiscoveryMode: entraMode(connection.entra_discovery_mode) } : {}),
+    ...(typeof connection.draft_entra_discovery_mode === 'string' ? { draftEntraDiscoveryMode: entraMode(connection.draft_entra_discovery_mode) } : {}),
     ...(configurationPending ? { configurationPending: true, ...(includeClientID ? { clientId } : {}) } : clientId ? { clientId } : {}),
   }
 }
@@ -198,6 +208,7 @@ export const identityApi = {
         issuer: draft.issuer,
         client_id: draft.clientId,
         client_secret: draft.clientSecret,
+        ...(draft.entraDiscoveryMode ? { entra_discovery_mode: draft.entraDiscoveryMode } : {}),
         ...(draft.auth0OrganizationId ? { auth0_organization_id: draft.auth0OrganizationId } : {}),
         ...withProof(bootstrapEligibility),
       }),

@@ -71,6 +71,7 @@ func (rt *Router) enterpriseProvisioning(w http.ResponseWriter, r *http.Request,
 		ClientID            string    `json:"client_id"`
 		ClientSecret        string    `json:"client_secret"`
 		Auth0OrganizationID string    `json:"auth0_organization_id"`
+		EntraDiscoveryMode  string    `json:"entra_discovery_mode"`
 		Version             int       `json:"version"`
 		Revision            int       `json:"revision"`
 	}
@@ -89,7 +90,7 @@ func (rt *Router) enterpriseProvisioning(w http.ResponseWriter, r *http.Request,
 	case "status":
 		state, err = service.Status(r.Context(), actor, body.Capability)
 	case "draft":
-		state, err = service.Draft(r.Context(), actor, body.Capability, identityenterprise.ConnectionDraftInput{DisplayName: body.DisplayName, Issuer: body.Issuer, ClientID: body.ClientID, ClientSecret: body.ClientSecret, Auth0OrganizationID: body.Auth0OrganizationID, ExpectedVersion: body.Version})
+		state, err = service.Draft(r.Context(), actor, body.Capability, identityenterprise.ConnectionDraftInput{DisplayName: body.DisplayName, Issuer: body.Issuer, ClientID: body.ClientID, ClientSecret: body.ClientSecret, Auth0OrganizationID: body.Auth0OrganizationID, EntraDiscoveryMode: body.EntraDiscoveryMode, ExpectedVersion: body.Version})
 	case "activate":
 		state, err = service.Activate(r.Context(), actor, body.Capability, body.Revision, body.Version)
 	case "invitation":

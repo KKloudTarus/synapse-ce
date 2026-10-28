@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -286,5 +287,51 @@ func TestIdentityConnectionRequiresExplicitBootstrapProof(t *testing.T) {
 	}
 	if n := f.adminCount(t, `SELECT count(*) FROM identity_connections`); n != 0 {
 		t.Fatalf("denied administration created %d connections", n)
+	}
+}
+
+func TestEntraDiscoveryModeRevisionLifecycle(t *testing.T) {
+	f := newIdentityFixture(t)
+	f.tenants(t, "entra-mode")
+	at := time.Now().UTC()
+	proof := bootstrapConnectionProof("entra-mode", at)
+	draft := ports.IdentityConnectionDraft{TenantID: "entra-mode", ID: "entra", DisplayName: "Entra", Issuer: "https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0", Settings: ports.IdentityOIDCSettings{ClientID: "client", RedirectURL: "https://app.example/callback", SealedClientSecret: "sealed"}}
+	c, err := f.store.SaveIdentityConnectionDraft(t.Context(), draft, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, mode := range []string{"", "common", "organizations", ""} {
+		if i > 0 {
+			draft.ExpectedVersion = c.Version
+			draft.Settings.EntraDiscoveryMode = mode
+			c, err = f.store.SaveIdentityConnectionDraft(t.Context(), draft, proof)
+			if err != nil {
+				t.Fatal(err)
+			}
+			listed, e := f.store.ListIdentityConnections(t.Context(), draft.TenantID, false)
+			if e != nil || len(listed) != 1 || listed[0].Settings.EntraDiscoveryMode == mode || listed[0].DraftEntraDiscoveryMode != mode || listed[0].TestPassed {
+				t.Fatalf("active/draft projection=%+v err=%v", listed, e)
+			}
+			if _, e = f.store.ActivateIdentityConnection(t.Context(), draft.TenantID, draft.ID, c.DraftRevision, c.Version, proof); !errors.Is(e, shared.ErrConflict) {
+				t.Fatalf("untested activation=%v", e)
+			}
+			if _, e = f.store.ActivateIdentityConnection(t.Context(), draft.TenantID, draft.ID, c.DraftRevision, c.Version-1, proof); !errors.Is(e, shared.ErrConflict) {
+				t.Fatalf("stale version=%v", e)
+			}
+		}
+		test := ports.IdentityConnectionTest{ID: shared.ID(fmt.Sprintf("entra-test-%d", i)), TenantID: draft.TenantID, ConnectionID: draft.ID, Revision: c.DraftRevision, Passed: true, At: at, ExpiresAt: at.Add(time.Hour)}
+		if err = f.store.RecordIdentityConnectionTest(t.Context(), test, proof); err != nil {
+			t.Fatal(err)
+		}
+		previousEpoch := c.Epoch
+		c, err = f.store.ActivateIdentityConnection(t.Context(), draft.TenantID, draft.ID, c.DraftRevision, c.Version, proof)
+		if err != nil || c.Settings.EntraDiscoveryMode != mode || c.Epoch != previousEpoch {
+			t.Fatalf("activation=%+v err=%v", c, err)
+		}
+	}
+	before := c.Epoch
+	c, err = f.store.DisableIdentityConnection(t.Context(), draft.TenantID, draft.ID, c.Version, proof)
+	if err != nil || c.Epoch != before+1 {
+		t.Fatalf("disable=%+v err=%v", c, err)
 	}
 }

@@ -27,6 +27,13 @@ describe('identity provisioning API contract', () => {
     invitation: null,
   }
 
+  it('round trips Entra discovery mode in provisioning', async () => {
+    respond({ ...snapshot, connection: { ...snapshot.connection, entra_discovery_mode: 'common', draft_entra_discovery_mode: 'organizations' } })
+    const result = await identityProvisioningApi.draft({ capability: 'capability', displayName: 'Entra', issuer: 'https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0', clientId: 'client', clientSecret: 'secret', auth0OrganizationId: '', entraDiscoveryMode: 'organizations', version: 0 })
+    expect(result.connection).toMatchObject({ entraDiscoveryMode: 'common', draftEntraDiscoveryMode: 'organizations' })
+    expect(JSON.parse(fetchSpy.mock.calls.at(-1)![1]!.body as string)).toHaveProperty('entra_discovery_mode', 'organizations')
+  })
+
   it('sends only a target and recipient to begin and maps the safe snapshot', async () => {
     respond({ provisioning: snapshot, capability: 'capability-opaque' })
     await expect(identityProvisioningApi.begin('sandbox-b', 'admin@example.test')).resolves.toEqual({ provisioning: expect.objectContaining({ tenantId: 'sandbox-b', recipient: 'admin@example.test' }), capability: 'capability-opaque' })

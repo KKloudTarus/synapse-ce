@@ -707,3 +707,20 @@ $close_initial_provisioning$;`
 	}
 	t.Cleanup(func() { installInitialProvisioningClosure(t, f, true) })
 }
+
+func TestIdentityInitialProvisioningPinsEntraDiscoveryModeOnRetry(t *testing.T) {
+	f, p, state, at := declaredInitialTenant(t)
+	proof := initialProvisioningProof(state, p, at)
+	draft := ports.IdentityConnectionDraft{TenantID: state.TenantID, ID: state.ConnectionID, DisplayName: "Entra", Issuer: "https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0", Settings: ports.IdentityOIDCSettings{ClientID: "client", RedirectURL: "https://example.com/callback", SealedClientSecret: "sealed", EntraDiscoveryMode: "common"}}
+	state, err := f.store.SaveIdentityProvisioningDraft(t.Context(), draft, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Connection == nil || state.Connection.Settings.EntraDiscoveryMode != "common" {
+		t.Fatalf("state=%+v", state)
+	}
+	draft.Settings.EntraDiscoveryMode = "organizations"
+	if _, err = f.store.SaveIdentityProvisioningDraft(t.Context(), draft, initialProvisioningProof(state, p, at)); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("changed mode retry=%v", err)
+	}
+}

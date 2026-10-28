@@ -27,6 +27,28 @@ describe('InitialOrganizationProvisioning', () => {
     api.invitation.mockResolvedValue({ provisioning: { ...active, invitation: { id: 'invite-1', recipient: 'admin@example.test', role: 'admin', state: 'created', version: 1, expiresAt: '2026-10-30T00:00:00Z' } }, code: 'invite-code-secret' })
   })
 
+  it('allows initial Entra mode and fixes it after the draft is created', async () => {
+    const issuer = 'https://login.microsoftonline.com/01234567-89ab-cdef-0123-456789abcdef/v2.0'
+    api.draft.mockResolvedValue({ ...drafted, connection: { ...drafted.connection, issuer, auth0OrganizationId: '', draftEntraDiscoveryMode: 'common' } })
+    renderProvisioning()
+    fireEvent.change(screen.getByLabelText('Target organization ID'), { target: { value: 'sandbox-b' } })
+    fireEvent.change(screen.getByLabelText('First administrator email'), { target: { value: 'admin@example.test' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Begin provisioning' }))
+    await screen.findByText('Provisioning reserved')
+    fireEvent.change(screen.getByLabelText('Issuer'), { target: { value: issuer } })
+    fireEvent.change(screen.getByLabelText('Entra metadata discovery'), { target: { value: 'common' } })
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Entra' } })
+    fireEvent.change(screen.getByLabelText('Client ID'), { target: { value: 'client' } })
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'secret' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save connection draft' }))
+    await waitFor(() => expect(api.draft).toHaveBeenCalledWith(expect.objectContaining({ entraDiscoveryMode: 'common' })))
+    expect(screen.getByLabelText('Entra metadata discovery')).toBeDisabled()
+    expect(screen.getByLabelText('Entra metadata discovery')).toHaveValue('common')
+    fireEvent.change(screen.getByLabelText('Client secret'), { target: { value: 'replacement' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save corrected credential' }))
+    await waitFor(() => expect(api.draft).toHaveBeenLastCalledWith(expect.objectContaining({ entraDiscoveryMode: 'common', clientSecret: 'replacement', version: 1 })))
+  })
+
   it('takes a target through draft, test, activation, and an explicitly approved first-admin invitation', async () => {
     const assign = vi.fn()
     vi.stubGlobal('location', { assign })
