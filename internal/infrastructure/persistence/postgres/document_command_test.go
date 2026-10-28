@@ -21,6 +21,21 @@ func postgresDocumentCommand(id, key string, now time.Time) ports.DocumentComman
 	return ports.DocumentCommand{Intent: intent, Actor: ports.DocumentActor{UserID: "admin"}, ConnectionRevision: 1, CredentialRevision: 0, ReadGroup: "restricted", Artifact: ports.DocumentArtifact{Title: "Report", Paragraphs: []string{"body"}, PDF: []byte("pdf"), SourceRevision: "source-v1", GeneratedAt: now}, Progress: ports.DocumentProgress{Version: 1, IntentVersion: 1, Step: "shell", UpdatedAt: now}}
 }
 
+func TestCleanDocumentRetryCheckpointAllowsTrash(t *testing.T) {
+	at := time.Date(2026, 10, 26, 13, 0, 0, 0, time.UTC)
+	lease := at.Add(time.Minute)
+	intent := docpublish.Intent{ID: "trash-retry-intent", TenantID: "doc-a", State: writeintent.InFlight, Version: 2, LeaseUntil: &lease}
+	progress := ports.DocumentProgress{
+		IntentVersion: 2,
+		LeaseUntil:    &lease,
+		Step:          "trash",
+		Remote:        docpublish.RemotePage{ID: "page", Version: 1, URL: "https://wiki.example/page"},
+	}
+	if !cleanDocumentRetryCheckpoint(progress, intent, at) {
+		t.Fatal("clean pre-dispatch trash checkpoint was not retryable")
+	}
+}
+
 func TestDocumentCommandStorePostgresAdmissionProgressAndRLS(t *testing.T) {
 	dsn := testDSN(t)
 	ctx := context.Background()

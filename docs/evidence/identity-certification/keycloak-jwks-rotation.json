@@ -1,0 +1,41 @@
+{
+  "at": "2026-10-25T13:49:42.580048+00:00",
+  "result": "pass",
+  "scope": "Actual local Keycloak signing-key overlap and real Synapse callback without API restart",
+  "new_active_rs256_kid": "q8mZHVwGiUGuHhfdgOq1PBB784EXj4BJP2Q4wkK7WLs",
+  "old_active_rs256_kid": "GSwmZbsQ9A4YxWMk0dD7OqAgOJ13N8SzBNWrMQoWpgY",
+  "public_key_overlap": [
+    "GSwmZbsQ9A4YxWMk0dD7OqAgOJ13N8SzBNWrMQoWpgY",
+    "mnuZtiKH1pvk0tq1N2HYOoDZd1gn2pFnlUPuh6pL8V8",
+    "q8mZHVwGiUGuHhfdgOq1PBB784EXj4BJP2Q4wkK7WLs"
+  ],
+  "issuer_unchanged": true,
+  "configured_id_token_algorithm": "RS256",
+  "existing_local_session_after_rotation": "passed",
+  "fresh_authorization_callback_after_rotation": "passed same existing person and readonly role",
+  "authority_unchanged": true,
+  "authority_counts": [
+    5,
+    7,
+    8
+  ],
+  "api_image": "sha256:15be92cbec55907328c1a8db99d4a9f153b54992adc73b3931c712aa4f56ee9a",
+  "api_started_at": "2026-10-25T13:15:49.518142939Z",
+  "api_restarted": false,
+  "client_secret_rotated": false,
+  "inference": "New signer is established from Keycloak active RS256 key metadata, configured token algorithm, public JWKS overlap and a real post-rotation callback. Raw ID token header/claims were not retained.",
+  "limits": [
+    "Does not claim provider client-secret rotation or new/cross-realm certification.",
+    "The existing Quick Tunnel hostname remains process-bound; no silent issuer change."
+  ],
+  "no_cloud_or_billing_actions": true,
+  "artifacts": {
+    "native-connection-revision-keycloak-jwks-baseline.json": "e07954ae45fdf160404cdc85473d65ae5ecf6fd0e8d7b1629a6b80489aaf5fea",
+    "native-connection-revision-keycloak-jwks-old-session.json": "567d465709773580b0841e2acbfa7075de82dc5e2f0c985d24da6ab183c64ddd",
+    "native-connection-revision-keycloak-jwks-after-login.json": "85dda798f598c1350d2235192fceadfab7c79d16abbf99d8c5da77e037de4e53",
+    "keycloak-jwks-before-dashboard.png": "d9d9d095fc782e8a881aab2986eef19a0c68dae1bc3c186ec85971c7ac869e5e",
+    "keycloak-jwks-old-session.png": "4f493f5d68cee2c84b298f9b7fe125bfe6ddd583ed8bcf58ee9a270c3a4fe1e4",
+    "keycloak-jwks-after-dashboard.png": "ed9726ce3191ac7f72e0d6b06f6d32fc31a4006b5125cab3a8e7e793ded8aa1e",
+    "keycloak_jwks_rotation.py": "ebeb53b92092ca60a9b73e4c78a2d17b4f489c4d7e1a31eafbe2ffee46c45919"
+  }
+}

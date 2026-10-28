@@ -1,0 +1,129 @@
+{
+  "source_pr": 1602,
+  "producer": "native engagement document schedule",
+  "source_kind": "engagement_report",
+  "schedule_id": "b8934b1adf442e3f69fcb415115b104b",
+  "occurrence_id": "schedule:e725d5cf6582957da04550564fe01fb5",
+  "state": "done",
+  "artifact_digest": "f0ea26b6139c34a87fa41bd63a5dcc4b9f34ba79d1df2e4ed349dc606e10f855",
+  "pdf_sha256": "bf5ad1a2be55be9481fd051cef10b86cb4b55c09e2914978c31eaa63284a6407",
+  "artifact_source_revision": "report:bf5ad1a2be55be9481fd051cef10b86cb4b55c09e2914978c31eaa63284a6407",
+  "source": {
+    "source_id": "engagement_report:bf5ad1a2be55be9481fd051cef10b86cb4b55c09e2914978c31eaa63284a6407",
+    "data": {
+      "title": "Report generated",
+      "summary": "A report artifact was sealed from stored data.",
+      "report_id": "bf5ad1a2be55be9481fd051cef10b86cb4b55c09e2914978c31eaa63284a6407",
+      "report_kind": "engagement_report",
+      "content_hash": "bf5ad1a2be55be9481fd051cef10b86cb4b55c09e2914978c31eaa63284a6407",
+      "generated_at": "2026-10-24T12:14:00Z",
+      "report_title": "Security assessment report: Functional report acceptance",
+      "engagement_id": "10224605004e20a5953e0f931327f8c1"
+    },
+    "processed": true
+  },
+  "deliveries": [
+    {
+      "id": "3fa6a922973e82405b2b0f635c881f24",
+      "channel_id": "49303c325d852fbe91c46349753c38ce",
+      "state": "delivered",
+      "attempts": 1,
+      "event_id": "37812a1ff442f5324ad626ed73de28e1"
+    },
+    {
+      "id": "f8c50a8b15f43a794d2320ad0ee6dc4a",
+      "channel_id": "6cef8455d6aa9d45f39c5df934dbc85e",
+      "state": "delivered",
+      "attempts": 1,
+      "event_id": "37812a1ff442f5324ad626ed73de28e1"
+    },
+    {
+      "id": "f1e97bcc0826f59b938c96e0c86f7b40",
+      "channel_id": "8f0e58285588ff20122299b9e95ebaf4",
+      "state": "delivered",
+      "attempts": 1,
+      "event_id": "37812a1ff442f5324ad626ed73de28e1"
+    },
+    {
+      "id": "aaadb7af797284fe8089d8decbfc381f",
+      "channel_id": "e7afbada70699473c906d6838c7f5f07",
+      "state": "delivered",
+      "attempts": 1,
+      "event_id": "37812a1ff442f5324ad626ed73de28e1"
+    }
+  ],
+  "receipts": [
+    {
+      "message_id": "BtB9ZijJqrztKYbvQtnHnB",
+      "kind": "report_notification",
+      "locale": "en",
+      "data_class": "detail",
+      "link": "https://localhost:8445/engagements/10224605004e20a5953e0f931327f8c1",
+      "html_anchor_verified": true,
+      "class_filter_verified": true
+    },
+    {
+      "message_id": "K95QG6jAw8YGrn2jABk8rK",
+      "kind": "report_notification",
+      "locale": "en",
+      "data_class": "signal",
+      "link": "https://localhost:8445/engagements/10224605004e20a5953e0f931327f8c1",
+      "html_anchor_verified": true,
+      "class_filter_verified": true
+    },
+    {
+      "message_id": "C3mwZbRYVwysfwUBeiJSh7",
+      "kind": "report_notification",
+      "locale": "vi",
+      "data_class": "signal",
+      "link": "https://localhost:8445/engagements/10224605004e20a5953e0f931327f8c1",
+      "html_anchor_verified": true,
+      "class_filter_verified": true
+    },
+    {
+      "message_id": "hC4APVWUeHyrHd3iqrZrrE",
+      "kind": "report_notification",
+      "locale": "vi",
+      "data_class": "detail",
+      "link": "https://localhost:8445/engagements/10224605004e20a5953e0f931327f8c1",
+      "html_anchor_verified": true,
+      "class_filter_verified": true
+    },
+    {
+      "message_id": "SZxL9QFgygJ5DQLDiuCan9",
+      "kind": "scheduled_pdf",
+      "pdf_sha256": "bf5ad1a2be55be9481fd051cef10b86cb4b55c09e2914978c31eaa63284a6407",
+      "pdf_bytes": 66156
+    }
+  ],
+  "source_count": 1,
+  "event_count": 1,
+  "schedule_disabled_after_one_controlled_run": true,
+  "smtp": "private Docker SMTP -> persistent Mailpit",
+  "external_relay": false,
+  "gmail_evidence": false,
+  "recipient_headers_omitted": true,
+  "browser_observations": {
+    "receipt_ui": "Mailpit HTML displayed actual received Vietnamese detail message",
+    "open_report_clicked": true,
+    "landing_url": "https://localhost:8445/engagements/10224605004e20a5953e0f931327f8c1",
+    "landing_title": "Functional report acceptance",
+    "evidence_verified_visible": true,
+    "readonly_scan_controls_disabled": true,
+    "screenshot": "report-email-landing.png",
+    "theme_sweep": "waived by user"
+  },
+  "restart_observation": {
+    "coordinated_api_lifecycle_integrations_notifications_restart": true,
+    "occurrence_count": 1,
+    "occurrence_state": "done",
+    "counts": {
+      "sources": 1,
+      "events": 1,
+      "deliveries": 4
+    },
+    "pdf_sha256_unchanged": true,
+    "original_receipts_retained": true,
+    "verified_at": "2026-10-24T14:18:11.845820+00:00"
+  }
+}

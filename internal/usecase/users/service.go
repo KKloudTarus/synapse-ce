@@ -97,6 +97,16 @@ func HashToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// BootstrapCredentialID identifies the configured credential generation without returning
+// the token or its authentication digest. The same credential keeps its ID across restart.
+func (s *Service) BootstrapCredentialID() string {
+	if s.bootstrapDigest == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("synapse:bootstrap-credential:v1:" + s.bootstrapDigest))
+	return "bootstrap_" + hex.EncodeToString(sum[:])
+}
+
 func generateKey() (plaintext, hash string, err error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
@@ -547,6 +557,7 @@ func (s *Service) AuthenticatePrincipal(ctx context.Context, token string) (auth
 			return authz.Principal{}, nil, fmt.Errorf("bootstrap credential does not match SYNAPSE_API_TOKEN: %w: %w", authz.ErrCredentialInvalid, shared.ErrForbidden)
 		}
 		p.Credential.Kind = authz.KindBootstrap
+		p.Credential.ID = s.BootstrapCredentialID()
 	}
 	return p, u, nil
 }

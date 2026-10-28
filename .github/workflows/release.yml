@@ -14,7 +14,14 @@ permissions:
   packages: write # push the container image to GHCR
 
 jobs:
+  keycloak-integration:
+    name: Keycloak enterprise conformance
+    permissions:
+      contents: read
+    uses: ./.github/workflows/keycloak-conformance.yml
+
   goreleaser:
+    needs: keycloak-integration
     name: goreleaser
     runs-on: ubuntu-latest
     steps:
@@ -87,9 +94,11 @@ jobs:
           git push --force origin "refs/tags/$ACTION_MAJOR"
 
   image:
+    needs: keycloak-integration
     name: ${{ matrix.image }} image
     runs-on: ubuntu-latest
-    # Independent of goreleaser: a release whose binaries publish but whose image build fails must be visible
+    # Both publication jobs require protocol conformance; image builds remain independent of
+    # goreleaser: a release whose binaries publish but whose image build fails must be visible
     # as a failed image job, not hidden behind a skipped step. One row per image the deploy artefacts
     # reference, so an image nobody built is a red job rather than a pull that fails in a cluster months
     # later. Two releases shipped with the Helm chart pointing at ghcr.io/kkloudtarus/synapse and

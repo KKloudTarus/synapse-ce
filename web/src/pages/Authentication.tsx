@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { InitialOrganizationProvisioning } from './InitialOrganizationProvisioning'
 import { ConfirmDialog } from '../components/synapse/ConfirmDialog'
 import { useOptionalAuth } from '../auth/AuthContext'
 import { ApiError } from '../lib/api/client'
@@ -19,11 +20,28 @@ type PendingAction =
   | { kind: 'disable'; connection: EnterpriseConnection }
   | null
 
-const emptyDraft: ConnectionDraft = { displayName: '', issuer: '', clientId: '', clientSecret: '' }
+type ConnectionConfigurationSelection = Pick<EnterpriseConnection, 'id' | 'version' | 'issuer' | 'auth0OrganizationId' | 'clientId'> & { legacy: boolean }
+
+const emptyDraft: ConnectionDraft = { displayName: '', issuer: '', clientId: '', clientSecret: '', auth0OrganizationId: '' }
+
+const issuerValidationMessage = 'Enter an absolute HTTPS issuer URL with a host and without credentials, a query, or a fragment.'
+
+function validIssuerURL(value: string): boolean {
+  // Keep the value itself untouched. The server remains authoritative, but this catches
+  // configuration errors that it can reject without sending a secret anywhere.
+  const authority = value.match(/^https:\/\/([^/?#]*)/i)?.[1]
+  if (!authority || authority.includes('@')) return false
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' && parsed.host !== '' && parsed.username === '' && parsed.password === '' && parsed.search === '' && parsed.hash === ''
+  } catch {
+    return false
+  }
+}
 
 function messageFor(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.status === 409) {
-    return 'These settings changed elsewhere. The latest values have been loaded; review them and try again.'
+    return 'This request could not be completed. The latest settings have been loaded; review them and try again.'
   }
   return error instanceof Error ? error.message : fallback
 }
@@ -36,6 +54,7 @@ function formatTime(value: string | null): string {
 
 export function Authentication({ enabled }: AuthenticationProps) {
   const auth = useOptionalAuth()
+  const recoverySession = auth?.currentUser?.credentialKind === 'break_glass'
   // null means the read has not landed yet, which each section says for itself. One section
   // still waiting must not hide the sections that have arrived.
   const [connections, setConnections] = useState<EnterpriseConnection[] | null>(null)
@@ -43,6 +62,10 @@ export function Authentication({ enabled }: AuthenticationProps) {
   const [policyDeclared, setPolicyDeclared] = useState<boolean | null>(null)
   const [alerts, setAlerts] = useState<RecoveryAlert[] | null>(null)
   const [draft, setDraft] = useState<ConnectionDraft>(emptyDraft)
+  // This is deliberately a snapshot of the row the administrator selected. A later
+  // list response cannot silently move a secret submission to a newer version.
+  const [connectionConfiguration, setConnectionConfiguration] = useState<ConnectionConfigurationSelection | null>(null)
+  const connectionConfigurationRef = useRef<ConnectionConfigurationSelection | null>(null)
   const [membershipId, setMembershipId] = useState('')
   const [personId, setPersonId] = useState('')
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null)
@@ -50,6 +73,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [issuerError, setIssuerError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
   const generation = useRef(0)
@@ -57,14 +81,17 @@ export function Authentication({ enabled }: AuthenticationProps) {
   // Counts the administrator's own changes to the sign-in requirement, including the one a
   // save makes. A read in flight across one of these must not put its answer back.
   const policyEdits = useRef(0)
+  const issuerInput = useRef<HTMLInputElement | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (clearError = true) => {
+    const connectionConfigurationAtStart = connectionConfigurationRef.current
+    if (connectionConfigurationRef.current) clearConnectionConfiguration()
     loadController.current?.abort()
     const requestGeneration = ++generation.current
     const controller = new AbortController()
     loadController.current = controller
     setLoading(true)
-    setError(null)
+    if (clearError) setError(null)
     const current = () => generation.current === requestGeneration
     // Each read lands on its own. One unavailable part must not blank the page: an
     // organization that has not been declared for shared identity has no policy row yet,
@@ -84,7 +111,11 @@ export function Authentication({ enabled }: AuthenticationProps) {
     const connectionRead = identityApi
       .connections(controller.signal)
       .then((value) => {
-        if (current()) setConnections(value)
+        if (!current()) return
+        setConnections(value)
+        // The list may have changed while an old row remained visible during this read.
+        // Never retain a secret editor against that later authoritative version.
+        if (connectionConfigurationRef.current && connectionConfigurationRef.current !== connectionConfigurationAtStart) clearConnectionConfiguration()
       })
       .catch(report)
       .finally(settled)
@@ -148,7 +179,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
       if (refresh) void load()
     } catch (cause) {
       setError(messageFor(cause, 'Authentication settings update failed. Reload and try again.'))
-      if (cause instanceof ApiError && cause.status === 409) void load()
+      if (cause instanceof ApiError && cause.status === 409) void load(false)
     } finally {
       setSaving(false)
     }
@@ -183,7 +214,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
     } catch (cause) {
       setPolicy(prior)
       setError(messageFor(cause, 'Could not save the sign-in requirement.'))
-      if (cause instanceof ApiError && cause.status === 409) void load()
+      if (cause instanceof ApiError && cause.status === 409) void load(false)
     } finally {
       setSaving(false)
     }
@@ -211,6 +242,75 @@ export function Authentication({ enabled }: AuthenticationProps) {
     }, 'Recovery code created. Copy it now; it will not be shown again.', false)
   }
 
+  function selectConnectionConfiguration(connection: EnterpriseConnection) {
+    setError(null)
+    setIssuerError(null)
+    setNotice(null)
+    const selected = {
+      id: connection.id,
+      version: connection.version,
+      issuer: connection.issuer,
+      auth0OrganizationId: connection.auth0OrganizationId,
+      clientId: connection.clientId,
+      legacy: connection.configurationPending === true,
+    }
+    connectionConfigurationRef.current = selected
+    setConnectionConfiguration(selected)
+    setDraft({
+      displayName: connection.displayName,
+      issuer: connection.issuer,
+      clientId: connection.clientId ?? '',
+      clientSecret: '',
+      auth0OrganizationId: connection.auth0OrganizationId ?? '',
+    })
+  }
+
+  function clearConnectionConfiguration() {
+    connectionConfigurationRef.current = null
+    setConnectionConfiguration(null)
+    setDraft(emptyDraft)
+    setIssuerError(null)
+  }
+
+  async function saveConnectionDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (saving) return
+    if (!validIssuerURL(draft.issuer)) {
+      setError(null)
+      setNotice(null)
+      setIssuerError(issuerValidationMessage)
+      issuerInput.current?.focus()
+      return
+    }
+    const selected = connectionConfiguration
+    const submitted = selected
+      ? { ...draft, id: selected.id, version: selected.version }
+      : draft
+    setSaving(true)
+    setError(null)
+    setIssuerError(null)
+    setNotice(null)
+    try {
+      await identityApi.draftConnection(submitted, bootstrapProof ?? undefined)
+      clearConnectionConfiguration()
+      setNotice(selected ? (selected.legacy ? 'Legacy connection configuration saved.' : 'Connection update saved.') : 'Connection draft saved.')
+      void load()
+    } catch (cause) {
+      setError(cause instanceof ApiError && cause.status === 400
+        ? 'Could not save the connection draft. Check the issuer URL, client ID, client secret, and Auth0 organization ID, then try again.'
+        : messageFor(cause, 'Could not save the connection draft.'))
+      setDraft((current) => ({ ...current, clientSecret: '' }))
+      if (cause instanceof ApiError && cause.status === 409) {
+        // A configuration correction is CAS-protected. Discard the secret and require
+        // an explicit reselect after the authoritative row has been reloaded.
+        clearConnectionConfiguration()
+        void load(false)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (!enabled) {
     return (
       <section aria-labelledby="authentication-heading">
@@ -227,13 +327,15 @@ export function Authentication({ enabled }: AuthenticationProps) {
         <p className="mt-2 text-secondary">Manage organization sign-in connections, recovery controls, and their operational alerts.</p>
       </div>
 
+      {auth?.currentUser?.credentialKind === 'bootstrap' ? <InitialOrganizationProvisioning /> : null}
+
       {error ? <div role="alert" className="rounded-md border border-error-subtle bg-error-primary p-4 text-error-primary">{error} <button type="button" className="underline" onClick={() => void load()}>Retry</button></div> : null}
       {notice ? <p role="status" className="rounded-md bg-success-primary p-3 text-success-primary">{notice}</p> : null}
 
       <section aria-labelledby="administrator-proof-heading" className="rounded-lg border border-secondary p-5">
         <h2 id="administrator-proof-heading" className="text-lg font-semibold text-primary">Administrator verification</h2>
         <p className="mt-1 text-sm text-secondary">Sensitive changes require a current administrator proof. The proof is held only in this page while it is open.</p>
-        {auth?.currentUser?.credentialKind === 'bootstrap' ? <button type="button" disabled={saving} className="mt-4 rounded border px-3 py-2 disabled:opacity-50" onClick={() => void verifyAdministratorSession()}>{bootstrapProof ? 'Refresh administrator verification' : 'Verify administrator session'}</button> : <p className="mt-3 text-sm text-secondary">Signed-in administrators use their current SSO proof. If it has expired, reauthenticate from your profile before changing access.</p>}
+        {auth?.currentUser?.credentialKind === 'bootstrap' ? <button type="button" disabled={saving} className="mt-4 rounded border px-3 py-2 disabled:opacity-50" onClick={() => void verifyAdministratorSession()}>{bootstrapProof ? 'Refresh administrator verification' : 'Verify administrator session'}</button> : recoverySession ? <p className="mt-3 text-sm text-secondary">This recovery session is the current administrator proof for connection repair. It can prepare, test, activate, and disable connections.</p> : <p className="mt-3 text-sm text-secondary">Signed-in administrators use their current SSO proof. If it has expired, reauthenticate from your profile before changing access.</p>}
       </section>
 
       {loading ? (
@@ -247,10 +349,10 @@ export function Authentication({ enabled }: AuthenticationProps) {
             {policyDeclared === false ? <p className="mt-2 text-sm text-secondary">This organization has not been enabled for shared identity, so it has no sign-in requirement to change yet. Connections below can still be prepared and tested.</p> : null}
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'optional'} onChange={() => { policyEdits.current += 1; setPolicy((current) => current && { ...current, requirement: 'optional' }) }} /> Optional</label>
-              <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'required'} onChange={() => { policyEdits.current += 1; setPolicy((current) => current && { ...current, requirement: 'required' }) }} /> Required</label>
-              <button type="button" disabled={!policy || saving} className="rounded bg-brand-primary px-3 py-2 text-white disabled:opacity-50" onClick={() => void savePolicy()}>Save policy</button>
-              <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={() => void run(() => identityApi.rehearse(bootstrapProof ?? undefined), 'Recovery rehearsal recorded.')}>Rehearse recovery</button>
-              <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={() => void run(() => identityApi.testAlert(bootstrapProof ?? undefined), 'Recovery alert test requested.')}>Test alert</button>
+              {!recoverySession ? <label><input type="radio" name="sso-requirement" checked={policy?.requirement === 'required'} onChange={() => { policyEdits.current += 1; setPolicy((current) => current && { ...current, requirement: 'required' }) }} /> Required</label> : null}
+              <button type="button" disabled={!policy || saving || (recoverySession && policy.requirement !== 'optional')} className="rounded bg-brand-primary px-3 py-2 text-white disabled:opacity-50" onClick={() => void savePolicy()}>Save policy</button>
+              {!recoverySession ? <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={() => void run(() => identityApi.rehearse(bootstrapProof ?? undefined), 'Recovery rehearsal recorded.')}>Rehearse recovery</button> : null}
+              {!recoverySession ? <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={() => void run(() => identityApi.testAlert(bootstrapProof ?? undefined), 'Recovery alert test requested.')}>Test alert</button> : null}
             </div>
             <dl className="mt-4 grid gap-2 text-sm text-secondary sm:grid-cols-3">
               <div><dt className="font-medium text-primary">Last rehearsal</dt><dd>{formatTime(policy?.rehearsedAt ?? null)}</dd></div>
@@ -265,11 +367,13 @@ export function Authentication({ enabled }: AuthenticationProps) {
               <ul className="mt-3 space-y-3">
                 {(connections ?? []).map((connection) => (
                   <li key={connection.id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-secondary p-3">
-                    <span>
+                    <div>
                       <strong>{connection.displayName}</strong>
-                      <span className="ml-2 text-sm text-secondary">{connection.enabled ? 'Active' : 'Draft'} · revision {connection.draftRevision} · {connection.testPassed ? 'tested' : 'not tested'}</span>
-                    </span>
+                      <span className="ml-2 text-sm text-secondary">{connection.enabled ? `Active · revision ${connection.revision}${connection.draftRevision !== connection.revision ? ` · draft ${connection.draftRevision}` : ''}` : `Draft · revision ${connection.draftRevision}`} · {connection.testPassed ? 'tested' : 'not tested'}</span>
+                      {connection.auth0OrganizationId ? <p className="mt-1 text-sm text-secondary">Auth0 organization ID: <code>{connection.auth0OrganizationId}</code></p> : null}
+                    </div>
                     <span className="flex gap-2">
+                      {connection.configurationPending ? <button type="button" disabled={saving} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => selectConnectionConfiguration(connection)}>{connection.clientId ? 'Update secret' : 'Configure'}</button> : connection.clientId ? <button type="button" disabled={saving} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => selectConnectionConfiguration(connection)}>Update connection</button> : null}
                       <button type="button" disabled={saving} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => void testConnection(connection)}>Test</button>
                       <button type="button" disabled={saving || connection.draftRevision === 0 || connection.version === 0} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => setPendingAction({ kind: 'activate', connection })}>Activate</button>
                       <button type="button" disabled={saving || !connection.enabled || connection.version === 0} className="rounded border px-2 py-1 disabled:opacity-50" onClick={() => setPendingAction({ kind: 'disable', connection })}>Disable</button>
@@ -280,8 +384,9 @@ export function Authentication({ enabled }: AuthenticationProps) {
             )}
           </section>
 
-          <form className="rounded-lg border border-secondary p-5" onSubmit={(event) => { event.preventDefault(); void run(async () => { await identityApi.draftConnection(draft, bootstrapProof ?? undefined); setDraft(emptyDraft) }, 'Connection draft saved.') }}>
-            <h2 className="text-lg font-semibold text-primary">Create connection draft</h2>
+          <form className="rounded-lg border border-secondary p-5" onSubmit={(event) => { void saveConnectionDraft(event) }}>
+            <h2 className="text-lg font-semibold text-primary">{connectionConfiguration ? (connectionConfiguration.legacy ? (connectionConfiguration.clientId ? 'Update legacy connection secret' : 'Configure legacy connection') : 'Update connection') : 'Create connection draft'}</h2>
+            {connectionConfiguration ? <p className="mt-1 text-sm text-secondary">This connection keeps its existing issuer and organization trust. Enter a client secret to save its next revision.</p> : null}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {([
                 ['displayName', 'Display name', 'text'],
@@ -290,14 +395,35 @@ export function Authentication({ enabled }: AuthenticationProps) {
                 ['clientSecret', 'Client secret', 'password'],
               ] as const).map(([field, label, type]) => (
                 <label key={field} className="grid gap-1 text-sm text-primary">{label}
-                  <input required type={type} value={draft[field]} onChange={(event) => setDraft((current) => ({ ...current, [field]: event.target.value }))} className="rounded border border-secondary px-3 py-2" />
+                  <input
+                    ref={field === 'issuer' ? issuerInput : undefined}
+                    required
+                    type={type}
+                    value={draft[field]}
+                    readOnly={connectionConfiguration !== null && (field === 'issuer' || (field === 'clientId' && connectionConfiguration.clientId !== ''))}
+                    aria-invalid={field === 'issuer' && issuerError ? true : undefined}
+                    aria-describedby={field === 'issuer' && issuerError ? 'issuer-url-error' : undefined}
+                    onChange={(event) => {
+                      if (field === 'issuer') setIssuerError(null)
+                      setDraft((current) => ({ ...current, [field]: event.target.value }))
+                    }}
+                    className="rounded border border-secondary px-3 py-2 read-only:bg-secondary"
+                  />
                 </label>
               ))}
+              <label className="grid gap-1 text-sm text-primary">Auth0 organization ID (optional)
+                <input type="text" value={draft.auth0OrganizationId ?? ''} readOnly={connectionConfiguration !== null && (!connectionConfiguration.legacy || connectionConfiguration.auth0OrganizationId === undefined)} onChange={(event) => setDraft((current) => ({ ...current, auth0OrganizationId: event.target.value }))} aria-describedby="auth0-organization-id-help" className="rounded border border-secondary px-3 py-2 read-only:bg-secondary" />
+              </label>
             </div>
-            <button disabled={saving} className="mt-4 rounded bg-brand-primary px-3 py-2 text-white disabled:opacity-50">Save draft</button>
+            {issuerError ? <p id="issuer-url-error" role="alert" className="mt-2 text-sm text-error-primary">{issuerError}</p> : null}
+            <p id="auth0-organization-id-help" className="mt-2 text-sm text-secondary">Use the stable, case-sensitive Auth0 organization ID, not an organization name.</p>
+            <div className="mt-4 flex gap-3">
+              <button disabled={saving} className="rounded bg-brand-primary px-3 py-2 text-white disabled:opacity-50">{connectionConfiguration ? 'Save configuration' : 'Save draft'}</button>
+              {connectionConfiguration ? <button type="button" disabled={saving} className="rounded border px-3 py-2 disabled:opacity-50" onClick={clearConnectionConfiguration}>Cancel</button> : null}
+            </div>
           </form>
 
-          <section aria-labelledby="recovery-heading" className="rounded-lg border border-secondary p-5">
+          {!recoverySession ? <section aria-labelledby="recovery-heading" className="rounded-lg border border-secondary p-5">
             <h2 id="recovery-heading" className="text-lg font-semibold text-primary">Emergency recovery</h2>
             <p className="mt-1 text-sm text-secondary">Generate a one-time activation code for a specific membership and person.</p>
             <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={(event) => { void createRecoveryCode(event) }}>
@@ -306,7 +432,7 @@ export function Authentication({ enabled }: AuthenticationProps) {
               <button disabled={saving} className="justify-self-start rounded border px-3 py-2 disabled:opacity-50">Generate recovery code</button>
             </form>
             {recoveryCode ? <div role="status" className="mt-4 rounded border border-warning-subtle bg-warning-primary p-3 text-primary"><p className="font-medium">Copy this recovery code now. It will disappear when this page reloads.</p><code className="mt-2 block break-all select-all rounded bg-secondary p-2">{recoveryCode}</code><button type="button" className="mt-2 underline" onClick={() => setRecoveryCode(null)}>I have copied it</button></div> : null}
-          </section>
+          </section> : null}
 
           <section aria-labelledby="alerts-heading" className="rounded-lg border border-secondary p-5">
             <h2 id="alerts-heading" className="text-lg font-semibold text-primary">Recovery alerts</h2>

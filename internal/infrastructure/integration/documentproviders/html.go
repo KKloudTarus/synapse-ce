@@ -94,11 +94,19 @@ func canonicalStart(stack *[]canonicalFrame, start xml.StartElement, files map[s
 	}
 	parent := &(*stack)[len(*stack)-1]
 	switch name {
-	case "h1", "p", "code":
+	case "h1", "p":
 		if len(start.Attr) != 0 || parent.name != "root" {
 			return shared.ErrValidation
 		}
 		visible.WriteString("<" + name + ">")
+	case "code":
+		// The release document carries the evidence-chain head and the content
+		// hash as inline code inside a paragraph, so code is admitted at the root
+		// and inside one paragraph. Nesting beyond that is still refused.
+		if len(start.Attr) != 0 || (parent.name != "root" && parent.name != "p") {
+			return shared.ErrValidation
+		}
+		visible.WriteString("<code>")
 	case "link", "image":
 		if len(start.Attr) != 0 || parent.name == "link" || parent.name == "image" || parent.name == "attachment" || parent.name == "plain-text-link-body" {
 			return shared.ErrValidation

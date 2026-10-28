@@ -48,6 +48,18 @@ func (authFactory) ProviderForConnection(context.Context, ports.IdentityConnecti
 	return authProvider{}, nil
 }
 
+type organizationDeniedProvider struct{ authProvider }
+
+func (organizationDeniedProvider) ExchangeAndVerifyWithMaxAge(context.Context, string, string, string, time.Duration) (ports.OIDCIdentity, error) {
+	return ports.OIDCIdentity{}, fmt.Errorf("configured organization claim was denied")
+}
+
+type organizationDeniedFactory struct{}
+
+func (organizationDeniedFactory) ProviderForConnection(context.Context, ports.IdentityConnection) (ports.OIDCProvider, error) {
+	return organizationDeniedProvider{}, nil
+}
+
 type authConnections struct{}
 
 func (authConnections) GetIdentityConnection(_ context.Context, t, id shared.ID, r int) (ports.IdentityConnection, error) {
@@ -67,6 +79,18 @@ func (authConnections) ActivateIdentityConnection(context.Context, shared.ID, sh
 }
 func (authConnections) DisableIdentityConnection(context.Context, shared.ID, shared.ID, int, ports.IdentityAdminProof) (ports.IdentityConnection, error) {
 	return ports.IdentityConnection{}, nil
+}
+
+type testRecordingConnections struct {
+	authConnections
+	tests    int
+	recorded []ports.IdentityConnectionTest
+}
+
+func (s *testRecordingConnections) RecordIdentityConnectionTest(_ context.Context, test ports.IdentityConnectionTest, _ ports.IdentityAdminProof) error {
+	s.tests++
+	s.recorded = append(s.recorded, test)
+	return nil
 }
 
 type authTransactions struct {
@@ -115,5 +139,27 @@ func TestCallback_BurnsStateAndReturnsVerifiedNeutralEvidence(t *testing.T) {
 	}
 	if _, err = s.Callback(context.Background(), CallbackInput{TenantID: "tenant", State: state, Code: "code", CallerNonce: "browser"}); err == nil {
 		t.Fatal("replay was accepted")
+	}
+}
+
+func TestCallback_OrganizationClaimDenialDoesNotRecordSuccessfulConnectionTest(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC)
+	connections := &testRecordingConnections{}
+	transactions := &authTransactions{}
+	service, err := NewService(connections, transactions, organizationDeniedFactory{}, authProtector{}, authClock{now}, &authIDs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := &ports.IdentityAdminProof{At: now}
+	started, err := service.Begin(t.Context(), BeginInput{TenantID: "tenant", ConnectionID: "connection", Revision: 1, Purpose: ports.IdentityAuthorizationTest, CallerNonce: "administrator", AdminProof: proof})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := started.AuthorizationURL[len("https://issuer.example/auth?state="):]
+	if _, err = service.Callback(t.Context(), CallbackInput{TenantID: "tenant", State: state, Code: "code", CallerNonce: "administrator"}); err == nil {
+		t.Fatal("organization claim denial was accepted")
+	}
+	if connections.tests != 0 {
+		t.Fatalf("denied callback recorded %d successful connection tests", connections.tests)
 	}
 }

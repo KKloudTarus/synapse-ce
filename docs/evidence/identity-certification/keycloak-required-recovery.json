@@ -1,0 +1,72 @@
+{
+  "at": "2026-10-25T18:38:34.938215+00:00",
+  "result": "functional_pass_retained_required_canary",
+  "authority_counts": [
+    5,
+    8,
+    10
+  ],
+  "authority_and_policy_unchanged": true,
+  "observed": [
+    "disabled Keycloak absent from signed-out Required Connect",
+    "default Keycloak sign-in still works",
+    "Auth0 fallback admin signs in while Required remains enabled",
+    "real Test succeeds and existing Keycloak connection reactivated",
+    "ordinary Keycloak sign-in returns readonly Dashboard"
+  ],
+  "session_evidence_limit": "Database active flag alone is not validity proof. Exact epoch rejection is exercised by native Keycloak/PostgreSQL lifecycle conformance; retained browser canary did not export or inject old cookies.",
+  "baseline_source": "reviewed shared runtime a2de17b9; not standalone PR1609 source",
+  "final_review": false,
+  "artifacts_sha256": {
+    "auth0-closure-keycloak-required-disable-before.json": "ef82152625ebd43167f50362cec74dd3c288a18931239c5357c8acea3afc677d",
+    "auth0-closure-keycloak-required-disabled.json": "db5cd1307eb336892ebb413a426495bede08a734769c6ae3aa73e8d8e7914f10",
+    "auth0-closure-keycloak-required-disabled-default-login.json": "582b9236df2e842d64efd28fe8892183803ac4c43705271c4bffffe2cb9eb6e2",
+    "auth0-closure-keycloak-required-recovery-test-complete.json": "33133d5bfa60dd4487c450f42cd4f1b67bc4fcafb1eb632b18b90e22623de592",
+    "auth0-closure-keycloak-required-connection-restored.json": "cb181837d38889132d40ac3f0f001adf5e8d13192f628b0d4c1108eb90eb7b61",
+    "auth0-closure-keycloak-required-recovered-ordinary-login.json": "787144d573a614e572eb0754c55bd7abbbca8ee382763476889ad59edfc69124",
+    "keycloak-required-disabled-connect.png": "8c2b44d1d6519cd834dcd4dd4ddee688da9e895b2b5d5865724d55204277b080",
+    "keycloak-required-disabled-default-works.png": "a755441eb58d6a659efa4eddf56e47734743650180cf53053e6dfb1179f53b1e",
+    "keycloak-required-auth0-admin-fallback.png": "f19bbc6ebd808ef5b6cedceef3a5303732d347c2486218b01c3ca623a5bf5e77",
+    "keycloak-required-recovered-ordinary-login.png": "5c0b7dd3e705a56dfbdfa99a62ea6ace5d8c42a622d33e88530cfbbef83702e8",
+    "keycloak-secret-conformance-lifecycle-functional.json": "0f21cbbdb20585a88dca7f98b9139448cb57c4a652e9976165ce64793e9d041f"
+  },
+  "connection_progression": [
+    {
+      "enabled": true,
+      "settings_revision": 1,
+      "version": 4,
+      "epoch": 2
+    },
+    {
+      "enabled": false,
+      "settings_revision": 1,
+      "version": 5,
+      "epoch": 3
+    },
+    {
+      "enabled": false,
+      "settings_revision": 1,
+      "version": 5,
+      "epoch": 3
+    },
+    {
+      "enabled": false,
+      "settings_revision": 1,
+      "version": 5,
+      "epoch": 3
+    },
+    {
+      "enabled": true,
+      "settings_revision": 1,
+      "version": 6,
+      "epoch": 3
+    },
+    {
+      "enabled": true,
+      "settings_revision": 1,
+      "version": 6,
+      "epoch": 3
+    }
+  ],
+  "source_integration": "Selective shared repair integration is in progress. These retained-browser observations do not certify standalone PR source."
+}

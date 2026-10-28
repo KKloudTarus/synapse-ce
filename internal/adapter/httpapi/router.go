@@ -487,6 +487,7 @@ func (rt *Router) routes() *http.ServeMux {
 		mux.HandleFunc("POST /api/v1/document-publications", rt.authz(userdom.PermReview, rt.publishDocument))
 		mux.HandleFunc("GET /api/v1/document-publications/{id}", rt.authz(userdom.PermView, rt.documentIntent))
 		mux.HandleFunc("POST /api/v1/document-publications/{id}/resume", rt.authz(userdom.PermReview, rt.resumePreparedDocumentPublication))
+		mux.HandleFunc("GET /api/v1/document-links/{id}/snapshots", rt.authz(userdom.PermView, rt.documentSnapshots))
 		mux.HandleFunc("DELETE /api/v1/document-links/{id}", rt.authz(userdom.PermReview, rt.unpublishDocument))
 		mux.HandleFunc("GET /api/v1/engagements/{id}/documents", rt.authz(userdom.PermView, rt.withEngTenant(rt.engagementDocuments)))
 		mux.HandleFunc("GET /api/v1/projects/{key}/documents", rt.authz(userdom.PermView, rt.projectDocuments))

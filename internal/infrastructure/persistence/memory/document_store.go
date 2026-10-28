@@ -119,6 +119,37 @@ func (s *DocumentStore) ListLinks(ctx context.Context, tenant shared.ID, scope d
 	return out, nil
 }
 
+func (s *DocumentStore) ListDocumentSnapshots(ctx context.Context, tenant, linkID shared.ID, limit int) ([]docpublish.Intent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if tenant.IsZero() || linkID.IsZero() || limit < 1 || limit > docpublish.MaxListLimit {
+		return nil, shared.ErrValidation
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	link, ok := s.links[tenant][linkID]
+	if !ok {
+		return nil, shared.ErrNotFound
+	}
+	out := make([]docpublish.Intent, 0, limit)
+	for _, intent := range s.intents[tenant] {
+		if intent.State == writeintent.Done && intent.Target == link.Target && (intent.Action == docpublish.Create || intent.Action == docpublish.Snapshot) {
+			out = append(out, intent.Clone())
+		}
+	}
+	slices.SortFunc(out, func(a, b docpublish.Intent) int {
+		if order := b.UpdatedAt.Compare(a.UpdatedAt); order != 0 {
+			return order
+		}
+		return strings.Compare(b.ID.String(), a.ID.String())
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 // validateScope mirrors the durable adapter's composite foreign keys. It reads the concrete
 // parent stores directly because GetByIDInTenant hides internal project contexts, which the
 // foreign key accepts, and this adapter must neither expose nor accept another tenant's rows.
@@ -173,7 +204,7 @@ func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID,
 		if _, linked := s.linkForTarget(tenant, intent.Target); linked {
 			return docpublish.Intent{}, false, shared.ErrConflict
 		}
-	case docpublish.Update:
+	case docpublish.Update, docpublish.Snapshot:
 		link, ok := s.links[tenant][intent.LinkID]
 		if !ok {
 			return docpublish.Intent{}, false, shared.ErrNotFound
@@ -181,15 +212,18 @@ func (s *DocumentStore) CreateOrGetIntent(ctx context.Context, tenant shared.ID,
 		if link.Target != intent.Target {
 			return docpublish.Intent{}, false, shared.ErrValidation
 		}
-		if link.RetiredAt != nil {
+		if link.RetiredAt != nil && intent.Action != docpublish.Snapshot {
 			return docpublish.Intent{}, false, shared.ErrConflict
 		}
-	case docpublish.Purge:
+		if intent.ExpectedLinkRevision > 0 && link.Revision != intent.ExpectedLinkRevision {
+			return docpublish.Intent{}, false, shared.ErrConflict
+		}
+	case docpublish.Purge, docpublish.Trash:
 		link, ok := s.links[tenant][intent.LinkID]
 		if !ok {
 			return docpublish.Intent{}, false, shared.ErrNotFound
 		}
-		if link.Target != intent.Target || link.RetiredAt != nil {
+		if link.Target != intent.Target || link.RetiredAt != nil || (intent.ExpectedLinkRevision > 0 && link.Revision != intent.ExpectedLinkRevision) {
 			return docpublish.Intent{}, false, shared.ErrConflict
 		}
 	}

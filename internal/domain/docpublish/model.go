@@ -23,6 +23,10 @@ import (
 // time, so no consumer gets an unbounded read.
 const MaxListLimit = 100
 
+// DestinationManagedSnapshotProfile records that a provider, not Synapse, owns
+// effective sharing for an immutable snapshot destination.
+const DestinationManagedSnapshotProfile = "destination_managed_snapshot_v1"
+
 // Persistence-compatible bounds. The migration's CHECK constraints repeat them.
 const (
 	maxSourceRefBytes      = 512
@@ -163,6 +167,7 @@ type Link struct {
 	RemoteRevision string
 	RemoteURL      string
 	ContentHash    string
+	AccessProfile  string
 	// Revision counts the writes applied to this link, starting at 1.
 	Revision int
 	// RestrictionStatus describes the last background sharing observation, not
@@ -173,9 +178,10 @@ type Link struct {
 	RestrictionCheckVersion int
 	// RetiredAt retains the page's immutable identity after a governed purge.
 	// A retired target cannot be created or updated again.
-	RetiredAt *time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	RetiredAt   *time.Time
+	RemovalKind RemovalKind
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 func (l Link) Validate() error {
@@ -183,8 +189,11 @@ func (l Link) Validate() error {
 		l.CreatedAt.IsZero() || l.UpdatedAt.Before(l.CreatedAt) {
 		return fmt.Errorf("%w: invalid document link", shared.ErrValidation)
 	}
-	if l.RetiredAt != nil && (l.RetiredAt.Before(l.CreatedAt) || l.RetiredAt.Before(l.UpdatedAt)) {
+	if l.RetiredAt != nil && (l.RetiredAt.Before(l.CreatedAt) || l.RetiredAt.Before(l.UpdatedAt) || !l.RemovalKind.Valid()) {
 		return fmt.Errorf("%w: document retirement time is invalid", shared.ErrValidation)
+	}
+	if l.RetiredAt == nil && l.RemovalKind != "" {
+		return fmt.Errorf("%w: active document link has a removal kind", shared.ErrValidation)
 	}
 	if err := l.Target.Validate(); err != nil {
 		return err
@@ -194,6 +203,9 @@ func (l Link) Validate() error {
 	}
 	if !sha256Pattern.MatchString(l.ContentHash) {
 		return fmt.Errorf("%w: document link needs a content hash", shared.ErrValidation)
+	}
+	if l.AccessProfile != "" && l.AccessProfile != DestinationManagedSnapshotProfile {
+		return fmt.Errorf("%w: invalid document access profile", shared.ErrValidation)
 	}
 	return nil
 }
@@ -208,8 +220,19 @@ const (
 	Update Action = "update"
 	// Purge permanently removes a previously published page and retires its
 	// local target. It cannot create a replacement page for that target.
-	Purge Action = "purge"
+	Purge    Action = "purge"
+	Snapshot Action = "snapshot"
+	Trash    Action = "trash"
 )
+
+type RemovalKind string
+
+const (
+	RemovalTrash RemovalKind = "trash"
+	RemovalPurge RemovalKind = "purge"
+)
+
+func (k RemovalKind) Valid() bool { return k == RemovalTrash || k == RemovalPurge }
 
 // Intent is one durable publish or republish command.
 type Intent struct {
@@ -218,18 +241,22 @@ type Intent struct {
 	Target
 	// LinkID names the link an Update writes to. It is empty for Create.
 	LinkID shared.ID
-	Action Action
+	// ExpectedLinkRevision fences managed snapshots and trash from advancing a
+	// link changed by another completed publication.
+	ExpectedLinkRevision int
+	Action               Action
 	// RequestKey is the logical command identity; PayloadDigest covers the command content,
 	// so a replay with different content is a conflict rather than a second write.
 	RequestKey    string
 	PayloadDigest string
 	// ContentHash is the hash of the document body this intent publishes.
-	ContentHash string
-	Marker      string
-	State       writeintent.State
-	Version     int
-	Attempts    int
-	LeaseUntil  *time.Time
+	ContentHash   string
+	AccessProfile string
+	Marker        string
+	State         writeintent.State
+	Version       int
+	Attempts      int
+	LeaseUntil    *time.Time
 	// RemoteID, RemoteURL, RemoteVersion and RemoteRevision are the page this write produced; set only when done.
 	RemoteID       string
 	RemoteURL      string
@@ -264,14 +291,26 @@ func (i Intent) Validate() error {
 	if err := i.Target.Validate(); err != nil {
 		return err
 	}
+	if i.AccessProfile != "" && i.AccessProfile != DestinationManagedSnapshotProfile {
+		return fmt.Errorf("%w: invalid document access profile", shared.ErrValidation)
+	}
 	switch i.Action {
 	case Create:
-		if !i.LinkID.IsZero() {
+		if !i.LinkID.IsZero() || i.ExpectedLinkRevision != 0 {
 			return fmt.Errorf("%w: a create intent has no existing link", shared.ErrValidation)
 		}
-	case Update, Purge:
+	case Update, Purge, Snapshot, Trash:
 		if i.LinkID.IsZero() {
-			return fmt.Errorf("%w: a document update or purge needs an existing link", shared.ErrValidation)
+			return fmt.Errorf("%w: a document update, snapshot or removal needs an existing link", shared.ErrValidation)
+		}
+		if (i.Action == Snapshot || i.Action == Trash) && i.ExpectedLinkRevision < 1 {
+			return fmt.Errorf("%w: document snapshot or trash needs expected link revision", shared.ErrValidation)
+		}
+		if (i.Action == Snapshot || i.Action == Trash) && i.AccessProfile != DestinationManagedSnapshotProfile {
+			return fmt.Errorf("%w: document snapshot or trash requires a managed access profile", shared.ErrValidation)
+		}
+		if i.Action != Snapshot && i.Action != Trash && i.ExpectedLinkRevision != 0 {
+			return fmt.Errorf("%w: only document snapshot or trash has an expected link revision", shared.ErrValidation)
 		}
 	default:
 		return fmt.Errorf("%w: invalid document intent action", shared.ErrValidation)
@@ -326,7 +365,7 @@ const RetryDeferred writeintent.Event = "retry_deferred"
 // replayed request key must be. Identity fields that the server issues (ID, marker, state,
 // timestamps) are deliberately not compared.
 func (i Intent) SameCommand(other Intent) bool {
-	return i.TenantID == other.TenantID && i.Target == other.Target && i.LinkID == other.LinkID &&
+	return i.TenantID == other.TenantID && i.Target == other.Target && i.LinkID == other.LinkID && i.ExpectedLinkRevision == other.ExpectedLinkRevision && i.AccessProfile == other.AccessProfile &&
 		i.Action == other.Action && i.RequestKey == other.RequestKey &&
 		i.PayloadDigest == other.PayloadDigest && i.ContentHash == other.ContentHash
 }
@@ -457,7 +496,7 @@ func (i Intent) Complete(existing *Link) (Link, bool, error) {
 		link := Link{
 			ID: i.ID, TenantID: i.TenantID, Target: i.Target,
 			RemotePageID: i.RemoteID, RemoteVersion: i.RemoteVersion, RemoteRevision: i.RemoteRevision, RemoteURL: i.RemoteURL,
-			ContentHash: i.ContentHash, Revision: 1, CreatedAt: i.UpdatedAt, UpdatedAt: i.UpdatedAt,
+			ContentHash: i.ContentHash, AccessProfile: i.AccessProfile, Revision: 1, CreatedAt: i.UpdatedAt, UpdatedAt: i.UpdatedAt,
 		}
 		if err := link.Validate(); err != nil {
 			return Link{}, false, err
@@ -470,24 +509,51 @@ func (i Intent) Complete(existing *Link) (Link, bool, error) {
 	if existing.TenantID != i.TenantID || existing.Target != i.Target {
 		return Link{}, false, fmt.Errorf("%w: document link target differs", shared.ErrConflict)
 	}
-	if (i.Action == Update || i.Action == Purge) && existing.ID != i.LinkID {
+	if existing.AccessProfile != i.AccessProfile {
+		return Link{}, false, fmt.Errorf("%w: document access profile differs", shared.ErrConflict)
+	}
+	if (i.Action == Update || i.Action == Purge || i.Action == Snapshot || i.Action == Trash) && existing.ID != i.LinkID {
 		return Link{}, false, fmt.Errorf("%w: document update targets another link", shared.ErrConflict)
 	}
-	if existing.RemotePageID != i.RemoteID {
+	if i.Action != Snapshot && existing.RemotePageID != i.RemoteID {
 		return Link{}, false, fmt.Errorf("%w: document page identity differs", shared.ErrConflict)
 	}
-	if existing.RetiredAt != nil {
+	if existing.RetiredAt != nil && (i.Action != Snapshot || existing.RemovalKind != RemovalTrash || i.AccessProfile != DestinationManagedSnapshotProfile) {
 		return Link{}, false, fmt.Errorf("%w: document link is retired", shared.ErrConflict)
 	}
-	if i.Action == Purge {
+	if i.Action == Purge || i.Action == Trash {
 		if i.RemoteVersion != existing.RemoteVersion || i.RemoteRevision != existing.RemoteRevision || i.RemoteURL != existing.RemoteURL {
-			return Link{}, false, fmt.Errorf("%w: document purge must retain the existing page identity and version", shared.ErrConflict)
+			return Link{}, false, fmt.Errorf("%w: document removal must retain the existing page identity and version", shared.ErrConflict)
+		}
+		if i.ExpectedLinkRevision > 0 && i.ExpectedLinkRevision != existing.Revision {
+			return Link{}, false, fmt.Errorf("%w: document removal link revision differs", shared.ErrConflict)
 		}
 		next := *existing
 		retired := i.UpdatedAt.UTC()
 		next.RetiredAt = &retired
+		if i.Action == Trash {
+			next.RemovalKind = RemovalTrash
+		} else {
+			next.RemovalKind = RemovalPurge
+		}
 		next.UpdatedAt = retired
 		next.Revision++
+		if err := next.Validate(); err != nil {
+			return Link{}, false, err
+		}
+		return next, true, nil
+	}
+	if i.Action == Snapshot {
+		if i.ExpectedLinkRevision != existing.Revision {
+			return Link{}, false, fmt.Errorf("%w: document snapshot link revision differs", shared.ErrConflict)
+		}
+		next := *existing
+		next.RemotePageID, next.RemoteVersion, next.RemoteRevision, next.RemoteURL = i.RemoteID, i.RemoteVersion, i.RemoteRevision, i.RemoteURL
+		next.ContentHash, next.AccessProfile = i.ContentHash, i.AccessProfile
+		next.RetiredAt, next.RemovalKind = nil, ""
+		next.RestrictionStatus, next.RestrictionCheckedAt, next.RestrictionNextAt, next.RestrictionCheckVersion = "", nil, time.Time{}, 0
+		next.Revision++
+		next.UpdatedAt = i.UpdatedAt.UTC()
 		if err := next.Validate(); err != nil {
 			return Link{}, false, err
 		}
