@@ -56,16 +56,17 @@ type SigningKeyResolver interface {
 }
 
 type Service struct {
-	transport    ports.TelemetryAuditStore
-	sensorStates ports.SensorStateAuditStore
-	coverage     ports.CoverageReconciler
-	detections   ports.PendingDetectionReconciler
-	keys         SigningKeyResolver
-	policies     ports.PrivacyPolicyResolver
-	bindings     ports.TelemetryAssetBindingStore
-	audit        ports.IdempotentAuditLogger
-	clock        ports.Clock
-	timeline     EnvelopeRecorder // optional #594 B7 State-Timeline projection sink
+	transport      ports.TelemetryAuditStore
+	sensorStates   ports.SensorStateAuditStore
+	coverage       ports.CoverageReconciler
+	detections     ports.PendingDetectionReconciler
+	keys           SigningKeyResolver
+	policies       ports.PrivacyPolicyResolver
+	bindings       ports.TelemetryAssetBindingStore
+	audit          ports.IdempotentAuditLogger
+	admissionAudit ports.FirstObservationAuditLogger
+	clock          ports.Clock
+	timeline       EnvelopeRecorder // optional #594 B7 State-Timeline projection sink
 }
 
 // EnvelopeRecorder projects an accepted telemetry envelope into the endpoint State Timeline (#594 B7).
@@ -98,13 +99,18 @@ func NewService(
 	if transport == nil || keys == nil || policies == nil || audit == nil || clock == nil {
 		return nil, fmt.Errorf("%w: telemetry ingest service needs a transport store, signing-key store, privacy-policy resolver, audit log and clock", shared.ErrValidation)
 	}
+	admissionAudit, ok := audit.(ports.FirstObservationAuditLogger)
+	if !ok {
+		return nil, fmt.Errorf("%w: telemetry ingest requires first-observation audit support", shared.ErrValidation)
+	}
 	return &Service{
-		transport: transport,
-		keys:      keys,
-		policies:  policies,
-		bindings:  transport,
-		audit:     audit,
-		clock:     clock,
+		transport:      transport,
+		keys:           keys,
+		policies:       policies,
+		bindings:       transport,
+		audit:          audit,
+		admissionAudit: admissionAudit,
+		clock:          clock,
 	}, nil
 }
 
@@ -552,10 +558,11 @@ func (s *Service) eventBatch(m fleetagent.TelemetryBatchManifest, events []verif
 }
 
 // record makes the durable-admission audit mandatory. Telemetry admission is
-// already idempotent, so an exact retry after an audit failure re-runs this with
-// the same deterministic key and repairs the missing line instead of duplicating it.
+// already committed before this observation. Retries retain the first successful
+// admission's timestamp and hash, including when admission followed a later retry
+// than the batch commitment. All other audit fields must still match exactly.
 func (s *Service) record(ctx context.Context, actor shared.ID, m fleetagent.TelemetryBatchManifest, action string, gap bool, at time.Time) error {
-	if err := s.audit.RecordOnce(ctx, ports.AuditEntry{
+	if err := s.admissionAudit.RecordFirstObservation(ctx, ports.AuditEntry{
 		Actor: actor.String(), Action: action, Target: m.StreamID.String(), At: at,
 		Metadata: map[string]string{
 			"idempotency_key": telemetryAuditKey(action, m),

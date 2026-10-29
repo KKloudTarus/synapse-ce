@@ -262,8 +262,9 @@ func (c telemetryGapClock) Now() time.Time { return c.now }
 
 type telemetryGapAudit struct{}
 
-func (telemetryGapAudit) Record(context.Context, ports.AuditEntry) error     { return nil }
-func (telemetryGapAudit) RecordOnce(context.Context, ports.AuditEntry) error { return nil }
+func (telemetryGapAudit) Record(context.Context, ports.AuditEntry) error                 { return nil }
+func (telemetryGapAudit) RecordOnce(context.Context, ports.AuditEntry) error             { return nil }
+func (telemetryGapAudit) RecordFirstObservation(context.Context, ports.AuditEntry) error { return nil }
 
 func telemetryGapSpoolConfig(t *testing.T, now time.Time) spool.Config {
 	t.Helper()

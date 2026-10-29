@@ -60,9 +60,11 @@ func (q TelemetryBatchAccountingQuery) Valid() bool {
 	return !q.AgentID.IsZero() && !q.AssetID.IsZero() && !q.Since.IsZero() && !q.Until.IsZero() && q.Since.Before(q.Until)
 }
 
-// CoverageSensorStateReader returns the state effective at Since plus every
-// observation in [Since,Until), so a composer cannot mistake a mid-window gap
-// followed by recovery for complete coverage.
+// CoverageSensorStateReader returns complete observations containing the latest
+// state of each class before Since, plus every observation in [Since,Until).
+// Pre-window reports may overlap classes: the composer selects each class's
+// greatest (ObservedAt, ReportID) before conservatively scoring all in-window
+// states. Returning complete reports preserves their signed source provenance.
 type CoverageSensorStateReader interface {
 	ListCoverageSensorStates(ctx context.Context, q CoverageSensorStateQuery) ([]sensorstate.Observation, error)
 }
