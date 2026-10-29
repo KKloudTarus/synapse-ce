@@ -342,6 +342,10 @@ Five service setups were not ready at the last direct environment audit on
 2026-10-28. This is a setup count, not a count of all untested acceptance cells;
 SharePoint and OneDrive Business are grouped together. The subsequent source
 rehearsals did not add these entitlements or credentials.
+The Google Chat personal session was rechecked on 2026-10-29; no space or
+webhook was created. Google's [documented webhook prerequisites](https://developers.google.com/workspace/chat/quickstart/webhooks)
+require an eligible Workspace account and organization permission. The other
+setup rows retain their original audit date.
 
 | Setup | Verified gap |
 | --- | --- |
