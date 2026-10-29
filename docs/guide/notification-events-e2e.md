@@ -336,12 +336,42 @@ The observer was upgraded during reversal; the executor stayed running to preser
 its pinned restart descriptors. This proves the governed local operation and Slack
 journey, not production capacity, other operating systems or deferred clients.
 
+### Restored Gmail SMTP
+
+On 2026-10-30 (Asia/Bangkok), the retained identity sandbox delivered four
+self-mails through Google OAuth SMTP: an initial channel test, one real manual
+finding in EN/VI, and a channel test after worker restart. Each delivery has one
+SMTP 250 attempt and exactly one matching Message-ID in the Gmail Inbox. The
+[receipt](assets/ui/notification-events/live/gmail-smtp-live.json) binds the
+finding's immutable source record, projected event, deliveries and actual runtime
+image digests. Received subject, plain text and HTML match the stored-event
+preview for both source messages.
+
+The [English](assets/ui/notification-events/live/gmail-source-en.png) and
+[Vietnamese](assets/ui/notification-events/live/gmail-source-vi.png) native body
+crops show the red critical label, intact Vietnamese title and literal hostile
+strings. The full URL is defanged and the only HTML anchor is the generated
+console link. A native Gmail click, repeated after normal sign-in, opened the
+[exact finding](assets/ui/notification-events/live/gmail-finding-console.png)
+under the existing readonly membership. The unauthenticated sign-in returned to
+Dashboard; automatic deep-link restoration is not claimed.
+
+The existing personal project supplied a new Desktop client and an explicitly
+approved self-test grant. No project, API enablement, compute or billing change
+was made. Client material and tokens are encrypted locally; mailbox headers and
+raw MIME stay private. The operator resume command was exercised without fresh
+consent or enrollment. The test rule and channels are disabled and the worker is
+parked, with configuration retained. This Testing grant expires around
+2026-11-05 16:55 UTC; encrypted storage does not remove the provider's expiry.
+This is representative current SMTP/source proof, not every event/client cell
+or Microsoft SMTP acceptance. Historical receipts keep their original scope.
+
 ### Remaining environments
 
-Five service setups were not ready at the last direct environment audit on
-2026-10-28. This is a setup count, not a count of all untested acceptance cells;
-SharePoint and OneDrive Business are grouped together. The subsequent source
-rehearsals did not add these entitlements or credentials.
+Four service setups remain unavailable after the Gmail restoration above. The
+direct environment audit on 2026-10-28 recorded five. This is a setup count,
+not a count of all untested acceptance cells; SharePoint and OneDrive Business
+are grouped together.
 The Google Chat personal session was rechecked on 2026-10-29; no space or
 webhook was created. Google's [documented webhook prerequisites](https://developers.google.com/workspace/chat/quickstart/webhooks)
 require an eligible Workspace account and organization permission. The other
@@ -353,10 +383,9 @@ setup rows retain their original audit date.
 | Microsoft SMTP / Outlook | No authorized Exchange mailbox and SMTP entitlement verified. Entra Free sign-in does not provide a mailbox. |
 | SharePoint / OneDrive Business | No Business site/drive and restricted-reader setup verified. An Entra app alone is insufficient. |
 | Google Chat | No current eligible configured space/webhook in the personal session. Historical receipts remain valid. |
-| Gmail SMTP | The earlier OAuth grant was revoked; a current sender credential has not been restored. Historical SMTP receipts remain valid. |
 
 Okta, Google Workspace identity, PingOne and PagerDuty are intentionally excluded
-by the maintainer and are not counted in those five. Google Workspace identity
+by the maintainer and are not counted in those four. Google Workspace identity
 and Gmail SMTP are separate integrations.
 
 Two execution environment groups remain unproved: governed DAST/recon needs an
