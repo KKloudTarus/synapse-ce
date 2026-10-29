@@ -387,3 +387,39 @@ func TestFindingCommentMentionFailureRollsBackCommentAndOutbox(t *testing.T) {
 		t.Fatalf("outbox escaped rollback: %+v", records)
 	}
 }
+
+func TestFindingNotificationFreezesLifecycleAcrossReopen(t *testing.T) {
+	repo := memory.NewFindingRepository()
+	outbox := memory.NewNotificationOutbox()
+	service, tenantID, engagementID := notificationFindingService(t, repo, memory.NewRetestRepository(), &fakeAudit{}, outbox)
+	outbox.Activate(tenantID, testNow.Add(-time.Second))
+	created, err := service.Create(context.Background(), "operator", engagementID, finding.ManualInput{Title: "Lifecycle", Severity: shared.SeverityHigh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := service.UpdateStatus(context.Background(), engagementID, created.ID, finding.StatusRemediated, "", "operator", created.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.UpdateStatus(context.Background(), engagementID, created.ID, finding.StatusOpen, "", "operator", closed.Version); err != nil {
+		t.Fatal(err)
+	}
+	records := outbox.Records(tenantID)
+	if len(records) != 3 {
+		t.Fatalf("records = %d", len(records))
+	}
+	want := map[string]notification.PagerLifecycle{
+		"finding_created": {Episode: 1, Revision: 1},
+		"finding_status:" + created.ID.String() + ":2": {Episode: 1, Revision: 2, Terminal: true},
+		"finding_status:" + created.ID.String() + ":3": {Episode: 2, Revision: 3},
+	}
+	for _, record := range records {
+		key := record.SourceKind
+		if key == "finding_status" {
+			key += ":" + record.SourceID
+		}
+		if record.PagerLifecycle != want[key] {
+			t.Fatalf("source %s lifecycle = %+v, want %+v", key, record.PagerLifecycle, want[key])
+		}
+	}
+}

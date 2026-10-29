@@ -73,8 +73,9 @@ func NewDAST(id, engagementID shared.ID, in DASTInput, now time.Time) (Finding, 
 		Kind:         KindDAST,
 		DedupKey:     dastDedupKey(anchor, source, fingerprint),
 		// ProposedBy LEFT EMPTY (the judgment-layer gate already ran) – see the doc above.
-		Version: 1,
-		Audit:   shared.Audit{CreatedAt: now, UpdatedAt: now},
+		Version:      1,
+		PagerEpisode: 1,
+		Audit:        shared.Audit{CreatedAt: now, UpdatedAt: now},
 	}, nil
 }
 

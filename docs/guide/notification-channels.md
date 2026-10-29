@@ -153,8 +153,26 @@ successfully acknowledged remote reference for the same tenant, channel, pinned
 channel-secret version, and subject. It orders by acknowledgement time and then
 delivery ID, so later delivery has a deterministic anchor. Concurrent first sends
 can both create a top-level message because neither has an earlier acknowledgement
-yet. The event catalog currently declares no trusted closure state, so arbitrary
-event data never causes closure or resolution to be inferred.
+yet. This chat-thread behavior is separate from pager lifecycle admission.
+
+For newly captured finding and incident events, pagers use a source episode and
+revision recorded in the business transaction. Findings end an episode at
+`remediated` or `false_positive`; incidents end it at `resolved` or `closed`.
+Moving from a terminal state back to an active state starts another episode and
+another provider alias. An incident disposition does not close an alert. Historical
+events without this metadata retain their legacy behavior; event JSON and template
+text cannot request closure.
+
+Each channel uses one alert alias per episode and serializes the matched updates
+sent to that alert. A terminal event closes the admitted alert after submitted
+updates have settled, even if the rule only matches creation.
+A terminal event received before an unsent trigger suppresses that trigger. JSM
+request handles survive worker lease expiry and resume through status reads. A
+mutation whose outcome is unknown remains blocked instead of being sent again;
+a new episode remains independent. Disabling, pausing or rotating a channel keeps
+its outstanding obligation, and prevents follow-up sends using a retired version.
+A send already admitted before a configuration change may still finish; its
+receipt is retained.
 
 Telegram replies to the selected message ID and permits a missing parent to fall
 back to a new message. Google Chat derives a stable thread key from the tenant,
@@ -182,6 +200,24 @@ pending JSM request persistence also ignore stored request IDs and can repeat a
 POST instead of resuming its status GET. Keep JSM disabled across the entire pool
 until all workers support the new persistence contract. Drain pending JSM requests
 before downgrading workers; preserve their request IDs and schema during rollback.
+
+For pager lifecycle rollout, stop both producers and notification workers before
+applying migrations `0267–0269`, then upgrade both before resuming. Producer code
+assigns episodes, so a mixed deployment with old producers is unsupported. The
+source and attempt guards reject old workers processing classified records.
+Preserve episode tombstones, pending operations, pinned credentials and terminal
+events during recovery; they cannot expire while old source events can replay.
+The pager transport and gate migrations intentionally require forward recovery
+instead of a Down migration that would erase unresolved external operations.
+
+The JSM sandbox rehearsal on 2026-10-29 exercised a source-created finding,
+worker restart with a persisted accepted request, two same-episode comments,
+automatic close, reopen with a distinct alias, and a second automatic close.
+All six operations reached provider-confirmed success. Native JSM inspection
+showed both comments on the first alert and the reopened alert as a separate
+record. The rehearsal used the existing Free integration without billing changes.
+This covers the pager lifecycle path; it does not establish live PagerDuty
+acceptance or complete the broader event/client matrix.
 
 For an immediate rollback, keep the current binaries and disable the affected
 providers. If reverting binaries, quiesce deliveries and coordinate both API and

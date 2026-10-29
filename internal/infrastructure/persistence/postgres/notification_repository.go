@@ -142,6 +142,9 @@ func (r *NotificationRepository) UpdateChannel(ctx context.Context, c notificati
 // whose current attempt has started is left alone: FinishAttempt is racing to close it out, and
 // canceling underneath that attempt would let a delivery end up both cancelled and finished.
 func cancelPendingDeliveries(ctx context.Context, tx pgx.Tx, tenant, channelID shared.ID, reason string, at time.Time) error {
+	if _, err := tx.Exec(ctx, `UPDATE notification_pager_operations SET blocked_reason=$3 WHERE tenant_id=$1 AND channel_id=$2 AND state IN ('pending','sending','confirming','unknown')`, tenant, channelID, reason); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, `UPDATE notification_deliveries d SET state='cancelled',last_error=$3,next_attempt_at=NULL,updated_at=$4 WHERE tenant_id=$1 AND channel_id=$2 AND state IN ('pending','retrying') AND NOT EXISTS(SELECT 1 FROM notification_delivery_attempts a WHERE a.tenant_id=d.tenant_id AND a.delivery_id=d.id AND a.outcome='started')`, tenant, channelID, reason, at)
 	if err != nil {
 		return err
@@ -467,7 +470,7 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 		return nil, fmt.Errorf("declare notification rule selection support: %w", err)
 	}
 	data := []byte(e.Data)
-	tag, err := tx.Exec(ctx, `INSERT INTO notification_events(tenant_id,id,event_type,source_kind,source_id,engagement_id,severity,schema_version,occurred_at,data,subject_kind,subject_id,context,test_template) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(tenant_id,source_kind,source_id) DO NOTHING`, e.TenantID, e.ID, e.Type, e.SourceKind, e.SourceID, e.EngagementID, e.Severity, e.SchemaVersion, e.OccurredAt, data, e.SubjectKind, e.SubjectID, contextJSON(e.Context), testTemplateJSON(e.TestTemplate))
+	tag, err := tx.Exec(ctx, `INSERT INTO notification_events(tenant_id,id,event_type,source_kind,source_id,engagement_id,severity,schema_version,occurred_at,data,subject_kind,subject_id,context,test_template,pager_episode,pager_revision,pager_terminal) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(tenant_id,source_kind,source_id) DO NOTHING`, e.TenantID, e.ID, e.Type, e.SourceKind, e.SourceID, e.EngagementID, e.Severity, e.SchemaVersion, e.OccurredAt, data, e.SubjectKind, e.SubjectID, contextJSON(e.Context), testTemplateJSON(e.TestTemplate), e.PagerLifecycle.Episode, e.PagerLifecycle.Revision, e.PagerLifecycle.Terminal)
 	if err != nil {
 		return nil, err
 	}
@@ -502,6 +505,22 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 			return nil, err
 		}
 		return ids, nil
+	}
+
+	var pager *pagerEpisode
+	var pagerCloseIDs []shared.ID
+	if e.PagerLifecycle.Episode > 0 {
+		locked, lockErr := lockPagerEpisode(ctx, tx, e)
+		if lockErr != nil {
+			return nil, lockErr
+		}
+		pager = &locked
+		if e.PagerLifecycle.Terminal {
+			pagerCloseIDs, lockErr = schedulePagerCloses(ctx, tx, locked)
+			if lockErr != nil {
+				return nil, lockErr
+			}
+		}
 	}
 
 	type target struct {
@@ -577,13 +596,30 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 			}
 		}
 	}
-	ids := []shared.ID{}
+	ids := append([]shared.ID{}, pagerCloseIDs...)
 	if len(targets) > 0 {
 		if err := notificationAdmission(ctx, tx, e.TenantID, "delivery", 10000); err != nil {
 			return nil, err
 		}
 	}
 	for _, t := range targets {
+		isPager := pager != nil && (t.channel.Type == notification.ChannelPagerDuty || t.channel.Type == notification.ChannelJSM)
+		if isPager {
+			if pager.terminal != "" {
+				continue
+			}
+			// Every occurrence on the same lane retains the configuration pinned
+			// by its first admitted delivery, even after channel rotation.
+			var pinned int
+			err := tx.QueryRow(ctx, `SELECT channel_version FROM notification_pager_operations WHERE tenant_id=$1 AND subject_kind=$2 AND subject_id=$3 AND episode=$4 AND channel_id=$5 AND NOT is_close ORDER BY delivery_id LIMIT 1`, pager.tenant, pager.kind, pager.subject, pager.episode, t.channel.ID).Scan(&pinned)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
+			}
+			if err == nil {
+				t.channel.SecretVersion = pinned
+			}
+
+		}
 		recipients := []string{""}
 		if t.channel.Type == notification.ChannelEmail {
 			recipients = t.channel.Recipients
@@ -600,6 +636,11 @@ func (r *NotificationRepository) publishTx(ctx context.Context, tx pgx.Tx, e not
 				return nil, err
 			}
 			if tag.RowsAffected() > 0 {
+				if isPager {
+					if _, err := tx.Exec(ctx, `INSERT INTO notification_pager_operations(tenant_id,delivery_id,subject_kind,subject_id,episode,channel_id,channel_version,is_close,state) VALUES($1,$2,$3,$4,$5,$6,$7,false,'pending')`, pager.tenant, did, pager.kind, pager.subject, pager.episode, t.channel.ID, t.channel.SecretVersion); err != nil {
+						return nil, err
+					}
+				}
 				payload, _ := json.Marshal(map[string]string{"delivery_id": did.String()})
 				jobID := "notification-" + did.String()
 				if _, err := tx.Exec(ctx, `INSERT INTO jobs(id,tenant_id,kind,payload,status,available_at) VALUES($1,$2,'notification.deliver',$3,'queued',$4) ON CONFLICT(id) DO NOTHING`, jobID, e.TenantID, payload, created); err != nil {
@@ -779,7 +820,7 @@ func (r *NotificationRepository) LoadWork(ctx context.Context, tenant, did share
 	var rules, eventData, eventContext, eventTemplate, recipients []byte
 	var ctyp, state, etype string
 	err := WithTenant(ctx, r.pool, tenant.String(), func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,d.remote_ref,d.provider_request_ref,e.event_type,e.source_kind,e.source_id,e.engagement_id,e.severity,e.schema_version,e.occurred_at,e.data,e.subject_kind,e.subject_id,e.context,e.test_template,c.name,c.enabled,c.destination,c.recipients,c.revision,d.channel_version,c.created_at,c.updated_at,v.sealed_config,c.consecutive_permanent_failures,c.last_failure_code,c.last_failure_at,c.paused_at,COALESCE(c.paused_reason,''),COALESCE(c.template_id,''),COALESCE(c.locale,''),c.custom_body,c.data_class,c.raw_event,COALESCE((SELECT s.external_notifications FROM notification_engagement_settings s WHERE s.tenant_id=d.tenant_id AND s.engagement_id=e.engagement_id),'inherit') FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id JOIN notification_channels c ON c.tenant_id=d.tenant_id AND c.id=d.channel_id JOIN notification_channel_versions v ON v.tenant_id=d.tenant_id AND v.channel_id=d.channel_id AND v.version=d.channel_version WHERE d.tenant_id=$1 AND d.id=$2`, tenant, did).Scan(&w.Delivery.TenantID, &w.Delivery.ID, &w.Delivery.EventID, &w.Delivery.ChannelID, &ctyp, &w.Delivery.Recipient, &rules, &state, &w.Delivery.Attempts, &w.Delivery.LastError, &w.Delivery.NextAttemptAt, &w.Delivery.DeliveredAt, &w.Delivery.CreatedAt, &w.Delivery.UpdatedAt, &w.Delivery.TemplateRef, &w.Delivery.RemoteRef, &w.Delivery.ProviderRequestRef, &etype, &w.Event.SourceKind, &w.Event.SourceID, &w.Event.EngagementID, &w.Event.Severity, &w.Event.SchemaVersion, &w.Event.OccurredAt, &eventData, &w.Event.SubjectKind, &w.Event.SubjectID, &eventContext, &eventTemplate, &w.Channel.Name, &w.Channel.Enabled, &w.Channel.Destination, &recipients, &w.Channel.Revision, &w.Channel.SecretVersion, &w.Channel.CreatedAt, &w.Channel.UpdatedAt, &w.Sealed, &w.Channel.Health.ConsecutiveFailures, &w.Channel.Health.LastFailureCode, &w.Channel.Health.LastFailureAt, &w.Channel.Health.PausedAt, &w.Channel.Health.PausedReason, &w.Channel.TemplateID, &w.Channel.Locale, &w.Channel.CustomBody, &w.Channel.DataClass, &w.Channel.RawEvent, &w.Engagement)
+		return tx.QueryRow(ctx, `SELECT d.tenant_id,d.id,d.event_id,d.channel_id,d.channel_type,d.recipient,d.matched_rules,d.state,d.attempts,d.last_error,d.next_attempt_at,d.delivered_at,d.created_at,d.updated_at,d.template_ref,d.remote_ref,d.provider_request_ref,e.event_type,e.source_kind,e.source_id,e.engagement_id,e.severity,e.schema_version,e.occurred_at,e.data,e.subject_kind,e.subject_id,e.context,e.test_template,e.pager_episode,e.pager_revision,e.pager_terminal,c.name,c.enabled,c.destination,c.recipients,c.revision,d.channel_version,c.created_at,c.updated_at,v.sealed_config,c.consecutive_permanent_failures,c.last_failure_code,c.last_failure_at,c.paused_at,COALESCE(c.paused_reason,''),COALESCE(c.template_id,''),COALESCE(c.locale,''),c.custom_body,c.data_class,c.raw_event,COALESCE((SELECT s.external_notifications FROM notification_engagement_settings s WHERE s.tenant_id=d.tenant_id AND s.engagement_id=e.engagement_id),'inherit') FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id JOIN notification_channels c ON c.tenant_id=d.tenant_id AND c.id=d.channel_id JOIN notification_channel_versions v ON v.tenant_id=d.tenant_id AND v.channel_id=d.channel_id AND v.version=d.channel_version WHERE d.tenant_id=$1 AND d.id=$2`, tenant, did).Scan(&w.Delivery.TenantID, &w.Delivery.ID, &w.Delivery.EventID, &w.Delivery.ChannelID, &ctyp, &w.Delivery.Recipient, &rules, &state, &w.Delivery.Attempts, &w.Delivery.LastError, &w.Delivery.NextAttemptAt, &w.Delivery.DeliveredAt, &w.Delivery.CreatedAt, &w.Delivery.UpdatedAt, &w.Delivery.TemplateRef, &w.Delivery.RemoteRef, &w.Delivery.ProviderRequestRef, &etype, &w.Event.SourceKind, &w.Event.SourceID, &w.Event.EngagementID, &w.Event.Severity, &w.Event.SchemaVersion, &w.Event.OccurredAt, &eventData, &w.Event.SubjectKind, &w.Event.SubjectID, &eventContext, &eventTemplate, &w.Event.PagerLifecycle.Episode, &w.Event.PagerLifecycle.Revision, &w.Event.PagerLifecycle.Terminal, &w.Channel.Name, &w.Channel.Enabled, &w.Channel.Destination, &recipients, &w.Channel.Revision, &w.Channel.SecretVersion, &w.Channel.CreatedAt, &w.Channel.UpdatedAt, &w.Sealed, &w.Channel.Health.ConsecutiveFailures, &w.Channel.Health.LastFailureCode, &w.Channel.Health.LastFailureAt, &w.Channel.Health.PausedAt, &w.Channel.Health.PausedReason, &w.Channel.TemplateID, &w.Channel.Locale, &w.Channel.CustomBody, &w.Channel.DataClass, &w.Channel.RawEvent, &w.Engagement)
 	})
 	w.Channel.Health.State = healthState(w.Channel.Health.PausedAt)
 	w.Delivery.ChannelType = notification.ChannelType(ctyp)
@@ -914,6 +955,18 @@ func (r *NotificationRepository) BeginAttempt(ctx context.Context, tenant, did s
 			}
 			return err
 		}
+		var classifiedPager, admitted bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM notification_deliveries d JOIN notification_events e ON e.tenant_id=d.tenant_id AND e.id=d.event_id WHERE d.tenant_id=$1 AND d.id=$2 AND d.channel_type IN ('pagerduty','jsm') AND e.pager_episode>0), EXISTS(SELECT 1 FROM notification_pager_operations WHERE tenant_id=$1 AND delivery_id=$2)`, tenant, did).Scan(&classifiedPager, &admitted); err != nil {
+			return err
+		}
+		if classifiedPager {
+			if !admitted {
+				return fmt.Errorf("%w: pager obligation missing", shared.ErrConflict)
+			}
+			if _, err := tx.Exec(ctx, `SELECT set_config('synapse.notification_pager_capability','pager-lifecycle-v1',true)`); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO notification_delivery_attempts(tenant_id,id,delivery_id,attempt_number,started_at,outcome,template_ref) VALUES($1,$2,$3,$4,$5,'started',$6)`, tenant, aid, did, n, at, templateRef); err != nil {
 			return err
 		}
@@ -1023,6 +1076,9 @@ func (r *NotificationRepository) CancelDelivery(ctx context.Context, tenant, did
 			}
 			return err
 		}
+		if _, err := tx.Exec(ctx, `UPDATE notification_pager_operations SET blocked_reason=$3 WHERE tenant_id=$1 AND delivery_id=$2 AND state IN ('pending','sending','confirming','unknown')`, tenant, did, sanitizeError(reason)); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx, `WITH changed AS (UPDATE notification_deliveries SET state='cancelled',last_error=$3,next_attempt_at=NULL,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND state IN ('pending','retrying') RETURNING id)
         INSERT INTO notification_audit_intents(tenant_id,id,delivery_id,action,error_code,occurred_at) SELECT $1,'cancel:'||id,id,'notification.delivery_cancelled',$3,now() FROM changed ON CONFLICT DO NOTHING`, tenant, did, sanitizeError(reason))
 		return err
@@ -1043,6 +1099,11 @@ func (r *NotificationRepository) DeadLetterDelivery(ctx context.Context, tenant,
 			return err
 		}
 		if status != "failed" || kind != "notification.deliver" || currentFence != fence {
+			return nil
+		}
+		if resumed, err := wakeKnownPagerRequestTx(ctx, tx, tenant, did, ""); err != nil {
+			return err
+		} else if resumed {
 			return nil
 		}
 		tag, err := tx.Exec(ctx, `UPDATE notification_deliveries SET state='dead_letter',last_error=$3,next_attempt_at=NULL,updated_at=now()

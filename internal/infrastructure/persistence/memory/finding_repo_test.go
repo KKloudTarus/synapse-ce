@@ -352,3 +352,34 @@ func TestFindingRepositoryOrMergesPublicExploit(t *testing.T) {
 		t.Fatalf("PublicExploit must be preserved (OR-merged) on a false re-upsert, got %+v", list)
 	}
 }
+
+func TestFindingPagerEpisodeCASAndUpsert(t *testing.T) {
+	ctx := context.Background()
+	repo := NewFindingRepository()
+	f := finding.Finding{ID: "f-pager", EngagementID: "e-pager", DedupKey: "pager", Status: finding.StatusOpen, Version: 1}
+	if err := repo.Upsert(ctx, []finding.Finding{f}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := repo.UpdateStatus(ctx, f.EngagementID, f.ID, finding.StatusRemediated, 1)
+	if err != nil || current.PagerEpisode != 1 {
+		t.Fatalf("close: %+v %v", current, err)
+	}
+	if _, err = repo.UpdateStatus(ctx, f.EngagementID, f.ID, finding.StatusOpen, 1); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("stale update: %v", err)
+	}
+	current, err = repo.UpdateStatus(ctx, f.EngagementID, f.ID, finding.StatusFalsePos, 2)
+	if err != nil || current.PagerEpisode != 1 {
+		t.Fatalf("terminal transition: %+v %v", current, err)
+	}
+	current, err = repo.UpdateStatus(ctx, f.EngagementID, f.ID, finding.StatusOpen, 3)
+	if err != nil || current.PagerEpisode != 2 {
+		t.Fatalf("reopen: %+v %v", current, err)
+	}
+	if err := repo.Upsert(ctx, []finding.Finding{f}); err != nil {
+		t.Fatal(err)
+	}
+	current, err = repo.GetByEngagementAndID(ctx, f.EngagementID, f.ID)
+	if err != nil || current.PagerEpisode != 2 || current.Status != finding.StatusOpen {
+		t.Fatalf("upsert: %+v %v", current, err)
+	}
+}

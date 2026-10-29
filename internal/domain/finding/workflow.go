@@ -49,6 +49,7 @@ func NewManual(id, engagementID shared.ID, in ManualInput, now time.Time) (Findi
 		Priority:     priorityForSeverity(sev),
 		DedupKey:     "manual:" + id.String(),
 		Version:      1,
+		PagerEpisode: 1,
 		Audit:        shared.Audit{CreatedAt: now, UpdatedAt: now},
 	}, nil
 }

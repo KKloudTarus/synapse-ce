@@ -62,6 +62,7 @@ func (s *NotificationSource) Poll(ctx context.Context, now time.Time, limit int)
 		limit = defaultSourcePollLimit
 	}
 	limit = min(limit, maxSourcePollLimit)
+	s.repo.reconcilePagerDoneJobs(limit)
 	total := 0
 	var failures []error
 	for _, tenant := range s.knownTenants() {
@@ -127,7 +128,7 @@ func eventFromSourceRecord(record notification.SourceRecord) notification.Event 
 		TenantID: record.TenantID, ID: notificationStableID(record.TenantID.String(), record.SourceKind, record.SourceID),
 		Type: record.EventType, SourceKind: record.SourceKind, SourceID: record.SourceID,
 		EngagementID: record.EngagementID, Severity: record.Severity, SchemaVersion: record.SchemaVersion,
-		OccurredAt: record.OccurredAt, Data: record.Data, SubjectKind: record.SubjectKind, SubjectID: record.SubjectID, Context: record.Context,
+		OccurredAt: record.OccurredAt, Data: record.Data, SubjectKind: record.SubjectKind, SubjectID: record.SubjectID, Context: record.Context, PagerLifecycle: record.PagerLifecycle,
 	}
 }
 

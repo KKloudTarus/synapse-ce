@@ -11,7 +11,11 @@ import (
 // a declared subject. This is a best-effort read with no network operation or held persistence
 // lock; concurrent first sends may each create a root message by contract.
 func (s *Service) prepareSubjectThread(ctx context.Context, work *ports.NotificationWork) error {
-	work.SubjectResolved = subjectResolved(work.Event)
+	work.SubjectResolved = false
+	if pagerLifecycleWork(*work) {
+		// Pager anchors and closure are admitted by the durable episode gate.
+		return nil
+	}
 	switch work.Channel.Type {
 	case domain.ChannelTelegram, domain.ChannelPagerDuty, domain.ChannelJSM, domain.ChannelType("slack_bot"):
 	default:
@@ -32,6 +36,7 @@ func (s *Service) prepareSubjectThread(ctx context.Context, work *ports.Notifica
 	return nil
 }
 
-// subjectResolved remains false until a catalog event explicitly declares a trusted closure
-// state. Generic event JSON is intentionally never interpreted as a closure signal.
-func subjectResolved(domain.Event) bool { return false }
+// subjectResolved reads only the authoritative lifecycle snapshot.
+func subjectResolved(event domain.Event) bool {
+	return event.PagerLifecycle.Episode > 0 && event.PagerLifecycle.Revision > 0 && event.PagerLifecycle.Terminal
+}
