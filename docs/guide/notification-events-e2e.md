@@ -366,4 +366,6 @@ these remaining execution prerequisites. Custody failure was exercised in a disp
 chain and reporting failed closed; retained audit/evidence history was untouched.
 The [custody receipt](assets/ui/notification-events/live/functional-followup.json)
 records the verifier transition, HTTP 400 report denial and one delivered event.
-No card, paid plan, paid trial, SMS or call feature was enabled for these runs.
+These source rehearsals reuse retained sandbox configuration with optional paid
+model calls disabled. Provider subscription and billing status are separate from
+delivery proof; verify them before resuming a cloud destination.
