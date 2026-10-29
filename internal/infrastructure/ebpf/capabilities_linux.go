@@ -28,6 +28,10 @@ func ProbeHostCapabilities() HostCapabilities {
 }
 
 func probeHostCapabilities(goarch, objectArch string, load kernelTypeLoader) HostCapabilities {
+	return probeClassCapabilities(goarch, objectArch, load, []string{"sock", "msghdr", "sockaddr_in"})
+}
+
+func probeClassCapabilities(goarch, objectArch string, load kernelTypeLoader, types []string) HostCapabilities {
 	result := HostCapabilities{Architecture: goarch, ObjectArchitecture: objectArch}
 	if objectArch == "" || objectArch != goarch {
 		result.Reason = fmt.Sprintf("no architecture-matched eBPF objects for linux/%s", goarch)
@@ -43,7 +47,7 @@ func probeHostCapabilities(goarch, objectArch string, load kernelTypeLoader) Hos
 	result.KernelBTF = true
 
 	var missing []string
-	for _, name := range [...]string{"sock", "msghdr", "sockaddr_in"} {
+	for _, name := range types {
 		if _, err := lookup(name); err != nil {
 			missing = append(missing, name)
 		}

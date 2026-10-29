@@ -1918,7 +1918,7 @@ func main() {
 			log.Error("fleet response observer dispatcher init failed", "err", observerErr)
 			os.Exit(1)
 		}
-		receiptBuilder, receiptErr := responsefleet.NewTargetEvidenceReceiptBuilder(telemetryTransportStore, endpointTimelineStore, coverageWindowStore, responseVerificationStore, clock)
+		receiptBuilder, receiptErr := responsefleet.NewTargetEvidenceReceiptBuilder(telemetryTransportStore, fleetAgentStore, endpointTimelineStore, coverageWindowStore, responseVerificationStore, clock, cfg.FleetAgentStaleAfter)
 		if receiptErr != nil {
 			log.Error("response target evidence receipt builder init failed", "err", receiptErr)
 			os.Exit(1)

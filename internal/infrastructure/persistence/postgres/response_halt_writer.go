@@ -61,6 +61,9 @@ func (r *ResponseHaltWriterRepository) AdvanceHaltGenerationWithAudit(ctx contex
 		dispatch   ports.ResponseHaltDispatch
 	)
 	err = WithContextTenant(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := lockResponseHalt(ctx, tx, true); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO response_halt_fences (tenant_id) VALUES (current_setting('app.current_tenant', true))
 			ON CONFLICT (tenant_id) DO NOTHING`); err != nil {

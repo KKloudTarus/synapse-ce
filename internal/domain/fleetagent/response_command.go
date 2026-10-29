@@ -17,6 +17,7 @@ import (
 	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 )
 
 const (
@@ -106,11 +107,8 @@ func (c ResponseCommand) Validate() error {
 	if c.Action.Kind != rdom.KindStopProcess {
 		return fmt.Errorf("%w: response command protocol v2 supports process stop/restart only", shared.ErrValidation)
 	}
-	if err := c.Target.Validate(); err != nil {
+	if err := rdom.ValidateTargetBinding(c.Action, c.AuthorizationTarget, c.Target); err != nil {
 		return err
-	}
-	if err := c.AuthorizationTarget.Validate(); err != nil {
-		return fmt.Errorf("%w: response command authorization target is invalid: %v", shared.ErrValidation, err)
 	}
 	if c.Target.Kind != responsesaga.FingerprintProcess || c.Target.ProcessAssetID != c.AssetID ||
 		c.Action.Target != c.Target.ProcessEntityID || c.AuthorizationTarget.Value != c.Action.Target.String() {
@@ -206,20 +204,24 @@ func (s ResponseExecutionState) Valid() bool {
 // ResponseExecutionResult is the local durable command outcome. It is not verification evidence;
 // independent post-condition telemetry remains authoritative for VerifiedSucceeded.
 type ResponseExecutionResult struct {
-	AttemptKey     string
-	CommandDigest  string
-	LeaseID        string
-	State          ResponseExecutionState
-	ObservedRadius offensivepolicy.Radius
-	AffectedCount  int
-	AlreadyApplied bool
-	CompletedAt    time.Time
+	ReplacementProcessEntityID shared.ID
+	AttemptKey                 string
+	CommandDigest              string
+	LeaseID                    string
+	State                      ResponseExecutionState
+	ObservedRadius             offensivepolicy.Radius
+	AffectedCount              int
+	AlreadyApplied             bool
+	CompletedAt                time.Time
 }
 
 func (r ResponseExecutionResult) Validate() error {
 	decodedDigest, digestErr := hex.DecodeString(r.CommandDigest)
 	if strings.TrimSpace(r.AttemptKey) == "" || strings.TrimSpace(r.LeaseID) == "" || digestErr != nil || len(decodedDigest) != sha256.Size || !r.State.Valid() {
 		return fmt.Errorf("%w: response execution result is incomplete", shared.ErrValidation)
+	}
+	if !r.ReplacementProcessEntityID.IsZero() && !telemetry.ValidProcessEntityID(r.ReplacementProcessEntityID.String()) {
+		return fmt.Errorf("%w: malformed replacement process identity", shared.ErrValidation)
 	}
 	if r.State == ResponseExecutionApplied {
 		if !r.ObservedRadius.Valid() || r.AffectedCount < 0 || r.CompletedAt.IsZero() {
@@ -229,7 +231,7 @@ func (r ResponseExecutionResult) Validate() error {
 		if r.CompletedAt.IsZero() {
 			return fmt.Errorf("%w: ambiguous response execution result has no completion time", shared.ErrValidation)
 		}
-		if r.ObservedRadius != "" || r.AffectedCount != 0 || r.AlreadyApplied {
+		if r.ObservedRadius != "" || r.AffectedCount != 0 || r.AlreadyApplied || !r.ReplacementProcessEntityID.IsZero() {
 			return fmt.Errorf("%w: ambiguous response execution result cannot claim an observed effect", shared.ErrValidation)
 		}
 	}
@@ -240,7 +242,7 @@ func (r ResponseExecutionResult) Validate() error {
 // timestamp locations as the same instant.
 func SameResponseExecutionResult(left, right ResponseExecutionResult) bool {
 	return left.AttemptKey == right.AttemptKey && left.CommandDigest == right.CommandDigest &&
-		left.LeaseID == right.LeaseID && left.State == right.State && left.ObservedRadius == right.ObservedRadius &&
+		left.LeaseID == right.LeaseID && left.State == right.State && left.ObservedRadius == right.ObservedRadius && left.ReplacementProcessEntityID == right.ReplacementProcessEntityID &&
 		left.AffectedCount == right.AffectedCount && left.AlreadyApplied == right.AlreadyApplied &&
 		left.CompletedAt.Equal(right.CompletedAt)
 }
@@ -274,7 +276,13 @@ func (e ResponseExecutionJournalEntry) Validate() error {
 			e.Result.CommandDigest != e.CommandDigest || e.Result.LeaseID != e.LeaseID {
 			return fmt.Errorf("%w: terminal response execution journal entry has an unbound result", shared.ErrValidation)
 		}
-		return e.Result.Validate()
+		if err := e.Result.Validate(); err != nil {
+			return err
+		}
+		if e.Result.State == ResponseExecutionApplied && ((e.Command.Reversal && (e.Result.ReplacementProcessEntityID.IsZero() || e.Result.ReplacementProcessEntityID == e.Command.Target.ProcessEntityID)) || (!e.Command.Reversal && !e.Result.ReplacementProcessEntityID.IsZero())) {
+			return fmt.Errorf("%w: replacement process identity disagrees with command", shared.ErrValidation)
+		}
+		return nil
 	}
 	if e.Result != nil || e.ResultAcknowledged {
 		return fmt.Errorf("%w: non-terminal response execution journal entry carries a result", shared.ErrValidation)

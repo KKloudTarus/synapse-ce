@@ -31,7 +31,7 @@ func testResponseVerificationReport(t *testing.T) fleetagent.ResponseVerificatio
 		ProtocolVersion: fleetagent.TelemetryProtocolVersion, ReportID: "response-report-test", AgentID: "agent-response-test", HostID: "agent-response-test",
 		AgentSessionID: fleetagent.CanonicalSessionID("agent-response-test"), AssetID: "asset-response-test", EngagementID: "eng-1", ActionID: "action-1",
 		ActionDigest: strings.Repeat("a", 64), AttemptKey: "attempt-1", VerificationChallenge: strings.Repeat("b", 64),
-		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-response-test", ProcessEntityID: "process-1"},
+		Target:     responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-response-test", ProcessEntityID: "pe_11111111111111111111111111111111"},
 		ObservedAt: at, KeyID: key.KeyID,
 	}
 	report.Signature = fleetagent.SignResponseVerification(private, report)

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
@@ -357,5 +359,62 @@ func requireRoot(t *testing.T) {
 	t.Helper()
 	if os.Geteuid() != 0 {
 		t.Skipf("descriptor-pinned restart needs root; uid=%d", os.Geteuid())
+	}
+}
+
+func TestReplacementCorrelationUsesExactPIDBootAndBirth(t *testing.T) {
+	// These callbacks are unit fixtures; production correlation receives events after WAL durability.
+	child := exec.Command("/bin/sleep", "30")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = child.Process.Kill(); _ = child.Wait() }()
+	tick, err := readProcessStartTick(child.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd, err := unix.PidfdOpen(child.Process.Pid, 0)
+	if err != nil {
+		t.Skipf("pidfd unavailable: %v", err)
+	}
+	defer func() { _ = unix.Close(fd) }()
+	ready := make(chan struct{})
+	start := tick * linuxUserTickNanos
+	original := &trackedProcess{assetID: "asset-1", bootID: "boot-1", replacementPID: child.Process.Pid, replacementPIDFD: fd, replacementStartTick: tick, replacementStarted: start - 1, replacementReady: ready}
+	registry := &Registry{entries: map[shared.ID]*trackedProcess{"original": original}, pending: map[int]*trackedProcess{child.Process.Pid: original}}
+	event := detection.ProcessEvent{Kind: "exec", PID: original.replacementPID, StartTimeNanos: start}
+	registry.ObserveProcess("asset-1", "boot-other", event)
+	registry.ObserveProcess("asset-1", "boot-1", detection.ProcessEvent{Kind: "exec", PID: event.PID, StartTimeNanos: start - 2})
+	registry.ObserveProcess("asset-1", "boot-1", detection.ProcessEvent{Kind: "exec", PID: event.PID + 100000, StartTimeNanos: start})
+	select {
+	case <-ready:
+		t.Fatal("unrelated event matched replacement")
+	default:
+	}
+	registry.ObserveProcess("asset-1", "boot-1", event)
+	select {
+	case <-ready:
+	default:
+		t.Fatal("matching event did not notify waiter")
+	}
+	want := telemetry.ProcessEntityID("asset-1", "boot-1", event.PID, event.StartTimeNanos)
+	if original.replacementID != want {
+		t.Fatalf("replacement=%s want=%s", original.replacementID, want)
+	}
+}
+
+func TestUncorrelatedRestartRemainsUnknownAndCannotRelaunch(t *testing.T) {
+	process := &trackedProcess{restart: restartStarted, replacementPID: 12345678, replacementPIDFD: -1, replacementReady: make(chan struct{})}
+	registry := &Registry{entries: map[shared.ID]*trackedProcess{"original": process}, pending: map[int]*trackedProcess{process.replacementPID: process}}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, _, err := registry.RestartProcessCorrelated(ctx, "original"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("correlation error=%v", err)
+	}
+	if _, err := registry.RestartProcess(context.Background(), "original"); !errors.Is(err, shared.ErrConflict) {
+		t.Fatalf("unknown launch retry error=%v", err)
+	}
+	if len(registry.pending) != 0 {
+		t.Fatal("timed-out correlation retained pending PID")
 	}
 }

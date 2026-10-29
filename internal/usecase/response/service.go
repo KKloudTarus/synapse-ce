@@ -523,6 +523,9 @@ func (s *Service) verifyEffect(ctx context.Context, engagementID shared.ID, acti
 		AttemptKey:      strings.TrimSpace(attempt.IdempotencyKey), VerificationChallenge: attempt.VerificationChallenge,
 		AttemptedAt: attempt.At.UTC(), DeadlineAt: attempt.DeadlineAt.UTC(),
 	}
+	if err := s.bindReversalVerification(ctx, &req); err != nil {
+		return VerificationPending, verifierID, "", err
+	}
 	receipt, err := s.verify.Verify(ctx, req)
 	if err != nil {
 		return VerificationPending, verifierID, "", err
@@ -541,6 +544,32 @@ func (s *Service) verifyEffect(ctx context.Context, engagementID shared.ID, acti
 		return VerificationUnknown, verifierID, receipt.EvidenceID, nil
 	}
 	return receipt.Outcome, verifierID, receipt.EvidenceID, nil
+}
+
+// bindReversalVerification resolves both facts from durable server-owned records on every verification
+// and revalidation, rather than trusting either the caller or the observer's claimed process identity.
+func (s *Service) bindReversalVerification(ctx context.Context, req *VerificationRequest) error {
+	if !req.Reversal {
+		return nil
+	}
+	original, found, err := s.store.GetAttempt(ctx, responseAttemptKey(req.Action, false))
+	if err != nil {
+		return err
+	}
+	if !found || original.IsReversal || original.ActionID != req.Action.ID || original.Target != req.Target {
+		return fmt.Errorf("%w: original response attempt is unavailable", ErrVerificationPending)
+	}
+	req.OriginalAttemptKey, req.OriginalAttemptedAt, req.OriginalDeadlineAt, req.OriginalChallenge = original.IdempotencyKey, original.At.UTC(), original.DeadlineAt.UTC(), original.VerificationChallenge
+	if resolver, ok := s.exec.(interface {
+		ResolveReplacement(context.Context, ports.ResponseVerificationRequest) (shared.ID, error)
+	}); ok {
+		replacement, err := resolver.ResolveReplacement(ctx, *req)
+		if err != nil {
+			return err
+		}
+		req.ReplacementProcessEntityID = replacement
+	}
+	return nil
 }
 
 // PlanStep is one line of a dry run: the action or reversal that WOULD run, and its argv.
@@ -587,10 +616,7 @@ func (s *Service) Decide(ctx context.Context, actionID shared.ID, reviewer strin
 	if err := rec.AuthorizationTarget.Validate(); err != nil {
 		return Record{}, fmt.Errorf("%w: response %s has no durable authorization target", shared.ErrConflict, actionID)
 	}
-	if rec.AuthorizationTarget.Value != rec.Action.Target.String() {
-		return Record{}, fmt.Errorf("%w: response %s authorization target is not action-bound", shared.ErrConflict, actionID)
-	}
-	if err := bindFingerprint(rec.Action, rec.TargetFingerprint); err != nil {
+	if err := rdom.ValidateTargetBinding(rec.Action, rec.AuthorizationTarget, rec.TargetFingerprint); err != nil {
 		return Record{}, fmt.Errorf("%w: response %s has no durable target fingerprint", shared.ErrConflict, actionID)
 	}
 	reversal := rec.ReversalRequestedBy != ""
@@ -691,7 +717,7 @@ func (s *Service) PrepareIncidentResponse(ctx context.Context, engagementID shar
 	if err := action.Validate(); err != nil {
 		return Record{}, err
 	}
-	if err := bindFingerprint(action, fingerprint); err != nil {
+	if err := rdom.ValidateTargetBinding(action, target, fingerprint); err != nil {
 		return Record{}, err
 	}
 	if !s.exec.Supports(action.Kind) {
@@ -704,9 +730,6 @@ func (s *Service) PrepareIncidentResponse(ctx context.Context, engagementID shar
 	}
 	if shared.IsMachineActor(submitter) {
 		return Record{}, fmt.Errorf("%w: incident response submission requires a human identity", shared.ErrForbidden)
-	}
-	if target.Value != action.Target.String() {
-		return Record{}, fmt.Errorf("%w: admitted target %q does not match the action target %q", shared.ErrForbidden, target.Value, action.Target)
 	}
 	existing, found, err := s.store.Get(ctx, action.ID)
 	if err != nil {
@@ -739,7 +762,7 @@ func (s *Service) Apply(ctx context.Context, engagementID shared.ID, action rdom
 	if err := action.Validate(); err != nil {
 		return Record{}, err
 	}
-	if err := bindFingerprint(action, fingerprint); err != nil {
+	if err := rdom.ValidateTargetBinding(action, target, fingerprint); err != nil {
 		return Record{}, err
 	}
 	if !s.exec.Supports(action.Kind) {
@@ -758,13 +781,6 @@ func (s *Service) Apply(ctx context.Context, engagementID shared.ID, action rdom
 	}
 	if isMachine(approver) {
 		return Record{}, fmt.Errorf("%w: a response action requires a human approver; %q is a machine identity", shared.ErrForbidden, approver)
-	}
-
-	// Bind the ADMITTED target to the EXECUTED target: admission scope-checks the engagement.Target, but
-	// execution acts on action.Target — decoupling them would let a caller get an in-scope admission for
-	// one asset while hitting another. They must be the same asset.
-	if target.Value != action.Target.String() {
-		return Record{}, fmt.Errorf("%w: admitted target %q does not match the action target %q", shared.ErrForbidden, target.Value, action.Target)
 	}
 
 	existing, found, err := s.store.Get(ctx, action.ID)
@@ -1189,6 +1205,9 @@ func (s *Service) revalidatePersistedReceipt(ctx context.Context, rec Record, at
 		VerificationChallenge: attempt.VerificationChallenge,
 		AttemptedAt:           attempt.At,
 		DeadlineAt:            attempt.DeadlineAt,
+	}
+	if err := s.bindReversalVerification(ctx, &req); err != nil {
+		return fmt.Errorf("bind persisted reversal evidence: %w", err)
 	}
 	receipt := VerificationReceipt{Outcome: outcome, EvidenceID: attempt.VerificationEvidenceID}
 	if err := s.receipts.Validate(ctx, req, receipt, attempt.VerifierID); err != nil {

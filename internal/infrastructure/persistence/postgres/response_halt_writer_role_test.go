@@ -2,12 +2,16 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
+	rdom "github.com/KKloudTarus/synapse-ce/internal/domain/response"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 )
 
@@ -52,14 +56,8 @@ func TestResponseHaltWriterRoleIsolation(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		for _, id := range []shared.ID{tenant, otherTenant} {
-			_, _ = admin.Exec(cleanupCtx, `DELETE FROM response_halt_dispatches WHERE tenant_id=$1`, id.String())
-			_, _ = admin.Exec(cleanupCtx, `DELETE FROM response_audit_intents WHERE tenant_id=$1`, id.String())
-			_, _ = admin.Exec(cleanupCtx, `DELETE FROM response_halt_fences WHERE tenant_id=$1`, id.String())
-			_, _ = admin.Exec(cleanupCtx, `DELETE FROM tenants WHERE id=$1`, id.String())
-		}
+		cleanupResponseAuditFixture(t, admin, tenant)
+		cleanupResponseAuditFixture(t, admin, otherTenant)
 	})
 
 	tenantCtx := shared.WithTenant(ctx, tenant)
@@ -67,8 +65,51 @@ func TestResponseHaltWriterRoleIsolation(t *testing.T) {
 		`INSERT INTO response_halt_fences(tenant_id) VALUES(current_setting('app.current_tenant', true))`,
 		`INSERT INTO response_halt_dispatches(tenant_id,generation,created_at) VALUES(current_setting('app.current_tenant', true),1,now())`,
 	} {
-		if err := WithContextTenant(tenantCtx, runtime, func(tx pgx.Tx) error { _, err := tx.Exec(tenantCtx, query); return err }); err == nil {
-			t.Fatalf("normal runtime role forged protected halt state: %s", query)
+		err := WithContextTenant(tenantCtx, runtime, func(tx pgx.Tx) error { _, err := tx.Exec(tenantCtx, query); return err })
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Fatalf("runtime must lack protected halt insert privilege for %s: %v", query, err)
+		}
+	}
+
+	engagement := shared.ID(tenant.String() + "-engagement")
+	if _, err := admin.Exec(ctx, `INSERT INTO engagements(id,tenant_id,name) VALUES($1,$2,$1)`, engagement.String(), tenant.String()); err != nil {
+		t.Fatalf("seed engagement: %v", err)
+	}
+	const processID = "pe_11111111111111111111111111111111"
+	action, err := rdom.NewAction(shared.ID(tenant.String()+"-action"), rdom.KindStopProcess, processID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	repo := NewResponseRepository(runtime)
+	if err := repo.Put(tenantCtx, rdom.Record{ID: action.ID, TenantID: tenant, EngagementID: engagement, Action: action, State: rdom.StatePending, ApprovedBy: "reviewer", UpdatedAt: at}); err != nil {
+		t.Fatalf("seed response action as runtime: %v", err)
+	}
+	attempt := responsesaga.ResponseAttempt{
+		ActionID: action.ID, Attempt: 1, IdempotencyKey: tenant.String() + "-attempt-1",
+		Target: responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: processID},
+		State:  responsesaga.StateIssued, ExecutorID: "agent:response-executor", ExecutorAgentID: "response-executor", DecidedBy: "reviewer", At: at, DeadlineAt: at.Add(time.Hour),
+	}
+	if _, created, err := repo.StartAttempt(tenantCtx, attempt); err != nil || !created {
+		t.Fatalf("start attempt without fence: created=%t err=%v", created, err)
+	}
+	if _, err := admin.Exec(ctx, `INSERT INTO response_halt_fences(tenant_id) VALUES($1)`, tenant.String()); err != nil {
+		t.Fatalf("seed unhalted fence: %v", err)
+	}
+	attempt.Attempt = 2
+	attempt.IdempotencyKey = tenant.String() + "-attempt-2"
+	if _, created, err := repo.StartAttempt(tenantCtx, attempt); err != nil || !created {
+		t.Fatalf("start attempt with unhalted fence: created=%t err=%v", created, err)
+	}
+	for _, query := range []string{
+		`UPDATE response_halt_fences SET halted=true WHERE tenant_id=current_setting('app.current_tenant', true)`,
+		`DELETE FROM response_halt_fences WHERE tenant_id=current_setting('app.current_tenant', true)`,
+	} {
+		err := WithContextTenant(tenantCtx, runtime, func(tx pgx.Tx) error { _, err := tx.Exec(tenantCtx, query); return err })
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+			t.Fatalf("runtime must lack fence write privilege for %s: %v", query, err)
 		}
 	}
 	if err := WithContextTenant(tenantCtx, halt, func(tx pgx.Tx) error {

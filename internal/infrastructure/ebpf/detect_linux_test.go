@@ -3,15 +3,23 @@
 package ebpf
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/KKloudTarus/synapse-ce/internal/domain/detection"
+	detectuc "github.com/KKloudTarus/synapse-ce/internal/usecase/fleet/detect"
+	cebpf "github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/rlimit"
 )
 
 // requireSensor skips unless we can actually run eBPF here: root (unprivileged BPF is disabled on most
@@ -308,6 +316,246 @@ func TestSensorAlwaysReportsEveryClass(t *testing.T) {
 		}
 		if _, ok := coverageFor(cov, cc.Class); !ok {
 			t.Errorf("class %s missing", cc.Class)
+		}
+	}
+}
+
+// The helper keeps its process alive while one non-leader thread exits and an exec fails.
+func TestProcessLifecycleHelper(t *testing.T) {
+	if os.Getenv("SYNAPSE_PROCESS_SENSOR_HELPER") != "1" {
+		return
+	}
+	done := make(chan struct{})
+	go func() { runtime.LockOSThread(); close(done) }()
+	<-done
+	if err := syscall.Exec("/definitely-missing-synapse-executable", []string{"missing"}, os.Environ()); err == nil {
+		os.Exit(3)
+	}
+	fmt.Fprintln(os.Stdout, "ready")
+	var b [1]byte
+	_, _ = os.Stdin.Read(b[:])
+	os.Exit(0)
+}
+
+func TestProcessSensorNativeLifecycleIdentity(t *testing.T) {
+	requireSensor(t)
+	s := NewSensor("host-native", "agent:native", []detection.Class{detection.ClassProcess})
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("start process sensor: %v; coverage=%+v", err, s.Coverage())
+	}
+	defer s.Close()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestProcessLifecycleHelper$")
+	cmd.Env = append(os.Environ(), "SYNAPSE_PROCESS_SENSOR_HELPER=1")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("helper readiness %q: %v", line, err)
+	}
+	pid := cmd.Process.Pid
+	timer := time.NewTimer(4 * time.Second)
+	defer timer.Stop()
+	var start uint64
+	for start == 0 {
+		select {
+		case ev := <-s.Events():
+			if ev.Process != nil && ev.Process.PID == pid {
+				if ev.Process.Kind != "exec" || ev.Process.StartTimeNanos == 0 {
+					t.Fatalf("invalid first lifecycle event: %+v", ev.Process)
+				}
+				start = ev.Process.StartTimeNanos
+			}
+		case <-timer.C:
+			t.Fatal("successful exec was not observed")
+		}
+	}
+	// The helper remains alive after a failed exec and a non-leader thread exit.
+	quiet := time.NewTimer(300 * time.Millisecond)
+	for {
+		select {
+		case ev := <-s.Events():
+			if ev.Process != nil && ev.Process.PID == pid {
+				t.Fatalf("spurious lifecycle event while alive: %+v", ev.Process)
+			}
+		case <-quiet.C:
+			goto release
+		}
+	}
+release:
+	if _, err := stdin.Write([]byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	_ = stdin.Close()
+	for {
+		select {
+		case ev := <-s.Events():
+			if ev.Process != nil && ev.Process.PID == pid {
+				if ev.Process.Kind != "exit" || ev.Process.StartTimeNanos != start {
+					t.Fatalf("exit identity differs from exec: %+v, want start %d", ev.Process, start)
+				}
+				quietAfterExit := time.NewTimer(300 * time.Millisecond)
+				defer quietAfterExit.Stop()
+				for {
+					select {
+					case next := <-s.Events():
+						if next.Process != nil && next.Process.PID == pid && next.Process.StartTimeNanos == start {
+							t.Fatalf("duplicate lifecycle event after exit: %+v", next.Process)
+						}
+					case <-quietAfterExit.C:
+						return
+					}
+				}
+			}
+		case <-timer.C:
+			t.Fatal("final process exit was not observed")
+		}
+	}
+}
+
+func TestProcessDroppedCombinesKernelAndUserspaceAndFailsClosed(t *testing.T) {
+	lc := &loadedClass{class: detection.ClassProcess}
+	lc.dropped.Store(2)
+	lc.kernelDropped = func() (uint64, error) { return 3, nil }
+	s := &Sensor{loaded: []*loadedClass{lc}}
+	if got := s.Dropped()[detection.ClassProcess]; got != 5 {
+		t.Fatalf("combined drops = %d, want 5", got)
+	}
+	lc.kernelDropped = func() (uint64, error) { return 0, errors.New("read failed") }
+	if got := s.Dropped()[detection.ClassProcess]; got != 6 {
+		t.Fatalf("failed read drops = %d, want 6", got)
+	}
+	lc.kernelDropped = func() (uint64, error) { return 0, nil }
+	if got := s.Dropped()[detection.ClassProcess]; got != 3 {
+		t.Fatalf("read failure must remain visible, got %d", got)
+	}
+}
+
+func TestProcessSensorNativeCapacityLoss(t *testing.T) {
+	requireSensor(t)
+	if err := rlimit.RemoveMemlock(); err != nil {
+		t.Fatalf("remove memlock limit: %v", err)
+	}
+	cp := classPrograms()[0]
+	spec, err := cebpf.LoadCollectionSpecFromReader(bytes.NewReader(cp.obj))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Maps["process_live"].MaxEntries = 1
+	s := NewSensor("host-native", "agent:native", []detection.Class{detection.ClassProcess})
+	s.ktimeEpoch = captureKtimeEpoch()
+	lc, err := s.loadClassSpec(cp, spec, nil)
+	if err != nil {
+		t.Fatalf("load reduced process sensor: %v", err)
+	}
+	s.loaded = append(s.loaded, lc)
+	s.recordGap(detection.ClassProcess, detection.StateActive, "")
+	s.wg.Add(1)
+	go s.drain(lc, cp.decode)
+	defer s.Close()
+	var children []*exec.Cmd
+	defer func() {
+		for _, cmd := range children {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
+	for i := 0; i < 3; i++ {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestProcessLifecycleHelper$")
+		cmd.Env = append(os.Environ(), "SYNAPSE_PROCESS_SENSOR_HELPER=1")
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer stdin.Close()
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		children = append(children, cmd)
+		if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || line != "ready\n" {
+			t.Fatalf("helper readiness %q: %v", line, err)
+		}
+	}
+	if got := s.Dropped()[detection.ClassProcess]; got == 0 {
+		t.Fatal("live map overflow was not reported")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Dropped()[detection.ClassProcess]; got == 0 {
+		t.Fatal("native map overflow was lost on close")
+	}
+	if coverage, ok := coverageFor(s.Coverage(), detection.ClassProcess); !ok || !coverage.IsObservationGap() {
+		t.Fatalf("closed native sensor must report a gap: %+v", coverage)
+	}
+}
+
+type lifecycleSensor struct {
+	*Sensor
+	ready chan struct{}
+}
+
+func (s *lifecycleSensor) Start(context.Context) error { close(s.ready); return nil }
+
+type lifecycleSink struct{}
+
+func (lifecycleSink) Emit(context.Context, detection.Detection) error { return nil }
+
+func TestEngineCancellationPreservesFinalSensorCoverage(t *testing.T) {
+	s := NewSensor("host", "agent", []detection.Class{detection.ClassProcess})
+	lc := &loadedClass{class: detection.ClassProcess, kernelDropped: func() (uint64, error) { return 7, nil }}
+	s.loaded = []*loadedClass{lc}
+	s.coverage = []detection.ClassCoverage{{Class: detection.ClassProcess, State: detection.StateActive}}
+	sensor := &lifecycleSensor{Sensor: s, ready: make(chan struct{})}
+	engine, err := detectuc.NewEngine(sensor, lifecycleSink{}, "host", "agent", detectuc.Options{Classes: []detection.Class{detection.ClassProcess}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() { done <- engine.Run(ctx) }()
+	<-sensor.ready
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("engine shutdown: %v", err)
+	}
+	coverage := engine.Coverage()
+	if len(coverage) != 1 || !coverage[0].IsObservationGap() || s.Dropped()[detection.ClassProcess] != 7 {
+		t.Fatalf("final coverage lost the stopped sensor's gap/drops: %+v, %+v", coverage, s.Dropped())
+	}
+}
+
+func TestSensorClosePreservesUnpolledLossAndDegradesCoverage(t *testing.T) {
+	s := NewSensor("host", "agent", []detection.Class{detection.ClassProcess})
+	lc := &loadedClass{class: detection.ClassProcess}
+	lc.dropped.Store(2)
+	lc.kernelDropped = func() (uint64, error) { return 7, nil }
+	s.loaded = []*loadedClass{lc}
+	s.coverage = []detection.ClassCoverage{{Class: detection.ClassProcess, State: detection.StateActive}}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	lc.kernelDropped = func() (uint64, error) { t.Error("read kernel counter after close"); return 0, errors.New("closed") }
+	for range 2 {
+		if got := s.Dropped()[detection.ClassProcess]; got != 9 {
+			t.Errorf("final drops=%d, want9", got)
+		}
+		coverage := s.Coverage()
+		if len(coverage) != 1 || coverage[0].State == detection.StateActive || !coverage[0].IsObservationGap() {
+			t.Errorf("closed sensor must expose a gap: %+v", coverage)
 		}
 	}
 }

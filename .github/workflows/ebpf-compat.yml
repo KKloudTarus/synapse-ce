@@ -50,4 +50,4 @@ jobs:
         run: go test -count=1 ./internal/infrastructure/ebpf -run 'TestProbe|TestCommitted|TestNetworkObjects|TestNativeBuild' -v
 
       - name: Load and attach every sensor class on the native kernel
-        run: sudo --preserve-env=PATH go test -count=1 ./internal/infrastructure/ebpf -run '^Test(SensorLoadsAndDisablesEachClassIndependently|NetworkSensorCapturesNativeKprobeArguments)$' -v
+        run: sudo --preserve-env=PATH go test -count=1 ./internal/infrastructure/ebpf -run '^Test(SensorLoadsAndDisablesEachClassIndependently|NetworkSensorCapturesNativeKprobeArguments|ProcessSensorNativeLifecycleIdentity|ProcessSensorNativeCapacityLoss)$' -v

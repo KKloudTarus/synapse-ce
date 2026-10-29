@@ -291,20 +291,58 @@ that declines work records `refused` rather than failing quietly. Bound server-s
 `SYNAPSE_AGENT_CONCURRENCY`, `SYNAPSE_AGENT_QUEUE_DEPTH`, `SYNAPSE_AGENT_MAX_PARALLEL`, and
 `SYNAPSE_AGENT_RECON_CONCURRENCY`.
 
-Response actions are governed, reversible, and audited. They run through the same scope and authorization
-enforcement as any other execution.
+Response actions pass scope, authorization-window, approval and effect checks and retain an audited
+reversal path. Reverting a stopped process is a best-effort restart; it cannot restore the original
+process state.
 
-Wire the routes and a defender can drive the full loop: `POST /api/v1/blueteam/engagements/{id}/response/plan`
-dry-runs an action (isolate_host, quarantine_file, stop_process) and its mandatory reversal and executes
-nothing; `.../response/apply` applies it through the shared admission gate (server-side scope
-authorization, a recorded human approver, a blast-radius check on the executed effect); `POST
-/api/v1/blueteam/response/{id}/revert` reverses it; `GET /api/v1/blueteam/response` lists the
-admitted-but-not-applied set the kill switch cancels. The action id is server-minted, and a second-approval
-requirement answers 202. The default executor records the full admission -> approval -> apply -> verify ->
-revert ledger without touching a host; a real host executor is a deliberate, review-gated extension point
-(`internal/usecase/response/simulation.go`), so applying a real isolation still requires an explicit
-execution-safety decision the platform does not make on its own. The `POST /api/v1/redteam/halt` kill switch
-now cancels pending response actions as a fourth layer, so one operator action stops the whole estate.
+For `stop_process`, add an explicit **Process** engagement scope target using the telemetry-observed
+`ProcessEntityID`: `pe_` followed by 32 lowercase hexadecimal characters. The ID identifies one process
+instance, including its boot and start identity. PID reuse or a reboot does not authorize the replacement
+process. Process scope matches that exact ID only; wildcards, bare PIDs and repository/cloud-account
+aliases are refused. Out-of-scope entries still take precedence.
+
+In Response operations, select the engagement and **Stop process**, enter that process ID and its
+reporting asset ID, then plan the action. Planning executes nothing and does not authorize a target.
+Changing an input discards the plan. Apply sends `target_kind: "process"` and a fingerprint containing
+`kind: "process"`, `process_entity_id` and `process_asset_id`; the server checks their binding before
+admission. A second-approval requirement returns HTTP 202 with `approval_state: "pending"`.
+An authorized reviewer distinct from the submitter records the decision through
+`POST /api/v1/blueteam/response/{id}/decide`. Reversal uses the original stored target and fingerprint
+at `POST /api/v1/blueteam/response/{id}/revert` and has its own approval.
+
+`GET /api/v1/blueteam/response` defaults to pending records; its `state` filter also accepts `applied`,
+`reverted`, `cancelled` and `violation`. The console combines those states and shows the submitter,
+target binding, current approval and verification result. A reversal requester records provenance;
+only an authoritative pending approval enables the decision controls. Missing approval state is not
+treated as permission to decide.
+The ledger refreshes outstanding approvals and verification every ten seconds. Use **Refresh responses**
+to discover actions created elsewhere when none of the loaded records is outstanding.
+
+The default executor is a simulation. Enabling `SYNAPSE_RESPONSE_EXECUTION_ENABLED` with the required
+signer, agent trust and independent observer configuration selects the governed fleet executor. A
+queued command or an `applied` record alone does not establish a verified host effect; inspect the
+verification result. The `POST /api/v1/redteam/halt` kill switch also cancels pending response actions.
+
+Verification waits for accepted process lifecycle telemetry and continuous process coverage before
+sealing a target receipt and dispatching the independent observer. It uses the authenticated agent's
+host identity separately from the inventory asset ID. A restart must correlate the exact launched child
+to its successful exec event; it cannot borrow another process's event or move the original exit into
+the restart window.
+
+Only successful exec events observed during the current agent run can supply the descriptor pins
+needed to stop a process. Restarting the agent loses those pins; an older inventory entry alone cannot
+authorize a host effect. The process sensor retains at most 16,384 live identities without eviction.
+Insertion or ring-buffer loss degrades process coverage, so an incomplete observation window cannot
+be used as proof of absence. Native lifecycle tests establish behavior on the tested kernel; other
+kernel versions still need their supported-kernel checks.
+Loss accounting is cumulative for the current sensor run. After a loss, coverage stays degraded until
+the sensor restarts. Shutdown retains the final counters and records stopped coverage as a gap.
+
+`SYNAPSE_RESPONSE_COMMAND_TTL` bounds both command and verification time (default `2m`, maximum `10m`).
+Allow time for durable telemetry delivery, the observer round trip and the one-minute reconciliation
+cadence when choosing this deployment setting. The retained local rehearsal uses `5m`. Changing the
+setting does not extend existing attempts: an expired attempt keeps its terminal history and cannot be
+promoted to success by a later report. A recovery restart receives a new approval and deadline.
 
 ## Rollout and upgrades
 
@@ -382,3 +420,11 @@ Emulation expectations are compared against observed detections, so a missing de
 coverage gap. See [Governed assessments](governed-assessment-workflows.md#purple-coverage).
 
 Next: [AI triage review](ai-triage-review.md)
+
+Response admission and halt writers coordinate with a tenant-scoped PostgreSQL
+transaction lock, including tenants with no halt fence yet. These transactions
+require `READ COMMITTED`; other isolation levels fail closed. When upgrading from
+binaries that do not use this lock, drain response admission and halt requests and
+restart all API instances together. Apply the same coordination when rolling back;
+do not mix old and new halt writers. Runtime database roles keep read-only access
+to halt fences, and the dedicated halt writer retains exclusive mutation rights.

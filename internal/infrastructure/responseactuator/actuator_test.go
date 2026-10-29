@@ -27,14 +27,14 @@ func (f *fakeProcesses) StopProcess(_ context.Context, target shared.ID) (bool, 
 	return f.already, f.err
 }
 
-func (f *fakeProcesses) RestartProcess(_ context.Context, target shared.ID) (bool, error) {
+func (f *fakeProcesses) RestartProcessCorrelated(_ context.Context, target shared.ID) (bool, shared.ID, error) {
 	f.restarted = target
-	return f.already, f.err
+	return f.already, "pe_22222222222222222222222222222222", f.err
 }
 
 func actuatorCommand(t *testing.T) fleetagent.ResponseCommand {
 	t.Helper()
-	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "process-1")
+	action, err := rdom.NewAction("action-1", rdom.KindStopProcess, "pe_11111111111111111111111111111111")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,9 +47,9 @@ func actuatorCommand(t *testing.T) fleetagent.ResponseCommand {
 		ProtocolVersion: fleetagent.ResponseCommandProtocolVersion, CommandID: "command-1", TenantID: "tenant-1",
 		AgentID: "agent-1", AssetID: "asset-1", EngagementID: "engagement-1", Action: action,
 		ActionDigest: digest, AttemptKey: "attempt-1", VerificationChallenge: strings.Repeat("a", 64),
-		AuthorizationTarget: engagement.Target{Kind: engagement.TargetDomain, Value: "process-1"},
+		AuthorizationTarget: engagement.Target{Kind: engagement.TargetProcess, Value: "pe_11111111111111111111111111111111"},
 		Target: responsesaga.TargetFingerprint{
-			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1",
+			Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111",
 		},
 		IssuedAt: now, NotAfter: now.Add(time.Minute), SigningKeyID: "key-1", Signature: "signed-upstream",
 	}
@@ -65,7 +65,7 @@ func TestActuatorUsesTypedProcessBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if processes.stopped != "process-1" || outcome.ObservedRadius != offensivepolicy.RadiusStateChanging || outcome.AffectedCount != 1 {
+	if processes.stopped != "pe_11111111111111111111111111111111" || outcome.ObservedRadius != offensivepolicy.RadiusStateChanging || outcome.AffectedCount != 1 {
 		t.Fatalf("stop outcome=%+v processes=%+v", outcome, processes)
 	}
 
@@ -87,7 +87,7 @@ func TestActuatorKeepsReversalSeparate(t *testing.T) {
 	if _, err := actuator.ExecuteResponse(context.Background(), command); err != nil {
 		t.Fatal(err)
 	}
-	if processes.restarted != "process-1" || processes.stopped != "" {
+	if processes.restarted != "pe_11111111111111111111111111111111" || processes.stopped != "" {
 		t.Fatalf("reversal crossed wrong boundary: %+v", processes)
 	}
 	processes.already = true

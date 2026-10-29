@@ -166,14 +166,14 @@ func TestIncidentEventRepositoryListsPendingResponseLinksBeyondOperatorPage(t *t
 	base := time.Unix(1_800_000_000, 0).UTC()
 	targetIncident := shared.ID("zzzz-pending-" + suffix)
 	targetAction := shared.ID("response-" + suffix)
-	target := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "process-1"}
-	action, err := rdom.NewAction(targetAction, rdom.KindStopProcess, "asset-1")
+	target := responsesaga.TargetFingerprint{Kind: responsesaga.FingerprintProcess, ProcessAssetID: "asset-1", ProcessEntityID: "pe_11111111111111111111111111111111"}
+	action, err := rdom.NewAction(targetAction, rdom.KindStopProcess, target.ProcessEntityID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := NewResponseRepository(pool).Put(tctx, rdom.Record{
 		ID: targetAction, TenantID: tenant, EngagementID: "eng-1", Action: action,
-		AuthorizationTarget: engagement.Target{Kind: engagement.TargetDomain, Value: "asset-1.example"}, TargetFingerprint: target,
+		AuthorizationTarget: engagement.Target{Kind: engagement.TargetProcess, Value: target.ProcessEntityID.String()}, TargetFingerprint: target,
 		SubmittedBy: "alice", State: rdom.StatePending, UpdatedAt: base,
 	}); err != nil {
 		t.Fatalf("seed prepared response: %v", err)

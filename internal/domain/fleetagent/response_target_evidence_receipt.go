@@ -14,34 +14,45 @@ import (
 	"github.com/KKloudTarus/synapse-ce/internal/domain/responsesaga"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/sensorstate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/telemetry"
 )
+
+// ResponseOriginalProcessEvidence binds an original attempt to accepted exit telemetry.
+type ResponseOriginalProcessEvidence struct {
+	AttemptKey  string                       `json:"attempt_key"`
+	AttemptedAt time.Time                    `json:"attempted_at"`
+	Exit        endpoint.TimelineEntry       `json:"exit"`
+	Coverage    []sensorstate.CoverageWindow `json:"coverage"`
+}
 
 // ResponseTargetEvidenceReceipt is the immutable, server-generated snapshot of bounded target-primary
 // telemetry. It is deliberately independent of the observer that later purpose-signs its binding.
 type ResponseTargetEvidenceReceipt struct {
-	Version               int                            `json:"version"`
-	ReceiptID             shared.ID                      `json:"receipt_id"`
-	Digest                string                         `json:"digest"`
-	TenantID              shared.ID                      `json:"tenant_id"`
-	EngagementID          shared.ID                      `json:"engagement_id"`
-	ActionID              shared.ID                      `json:"action_id"`
-	ActionDigest          string                         `json:"action_digest"`
-	AttemptKey            string                         `json:"attempt_key"`
-	VerificationChallenge string                         `json:"verification_challenge"`
-	Target                responsesaga.TargetFingerprint `json:"target"`
-	Reversal              bool                           `json:"reversal"`
-	AttemptedAt           time.Time                      `json:"attempted_at"`
-	WindowUntil           time.Time                      `json:"window_until"`
-	RecordedAt            time.Time                      `json:"recorded_at"`
-	SourceAgentID         shared.ID                      `json:"source_agent_id"`
-	SourceAgentSessionID  shared.ID                      `json:"source_agent_session_id"`
-	SourceHostID          shared.ID                      `json:"source_host_id"`
-	Timeline              []endpoint.TimelineEntry       `json:"timeline"`
-	Coverage              []sensorstate.CoverageWindow   `json:"coverage"`
-	TimelineComplete      bool                           `json:"timeline_complete"`
-	CoverageComplete      bool                           `json:"coverage_complete"`
-	Saturated             bool                           `json:"saturated"`
-	Reasons               []string                       `json:"reasons"`
+	Version                    int                              `json:"version"`
+	ReceiptID                  shared.ID                        `json:"receipt_id"`
+	Digest                     string                           `json:"digest"`
+	TenantID                   shared.ID                        `json:"tenant_id"`
+	EngagementID               shared.ID                        `json:"engagement_id"`
+	ActionID                   shared.ID                        `json:"action_id"`
+	ActionDigest               string                           `json:"action_digest"`
+	AttemptKey                 string                           `json:"attempt_key"`
+	VerificationChallenge      string                           `json:"verification_challenge"`
+	Target                     responsesaga.TargetFingerprint   `json:"target"`
+	Reversal                   bool                             `json:"reversal"`
+	AttemptedAt                time.Time                        `json:"attempted_at"`
+	WindowUntil                time.Time                        `json:"window_until"`
+	RecordedAt                 time.Time                        `json:"recorded_at"`
+	SourceAgentID              shared.ID                        `json:"source_agent_id"`
+	SourceAgentSessionID       shared.ID                        `json:"source_agent_session_id"`
+	SourceHostID               shared.ID                        `json:"source_host_id"`
+	Timeline                   []endpoint.TimelineEntry         `json:"timeline"`
+	Coverage                   []sensorstate.CoverageWindow     `json:"coverage"`
+	TimelineComplete           bool                             `json:"timeline_complete"`
+	CoverageComplete           bool                             `json:"coverage_complete"`
+	Saturated                  bool                             `json:"saturated"`
+	Reasons                    []string                         `json:"reasons"`
+	OriginalEvidence           *ResponseOriginalProcessEvidence `json:"original_evidence,omitempty"`
+	ReplacementProcessEntityID shared.ID                        `json:"replacement_process_entity_id,omitempty"`
 }
 
 const ResponseTargetEvidenceReceiptVersion = 1
@@ -82,6 +93,19 @@ func (r ResponseTargetEvidenceReceipt) Validate() error {
 	if r.SourceAgentID.IsZero() && (len(r.Timeline) != 0 || len(r.Coverage) != 0) {
 		return fmt.Errorf("%w: source-less receipt cannot contain evidence", shared.ErrValidation)
 	}
+	if r.OriginalEvidence != nil {
+		o := r.OriginalEvidence
+		if !r.Reversal || strings.TrimSpace(o.AttemptKey) == "" || o.AttemptedAt.IsZero() || o.Exit.EntityKind != endpoint.EntityProcess || o.Exit.Kind != endpoint.TimelineProcessExit || o.Exit.EntityID != r.Target.ProcessEntityID || o.Exit.EventID.IsZero() || o.Exit.TenantID != r.TenantID || o.Exit.AssetID != r.Target.ProcessAssetID || o.Exit.SourceAgentID != r.SourceAgentID || o.Exit.SourceAgentSessionID != r.SourceAgentSessionID || o.Exit.OccurredAt.Before(o.AttemptedAt) || o.Exit.OccurredAt.After(r.AttemptedAt) || !telemetry.ValidProcessEntityID(r.ReplacementProcessEntityID.String()) || r.ReplacementProcessEntityID == r.Target.ProcessEntityID {
+			return fmt.Errorf("%w: original process evidence is not bound to reversal", shared.ErrValidation)
+		}
+		for _, w := range o.Coverage {
+			if w.Validate() != nil || w.AgentID != r.SourceAgentID || w.AssetID != r.Target.ProcessAssetID || w.HostID != r.SourceHostID {
+				return fmt.Errorf("%w: original coverage is not bound", shared.ErrValidation)
+			}
+		}
+	} else if !r.ReplacementProcessEntityID.IsZero() {
+		return fmt.Errorf("%w: replacement identity lacks original evidence", shared.ErrValidation)
+	}
 	for i, entry := range r.Timeline {
 		if entry.TenantID != r.TenantID || entry.AssetID != r.Target.ProcessAssetID || entry.SourceAgentID != r.SourceAgentID || entry.SourceAgentSessionID != r.SourceAgentSessionID || entry.EventID.IsZero() || entry.OccurredAt.Before(r.AttemptedAt) || entry.OccurredAt.After(r.WindowUntil) ||
 			(i > 0 && (r.Timeline[i-1].OccurredAt.After(entry.OccurredAt) || (r.Timeline[i-1].OccurredAt.Equal(entry.OccurredAt) && r.Timeline[i-1].EventID >= entry.EventID))) {
@@ -118,6 +142,21 @@ func CloneResponseTargetEvidenceReceipt(r ResponseTargetEvidenceReceipt) Respons
 		if r.Coverage[i].Vector.Reasons != nil {
 			r.Coverage[i].Vector.Reasons = append(make([]string, 0, len(r.Coverage[i].Vector.Reasons)), r.Coverage[i].Vector.Reasons...)
 		}
+	}
+	if r.OriginalEvidence != nil {
+		original := *r.OriginalEvidence
+		if original.Coverage != nil {
+			original.Coverage = append(make([]sensorstate.CoverageWindow, 0, len(original.Coverage)), original.Coverage...)
+		}
+		for i := range original.Coverage {
+			if original.Coverage[i].States != nil {
+				original.Coverage[i].States = append(make([]detection.ClassCoverage, 0, len(original.Coverage[i].States)), original.Coverage[i].States...)
+			}
+			if original.Coverage[i].Vector.Reasons != nil {
+				original.Coverage[i].Vector.Reasons = append(make([]string, 0, len(original.Coverage[i].Vector.Reasons)), original.Coverage[i].Vector.Reasons...)
+			}
+		}
+		r.OriginalEvidence = &original
 	}
 	if r.Reasons != nil {
 		r.Reasons = append(make([]string, 0, len(r.Reasons)), r.Reasons...)

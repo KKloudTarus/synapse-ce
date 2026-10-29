@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKloudTarus/synapse-ce/internal/domain/endpoint"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/fleetagent"
+	"github.com/KKloudTarus/synapse-ce/internal/domain/sensorstate"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/shared"
 	"github.com/KKloudTarus/synapse-ce/internal/domain/workorder"
 	"github.com/KKloudTarus/synapse-ce/internal/infrastructure/persistence/memory"
@@ -60,7 +62,8 @@ func observerVerificationRequest(h executorHarness) responseuc.VerificationReque
 
 func attachReceiptBuilder(t *testing.T, dispatcher *ObserverDispatcher, h executorHarness, clock ports.Clock) {
 	t.Helper()
-	builder, err := NewTargetEvidenceReceiptBuilder(h.executor.bindings, memory.NewEndpointTimelineStore(), memory.NewCoverageWindowStore(), memory.NewResponseVerificationStore(), clock)
+	event := endpoint.TimelineEntry{OccurredAt: h.req.IssuedAt, TenantID: "tenant-1", AssetID: "asset-1", SourceAgentID: "agent-1", SourceAgentSessionID: shared.ID(fleetagent.CanonicalSessionID("agent-1")), EntityKind: endpoint.EntityProcess, EntityID: h.req.Fingerprint.ProcessEntityID, Kind: endpoint.TimelineProcessExit, EventID: "event-1"}
+	builder, err := NewTargetEvidenceReceiptBuilder(h.executor.bindings, h.executor.agents, receiptTimeline{[]endpoint.TimelineEntry{event}}, receiptCoverage{[]sensorstate.CoverageWindow{receiptWindow(t, h.req.IssuedAt, "observer")}}, memory.NewResponseVerificationStore(), clock, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
