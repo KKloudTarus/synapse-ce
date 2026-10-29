@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -206,5 +208,57 @@ func TestTicketMetadataAliasDerivesTenantAndRequiresIntegrationPermission(t *tes
 				t.Fatal("foreign metadata leaked")
 			}
 		}
+	}
+}
+
+type ticketBulkSubmitFake struct {
+	ticketHTTPFake
+	err error
+}
+
+func (f *ticketBulkSubmitFake) Submit(context.Context, ticketuc.SubmitRequest) (ticketing.Intent, bool, error) {
+	return ticketing.Intent{ID: "recorded-intent"}, f.err == nil, f.err
+}
+
+func TestBulkTicketSubmissionReturnsSafePerFindingErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		code string
+	}{
+		{"permission", fmt.Errorf("private policy detail: %w", shared.ErrForbidden), "permission_denied"},
+		{"validation", shared.ErrValidation, "validation"},
+		{"missing", shared.ErrNotFound, "not_found"},
+		{"conflict", shared.ErrConflict, "conflict"},
+		{"unknown", errors.New("private provider detail"), "unavailable"},
+		{"success", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := &Router{log: discardLog()}
+			rt.SetTicketing(&ticketBulkSubmitFake{err: tc.err})
+			request := httptest.NewRequest("POST", "/api/v1/engagements/eng/tickets/bulk", strings.NewReader(`{"mapping_id":"mapping","items":[{"finding_id":"finding","preview_digest":"preview","request_key":"request"}]}`))
+			response := httptest.NewRecorder()
+			rt.bulkSubmitTickets(response, request)
+			if response.Code != 202 {
+				t.Fatalf("status=%d", response.Code)
+			}
+			var rows []struct {
+				FindingID string            `json:"finding_id"`
+				ErrorCode string            `json:"error_code"`
+				Intent    *ticketIntentView `json:"intent"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &rows); err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || rows[0].FindingID != "finding" || rows[0].ErrorCode != tc.code {
+				t.Fatalf("response=%s", response.Body.String())
+			}
+			if (rows[0].Intent != nil) != (tc.err == nil) {
+				t.Fatalf("intent presence=%v", rows[0].Intent != nil)
+			}
+			if strings.Contains(response.Body.String(), "private") {
+				t.Fatal("raw error leaked")
+			}
+		})
 	}
 }

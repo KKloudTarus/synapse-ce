@@ -539,7 +539,7 @@ paths:
     post:
       tags: [ticketing]
       summary: Submit up to fifty previewed finding tickets
-      description: Human triage permission. Returns one intent or stable error code per item; partial success is explicit.
+      description: Human triage permission. Returns one intent or stable error code per item; partial success is explicit. Per-item error_code values are validation, not_found, conflict, permission_denied and unavailable. Policy refusals use permission_denied without exposing raw error text. Route-level permission denial returns HTTP 403.
       requestBody:
         required: true
         content:
