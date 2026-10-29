@@ -47,8 +47,9 @@ func (g *ftIDs) NewID() shared.ID { g.n++; return shared.ID(fmt.Sprintf("fid-%d"
 
 type ftAudit struct{}
 
-func (ftAudit) Record(context.Context, ports.AuditEntry) error     { return nil }
-func (ftAudit) RecordOnce(context.Context, ports.AuditEntry) error { return nil }
+func (ftAudit) Record(context.Context, ports.AuditEntry) error                 { return nil }
+func (ftAudit) RecordOnce(context.Context, ports.AuditEntry) error             { return nil }
+func (ftAudit) RecordFirstObservation(context.Context, ports.AuditEntry) error { return nil }
 
 type ftAuthorizer struct{}
 

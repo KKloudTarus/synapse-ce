@@ -92,6 +92,10 @@ func (a *captureAudit) has(action string) bool {
 	return false
 }
 
+func (a *captureAudit) RecordFirstObservation(ctx context.Context, e ports.AuditEntry) error {
+	return a.RecordOnce(ctx, e)
+}
+
 // e2eClock is a mutable clock shared (by pointer) with every service the harness composes, so a test that
 // advances it — e.g. past a retention window — is seen by the ledger/evidence, not just the harness copy.
 type e2eClock struct{ t time.Time }
