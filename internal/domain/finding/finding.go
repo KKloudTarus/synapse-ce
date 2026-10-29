@@ -187,6 +187,7 @@ type Finding struct {
 	// routing. A legacy free-text label may have no resolvable user.
 	AssigneeUserID shared.ID `json:"assignee_user_id,omitempty"`
 	Version        int
+	PagerEpisode   int64 `json:"-"`
 
 	// Risk priority (CISA KEV -> EPSS x CVSS), copied from the source vuln so
 	// findings can be ordered by real risk. KEV findings rank above all.
@@ -366,3 +367,6 @@ func (f Finding) ValidateRuleKey() error {
 
 	return nil
 }
+
+// PagerTerminal identifies statuses that end a pager occurrence.
+func (s Status) PagerTerminal() bool { return s == StatusRemediated || s == StatusFalsePos }

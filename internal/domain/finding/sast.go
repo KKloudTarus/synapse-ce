@@ -81,7 +81,8 @@ func NewSAST(id, engagementID shared.ID, in SASTInput, now time.Time) (Finding, 
 		DataFlow:       dataFlow,
 		DedupKey:       "sast:ai:" + anchor,
 		// ProposedBy LEFT EMPTY (the judgment-layer gate already ran) – see the doc above.
-		Version: 1,
-		Audit:   shared.Audit{CreatedAt: now, UpdatedAt: now},
+		Version:      1,
+		PagerEpisode: 1,
+		Audit:        shared.Audit{CreatedAt: now, UpdatedAt: now},
 	}, nil
 }

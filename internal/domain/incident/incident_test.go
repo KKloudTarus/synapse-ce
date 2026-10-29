@@ -285,3 +285,19 @@ func TestProjectRejectsBackdatedEvent(t *testing.T) {
 		t.Fatalf("equal timestamps must be allowed, got %v", err)
 	}
 }
+
+func TestPagerEpisodeFollowsTerminalReopen(t *testing.T) {
+	events := []IncidentEvent{created("det-1")}
+	states := []State{StateInvestigating, StateRemediated, StateResolved, StateClosed, StateReopened, StateClosed, StateReopened}
+	want := []int64{1, 1, 1, 1, 2, 2, 3}
+	for i, state := range states {
+		events = append(events, IncidentEvent{IncidentID: incID, Kind: EventStatusChanged, At: at(i + 1), Actor: "analyst", To: state})
+		got, err := Project(events)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PagerEpisode != want[i] {
+			t.Fatalf("state %s episode %d, want %d", state, got.PagerEpisode, want[i])
+		}
+	}
+}

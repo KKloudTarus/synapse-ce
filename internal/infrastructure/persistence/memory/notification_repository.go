@@ -42,15 +42,18 @@ type NotificationRepository struct {
 	// Postgres repository's does.
 	projector ports.NotificationEventProjector
 
-	channels      map[notificationKey]notification.Channel
-	versions      map[channelVersionKey]string
-	rules         map[notificationKey]notification.Rule
-	events        map[notificationKey]storedEvent
-	eventIDs      map[eventSourceKey]shared.ID
-	deliveries    map[notificationKey]storedDelivery
-	attempts      map[notificationKey][]notification.Attempt
-	digestMembers map[memoryDigestKey]map[shared.ID]struct{}
-	digestWindows map[memoryDigestKey]memoryDigestWindow
+	channels        map[notificationKey]notification.Channel
+	versions        map[channelVersionKey]string
+	rules           map[notificationKey]notification.Rule
+	events          map[notificationKey]storedEvent
+	eventIDs        map[eventSourceKey]shared.ID
+	deliveries      map[notificationKey]storedDelivery
+	attempts        map[notificationKey][]notification.Attempt
+	digestMembers   map[memoryDigestKey]map[shared.ID]struct{}
+	digestWindows   map[memoryDigestKey]memoryDigestWindow
+	pagerEpisodes   map[memoryPagerEpisodeKey]shared.ID
+	pagerOperations map[memoryPagerOperationKey]memoryPagerOperation
+	pagerDeliveries map[notificationKey]memoryPagerOperationKey
 
 	engagements map[notificationKey]bool
 	teams       map[notificationKey]bool
@@ -127,10 +130,13 @@ func NewNotificationRepository(jobs *JobQueue, now func() time.Time) *Notificati
 		channels: map[notificationKey]notification.Channel{}, versions: map[channelVersionKey]string{},
 		rules: map[notificationKey]notification.Rule{}, events: map[notificationKey]storedEvent{},
 		eventIDs: map[eventSourceKey]shared.ID{}, deliveries: map[notificationKey]storedDelivery{},
-		attempts:      map[notificationKey][]notification.Attempt{},
-		digestMembers: map[memoryDigestKey]map[shared.ID]struct{}{},
-		digestWindows: map[memoryDigestKey]memoryDigestWindow{},
-		engagements:   map[notificationKey]bool{}, teams: map[notificationKey]bool{},
+		attempts:        map[notificationKey][]notification.Attempt{},
+		digestMembers:   map[memoryDigestKey]map[shared.ID]struct{}{},
+		digestWindows:   map[memoryDigestKey]memoryDigestWindow{},
+		pagerEpisodes:   map[memoryPagerEpisodeKey]shared.ID{},
+		pagerOperations: map[memoryPagerOperationKey]memoryPagerOperation{},
+		pagerDeliveries: map[notificationKey]memoryPagerOperationKey{},
+		engagements:     map[notificationKey]bool{}, teams: map[notificationKey]bool{},
 		channelAttemptAt: map[notificationKey]time.Time{}, tenantAttemptAt: map[shared.ID]time.Time{},
 		healthEvents:       map[notificationKey][]notification.ChannelHealthEvent{},
 		engagementSettings: map[notificationKey]notification.EngagementNotificationSetting{},

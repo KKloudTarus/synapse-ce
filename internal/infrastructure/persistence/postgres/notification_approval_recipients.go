@@ -67,7 +67,7 @@ func appendApprovalSourceTx(ctx context.Context, tx pgx.Tx, record notification.
 	tag, err := tx.Exec(ctx, appendSourceRecord,
 		record.TenantID.String(), record.SourceKind, record.SourceID, string(record.EventType),
 		record.EngagementID.String(), string(record.Severity), record.OccurredAt, string(record.Data),
-		record.SchemaVersion, record.SubjectKind, record.SubjectID, string(record.Context), record.CaptureVersion)
+		record.SchemaVersion, record.SubjectKind, record.SubjectID, string(record.Context), record.CaptureVersion, record.PagerLifecycle.Episode, record.PagerLifecycle.Revision, record.PagerLifecycle.Terminal)
 	if err != nil {
 		return fmt.Errorf("append approval notification source: %w", err)
 	}

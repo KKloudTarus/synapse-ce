@@ -694,6 +694,7 @@ func (s *Service) appendFindingEvent(ctx context.Context, tenantID shared.ID, ev
 		TenantID: tenantID, SourceKind: sourceKind, SourceID: sourceID, EventType: eventType,
 		EngagementID: f.EngagementID, Severity: f.Severity, OccurredAt: s.clock.Now(), Data: raw,
 		SubjectKind: "finding", SubjectID: f.ID.String(),
+		PagerLifecycle: notification.PagerLifecycle{Episode: f.PagerEpisode, Revision: int64(f.Version), Terminal: f.Status.PagerTerminal()},
 	}, vars)
 	if err != nil {
 		return fmt.Errorf("snapshot finding notification: %w", err)

@@ -60,7 +60,8 @@ func NewThreat(id, engagementID shared.ID, in ThreatInput, now time.Time) (Findi
 		// ProposedBy is deliberately LEFT EMPTY: the evidence gate already ran at the judgment layer
 		// (gated propose→verify, score ≥ threshold, PermReview/SoD), so this projection is ungated like a
 		// manual finding. Do NOT set it to the agent proposer – that would re-gate it stuck-at-score-0.
-		Version: 1,
-		Audit:   shared.Audit{CreatedAt: now, UpdatedAt: now},
+		Version:      1,
+		PagerEpisode: 1,
+		Audit:        shared.Audit{CreatedAt: now, UpdatedAt: now},
 	}, nil
 }

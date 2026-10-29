@@ -18,7 +18,7 @@ var _ ports.NotificationEventReader = (*NotificationRepository)(nil)
 // maxRecentNotificationEvents bounds one ListRecentNotificationEvents call.
 const maxRecentNotificationEvents = 100
 
-const notificationEventSelect = `SELECT id,event_type,source_kind,source_id,engagement_id,severity,schema_version,occurred_at,data,subject_kind,subject_id,context,test_template FROM notification_events`
+const notificationEventSelect = `SELECT id,event_type,source_kind,source_id,engagement_id,severity,schema_version,occurred_at,data,subject_kind,subject_id,context,test_template,pager_episode,pager_revision,pager_terminal FROM notification_events`
 
 func scanNotificationEvent(row pgx.Row, tenant shared.ID) (notification.Event, error) {
 	var (
@@ -28,7 +28,7 @@ func scanNotificationEvent(row pgx.Row, tenant shared.ID) (notification.Event, e
 		context   []byte
 		template  []byte
 	)
-	if err := row.Scan(&e.ID, &eventType, &e.SourceKind, &e.SourceID, &e.EngagementID, &e.Severity, &e.SchemaVersion, &e.OccurredAt, &data, &e.SubjectKind, &e.SubjectID, &context, &template); err != nil {
+	if err := row.Scan(&e.ID, &eventType, &e.SourceKind, &e.SourceID, &e.EngagementID, &e.Severity, &e.SchemaVersion, &e.OccurredAt, &data, &e.SubjectKind, &e.SubjectID, &context, &template, &e.PagerLifecycle.Episode, &e.PagerLifecycle.Revision, &e.PagerLifecycle.Terminal); err != nil {
 		return notification.Event{}, err
 	}
 	e.TenantID, e.Type, e.Data, e.Context = tenant, notification.EventType(eventType), data, context
